@@ -4,10 +4,8 @@ import {
   AiBehaviorPreferenceSchema,
   ApplicationAttestationKindSchema,
   ApplicationAutomationModeSchema,
-  CompanyPreferenceSchema,
   CoverLetterPolicySchema,
   JobSearchSelectivitySchema,
-  NonEmptyStringSchema,
   ProfileAssistantInitiativeSchema,
   ProfileAssistantReplyStyleSchema,
   UpdateAiBehaviorInputSchema,
@@ -15,6 +13,7 @@ import {
   UpdateWorkspaceBehaviorInputSchema,
   WrittenAnswerLengthSchema,
   collapsesSideMenuWithAssistant,
+  writesResumesOnShortlist,
   type AssistantMessagePart,
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -29,8 +28,6 @@ import {
   type AssistantToolContext,
 } from "../tool-kit";
 
-const Id = NonEmptyStringSchema.max(200);
-
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
   maxApplicationsPerLocalDay: "Daily application limit",
@@ -43,6 +40,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   discoveryOnly: "Search only",
   collapseSideMenuWithAssistant:
     "Collapse the side menu while the assistant is open",
+  writeResumesOnShortlist: "Write resumes when I shortlist",
   tailoringMode: "Resume level",
   discovery: "Search selectivity",
 };
@@ -127,6 +125,7 @@ export const readSettingsTool = defineTool({
         collapseSideMenuWithAssistant: collapsesSideMenuWithAssistant(
           snapshot.settings,
         ),
+        writeResumesOnShortlist: writesResumesOnShortlist(snapshot.settings),
         activityPaused: snapshot.activityControl.paused ?? false,
         searchPlans: snapshot.campaigns.map((campaign) => ({
           id: campaign.id,
@@ -252,12 +251,15 @@ export const updateWorkspaceBehaviorTool = defineTool({
   name: "update_workspace_behavior",
   group: "settings",
   description:
-    "Changes whether browser tabs stay open after runs, whether Job Finder only searches (never prepares applications), and whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device). Send only the fields to change.",
+    "Changes whether browser tabs stay open after runs, whether Job Finder only searches (never prepares applications), whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), and whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes). Send only the fields to change.",
   parameters: json.object({
     keepSessionAlive: json.boolean(),
     discoveryOnly: json.boolean(),
     collapseSideMenuWithAssistant: json.boolean(
       "On (the default) folds the side menu while the assistant is open.",
+    ),
+    writeResumesOnShortlist: json.boolean(
+      "On (the default) starts writing a job's resume at its level as soon as it is shortlisted. Off leaves resumes for the person to create.",
     ),
   }),
   input: UpdateWorkspaceBehaviorInputSchema,
@@ -314,6 +316,7 @@ export const setAppearanceTool = defineTool({
     );
     context.ports.publishWorkspaceUpdate();
     return {
+      canFinish: true,
       summary: `Appearance is now ${after.settings.appearanceTheme}.`,
       data: { receiptId: recorded.receiptId },
       parts: recorded.parts,
@@ -375,54 +378,9 @@ export const pauseActivityTool = defineTool({
   },
 });
 
-export const selectSearchPlanTool = defineTool({
-  name: "select_search_plan",
-  group: "settings",
-  description:
-    "Makes one search plan the active one (the plan Find jobs shows and searches use).",
-  parameters: json.object({ campaignId: json.string() }, ["campaignId"]),
-  input: z.object({ campaignId: Id }),
-  label: () => "Switching the search plan",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    await service.selectCampaign(input.campaignId);
-    ports.publishWorkspaceUpdate();
-    return { summary: "Switched the active search plan." };
-  },
-});
 
-export const setCompanyPreferenceTool = defineTool({
-  name: "set_company_preference",
-  group: "settings",
-  description:
-    "Marks a company as followed, preferred, to review, excluded or neutral.",
-  parameters: json.object(
-    {
-      companyId: json.string("From search_workspace."),
-      preference: json.enumOf(CompanyPreferenceSchema.options),
-    },
-    ["companyId", "preference"],
-  ),
-  input: z.object({ companyId: Id, preference: CompanyPreferenceSchema }),
-  label: () => "Updating a company preference",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    try {
-      await service.setCompanyPreference(input);
-    } catch (error) {
-      throw new AssistantToolError(
-        "invalid_input",
-        error instanceof Error
-          ? error.message
-          : "That company could not be updated.",
-      );
-    }
-    ports.publishWorkspaceUpdate();
-    return { summary: `Company marked ${input.preference}.` };
-  },
-});
+
+
 
 export const setDefaultResumeLevelTool = defineTool({
   name: "set_default_resume_level",
@@ -482,6 +440,4 @@ export const settingsTools = [
   updateAiBehaviorTool,
   updateWorkspaceBehaviorTool,
   pauseActivityTool,
-  selectSearchPlanTool,
-  setCompanyPreferenceTool,
 ];

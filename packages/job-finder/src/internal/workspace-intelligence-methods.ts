@@ -45,7 +45,7 @@ import {
 import {
   applyCompanyIntelligenceMutation,
   nextCompanyIntelligenceUpdatedAt,
-  reconcileCompanies,
+  reconcileCompaniesInTurns,
   reviewCompanyMerge,
   setCompanyPreference,
 } from "./company-intelligence-operations";
@@ -61,6 +61,7 @@ import {
 } from "./resume-strategy-application";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 import { ensureCampaignState } from "./campaign-dashboard";
+import { readSavedJob } from "./read-saved-job";
 import {
   appendExactEmployerExclusion,
   removeExactEmployerExclusion,
@@ -119,7 +120,7 @@ export function createWorkspaceIntelligenceMethods(input: {
         input.ctx.repository.listApplicationRecords(),
       ]);
       const now = new Date().toISOString();
-      const reconciled = reconcileCompanies({
+      const reconciled = await reconcileCompaniesInTurns({
         companies: state.companies,
         jobs: savedJobs,
         applicationRecords,
@@ -435,12 +436,11 @@ export function createWorkspaceIntelligenceMethods(input: {
       rawInput: RecommendResumeStrategyInput,
     ): Promise<ResumeStrategyRecommendation> {
       const command = RecommendResumeStrategyInputSchema.parse(rawInput);
-      const [state, campaignState, savedJobs] = await Promise.all([
+      const [state, campaignState, job] = await Promise.all([
         input.ctx.repository.getIntelligenceState(),
         input.ctx.repository.getCampaignState(),
-        input.ctx.repository.listSavedJobs(),
+        readSavedJob(input.ctx.repository, command.jobId),
       ]);
-      const job = savedJobs.find((candidate) => candidate.id === command.jobId);
       if (!job) {
         throw new Error("That job is no longer available.");
       }
@@ -544,16 +544,13 @@ export function createWorkspaceIntelligenceMethods(input: {
     ): Promise<JobFinderWorkspaceSnapshot> {
       const command = RecordOutcomeInputSchema.parse(rawInput);
       await input.ctx.withIntelligenceTransition(async () => {
-        const [campaignState, currentState, savedJobs, applicationRecords] =
+        const [campaignState, currentState, job, applicationRecords] =
           await Promise.all([
             input.ctx.repository.getCampaignState(),
             input.ctx.repository.getIntelligenceState(),
-            input.ctx.repository.listSavedJobs(),
+            readSavedJob(input.ctx.repository, command.jobId),
             input.ctx.repository.listApplicationRecords(),
           ]);
-        const job = savedJobs.find(
-          (candidate) => candidate.id === command.jobId,
-        );
         if (!job) throw new Error("That job is no longer available.");
         const campaignsForJob = (campaignState?.campaigns ?? []).filter(
           (candidate) => candidate.jobIds.includes(job.id),

@@ -494,6 +494,11 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
           description:
             "Optional ref of this step’s Continue or Next control. Use only when every required field is answered.",
         },
+        finishWhenReady: {
+          type: "boolean",
+          description:
+            "On the final page, finish after filling and verifying every answer. Uses the same readiness checks as finish; never presses Send.",
+        },
         fields: {
           type: "array",
           minItems: 1,
@@ -521,7 +526,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
               documentId: {
                 type: "string",
                 description:
-                  "For upload: an id from the available document list.",
+                  "For upload: an id from the available document list, or letter for an observed cover-letter field. Job Finder writes and checks a missing permitted letter locally; put that upload after the other fields so its writing can overlap their fills.",
               },
               reason: {
                 type: "string",
@@ -548,10 +553,13 @@ export type FillFieldsEntry = Extract<
   { tool: "type" | "select" | "set_checkbox" | "upload" | "click" }
 >;
 
-export function parseFillFields(
-  rawArguments: string,
-):
-  | { ok: true; fields: FillFieldsEntry[]; thenContinue?: string }
+export function parseFillFields(rawArguments: string):
+  | {
+      ok: true;
+      fields: FillFieldsEntry[];
+      thenContinue?: string;
+      finishWhenReady?: boolean;
+    }
   | { ok: false; error: string } {
   let parsed: unknown;
   try {
@@ -564,6 +572,17 @@ export function parseFillFields(
   }
   const record = asRecord(parsed);
   const thenContinue = record.thenContinue;
+  if (
+    (record.finishWhenReady !== undefined &&
+      typeof record.finishWhenReady !== "boolean") ||
+    (record.finishWhenReady === true && thenContinue !== undefined)
+  ) {
+    return {
+      ok: false,
+      error:
+        "Use finishWhenReady: true on the final page, or thenContinue on an earlier step, never both.",
+    };
+  }
   if (
     thenContinue !== undefined &&
     (typeof thenContinue !== "string" || !thenContinue.trim())
@@ -618,6 +637,7 @@ export function parseFillFields(
   return {
     ok: true,
     fields,
+    ...(record.finishWhenReady === true ? { finishWhenReady: true } : {}),
     ...(typeof thenContinue === "string"
       ? { thenContinue: thenContinue.trim() }
       : {}),

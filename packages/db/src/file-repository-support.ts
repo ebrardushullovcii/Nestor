@@ -1,3 +1,4 @@
+import { notifyWorkspaceCommit } from "./workspace-commits";
 import {
   ApplicationAuthorityEnvelopeSchema,
   ApprovedApplicationAnswerSnapshotSchema,
@@ -18,7 +19,10 @@ import {
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
 } from "@nestor/contracts";
+import { statSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
+import { readWalCheckpointProgress } from "./internal/wal-checkpoint-progress";
 
 import { secureDatabaseFile } from "./internal/migrations";
 import {
@@ -39,11 +43,208 @@ export function runImmediateTransaction<TValue>(
   try {
     const result = operation();
     database.exec("COMMIT");
+    notifyWorkspaceCommit(database);
+    walCheckpointSchedulers.get(database)?.();
     return result;
   } catch (error) {
     database.exec("ROLLBACK");
     throw error;
   }
+}
+
+/** Quiet time after the last write before the log is folded into the file. */
+const WAL_CHECKPOINT_IDLE_MS = 1_500;
+/** A log this large is folded in at once, quiet or not. */
+const WAL_CHECKPOINT_MAX_BYTES = 16 * 1024 * 1024;
+const walCheckpointSchedulers = new WeakMap<DatabaseSync, () => void>();
+
+/**
+ * Folds the write-ahead log into the database once writes pause, instead of
+ * inside whichever commit crossed SQLite's 1,000-page mark: that commit then
+ * also copied the pages and synced the file, 26-500 ms on a 200 MB
+ * workspace, in the middle of a click. A log past the size cap is folded at
+ * once. Returns the function that stops the schedule.
+ */
+export function scheduleWalCheckpoints(
+  database: DatabaseSync,
+  filePath: string,
+  options: {
+    /** Fold the log in from a worker thread (the app); tests may keep it inline. */
+    background?: boolean;
+  } = {},
+): () => Promise<void> {
+  database.exec("PRAGMA wal_autocheckpoint = 0");
+  const walPath = `${filePath}-wal`;
+  let urgentGeneration: string | null = null;
+  let urgentFrame = 0;
+  let fallbackHighWater = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const inline = () => {
+    try {
+      database.exec("PRAGMA wal_checkpoint(PASSIVE)");
+    } catch (error) {
+      console.warn(
+        "[JobFinderRepository] Write-ahead log checkpoint failed.",
+        error,
+      );
+    }
+  };
+  const background =
+    options.background === false
+      ? null
+      : createBackgroundCheckpointer(filePath, inline);
+  const checkpoint = () => {
+    timer = null;
+    if (background) {
+      background.run();
+      return;
+    }
+    if (database.isTransaction) {
+      timer = setTimeout(checkpoint, WAL_CHECKPOINT_IDLE_MS);
+      return;
+    }
+    inline();
+  };
+  walCheckpointSchedulers.set(database, () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    const progress = readWalCheckpointProgress(filePath);
+    let urgent = false;
+    if (progress) {
+      if (urgentGeneration !== progress.generation) {
+        urgentGeneration = progress.generation;
+        urgentFrame = 0;
+      }
+      // Backfill is completed checkpoint work, even if another connection did
+      // it. A pinned reader cannot cause the same frames to request endlessly;
+      // another cap's worth of new frames may retry while it remains pinned.
+      urgent = (progress.frames - Math.max(urgentFrame, progress.backfilled)) * progress.frameBytes >= WAL_CHECKPOINT_MAX_BYTES;
+      if (urgent) urgentFrame = progress.frames;
+    } else {
+      // Missing/unpublished WAL-index headers are only a scheduling failure.
+      // Retain idle checkpoints and bound further physical file growth.
+      let bytes = 0;
+      try { bytes = statSync(walPath).size; } catch { /* No WAL yet. */ }
+      if (bytes < fallbackHighWater) fallbackHighWater = bytes;
+      urgent = bytes - fallbackHighWater >= WAL_CHECKPOINT_MAX_BYTES;
+      if (urgent) fallbackHighWater = bytes;
+    }
+    if (urgent) {
+      checkpoint();
+    }
+    timer = setTimeout(checkpoint, WAL_CHECKPOINT_IDLE_MS);
+    timer.unref?.();
+  });
+  return async () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    walCheckpointSchedulers.delete(database);
+    await background?.stop();
+  };
+}
+
+// Runs in the worker: its own connection, used only to fold the log in.
+const CHECKPOINT_WORKER_SOURCE = `
+const { parentPort, workerData } = require("node:worker_threads");
+const { DatabaseSync } = require("node:sqlite");
+const database = new DatabaseSync(workerData.filePath);
+database.exec("PRAGMA busy_timeout = 1000");
+parentPort.on("message", (message) => {
+  if (message === "close") {
+    database.close();
+    parentPort.close();
+    return;
+  }
+  let ok = true;
+  try {
+    database.exec("PRAGMA wal_checkpoint(PASSIVE)");
+  } catch {
+    ok = false;
+  }
+  parentPort.postMessage(ok);
+});
+`;
+
+/**
+ * Folds the log in from a worker thread with its own connection. Copying the
+ * log into a 200-500 MB file and syncing it held main 180-220 ms each time
+ * the log passed the size cap (a profile save restaling every draft, a
+ * search). SQLite lets another connection checkpoint beside the app's reads
+ * and writes. If the worker cannot run, the checkpoint runs inline.
+ */
+function createBackgroundCheckpointer(filePath: string, inline: () => void) {
+  let worker: Worker | null = null;
+  let failed = false;
+  let busy = false;
+  let again = false;
+
+  function start(): Worker | null {
+    try {
+      const started = new Worker(CHECKPOINT_WORKER_SOURCE, {
+        eval: true,
+        workerData: { filePath },
+      });
+      started.on("message", (ok: unknown) => {
+        busy = false;
+        if (ok !== true) failed = true;
+        if (again) {
+          again = false;
+          run();
+        }
+      });
+      started.on("error", () => {
+        failed = true;
+        busy = false;
+        if (worker === started) worker = null;
+      });
+      started.unref();
+      return started;
+    } catch {
+      failed = true;
+      return null;
+    }
+  }
+
+  function run(): void {
+    if (failed) {
+      inline();
+      return;
+    }
+    worker ??= start();
+    if (!worker) {
+      inline();
+      return;
+    }
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
+    worker.postMessage("checkpoint");
+  }
+
+  /**
+   * Closes the worker's connection before the app closes its own, so the
+   * app's close is the last one and still folds in and removes the log.
+   */
+  async function stop(): Promise<void> {
+    const stopping = worker;
+    worker = null;
+    failed = true;
+    if (!stopping) return;
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        void stopping.terminate().finally(resolve);
+      }, 5_000);
+      stopping.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      stopping.postMessage("close");
+    });
+  }
+
+  return { run, stop };
 }
 
 export function syncApprovedResumeExportsForJob(
@@ -304,6 +505,7 @@ export const INDEXED_COLLECTION_CONFIGS = {
 } as const;
 
 export type PersistedTableName =
+  | "prepared_application_forms"
   | "application_answer_snapshots"
   | "application_authority_envelopes"
   | "apply_runs"

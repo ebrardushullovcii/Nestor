@@ -1,3 +1,6 @@
+import { extractSalaryRangeFromListingBody } from "@nestor/contracts";
+import { yieldToEventLoop } from "@nestor/core";
+export { extractSalaryRangeFromListingBody } from "@nestor/contracts";
 import {
   annualizeCompensationAmount,
   type CompensationPreference,
@@ -471,28 +474,6 @@ function comparableSalaryText(value: string | null | undefined): string {
     .trim();
 }
 
-const BODY_SALARY_RANGE_PATTERN =
-  /\b(?:salary|compensation|pay(?:\s+range)?)\b[^.!?]{0,90}?((?:(?:USD|CAD|AUD|EUR|GBP)\s*)?(?:CA\$|A\$|\$|€|£)?\s*\d[\d,.]*(?:\s*[kK])?(?:\s*(?:-|–|—|to)\s*(?:(?:USD|CAD|AUD|EUR|GBP)\s*)?(?:CA\$|A\$|\$|€|£)?\s*\d[\d,.]*(?:\s*[kK])?)?(?:\s*(?:USD|CAD|AUD|EUR|GBP))?(?:\s*(?:\/|per\s+)?(?:hourly|daily|weekly|monthly|yearly|annually|hour|hours|hr|day|week|month|year|yr))?)/iu;
-
-const BODY_SALARY_MONEY_MARKER_PATTERN =
-  /(?:(?:(?:USD|CAD|AUD|EUR|GBP)\s*|(?:CA\$|A\$|\$|€|£)\s*)\d|\d[\d,.]*\s*(?:[kK]\b|(?:USD|CAD|AUD|EUR|GBP)\b|(?:\/\s*|per\s+)(?:hour|hr|day|week|month|year)\b|annually\b))/iu;
-
-/**
- * Returns the explicit pay range nearest a salary/compensation/pay label in
- * the listing body. It is deliberately cue-bound: arbitrary years, user
- * counts and performance percentages elsewhere in the page are not pay.
- */
-export function extractSalaryRangeFromListingBody(
-  description: string,
-): string | null {
-  const explicitAmount =
-    /(?:\b(?:USD|CAD|AUD|EUR|GBP)\s*|(?:CA\$|A\$|\$|€|£)\s*)\d[\d,.]*(?:\s*[kK])?(?:\s*(?:-|–|—|to)\s*(?:(?:USD|CAD|AUD|EUR|GBP)\s*)?(?:CA\$|A\$|\$|€|£)?\s*\d[\d,.]*(?:\s*[kK])?)?\s*(?:per\s+(?:year|month|week|day|hour)|\/(?:year|yr|month|week|day|hour|hr)|annually|yearly|monthly|weekly|daily|hourly)\b/iu;
-  const labelled = BODY_SALARY_RANGE_PATTERN.exec(description)?.[1]?.trim();
-  if (labelled && BODY_SALARY_MONEY_MARKER_PATTERN.test(labelled))
-    return labelled;
-  return explicitAmount.exec(description)?.[0]?.trim() ?? null;
-}
-
 /**
  * The listing body is stronger evidence than a separate extracted cell when
  * the two disagree. This repairs malformed structured data such as a stored
@@ -503,10 +484,22 @@ export function reconcileSalaryTextWithListingBody(
   salaryText: string | null | undefined,
   description: string,
 ): string | null {
-  const stated = extractSalaryRangeFromListingBody(description);
+  return reconcileSalaryTextWithPreparedBody(
+    salaryText, extractSalaryRangeFromListingBody(description), () => description,
+  );
+}
+
+/** Same reconciliation; prepared text avoids another parse and unused body read. */
+export function reconcileSalaryTextWithPreparedBody(
+  salaryText: string | null | undefined,
+  stated: string | null,
+  readDescription: () => string,
+): string | null {
   if (!stated) return salaryText ?? null;
   if (!salaryText) return stated;
-  return isSalaryTextStatedInBody(description, salaryText)
+  // Both branches below return this same value; no body is needed.
+  if (salaryText === stated) return stated;
+  return isSalaryTextStatedInBody(readDescription(), salaryText)
     ? salaryText
     : stated;
 }
@@ -538,36 +531,50 @@ export interface SalaryFurnitureCandidate {
  * one job's pay. Compare a job's `salaryText` against the returned set before
  * storing or printing it.
  */
-export function findSiteFurnitureSalaryTexts(
+export async function findSiteFurnitureSalaryTexts(
   postings: readonly SalaryFurnitureCandidate[],
-): ReadonlySet<string> {
+): Promise<ReadonlySet<string>> {
   const furniture = new Set<string>();
   if (postings.length < SITE_FURNITURE_SALARY_MIN_RESULTS) {
     return furniture;
   }
 
-  const byBand = new Map<string, { count: number; statedInBody: number }>();
+  const byBand = new Map<string, SalaryFurnitureCandidate[]>();
+  let turnStarted = performance.now();
   for (const posting of postings) {
+    if (performance.now() - turnStarted >= 8) {
+      await yieldToEventLoop();
+      turnStarted = performance.now();
+    }
     const key = comparableSalaryText(posting.salaryText);
     if (!key) {
       continue;
     }
-    const entry = byBand.get(key) ?? { count: 0, statedInBody: 0 };
-    entry.count += 1;
-    if (isSalaryTextStatedInBody(posting.description, posting.salaryText)) {
-      entry.statedInBody += 1;
-    }
-    byBand.set(key, entry);
+    const group = byBand.get(key);
+    if (group) group.push(posting);
+    else byBand.set(key, [posting]);
   }
 
   const threshold = Math.max(
     SITE_FURNITURE_SALARY_MIN_RESULTS,
     Math.ceil(postings.length * SITE_FURNITURE_SALARY_SHARE),
   );
-  for (const [key, entry] of byBand) {
+  for (const [key, group] of byBand) {
+    // The existing policy can only reject a band this common. Other bands'
+    // bodies cannot change the result, so leave them in SQLite.
+    if (group.length < threshold) continue;
+    let statedInBody = 0;
+    for (const posting of group) {
+      if (performance.now() - turnStarted >= 8) {
+        await yieldToEventLoop();
+        turnStarted = performance.now();
+      }
+      if (isSalaryTextStatedInBody(posting.description, posting.salaryText))
+        statedInBody += 1;
+    }
     // A band most of the run shares AND that almost none of the listing
     // bodies actually state is the page's, not the jobs'.
-    if (entry.count >= threshold && entry.statedInBody * 2 < entry.count) {
+    if (statedInBody * 2 < group.length) {
       furniture.add(key);
     }
   }

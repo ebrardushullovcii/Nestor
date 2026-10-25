@@ -43,7 +43,10 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 
-import { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -103,10 +106,10 @@ const job: SavedJob = SavedJobSchema.parse({
   matchAssessment: { score: 80, reasons: ["Relevant"], gaps: [] },
 });
 
-function renderScreen(options?: { onBackToRapidReview?: () => void }) {
-  return render(
+async function renderScreen(options?: { onBackToRapidReview?: () => void }) {
+  const rendered = render(
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={{ message: null }}
         activeRun={null}
         browserSession={browserSession}
@@ -120,7 +123,6 @@ function renderScreen(options?: { onBackToRapidReview?: () => void }) {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[job]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -136,22 +138,24 @@ function renderScreen(options?: { onBackToRapidReview?: () => void }) {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 afterEach(cleanup);
 
 describe("DiscoveryScreen rapid review return action", () => {
-  it("renders the direct return action only when a return context exists", () => {
-    renderScreen();
+  it("renders the direct return action only when a return context exists", async () => {
+    await renderScreen();
 
     expect(
       screen.queryByRole("button", { name: "Back to rapid review" }),
     ).toBeNull();
   });
 
-  it("invokes the return handler from the rendered action", () => {
+  it("invokes the return handler from the rendered action", async () => {
     const onBackToRapidReview = vi.fn();
-    renderScreen({ onBackToRapidReview });
+    await renderScreen({ onBackToRapidReview });
 
     fireEvent.click(
       screen.getByRole("button", { name: "Back to rapid review" }),

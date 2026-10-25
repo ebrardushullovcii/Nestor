@@ -167,6 +167,8 @@ export interface ApplyRawPageHands {
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Scroll to an action and report obstruction without pressing it. */
+  checkAction?: (ref: string) => Promise<ApplyWriteResult>;
   /**
    * Opens what one of the page's links points at, in the same tab.
    *
@@ -191,6 +193,8 @@ export interface ApplyRawPageHands {
   goBack: () => Promise<ApplyNavigationResult>;
   /** Reads one element's text, or the page's, in full rather than excerpted. */
   readText: (ref?: string) => Promise<string>;
+  /** Visible text with inline link destinations and semantic item boundaries. */
+  readLinkedText?: () => Promise<string>;
   /**
    * Brings a tab the page opened into this one: the working tab goes to the
    * tab's address and the extra tab is closed. A run works in one tab; a

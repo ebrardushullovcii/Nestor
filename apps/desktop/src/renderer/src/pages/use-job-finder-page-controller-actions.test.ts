@@ -19,7 +19,7 @@ import {
   createDiscoveryWorkspaceRefreshCoordinator,
   consumeFirstSearchRequest,
   createPrimaryPageActions,
-  describeAutoApplyQueueStart,
+  describeApplyQueueStart,
   describePreparedApplicationSubmitResult,
   preparedApplicationsToastTone,
   clearJobFinderNavigationHint,
@@ -28,62 +28,6 @@ import {
   stripActionStateOwner,
   type ActionStateStatusWrite,
 } from "./use-job-finder-page-controller-actions";
-
-describe("describeAutoApplyQueueStart", () => {
-  it("explains an Apply to all press containing only receipt-confirmed jobs", () => {
-    const snapshot = {
-      applyRuns: [],
-      reviewQueue: [],
-      applyJobResults: [
-        {
-          jobId: "sent",
-          privacyReceipt: {
-            finalSubmitOccurred: true,
-            submissionOutcome: { outcome: "submitted" },
-          },
-        },
-      ],
-    } as unknown as Parameters<typeof describeAutoApplyQueueStart>[0];
-    expect(
-      describeAutoApplyQueueStart(snapshot, ["sent"], {
-        onlyWhenHeldBack: true,
-      }),
-    ).toBe("These applications are already sent. Nothing was started.");
-  });
-
-  it("counts the jobs the new batch took and names the one held back", () => {
-    const snapshot = {
-      applyRuns: [
-        { id: "old", createdAt: "2026-09-27T01:00:00.000Z", jobIds: ["a"] },
-        {
-          id: "new",
-          createdAt: "2026-09-27T02:00:00.000Z",
-          jobIds: ["dusk", "willow"],
-        },
-      ],
-      reviewQueue: [{ jobId: "cedar", title: "Cedar Engineer" }],
-    } as unknown as Parameters<typeof describeAutoApplyQueueStart>[0];
-    expect(
-      describeAutoApplyQueueStart(snapshot, ["cedar", "dusk", "willow"]),
-    ).toBe(
-      "2 applications started. Watch them in Applications. Cedar Engineer waits: its resume has a line for you to decide first.",
-    );
-    expect(describeAutoApplyQueueStart(snapshot, ["dusk", "willow"])).toBe(
-      "2 applications started. Watch them in Applications.",
-    );
-    // Home shows the running batch itself, so it keeps only a held-back job.
-    expect(
-      describeAutoApplyQueueStart(snapshot, ["dusk", "willow"], {
-        onlyWhenHeldBack: true,
-      }),
-    ).toBeNull();
-    expect(
-      describeAutoApplyQueueStart(snapshot, ["cedar", "dusk", "willow"], {
-        onlyWhenHeldBack: true,
-      }),
-    ).toContain("Cedar Engineer waits");
-  });
-});
 
 describe("describePreparedApplicationSubmitResult", () => {
   const snapshotWith = (
@@ -745,7 +689,8 @@ describe("createPrimaryPageActions", () => {
         saveProfileSetupState,
         saveWorkspaceInputs: vi.fn().mockResolvedValue(snapshot),
       } as unknown as JobFinderShellActions,
-      locationPathname: input.locationPathname ?? "/job-finder/profile/setup",
+      getLocationPathname: () =>
+        input.locationPathname ?? "/job-finder/profile/setup",
       navigate,
       runAction,
       runSaveAction,
@@ -855,7 +800,7 @@ describe("createPrimaryPageActions", () => {
         ),
         saveWorkspaceInputs: vi.fn().mockResolvedValue(savedSnapshot),
       } as unknown as JobFinderShellActions,
-      locationPathname: "/job-finder/profile/setup",
+      getLocationPathname: () => "/job-finder/profile/setup",
       navigate,
       runAction: vi.fn(),
       runSaveAction: vi.fn(
@@ -919,7 +864,7 @@ describe("createPrimaryPageActions", () => {
         saveProfileSetupState,
         saveWorkspaceInputs: vi.fn().mockResolvedValue(snapshot),
       } as unknown as JobFinderShellActions,
-      locationPathname: "/job-finder/profile/setup",
+      getLocationPathname: () => "/job-finder/profile/setup",
       navigate,
       runAction: vi.fn(),
       runSaveAction: vi.fn(
@@ -1216,7 +1161,7 @@ describe("createPrimaryPageActions", () => {
         saveWorkspaceInputs,
         updateApplicationDefaults,
       } as unknown as JobFinderShellActions,
-      locationPathname: "/job-finder/profile/setup",
+      getLocationPathname: () => "/job-finder/profile/setup",
       navigate: vi.fn(),
       runSaveAction,
       workspace: persistedSnapshot,
@@ -1376,7 +1321,7 @@ describe("createPrimaryPageActions", () => {
         saveProfileSetupState,
         saveWorkspaceInputs,
       } as unknown as JobFinderShellActions,
-      locationPathname: "/job-finder/profile/setup",
+      getLocationPathname: () => "/job-finder/profile/setup",
       navigate,
       runSaveAction,
       workspace: persistedSnapshot,
@@ -2445,10 +2390,7 @@ describe("createPrimaryPageActions", () => {
       expect(setActionState).toHaveBeenLastCalledWith({
         message: "Job added to Shortlisted.",
         tone: "success",
-        actionLink: {
-          label: "Open Shortlisted",
-          route: "/job-finder/review-queue",
-        },
+        undo: expect.any(Function) as unknown,
       });
     });
     expect(navigate).not.toHaveBeenCalled();
@@ -2498,9 +2440,17 @@ describe("createPrimaryPageActions", () => {
     finish({} as JobFinderRendererWorkspaceSnapshot);
     expect(await first).toEqual({
       status: "success",
-      message: "50 jobs added to Shortlisted.",
+      message: "Shortlisted 50 jobs.",
     });
-    expect(setSelectedReviewJobId).toHaveBeenCalledExactlyOnceWith("job-0");
+    // Shortlisted keeps its own selection, so it does not open on the last
+    // page where the new jobs landed; the toast offers Undo all instead.
+    expect(setSelectedReviewJobId).not.toHaveBeenCalled();
+    expect(setActionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        undo: expect.any(Function) as unknown,
+        undoLabel: "Undo all",
+      }),
+    );
     expect(navigate).not.toHaveBeenCalled();
     expect(setResumeWorkspaceDirty).not.toHaveBeenCalled();
     expect(queueJobForReview).not.toHaveBeenCalled();
@@ -3050,7 +3000,23 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
     });
     const startAutoApplyQueueRun = vi.fn(
       input?.queueRunBehavior ??
-        (() => Promise.resolve({} as JobFinderRendererWorkspaceSnapshot)),
+        ((request: { jobIds: string[] }) =>
+          Promise.resolve({
+            reviewQueue: [],
+            applyQueue: {
+              id: "queue_1",
+              mode: "prepare_only",
+              state: "running",
+              jobIds: request.jobIds,
+              startedJobIds: request.jobIds,
+              skipped: [],
+              activeRunId: "run_1",
+              pausedReason: null,
+              resumesAt: null,
+              createdAt: "2026-10-23T10:00:00.000Z",
+              updatedAt: "2026-10-23T10:00:00.000Z",
+            },
+          } as unknown as JobFinderRendererWorkspaceSnapshot)),
     );
     const confirmLeaveDirtyResumeWorkspace = vi
       .fn<(pendingAction: string) => Promise<boolean>>()
@@ -3059,9 +3025,11 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
     const setResumeWorkspaceDirty = vi.fn();
 
     const pageActions = createPrimaryPageActions({
-      actions: { startAutoApplyQueueRun } as unknown as JobFinderShellActions,
+      actions: {
+        startApplyQueue: startAutoApplyQueueRun,
+      } as unknown as JobFinderShellActions,
       confirmLeaveDirtyResumeWorkspace,
-      locationPathname: "/job-finder/review-queue",
+      getLocationPathname: () => "/job-finder/review-queue",
       navigate,
       runAction,
       setActionState: wrappedSetActionState,
@@ -3095,24 +3063,12 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
       setJobFinderStatusRoute(null);
     }
   });
-  it("refuses a batch start with a visible status when the daily limit is reached", async () => {
+  it("queues a press when today's limit is used; the queue waits for tomorrow", async () => {
     const harness = createQueueHarness({ capacity: exhaustedCapacity });
-
-    const refusalMessage = expect.stringContaining(
-      "20 of 20 used today",
-    ) as unknown as string;
-
     await expect(harness.startQueue(["job_a", "job_b"])).resolves.toMatchObject(
-      {
-        status: "refused",
-        reason: "daily_capacity_exhausted",
-        message: refusalMessage,
-      },
+      { status: "confirmed" },
     );
-    expect(harness.startAutoApplyQueueRun).not.toHaveBeenCalled();
-    expect(harness.confirmLeaveDirtyResumeWorkspace).not.toHaveBeenCalled();
-    expect(harness.navigate).not.toHaveBeenCalled();
-    expect(harness.readMessage()).toContain("20 of 20 used today");
+    expect(harness.startAutoApplyQueueRun).toHaveBeenCalledTimes(1);
   });
 
   it("reports confirmed only after the run stages, then hands off to Applications", async () => {
@@ -3121,7 +3077,9 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
     await expect(harness.startQueue(["job_a"])).resolves.toMatchObject({
       status: "confirmed",
     });
-    expect(harness.startAutoApplyQueueRun).toHaveBeenCalledWith(["job_a"]);
+    expect(harness.startAutoApplyQueueRun).toHaveBeenCalledWith({
+      jobIds: ["job_a"],
+    });
     expect(harness.setResumeWorkspaceDirty).toHaveBeenCalledWith(false);
     expect(harness.navigate).toHaveBeenCalledWith("/job-finder/applications");
     expect(harness.readMessage()).toBe(
@@ -3366,4 +3324,36 @@ it("names only Job sources when that Profile section is saved", () => {
         "Job sources were not saved. Retry before leaving this page.",
     }),
   );
+});
+
+describe("describeApplyQueueStart", () => {
+  const queue = (startedJobIds: string[]) =>
+    ({
+      reviewQueue: [],
+      applyQueue: {
+        id: "queue_1",
+        mode: "prepare_only",
+        state: "running",
+        jobIds: ["a", "b", "c"],
+        startedJobIds,
+        skipped: [],
+        activeRunId: "run_1",
+        pausedReason: null,
+        resumesAt: null,
+        createdAt: "2026-10-23T10:00:00.000Z",
+        updatedAt: "2026-10-23T10:00:00.000Z",
+      },
+    }) as unknown as JobFinderRendererWorkspaceSnapshot;
+
+  it("counts only the jobs today's limit let start", () => {
+    expect(describeApplyQueueStart(queue(["a"]), ["a", "b", "c"])).toBe(
+      "1 application started. Today's limit is reached, so 2 more start after midnight by themselves.",
+    );
+  });
+
+  it("keeps the plain line when every chosen job started", () => {
+    expect(
+      describeApplyQueueStart(queue(["a", "b", "c"]), ["a", "b", "c"]),
+    ).toBe("3 applications started. Watch them in Applications.");
+  });
 });

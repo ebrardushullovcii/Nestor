@@ -1,9 +1,5 @@
-import {
-  JobPostingSchema,
-  SavedJobSchema,
-  type SavedJob,
-} from "@nestor/contracts";
-import { expect, test, vi } from "vitest";
+import { JobPostingSchema, type SavedJob } from "@nestor/contracts";
+import { expect, test } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { mergeDiscoveredPostings } from "./matching";
 
@@ -29,38 +25,35 @@ test.each([3_000, 10_000])(
       ...existing,
       summary: "Updated checkpoint summary",
     });
-    const parseSpy = vi.spyOn(SavedJobSchema, "parse");
-    try {
-      const result = mergeDiscoveredPostings(
-        seed.profile,
-        seed.searchPreferences,
-        jobs,
-        [posting],
-        (job) => ({
-          targetId: "scale_target",
-          adapterKind: "auto",
-          resolvedAdapterKind: "target_site",
-          startingUrl: "https://example.com/scale",
-          discoveredAt: job.discoveredAt,
-          collectionMethod: job.collectionMethod,
-          providerKey: job.providerKey,
-          providerBoardToken: job.providerBoardToken,
-          titleTriageOutcome: job.titleTriageOutcome,
-        }),
-        undefined,
-        () => existing.matchAssessment,
-        new Set([existing.id]),
-      );
-      expect(result.duplicatesMerged).toBe(1);
-      expect(result.newJobs).toHaveLength(0);
-      expect(result.mergedJobs[0]).not.toBe(existing);
-      expect(result.mergedJobs[0]?.provenance).toHaveLength(1);
-      expect(parseSpy).toHaveBeenCalledTimes(3);
-      for (let index = 1; index < size; index += 1) {
-        expect(result.mergedJobs[index]).toBe(jobs[index]);
-      }
-    } finally {
-      parseSpy.mockRestore();
+    const result = mergeDiscoveredPostings(
+      seed.profile,
+      seed.searchPreferences,
+      jobs,
+      [posting],
+      (job) => ({
+        targetId: "scale_target",
+        adapterKind: "auto",
+        resolvedAdapterKind: "target_site",
+        startingUrl: "https://example.com/scale",
+        discoveredAt: job.discoveredAt,
+        collectionMethod: job.collectionMethod,
+        providerKey: job.providerKey,
+        providerBoardToken: job.providerBoardToken,
+        titleTriageOutcome: job.titleTriageOutcome,
+      }),
+      undefined,
+      () => existing.matchAssessment,
+      new Set([existing.id]),
+    );
+    expect(result.duplicatesMerged).toBe(1);
+    expect(result.newJobs).toHaveLength(0);
+    expect(result.mergedJobs[0]).not.toBe(existing);
+    expect(result.mergedJobs[0]?.provenance).toHaveLength(1);
+    expect(result.mergedJobs).toHaveLength(size);
+    expect(result.mergedJobs[0]?.id).toBe(existing.id);
+    expect(existing.provenance).toEqual([]);
+    for (let index = 1; index < size; index += 1) {
+      expect(result.mergedJobs[index]).toBe(jobs[index]);
     }
   },
 );

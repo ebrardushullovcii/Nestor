@@ -31,7 +31,98 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   configurable: true,
   value: vi.fn(),
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The list remembers its search and stage; each test starts without them.
+  window.localStorage.clear();
+});
+
+describe("ApplicationsRecordsPanel row menu: the way back", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "nestor");
+  });
+  const counts = {
+    all: 1,
+    needs_action: 0,
+    in_progress: 0,
+    submitted: 0,
+    manual_only: 0,
+  };
+  function openMenuFor(record: ApplicationRecord) {
+    const showContextMenu = vi.fn(() => Promise.resolve({ id: null }));
+    (window as unknown as { nestor?: unknown }).nestor = {
+      window: { showContextMenu },
+    };
+    const onReturnToShortlist = vi.fn();
+    const onMutateApplicationCrm = vi.fn(() => Promise.resolve());
+    render(
+      <MemoryRouter>
+        <ApplicationsRecordsPanel
+          activeFilter="all"
+          applicationRecords={[record]}
+          filterCounts={counts}
+          hasAnyApplications
+          onFilterChange={vi.fn()}
+          onSelectRecord={vi.fn()}
+          onReturnToShortlist={onReturnToShortlist}
+          onMutateApplicationCrm={onMutateApplicationCrm}
+          selectedRecord={record}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.contextMenu(
+      screen.getByRole("button", { name: /View details for/ }),
+    );
+    const [call] = showContextMenu.mock.calls as unknown as [
+      [{ items: { label?: string; enabled?: boolean }[] }],
+    ];
+    return {
+      labels: call[0].items.map((item) =>
+        item.enabled === false ? `(${item.label})` : (item.label ?? "-"),
+      ),
+      onReturnToShortlist,
+    };
+  }
+  const base = {
+    id: "application_1",
+    jobId: "job_1",
+    title: "Engineer",
+    company: "Example",
+    lastActionLabel: "Prepared",
+    nextActionLabel: null,
+    lastUpdatedAt: "2026-10-02T10:00:00.000Z",
+  };
+
+  it("offers Move back to Shortlisted for an application nothing was sent for", () => {
+    const { labels } = openMenuFor(
+      ApplicationRecordSchema.parse({
+        ...base,
+        status: "approved",
+        lastAttemptState: "failed",
+      }),
+    );
+    expect(labels).toContain("Move back to Shortlisted");
+    expect(labels).not.toContain("Archive");
+  });
+
+  it("offers Mark withdrawn and Archive for a sent one, and says why it stays", () => {
+    const { labels } = openMenuFor(
+      ApplicationRecordSchema.parse({
+        ...base,
+        status: "submitted",
+        lastAttemptState: "submitted",
+      }),
+    );
+    expect(labels).not.toContain("Move back to Shortlisted");
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "(It was sent, so it cannot move back)",
+        "Mark withdrawn",
+        "Archive",
+      ]),
+    );
+  });
+});
 
 describe("ApplicationsRecordsPanel", () => {
   it("removes stale preparing guidance from a failed row", () => {
@@ -235,7 +326,7 @@ describe("ApplicationsRecordsPanel", () => {
     ).toBeNull();
   });
 
-  it("shows stage filters only when there are applications to filter", () => {
+  it("shows no filter row when there is nothing to filter", () => {
     const record: ApplicationRecord = {
       id: "application_1",
       jobId: "job_1",
@@ -285,9 +376,11 @@ describe("ApplicationsRecordsPanel", () => {
       </MemoryRouter>,
     );
 
+    // One application: no search, stage or view could change the list, so
+    // the panel opens on the row itself.
     expect(
-      screen.getByRole("group", { name: "Application filters" }),
-    ).toBeTruthy();
+      screen.queryByRole("group", { name: "Application filters" }),
+    ).toBeNull();
   });
 
   it("gives each row one clear whole-row details action", () => {
@@ -347,9 +440,12 @@ describe("ApplicationsRecordsPanel", () => {
     const firstRowAction = screen.getByRole("button", {
       name: "View details for Product Engineer 1 at Acme",
     });
-    // The row IS the action now (the shared SelectableRow primitive), rather
-    // than an absolutely positioned overlay button on top of the content.
-    expect(firstRowAction.getAttribute("data-slot")).toBe("selectable-row");
+    // The details action fills the shared SelectableRow, as on Shortlisted,
+    // rather than an absolutely positioned overlay button on top of the
+    // content; the row's Open form button sits beside it, not inside it.
+    expect(firstRowAction.parentElement?.getAttribute("data-slot")).toBe(
+      "selectable-row",
+    );
     expect(firstRowAction.className).toContain("w-full");
     expect(firstRowAction.className).not.toContain("absolute");
     fireEvent.click(firstRowAction);
@@ -458,7 +554,9 @@ describe("ApplicationsRecordsPanel", () => {
     // list's own two-column grid. `list-row.test.tsx` pins that the three
     // panels agree; this pins what the Applications row itself renders.
     const rowLines = rowAction?.firstElementChild;
-    expect(rowLines?.className).toBe(jobFinderListRowLinesClassName);
+    expect(rowLines?.className.startsWith(jobFinderListRowLinesClassName)).toBe(
+      true,
+    );
     const rowTitleLine = rowLines?.firstElementChild;
     expect(rowTitleLine?.className).toBe(jobFinderListRowTitleLineClassName);
     const rowBadgeSlot = rowTitleLine?.lastElementChild;
@@ -514,7 +612,7 @@ describe("ApplicationsRecordsPanel", () => {
     const { container } = render(
       <MemoryRouter>
         <ApplicationsRecordsPanel
-          activeFilter="all"
+          activeFilter="needs_action"
           applicationRecords={[record]}
           filterCounts={{
             all: 1,
@@ -553,8 +651,8 @@ describe("ApplicationsRecordsPanel", () => {
       expect(filterButton.className).toContain("h-6");
     }
 
-    // Zero-count views are hidden so a single record cannot wrap the filter
-    // row; All and the waiting-on-you view always stay reachable.
+    // Views that could not change the list are hidden; the active view and
+    // All, the way back from it, stay reachable.
     expect(screen.queryByRole("button", { name: /submitted/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /manual only/i })).toBeNull();
     expect(screen.getByRole("button", { name: /^All/ })).toBeTruthy();
@@ -562,8 +660,8 @@ describe("ApplicationsRecordsPanel", () => {
       screen.getByRole("button", { name: /waiting on you/i }),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /waiting on you/i }));
-    expect(onFilterChange).toHaveBeenCalledWith("needs_action");
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(onFilterChange).toHaveBeenCalledWith("all");
   });
 
   it("names the waiting-applications filter apart from the Needs you step badge", () => {
@@ -628,7 +726,9 @@ describe("ApplicationsRecordsPanel", () => {
     render(
       <MemoryRouter>
         <ApplicationsRecordsPanel
-          activeFilter="all"
+          // Both applications wait on the person, so the view is offered
+          // only once it is the active one.
+          activeFilter="needs_action"
           applicationRecords={applicationRecords}
           filterCounts={filterCounts}
           hasAnyApplications
@@ -1261,12 +1361,14 @@ it("counts chips from unarchived search and stage matches and keeps filters in o
       jobId: id,
       title: "Engineer",
       company: id === "other" ? "Other" : "Acme",
-      status: "submitted",
+      // "other" is still being filled in, so the Submitted view and the
+      // stage picker each have something to choose between.
+      status: id === "other" ? "drafting" : "submitted",
       lastActionLabel: "Sent",
       nextActionLabel: null,
       lastUpdatedAt: "2026-10-05T10:00:00Z",
       crm: {
-        stage: "applied",
+        stage: id === "other" ? "preparing" : "applied",
         stageSource: "user",
         stageChangedAt: "2026-10-05T10:00:00Z",
         archivedAt: id === "archived" ? "2026-10-05T10:00:00Z" : null,

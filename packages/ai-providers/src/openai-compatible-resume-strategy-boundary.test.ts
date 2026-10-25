@@ -134,18 +134,17 @@ describe("configured resume strategy request boundary", () => {
         "ILS renewed 2025",
       ])
         expect(systemPrompt).not.toContain(personaFact);
+      // The instructions point at the payload's strategy; its values stay in
+      // the payload so every job's instructions are the same text.
       expect(systemPrompt).toContain(
-        'Apply the named resume strategy "Frontend platform" for the Frontend Platform Engineering role family.',
+        "Apply the resume strategy in the payload's strategy",
       );
-      expect(systemPrompt).toContain(
-        "Use the per_job_tailored headline policy, role_family_expanded skills policy, and full_tailoring coverage policy.",
-      );
-      expect(systemPrompt).toContain(
-        "The selected base resume document is resume_strategy_1",
-      );
-      expect(systemPrompt).toContain(
-        "Evidence boundaries: exact claims not allowed; paraphrased claims allowed; at most 2 evidence references per bullet.",
-      );
+      for (const strategyValue of [
+        "Frontend platform",
+        "Frontend Platform Engineering",
+        "resume_strategy_1",
+      ])
+        expect(systemPrompt).not.toContain(strategyValue);
     } finally {
       fetchMock.restore();
     }

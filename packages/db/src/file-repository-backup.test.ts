@@ -5,17 +5,20 @@ import {
   readFile,
   rename,
   stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { ApplicationRecordSchema, SavedJobSchema } from "@nestor/contracts";
+import { SavedJobSchema } from "@nestor/contracts";
 
 import { createFileJobFinderRepository } from "./index";
 import {
   createWorkspaceResetDatabaseBackup,
+  createWorkspaceDatabaseBackup,
+  scheduleWorkspaceDatabaseBackups,
   getWorkspaceDatabaseBackupPaths,
   reconcileWorkspaceBackupRotation,
 } from "./file-repository-backup";
@@ -65,272 +68,296 @@ if (process.platform === "win32") {
   vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 }
 
-describe("automatic workspace database backup", () => {
+describe("background workspace database backup", () => {
   let workspace: Awaited<ReturnType<typeof createTempWorkspace>>;
-
+  const stops: Array<() => Promise<void>> = [];
   beforeEach(async () => {
     workspace = await createTempWorkspace("nestor-db-backup-");
   });
-
   afterEach(async () => {
+    for (const stop of stops.splice(0)) await stop();
     vi.restoreAllMocks();
     await cleanupTempDirectoryWithRetry(workspace.tempDirectory);
   });
-
-  test("writes no backup files when automatic backup is disabled", async () => {
-    const repository = await createFileJobFinderRepository({
+  async function snapshot() {
+    const result = await createWorkspaceDatabaseBackup({
+      filePath: workspace.filePath,
+    });
+    expect(result.status).toBe("created");
+  }
+  async function seed() {
+    return createFileJobFinderRepository({
       filePath: workspace.filePath,
       seed: createSeed(),
     });
-
-    await repository.close();
-
-    expect(existsSync(workspace.closeBackupPath)).toBe(false);
-    expect(existsSync(workspace.closeBackupPreviousPath)).toBe(false);
-    expect(existsSync(workspace.resetBackupPath)).toBe(false);
-    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
-    expect(existsSync(workspace.resetTemporaryPath)).toBe(false);
-  });
-
-  test("captures a restorable snapshot on close including WAL-resident commits", async () => {
-    const repository = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: createSeed(),
-      automaticBackup: { onClose: true },
-    });
+  }
+  async function waitForBackup() {
+    await vi.waitFor(
+      () => expect(existsSync(workspace.closeBackupPath)).toBe(true),
+      { timeout: 10000 },
+    );
+  }
+  test("close neither starts a backup nor changes an existing recovery point", async () => {
+    const repository = await seed();
     await repository.commitSavedJobDelta({
-      upserts: [createBackupFixtureJob("job_backup_close")],
+      upserts: [createBackupFixtureJob("original")],
     });
-
+    await snapshot();
+    const before = await readFile(workspace.closeBackupPath);
+    await repository.commitSavedJobDelta({
+      upserts: [createBackupFixtureJob("later")],
+    });
     await repository.close();
-
-    expect(existsSync(workspace.closeBackupPath)).toBe(true);
-    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
-
-    if (process.platform !== "win32") {
-      const backupMode = (await stat(workspace.closeBackupPath)).mode & 0o777;
-      expect(backupMode).toBe(0o600);
-    }
-
-    const restored = openSnapshot(workspace.closeBackupPath);
-    try {
-      expect(listSavedJobIds(restored)).toContain("job_backup_close");
-    } finally {
-      restored.close();
-    }
-
-    // The live database must remain fully intact after the backup.
-    const reopened = new DatabaseSync(workspace.filePath);
-    try {
-      runMigrations(reopened);
-      expect(hasPersistedState(reopened)).toBe(true);
-      expect(listSavedJobIds(reopened)).toContain("job_backup_close");
-    } finally {
-      reopened.close();
-    }
+    expect(await readFile(workspace.closeBackupPath)).toEqual(before);
+    expect(existsSync(workspace.closeBackupPreviousPath)).toBe(false);
   });
-
-  test("preserves one prior generation when the close snapshot rotates", async () => {
-    const firstRepository = await createFileJobFinderRepository({
+  test("an immediate close cancels scheduled work without creating any snapshot", async () => {
+    const repository = await createFileJobFinderRepository({
       filePath: workspace.filePath,
       seed: createSeed(),
-      automaticBackup: { onClose: true },
+      automaticBackup: { inBackground: true },
     });
-    await firstRepository.commitSavedJobDelta({
-      upserts: [createBackupFixtureJob("job_generation_one")],
+    await repository.close();
+    expect(existsSync(workspace.closeBackupPath)).toBe(false);
+    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
+  });
+  test("a failed snapshot leaves the completed recovery point intact and close still works", async () => {
+    const repository = await seed();
+    await snapshot();
+    const before = await readFile(workspace.closeBackupPath);
+    await mkdir(workspace.closeTemporaryPath);
+    expect(
+      (await createWorkspaceDatabaseBackup({ filePath: workspace.filePath }))
+        .status,
+    ).toBe("skipped");
+    await expect(repository.close()).resolves.toBeUndefined();
+    expect(await readFile(workspace.closeBackupPath)).toEqual(before);
+    expect(existsSync(workspace.closeBackupPreviousPath)).toBe(false);
+  });
+  test("background snapshots include WAL commits and preserve the prior generation", async () => {
+    const repository = await seed();
+    await repository.commitSavedJobDelta({
+      upserts: [createBackupFixtureJob("first")],
     });
-    await firstRepository.close();
-
-    const secondRepository = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: createSeed(),
-      automaticBackup: { onClose: true },
+    await snapshot();
+    await repository.commitSavedJobDelta({
+      upserts: [createBackupFixtureJob("second")],
     });
-    await secondRepository.commitSavedJobDelta({
-      upserts: [createBackupFixtureJob("job_generation_two")],
-    });
-    await secondRepository.close();
-
+    await snapshot();
+    await repository.close();
     const newest = openSnapshot(workspace.closeBackupPath);
-    try {
-      // The second session inherits the first session's committed row, so
-      // the newest snapshot holds both; the rotation is proven by the
-      // previous generation file below.
-      expect(listSavedJobIds(newest)).toContain("job_generation_one");
-      expect(listSavedJobIds(newest)).toContain("job_generation_two");
-    } finally {
-      newest.close();
-    }
-
     const previous = openSnapshot(workspace.closeBackupPreviousPath);
     try {
-      expect(listSavedJobIds(previous)).toContain("job_generation_one");
-      expect(listSavedJobIds(previous)).not.toContain("job_generation_two");
+      expect(listSavedJobIds(newest)).toEqual(
+        expect.arrayContaining(["first", "second"]),
+      );
+      expect(listSavedJobIds(previous)).toContain("first");
+      expect(listSavedJobIds(previous)).not.toContain("second");
     } finally {
+      newest.close();
       previous.close();
     }
+    if (process.platform !== "win32")
+      expect((await stat(workspace.closeBackupPath)).mode & 0o777).toBe(0o600);
   });
-
-  test("reset removes every managed copy of the old workspace across restart", async () => {
-    const oldSeed = createSeed();
-    oldSeed.profile.email = "deleted-person@example.test";
-    oldSeed.profile.baseResume.textContent = "Synthetic deleted resume text";
-    oldSeed.applicationRecords = [
-      ApplicationRecordSchema.parse({
-        id: "deleted_application",
-        jobId: "job_before_reset",
-        title: "Synthetic role",
-        company: "Synthetic company",
-        status: "submitted",
-        lastActionLabel: "Applied",
-        nextActionLabel: null,
-        lastUpdatedAt: "2026-10-02T10:00:00.000Z",
-      }),
-    ];
-    const first = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: oldSeed,
-      automaticBackup: { onClose: true, beforeReset: true },
-    });
-    await first.commitSavedJobDelta({
-      upserts: [createBackupFixtureJob("job_before_reset")],
-    });
-    await first.close();
-    const second = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: oldSeed,
-      automaticBackup: { onClose: true, beforeReset: true },
-    });
-    await second.close();
-    const managedPaths = Object.values({
-      ...getWorkspaceDatabaseBackupPaths(workspace.filePath),
-    });
-    // Include leftovers from interrupted recovery and reset snapshot writes.
-    const recoveryPaths = [
-      `${workspace.filePath}.quarantine-2026-10-02T10-00-00-000Z-test`,
-      `${workspace.filePath}-wal.quarantine-2026-10-02T10-00-00-000Z-test`,
-      `${workspace.filePath}.restore-test.tmp`,
-      `${workspace.filePath}.recovery-validate-backup-test.tmp`,
-      `${workspace.filePath}.recovery-integrity-test.tmp-wal`,
-    ];
-    for (const copyPath of [
-      ...managedPaths.filter((p) => !existsSync(p)),
-      ...recoveryPaths,
-    ]) {
-      await writeFile(copyPath, await readFile(workspace.closeBackupPath));
-    }
+  test("starts without waiting for quit and does not refresh a recent recovery point", async () => {
     const repository = await createFileJobFinderRepository({
       filePath: workspace.filePath,
-      seed: oldSeed,
-      automaticBackup: { onClose: true, beforeReset: true },
+      seed: createSeed(),
+      automaticBackup: { inBackground: true },
     });
-    await repository.reset(createSeed());
-    for (const copyPath of [...managedPaths, ...recoveryPaths])
-      expect(existsSync(copyPath)).toBe(false);
-    // Deleted rows must not survive as free pages in the live database file
-    // or as old frames in its WAL.
-    for (const livePath of [workspace.filePath, `${workspace.filePath}-wal`]) {
-      if (!existsSync(livePath)) continue;
-      const liveBytes = await readFile(livePath);
-      expect(
-        liveBytes.includes(Buffer.from("deleted-person@example.test")),
-      ).toBe(false);
-      expect(
-        liveBytes.includes(Buffer.from("Synthetic deleted resume text")),
-      ).toBe(false);
-    }
+    await waitForBackup();
     await repository.close();
+    const modified = (await stat(workspace.closeBackupPath)).mtimeMs;
     const reopened = await createFileJobFinderRepository({
       filePath: workspace.filePath,
       seed: createSeed(),
-      automaticBackup: { onClose: true, beforeReset: true },
+      automaticBackup: { inBackground: true },
     });
-    expect((await reopened.listSavedJobs()).map((job) => job.id)).not.toContain(
-      "job_before_reset",
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await reopened.close();
+    expect((await stat(workspace.closeBackupPath)).mtimeMs).toBe(modified);
+    expect(existsSync(workspace.closeBackupPreviousPath)).toBe(false);
+  });
+  test("refreshes an expired recovery point while open", async () => {
+    const repository = await seed();
+    await snapshot();
+    const oldTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await utimes(workspace.closeBackupPath, oldTime, oldTime);
+    const db = new DatabaseSync(workspace.filePath);
+    const version = Number(
+      db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()
+        ?.version,
     );
+    db.close();
+    const stop = scheduleWorkspaceDatabaseBackups({
+      filePath: workspace.filePath,
+      schemaVersion: version,
+    });
+    stops.push(stop);
+    await vi.waitFor(
+      () => expect(existsSync(workspace.closeBackupPreviousPath)).toBe(true),
+      { timeout: 10000 },
+    );
+    await stop();
+    await repository.close();
+    expect((await stat(workspace.closeBackupPath)).mtimeMs).toBeGreaterThan(
+      oldTime.getTime(),
+    );
+  });
+  test("refreshes after a migration even if the previous recovery point is recent", async () => {
+    const repository = await seed();
+    await snapshot();
+    const db = new DatabaseSync(workspace.filePath);
+    const version = Number(
+      db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()
+        ?.version,
+    );
+    db.close();
+    const stop = scheduleWorkspaceDatabaseBackups({
+      filePath: workspace.filePath,
+      schemaVersion: version + 1,
+    });
+    stops.push(stop);
+    await vi.waitFor(
+      () => expect(existsSync(workspace.closeBackupPreviousPath)).toBe(true),
+      { timeout: 10000 },
+    );
+    await stop();
+    await repository.close();
+  });
+  test("an aborted snapshot preserves the completed recovery point", async () => {
+    const repository = await seed();
+    await snapshot();
+    const before = await readFile(workspace.closeBackupPath);
+    const controller = new AbortController();
+    controller.abort();
+    expect(
+      (
+        await createWorkspaceDatabaseBackup({
+          filePath: workspace.filePath,
+          signal: controller.signal,
+        })
+      ).status,
+    ).toBe("skipped");
+    await repository.close();
+    expect(await readFile(workspace.closeBackupPath)).toEqual(before);
+    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
+  });
+  test("close cancels an active native copy and preserves the completed recovery point", async () => {
+    const initial = await seed();
+    await snapshot();
+    await initial.close();
+    const before = await readFile(workspace.closeBackupPath);
+    const oldTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await utimes(workspace.closeBackupPath, oldTime, oldTime);
+    const raw = new DatabaseSync(workspace.filePath);
+    raw.exec(
+      "CREATE TABLE backup_load(value BLOB); INSERT INTO backup_load VALUES(zeroblob(134217728))",
+    );
+    raw.close();
+    const repository = await createFileJobFinderRepository({
+      filePath: workspace.filePath,
+      seed: createSeed(),
+      automaticBackup: { inBackground: true },
+    });
+    await vi.waitFor(
+      () => expect(existsSync(workspace.closeTemporaryPath)).toBe(true),
+      { timeout: 10000, interval: 5 },
+    );
+    const started = performance.now();
+    await repository.close();
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(await readFile(workspace.closeBackupPath)).toEqual(before);
+    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
+  });
+  test("reset removes rotating, migration, quarantine and interrupted recovery copies", async () => {
+    const oldSeed = createSeed();
+    oldSeed.profile.email = "deleted-person@example.test";
+    oldSeed.profile.baseResume.textContent = "Synthetic deleted resume text";
+    const repository = await createFileJobFinderRepository({
+      filePath: workspace.filePath,
+      seed: oldSeed,
+      automaticBackup: { beforeReset: true, inBackground: true },
+    });
+    await waitForBackup();
+    const copies = [
+      workspace.closeBackupPreviousPath,
+      `${workspace.filePath}.before-v26.sqlite`,
+      `${workspace.filePath}.before-v29.sqlite`,
+      `${workspace.filePath}.quarantine-2026-10-02T10-00-00-000Z-test`,
+      `${workspace.filePath}.recovery-validate-backup-test.tmp.before-v26.sqlite`,
+      `${workspace.filePath}.recovery-integrity-test.tmp-wal`,
+    ];
+    for (const copy of copies)
+      await writeFile(copy, await readFile(workspace.closeBackupPath));
+    await repository.reset(createSeed());
+    await repository.close();
+    for (const copy of [
+      ...copies,
+      ...Object.values({
+        ...getWorkspaceDatabaseBackupPaths(workspace.filePath),
+      }),
+    ])
+      expect(existsSync(copy)).toBe(false);
+    const bytes = await readFile(workspace.filePath);
+    expect(bytes.includes(Buffer.from("deleted-person@example.test"))).toBe(
+      false,
+    );
+    expect(bytes.includes(Buffer.from("Synthetic deleted resume text"))).toBe(
+      false,
+    );
+    const reopened = await seed();
     expect((await reopened.getProfile()).email).not.toBe(
       "deleted-person@example.test",
     );
-    expect(await reopened.listApplicationRecords()).toHaveLength(0);
+    expect(await reopened.listApplicationRecords()).toEqual([]);
     await reopened.close();
-    for (const snapshotPath of [
-      workspace.closeBackupPath,
-      workspace.closeBackupPreviousPath,
-    ]) {
-      const snapshot = openSnapshot(snapshotPath);
-      try {
-        expect(
-          listValues(snapshot, "application_records", ApplicationRecordSchema),
-        ).toHaveLength(0);
-        expect(listSavedJobIds(snapshot)).not.toContain("job_before_reset");
-      } finally {
-        snapshot.close();
-      }
-      const bytes = await readFile(snapshotPath);
-      expect(bytes.includes(Buffer.from("deleted-person@example.test"))).toBe(
-        false,
-      );
-      expect(bytes.includes(Buffer.from("Synthetic deleted resume text"))).toBe(
-        false,
-      );
-    }
-    expect(existsSync(workspace.resetBackupPath)).toBe(false);
   });
-
-  test("still closes the database cleanly when the backup fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const repository = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: createSeed(),
-      automaticBackup: { onClose: true },
-    });
-    // A directory at the temporary destination makes every close-snapshot
-    // attempt fail without touching directory permissions, keeping the
-    // failure deterministic across platforms.
-    await mkdir(workspace.closeTemporaryPath);
-
-    await expect(repository.close()).resolves.toBeUndefined();
-
-    expect(warn).toHaveBeenCalledWith(
-      "[JobFinderRepository] Skipped graceful-close database backup.",
-      expect.anything(),
-    );
-
-    expect(existsSync(workspace.closeBackupPath)).toBe(false);
-    expect(existsSync(workspace.closeBackupPreviousPath)).toBe(false);
-    expect(existsSync(workspace.closeTemporaryPath)).toBe(true);
-
-    const reopened = new DatabaseSync(workspace.filePath);
-    try {
-      runMigrations(reopened);
-      expect(hasPersistedState(reopened)).toBe(true);
-    } finally {
-      reopened.close();
-    }
-  });
-
-  test("replaces a stale interrupted temporary snapshot instead of failing", async () => {
-    const repository = await createFileJobFinderRepository({
-      filePath: workspace.filePath,
-      seed: createSeed(),
-      automaticBackup: { onClose: true },
-    });
-    await writeFile(workspace.closeTemporaryPath, "interrupted-snapshot");
-
-    await repository.commitSavedJobDelta({
-      upserts: [createBackupFixtureJob("job_after_stale_tmp")],
-    });
+  test("an empty reset removes unused normalized evidence as well as its owner rows", async () => {
+    const repository = await seed();
+    const raw = new DatabaseSync(workspace.filePath);
+    raw.exec(`INSERT INTO resume_source_texts(id, stable_key, text) VALUES(999, 'deleted', 'Synthetic deleted evidence');
+      INSERT INTO resume_sources(id, stable_key, ref_id, source_kind, source_id, text_id) VALUES(999, 'deleted', 'deleted', 'profile', NULL, 999);
+      INSERT INTO job_listing_texts(id, stable_key, text) VALUES(999, 'deleted', 'Synthetic deleted listing');
+      INSERT INTO job_fit_assessments(id, stable_key, value) VALUES(999, 'deleted', '{}');
+      INSERT INTO search_preference_sets(id, value) VALUES('deleted', '{}');
+      INSERT INTO job_sources(id, source_id, value) VALUES('deleted', 'deleted', '{}');
+      INSERT INTO search_preference_sources(preference_id, source_id, source_version_id, position) VALUES('deleted', 'deleted', 'deleted', 0);`);
+    await repository.reset(createSeed());
+    for (const table of [
+      "resume_sources",
+      "resume_source_texts",
+      "job_listing_texts",
+      "job_fit_assessments",
+    ])
+      expect(
+        Number(
+          raw.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count,
+        ),
+      ).toBe(0);
+    for (const table of ["search_preference_sets", "job_sources"])
+      expect(
+        Number(
+          raw
+            .prepare(
+              `SELECT COUNT(*) AS count FROM ${table} WHERE id = 'deleted'`,
+            )
+            .get()?.count,
+        ),
+      ).toBe(0);
+    raw.close();
     await repository.close();
-
-    expect(existsSync(workspace.closeBackupPath)).toBe(true);
-    expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
-
-    const restored = openSnapshot(workspace.closeBackupPath);
-    try {
-      expect(listSavedJobIds(restored)).toContain("job_after_stale_tmp");
-    } finally {
-      restored.close();
-    }
+    expect(
+      (await readFile(workspace.filePath)).includes(
+        Buffer.from("Synthetic deleted evidence"),
+      ),
+    ).toBe(false);
+    expect(
+      (await readFile(workspace.filePath)).includes(
+        Buffer.from("Synthetic deleted listing"),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -350,11 +377,11 @@ describe("workspace backup rotation reconciliation", () => {
     const repository = await createFileJobFinderRepository({
       filePath: workspace.filePath,
       seed: createSeed(),
-      automaticBackup: { onClose: true },
     });
     await repository.commitSavedJobDelta({
       upserts: [createBackupFixtureJob(jobId)],
     });
+    await createWorkspaceDatabaseBackup({ filePath: workspace.filePath });
     await repository.close();
   }
 

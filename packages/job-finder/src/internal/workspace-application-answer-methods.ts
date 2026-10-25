@@ -18,6 +18,7 @@ import {
   normalizeAnswerQuestion,
 } from "./workspace-answer-memory";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { readSavedJob } from "./read-saved-job";
 
 function getLatestQuestionAnswer(
   details: ApplyRunDetails,
@@ -133,9 +134,7 @@ async function saveReusableAnswer(input: {
     );
   }
 
-  const job = (await input.ctx.repository.listSavedJobs()).find(
-    (entry) => entry.id === input.command.jobId,
-  );
+  const job = await readSavedJob(input.ctx.repository, input.command.jobId);
   const applicationScope = eligibilityAnswerScope({
     kind: input.questionKind,
     resultId: input.command.resultId,
@@ -198,10 +197,100 @@ export function createWorkspaceApplicationAnswerMethods(
   getApplyRunDetails: (
     runId: string,
     jobId: string,
+    applicationRecordId?: string | null,
   ) => Promise<ApplyRunDetails>,
   performUserAction?: (command: UserActionCommand) => Promise<unknown>,
 ) {
   const mutationFlights = new Map<string, Promise<ApplyRunDetails>>();
+
+  async function reuseAnswerInBatch(command: SaveApplicationAnswerCommand) {
+    if (
+      command.saveScope !== "reusable_profile" ||
+      command.value.type === "asset_ref"
+    )
+      return;
+    const details = await getApplyRunDetails(command.runId, command.jobId);
+    const source = details.questionRecords.find(
+      (question) => question.id === command.questionId,
+    );
+    if (!source) return;
+    const job = await readSavedJob(ctx.repository, command.jobId);
+    const questions = await ctx.repository.listApplicationQuestionRecords({
+      runId: command.runId,
+    });
+    for (const question of questions) {
+      if (
+        question.jobId === command.jobId ||
+        !question.applicationRecordId ||
+        question.status !== "detected" ||
+        question.selectedAnswerId ||
+        question.kind !== source.kind ||
+        question.answerControlType !== source.answerControlType ||
+        normalizeAnswerQuestion(question.prompt) !==
+          normalizeAnswerQuestion(source.prompt) ||
+        JSON.stringify([...question.answerOptions].sort()) !==
+          JSON.stringify([...source.answerOptions].sort())
+      )
+        continue;
+      // Country-dependent facts never spread to a different hiring context.
+      if (
+        source.kind === "work_authorization" ||
+        source.kind === "visa_sponsorship"
+      ) {
+        // Conditional permits still need the ordinary per-job interpretation.
+        const profile = await ctx.repository.getProfile();
+        if (profile.workEligibility.limitedWorkPermissions?.length) continue;
+        const peerJob = await readSavedJob(ctx.repository, question.jobId);
+        if (!job?.location?.trim() || peerJob?.location !== job.location)
+          continue;
+      }
+      const peer = await getApplyRunDetails(
+        command.runId,
+        question.jobId,
+        question.applicationRecordId,
+      );
+      const latest = getLatestQuestionAnswer(peer, question.id);
+      if (
+        peer.result?.id !== question.resultId ||
+        !["blocked", "awaiting_review"].includes(peer.result.state) ||
+        (latest &&
+          (latest.sourceKind === "user" || latest.status !== "suggested"))
+      )
+        continue;
+      const reused: SaveApplicationAnswerCommand = {
+        ...command,
+        commandId: `${command.commandId}_reuse_${question.id}`,
+        jobId: question.jobId,
+        resultId: question.resultId,
+        questionId: question.id,
+        expectedAnswerRevision: latest?.revision ?? 0,
+        saveScope: "application_once",
+      };
+      // The person's own answer is already saved. Another application's
+      // write or continuation must not fail or hold up their Save.
+      await runSingleFlight(reused.commandId, () =>
+        saveApplicationAnswerOnce(reused, { continueInBackground: true }),
+      ).catch((error: unknown) => {
+        console.error(
+          "Job Finder could not reuse an answer on another application.",
+          error,
+        );
+      });
+    }
+  }
+
+  async function continueAfterSave(
+    command: SaveApplicationAnswerCommand,
+    continueInBackground: boolean,
+  ) {
+    if (!continueInBackground) return continueAnsweredStep(command);
+    void continueAnsweredStep(command).catch((error: unknown) => {
+      console.error(
+        "Job Finder could not continue another application after reusing an answer.",
+        error,
+      );
+    });
+  }
 
   async function continueAnsweredStep(command: SaveApplicationAnswerCommand) {
     if (!performUserAction) return;
@@ -296,6 +385,7 @@ export function createWorkspaceApplicationAnswerMethods(
 
   async function saveApplicationAnswerOnce(
     command: SaveApplicationAnswerCommand,
+    { continueInBackground = false } = {},
   ): Promise<ApplyRunDetails> {
     const existingDetails = await getApplyRunDetails(
       command.runId,
@@ -306,7 +396,8 @@ export function createWorkspaceApplicationAnswerMethods(
         (answer) => answer.id === `application_answer_${command.commandId}`,
       )
     ) {
-      await continueAnsweredStep(command);
+      await reuseAnswerInBatch(command);
+      await continueAfterSave(command, continueInBackground);
       return getApplyRunDetails(command.runId, command.jobId);
     }
 
@@ -405,7 +496,8 @@ export function createWorkspaceApplicationAnswerMethods(
         "This answer changed in another view. Reload the application before replacing it.",
       );
     }
-    await continueAnsweredStep(command);
+    await reuseAnswerInBatch(command);
+    await continueAfterSave(command, continueInBackground);
     return getApplyRunDetails(command.runId, command.jobId);
   }
 

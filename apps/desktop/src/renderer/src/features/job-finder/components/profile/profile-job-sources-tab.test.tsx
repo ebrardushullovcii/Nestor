@@ -32,6 +32,10 @@ import {
   ProfileJobSourcesTab,
 } from "./profile-job-sources-tab";
 import { resetSourceCheckQueueForTests } from "../../lib/source-check-queue";
+import {
+  describeSourcesNeedingAttention,
+  listSourcesNeedingAttention,
+} from "../../lib/source-attention";
 import { SourceCheckQueueRunner } from "../../lib/source-check-queue-runner";
 
 type DiscoveryTarget =
@@ -77,6 +81,8 @@ function JobSourcesHarness(props: {
   discoveryRuns?: readonly DiscoveryRunRecord[];
   isSourceDebugPending?: (targetId: string) => boolean;
   onRunSourceDebug?: (targetId: string) => void;
+  onSaveNow?: () => void;
+  requestedFilter?: string | null;
   targets?: DiscoveryTarget[];
 }) {
   const preferences = JobSearchPreferencesSchema.parse({
@@ -101,6 +107,7 @@ function JobSourcesHarness(props: {
         recentSourceDebugRuns={[]}
       />
       <ProfileJobSourcesTab
+        requestedFilter={props.requestedFilter ?? null}
         activeDiscoveryRun={props.activeDiscoveryRun ?? null}
         discoveryRuns={props.discoveryRuns ?? []}
         isBrowserSessionPending={() => false}
@@ -116,6 +123,7 @@ function JobSourcesHarness(props: {
         onOpenBrowserSessionForTarget={() => undefined}
         onRunDiscoveryForTarget={() => undefined}
         onRunSourceDebug={props.onRunSourceDebug ?? (() => undefined)}
+        {...(props.onSaveNow ? { onSaveNow: props.onSaveNow } : {})}
         onSaveSourceInstructionArtifact={() => undefined}
         onVerifySourceInstructions={() => undefined}
         preferencesForm={preferencesForm}
@@ -128,6 +136,35 @@ function JobSourcesHarness(props: {
 }
 
 describe("ProfileJobSourcesTab", () => {
+  it("opens on Needs attention from Home's line, with Home's count", () => {
+    const targets = [
+      createTarget(1, { id: "target_failing", staleReason: "HTTP 404" }),
+      createTarget(2, { id: "target_fine" }),
+      createTarget(3, {
+        id: "target_off",
+        enabled: false,
+        staleReason: "HTTP 404",
+      }),
+    ];
+    render(
+      <JobSourcesHarness requestedFilter="needs_attention" targets={targets} />,
+    );
+
+    const homeCount = listSourcesNeedingAttention(
+      targets,
+      deriveSourceHealthSignals({}),
+    ).length;
+    expect(describeSourcesNeedingAttention(homeCount)).toBe(
+      "1 job source needs attention.",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Needs attention" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText(`${homeCount} of 3 sources`)).toBeTruthy();
+  });
+
   it("normalizes newline and comma separated source URLs", () => {
     expect(
       parseJobSourceUrls(
@@ -299,7 +336,11 @@ describe("ProfileJobSourcesTab", () => {
         name: "Previous source page (top of list)",
       }),
     ).toHaveProperty("disabled", true);
-    expect(within(topPager).getByText("Page 1 of 21")).toBeTruthy();
+    expect(
+      within(topPager)
+        .getByRole("button", { name: "Page 1" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
     expect(screen.getAllByRole("button", { name: "Next" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Previous" })).toHaveLength(1);
 
@@ -417,14 +458,17 @@ describe("ProfileJobSourcesTab", () => {
     await waitFor(() => expect(screen.getByText("OpenAI")).toBeTruthy());
     expect(screen.getByText("1 of 507 sources")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
-    await waitFor(() =>
-      expect(
-        container.querySelectorAll("[data-compact-source-id]"),
-      ).toHaveLength(0),
-    );
+    // The one match is off, so neither "Enabled" (nothing) nor "Disabled"
+    // (everything) could change the list: no filter is offered.
+    expect(screen.queryByRole("button", { name: "Enabled" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disabled" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show all sources" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), {
+      target: { value: "" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Enabled" })).toBeTruthy(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
     expect(container.querySelectorAll("[data-compact-source-id]")).toHaveLength(
       5,
@@ -615,11 +659,10 @@ describe("ProfileJobSourcesTab", () => {
     ).toBeTruthy();
 
     // Nothing in the list claims attention for a source that just completed
-    // a run; the filter is the only place that count lives now.
-    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
-    expect(container.querySelectorAll("[data-compact-source-id]")).toHaveLength(
-      0,
-    );
+    // a run, so the filter that would show none is not offered either.
+    expect(
+      screen.queryByRole("button", { name: "Needs attention" }),
+    ).toBeNull();
   });
 
   it("does not flag a source whose search completed with no jobs", () => {
@@ -688,6 +731,17 @@ describe("ProfileJobSourcesTab", () => {
       3,
     );
     expect(screen.getByText("3 sources")).toBeTruthy();
+  });
+
+  it("saves a quick Include in search tick at once", async () => {
+    const onSaveNow = vi.fn();
+    render(
+      <JobSourcesHarness onSaveNow={onSaveNow} targets={createTargets(3)} />,
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include Company 002 in searches" }),
+    );
+    await vi.waitFor(() => expect(onSaveNow).toHaveBeenCalledTimes(1));
   });
 
   it("supports quick enablement and mounts the full editor only for the opened source", () => {

@@ -191,7 +191,7 @@ export const WaitingFormMemorySchema = z.object({
         backgroundThrottled: z.boolean(),
       }),
     )
-    .max(16),
+    .max(64),
 });
 export type WaitingFormMemory = z.infer<typeof WaitingFormMemorySchema>;
 

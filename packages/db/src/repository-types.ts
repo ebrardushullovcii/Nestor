@@ -1,4 +1,5 @@
 import type {
+  PreparedApplicationForm,
   ApplyJobResult,
   ApplyJobResultInput,
   ApplyRun,
@@ -16,8 +17,15 @@ import type {
   ApplicationReplayCheckpoint,
   ApplicationReplayCheckpointInput,
   CandidateProfile,
+  DiscoverySavedJobFingerprints,
+  SavedJobSightingPatch,
+  SavedJobPlanAssessmentPatch,
   JobFinderDiscoveryState,
+  DiscoveryBootstrapState,
+  DiscoveryHomeState,
+  DiscoveryRunStateProjection,
   JobFinderActivityControl,
+  ApplyQueue,
   JobFinderRepositoryState,
   JobFinderIntelligenceState,
   JobFinderSettings,
@@ -212,6 +220,8 @@ export interface JobFinderRepository
   close(): Promise<void>;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
   getProfile(): Promise<CandidateProfile>;
+  /** Validated frozen singleton; display readers must not mutate it. */
+  readProfileProjection?(): Promise<CandidateProfile>;
   /**
    * Reads the persisted candidate profile together with the profile
    * singleton's monotonic revision. The revision is the compare-and-swap
@@ -240,6 +250,7 @@ export interface JobFinderRepository
     options?: { expectedRevision?: number },
   ): Promise<ProfileCommitOutcome>;
   getSearchPreferences(): Promise<JobSearchPreferences>;
+  readSearchPreferencesProjection?(): Promise<JobSearchPreferences>;
   /**
    * Persists search preferences and advances the shared profile revision
    * epoch, so concurrent compare-and-swap commits that captured preferences
@@ -301,10 +312,31 @@ export interface JobFinderRepository
   /** The saved jobs with these ids, in `listSavedJobs` order. */
   listSavedJobsByIds(jobIds: readonly string[]): Promise<readonly SavedJob[]>;
   /**
+   * Ids of the saved jobs the person took past Find jobs: every status but
+   * "discovered" and "archived". Home's first view reads only these.
+   */
+  listCuratedSavedJobIds?(): Promise<readonly string[]>;
+  /** Stored prepared fingerprints in one indexed batch; listing bodies are not read. */
+  readSavedJobDiscoveryFingerprints(
+    jobIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DiscoverySavedJobFingerprints>>;
+  /** Store carried preparation only if its inputs still match; never rewrite a job body. */
+  writeSavedJobDiscoveryFingerprints(jobs: readonly SavedJob[]): Promise<void>;
+  /** Timestamp-only batch; absent fields stay unchanged, null clears, unknown ids are ignored. */
+  updateSavedJobSightings(
+    updates: readonly SavedJobSightingPatch[],
+  ): Promise<number>;
+  updateSavedJobPlanAssessments(
+    updates: readonly SavedJobPlanAssessmentPatch[],
+  ): Promise<number>;
+  /**
    * Atomically applies row-local saved-job updates and/or inserts without
    * replacing rows that the caller did not intend to change.
    */
   commitSavedJobDelta(input: {
+    planAssessments?: readonly SavedJobPlanAssessmentPatch[];
+    /** Applied after full upserts, in this same job/discovery transaction. */
+    sightings?: readonly SavedJobSightingPatch[];
     upserts?: readonly SavedJob[];
     /**
      * Builds additional upserts from transaction-current canonical discovery
@@ -328,6 +360,8 @@ export interface JobFinderRepository
       current: BorrowedDiscoveryState,
     ) => readonly SavedJob[];
     update?: (job: SavedJob) => SavedJob;
+    /** Give the updater frozen current rows; it must return a new row for changes. */
+    borrowCurrentJobs?: boolean;
     /**
      * Runs `update` only on these rows (and on stored rows an upsert names);
      * every other row stays as stored without being read. Pass it only when
@@ -367,6 +401,8 @@ export interface JobFinderRepository
     update: (
       current: DiscoveryFeedbackCommitCurrent,
     ) => DiscoveryFeedbackCommitNext<TResult>,
+    /** Borrow frozen transaction-current singletons; replace changed values. */
+    options?: { borrowUnchangedState: boolean },
   ): Promise<TResult>;
   /**
    * Destructively replaces the complete saved-job collection. The caller must
@@ -400,12 +436,16 @@ export interface JobFinderRepository
   listResumeDraftRevisions(
     draftId?: string,
   ): Promise<readonly ResumeDraftRevision[]>;
+  /** The id `listResumeDraftRevisions(draftId)[0]` would have, read alone. */
+  getLatestResumeDraftRevisionId(draftId: string): Promise<string | null>;
   upsertResumeDraftRevision(revision: ResumeDraftRevision): Promise<void>;
   listResumeExportArtifacts(options?: {
     jobId?: string;
     draftId?: string;
   }): Promise<readonly ResumeExportArtifact[]>;
   upsertResumeExportArtifact(artifact: ResumeExportArtifact): Promise<void>;
+  /** Current/approved exports and every resume referenced by application history. */
+  listRetainedResumeExportPaths(): Promise<readonly string[]>;
   listResumeResearchArtifacts(
     jobId?: string,
   ): Promise<readonly ResumeResearchArtifact[]>;
@@ -462,11 +502,17 @@ export interface JobFinderRepository
   listApplyRuns(options?: { id?: string }): Promise<readonly ApplyRun[]>;
   upsertApplyRun(run: ApplyRun): Promise<void>;
   listApplyJobResults(options?: {
+    id?: string;
     runId?: string;
     jobId?: string;
     applicationRecordId?: string;
   }): Promise<readonly ApplyJobResult[]>;
   upsertApplyJobResult(result: ApplyJobResultInput): Promise<void>;
+  getPreparedApplicationForm(
+    resultId: string,
+  ): Promise<PreparedApplicationForm | null>;
+  upsertPreparedApplicationForm(form: PreparedApplicationForm): Promise<void>;
+  deletePreparedApplicationForm(resultId: string): Promise<void>;
   markApplicationPreparationStarted(input: {
     resultId: string;
     runId: string;
@@ -561,6 +607,8 @@ export interface JobFinderRepository
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   applyResumePatchWithRevision(input: {
+    /** Replace only this latest revision, preserving its exact pre-edit snapshot. */
+    coalesceRevision?: { id: string; afterHash: string };
     expectedDraftUpdatedAt: string;
     draft: ResumeDraft;
     revision: ResumeDraftRevision;
@@ -575,8 +623,27 @@ export interface JobFinderRepository
   }): Promise<void>;
   clearResumeApproval(input: {
     draft: ResumeDraft;
-    staleReason: string;
+    /** Null when an undo puts the draft back as it was. */
+    staleReason: string | null;
     tailoredAsset?: TailoredAsset | null;
+  }): Promise<void>;
+  /**
+   * Marks stored drafts stale in one transaction, as clearResumeApproval
+   * does for one: status, reason and time, no approval, the job's exports
+   * unapproved, and the job's first tailored asset without its file. Only
+   * those fields change in the commit; the file repository then folds them
+   * into the bodies in bounded background slices for older builds. Whole
+   * drafts are not read or validated by the save. Unknown ids are skipped.
+   */
+  staleResumeDrafts?(input: {
+    draftIds: readonly string[];
+    staleReason: string;
+    updatedAt: string;
+    /** The explicit profile save and its approval invalidation share a commit. */
+    profileInputs?: {
+      profile: CandidateProfile;
+      searchPreferences?: JobSearchPreferences;
+    };
   }): Promise<void>;
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
   upsertApplicationRecord(
@@ -639,6 +706,8 @@ export interface JobFinderRepository
     update: (current: JobFinderSettings) => JobFinderSettings,
   ): Promise<JobFinderSettings>;
   getDiscoveryState(): Promise<JobFinderDiscoveryState>;
+  /** Frozen canonical run state, including checkpoints. Never mutate borrowed rows. */
+  readDiscoveryStateForRun?(): Promise<JobFinderDiscoveryState>;
   /**
    * Borrowed immutable display state, reused until discovery changes. Agent
    * checkpoints stay in canonical storage and are null in this projection.
@@ -646,6 +715,13 @@ export interface JobFinderRepository
    * use getDiscoveryState or the transaction-current commit updater instead.
    */
   readDiscoveryDisplayProjection(): Promise<DiscoveryDisplayProjection>;
+  readDiscoveryBootstrapProjection(): Promise<DiscoveryBootstrapState>;
+  /** Display runs without checkpoints and indexed activity for the requested saved jobs only. */
+  readDiscoveryHomeProjection(
+    jobIds: readonly string[],
+    planId?: string | null,
+  ): Promise<DiscoveryHomeState>;
+  readDiscoveryRunStates(): Promise<readonly DiscoveryRunStateProjection[]>;
   /**
    * Atomically applies a synchronous transform to the currently stored
    * discovery state. The updater borrows frozen canonical rows and must return
@@ -657,7 +733,22 @@ export interface JobFinderRepository
   commitDiscoveryStateUpdate(
     update: (current: BorrowedDiscoveryState) => CanonicalDiscoveryWrite,
   ): Promise<JobFinderDiscoveryState>;
+  /**
+   * Reads the canonical discovery state into its cache without copying it,
+   * so the first discovery commit after start does not pay for the read.
+   */
+  warmDiscoveryState?(): Promise<void>;
+  /**
+   * Atomically changes only the stored browser session states, without
+   * reading discovery runs, logs or checkpoints.
+   */
+  commitDiscoverySessions?(
+    update: (
+      sessions: JobFinderDiscoveryState["sessions"],
+    ) => JobFinderDiscoveryState["sessions"],
+  ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
+  readCampaignProjection?(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**
    * Applies a campaign collection and its corresponding global preferences
@@ -688,15 +779,17 @@ export interface JobFinderRepository
   ): Promise<JobFinderIntelligenceState>;
   getActivityControl(): Promise<JobFinderActivityControl>;
   saveActivityControl(activityControl: JobFinderActivityControl): Promise<void>;
+  /** The one saved Apply queue (Apply to selected, this page or all), or null. */
+  getApplyQueue(): Promise<ApplyQueue | null>;
+  saveApplyQueue(queue: ApplyQueue | null): Promise<void>;
 }
 
 export interface AutomaticWorkspaceBackupOptions {
   /**
-   * Rotate the graceful-close snapshot into `<filePath>.backup` (previous
-   * generation preserved as `<filePath>.backup.prev`) right before the
-   * repository closes its SQLite connection (normal app shutdown).
+   * Refresh `<filePath>.backup` in the background after migrations and at
+   * most daily, retaining one previous generation. Quit cancels unfinished work.
    */
-  onClose?: boolean;
+  inBackground?: boolean;
   /**
    * Snapshot the pre-reset state into the dedicated `<filePath>.reset-backup`
    * destination right before a destructive full-state reset overwrites it.
@@ -776,6 +869,8 @@ export interface WorkspaceDatabaseRecoveryRequiredDetails {
 export interface FileJobFinderRepositoryOptions {
   filePath: string;
   seed: JobFinderRepositorySeed;
+  /** Desktop's startup worker converts evidence in slices; typed reads support both shapes. */
+  deferEvidenceConversion?: boolean;
   /**
    * Opt-in database-only recovery snapshots stored next to the live
    * database. They do not capture generated documents, candidate assets, or
@@ -806,7 +901,8 @@ export type StateTableKey =
   | "discovery_state"
   | "campaign_state"
   | "intelligence_state"
-  | "activity_control";
+  | "activity_control"
+  | "apply_queue";
 
 export interface SchemaParser<TValue> {
   parse: (value: unknown) => TValue;

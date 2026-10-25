@@ -20,6 +20,33 @@ function getDiscoveryLedgerDecisionKey(
   return entry ? `${entry.latestStatus}\u0000${entry.skipReason ?? ""}` : null;
 }
 
+export function rebaseDiscoveryLedgerEntry(
+  baseline: DiscoveryLedgerEntry | null,
+  working: DiscoveryLedgerEntry,
+  persisted: DiscoveryLedgerEntry | null,
+): DiscoveryLedgerEntry {
+  if (!persisted) return working;
+  const runChanged =
+    getDiscoveryLedgerDecisionKey(working) !==
+    getDiscoveryLedgerDecisionKey(baseline);
+  const persistedChanged =
+    getDiscoveryLedgerDecisionKey(persisted) !==
+    getDiscoveryLedgerDecisionKey(baseline);
+  if (!persistedChanged) return working;
+  if (
+    !runChanged ||
+    persisted.latestStatus === "skipped" ||
+    persisted.latestStatus === "applied"
+  )
+    return persisted;
+  return working;
+}
+
+const ledgerEntriesById = new WeakMap<
+  readonly DiscoveryLedgerEntry[],
+  ReadonlyMap<string, DiscoveryLedgerEntry>
+>();
+
 /**
  * Rebases the run-owned ledger onto the latest persisted ledger.
  *
@@ -40,9 +67,14 @@ export function rebaseRunLedgerOntoPersisted(input: {
   workingLedger: readonly DiscoveryLedgerEntry[];
   persistedLedger: readonly DiscoveryLedgerEntry[];
 }): DiscoveryLedgerEntry[] {
-  const baselineById = new Map(
-    input.baselineLedger.map((entry) => [entry.id, entry]),
-  );
+  // The run-start ledger is the same list at every save of a run.
+  let baselineById = ledgerEntriesById.get(input.baselineLedger);
+  if (!baselineById) {
+    baselineById = new Map(
+      input.baselineLedger.map((entry) => [entry.id, entry]),
+    );
+    ledgerEntriesById.set(input.baselineLedger, baselineById);
+  }
   const workingById = new Map(
     input.workingLedger.map((entry) => [entry.id, entry]),
   );

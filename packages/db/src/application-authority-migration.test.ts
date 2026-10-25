@@ -41,6 +41,10 @@ describe("application authority migration integrity", () => {
 
     try {
       runMigrations(database);
+      // The simulated older schema predates column-aware change-feed triggers.
+      database.exec(
+        "DROP TRIGGER workspace_feed_application_authority_envelopes_update",
+      );
       database.exec(
         "ALTER TABLE application_authority_envelopes DROP COLUMN value",
       );
@@ -79,6 +83,8 @@ describe("application authority migration integrity", () => {
 
     try {
       runMigrations(database);
+      // The simulated older schema predates column-aware change-feed triggers.
+      database.exec("DROP TRIGGER workspace_feed_submission_preflights_update");
       database.exec(
         "ALTER TABLE submission_preflights DROP COLUMN authority_revision",
       );
@@ -118,6 +124,10 @@ describe("application authority migration integrity", () => {
 
     try {
       runMigrations(database);
+      // The simulated older schema predates column-aware change-feed triggers.
+      database.exec(
+        "DROP TRIGGER workspace_feed_application_authority_envelopes_update",
+      );
       database.exec(
         "ALTER TABLE application_authority_envelopes DROP COLUMN value",
       );

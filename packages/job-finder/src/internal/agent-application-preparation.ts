@@ -82,6 +82,7 @@ export interface AgentApplicationPreparationInput {
   applicationRecordId?: string;
   searchPreferences?: JobSearchPreferences | undefined;
   llmClient: LLMClient;
+  questionReadCacheScope?: object;
   startedAt: string;
   /** What the person would call this site. */
   siteLabel: string;
@@ -89,6 +90,9 @@ export interface AgentApplicationPreparationInput {
   providerLabel?: string | null;
   modelLabel?: string | null;
   onProgress?: Parameters<typeof runApplyAgent>[0]["onProgress"];
+  readReusableAnswers?: Parameters<
+    typeof runApplyAgent
+  >[0]["readReusableAnswers"];
   /**
    * Writes and renders the letter this application sends. Omitted when the
    * caller has no way to produce one, in which case a form that asks for a
@@ -553,6 +557,12 @@ export async function runAgentApplicationPreparation(
     hands: createApplyPageHands(input.session, now),
     safety: input.session,
     modelQuestionClassification: true,
+    ...(input.questionReadCacheScope
+      ? { questionReadCacheScope: input.questionReadCacheScope }
+      : {}),
+    ...(input.readReusableAnswers
+      ? { readReusableAnswers: input.readReusableAnswers }
+      : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     accountCreationAuthorized:
@@ -764,22 +774,43 @@ export function resolveApplySiteLabel(input: {
  * Returns null when this build has no model available. That is an outage, not
  * something the person can configure, and the caller says so in those words.
  */
-export function toApplyLlmClient(aiClient: {
-  getStatus?: () => { label: string; model: string | null };
-  chatWithTools?: (
-    messages: Parameters<LLMClient["chatWithTools"]>[0],
-    tools: Parameters<LLMClient["chatWithTools"]>[1],
-    options?: { signal?: AbortSignal; maxOutputTokens?: number },
-  ) => ReturnType<LLMClient["chatWithTools"]>;
-}): LLMClient | null {
+export function toApplyLlmClient(
+  aiClient: {
+    getStatus?: () => { label: string; model: string | null };
+    chatWithTools?: (
+      messages: Parameters<LLMClient["chatWithTools"]>[0],
+      tools: Parameters<LLMClient["chatWithTools"]>[1],
+      options?: {
+        signal?: AbortSignal;
+        maxOutputTokens?: number;
+        conversationKey?: string;
+      },
+    ) => ReturnType<LLMClient["chatWithTools"]>;
+  },
+  /**
+   * One conversation for everything one person's applications ask the
+   * model: form turns, question readings and answer checks lead with the
+   * same instructions and facts, so the gateway serves that prefix from its
+   * cache across a batch and across restarts.
+   */
+  conversationKey?: string,
+): LLMClient | null {
   const chatWithTools = aiClient.chatWithTools;
   if (!chatWithTools) {
     return null;
   }
   return {
     chatWithTools: (messages, tools, options) =>
-      chatWithTools(messages, tools, options ?? {}),
+      chatWithTools(messages, tools, {
+        ...(options ?? {}),
+        ...(conversationKey ? { conversationKey } : {}),
+      }),
   };
+}
+
+/** The conversation key for one person's applications. */
+export function applyingConversationKey(profile: { id: string }): string {
+  return `applying:${profile.id}`;
 }
 
 /**
@@ -801,10 +832,14 @@ export function createApplyFormPreparer(input: {
   envelope?: ApplicationAuthorityEnvelope | null;
   onPrepared?: AgentApplicationPreparationInput["onPrepared"];
   onProgress?: AgentApplicationPreparationInput["onProgress"];
+  readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
   return async ({ session, currentUrl, startedAt, signal, onProgress }) => {
-    const llmClient = toApplyLlmClient(input.aiClient);
+    const llmClient = toApplyLlmClient(
+      input.aiClient,
+      applyingConversationKey(input.executionInput.profile),
+    );
     if (!llmClient) {
       const detail =
         "Job Finder could not fill this application in because its assistant is unavailable right now. Nothing was changed on the site. Try again shortly.";
@@ -849,6 +884,10 @@ export function createApplyFormPreparer(input: {
         : {}),
       searchPreferences: input.searchPreferences,
       llmClient,
+      questionReadCacheScope: input.aiClient,
+      ...(input.readReusableAnswers
+        ? { readReusableAnswers: input.readReusableAnswers }
+        : {}),
       startedAt,
       siteLabel: input.siteLabel,
       providerLabel: status?.label ?? null,
@@ -874,7 +913,7 @@ export function buildApplyLetterDependencies(input: {
     chatWithTools?: (
       messages: Parameters<LLMClient["chatWithTools"]>[0],
       tools: Parameters<LLMClient["chatWithTools"]>[1],
-      options?: { signal?: AbortSignal },
+      options?: { signal?: AbortSignal; conversationKey?: string },
     ) => ReturnType<LLMClient["chatWithTools"]>;
   };
   documentManager: {
@@ -892,10 +931,14 @@ export function buildApplyLetterDependencies(input: {
   settings: JobFinderSettings;
   searchPreferences?: JobSearchPreferences | undefined;
 }): Omit<ApplicationLetterDependencies, "application" | "signal"> | undefined {
-  const chatWithTools = input.aiClient.chatWithTools;
-  if (!chatWithTools) {
+  const rawChatWithTools = input.aiClient.chatWithTools;
+  if (!rawChatWithTools) {
     return undefined;
   }
+  // The letter and its check share the person's applying conversation.
+  const conversationKey = applyingConversationKey(input.profile);
+  const chatWithTools: typeof rawChatWithTools = (messages, tools, options) =>
+    rawChatWithTools(messages, tools, { ...options, conversationKey });
 
   const renderLetterArtifact = input.documentManager.renderLetterArtifact;
 

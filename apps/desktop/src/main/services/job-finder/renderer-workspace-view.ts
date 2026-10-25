@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { transferRowChanges } from "@nestor/core";
 import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
@@ -63,15 +64,19 @@ export function toRendererJob(job: DiscoveryJobView): JobListRow {
     status: job.status,
     matchAssessment: toListMatchAssessment(job.matchAssessment),
     provenance: job.provenance.map((entry) => {
-      const sighting = { ...entry };
-      delete sighting.listingFacts;
+      const descriptors = Object.getOwnPropertyDescriptors(entry);
+      delete descriptors.listingFacts;
+      const sighting = Object.defineProperties(
+        {},
+        descriptors,
+      ) as JobListRow["provenance"][number];
       return reusable ? Object.freeze(sighting) : sighting;
     }),
     discoveryFeedback: job.discoveryFeedback,
     resumeApplicationMode: job.resumeApplicationMode,
     resumeTailoringMode: job.resumeTailoringMode ?? null,
     listingActivity: job.listingActivity,
-    detailRevision: jobDetailRevision(job),
+    detailRevision: reusable ? frozenRowRevision(job) : jobDetailRevision(job),
     rescoredAfterListingRead: Boolean(
       job.latestMatchAssessmentAudit?.inputChanges.some(
         (change) => change.code === "listing_evidence_changed",
@@ -155,8 +160,6 @@ export function toListMatchAssessment(
             role: judgment.role,
             preferences: judgment.preferences,
             locationReach: judgment.locationReach,
-            reasons: judgment.reasons,
-            gaps: judgment.gaps,
             ...(judgment.summary === undefined
               ? {}
               : { summary: judgment.summary }),
@@ -164,6 +167,26 @@ export function toListMatchAssessment(
           },
         }),
   };
+}
+
+/**
+ * A frozen repository row cannot change, and the repository hands out a new
+ * row whenever a stored job changes, so the row's identity is its revision.
+ * The epoch keeps a number from an earlier run of the app from matching a
+ * different row now. Hashing every job's detail instead cost about 0.7 s of
+ * each start on 6,284 jobs.
+ */
+const rowRevisionEpoch = randomUUID().slice(0, 8);
+let nextRowRevision = 0;
+const rowRevisions = new WeakMap<object, string>();
+function frozenRowRevision(job: DiscoveryJobView): string {
+  let revision = rowRevisions.get(job);
+  if (!revision) {
+    nextRowRevision += 1;
+    revision = `${rowRevisionEpoch}-${nextRowRevision}`;
+    rowRevisions.set(job, revision);
+  }
+  return revision;
 }
 
 /** Detail-only revision, cached with the job, independent of delta comparisons. */
@@ -305,6 +328,7 @@ function toRendererJobs(jobs: DiscoveryJobView[]): JobListRow[] {
   if (reusable) {
     Object.freeze(rows);
     jobCollections.set(jobs, rows);
+    transferRowChanges(jobs, rows, toRendererJob);
   }
   return rows;
 }
@@ -388,16 +412,17 @@ export function toRendererRun(
 }
 
 /**
- * Every job identity stays available; only selected panels read full evidence.
+ * Legacy windows retain job identities until all screens use the query API.
  */
 export function toRendererWorkspaceSnapshot(
   snapshot: JobFinderWorkspaceSnapshot,
+  queryLists = process.env.NESTOR_QUERY_LISTS === "1",
 ): JobFinderRendererWorkspaceSnapshot {
-  const discoveryJobs = toRendererJobs(snapshot.discoveryJobs);
-  const dismissedDiscoveryJobs = toRendererJobs(
+  const discoveryJobs = queryLists ? [] : toRendererJobs(snapshot.discoveryJobs);
+  const dismissedDiscoveryJobs = queryLists ? [] : toRendererJobs(
     snapshot.dismissedDiscoveryJobs,
   );
-  const companyJobs = toRendererJobs(snapshot.companyJobs);
+  const companyJobs = queryLists ? [] : toRendererJobs(snapshot.companyJobs);
   const activeDiscoveryRun = snapshot.activeDiscoveryRun
     ? toRendererRun(snapshot.activeDiscoveryRun)
     : null;

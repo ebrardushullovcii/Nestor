@@ -13,7 +13,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nestor/contracts": "workspace:*"
+    "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
+    "@nestor/job-list-policy": "workspace:*"
   }
 }
-

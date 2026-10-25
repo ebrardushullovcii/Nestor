@@ -240,6 +240,14 @@ export function JobFinderSaveStatus(props: {
           }
         }}
         onFocusCapture={() => setAutoDismissPaused(true)}
+        // Held while the pointer is on it, so an Undo is not pulled away
+        // from under the cursor.
+        onPointerEnter={() => setAutoDismissPaused(true)}
+        onPointerLeave={(event) => {
+          if (!event.currentTarget.contains(document.activeElement)) {
+            setAutoDismissPaused(false);
+          }
+        }}
         role="status"
       >
         <Icon
@@ -272,6 +280,24 @@ export function JobFinderSaveStatus(props: {
           >
             {props.saveState.retryBlockedReason}
           </span>
+        ) : null}
+        {props.saveState.state === "saved" && props.saveState.undo ? (
+          <Button
+            aria-label={`Undo ${props.saveState.label} change`}
+            onClick={() => {
+              const undo =
+                props.saveState.state === "saved"
+                  ? props.saveState.undo
+                  : undefined;
+              dismissSavedMessage();
+              undo?.();
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Undo
+          </Button>
         ) : null}
         {/* A failed save has the same dismiss control as a successful one.
             Without it the toast — and the navigation and window-close guards

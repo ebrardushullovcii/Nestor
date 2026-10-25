@@ -10,6 +10,7 @@ const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(desktop, "package.json"));
 const output = await mkdtemp(join(tmpdir(), "nestor-embedded-browser-test-"));
 const discoveryCleanup = process.argv.includes("--discovery-cleanup");
+const pageApi = process.argv.includes("--page-api");
 await build({
   configFile: false,
   root: desktop,
@@ -46,7 +47,9 @@ await build({
       desktop,
       discoveryCleanup
         ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-        : "scripts/fixtures/embedded-browser.ts",
+        : pageApi
+          ? "scripts/fixtures/embedded-browser-page-api.ts"
+          : "scripts/fixtures/embedded-browser.ts",
     ),
     outDir: output,
     emptyOutDir: false,
@@ -56,7 +59,14 @@ await build({
         require.resolve("playwright"),
         require.resolve("ws"),
       ],
-      output: { format: "cjs", entryFileNames: "probe.cjs" },
+      output: {
+        format: "cjs",
+        entryFileNames: "probe.cjs",
+        // External paths are absolute Windows paths; load them via require.
+        dynamicImportInCjs: false,
+        // ws inherits enumerable properties that are not own descriptors.
+        externalLiveBindings: false,
+      },
     },
   },
 });

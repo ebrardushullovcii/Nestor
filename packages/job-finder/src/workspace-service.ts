@@ -1,4 +1,5 @@
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
+import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -10,13 +11,19 @@ import { isDeepStrictEqual } from "node:util";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
+import type { JobFinderRepository } from "@nestor/db";
+import type {
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryCancellationReply,
+} from "@nestor/contracts";
 import {
+  ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
   JobFinderDiscoveryCancellationInputSchema,
   JobFinderActivityControlSchema,
   JobSearchCampaignCollectionSchema,
   SetJobFinderActivityControlInputSchema,
-  JobSourceSchema,
+  jobSourceValues,
   SavedJobSchema,
   type ApplyJobResult,
   type ApplyRun,
@@ -34,8 +41,7 @@ import {
 } from "@nestor/contracts";
 import { mergeSessionStates } from "./internal/workspace-service-helpers";
 import {
-  getActiveDiscoveryTargets,
-  resolveAdapterKind,
+  getPreferredSessionAdapter,
   updateDiscoveryTarget,
 } from "./internal/workspace-helpers";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
@@ -75,7 +81,10 @@ import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-groupe
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { createWorkspaceIntelligenceMethods } from "./internal/workspace-intelligence-methods";
 import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
-import { createWorkspaceUserActionMethods } from "./internal/workspace-user-action-methods";
+import {
+  createWorkspaceUserActionMethods,
+  isWorkspaceActivityPaused,
+} from "./internal/workspace-user-action-methods";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { uniqueStrings } from "./internal/shared";
 import { buildDiscoveryJobs } from "./internal/matching-review-queue";
@@ -103,6 +112,11 @@ const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
   "submitting",
   "blocked",
 ]);
+
+/** One turn of the event loop, so pending window messages are served. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 /**
  * Automatic workflow cleanup must not destroy a different application that is
@@ -194,10 +208,12 @@ export type {
   ResumeRenderSection,
   ResumeRenderSectionEntry,
 } from "./internal/resume-workspace-structure";
+import { readSavedJob } from "./internal/read-saved-job";
 
 export {
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
+  deriveGlobalDailyApplicationPreparationCapacity,
 } from "./internal/application-preparation-capacity";
 
 type PreparationCapacityState = {
@@ -251,11 +267,13 @@ export function createJobFinderWorkspaceService(
   options: CreateJobFinderWorkspaceServiceOptions,
 ): JobFinderWorkspaceService {
   const {
+    backgroundWorkReady,
     aiClient,
     visionProvider,
     browserRuntime,
     candidateAssetResolver,
     documentManager,
+    resumeDraftProcessor,
     exportFileVerifier,
     repository,
     researchAdapter,
@@ -263,7 +281,9 @@ export function createJobFinderWorkspaceService(
     onActivityControlChanged,
     onDetachedApplyRunFinished,
     onResumeEvidenceFinished,
+    onShortlistResumeChanged,
     onListingAssessmentFinished,
+    onSavedJobsRescored,
     onExplicitUserStart,
   } = options;
   const activeDiscoveryAbortControllerRef = {
@@ -404,6 +424,8 @@ export function createJobFinderWorkspaceService(
     workspaceResetInProgress = true;
     invalidateListingReads();
     try {
+      // Finish queued document cleanup before Reset moves the managed folder.
+      await documentManager.pruneGeneratedResumeFiles?.();
       await options?.beforeStateReset?.();
       return await snapshotProfileMethods.resetWorkspace(seed);
     } finally {
@@ -412,6 +434,8 @@ export function createJobFinderWorkspaceService(
   }
 
   const context: WorkspaceServiceContext = {
+    ...(backgroundWorkReady ? { backgroundWorkReady } : {}),
+    ...(resumeDraftProcessor ? { resumeDraftProcessor } : {}),
     aiClient,
     ...(visionProvider ? { visionProvider } : {}),
     browserRuntime,
@@ -420,12 +444,14 @@ export function createJobFinderWorkspaceService(
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
     listingAssessmentJobIds: new Set<string>(),
+    listingActivityIdentityIndex: createListingActivityIdentityIndex(),
     listingAssessmentGenerationRef: { current: 0 },
     listingAssessmentAbortControllerRef: { current: new AbortController() },
     isWorkspaceClosing: () =>
       workspaceResetInProgress || shutdownPromiseRef.current !== null,
     fitJudgmentProgressRef,
     ...(onListingAssessmentFinished ? { onListingAssessmentFinished } : {}),
+    ...(onSavedJobsRescored ? { onSavedJobsRescored } : {}),
     activeDiscoveryAbortControllerRef,
     activeDiscoveryRunIdRef,
     activeDiscoveryPromiseRef,
@@ -465,6 +491,7 @@ export function createJobFinderWorkspaceService(
     activeResumeVisionRunIds,
     activeResumeEvidenceRunIds,
     ...(onResumeEvidenceFinished ? { onResumeEvidenceFinished } : {}),
+    ...(onShortlistResumeChanged ? { onShortlistResumeChanged } : {}),
     getWorkspaceSnapshot: () =>
       Promise.reject(new Error("Workspace snapshot method not initialized.")),
     readWorkspaceSnapshot: () =>
@@ -487,10 +514,14 @@ export function createJobFinderWorkspaceService(
       searchPreferences: JobSearchPreferences,
       knownSessions?: JobFinderDiscoveryState["sessions"],
     ): Promise<JobFinderDiscoveryState["sessions"]> {
-      const targets = getActiveDiscoveryTargets(searchPreferences);
-      const adapterKinds = uniqueStrings(
-        targets.map((target) => resolveAdapterKind(target)),
-      ) as JobSource[];
+      // Every source reads through the same generic adapter (see
+      // resolveAdapterKind), so only whether any source is on matters.
+      // Normalizing all 900 sources of a large workspace to learn that took
+      // about 4 ms of every workspace read.
+      const adapterKinds: JobSource[] =
+        searchPreferences.discovery.targets.some((target) => target.enabled)
+          ? [getPreferredSessionAdapter(searchPreferences)]
+          : [];
       if (adapterKinds.length === 0) {
         return [];
       }
@@ -531,12 +562,17 @@ export function createJobFinderWorkspaceService(
         return knownSessions;
       }
 
+      const merge = (current: JobFinderDiscoveryState["sessions"]) =>
+        observedSessions.reduce(
+          (sessions, observation) => mergeSessionStates(sessions, observation),
+          current,
+        );
+      if (repository.commitDiscoverySessions) {
+        return repository.commitDiscoverySessions(merge);
+      }
       const next = await context.persistDiscoveryState((current) => ({
         ...current,
-        sessions: observedSessions.reduce(
-          (sessions, observation) => mergeSessionStates(sessions, observation),
-          current.sessions,
-        ),
+        sessions: merge(current.sessions),
       }));
       return next.sessions;
     },
@@ -637,11 +673,18 @@ export function createJobFinderWorkspaceService(
     async staleApprovedResumeDrafts(
       staleReason: string,
       jobIds?: readonly string[],
+      profileInputs?: Parameters<
+        NonNullable<JobFinderRepository["staleResumeDrafts"]>
+      >[0]["profileInputs"],
     ): Promise<void> {
+      // The cached display rows, when the repository keeps them: every
+      // draft holds whole resumes, and parsing them all again made each
+      // profile save half a second slower. Each write below is a new value.
+      const display = await repository.readDisplayCollections?.();
       const [drafts, tailoredAssets, applicationRecords] = await Promise.all([
-        repository.listResumeDrafts(),
-        repository.listTailoredAssets(),
-        repository.listApplicationRecords(),
+        display?.resumeDrafts ?? repository.listResumeDrafts(),
+        display?.tailoredAssets ?? repository.listTailoredAssets(),
+        display?.applicationRecords ?? repository.listApplicationRecords(),
       ]);
 
       const targetJobIds = jobIds ? new Set(jobIds) : null;
@@ -651,6 +694,10 @@ export function createJobFinderWorkspaceService(
           .filter((record) => record.status === "submitted")
           .map((record) => record.jobId),
       );
+      const toStale: {
+        draft: (typeof drafts)[number];
+        existingAsset: (typeof tailoredAssets)[number] | null;
+      }[] = [];
       for (const draft of drafts) {
         if (submittedJobIds.has(draft.jobId)) continue;
 
@@ -660,6 +707,33 @@ export function createJobFinderWorkspaceService(
 
         const existingAsset =
           tailoredAssets.find((asset) => asset.jobId === draft.jobId) ?? null;
+        // Already stale for this reason, with nothing approved and no file
+        // kept: staling it again would only rewrite it with a new time.
+        if (
+          draft.status === "stale" &&
+          draft.staleReason === staleReason &&
+          draft.approvedAt === null &&
+          draft.approvedExportId === null &&
+          (existingAsset === null || existingAsset.storagePath === null)
+        ) {
+          continue;
+        }
+        toStale.push({ draft, existingAsset });
+      }
+      if (toStale.length === 0 && !profileInputs) return;
+      // Only the approval fields change, so a repository that can mark them
+      // in place does so in one transaction. Reading, validating and writing
+      // each whole draft again held a profile save for about 1.5 s.
+      if (repository.staleResumeDrafts) {
+        await repository.staleResumeDrafts({
+          draftIds: toStale.map(({ draft }) => draft.id),
+          staleReason,
+          updatedAt: new Date().toISOString(),
+          ...(profileInputs ? { profileInputs } : {}),
+        });
+        return;
+      }
+      for (const { draft, existingAsset } of toStale) {
         const staleDraft = buildStaleResumeDraft(draft, staleReason);
 
         await repository.clearResumeApproval({
@@ -673,6 +747,14 @@ export function createJobFinderWorkspaceService(
               }
             : null,
         });
+      }
+      if (profileInputs) {
+        if (profileInputs.searchPreferences)
+          await repository.saveProfileAndSearchPreferences(
+            profileInputs.profile,
+            profileInputs.searchPreferences,
+          );
+        else await repository.saveProfile(profileInputs.profile);
       }
     },
     async openRunBrowserSession(
@@ -745,7 +827,8 @@ export function createJobFinderWorkspaceService(
     ...(fetchListingHtml ? { fetchListingHtml } : {}),
   };
 
-  const snapshotProfileMethods = createWorkspaceSnapshotProfileMethods(context);
+  const { discoveryRecoveryReady, ...snapshotProfileMethods } =
+    createWorkspaceSnapshotProfileMethods(context);
   const assistantEditMethods = createWorkspaceAssistantEditMethods({
     ctx: context,
     applyAssistantProfilePatchGroup:
@@ -801,7 +884,66 @@ export function createJobFinderWorkspaceService(
     }
   }
 
+  async function cancelDiscoveryRunCommand(
+    runId: string,
+  ): Promise<JobFinderDiscoveryCancellationReply> {
+    const input = JobFinderDiscoveryCancellationInputSchema.parse({ runId });
+    const requestedAt = new Date().toISOString();
+    let accepted = false;
+    await context.persistDiscoveryState((current) => {
+      if (
+        current.activeRun?.id !== input.runId ||
+        current.activeRun.state !== "running"
+      )
+        return current;
+      accepted = true;
+      return {
+        ...current,
+        activeRun: {
+          ...current.activeRun,
+          cancellationRequestedAt:
+            current.activeRun.cancellationRequestedAt ?? requestedAt,
+        },
+      };
+    });
+    // The live identity reaches the window before the first durable run row.
+    if (activeDiscoveryRunIdRef.current === input.runId) accepted = true;
+    if (accepted) activeDiscoveryAbortControllerRef.current?.abort();
+    return { runId: input.runId, accepted };
+  }
+
+  let lastDisplayProjection: JobFinderWorkspaceSnapshot | undefined;
+  let runningDiscoveryCommands = 0;
+  async function readDisplayProjection() {
+    // Query screens follow committed rows. Legacy readers can retain their
+    // last complete view while search writes, rather than rebuilding it per beat.
+    if (
+      lastDisplayProjection &&
+      (runningDiscoveryCommands > 0 ||
+        activeDiscoveryAbortControllerRef.current)
+    )
+      return lastDisplayProjection;
+    lastDisplayProjection =
+      await (snapshotProfileMethods.getWorkspaceProjection?.() ??
+        snapshotProfileMethods.getWorkspaceSnapshot());
+    return lastDisplayProjection;
+  }
+
   async function getWorkspaceSnapshot(borrowValidatedJobs = false) {
+    if (
+      borrowValidatedJobs &&
+      lastDisplayProjection &&
+      (runningDiscoveryCommands > 0 ||
+        activeDiscoveryAbortControllerRef.current)
+    )
+      return lastDisplayProjection;
+    await waitForUserActionRecovery();
+    return borrowValidatedJobs
+      ? readDisplayProjection()
+      : snapshotProfileMethods.getWorkspaceSnapshot();
+  }
+
+  async function waitForUserActionRecovery() {
     // Recovery starts or joins the continuation of every verifying step, and
     // a continuation drives the browser for minutes. Quick verifications
     // still land in this snapshot; a long continuation carries on in the
@@ -827,13 +969,15 @@ export function createJobFinderWorkspaceService(
       ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
-    return borrowValidatedJobs && snapshotProfileMethods.getWorkspaceProjection
-      ? snapshotProfileMethods.getWorkspaceProjection()
-      : snapshotProfileMethods.getWorkspaceSnapshot();
   }
 
   async function getWorkspaceBootstrap() {
     return snapshotProfileMethods.getWorkspaceBootstrap();
+  }
+
+  async function getWorkspaceHomeSnapshot() {
+    await waitForUserActionRecovery();
+    return (await snapshotProfileMethods.getWorkspaceHomeSnapshot?.()) ?? null;
   }
 
   // Mutation results are display reads. Canonical snapshots stay available
@@ -841,6 +985,7 @@ export function createJobFinderWorkspaceService(
   context.getWorkspaceSnapshot = () => getWorkspaceSnapshot(true);
   context.readWorkspaceSnapshot = () =>
     snapshotProfileMethods.getWorkspaceSnapshot();
+  context.readWorkspaceProjection = readDisplayProjection;
   const crmMethods = createWorkspaceCrmMethods({
     ctx: context,
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
@@ -857,9 +1002,7 @@ export function createJobFinderWorkspaceService(
           action: "hide_job",
         }),
       restore: async (jobId) => {
-        const job = (await repository.listSavedJobs()).find(
-          (candidate) => candidate.id === jobId,
-        );
+        const job = await readSavedJob(repository, jobId);
         if (job?.status === "archived") {
           await applicationMethods.restoreDismissedDiscoveryJob(jobId);
         } else if (job && job.status !== "discovered") {
@@ -926,19 +1069,30 @@ export function createJobFinderWorkspaceService(
     afterCampaignRun: () => intelligenceMethods.refreshCompanyIntelligence(),
   });
 
-  async function runCampaignScopedDiscovery(
+  function runCampaignScopedDiscovery(
+    executor: (
+      campaign: CampaignRunContext,
+    ) => Promise<JobFinderDiscoveryCommandReply>,
+    requestedCampaignId: string | undefined,
+    options: { commandOnly: true },
+  ): Promise<JobFinderDiscoveryCommandReply>;
+  function runCampaignScopedDiscovery(
     executor: (
       campaign: CampaignRunContext,
     ) => Promise<JobFinderWorkspaceSnapshot>,
     requestedCampaignId?: string,
-    options: { nestedUserActionRecovery?: boolean } = {},
+    options?: { nestedUserActionRecovery?: boolean },
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  async function runCampaignScopedDiscovery(
+    executor: (
+      campaign: CampaignRunContext,
+    ) => Promise<JobFinderWorkspaceSnapshot | JobFinderDiscoveryCommandReply>,
+    requestedCampaignId?: string,
+    options: { nestedUserActionRecovery?: boolean; commandOnly?: boolean } = {},
   ) {
+    await discoveryRecoveryReady;
     await requireDiscoverySafeguardClearance();
-    let [campaignState, savedJobs, discoveryState] = await Promise.all([
-      repository.getCampaignState(),
-      repository.listSavedJobs(),
-      repository.getDiscoveryState(),
-    ]);
+    let campaignState = await repository.getCampaignState();
     if (!campaignState && requestedCampaignId) {
       throw new Error("This search plan was removed; run the plan again");
     }
@@ -955,10 +1109,6 @@ export function createJobFinderWorkspaceService(
           searchPreferences: await repository.getSearchPreferences(),
         });
       });
-      [savedJobs, discoveryState] = await Promise.all([
-        repository.listSavedJobs(),
-        repository.getDiscoveryState(),
-      ]);
     }
     const campaignId = requestedCampaignId ?? campaignState.activeCampaignId;
     const campaign = campaignState.campaigns.find(
@@ -972,23 +1122,27 @@ export function createJobFinderWorkspaceService(
       );
     }
     assertCampaignCanRun(campaign);
-    await executor({
+    const result = await executor({
       campaignId: campaign.id,
       mode: campaign.mode,
       searchPreferences: searchPreferencesForCampaignRun(campaign),
       runJobBudget: campaign.limits.discoveryRunJobBudget ?? null,
     });
+    // The steps that close a search each take a while on a large workspace
+    // and none of them waits on anything outside main, so together they held
+    // main (and every window) for seconds at once. A turn of the event loop
+    // between them lets the window's messages through.
+    await yieldToEventLoop();
     await recordCampaignDiscoveryResult({
       ctx: context,
       campaignId,
       beforeCampaignJobIds: campaign.jobIds,
-      beforeJobProvenanceFingerprints: new Map(
-        [...savedJobs, ...discoveryState.pendingDiscoveryJobs].map((job) => [
-          job.id,
-          JSON.stringify(job.provenance),
-        ]),
-      ),
     });
+    await yieldToEventLoop();
+    if (options.commandOnly) {
+      await intelligenceMethods.refreshCompanyIntelligenceState();
+      return result;
+    }
     if (options.nestedUserActionRecovery) {
       await intelligenceMethods.refreshCompanyIntelligenceState();
       return context.readWorkspaceSnapshot();
@@ -1050,7 +1204,20 @@ export function createJobFinderWorkspaceService(
    */
   async function requireActivityEnabled(): Promise<void> {
     if ((await repository.getActivityControl()).paused) {
-      await setActivityControl({ paused: false });
+      await commitActivityControl({ paused: false });
+    }
+    await onExplicitUserStart?.();
+  }
+
+  /**
+   * Application work is the exception: the global pause is the person's brake
+   * on anything that fills in or sends a form, so a row's Try again or an
+   * Apply press refuses instead of quietly lifting it. Continue on Home (or in
+   * the header) is the one way back.
+   */
+  async function requireApplicationActivityNotPaused(): Promise<void> {
+    if (await isWorkspaceActivityPaused(repository)) {
+      throw new Error(ACTIVITY_PAUSED_MESSAGE);
     }
     await onExplicitUserStart?.();
   }
@@ -1196,7 +1363,7 @@ export function createJobFinderWorkspaceService(
     reservedJobs = 0,
     reservedJobIds: readonly string[] = [],
   ): Promise<void> {
-    await requireActivityEnabled();
+    await requireApplicationActivityNotPaused();
     await requireEmployerApplicationCapacity(
       jobIds,
       run,
@@ -1364,7 +1531,7 @@ export function createJobFinderWorkspaceService(
     safeguardMethods.requireNoBlockers(blockers);
   }
 
-  async function setActivityControl(
+  async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,
   ) {
     const input = SetJobFinderActivityControlInputSchema.parse(rawInput);
@@ -1380,6 +1547,7 @@ export function createJobFinderWorkspaceService(
     });
     await repository.saveActivityControl(control);
     await onActivityControlChanged?.(control);
+    applicationMethods.resumeOnShortlistPauseChanged(control.paused);
     // Home's Pause new work lets the current application reach a safe
     // boundary. The queue waits between jobs and Resume continues that same
     // run. Browser takeover and shutdown still abort immediately.
@@ -1414,6 +1582,11 @@ export function createJobFinderWorkspaceService(
         );
       }
     }
+  }
+  async function setActivityControl(
+    rawInput: SetJobFinderActivityControlInput,
+  ) {
+    await commitActivityControl(rawInput);
     return getWorkspaceSnapshot();
   }
   const applyRunStoreMethods = createWorkspaceApplyRunStoreMethods(context);
@@ -1430,10 +1603,6 @@ export function createJobFinderWorkspaceService(
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
     resumeVerifyingUserActions: resumeVerifyingUserActionsAfterCommit,
   });
-
-  function isJobSource(value: unknown): value is JobSource {
-    return JobSourceSchema.safeParse(value).success;
-  }
 
   function describeShutdownFailure(reason: unknown): string {
     return reason instanceof Error ? reason.message : String(reason);
@@ -1542,14 +1711,11 @@ export function createJobFinderWorkspaceService(
         ]);
       }
 
-      const discoveryState = await repository
-        .getDiscoveryState()
-        .catch(() => null);
-      const sessionSources = uniqueStrings(
-        (discoveryState?.sessions ?? []).map((session) => session.adapterKind),
-      ).filter(isJobSource);
       const shutdownResults = await Promise.allSettled([
-        ...sessionSources.map((source) => browserRuntime.closeSession(source)),
+        ...(resumeDraftProcessor ? [resumeDraftProcessor.close()] : []),
+        // Session kinds come from the runtime contract. Reading discovery
+        // history just to close its sessions copies a large workspace at quit.
+        ...jobSourceValues.map((source) => browserRuntime.closeSession(source)),
         repository.close(),
       ]);
       const rejectedResults = shutdownResults.filter(
@@ -1684,6 +1850,7 @@ export function createJobFinderWorkspaceService(
       };
     },
     getWorkspaceBootstrap,
+    getWorkspaceHomeSnapshot,
     mutateSafeguards: safeguardMethods.mutateSafeguards,
     getSafeguardsOverview: safeguardMethods.getSafeguardsOverview,
     evaluateApplicationSafeguardBlockers:
@@ -1717,43 +1884,39 @@ export function createJobFinderWorkspaceService(
           discoveryMethods.runDiscoveryForTarget(targetId, onActivity, signal),
         );
       }),
+    runAgentDiscoveryCommand: (onActivity, targetId, searchRequest) =>
+      trackWorkspaceOperation("discovery", async () => {
+        runningDiscoveryCommands += 1;
+        try {
+          await requireActivityEnabled();
+          return await runCampaignScopedDiscovery(
+            () =>
+              discoveryMethods.runAgentDiscoveryCommand(
+                onActivity,
+                targetId,
+                searchRequest,
+              ),
+            undefined,
+            { commandOnly: true },
+          );
+        } finally {
+          runningDiscoveryCommands -= 1;
+        }
+      }),
+    cancelDiscoveryRunCommand: (runId) =>
+      trackWorkspaceOperation("discovery cancellation", () =>
+        cancelDiscoveryRunCommand(runId),
+      ),
     cancelDiscoveryRun: (runId) =>
       trackWorkspaceOperation("discovery cancellation", async () => {
-        const input = JobFinderDiscoveryCancellationInputSchema.parse({
-          runId,
-        });
-        const requestedAt = new Date().toISOString();
-        let accepted = false;
-        await context.persistDiscoveryState((current) => {
-          if (
-            current.activeRun?.id !== input.runId ||
-            current.activeRun.state !== "running"
-          ) {
-            return current;
-          }
-          accepted = true;
-          return {
-            ...current,
-            activeRun: {
-              ...current.activeRun,
-              cancellationRequestedAt:
-                current.activeRun.cancellationRequestedAt ?? requestedAt,
-            },
-          };
-        });
-        // Abort whenever this is the run actually in flight, even when the
-        // stored state has not caught up (the run record is written after the
-        // pipeline starts). Matching only on stored state let a stop be
-        // accepted as a request and never reach the pipeline.
-        if (accepted || activeDiscoveryRunIdRef.current === input.runId) {
-          activeDiscoveryAbortControllerRef.current?.abort();
-        }
+        await cancelDiscoveryRunCommand(runId);
         return getWorkspaceSnapshot();
       }),
     ...sourceDebugMethods,
     runSourceDebug: (targetId, signal, onProgress) =>
       trackWorkspaceOperation("source debug", async () => {
         await requireActivityEnabled();
+        await discoveryRecoveryReady;
         return sourceDebugMethods.runSourceDebug(targetId, signal, onProgress);
       }),
     verifySourceInstructions: (targetId, instructionId, signal, onProgress) =>
@@ -1810,6 +1973,8 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobsForReview!(jobIds),
       ),
+    continueResumesOnShortlist: () =>
+      applicationMethods.continueResumesOnShortlist(),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
     judgeUnjudgedJobs: () => {

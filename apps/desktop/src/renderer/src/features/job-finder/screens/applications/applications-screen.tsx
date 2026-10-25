@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
 import { projectApplicationRecordsActivity } from "@nestor/contracts";
 import type { ReactNode } from "react";
@@ -50,6 +51,12 @@ import {
   APPLICATION_FILTERS,
   type ApplicationsViewFilter,
 } from "./applications-filters";
+import { useRememberedString } from "../../hooks/use-remembered-string";
+
+const isApplicationsViewFilter = (
+  value: string,
+): value is ApplicationsViewFilter =>
+  (APPLICATION_FILTERS as readonly string[]).includes(value);
 import {
   getLatestApplicationAttemptForRecord,
   matchesApplicationsFilter,
@@ -72,9 +79,14 @@ import {
   WAITING_FOR_BROWSER_TAB_SUMMARY,
 } from "./apply-state";
 import { buildApplyRunContextReader } from "./applications-recovery-state";
-import { APPLICATION_PREPARATION_BATCH_LIMIT } from "../review-queue/review-queue-status";
+import { ApplyQueueStrip } from "../../components/apply-queue-strip";
+import {
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+} from "../../lib/apply-queue-view";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
+import { buildApplicationQueueHolds } from "./application-queue-hold";
 
 /** Statuses an application reaches once it was sent and can have an outcome. */
 const OUTCOME_STATUSES = new Set<string>([
@@ -145,6 +157,12 @@ export function ApplicationsScreen(props: {
     jobIds: string[],
     applicationAutomationMode?: ApplicationAutomationMode,
   ) => void;
+  /** The Apply queue (ADR 0058), shown above the list with its controls. */
+  applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
+  /** Same-company conflicts, to tell a held job's open choice from a made one. */
+  sameCompanyConflicts?: JobFinderRendererWorkspaceSnapshot["intelligence"]["safeguards"]["simultaneousApplicationConflicts"];
+  onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
+  onRaiseDailyLimit?: () => void;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onOpenCompany?: (companyId: string) => void;
@@ -160,6 +178,11 @@ export function ApplicationsScreen(props: {
   onMutateApplicationCrm?: (
     command: ApplicationCrmMutationInput,
   ) => Promise<void>;
+  /**
+   * Applications -> Shortlisted for an application nothing was sent for.
+   * Offered on the row menu and in the detail panel.
+   */
+  onReturnApplicationToShortlist?: (record: ApplicationRecord) => void;
   onMutateApplicationCrmBulkStage?: (
     command: ApplicationCrmBulkStageMutationInput,
   ) => Promise<void>;
@@ -243,8 +266,12 @@ export function ApplicationsScreen(props: {
     selectedAttempt,
     selectedRecord,
   } = props;
-  const [activeFilter, setActiveFilter] =
-    useState<ApplicationsViewFilter>("all");
+  const applicationWorkPaused = Boolean(props.activityControl?.paused);
+  const [activeFilter, setActiveFilter] = useRememberedString(
+    "applications.filter",
+    "all",
+    isApplicationsViewFilter,
+  );
   // Preparation is the product; the stage tracker is a deferred power surface
   // reached explicitly, not a peer tab that splits one application into two
   // competing screens. The route owns the mode so the tracker keeps a link.
@@ -415,12 +442,22 @@ export function ApplicationsScreen(props: {
   // Bulk retry: every application whose last run ended where a fresh run
   // could differ. One control, so a batch that failed on a bad network night
   // is not ten separate "Try again" presses.
+  const queueHolds = useMemo(
+    () =>
+      buildApplicationQueueHolds({
+        applyQueue: props.applyQueue,
+        conflicts: props.sameCompanyConflicts ?? [],
+      }),
+    [props.applyQueue, props.sameCompanyConflicts],
+  );
   const retryableJobIds = useMemo(() => {
     const running = new Set(
       applyRuns
         .filter((run) => run.state === "running")
         .flatMap((run) => run.jobIds),
     );
+    for (const jobId of listApplyQueueWaitingJobIds(props.applyQueue))
+      running.add(jobId);
     const jobIds: string[] = [];
     for (const record of applicationRecords) {
       if (running.has(record.jobId)) continue;
@@ -894,28 +931,21 @@ export function ApplicationsScreen(props: {
     }
     const retryCount = retryableJobIds.length;
     if (applicationRecords.length > 0 && retryCount > 1) {
-      const limit = APPLICATION_PREPARATION_BATCH_LIMIT;
-      // ADR 0043: the total, how many start now and how many remain.
+      // One press queues them all; the Apply queue goes ten at a time and
+      // waits for tomorrow at the daily limit (ADR 0058).
       applicationsStatusItems.push({
         id: "bulk-retry",
         tone: "warning",
-        text:
-          retryCount > limit
-            ? `${retryCount} applications need another try; ${limit} start at a time, ${retryCount - limit} wait for the next batch`
-            : `${retryCount} applications need another try`,
+        text: applicationWorkPaused
+          ? `${retryCount} applications need another try. ${APPLICATION_WORK_PAUSED_REASON}`
+          : `${retryCount} applications need another try`,
         action: {
           kind: "button",
-          label:
-            retryCount > limit
-              ? `Retry next ${limit}`
-              : `Try again for all ${retryCount}`,
-          disabled:
-            isApplyPending ||
-            (dailyPreparationCapacity !== null &&
-              dailyPreparationCapacity.remaining < 1),
+          label: `Try again for all ${retryCount}`,
+          disabled: isApplyPending || applicationWorkPaused,
           onClick: () =>
             onStartAutoApplyQueue(
-              retryableJobIds.slice(0, limit),
+              retryableJobIds,
               props.applicationAutomationMode ?? "prepare_only",
             ),
         },
@@ -1034,6 +1064,16 @@ export function ApplicationsScreen(props: {
             statusItems={applicationsStatusItems}
             title={workspaceView === "crm" ? "Tracker" : "Applications"}
           />
+          {workspaceView === "workflow" && props.onControlApplyQueue ? (
+            <ApplyQueueStrip
+              dailyLimit={dailyPreparationCapacity?.limit ?? null}
+              onControl={props.onControlApplyQueue}
+              onRaiseLimit={() => props.onRaiseDailyLimit?.()}
+              pending={isApplyPending}
+              queue={props.applyQueue}
+              results={applyJobResults}
+            />
+          ) : null}
           {visibleActionMessage ? (
             <p
               aria-atomic="true"
@@ -1137,6 +1177,7 @@ export function ApplicationsScreen(props: {
         ) : (
           <ApplicationsRecordsPanel
             progressNow={progressNow}
+            queueHolds={queueHolds}
             {...(props.crmSettings
               ? { customStages: props.crmSettings.customStages }
               : {})}
@@ -1150,6 +1191,18 @@ export function ApplicationsScreen(props: {
             latestApplyResultByRecordId={latestApplyResultByRecordId}
             readApplyRunContext={readApplyRunContext}
             applyMode={applyMode}
+            {...(props.onFinishInBrowser
+              ? { onFinishInBrowser: props.onFinishInBrowser }
+              : {})}
+            onStartApplyCopilot={onStartApplyCopilot}
+            isApplyPending={isApplyPending}
+            applicationWorkPaused={applicationWorkPaused}
+            {...(props.onReturnApplicationToShortlist
+              ? { onReturnToShortlist: props.onReturnApplicationToShortlist }
+              : {})}
+            {...(props.onMutateApplicationCrm
+              ? { onMutateApplicationCrm: props.onMutateApplicationCrm }
+              : {})}
             hasUnassignedLegacyHistory={hasUnassignedLegacyLineage}
             onFilterChange={handleFilterChange}
             onSelectRecord={selectRecordAndRevealDetails}
@@ -1232,7 +1285,11 @@ export function ApplicationsScreen(props: {
           </section>
         ) : (
           <ApplicationsDetailPanel
+            queueHolds={queueHolds}
             progressNow={progressNow}
+            {...(props.onReturnApplicationToShortlist
+              ? { onReturnToShortlist: props.onReturnApplicationToShortlist }
+              : {})}
             {...(props.crmSettings
               ? { customStages: props.crmSettings.customStages }
               : {})}
@@ -1286,6 +1343,7 @@ export function ApplicationsScreen(props: {
             hasAnyApplications={applicationRecords.length > 0}
             hasVisibleApplications={filteredApplicationRecords.length > 0}
             isApplyPending={isApplyPending}
+            applicationWorkPaused={applicationWorkPaused}
             isApplyRequestPending={isApplyRequestPending}
             isApplyRunPending={isApplyRunPending}
             onApproveApplyRun={onApproveApplyRun}

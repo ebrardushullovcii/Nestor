@@ -38,15 +38,32 @@ function run(overrides: RunOverrides = {}): DiscoveryRunRecord {
 
 function repositoryOver(state: JobFinderDiscoveryState) {
   let current = state;
-  return {
+  const repository = {
+    commits: 0,
     read: () => current,
+    readDiscoveryRunStates: () =>
+      Promise.resolve(
+        [current.activeRun, ...current.recentRuns].flatMap((run, index) =>
+          run
+            ? [
+                {
+                  state: run.state,
+                  runPhase: run.runPhase,
+                  isActive: index === 0,
+                },
+              ]
+            : [],
+        ),
+      ),
     commitDiscoveryStateUpdate: (
       update: (value: JobFinderDiscoveryState) => JobFinderDiscoveryState,
     ) => {
+      repository.commits += 1;
       current = JobFinderDiscoveryStateSchema.parse(update(current));
       return Promise.resolve(current);
     },
   };
+  return repository;
 }
 
 describe("recoverInterruptedDiscoveryRuns", () => {
@@ -98,6 +115,8 @@ describe("recoverInterruptedDiscoveryRuns", () => {
     expect(first.recentRuns[0]?.state).toBe("completed");
     expect(getDiscoveryRunPhase(first.recentRuns[0]!)).toBe("complete");
     expect(second).toEqual(first);
+    // Nothing was left running, so the full canonical read never happened.
+    expect(repository.commits).toBe(0);
   });
 
   it("says what it can when the run recorded no counts", async () => {

@@ -44,7 +44,7 @@ export function PreferenceList({
           </div>
         )
       ) : (
-        <p className="font-mono text-(length:--text-tiny) uppercase tracking-(--tracking-normal) text-muted-foreground">
+        <p className="font-mono text-(length:--text-tiny) uppercase tracking-(--tracking-chip) text-muted-foreground">
           No values configured.
         </p>
       )}

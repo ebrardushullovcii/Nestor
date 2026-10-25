@@ -239,6 +239,7 @@ export interface ApplyPageHands {
   wait: (milliseconds: number) => Promise<void>;
   goBack: () => Promise<ApplyNavigationResult>;
   readText: (ref?: string) => Promise<string>;
+  readLinkedText?: () => Promise<string>;
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
@@ -247,6 +248,8 @@ export interface ApplyPageHands {
     file: { name: string; mimeType: string; bytes: Uint8Array },
   ) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Report whether an intended action is reachable, without clicking it. */
+  checkAction?: (ref: string) => Promise<ApplyWriteResult>;
   /** Opens what a link points at, in the same page. A read, never a write. */
   followLink: (ref: string) => Promise<ApplyNavigationResult>;
   /** Moves the run into a tab the page opened, closing that tab. */
@@ -343,6 +346,8 @@ export interface ApplyLetterProvider {
     approvedText?: string;
     /** A file type the form insists on, when it named one. */
     fileType: "pdf" | "docx" | "txt" | null;
+    /** Cancel local drafting when this form run ends or the person stops it. */
+    signal?: AbortSignal;
   }) => Promise<
     | { ok: true; text: string; document: ApplyDocument | null }
     | { ok: false; reason: string; draftText?: string }
@@ -475,6 +480,10 @@ export interface ApplyAgentConfig {
    * classification on the observation stands.
    */
   modelQuestionClassification?: boolean;
+  /** Reuse complete, identical model question reads within this AI client. */
+  questionReadCacheScope?: object;
+  /** Latest saved answers while other applications in this batch are open. */
+  readReusableAnswers?: () => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */
   safety?: ApplySafetyHooks;
   /** Writes and renders the letter this application sends, when it needs one. */

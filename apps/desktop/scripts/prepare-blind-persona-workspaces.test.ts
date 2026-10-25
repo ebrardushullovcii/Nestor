@@ -906,6 +906,21 @@ async function startFakeCdpServer(options: {
   };
 }
 
+/** A loopback port nothing listens on right now. Fixed numbers collided with
+ * other test files and local apps when the whole suite ran at once. */
+async function freeLoopbackPort(): Promise<number> {
+  const server = createHttpServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === "string")
+    throw new Error("The test server has no port.");
+  return address.port;
+}
+
 function driverChannelLaunch(options: {
   cdpResponse?: (
     port: number,
@@ -2190,16 +2205,17 @@ describe("blind persona accepted-build preparation", () => {
       },
       { launch: runtimeLaunch({}).launch },
     );
+    const ephemeralPort = await freeLoopbackPort();
     const mixed = driverChannelLaunch({
       emitPorts: (args) => {
-        if (args.includes("--remote-debugging-port=0")) return 48971;
+        if (args.includes("--remote-debugging-port=0")) return ephemeralPort;
         const requested = args
           .map((arg) => /--remote-debugging-port=(\d+)/u.exec(arg)?.[1])
           .find(Boolean);
         const port = Number(requested);
         return requested && port > 0 ? port : null;
       },
-      unkeyedPorts: [48971],
+      unkeyedPorts: [ephemeralPort],
     });
     try {
       const session = await launchBlindPersonaTester(
@@ -2545,6 +2561,7 @@ describe("blind persona accepted-build preparation", () => {
     // Flag present: ephemeral --remote-debugging-port=0 resolved through the
     // workspace DevToolsActivePort file AND confirmed live with the required
     // endpoint keys; network blocking stays intact.
+    const ephemeralPort = await freeLoopbackPort();
     const ephemeral = driverChannelLaunch({
       cdpResponse: (port) => ({
         Browser: "fake/1",
@@ -2553,7 +2570,7 @@ describe("blind persona accepted-build preparation", () => {
       emitPorts: (args) =>
         args.includes("--remote-debugging-port=0") &&
         args.includes("--remote-debugging-address=127.0.0.1")
-          ? 41234
+          ? ephemeralPort
           : null,
     });
     try {
@@ -2571,11 +2588,11 @@ describe("blind persona accepted-build preparation", () => {
         enabled: true,
         flag: "--driver-cdp",
         networkBlockingIntact: true,
-        port: 41234,
+        port: ephemeralPort,
         requestedPortArg: "--remote-debugging-port=0",
         resolution: "ephemeral-port-zero-devtools-active-port-file",
         transport: "chrome-devtools-protocol",
-        url: "http://127.0.0.1:41234",
+        url: `http://127.0.0.1:${ephemeralPort}`,
       });
       const cdpRecord = JSON.parse(
         await readFile(cdpSession.launchRecordPath, "utf8"),
@@ -2654,10 +2671,11 @@ describe("blind persona accepted-build preparation", () => {
       },
       { launch: runtimeLaunch({}).launch },
     );
+    const unkeyedPort = await freeLoopbackPort();
     const unkeyed = driverChannelLaunch({
       emitPorts: (args) =>
-        args.includes("--remote-debugging-port=0") ? 45678 : null,
-      unkeyedPorts: [45678],
+        args.includes("--remote-debugging-port=0") ? unkeyedPort : null,
+      unkeyedPorts: [unkeyedPort],
     });
     try {
       await expect(
@@ -2777,16 +2795,17 @@ describe("blind persona accepted-build preparation", () => {
       },
       { launch: runtimeLaunch({}).launch },
     );
+    const ephemeralPort = await freeLoopbackPort();
     const mixed = driverChannelLaunch({
       emitPorts: (args) => {
-        if (args.includes("--remote-debugging-port=0")) return 45679;
+        if (args.includes("--remote-debugging-port=0")) return ephemeralPort;
         const requested = args
           .map((arg) => /--remote-debugging-port=(\d+)/u.exec(arg)?.[1])
           .find(Boolean);
         const port = Number(requested);
         return requested && port > 0 ? port : null;
       },
-      unkeyedPorts: [45679],
+      unkeyedPorts: [ephemeralPort],
     });
     try {
       const session = await launchBlindPersonaTester(
@@ -3280,9 +3299,10 @@ describe("blind persona accepted-build preparation", () => {
       verifyPreparedPersonaWorkspace(userDataRoot, custodyIndexPath),
     ).resolves.toMatchObject({ decidedBy: null, mode: "strict" });
 
+    const ephemeralPort = await freeLoopbackPort();
     const cdp = driverChannelLaunch({
       emitPorts: (args) =>
-        args.includes("--remote-debugging-port=0") ? 41235 : null,
+        args.includes("--remote-debugging-port=0") ? ephemeralPort : null,
     });
     try {
       const session = await launchBlindPersonaTester(

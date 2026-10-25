@@ -3,12 +3,14 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BrowserWindow } from "electron";
+import type { ResumeDraftProcessor } from "@nestor/contracts";
 import { createConcurrencyLimiter } from "@nestor/core";
 import type { JobFinderDocumentManager } from "@nestor/job-finder";
 import JSZip from "jszip";
 import { getApplicationDocumentLibrary } from "../services/job-finder/application-document-library-instance";
 
 import { getPdfPageCount } from "./resume-document";
+import { createGeneratedResumeCleanup } from "./generated-resume-cleanup";
 import {
   listLocalResumeTemplates,
   renderResumeTemplateHtml,
@@ -121,7 +123,10 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
 }
 
 interface CreateLocalJobFinderDocumentManagerOptions {
+  renderResumeHtml?: ResumeDraftProcessor["render"];
+  inspectPdf?: ResumeDraftProcessor["inspectPdf"];
   outputDirectory: string;
+  retainedResumePaths?: () => Promise<readonly string[]>;
   previewTestMode?: "ok" | "fail_once";
 }
 
@@ -152,6 +157,7 @@ async function renderPdfFromHtml(
     const exportWindow = new BrowserWindow({
       show: false,
       webPreferences: {
+        backgroundThrottling: false,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -306,8 +312,24 @@ export function createLocalJobFinderDocumentManager(
 ): JobFinderDocumentManager {
   let shouldFailNextPreview = options.previewTestMode === "fail_once";
   const countPreviewPages = createPreviewPageCounter();
+  const cleanup = createGeneratedResumeCleanup({
+    directory: options.outputDirectory,
+    retainedPaths: options.retainedResumePaths ?? (() => Promise.resolve([])),
+  });
 
   return {
+    async pruneGeneratedResumeFiles() {
+      if (!options.retainedResumePaths) return;
+      await cleanup.prune().catch(() => {
+        console.warn(
+          "[JobFinderDocuments] Generated resume cleanup will retry after the next export.",
+        );
+      });
+    },
+    async discardResumeArtifact(artifact) {
+      if (artifact.storagePath)
+        await cleanup.discard(artifact.storagePath).catch(() => undefined);
+    },
     listResumeTemplates() {
       return listLocalResumeTemplates();
     },
@@ -318,13 +340,21 @@ export function createLocalJobFinderDocumentManager(
         throw new Error("Preview rendering failed in desktop test mode.");
       }
 
-      const html = renderResumeTemplateHtml(input, { mode: "preview" });
+      const rendered = options.renderResumeHtml
+        ? await options.renderResumeHtml({
+            renderDocument: input.renderDocument,
+            settings: input.settings,
+            templateId: input.templateId,
+          })
+        : {
+            previewHtml: renderResumeTemplateHtml(input, { mode: "preview" }),
+            exportHtml: renderResumeTemplateHtml(input),
+          };
+      throwIfPreviewAborted(signal);
+      const html = rendered.previewHtml;
       let pageCount: number | null = null;
       try {
-        pageCount = await countPreviewPages(
-          renderResumeTemplateHtml(input),
-          signal,
-        );
+        pageCount = await countPreviewPages(rendered.exportHtml, signal);
       } catch {
         throwIfPreviewAborted(signal);
       }
@@ -416,6 +446,11 @@ export function createLocalJobFinderDocumentManager(
         htmlPath,
         pdfPath,
       );
+      try {
+        await rm(htmlPath, { force: true });
+      } catch {
+        /* Retried by managed cleanup. */
+      }
       const sha256 = createHash("sha256")
         .update(await readFile(pdfPath))
         .digest("hex");
@@ -436,13 +471,23 @@ export function createLocalJobFinderDocumentManager(
         options.outputDirectory,
         `${Date.now()}_${randomUUID()}`,
       );
+      cleanup?.rendering(artifactDirectory);
+      if (input.targetPath) cleanup?.renderingFile(input.targetPath);
       const artifactBaseName = employerFacingFileBaseName(
         input.profile.fullName,
         "resume",
       );
       const htmlFileName = `${artifactBaseName}.html`;
       const htmlPath = path.join(artifactDirectory, htmlFileName);
-      const html = renderResumeTemplateHtml(input);
+      const html = options.renderResumeHtml
+        ? (
+            await options.renderResumeHtml({
+              renderDocument: input.renderDocument,
+              settings: input.settings,
+              templateId: input.templateId,
+            })
+          ).exportHtml
+        : renderResumeTemplateHtml(input);
 
       const requestedFormat =
         input.settings.resumeFormat === "html" ? "html" : "pdf";
@@ -479,18 +524,28 @@ export function createLocalJobFinderDocumentManager(
         input.signal,
         input.onQueueWait,
       );
-      const pageCount = await getPdfPageCount(pdfPath);
-      const sha256 = createHash("sha256")
-        .update(await readFile(pdfPath))
-        .digest("hex");
+      try {
+        await rm(htmlPath, { force: true });
+      } catch {
+        /* Retried by managed cleanup. */
+      }
+      // Chromium's sandboxed renderer processes do layout/printing (at most
+      // two). HTML generation and PDF parsing/hash work use the document
+      // worker too, leaving main to coordinate files and approval writes.
+      const { pageCount, sha256 } = options.inspectPdf
+        ? await options.inspectPdf(pdfPath)
+        : {
+            pageCount: await getPdfPageCount(pdfPath),
+            sha256: createHash("sha256")
+              .update(await readFile(pdfPath))
+              .digest("hex"),
+          };
 
       return {
         fileName: outputFileName,
         storagePath: pdfPath,
         sha256,
         format: "pdf",
-        intermediateFileName: htmlFileName,
-        intermediateStoragePath: htmlPath,
         pageCount,
         warnings: [],
       };

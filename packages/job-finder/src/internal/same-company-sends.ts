@@ -107,12 +107,15 @@ export async function checkSameCompanySends(input: {
   jobIds: readonly string[];
   now?: string;
   transition?: WorkspaceServiceContext["withIntelligenceTransition"];
+  onRefusedJob?: (jobId: string, reason: string) => void;
 }): Promise<string | null> {
   const operation = async () => {
     const [state, records, jobs, results, runs] = await Promise.all([
       input.repository.getIntelligenceState(),
       input.repository.listApplicationRecords(),
-      input.repository.listSavedJobs(),
+      // Read-only company grouping; the cached display rows spare a full
+      // parse of every saved job on each send.
+      input.repository.readSavedJobsProjection(),
       input.repository.listApplyJobResults(),
       input.repository.listApplyRuns(),
     ]);
@@ -217,6 +220,10 @@ export async function checkSameCompanySends(input: {
         const label = (entry: SavedJob) =>
           `${entry.title} (${entry.location || "place not listed"})`;
         const message = `${job.company}: ${[label(job), label(other)].sort().join(" and ")}`;
+        input.onRefusedJob?.(
+          job.id,
+          `${label(job)} at ${job.company} overlaps with ${label(other)}. Review this pair in Safeguards before sending.`,
+        );
         if (!refused.includes(message)) refused.push(message);
       }
     }

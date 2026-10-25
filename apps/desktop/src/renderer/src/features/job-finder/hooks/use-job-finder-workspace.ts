@@ -18,6 +18,11 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -26,6 +31,9 @@ import type {
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSettings,
   JobFinderSearchRequest,
+  JobFinderAgentDiscoveryReply,
+  JobFinderAgentDiscoveryResult,
+  JobFinderJobDetail,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
@@ -68,6 +76,20 @@ import type {
 } from "@nestor/contracts";
 import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
+import { whenLaunchReadsSettled } from "../lib/launch-reads";
+import {
+  createSearchChangeFeedFollower,
+  isSearchRunning,
+  publishLiveFindJobsCounts,
+  publishSearchLiveCounts,
+  type SearchChangeFeedFollower,
+} from "../lib/search-change-feed";
+import {
+  markFindJobsListsBehind,
+  patchFindJobsLists,
+  PATCHED_JOBS_LIMIT,
+  registerFullWorkspaceRead,
+} from "../lib/workspace-view-refresh";
 import {
   isJobFinderStartupDatabaseRecoveryFact,
   type JobFinderStartupDatabaseRecoveryBlockedFact,
@@ -76,6 +98,12 @@ import {
 
 /** How long update-driven syncs rest, as a multiple of the last sync. */
 const UPDATE_SYNC_REST_FACTOR = 2;
+/**
+ * At least this long between update-driven syncs. A search publishes several
+ * updates a second and each sync costs main tens of milliseconds; more than
+ * two refreshes a second shows nothing new and slows every click.
+ */
+const MIN_UPDATE_SYNC_REST_MS = 400;
 /** A stalled sync never leaves the workspace stale for longer than this. */
 const MAX_UPDATE_SYNC_REST_MS = 8_000;
 const MAX_WORKSPACE_BASELINES = 4;
@@ -95,6 +123,9 @@ type JobFinderWorkspaceState =
       retry: () => void;
       startupDatabaseRecovery: JobFinderStartupDatabaseRecoveryBlockedFact | null;
     };
+
+/** How long a press made before the full workspace landed waits for it. */
+const HYDRATION_ACTION_WAIT_MS = 120_000;
 
 function markJobFinderTiming(markName: string, startMarkName?: string) {
   const performanceApi = globalThis.performance;
@@ -138,6 +169,16 @@ function selectBlockedStartupDatabaseRecovery(
     : null;
 }
 
+/** Changes answer with a sync result; test and demo routes still send a bare snapshot. */
+function isWorkspaceSyncResult(
+  response: JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult,
+): response is JobFinderWorkspaceSyncResult {
+  return (
+    "kind" in response &&
+    (response.kind === "delta" || response.kind === "snapshot")
+  );
+}
+
 export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   const [workspaceState, setWorkspaceState] = useState<JobFinderWorkspaceState>(
     { status: "loading" },
@@ -175,12 +216,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspaceRequestSequenceRef.current === sequence;
   }, []);
 
-  const assertWorkspaceHydrated = useCallback(() => {
-    if (workspaceRef.current?.hydration?.phase === "bootstrap") {
-      throw new Error(
-        "Job Finder is still finishing its initial load. Please wait a moment and try again.",
-      );
-    }
+  // Home can show its buttons before the full snapshot lands (ADR 0077). A
+  // press then waits for it quietly instead of failing; only a load that
+  // never finishes answers with the error.
+  const hydrationWaitersRef = useRef(new Set<() => void>());
+  // Null when nothing is pending, so a press on a loaded workspace still
+  // reaches main in the same turn.
+  const waitForWorkspaceHydrated = useCallback((): Promise<void> | null => {
+    if (workspaceRef.current?.hydration?.phase !== "bootstrap") return null;
+    const waiters = hydrationWaitersRef.current;
+    return new Promise<void>((resolve, reject) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(done);
+        reject(
+          new Error(
+            "Job Finder is still finishing its initial load. Please wait a moment and try again.",
+          ),
+        );
+      }, HYDRATION_ACTION_WAIT_MS);
+      waiters.add(done);
+    });
   }, []);
 
   const commitWorkspace = useCallback(
@@ -203,6 +262,33 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           baselines.delete(oldestRevision);
         }
       }
+      workspaceCommitVersionRef.current += 1;
+      workspaceRef.current = workspace;
+      if (workspace.hydration?.phase !== "bootstrap") {
+        const waiters = [...hydrationWaitersRef.current];
+        hydrationWaitersRef.current.clear();
+        for (const done of waiters) done();
+      }
+      // Main answers this window's next change relative to what it shows.
+      // Test hosts and an older preload may not offer the notice.
+      const noteRevision = window.nestor.jobFinder.noteWorkspaceRevision;
+      if (typeof noteRevision === "function") noteRevision(revision);
+      setWorkspaceState((currentState) =>
+        currentState.status === "ready"
+          ? { ...currentState, workspace }
+          : currentState,
+      );
+    },
+    [],
+  );
+
+  /**
+   * Shows a workspace that is not a revision main sent (a view refresh). The
+   * revision and its baseline stay, so main's next delta still applies to
+   * what it was computed from.
+   */
+  const commitWorkspaceView = useCallback(
+    (workspace: JobFinderRendererWorkspaceSnapshot) => {
       workspaceCommitVersionRef.current += 1;
       workspaceRef.current = workspace;
       setWorkspaceState((currentState) =>
@@ -267,87 +353,18 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   // its snapshot observes every settled commit — restores freshness without
   // weakening the latest-request fence: nothing stale is ever committed.
   const scheduleConvergenceFetch = useCallback(() => {
+    // A loaded window converges through the view refresh, never the full
+    // sync (it walked every job in main).
+    if (
+      workspaceRef.current?.hydration?.phase === "complete" &&
+      typeof window.nestor.jobFinder.getWorkspaceHome === "function" &&
+      requestBackgroundSyncRef.current
+    ) {
+      requestBackgroundSyncRef.current();
+      return;
+    }
     void recoverFullWorkspaceOnce().catch(() => undefined);
   }, [recoverFullWorkspaceOnce]);
-
-  const runWorkspaceAction = useCallback(
-    async (
-      action: () => Promise<JobFinderRendererWorkspaceSnapshot>,
-      options?: { allowDuringBootstrap?: boolean },
-    ) => {
-      if (!options?.allowDuringBootstrap) {
-        assertWorkspaceHydrated();
-      }
-      const sequence = beginWorkspaceRequest();
-      let workspace: JobFinderRendererWorkspaceSnapshot;
-      try {
-        workspace = await action();
-      } catch (error) {
-        // Main often records the failure before it throws (a resume run that
-        // failed saves a failed asset with its cause). Without a re-sync the
-        // screen kept its pre-action state, "No resume yet" with "Create the
-        // resume", until the window was reloaded.
-        scheduleConvergenceFetch();
-        throw error;
-      }
-      if (!isCurrentWorkspaceRequest(sequence)) {
-        scheduleConvergenceFetch();
-        return workspaceRef.current ?? workspace;
-      }
-
-      // A bare snapshot response carries no revision, so the delta baseline
-      // must be surrendered here. `0` means "this workspace corresponds to no
-      // revision main knows about", which forces the next sync to ask for a
-      // full snapshot and re-baseline both sides together.
-      //
-      // Do NOT "optimise" this into keeping the previous revision: main's
-      // tracker baseline would still be the pre-mutation snapshot while the
-      // committed workspace is the post-mutation one, so the next delta would
-      // be computed against a state the renderer no longer holds. An entity
-      // created by this mutation and removed before the next sync would then
-      // survive forever in the UI, because it is absent from both the baseline
-      // and the current snapshot and therefore never appears in `removedIds`.
-      // The revision can only be carried forward once the mutation response
-      // itself carries it (see `runWorkspaceEntityMutation`, which does exactly
-      // that through the typed sync envelope).
-      commitWorkspace(workspace);
-      return workspace;
-    },
-    [
-      assertWorkspaceHydrated,
-      beginWorkspaceRequest,
-      commitWorkspace,
-      isCurrentWorkspaceRequest,
-      scheduleConvergenceFetch,
-    ],
-  );
-
-  // Same request fencing and snapshot commit as runWorkspaceAction, but the
-  // typed envelope around the snapshot survives so callers can classify the
-  // terminal outcome (completed vs user-cancelled) without re-deriving it
-  // from a later refresh.
-  const runWorkspaceResultAction = useCallback(
-    async <T extends { snapshot: JobFinderRendererWorkspaceSnapshot }>(
-      action: () => Promise<T>,
-    ): Promise<T> => {
-      assertWorkspaceHydrated();
-      const sequence = beginWorkspaceRequest();
-      const result = await action();
-      if (!isCurrentWorkspaceRequest(sequence)) {
-        return { ...result, snapshot: workspaceRef.current ?? result.snapshot };
-      }
-
-      commitWorkspace(result.snapshot);
-      return result;
-    },
-    [
-      assertWorkspaceHydrated,
-      beginWorkspaceRequest,
-      commitWorkspace,
-      isCurrentWorkspaceRequest,
-      scheduleConvergenceFetch,
-    ],
-  );
 
   const commitWorkspaceSyncResult = useCallback(
     (
@@ -380,6 +397,75 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       return applied.workspace;
     },
     [applyWorkspaceDelta, commitWorkspace, isCurrentWorkspaceRequest],
+  );
+
+  const runWorkspaceAction = useCallback(
+    async (
+      action: () => Promise<
+        JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult
+      >,
+      options?: { allowDuringBootstrap?: boolean },
+    ): Promise<JobFinderRendererWorkspaceSnapshot> => {
+      if (!options?.allowDuringBootstrap) {
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
+      }
+      const sequence = beginWorkspaceRequest();
+      let response:
+        | JobFinderRendererWorkspaceSnapshot
+        | JobFinderWorkspaceSyncResult;
+      try {
+        response = await action();
+      } catch (error) {
+        // Main often records the failure before it throws (a resume run that
+        // failed saves a failed asset with its cause). Without a re-sync the
+        // screen kept its pre-action state, "No resume yet" with "Create the
+        // resume", until the window was reloaded.
+        scheduleConvergenceFetch();
+        throw error;
+      }
+      if (isWorkspaceSyncResult(response)) {
+        // Same convergence contract as runWorkspaceEntityMutation: main
+        // answered relative to the revision this window holds.
+        if (!isCurrentWorkspaceRequest(sequence)) scheduleConvergenceFetch();
+        return (
+          commitWorkspaceSyncResult(response, sequence) ??
+          (await recoverFullWorkspaceOnce(sequence))
+        );
+      }
+      const workspace = response;
+      if (!isCurrentWorkspaceRequest(sequence)) {
+        scheduleConvergenceFetch();
+        return workspaceRef.current ?? workspace;
+      }
+
+      // A bare snapshot response carries no revision, so the delta baseline
+      // must be surrendered here. `0` means "this workspace corresponds to no
+      // revision main knows about", which forces the next sync to ask for a
+      // full snapshot and re-baseline both sides together.
+      //
+      // Do NOT "optimise" this into keeping the previous revision: main's
+      // tracker baseline would still be the pre-mutation snapshot while the
+      // committed workspace is the post-mutation one, so the next delta would
+      // be computed against a state the renderer no longer holds. An entity
+      // created by this mutation and removed before the next sync would then
+      // survive forever in the UI, because it is absent from both the baseline
+      // and the current snapshot and therefore never appears in `removedIds`.
+      // The revision can only be carried forward once the mutation response
+      // itself carries it (see `runWorkspaceEntityMutation`, which does exactly
+      // that through the typed sync envelope).
+      commitWorkspace(workspace);
+      return workspace;
+    },
+    [
+      waitForWorkspaceHydrated,
+      beginWorkspaceRequest,
+      commitWorkspace,
+      commitWorkspaceSyncResult,
+      isCurrentWorkspaceRequest,
+      recoverFullWorkspaceOnce,
+      scheduleConvergenceFetch,
+    ],
   );
 
   const syncWorkspace = useCallback(async () => {
@@ -445,6 +531,94 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspace;
   }, [applyWorkspaceDelta, commitWorkspace]);
 
+  // Jobs the change feed named since the last view refresh.
+  const changedJobIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const queries = window.nestor.jobFinder.queries;
+    if (typeof queries?.onChanges !== "function") return undefined;
+    return queries.onChanges((batch) => {
+      for (const change of batch.changes)
+        if (
+          change.table === "saved_jobs" ||
+          change.table === "discovery_pending_jobs"
+        )
+          changedJobIdsRef.current.add(change.id);
+    });
+  }, []);
+
+  // A loaded window takes a workspace update without the full sync: it reads
+  // Home's first view again (everything but the Find jobs lists) and patches
+  // those lists for the jobs the feed named. Revisions and baselines stay as
+  // they are, so the next mutation's delta still applies.
+  const refreshWorkspaceView = useCallback(async () => {
+    const current = workspaceRef.current;
+    const readHome = window.nestor.jobFinder.getWorkspaceHome;
+    const queries = window.nestor.jobFinder.queries;
+    if (
+      !current ||
+      current.hydration?.phase !== "complete" ||
+      typeof readHome !== "function" ||
+      typeof queries?.getJobDetail !== "function"
+    )
+      return syncWorkspaceFromUpdate();
+    const commitVersion = workspaceCommitVersionRef.current;
+    const jobIds = [...changedJobIdsRef.current];
+    changedJobIdsRef.current.clear();
+    const readOneByOne = jobIds.length <= PATCHED_JOBS_LIMIT;
+    const planId = current.activeCampaignId;
+    let view: JobFinderRendererWorkspaceSnapshot | null;
+    let details: (JobFinderJobDetail | null | undefined)[] = [];
+    try {
+      [view, details] = await Promise.all([
+        readHome(),
+        readOneByOne
+          ? Promise.all(
+              jobIds.map((jobId) =>
+                queries.getJobDetail(jobId, planId).catch(() => undefined),
+              ),
+            )
+          : Promise.resolve([]),
+      ]);
+    } catch {
+      view = null;
+    }
+    if (!view) {
+      for (const jobId of jobIds) changedJobIdsRef.current.add(jobId);
+      return syncWorkspaceFromUpdate();
+    }
+    if (workspaceCommitVersionRef.current !== commitVersion) {
+      // A newer answer landed meanwhile; these jobs are read next time.
+      for (const jobId of jobIds) changedJobIdsRef.current.add(jobId);
+      return workspaceRef.current;
+    }
+    const latest = workspaceRef.current ?? current;
+    const lists = readOneByOne
+      ? patchFindJobsLists({
+          current: latest,
+          curated: view.discoveryJobs,
+          jobIds,
+          details,
+        })
+      : { ...latest, complete: false };
+    if (!lists.complete) markFindJobsListsBehind(true);
+    const next: JobFinderRendererWorkspaceSnapshot = {
+      ...view,
+      discoveryJobs: lists.discoveryJobs,
+      dismissedDiscoveryJobs: lists.dismissedDiscoveryJobs,
+      companyJobs: lists.companyJobs,
+      selectedDiscoveryJobId: latest.selectedDiscoveryJobId,
+      hydration: latest.hydration,
+    };
+    commitWorkspaceView(next);
+    void publishLiveFindJobsCounts(next);
+    return next;
+  }, [commitWorkspaceView, syncWorkspaceFromUpdate]);
+
+  useEffect(() => {
+    registerFullWorkspaceRead(() => recoverFullWorkspaceOnce());
+    return () => registerFullWorkspaceRead(null);
+  }, [recoverFullWorkspaceOnce]);
+
   useEffect(() => {
     let disposed = false;
     let syncing = false;
@@ -454,7 +628,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     const startSync = () => {
       syncing = true;
       const startedAt = Date.now();
-      void syncWorkspaceFromUpdate().finally(() => {
+      void refreshWorkspaceView().finally(() => {
         syncing = false;
         // A search sends updates several times a second, and each sync makes
         // main rebuild the whole workspace, which takes seconds once it holds
@@ -465,7 +639,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           finishedAt +
           Math.min(
             MAX_UPDATE_SYNC_REST_MS,
-            UPDATE_SYNC_REST_FACTOR * (finishedAt - startedAt),
+            Math.max(
+              MIN_UPDATE_SYNC_REST_MS,
+              UPDATE_SYNC_REST_FACTOR * (finishedAt - startedAt),
+            ),
           );
         if (queued) {
           queued = false;
@@ -507,19 +684,63 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       if (waitTimer !== undefined) window.clearTimeout(waitTimer);
       unsubscribe?.();
     };
-  }, [syncWorkspaceFromUpdate]);
+  }, [refreshWorkspaceView]);
+
+  // During a search main announces only its start; the change feed says what
+  // the search wrote, and only screens that show the search sync for it.
+  const searchFeedRef = useRef<SearchChangeFeedFollower | null>(null);
+  useEffect(() => {
+    const queries = window.nestor.jobFinder.queries;
+    if (typeof queries?.onChanges !== "function") return undefined;
+    const follower = createSearchChangeFeedFollower({
+      isSearchRunning: () => isSearchRunning(workspaceRef.current),
+      currentRoute: () => window.location.hash.replace(/^#/, ""),
+      requestSync: () => requestBackgroundSyncRef.current?.(),
+      refreshCounts: () => {
+        const workspace = workspaceRef.current;
+        if (!workspace) return;
+        void queries
+          .getListCounts()
+          .then((counts) => {
+            if (workspaceRef.current === workspace)
+              publishSearchLiveCounts({ counts, workspace });
+          })
+          .catch(() => undefined);
+      },
+    });
+    searchFeedRef.current = follower;
+    const unsubscribe = queries.onChanges((changes) =>
+      follower.onChanges(changes),
+    );
+    const onRouteChange = () => follower.onRouteChange();
+    window.addEventListener("hashchange", onRouteChange);
+    return () => {
+      if (searchFeedRef.current === follower) searchFeedRef.current = null;
+      follower.dispose();
+      unsubscribe();
+      window.removeEventListener("hashchange", onRouteChange);
+    };
+  }, []);
 
   /**
    * Asks for a background refresh on the same paced path as main's update
    * notices, so progress refreshes during a search never stack on them.
+   * While a search runs it goes through the change-feed follower, so screens
+   * that do not show the search are not rebuilt for its progress.
    */
   const requestWorkspaceRefresh = useCallback(() => {
+    const follower = searchFeedRef.current;
+    if (follower && isSearchRunning(workspaceRef.current)) {
+      follower.onSearchProgress();
+      return;
+    }
     requestBackgroundSyncRef.current?.();
   }, []);
 
   const runWorkspaceEntityMutation = useCallback(
     async (mutation: JobFinderWorkspaceEntityMutation) => {
-      assertWorkspaceHydrated();
+      const hydrating = waitForWorkspaceHydrated();
+      if (hydrating) await hydrating;
       const sequence = beginWorkspaceRequest();
       const baseRevision = workspaceRevisionRef.current || null;
       const result = await window.nestor.jobFinder.mutateWorkspaceEntities({
@@ -544,7 +765,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       beginWorkspaceRequest,
       commitWorkspaceSyncResult,
       recoverFullWorkspaceOnce,
-      assertWorkspaceHydrated,
+      waitForWorkspaceHydrated,
       isCurrentWorkspaceRequest,
       scheduleConvergenceFetch,
     ],
@@ -620,9 +841,9 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         window.nestor.jobFinder.getResumeWorkspace(jobId),
       previewResumeDraft: (draft: ResumeDraft, requestId?: string) =>
         window.nestor.jobFinder.previewResumeDraft(draft, requestId),
-      saveResumeDraft: (draft: ResumeDraft) =>
+      saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveResumeDraft(draft),
+          window.nestor.jobFinder.saveResumeDraft(draft, autosaveSessionId),
         ),
       regenerateResumeDraft: (jobId: string) =>
         runWorkspaceAction(() =>
@@ -640,13 +861,23 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.undoResumeAssistantEdit(jobId, revisionId),
         ),
-      exportResumePdf: (
+      exportResumePdf: async (
         jobId: string,
         intent: ResumePdfExportIntent = "download",
-      ) =>
-        runWorkspaceResultAction(() =>
-          window.nestor.jobFinder.exportResumePdf(jobId, intent),
-        ),
+      ) => {
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
+        const sequence = beginWorkspaceRequest();
+        const { workspace, ...outcome } =
+          await window.nestor.jobFinder.exportResumePdf(jobId, intent);
+        // The workspace comes as a delta from the revision this window
+        // holds, like every other change's answer.
+        if (!isCurrentWorkspaceRequest(sequence)) scheduleConvergenceFetch();
+        const snapshot =
+          commitWorkspaceSyncResult(workspace, sequence) ??
+          (await recoverFullWorkspaceOnce(sequence));
+        return { ...outcome, snapshot };
+      },
       // Reveal is not a workspace mutation: it selects the written file in the
       // OS file manager and returns what happened, so it never refreshes.
       revealSavedFile: (path: string) =>
@@ -655,9 +886,12 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.approveResume(jobId, exportId),
         ),
-      clearResumeApproval: (jobId: string) =>
+      clearResumeApproval: (
+        jobId: string,
+        restoreStatus?: "draft" | "needs_review",
+      ) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.clearResumeApproval(jobId),
+          window.nestor.jobFinder.clearResumeApproval(jobId, restoreStatus),
         ),
       setWorkHistoryReviewAcknowledgment: (
         input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -713,6 +947,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
             jobIds,
             applicationAutomationMode,
           ),
+        ),
+      startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.startApplyQueue(input),
+        ),
+      approveResumes: (input: JobFinderApproveResumesInput) =>
+        runWorkspaceAction(() => window.nestor.jobFinder.approveResumes(input)),
+      controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.controlApplyQueue(input),
+        ),
+      removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.removeFromApplyQueue(input),
+        ),
+      returnApplicationToShortlist: (
+        input: JobFinderReturnApplicationToShortlistInput,
+      ) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.returnApplicationToShortlist(input),
+        ),
+      undoReturnApplicationToShortlist: (jobId: string) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.undoReturnApplicationToShortlist(jobId),
         ),
       approveApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>
@@ -837,18 +1095,27 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           clearTailoredAssetDetailCache();
         });
       },
-      runAgentDiscovery: (
+      runAgentDiscovery: async (
         onProgress?: (event: DiscoveryActivityEvent) => void,
         targetId?: string,
         searchRequest?: JobFinderSearchRequest,
-      ) =>
-        runWorkspaceResultAction(() =>
-          window.nestor.jobFinder.runAgentDiscovery(
+      ) => {
+        // Main answers with what changed since the revision this window
+        // holds; it is committed like any other change this window asked for.
+        let outcome: JobFinderAgentDiscoveryResult["outcome"] = "completed";
+        const snapshot = await runWorkspaceAction(async () => {
+          const reply = (await window.nestor.jobFinder.runAgentDiscovery(
             onProgress,
             targetId,
             searchRequest,
-          ),
-        ),
+          )) as JobFinderAgentDiscoveryReply | JobFinderAgentDiscoveryResult;
+          outcome = reply.outcome;
+          // Test hosts and an older preload may still answer with the
+          // whole workspace.
+          return "sync" in reply ? reply.sync : reply.snapshot;
+        });
+        return { outcome, snapshot };
+      },
       cancelAgentDiscovery: (input) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.cancelAgentDiscovery(input),
@@ -1116,7 +1383,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     [
       requestWorkspaceRefresh,
       runWorkspaceAction,
-      runWorkspaceResultAction,
       runWorkspaceEntityMutation,
       syncWorkspace,
     ],
@@ -1171,6 +1437,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         // hydration request is fenced like every other workspace request so a
         // later user action can never be overwritten by a stale full snapshot.
         if (bootstrap.hydration?.phase === "bootstrap") {
+          // Home's first view (ADR 0077): every collection but the Find jobs
+          // lists, read before the full snapshot so Home does not wait for
+          // it. It is still a bootstrap snapshot, so actions wait as before.
+          let shownBootstrap = bootstrap;
+          const readHome = window.nestor.jobFinder.getWorkspaceHome;
+          if (typeof readHome === "function") {
+            const homeSequence = beginWorkspaceRequest();
+            const home = await readHome().catch(() => null);
+            if (
+              home &&
+              !cancelled &&
+              isCurrentWorkspaceRequest(homeSequence) &&
+              workspaceRef.current === bootstrap
+            ) {
+              commitWorkspace(home);
+              shownBootstrap = home;
+              markJobFinderTiming("job-finder:workspace:home:ready");
+            }
+          }
+          // The full load reads every saved job in main. It starts once the
+          // screens drawn from the launch queries are usable, not ahead of
+          // them.
+          await whenLaunchReadsSettled();
+          if (cancelled) return;
           const hydrationSequence = beginWorkspaceRequest();
           markJobFinderTiming(`${performancePrefix}:hydration:start`);
           markJobFinderTiming("job-finder:workspace:hydration:start");
@@ -1239,7 +1529,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
               if (
                 cancelled ||
                 !isCurrentWorkspaceRequest(hydrationSequence) ||
-                workspaceRef.current !== bootstrap
+                workspaceRef.current !== shownBootstrap
               ) {
                 // This failure was superseded: an action owns the surface or
                 // a newer request already replaced the bootstrap snapshot.

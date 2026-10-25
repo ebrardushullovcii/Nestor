@@ -17,6 +17,7 @@ import type {
   RecordOutcomeInput,
   ResumeImportProgressEvent,
   ResumeAssistantMessage,
+  ResumeDraft,
   SafeguardMutationInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
@@ -76,7 +77,7 @@ type BuildJobFinderPageContextArgs = {
   discoveryRunFeedback: DiscoveryRunFeedback | null;
   liveDiscoveryEvents: readonly DiscoveryActivityEvent[];
   latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
-  locationPathname: string;
+  getLocationPathname: () => string;
   navigate: (
     path: string,
     options?: { replace?: boolean; state?: unknown },
@@ -109,6 +110,7 @@ type BuildJobFinderPageContextArgs = {
       updateAssistantMessages?: boolean;
     },
   ) => Promise<boolean>;
+  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   selectedApplicationAttempt: JobFinderPageContext["selectedApplicationAttempt"];
   selectedApplicationRecord: JobFinderPageContext["selectedApplicationRecord"];
@@ -177,7 +179,7 @@ export function buildJobFinderPageContext(
     discoveryRunFeedback,
     liveDiscoveryEvents,
     latestWorkspaceRef,
-    locationPathname,
+    getLocationPathname,
     navigate,
     navigateSafely,
     profileCopilotBusy,
@@ -189,6 +191,7 @@ export function buildJobFinderPageContext(
     saveCoordinator,
     saveState,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     selectedApplicationAttempt,
     selectedApplicationRecord,
@@ -245,12 +248,13 @@ export function buildJobFinderPageContext(
     importResumeGuardMessage,
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
-    locationPathname,
+    getLocationPathname,
     navigate,
     profileSetupState,
     profileCopilotRequestTokenRef,
     requestApplyCopilotVisualCheckpoints,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
     runResumeWorkspaceAction,

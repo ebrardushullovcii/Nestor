@@ -4,13 +4,17 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 /**
  * Three rows printed "26% fit" one under the other and two of them said
  * nothing else, so the order between them was unexplainable. A row that
- * shares its percentage with another row has to say the one thing that
- * separates it.
+ * shares its percentage with another row keeps the one thing that separates
+ * it as the score's tooltip. Printed as a line under every row it said "Job
+ * title matches one of your target roles." down most of a 6,000-job list.
  */
 const browserSession = {
   source: "target_site" as const,
@@ -129,10 +133,10 @@ function threeTiedJobs(): readonly SavedJob[] {
 afterEach(cleanup);
 
 describe("rows that share a percentage", () => {
-  it("gives every tied row its own secondary reason", () => {
+  it("gives every tied row its own secondary reason", async () => {
     const jobs = threeTiedJobs();
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -140,20 +144,28 @@ describe("rows that share a percentage", () => {
         selectedJob={jobs[0] ?? null}
       />,
     );
+    await flushFindJobsQueries();
 
     const reasons = jobs.map(
       (job) =>
-        screen.getByTestId(`discovery-result-fit-reason-${job.id}`)
-          .textContent ?? "",
+        screen
+          .getByTestId(`discovery-result-fit-${job.id}`)
+          .getAttribute("title") ?? "",
     );
 
     for (const reason of reasons) {
       expect(reason.trim().length).toBeGreaterThan(0);
     }
     expect(new Set(reasons).size).toBe(reasons.length);
+    // Not a printed line under each row.
+    for (const job of jobs) {
+      expect(
+        screen.queryByTestId(`discovery-result-fit-reason-${job.id}`),
+      ).toBeNull();
+    }
   });
 
-  it("leaves a row with no shared percentage quiet", () => {
+  it("leaves a row with no shared percentage quiet", async () => {
     const jobs = [
       tiedJob("solo_high", "Marketing Manager", "Envisionit", {
         score: 74,
@@ -169,7 +181,7 @@ describe("rows that share a percentage", () => {
       }),
     ];
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -177,6 +189,7 @@ describe("rows that share a percentage", () => {
         selectedJob={jobs[0] ?? null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(
       screen.queryByTestId("discovery-result-fit-reason-solo_high"),
@@ -184,5 +197,10 @@ describe("rows that share a percentage", () => {
     expect(
       screen.queryByTestId("discovery-result-fit-reason-solo_low"),
     ).toBeNull();
+    expect(
+      screen
+        .getByTestId("discovery-result-fit-solo_high")
+        .hasAttribute("title"),
+    ).toBe(false);
   });
 });

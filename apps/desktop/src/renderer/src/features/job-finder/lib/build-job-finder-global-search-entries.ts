@@ -4,12 +4,113 @@ import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
 import { buildResumeWorkspaceRoute } from "./resume-workspace-route";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 import {
-  formatJobEmployerLocationLine,
   isEmployerAbsenceLabel,
   isLocationAbsenceLabel,
   resolveJobEmployerDisplay,
   resolveJobLocationDisplay,
 } from "./job-employer-location-display";
+
+/**
+ * Every screen, so "set" then Enter opens Settings. The extra words are what
+ * a person might type for it.
+ */
+function screen(
+  id: string,
+  title: string,
+  subtitle: string,
+  href: string,
+  words: readonly string[],
+): JobFinderGlobalSearchEntry {
+  return {
+    href,
+    id: `screen:${id}`,
+    kind: "screen",
+    metadata: words,
+    subtitle,
+    title,
+  };
+}
+
+const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
+  screen("home", "Home", "Your next step", "/job-finder/home", ["start"]),
+  screen(
+    "profile",
+    "Profile",
+    "Experience and documents",
+    JOB_FINDER_ROUTE_PATHS.profile,
+    ["resume", "experience"],
+  ),
+  screen(
+    "job-sources",
+    "Job sources",
+    "Profile",
+    JOB_FINDER_ROUTE_PATHS.profileSources,
+    ["sites", "boards", "feeds"],
+  ),
+  screen(
+    "discovery",
+    "Find jobs",
+    "Search and triage",
+    JOB_FINDER_ROUTE_PATHS.discovery,
+    ["discover", "search now"],
+  ),
+  screen(
+    "review-queue",
+    "Shortlisted",
+    "Resumes and applying",
+    JOB_FINDER_ROUTE_PATHS.reviewQueue,
+    ["review", "approve"],
+  ),
+  screen(
+    "applications",
+    "Applications",
+    "Where each application stands",
+    JOB_FINDER_ROUTE_PATHS.applications,
+    ["tracker", "interviews"],
+  ),
+  screen(
+    "campaigns",
+    "Search plans",
+    "Roles, places and sources",
+    JOB_FINDER_ROUTE_PATHS.campaigns,
+    ["plans"],
+  ),
+  screen(
+    "companies",
+    "Companies",
+    "Employers in your jobs",
+    "/job-finder/companies",
+    ["employers"],
+  ),
+  screen(
+    "analytics",
+    "Outcomes",
+    "Replies and interviews",
+    "/job-finder/analytics",
+    ["stats"],
+  ),
+  screen(
+    "safeguards",
+    "Safeguards",
+    "Limits and checks",
+    "/job-finder/safeguards",
+    ["limits"],
+  ),
+  screen(
+    "settings",
+    "Settings",
+    "Applying, AI, appearance",
+    JOB_FINDER_ROUTE_PATHS.settings,
+    ["preferences", "options"],
+  ),
+  screen(
+    "settings-applying",
+    "Applying settings",
+    "Settings",
+    `${JOB_FINDER_ROUTE_PATHS.settings}#settings-application-authority`,
+    ["send for me", "daily limit", "fill in"],
+  ),
+];
 
 export function buildJobFinderGlobalSearchEntries(
   workspace: JobFinderRendererWorkspaceSnapshot,
@@ -66,11 +167,16 @@ export function buildJobFinderGlobalSearchEntries(
       canonicalUrl: job.canonicalUrl,
     });
     const location = resolveJobLocationDisplay(job.location);
+    const campaignId = campaignIdForJob(job.id);
     return {
-      campaignId: campaignIdForJob(job.id),
-      href: buildJobFinderContextRoute("/job-finder/discovery", {
-        jobId: job.id,
-      }),
+      campaignId,
+      // Built when a result is opened: building a link for each of thousands
+      // of jobs every time the palette opened cost about 45 ms.
+      get href() {
+        return buildJobFinderContextRoute("/job-finder/discovery", {
+          jobId: job.id,
+        });
+      },
       id: job.id,
       kind: "job" as const,
       metadata: [
@@ -86,13 +192,11 @@ export function buildJobFinderGlobalSearchEntries(
           !isEmployerAbsenceLabel(value) &&
           !isLocationAbsenceLabel(value),
       ),
+      // The employer and location line, from the two values resolved above.
       subtitle: [
-        formatJobEmployerLocationLine({
-          company: job.company,
-          location: job.location,
-          canonicalUrl: job.canonicalUrl,
-        }),
-        campaignLabelFor(campaignIdForJob(job.id)) ?? outOfPlanLabel(job.id),
+        employer,
+        location,
+        campaignLabelFor(campaignId) ?? outOfPlanLabel(job.id),
       ]
         .filter(Boolean)
         .join(" · "),
@@ -175,6 +279,7 @@ export function buildJobFinderGlobalSearchEntries(
   );
 
   return [
+    ...SCREEN_ENTRIES,
     ...campaignEntries,
     ...jobEntries,
     ...applicationEntries,

@@ -1,7 +1,10 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { WebContents } from "electron";
-import { WebSocket, WebSocketServer } from "ws";
+import type { WebSocket, WebSocketServer } from "ws";
+
+/** `WebSocket.OPEN`, without loading ws before the bridge starts. */
+const SOCKET_OPEN = 1;
 
 type Params = Record<string, unknown>;
 interface Request {
@@ -30,7 +33,7 @@ export interface BrowserCdpHost {
   selectPage(id: string): void;
   onPageCreated(listener: (page: BrowserCdpPage) => void): () => void;
   userAgent(): string;
-  emulateFocus?(): boolean;
+  emulateFocus?(pageId?: string): boolean;
   /**
    * Automation is about to send keyboard or pointer input to this page.
    * `pointerDown` is set for a pressed pointer button, which the page then
@@ -45,7 +48,11 @@ export interface BrowserCdpHost {
     },
   ): void;
   /** Keep hidden pages awake only while browser commands need them. */
-  onAutomationCommand?(pageId: string, active: boolean): void;
+  onAutomationCommand?(
+    pageId: string,
+    active: boolean,
+    needsFocus?: boolean,
+  ): void | Promise<void>;
 }
 interface AttachedPage {
   page: BrowserCdpPage;
@@ -86,7 +93,10 @@ export class BrowserCdpBridge {
   private disposed = false;
   private removeCreatedListener: (() => void) | null = null;
   private readonly pendingAttachments = new Set<Promise<void>>();
-  private readonly tokenWaiters = new Map<string, (tabId: string) => void>();
+  private readonly tokenWaiters = new Map<
+    string,
+    (tabId: string | null) => void
+  >();
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -96,17 +106,23 @@ export class BrowserCdpBridge {
    * the command passes through here on the way to exactly one tab, so this is
    * how the host learns which tab a run is working in without comparing URLs.
    */
-  waitForToken(token: string, timeoutMs: number): Promise<string | null> {
+  waitForToken(
+    token: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.tokenWaiters.delete(token);
-        resolve(null);
-      }, timeoutMs);
-      this.tokenWaiters.set(token, (tabId) => {
+      const finish = (tabId: string | null) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         this.tokenWaiters.delete(token);
         resolve(tabId);
-      });
+      };
+      const onAbort = () => finish(null);
+      const timer = setTimeout(onAbort, timeoutMs);
+      this.tokenWaiters.set(token, finish);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 
@@ -146,6 +162,8 @@ export class BrowserCdpBridge {
     endpoint: string;
     headers: Record<string, string>;
   }> {
+    // Before the guard: the guard and the claim below must run in one turn.
+    const { WebSocketServer } = await import("ws");
     if (this.server || this.disposed)
       throw new Error("Browser connection is not available.");
     const server = createServer((_request, response) => {
@@ -256,7 +274,7 @@ export class BrowserCdpBridge {
   }
 
   private send(message: Params): void {
-    if (this.socket?.readyState === WebSocket.OPEN)
+    if (this.socket?.readyState === SOCKET_OPEN)
       this.socket.send(JSON.stringify(message));
   }
   private emit(method: string, params: Params, sessionId?: string): void {
@@ -273,7 +291,7 @@ export class BrowserCdpBridge {
     const debuggerApi = page.contents.debugger;
     if (!debuggerApi.isAttached()) debuggerApi.attach("1.3");
     await debuggerApi.sendCommand("Emulation.setFocusEmulationEnabled", {
-      enabled: this.host.emulateFocus?.() ?? false,
+      enabled: this.host.emulateFocus?.(page.id) ?? false,
     });
     const native: unknown = await debuggerApi.sendCommand(
       "Target.getTargetInfo",
@@ -555,8 +573,32 @@ export class BrowserCdpBridge {
       request.method === "Browser.setDownloadBehavior"
     )
       return {};
-    // Profile cookies/storage are intentionally not exposed through automation.
-    // Website requests still use the persistent Electron session normally.
+    if (
+      request.method === "Storage.getCookies" ||
+      request.method === "Storage.setCookies"
+    ) {
+      if (
+        p.browserContextId !== undefined &&
+        p.browserContextId !== this.contextId
+      )
+        throw new Error("Unknown browser context.");
+      const target = [...this.targets.values()].find(
+        (candidate) => !candidate.page.contents.isDestroyed(),
+      );
+      if (!target)
+        throw new Error("A browser page is required for session cookies.");
+      // Playwright's APIRequestContext syncs cookies using browser-level Storage
+      // commands. Native Storage defaults to Electron's app session, so use an
+      // owned page's Network domain to keep reads and writes in its partition.
+      return this.forward(
+        { target },
+        request.method === "Storage.getCookies"
+          ? "Network.getAllCookies"
+          : "Network.setCookies",
+        request.method === "Storage.getCookies" ? {} : { cookies: p.cookies },
+      );
+    }
+    // Other profile storage and browser-wide commands remain unavailable.
     if (
       request.method.startsWith("Browser.") ||
       request.method.startsWith("Storage.")
@@ -582,7 +624,7 @@ export class BrowserCdpBridge {
     // host (see syncFocusEmulation), never by the automation client.
     if (request.method === "Emulation.setFocusEmulationEnabled") {
       return this.forward(binding, request.method, {
-        enabled: this.host.emulateFocus?.() ?? false,
+        enabled: this.host.emulateFocus?.(binding.target.page.id) ?? false,
       });
     }
     if (
@@ -620,8 +662,47 @@ export class BrowserCdpBridge {
       }
     }
     const pageId = binding.target.page.id;
-    this.host.onAutomationCommand?.(pageId, true);
+    // Wake for page work. Network continuation and protocol configuration
+    // must pass through while navigation is paused; a focus command may
+    // itself wait for that navigation and deadlock interception setup.
+    const wakePage =
+      method.startsWith("Input.") ||
+      method.startsWith("DOM.") ||
+      method.startsWith("DOMSnapshot.") ||
+      method.startsWith("Accessibility.") ||
+      [
+        "Runtime.evaluate",
+        "Runtime.callFunctionOn",
+        "Runtime.awaitPromise",
+        "Runtime.runScript",
+        "Page.navigate",
+        "Page.reload",
+        "Page.getLayoutMetrics",
+        "Page.captureScreenshot",
+        "Page.printToPDF",
+        "Page.createIsolatedWorld",
+      ].includes(method);
+    const needsFocus =
+      method.startsWith("Input.") ||
+      method === "Page.captureScreenshot" ||
+      method === "Page.printToPDF";
+    let focusTimer: ReturnType<typeof setTimeout> | undefined;
+    let focusReady: Promise<void> | undefined;
     try {
+      if (wakePage)
+        await this.host.onAutomationCommand?.(pageId, true, needsFocus);
+      if (wakePage && method.startsWith("Runtime.")) {
+        // Most DOM reads return without frames. A pending script may be
+        // waiting for requestAnimationFrame (Playwright's stability checks).
+        // Give only that command focus, rather than painting on every read.
+        focusTimer = setTimeout(() => {
+          focusReady = Promise.resolve().then(() =>
+            this.host.onAutomationCommand?.(pageId, true, true),
+          );
+          void focusReady.catch(() => undefined);
+        }, 32);
+        focusTimer.unref();
+      }
       const result: unknown =
         await binding.target.page.contents.debugger.sendCommand(
           method,
@@ -630,7 +711,19 @@ export class BrowserCdpBridge {
         );
       return record(result) ? result : {};
     } finally {
-      this.host.onAutomationCommand?.(pageId, false);
+      clearTimeout(focusTimer);
+      try {
+        if (focusReady) {
+          try {
+            await focusReady;
+          } finally {
+            await this.host.onAutomationCommand?.(pageId, false, true);
+          }
+        }
+      } finally {
+        if (wakePage)
+          await this.host.onAutomationCommand?.(pageId, false, needsFocus);
+      }
     }
   }
 
@@ -640,19 +733,33 @@ export class BrowserCdpBridge {
    * while automation drives a tab the user is not looking at.
    */
   async syncFocusEmulation(): Promise<void> {
-    const enabled = this.host.emulateFocus?.() ?? false;
     await Promise.all(
       [...this.targets.values()]
         .filter((target) => !target.page.contents.isDestroyed())
         .map((target) =>
           target.page.contents.debugger
-            .sendCommand("Emulation.setFocusEmulationEnabled", { enabled })
+            .sendCommand("Emulation.setFocusEmulationEnabled", {
+              enabled: this.host.emulateFocus?.(target.page.id) ?? false,
+            })
             .catch(() => undefined),
         ),
     );
   }
 
   private async captureScreenshot(
+    binding: SessionBinding,
+    params: Params,
+  ): Promise<Params> {
+    const pageId = binding.target.page.id;
+    try {
+      await this.host.onAutomationCommand?.(pageId, true, true);
+      return await this.captureAwakeScreenshot(binding, params);
+    } finally {
+      await this.host.onAutomationCommand?.(pageId, false, true);
+    }
+  }
+
+  private async captureAwakeScreenshot(
     binding: SessionBinding,
     params: Params,
   ): Promise<Params> {
@@ -689,26 +796,22 @@ export class BrowserCdpBridge {
       return this.forward(binding, "Page.captureScreenshot", params);
     }
     const contents = binding.target.page.contents;
-    const throttled = contents.getBackgroundThrottling();
-    contents.setBackgroundThrottling(false);
-    let snapshot;
-    try {
-      // A previously idle hidden view needs a compositor frame before capture.
-      if (throttled)
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      snapshot = await contents.capturePage(
-        {
-          x: Math.round(x),
-          y: Math.round(y),
-          width: Math.round(captureWidth),
-          height: Math.round(captureHeight),
-        },
-        { stayHidden: true, stayAwake: true },
-      );
-    } finally {
-      if (!contents.isDestroyed() && throttled)
-        contents.setBackgroundThrottling(true);
-    }
+    // Focus is scoped to this screenshot by captureScreenshot. Wait for a
+    // current frame on this page without unthrottling the whole host window.
+    await this.forward(binding, "Runtime.evaluate", {
+      expression:
+        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+      awaitPromise: true,
+    });
+    const snapshot = await contents.capturePage(
+      {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(captureWidth),
+        height: Math.round(captureHeight),
+      },
+      { stayHidden: true },
+    );
     if (snapshot.isEmpty())
       throw new Error("The browser page did not produce an image.");
     const scale =
@@ -739,6 +842,8 @@ export class BrowserCdpBridge {
   close(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const resolve of [...this.tokenWaiters.values()]) resolve(null);
+    this.tokenWaiters.clear();
     this.removeCreatedListener?.();
     this.removeCreatedListener = null;
     this.socket?.terminate();

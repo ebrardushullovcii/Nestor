@@ -59,6 +59,31 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0050](0050-one-selection-model-for-job-lists.md) | accepted | Find jobs and Shortlisted share checkboxes, a page select-all, ranges and one action bar; list screens share one column split |
 | [0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md) | accepted | The app fixes what it can and does not ask the person to manage its rules; the resume writer decides what each resume shows |
 | [0052](0052-nestor-rebrand.md) | accepted | Nordri becomes Nestor; the newest old workspace, browser sign-ins and preferences move once |
+| [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted; amended by 0057 | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
+| [0054](0054-a-build-skips-validating-rows-it-already-validated.md) | accepted; amended by 0057 | Saved jobs and resume drafts a build validated unchanged are marked; the same build's next start reads them without the schema |
+| [0055](0055-reclaim-verified-prepared-forms.md) | accepted | Idle tabs freeze; the oldest prepared forms give way only after an exact guarded refill is verified |
+| [0056](0056-resume-autosave-history-groups.md) | accepted | Consecutive Resume Studio autosaves share a history step |
+| [0057](0057-saved-job-details-stay-in-sqlite.md) | accepted | Saved listing details stay in SQLite behind bounded caches; compatible clean views survive updates while unopened saved jobs validate in background slices |
+| [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
+| [0059](0059-profile-approval-state.md) | accepted | Profile saves reuse resume bodies and commit approval changes |
+| [0060](0060-indexed-workspace-queries-and-a-durable-change-feed.md) | accepted | Screens query columns and follow committed row changes |
+| [0061](0061-search-reuses-owned-rows-and-one-ledger-index.md) | accepted | Search reuses owned rows and one ledger index |
+| [0062](0062-persist-prepared-discovery-fingerprints.md) | accepted | Keep prepared discovery fingerprints with saved jobs |
+| [0063](0063-command-scoped-browser-focus.md) | accepted | Hidden reads wake without rendering; only pending frame-dependent commands and requested screenshots receive temporary focus |
+| [0064](0064-job-finder-action-registry.md) | accepted | One list of Job Finder actions |
+| [0065](0065-screen-reads-before-evidence-conversion.md) | accepted | Prepare screen reads before converting evidence |
+| [0066](0066-share-listing-policy-with-bounded-read-models.md) | accepted | Share listing policy with bounded read models |
+| [0067](0067-direct-preload-reads-outside-busy-main.md) | accepted | Read screens outside the main event loop |
+| [0068](0068-discovery-commands-return-run-facts.md) | accepted | Search and Stop return run facts; query screens follow commits while legacy refreshes wait for search completion |
+| [0069](0069-sliced-evidence-conversion-retains-screen-facts.md) | accepted | Convert evidence in slices and retain screen facts |
+| [0070](0070-read-original-rows-during-startup-conversion.md) | accepted | Original rows answer startup queries before index preparation, and typed writers open before evidence conversion completes |
+| [0071](0071-store-evidence-once-and-query-startup-facts.md) | accepted | Store evidence once and query startup facts |
+| [0072](0072-background-database-backups-and-export-retention.md) | accepted | Background database backups and generated export retention |
+| [0074](0074-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
+| [0075](0075-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
+| [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | accepted | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
+| [0077](0077-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
+| [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
 
 ## Policy
 

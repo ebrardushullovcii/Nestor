@@ -124,7 +124,11 @@ test("SQLite selected-job lookup uses the index and never parses unrelated or la
     );
     expect(() => repo.listTailoredAssets()).toThrow("Corrupted persisted row");
     db.prepare("DELETE FROM tailored_assets WHERE id=?").run("a_selected");
-    expect(() => repo.getTailoredAssetByJobId("selected")).toThrow(
+    db.prepare(
+      "UPDATE tailored_assets SET value='invalid JSON' WHERE id=?",
+    ).run("z_later_selected");
+    expect(await repo.getTailoredAssetByJobId("selected")).toBeNull();
+    expect(() => repo.getTailoredAssetById("z_later_selected")).toThrow(
       "Corrupted persisted row",
     );
   } finally {

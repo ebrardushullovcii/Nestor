@@ -1,6 +1,7 @@
 import { FAILURE_SENTENCES } from "../../lib/describe-failure";
 import { ResumeWorkspaceLanguagePicker } from "./resume-workspace-language-picker";
 import { OriginalResumeFilePanel } from "./original-resume-file-panel";
+import { useResumeAutosave } from "./use-resume-autosave";
 import {
   useCallback,
   useEffect,
@@ -247,13 +248,24 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
     draftId: string;
     updatedAt: string;
     submittedContentKey: string;
+    /**
+     * An autosave: the editor keeps its own text even when the save matched
+     * it. Saving trims and drops empty bullets; adopting that copy a second
+     * after a pause would eat the space just typed or the bullet just added.
+     */
+    keepEditorContent?: boolean;
   } | null>(null);
   const acknowledgeSave = useCallback(
-    (submittedDraft: ResumeDraft, updatedAt: string) => {
+    (
+      submittedDraft: ResumeDraft,
+      updatedAt: string,
+      keepEditorContent = false,
+    ) => {
       setOwnSave({
         draftId: submittedDraft.id,
         updatedAt,
         submittedContentKey: draftContentKey(submittedDraft),
+        ...(keepEditorContent ? { keepEditorContent } : {}),
       });
     },
     [],
@@ -277,15 +289,21 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
       currentDraft?.id === persistedDraft.id
     ) {
       setBackgroundDraft(null);
-      setDraft(
-        draftContentKey(currentDraft) === ownSave.submittedContentKey
+      // Merged onto the editor's state as it is when this applies, not as
+      // the last render saw it: a key pressed while the save came back
+      // must not be dropped.
+      setDraft((latestDraft) =>
+        !latestDraft ||
+        latestDraft.id !== persistedDraft.id ||
+        (draftContentKey(latestDraft) === ownSave.submittedContentKey &&
+          !ownSave.keepEditorContent)
           ? cloneDraft(persistedDraft)
           : {
               ...cloneDraft(persistedDraft),
-              templateId: currentDraft.templateId,
-              identity: currentDraft.identity,
-              sections: currentDraft.sections,
-              targetPageCount: currentDraft.targetPageCount,
+              templateId: latestDraft.templateId,
+              identity: latestDraft.identity,
+              sections: latestDraft.sections,
+              targetPageCount: latestDraft.targetPageCount,
             },
       );
       return;
@@ -333,10 +351,41 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
     () => (props.workspace ? JSON.stringify(props.workspace.draft) : null),
     [props.workspace],
   );
-  const hasUnsavedChanges =
-    serializedDraft !== null && serializedWorkspaceDraft !== null
+  const draftKey = useMemo(
+    () => (draft ? draftContentKey(draft) : null),
+    [draft],
+  );
+  const persistedDraft = props.workspace?.draft ?? null;
+  const autosaves =
+    Boolean(props.onAutosaveDraft) && !props.originalResumeRoute;
+  // With autosave, "saved" means this exact text was saved: either it is the
+  // stored draft, or the last autosave stored it (normalized) as that draft.
+  const editsSaved =
+    draftKey === null ||
+    persistedDraft === null ||
+    draftKey === draftContentKey(persistedDraft) ||
+    (ownSave?.keepEditorContent === true &&
+      ownSave.draftId === persistedDraft.id &&
+      ownSave.updatedAt === persistedDraft.updatedAt &&
+      ownSave.submittedContentKey === draftKey);
+  const hasUnsavedChanges = autosaves
+    ? !editsSaved
+    : serializedDraft !== null && serializedWorkspaceDraft !== null
       ? serializedDraft !== serializedWorkspaceDraft
       : false;
+  // A language change is an AI rewrite run through Save and its own notice,
+  // and work in progress (a new draft being written) replaces the draft.
+  const autosave = useResumeAutosave({
+    contentKey: draftKey,
+    draft,
+    onSaved: (submitted, updatedAt) =>
+      acknowledgeSave(submitted, updatedAt, true),
+    save: autosaves ? props.onAutosaveDraft : undefined,
+    unsaved:
+      hasUnsavedChanges &&
+      !props.isWorkspacePending &&
+      (draft?.language ?? null) === (persistedDraft?.language ?? null),
+  });
   const lastDirtyValueRef = useRef<boolean | null>(null);
 
   useAssistantContextSource("resume-studio", () => {
@@ -381,14 +430,19 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
     };
   });
 
+  // Autosaved edits are saved on leaving too, so only a failed save keeps
+  // the page asking before it closes.
+  const reportedDirty = autosaves
+    ? hasUnsavedChanges && autosave.status === "failed"
+    : hasUnsavedChanges;
   useEffect(() => {
-    if (lastDirtyValueRef.current === hasUnsavedChanges) {
+    if (lastDirtyValueRef.current === reportedDirty) {
       return;
     }
 
-    lastDirtyValueRef.current = hasUnsavedChanges;
-    props.onDirtyChange(hasUnsavedChanges);
-  }, [hasUnsavedChanges, props.onDirtyChange]);
+    lastDirtyValueRef.current = reportedDirty;
+    props.onDirtyChange(reportedDirty);
+  }, [reportedDirty, props.onDirtyChange]);
 
   const availableExportToApprove = getAvailableExportToApprove({
     draft,
@@ -917,8 +971,12 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
   }
 
   if (!props.workspace || !draft) {
+    // A resume that opens within a blink shows no loading card in between.
     return (
-      <main className="grid min-h-full place-items-center px-6 py-10">
+      <main
+        aria-busy="true"
+        className="delayed-appear grid min-h-full place-items-center px-6 py-10"
+      >
         <EmptyState
           title="Loading Resume Studio"
           description="Loading the saved draft, validation, and version history."
@@ -1137,7 +1195,6 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
   const claimConfirmationPanel = null;
   const { approvalStateLabel, studioStatusMessage } = buildWorkspaceStatusCopy({
     approvalBlockedReason,
-    availableExportToApprove,
     draft,
     hasUnsavedChanges,
     selectedTemplateApprovalEligible,
@@ -1158,21 +1215,28 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
             jobCanonicalUrl={job.canonicalUrl}
             jobTitle={job.title}
             onBack={props.onBack}
+            // The language shares the header row; on a row of its own with
+            // a hint beside it, it pushed the preview down by a row.
+            actions={
+              !props.originalResumeRoute ? (
+                <ResumeWorkspaceLanguagePicker
+                  key={props.jobId}
+                  inline
+                  language={
+                    languageRequest
+                      ? languageRequest.language
+                      : (draft.language ?? null)
+                  }
+                  writtenLanguage={draft.writtenLanguage ?? null}
+                  listingLanguage={draft.listingLanguage ?? null}
+                  disabled={
+                    props.isWorkspacePending || backgroundDraft !== null
+                  }
+                  onWrite={writeLanguage}
+                />
+              ) : null
+            }
           />
-          {!props.originalResumeRoute ? (
-            <ResumeWorkspaceLanguagePicker
-              key={props.jobId}
-              language={
-                languageRequest
-                  ? languageRequest.language
-                  : (draft.language ?? null)
-              }
-              writtenLanguage={draft.writtenLanguage ?? null}
-              listingLanguage={draft.listingLanguage ?? null}
-              disabled={props.isWorkspacePending || backgroundDraft !== null}
-              onWrite={writeLanguage}
-            />
-          ) : null}
           {rewriteFailed ? (
             <div
               role="alert"
@@ -1284,6 +1348,27 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
             : { isApplyPending: props.isApplyPending })}
           isWorkspacePending={props.isWorkspacePending}
           mobileStudioTab={mobileStudioTab}
+          {...(props.reviewFlow
+            ? {
+                reviewFlow: {
+                  ...props.reviewFlow,
+                  onApproveAndNext: () => {
+                    const reviewFlow = props.reviewFlow;
+                    if (!reviewFlow) return;
+                    setAsidePendingAssistantProposals();
+                    // A PDF already built from the saved draft is approved as
+                    // it is; edits are saved first and get a fresh one.
+                    const exportId = hasUnsavedChanges
+                      ? undefined
+                      : availableExportToApprove?.id;
+                    runWithSavedDraftAsync(
+                      () => reviewFlow.onApproveAndNext(exportId),
+                      "Saved your edits before approving this resume.",
+                    );
+                  },
+                },
+              }
+            : {})}
           onApproveCurrentPdf={() => {
             setAsidePendingAssistantProposals();
             runWithSavedDraftAsync(
@@ -1379,6 +1464,15 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
               acknowledgeSave(draft, updatedAt),
             )
           }
+          {...(autosaves
+            ? {
+                autosave: {
+                  status: autosave.status,
+                  failure: autosave.failure,
+                  onRetry: autosave.retry,
+                },
+              }
+            : {})}
           onSelectValidationIssue={handleValidationIssueSelection}
           onSetMobileStudioTab={setMobileStudioTab}
           {...(props.originalResumeRoute || writingEditableLevel

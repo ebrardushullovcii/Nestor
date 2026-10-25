@@ -138,4 +138,94 @@ describe("drafts written before lines were settled during generation", () => {
     ).toBe(0);
     expect(modelChecks).toBe(0);
   });
+
+  test("a single skill an older word check called unsupported stops blocking, and the draft is kept", async () => {
+    const seed = createSeed();
+    const first = createWorkspaceServiceHarness({
+      seed,
+      aiClient: {
+        ...createAiClient(),
+        checkResumeClaims: fakeResumeClaimCheck(),
+      },
+    });
+    await first.workspaceService.generateResume("job_ready");
+    const generated = await first.repository.getResumeDraftByJobId("job_ready");
+    if (!generated) throw new Error("Expected a generated draft.");
+    const skills = generated.sections.find(
+      (section) => section.kind === "skills",
+    );
+    if (!skills) throw new Error("Expected a skills section.");
+
+    // An older draft: the AI added a skill, and the check of the time saved
+    // its verdict only as a blocking issue, with no fact-check verdict to
+    // settle from.
+    const olderDraft = {
+      ...generated,
+      sections: generated.sections.map((section) =>
+        section.id !== skills.id
+          ? section
+          : {
+              ...section,
+              bullets: [
+                ...section.bullets,
+                {
+                  ...section.bullets[0]!,
+                  id: "bullet_older_skill",
+                  text: "Synthetic Framework",
+                  origin: "ai_generated" as const,
+                  included: true,
+                },
+              ],
+            },
+      ),
+    };
+    const job = seed.savedJobs.find((entry) => entry.id === "job_ready")!;
+    const current = validateResumeDraft({
+      draft: olderDraft,
+      job,
+      profile: seed.profile,
+    });
+    const olderValidation = {
+      ...current,
+      issues: [
+        ...current.issues,
+        {
+          id: "issue_older_word_check",
+          severity: "error" as const,
+          category: "unsupported_claim" as const,
+          sectionId: skills.id,
+          entryId: null,
+          bulletId: "bullet_older_skill",
+          message:
+            "Your saved evidence does not back this generated claim. Rewrite it, or approve it as accurate if you can stand behind it.",
+          flaggedText: "Synthetic Framework",
+        },
+      ],
+    };
+
+    const second = createWorkspaceServiceHarness({
+      seed: {
+        ...seed,
+        tailoredAssets: [...(await first.repository.listTailoredAssets())],
+        resumeDrafts: [olderDraft],
+        resumeValidationResults: [olderValidation],
+      },
+      aiClient: createAiClient(),
+    });
+    await second.workspaceService.getWorkspaceSnapshot();
+
+    const [stored] = await second.repository.listLatestResumeValidationResults([
+      olderDraft.id,
+    ]);
+    expect(
+      stored?.issues.some(
+        (issue) =>
+          issue.category === "unsupported_claim" && issue.severity === "error",
+      ),
+    ).toBe(false);
+    const kept = await second.repository.getResumeDraftByJobId("job_ready");
+    expect(JSON.stringify(kept?.sections)).toBe(
+      JSON.stringify(olderDraft.sections),
+    );
+  });
 });

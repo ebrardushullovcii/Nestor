@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   JobDiscoveryTargetSchema,
+  SavedJobSchema,
   SaveJobSearchCampaignInputSchema,
 } from "@nestor/contracts";
 import {
@@ -141,10 +142,10 @@ test("jobs the model could not judge say so and are asked about next time", asyn
     ),
   ).toBe(true);
 
-  // The first search asked twice (one retry after the failure); the second
-  // search asks again for the jobs still unjudged.
+  // The first search asked once (the request layer does the retrying); the
+  // second search asks again for the jobs still unjudged.
   await workspaceService.runAgentDiscovery();
-  expect(judgeJobFits).toHaveBeenCalledTimes(3);
+  expect(judgeJobFits).toHaveBeenCalledTimes(2);
 }, 30_000);
 
 test("with a result limit, the model's best fits are kept rather than the newest jobs", async () => {
@@ -297,8 +298,12 @@ test("searching plan B never judges or changes plan A's jobs, including a shared
     ),
   ).toEqual([shared.id]);
   const storedAfter = await harness.repository.listSavedJobs();
-  expect(storedAfter.find((job) => job.id === onlyA.id)).toEqual(
-    storedBefore.find((job) => job.id === onlyA.id),
+  // Preparation is internal memoized evidence; compare every persisted domain
+  // field without requiring those non-JSON symbols to have been warmed equally.
+  expect(
+    SavedJobSchema.parse(storedAfter.find((job) => job.id === onlyA.id)),
+  ).toEqual(
+    SavedJobSchema.parse(storedBefore.find((job) => job.id === onlyA.id)),
   );
   expect(
     storedAfter.find((job) => job.id === shared.id)?.matchAssessment,

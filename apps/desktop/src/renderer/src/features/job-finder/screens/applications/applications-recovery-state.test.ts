@@ -442,6 +442,10 @@ describe("resolveApplicationRecoveryPresentation", () => {
     expect(formatQuestionPrompt("Phone — Mobile number")).toBe(
       "Phone — Mobile number",
     );
+    expect(
+      formatQuestionPrompt("Step 2 of 5: Contact details — Phone *"),
+    ).toBe("Step 2 of 5: Contact details — Phone");
+    expect(formatQuestionPrompt("Notice period:")).toBe("Notice period");
 
     const presentation = resolveApplicationRecoveryPresentation({
       canOpenSafeguards: true,
@@ -601,7 +605,7 @@ describe("a planned job's standing in its batch", () => {
 });
 
 describe("a job the person asked to skip", () => {
-  it("reads as skipped with Apply again, not as an unfinished application", () => {
+  it("reads as skipped with Prepare again, not as an unfinished application", () => {
     const presentation = resolveApplicationRecoveryPresentation({
       canOpenSafeguards: false,
       isApplyPending: false,
@@ -610,8 +614,54 @@ describe("a job the person asked to skip", () => {
     });
     expect(presentation).toMatchObject({
       statusLine: "Skipped at your request",
+      primaryActionLabel: "Prepare again",
+    });
+  });
+});
+
+describe("a retry in Send for me", () => {
+  it("says Apply again, because the new run sends", () => {
+    const sendForMe = resolveApplicationRecoveryPresentation({
+      applyMode: "apply_for_me",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "failed",
+        summary: PREPARED_PAGE_CLOSED_SUMMARY,
+      }),
+    });
+    expect(sendForMe).toMatchObject({
+      statusLine: "Apply again",
+      primaryAction: "try_again",
       primaryActionLabel: "Apply again",
     });
+    expect(sendForMe.reasonSentence).toContain("sends it");
+
+    const fillOnly = resolveApplicationRecoveryPresentation({
+      applyMode: "fill_only",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "failed",
+        summary: PREPARED_PAGE_CLOSED_SUMMARY,
+      }),
+    });
+    expect(fillOnly.primaryActionLabel).toBe("Prepare again");
+    expect(fillOnly.reasonSentence).not.toContain("sends");
+  });
+
+  it("renames Try again too", () => {
+    const presentation = resolveApplicationRecoveryPresentation({
+      applyMode: "apply_for_me",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "cancelled",
+        summary: "Cancelled by you",
+        detail: "Nothing was sent.",
+      }),
+    });
+    expect(presentation.primaryActionLabel).toBe("Apply again");
   });
 });
 
@@ -797,5 +847,52 @@ it("offers Prepare again after Tracker Undo instead of the withdrawn summary", (
     statusLine: "Prepare again",
     primaryActionLabel: "Prepare again",
     reasonSentence: "Your previous tracker stage is restored.",
+  });
+});
+
+describe("a filled-in form whose tab closed", () => {
+  const ready = buildResult({
+    state: "awaiting_review",
+    blockerReason: null,
+    blockerSummary: null,
+  });
+
+  it("offers one Open when the saved form can come back", () => {
+    expect(
+      resolveApplicationRecoveryPresentation({
+        canOpenSafeguards: false,
+        isApplyPending: false,
+        visibleApplyResult: ready,
+        applicationPageState: {
+          resultId: ready.id,
+          state: "reopenable",
+          reason: null,
+        },
+      }),
+    ).toMatchObject({
+      state: "finish_in_browser",
+      primaryAction: "open_browser",
+      primaryActionLabel: "Open",
+    });
+  });
+
+  it("asks to apply again in Send for me when it cannot come back", () => {
+    expect(
+      resolveApplicationRecoveryPresentation({
+        applyMode: "apply_for_me",
+        canOpenSafeguards: false,
+        isApplyPending: false,
+        visibleApplyResult: ready,
+        applicationPageState: {
+          resultId: ready.id,
+          state: "needs_preparing",
+          reason: "form_changed",
+        },
+      }),
+    ).toMatchObject({
+      state: "retry",
+      primaryAction: "try_again",
+      primaryActionLabel: "Apply again",
+    });
   });
 });

@@ -1,0 +1,100 @@
+import {
+  extractSalaryRangeFromListingBody,
+  computeMatchAssessmentPostingFingerprint,
+  readPreparedMatchAssessmentPostingFingerprint,
+  readPreparedSavedJobIdentity,
+  readDiscoveryPreparation,
+  readPreparedBodySalaryRange,
+  writeDiscoveryPreparation,
+  type JobPosting,
+} from "@nestor/contracts";
+import {
+  prepareJobIdentity,
+  prepareListingContent,
+  rememberPreparedListingContent,
+} from "./job-identity";
+import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+
+/** Call at creation; unchanged copies carry the same prepared facts. */
+export function prepareDiscoveryPosting<T extends JobPosting>(
+  posting: T,
+  textSource?: JobPosting,
+): T {
+  const matchAssessmentPostingFingerprint =
+    readPreparedMatchAssessmentPostingFingerprint(posting) ??
+    (textSource
+      ? readPreparedMatchAssessmentPostingFingerprint(posting, textSource)
+      : null);
+  let salaryRange = readPreparedBodySalaryRange(posting);
+  if (readDiscoveryPreparation(posting)?.normalizedPosting)
+    writeDiscoveryPreparation(posting, {
+      normalizedPosting: undefined,
+      normalizedPostingSource: undefined,
+    });
+  let content = readDiscoveryPreparation(posting)?.content;
+  const savedIdentity = readPreparedSavedJobIdentity(posting);
+  if (
+    (!content || content.description !== posting.description) &&
+    savedIdentity
+  ) {
+    rememberPreparedListingContent(posting, savedIdentity.content);
+    content = readDiscoveryPreparation(posting)?.content;
+  }
+  const needsContent = !content || content.description !== posting.description;
+  const sourcePreparation = textSource
+    ? readDiscoveryPreparation(textSource)
+    : undefined;
+  if (
+    textSource &&
+    (sourcePreparation?.content ||
+      sourcePreparation?.bodySalaryRange !== undefined) &&
+    (needsContent || salaryRange === undefined) &&
+    textSource.description === posting.description
+  ) {
+    if (
+      needsContent &&
+      sourcePreparation?.content?.description === posting.description
+    ) {
+      content = sourcePreparation.content;
+      writeDiscoveryPreparation(posting, { content });
+    }
+    if (salaryRange === undefined)
+      salaryRange = readPreparedBodySalaryRange(textSource);
+  }
+  if (!content || content.description !== posting.description)
+    rememberPreparedListingContent(
+      posting,
+      prepareListingContent(posting.description),
+    );
+  prepareJobIdentity(posting);
+  createDiscoveryListingFingerprints(posting);
+  writeDiscoveryPreparation(posting, {
+    matchAssessmentPostingFingerprint:
+      matchAssessmentPostingFingerprint ??
+      computeMatchAssessmentPostingFingerprint(posting),
+  });
+  if (salaryRange !== undefined)
+    rememberPreparedBodySalaryRange(posting, salaryRange);
+  else prepareBodySalaryRange(posting);
+  return posting;
+}
+
+export function rememberPreparedBodySalaryRange(
+  posting: JobPosting,
+  bodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>,
+): void {
+  writeDiscoveryPreparation(posting, { bodySalaryRange });
+}
+
+export function prepareBodySalaryRange(
+  posting: JobPosting,
+): ReturnType<typeof extractSalaryRangeFromListingBody> {
+  const carried = readPreparedBodySalaryRange(posting);
+  if (carried !== undefined) return carried;
+  const value = extractSalaryRangeFromListingBody(posting.description);
+  if (Object.isExtensible(posting)) {
+    createDiscoveryListingFingerprints(posting);
+    rememberPreparedBodySalaryRange(posting, value);
+  }
+  return value;
+}

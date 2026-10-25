@@ -484,9 +484,11 @@ test("Ledgerleaf stored history does not need an answer check before the first h
   expect(
     result.timing?.requests.map((request) => request.storedFactFills),
   ).toEqual([3, 0, 3, 6, 0, 0]);
+  // Both eligibility answers are decided in the same batch: the first one
+  // left for the person no longer stops the second.
   expect(
     result.timing?.requests.map((request) => request.answersWaited),
-  ).toEqual([0, 0, 0, 0, 1, 0]);
+  ).toEqual([0, 0, 0, 0, 2, 0]);
   expect(calls.checks).toHaveLength(1);
   expect(calls.checks[0].map((answer) => answer.question)).toEqual([
     "Are you authorized to work in the job's country?",
@@ -502,7 +504,7 @@ test("Ledgerleaf stored history does not need an answer check before the first h
     "stored_fact_fills_per_turn=[3,0,3,6,0,0]",
   );
   expect(result.notes.at(-1)).toContain(
-    "answers_waited_per_turn=[0,0,0,0,1,0]",
+    "answers_waited_per_turn=[0,0,0,0,2,0]",
   );
 });
 
@@ -519,7 +521,12 @@ test("Ledgerleaf recording compares the previous whole-step cache with per-quest
           >;
         }
       >();
-      return (controls, step = "") => {
+      const classify = (
+        controls: Parameters<
+          ReturnType<typeof questionClassification.createQuestionClassifier>
+        >[0],
+        step = "",
+      ) => {
         const questions = [
           ...new Map(
             controls
@@ -548,6 +555,7 @@ test("Ledgerleaf recording compares the previous whole-step cache with per-quest
         byStep.set(step, { key, result });
         return result;
       };
+      return Object.assign(classify, { settled: () => undefined });
     });
   const before = await ledgerleafRun(true).finally(() =>
     previousCache.mockRestore(),

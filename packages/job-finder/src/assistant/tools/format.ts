@@ -48,6 +48,15 @@ export function fitLabel(job: SavedJob | DiscoveryJobView): string {
     : `${job.matchAssessment.score}% fit`;
 }
 
+/**
+ * A saved job's stored status as the model should read it. Shortlisting
+ * stores "drafting" before any resume is asked for, so the raw word made the
+ * model report a resume "being drafted" when Shortlisted says "Needs a resume".
+ */
+export function assistantJobStatus(status: SavedJob["status"]): string {
+  return status === "drafting" ? "shortlisted_needs_resume" : status;
+}
+
 export function compactJob(job: SavedJob | DiscoveryJobView) {
   return {
     id: job.id,
@@ -55,7 +64,8 @@ export function compactJob(job: SavedJob | DiscoveryJobView) {
     company: job.company,
     location: job.location,
     workMode: job.workMode,
-    status: job.status,
+    status: assistantJobStatus(job.status),
+    inShortlist: ["drafting", "ready_for_review", "approved"].includes(job.status),
     fit: fitLabel(job),
     recommendation: job.matchAssessment.recommendation,
     postedAt: job.postedAt,

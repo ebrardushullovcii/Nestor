@@ -20,16 +20,21 @@ export function getPausedQuestionText(result: ApplyResult): string | null {
     : null;
 }
 
+/** The form's required-field star and a trailing colon. */
+const TRAILING_FIELD_MARKS = /[\s*:]+$/u;
+
 /**
  * The question as a person should read it. The runtime stores a field's label
  * and its description joined by an em dash, and a field whose description is
- * just its label again came out as "Phone — Phone".
+ * just its label again came out as "Phone — Phone". The form's step stays, so
+ * the person knows where the question is; the required star is the form's
+ * layout, not part of the question.
  */
 export function formatQuestionPrompt(prompt: string): string {
   const halves = prompt.split(/\s+[—–-]\s+/);
   const kept: string[] = [];
   for (const half of halves) {
-    const text = half.trim();
+    const text = half.trim().replace(TRAILING_FIELD_MARKS, "");
     if (!text) {
       continue;
     }

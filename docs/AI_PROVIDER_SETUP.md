@@ -23,13 +23,33 @@ NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
 NESTOR_AI_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_API_MODE=responses
 NESTOR_AI_REASONING_EFFORT=xhigh
-# Browser agents (search, source checks, applying) and page reads take many
-# short turns; they think briefly. Resume writing keeps the effort above.
+# "Judge fit" (a full listing read) uses the effort above. Muse resume
+# writing uses medium; other writers keep their route's effort. An optional
+# NESTOR_AI_RESUME_WRITER_REASONING_EFFORT overrides either writer.
+# Other repeated work has its own variable (code defaults shown).
+# Search and source-check turns:
+NESTOR_AI_SEARCH_REASONING_EFFORT=low
+# Reading the jobs on a page:
+NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
+# Fit judged in batches during and after a search (bundled Muse route;
+# other model routes retain medium unless explicitly overridden):
+NESTOR_AI_FIT_REASONING_EFFORT=low
+# Fact checks of resume lines and of written application answers:
+NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
+# Application form turns, reading a form's questions, and checking short
+# form values (a date, a number, a chosen option) that are not about
+# eligibility, pay or a declaration:
+NESTOR_AI_APPLY_REASONING_EFFORT=low
+# "Judge fit"; unset means NESTOR_AI_REASONING_EFFORT:
+# NESTOR_AI_LISTING_READ_REASONING_EFFORT=high
+# Other tool-calling work (resume import sections, the profile and resume
+# assistants, letters). It does not change the tasks above.
 NESTOR_AI_AGENT_REASONING_EFFORT=low
 
 # Aggressive resume tailoring runs on its own dedicated route so the whole
 # aggressive lifecycle (draft, re-tailor, and model-backed review/regenerate)
-# stays on one provider. Reasoning effort is read from its own env var.
+# stays on one provider. Its writer and edits use this route's effort, except
+# Muse writing as described above. Fact checks use the check effort.
 NESTOR_AI_AGGRESSIVE_MODEL=deepseek-v4.1-flash
 NESTOR_AI_AGGRESSIVE_API_MODE=chat_completions
 NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=high

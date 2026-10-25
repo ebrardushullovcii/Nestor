@@ -837,11 +837,17 @@ async function executeBenchmarkPairScenarios({
         `search_now:${target.id}`,
         () =>
           scopedWindow.evaluate(
-            async (targetId) =>
-              window.nestor.jobFinder.runAgentDiscovery(
+            async (targetId) => {
+              const reply = await window.nestor.jobFinder.runAgentDiscovery(
                 undefined,
                 targetId,
-              ),
+              );
+              // The route answers with what changed; read the whole workspace.
+              return {
+                ...reply,
+                snapshot: await window.nestor.jobFinder.getWorkspace(),
+              };
+            },
             target.id,
           ),
       );
@@ -914,9 +920,14 @@ async function runCurrentWorkspaceRunAllScenario(app, window, targets) {
         activeWindow,
         targets.map((target) => target.id),
         (scopedWindow) =>
-          scopedWindow.evaluate(async () =>
-            window.nestor.jobFinder.runAgentDiscovery(),
-          ),
+          scopedWindow.evaluate(async () => {
+            const reply = await window.nestor.jobFinder.runAgentDiscovery();
+            // The route answers with what changed; read the whole workspace.
+            return {
+              ...reply,
+              snapshot: await window.nestor.jobFinder.getWorkspace(),
+            };
+          }),
         resetWorkspaceSnapshot,
       ),
     );
@@ -972,9 +983,14 @@ async function runRunAllScenario(targets) {
           settings: buildSettings(fixture.settings),
         },
     runner: async (window) =>
-      window.evaluate(async () =>
-        window.nestor.jobFinder.runAgentDiscovery(),
-      ),
+      window.evaluate(async () => {
+        const reply = await window.nestor.jobFinder.runAgentDiscovery();
+        // The route answers with what changed; read the whole workspace.
+        return {
+          ...reply,
+          snapshot: await window.nestor.jobFinder.getWorkspace(),
+        };
+      }),
     scopeCurrentWorkspaceTargets: true,
   });
 }

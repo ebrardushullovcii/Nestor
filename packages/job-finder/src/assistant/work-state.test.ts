@@ -1,4 +1,5 @@
 import {
+  AssistantContextReferenceSchema,
   DiscoveryRunRecordSchema,
   ResumeImportRunSchema,
 } from "@nestor/contracts";
@@ -146,7 +147,11 @@ it("shows current approval and saved level, instead of an earlier approval claim
   ];
   snapshot.reviewQueue[0]!.resumeTailoringMode = "aggressive";
   const block = buildContextBlock({
-    context: null,
+    context: AssistantContextReferenceSchema.parse({
+      screen: "resume_studio",
+      focus: { kind: "job", id: workspace.job.id },
+      capturedAt: snapshot.generatedAt,
+    }),
     resultSets: [],
     snapshot,
     plan: null,

@@ -7,6 +7,7 @@ import {
   getDiscoveryListingRecencyKey,
   isProvisionalMatchAssessment,
 } from "@nestor/job-finder/discovery-ordering";
+import { createPerObjectCache } from "../../lib/identity-memo";
 
 export type DiscoveryResultsSortField = "fit" | "recent" | "company";
 export type DiscoveryResultsSortDirection = "asc" | "desc";
@@ -38,7 +39,7 @@ function isSortField(value: unknown): value is DiscoveryResultsSortField {
   return value === "fit" || value === "recent" || value === "company";
 }
 
-function readPersistedSort(): DiscoveryResultsSort {
+export function readPersistedSort(): DiscoveryResultsSort {
   try {
     const raw = window.localStorage.getItem(SORT_STORAGE_KEY);
     if (!raw) return DISCOVERY_RESULTS_DEFAULT_SORT;
@@ -99,6 +100,10 @@ export function getListingRecencyTimestamp(job: JobListRow): number | null {
   return recency.basis === null ? null : recency.timestamp;
 }
 
+// Read once per row: sorting thousands of jobs by Newest parsed each row's
+// dates on every comparison.
+const getRowRecencyTimestamp = createPerObjectCache(getListingRecencyTimestamp);
+
 const companyNameCollator = new Intl.Collator("en", {
   sensitivity: "base",
   numeric: true,
@@ -137,8 +142,8 @@ export function compareDiscoveryResults(
       break;
     }
     case "recent": {
-      const leftTimestamp = getListingRecencyTimestamp(left);
-      const rightTimestamp = getListingRecencyTimestamp(right);
+      const leftTimestamp = getRowRecencyTimestamp(left);
+      const rightTimestamp = getRowRecencyTimestamp(right);
       if (leftTimestamp === null || rightTimestamp === null) {
         if (leftTimestamp !== rightTimestamp) {
           return leftTimestamp === null ? 1 : -1;

@@ -2008,9 +2008,19 @@ describe("createFileJobFinderRepository", () => {
             survivorResult.state,
             JSON.stringify(survivorResult),
           );
-        database
-          .prepare("DELETE FROM schema_migrations WHERE version >= ?")
-          .run(4);
+        // Replay the old migration chain from its old schema, not a current
+        // observation table whose migration record has been removed.
+        expect(
+          database
+            .prepare("SELECT COUNT(*) AS count FROM discovery_ledger")
+            .get()?.count,
+        ).toBe(0);
+        database.exec(`
+          DROP TRIGGER discovery_ledger_split_insert;
+          DROP TRIGGER discovery_ledger_split_update;
+          DROP TABLE discovery_ledger_observations;
+          DELETE FROM schema_migrations WHERE version >= 4;
+        `);
       } finally {
         database.close();
       }
@@ -2035,9 +2045,7 @@ describe("createFileJobFinderRepository", () => {
     }
   }, 15000);
   test("retains the newest 100 revisions per draft across direct and atomic writes after restart", async () => {
-    const temp = await createTempRepository(
-      "nestor-db-revision-retention-",
-    );
+    const temp = await createTempRepository("nestor-db-revision-retention-");
     let repository: FileRepository | null = null;
 
     try {
@@ -2317,70 +2325,31 @@ describe("createFileJobFinderRepository", () => {
 });
 
 describe("persisted row corruption handling", () => {
-  function captureReadFailure(read: () => unknown): Promise<unknown> {
-    return Promise.resolve()
-      .then(read)
-      .then(
-        () => {
-          throw new Error("Expected the persisted read to fail loudly.");
-        },
-        (error: unknown) => error,
-      );
-  }
-
-  test("fails loudly instead of silently dropping a corrupted saved job row", async () => {
-    const sensitiveMarker = "CONFIDENTIAL-salary-band-9f31";
+  test("rejects malformed JSON before a saved-job write can corrupt the row", async () => {
     const temp = await createTempRepository("nestor-db-corrupt-job-row-");
-    let repository: FileRepository | null = null;
+    const repository = await temp.createRepository();
     try {
-      repository = await temp.createRepository();
       await repository.replaceSavedJobs([
-        createSavedJob({ id: "job_secret", title: sensitiveMarker }),
+        createSavedJob({ id: "job_guarded" }),
       ]);
-      await repository.close();
-      repository = null;
-
-      const corruptedDatabase = new DatabaseSync(temp.filePath);
+      const other = new DatabaseSync(temp.filePath);
       try {
-        corruptedDatabase
-          .prepare("UPDATE saved_jobs SET value = ? WHERE id = ?")
-          .run('{"id":"job_secret","title":"CONFIDENTIAL-salary', "job_secret");
+        expect(() =>
+          other
+            .prepare("UPDATE saved_jobs SET value = ? WHERE id = ?")
+            .run('{"id":"broken"', "job_guarded"),
+        ).toThrow("malformed JSON");
       } finally {
-        corruptedDatabase.close();
+        other.close();
       }
-
-      let reopened: FileRepository | null = null;
-      try {
-        reopened = await temp.createRepository();
-        const failure = await captureReadFailure(() =>
-          reopened!.listSavedJobs(),
-        );
-
-        expect(failure).toBeInstanceOf(Error);
-        const failureMessage = failure instanceof Error ? failure.message : "";
-        expect(failureMessage).toContain('table "saved_jobs"');
-        expect(failureMessage).toContain('row "job_secret"');
-        expect(failureMessage).toContain("not valid JSON");
-        expect(failureMessage).not.toContain(sensitiveMarker);
-
-        const verificationDatabase = new DatabaseSync(temp.filePath);
-        try {
-          const survivingRow = verificationDatabase
-            .prepare("SELECT COUNT(*) AS count FROM saved_jobs WHERE id = ?")
-            .get("job_secret") as { count: number };
-          expect(Number(survivingRow.count)).toBe(1);
-        } finally {
-          verificationDatabase.close();
-        }
-      } finally {
-        await reopened?.close().catch(() => undefined);
-      }
+      expect((await repository.listSavedJobs()).map((job) => job.id)).toEqual([
+        "job_guarded",
+      ]);
     } finally {
-      await repository?.close().catch(() => undefined);
+      await repository.close();
       await cleanupTempDirectoryWithRetry(temp.tempDirectory);
     }
   });
-
   test("fails loudly instead of falling back to the seed when a settings singleton is corrupted", async () => {
     const sensitiveMarker = "SECRET-TOKEN-4c2e";
     const temp = await createTempRepository("nestor-db-corrupt-settings-");
@@ -2399,10 +2368,10 @@ describe("persisted row corruption handling", () => {
         corruptedDatabase.close();
       }
 
-      let reopened: FileRepository | null = null;
-      try {
-        reopened = await temp.createRepository();
-        const failure = await captureReadFailure(() => reopened!.getSettings());
+      {
+        const failure = await temp
+          .createRepository()
+          .catch((error) => error as unknown);
 
         expect(failure).toBeInstanceOf(Error);
         const failureMessage = failure instanceof Error ? failure.message : "";
@@ -2421,8 +2390,6 @@ describe("persisted row corruption handling", () => {
         } finally {
           verificationDatabase.close();
         }
-      } finally {
-        await reopened?.close().catch(() => undefined);
       }
     } finally {
       await repository?.close().catch(() => undefined);
@@ -2670,6 +2637,85 @@ describe("repository backend parity", () => {
       expect(
         assets.find((asset) => asset.id === "asset_parity_older"),
       ).toMatchObject({ storagePath: "/tmp/asset_parity_older.pdf" });
+    },
+  );
+
+  test.each(backends)(
+    "marks drafts stale in place and leaves the rest of each draft as stored ($label)",
+    async ({ create }) => {
+      const repository = await createBackend(create);
+      const job = createSavedJob({ id: "job_parity_restale" });
+      const other = createSavedJob({ id: "job_parity_untouched" });
+      await repository.commitSavedJobDelta({ upserts: [job, other] });
+      const approved = createParityDraft({
+        id: "draft_parity_restale",
+        jobId: job.id,
+        updatedAt: "2026-07-30T12:00:00.000Z",
+        status: "approved",
+        approvedAt: "2026-07-30T12:00:00.000Z",
+        approvedExportId: "export_parity_restale",
+      });
+      const untouched = createParityDraft({
+        id: "draft_parity_untouched",
+        jobId: other.id,
+        updatedAt: "2026-07-30T11:00:00.000Z",
+        status: "needs_review",
+      });
+      await repository.upsertResumeDraft(approved);
+      await repository.upsertResumeDraft(untouched);
+      await repository.approveResumeExport({
+        draft: approved,
+        exportArtifact: createParityExport({
+          id: "export_parity_restale",
+          draftId: approved.id,
+          jobId: job.id,
+          exportedAt: "2026-07-30T12:00:00.000Z",
+          isApproved: true,
+        }),
+      });
+      await repository.upsertTailoredAsset(
+        createParityTailoredAsset({
+          id: "asset_parity_restale",
+          jobId: job.id,
+          updatedAt: "2026-07-30T12:00:00.000Z",
+        }),
+      );
+      const [before] = (await repository.listResumeDrafts()).filter(
+        (entry) => entry.id === approved.id,
+      );
+
+      await repository.staleResumeDrafts!({
+        draftIds: [approved.id, "draft_missing"],
+        staleReason: "Profile details changed.",
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
+
+      const drafts = await repository.listResumeDrafts();
+      expect(drafts.find((entry) => entry.id === approved.id)).toEqual({
+        ...before,
+        status: "stale",
+        staleReason: "Profile details changed.",
+        approvedAt: null,
+        approvedExportId: null,
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
+      expect(drafts.find((entry) => entry.id === untouched.id)).toMatchObject({
+        status: "needs_review",
+        updatedAt: "2026-07-30T11:00:00.000Z",
+      });
+      expect(
+        (await repository.listResumeExportArtifacts()).every(
+          (artifact) => artifact.isApproved === false,
+        ),
+      ).toBe(true);
+      expect(
+        (await repository.listTailoredAssets()).find(
+          (asset) => asset.id === "asset_parity_restale",
+        ),
+      ).toMatchObject({
+        storagePath: null,
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
     },
   );
 

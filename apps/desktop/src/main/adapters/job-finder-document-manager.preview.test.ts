@@ -58,6 +58,25 @@ vi.mock("electron", () => ({
 
 let input: Parameters<JobFinderDocumentManager["renderResumePreview"]>[0];
 let manager: JobFinderDocumentManager;
+
+test("uses the host renderer's HTML for both preview and page counting", async () => {
+  const renderResumeHtml = vi.fn().mockResolvedValue({
+    previewHtml: "<html>Worker preview</html>",
+    exportHtml: "<html>Worker printable document</html>",
+  });
+  const offThreadManager = createLocalJobFinderDocumentManager({
+    outputDirectory: "/synthetic-output",
+    renderResumeHtml,
+  });
+  const preview = await offThreadManager.renderResumePreview(input);
+  expect(preview.html).toBe("<html>Worker preview</html>");
+  expect(renderResumeHtml).toHaveBeenCalledWith({
+    renderDocument: input.renderDocument,
+    settings: input.settings,
+    templateId: input.templateId,
+  });
+  expect(mocks.write).toHaveBeenCalledWith(expect.any(String), "<html>Worker printable document</html>", "utf8");
+});
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.files.clear();

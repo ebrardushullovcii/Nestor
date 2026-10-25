@@ -60,6 +60,7 @@ function makeContents(id: string) {
     getURL: () => `https://jobs.example/${id}`,
     isLoading: () => false,
     setBackgroundThrottling: vi.fn(),
+    getBackgroundThrottling: () => true,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     mainFrame: {
       framesInSubtree: [{ executeJavaScript: vi.fn(() => Promise.resolve()) }],
@@ -78,6 +79,10 @@ describe("embedded browser tab state", () => {
     "a %s discovery operation closes finished tabs after releasing its claim",
     async (outcome) => {
       const { browser, state, pages } = makeBrowser();
+      Object.assign(browser, {
+        presentation: "peek",
+        viewport: { visible: true },
+      });
       state.parkedTabs.set("parked", null);
       state.heldTabs.set("held", []);
       state.personTabs.add("person");
@@ -268,20 +273,20 @@ test("opening a new reading tab leaves the active application's operation runnin
   expect(state.heldTabs.has("working")).toBe(false);
 });
 
-test("eight working and eight waiting tabs reach the total cap", () => {
+test("ten working tabs plus waiting forms leave room; sixteen working tabs use the measured concurrency ceiling", () => {
   const { browser, state } = makeBrowser();
   state.pageMap.clear();
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 26; i++) {
     const id = `tab_${i}`;
     state.pageMap.set(id, { id, contents: makeContents(id) });
-    if (i < 8) state.ownedTabs.set(`waiting_${i}`, new Set([id]));
+    if (i < 10) state.ownedTabs.set(`waiting_${i}`, new Set([id]));
   }
-  expect(browser.workingTabCount()).toBe(8);
+  expect(browser.workingTabCount()).toBe(16);
   expect(
     (browser as unknown as { hasTabCapacity(): boolean }).hasTabCapacity(),
   ).toBe(false);
-  state.pageMap.delete("tab_15");
-  expect(browser.workingTabCount()).toBe(7);
+  for (let i = 20; i < 26; i++) state.pageMap.delete(`tab_${i}`);
+  expect(browser.workingTabCount()).toBe(10);
   expect(
     (browser as unknown as { hasTabCapacity(): boolean }).hasTabCapacity(),
   ).toBe(true);
@@ -347,12 +352,13 @@ test.each(["pointer", "key"] as const)(
 
 test("a finished search's leftover tabs close at once, except the one on screen and occupied tabs", () => {
   const { browser, state, pages } = makeBrowser();
+  Object.assign(browser, { presentation: "peek", viewport: { visible: true } });
   state.parkedTabs.set("parked", null);
   state.heldTabs.set("held", []);
   state.personTabs.add("person");
   browser.markFinishedTabs(["failed", "search", "parked", "held", "person"]);
   expect(pages.get("search")?.close).toHaveBeenCalledOnce();
-  // "failed" is the active tab: it waits for the person or for room.
+  // "failed" is displayed; watching it keeps it until the panel is hidden.
   for (const id of ["failed", "parked", "held", "person"])
     expect(pages.get(id)?.close).not.toHaveBeenCalled();
 });
@@ -572,8 +578,8 @@ test("ending an application loan returns the person's own send control", async (
   );
 });
 
-test("waiting forms and idle searches are throttled; browser commands wake only their page", () => {
-  const { browser, state } = makeBrowser();
+test("browser commands wake only their page without disabling window-wide throttling", async () => {
+  const { browser, state, pages } = makeBrowser();
   state.ownedTabs.set("result", new Set(["prepared"]));
   const controller = new AbortController();
   state.operations.set(controller, "search");
@@ -583,35 +589,35 @@ test("waiting forms and idle searches are throttled; browser commands wake only 
     tabs: new Set(["search"]),
   });
   const policy = browser as unknown as {
-    shouldThrottleTab(id: string): boolean;
-    noteAutomationCommand(id: string, active: boolean): void;
+    isTabIdle(id: string): boolean;
+    noteAutomationCommand(id: string, active: boolean): Promise<void>;
   };
-  expect(policy.shouldThrottleTab("prepared")).toBe(true);
-  expect(policy.shouldThrottleTab("search")).toBe(true);
-  policy.noteAutomationCommand("search", true);
-  expect(policy.shouldThrottleTab("search")).toBe(false);
+  expect(policy.isTabIdle("prepared")).toBe(true);
+  expect(policy.isTabIdle("search")).toBe(true);
+  await policy.noteAutomationCommand("search", true);
+  expect(policy.isTabIdle("search")).toBe(false);
   state.operationClaims.get(controller)!.tabs.add("prepared");
-  policy.noteAutomationCommand("prepared", true);
-  expect(policy.shouldThrottleTab("prepared")).toBe(false);
+  await policy.noteAutomationCommand("prepared", true);
+  expect(policy.isTabIdle("prepared")).toBe(false);
+  for (const page of pages.values())
+    expect(page.setBackgroundThrottling).not.toHaveBeenCalledWith(false);
 });
 
-test("memory pressure collects garbage without closing forms and admits work when memory falls", async () => {
+test("waiting-form memory pressure triggers reclamation without blocking working slots", async () => {
   const { browser, state, pages } = makeBrowser();
   state.ownedTabs.set("result", new Set(["prepared"]));
   const metrics = vi.spyOn(app, "getAppMetrics");
   metrics.mockReturnValue([
-    { pid: 100, memory: { workingSetSize: 800 * 1024 } },
+    { pid: 100, memory: { workingSetSize: 2200 * 1024 } },
   ] as ReturnType<typeof app.getAppMetrics>);
-  expect(browser.hasAutomationTabCapacity()).toBe(false);
+  expect(browser.hasAutomationTabCapacity()).toBe(true);
   const before = await browser.reduceWaitingFormMemory();
   expect(before.overBudget).toBe(true);
   expect(pages.get("prepared")!.debugger.sendCommand).toHaveBeenCalledWith(
     "HeapProfiler.collectGarbage",
   );
   expect(pages.get("prepared")!.close).not.toHaveBeenCalled();
-  expect(pages.get("prepared")!.setBackgroundThrottling).toHaveBeenCalledWith(
-    true,
-  );
+  expect(pages.get("prepared")!.setBackgroundThrottling).not.toHaveBeenCalled();
   metrics.mockReturnValue([
     { pid: 100, memory: { workingSetSize: 50 * 1024 } },
   ] as ReturnType<typeof app.getAppMetrics>);
@@ -622,29 +628,102 @@ test("memory pressure collects garbage without closing forms and admits work whe
   ] as ReturnType<typeof app.getAppMetrics>);
 });
 
-test("hidden work sleeps between model turns and wakes without losing the page", async () => {
+test("search pages parked for the person do not use up the waiting-form budget", () => {
+  const { browser, state } = makeBrowser();
+  state.parkedTabs.set("parked", null);
+  const metrics = vi.spyOn(app, "getAppMetrics");
+  metrics.mockReturnValue([
+    { pid: 100, memory: { workingSetSize: 1100 * 1024 } },
+  ] as ReturnType<typeof app.getAppMetrics>);
+  expect(browser.getWaitingFormMemory().totalBytes).toBe(0);
+  expect(browser.hasAutomationTabCapacity()).toBe(true);
+  metrics.mockReturnValue([
+    { pid: 100, memory: { workingSetSize: 0 } },
+  ] as ReturnType<typeof app.getAppMetrics>);
+});
+
+test("hidden work releases focus at command completion and preserves overlapping reads", async () => {
   vi.useFakeTimers();
   try {
     const { browser, state, pages } = makeBrowser();
     const controller = new AbortController();
     state.operations.set(controller, "Search");
-    state.operationClaims.set(controller, { id: "search", owner: null, tabs: new Set(["search"]) });
+    state.operationClaims.set(controller, {
+      id: "search",
+      owner: null,
+      tabs: new Set(["search"]),
+    });
     const policy = browser as unknown as {
-      noteAutomationCommand(id: string, active: boolean): void;
-      shouldThrottleTab(id: string): boolean;
+      noteAutomationCommand(
+        id: string,
+        active: boolean,
+        emulateFocus?: boolean,
+      ): Promise<void>;
+      isTabIdle(id: string): boolean;
     };
-    policy.noteAutomationCommand("search", true);
-    policy.noteAutomationCommand("search", true);
-    policy.noteAutomationCommand("search", false);
-    await vi.advanceTimersByTimeAsync(6_000);
-    expect(policy.shouldThrottleTab("search")).toBe(false);
-    policy.noteAutomationCommand("search", false);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(pages.get("search")?.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
+    await policy.noteAutomationCommand("search", true);
+    await policy.noteAutomationCommand("search", true, false);
+    await policy.noteAutomationCommand("search", false);
+    expect(pages.get("search")?.debugger.sendCommand).toHaveBeenLastCalledWith(
+      "Emulation.setFocusEmulationEnabled",
+      { enabled: false },
+    );
+    expect(policy.isTabIdle("search")).toBe(false);
+    await policy.noteAutomationCommand("search", false, false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(policy.isTabIdle("search")).toBe(true);
     expect(pages.get("search")?.close).not.toHaveBeenCalled();
-    policy.noteAutomationCommand("search", true);
-    expect(pages.get("search")?.setBackgroundThrottling).toHaveBeenLastCalledWith(false);
-  } finally { vi.useRealTimers(); }
+    await policy.noteAutomationCommand("search", true);
+    expect(pages.get("search")?.debugger.sendCommand).toHaveBeenLastCalledWith(
+      "Emulation.setFocusEmulationEnabled",
+      { enabled: true },
+    );
+    expect(
+      pages.get("search")?.setBackgroundThrottling,
+    ).not.toHaveBeenCalledWith(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a selected finished tab closes while the browser panel is hidden", () => {
+  const { browser, pages } = makeBrowser();
+  browser.markFinishedTabs(["failed"]);
+  expect(pages.get("failed")?.close).toHaveBeenCalledOnce();
+});
+
+test("unfocused scripts still allow autosaves to settle; native probes do not cancel the window", async () => {
+  vi.useFakeTimers();
+  try {
+    const { browser, state, pages } = makeBrowser();
+    state.ownedTabs.set("result", new Set(["prepared"]));
+    const policy = browser as unknown as {
+      noteAutomationCommand(
+        id: string,
+        active: boolean,
+        focus: boolean,
+        settle?: boolean,
+      ): Promise<void>;
+    };
+    await policy.noteAutomationCommand("prepared", true, false, true);
+    await policy.noteAutomationCommand("prepared", false, false, true);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await policy.noteAutomationCommand("prepared", true, false);
+    await policy.noteAutomationCommand("prepared", false, false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(
+      pages.get("prepared")?.debugger.sendCommand,
+    ).not.toHaveBeenCalledWith("Page.setWebLifecycleState", {
+      state: "frozen",
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pages.get("prepared")?.debugger.sendCommand).toHaveBeenCalledWith(
+      "Page.setWebLifecycleState",
+      { state: "frozen" },
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("different places distinguish prepared tabs before a long job and employer name", () => {
@@ -694,4 +773,72 @@ test("tabs without a place stay plain and add the short reference only when they
   expect(
     browser.getState().tabs.find((tab) => tab.id === "failed")?.title,
   ).toBe("def456 · Engineer · Synthetic");
+});
+
+test("pressure reclaims the oldest eligible form and preserves a person's page", async () => {
+  const { browser, state } = makeBrowser();
+  state.ownedTabs.set("person-first", new Set(["person"]));
+  state.ownedTabs.set("old-ready", new Set(["prepared"]));
+  state.ownedTabs.set("new-ready", new Set(["failed"]));
+  state.personTabs.add("person");
+  browser.markPreparedForm("person-first");
+  browser.markPreparedForm("old-ready");
+  browser.markPreparedForm("new-ready");
+  const originalMemory = browser.getWaitingFormMemory();
+  let pressure = true;
+  vi.spyOn(browser, "getWaitingFormMemory").mockImplementation(() => ({
+    ...originalMemory,
+    budgetBytes: pressure ? 1 : originalMemory.budgetBytes,
+  }));
+  const reclaim = vi.fn((_owner: string, canDiscard: () => boolean) => {
+    expect(canDiscard()).toBe(true);
+    pressure = false;
+    return Promise.resolve(true);
+  });
+  browser.setPreparedFormReclaimer(reclaim);
+  await browser.reduceWaitingFormMemory();
+  expect(reclaim).toHaveBeenCalledExactlyOnceWith(
+    "old-ready",
+    expect.any(Function),
+  );
+});
+
+test("only idle retained pages freeze; active source loading stays awake", async () => {
+  const { browser, state, pages } = makeBrowser();
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  const policy = browser as unknown as {
+    syncTabLifecycle(page: {
+      id: string;
+      contents: ReturnType<typeof makeContents>;
+    }): void;
+  };
+  policy.syncTabLifecycle(state.pageMap.get("prepared")!);
+  policy.syncTabLifecycle(state.pageMap.get("search")!);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(pages.get("prepared")!.debugger.sendCommand).toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
+  expect(pages.get("search")!.debugger.sendCommand).not.toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
+});
+
+test("a page handed to the person never freezes in the background", async () => {
+  const { browser, state, pages } = makeBrowser();
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  state.personTabs.add("prepared");
+  const policy = browser as unknown as {
+    syncTabLifecycle(page: {
+      id: string;
+      contents: ReturnType<typeof makeContents>;
+    }): void;
+  };
+  policy.syncTabLifecycle(state.pageMap.get("prepared")!);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(pages.get("prepared")!.debugger.sendCommand).not.toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
 });

@@ -64,17 +64,6 @@ async function expectCommitDiscoveryStateUpdateParity(
     expect(await repository.getDiscoveryState()).toEqual(secondCommit);
 
     await expect(
-      repository.commitDiscoveryStateUpdate(
-        (current) =>
-          ({
-            ...current,
-            runState: "not-a-run-state",
-          }) as unknown as JobFinderDiscoveryState,
-      ),
-    ).rejects.toThrow();
-    expect(await repository.getDiscoveryState()).toEqual(secondCommit);
-
-    await expect(
       repository.commitDiscoveryStateUpdate((current) => {
         // @ts-expect-error Exercise a caller that ignores the borrowed-state contract.
         current.runState = "cancelled";
@@ -182,11 +171,9 @@ async function expectPairedSavedJobDiscoveryDeltaParity(
         upserts: [
           createSavedJob({ id: "job_invalid", sourceJobId: "target_invalid" }),
         ],
-        updateDiscoveryState: (current) =>
-          ({
-            ...current,
-            runState: "not-a-run-state",
-          }) as unknown as JobFinderDiscoveryState,
+        updateDiscoveryState: () => {
+          throw new Error("typed update failed");
+        },
       }),
     ).rejects.toThrow();
 
@@ -290,6 +277,47 @@ describe("commitDiscoveryFeedbackUpdate", () => {
       await expectDiscoveryFeedbackAtomicity(repository);
     } finally {
       await repository.close();
+    }
+  });
+
+  test("a hide that leaves preferences and plans as they were rewrites neither", async () => {
+    const temp = await createTempRepository("nestor-db-feedback-untouched-");
+    try {
+      const repository = await temp.createRepository();
+      const job = createSavedJob();
+      await repository.commitSavedJobDelta({ upserts: [job] });
+      const revisions = () => {
+        const reader = new DatabaseSync(temp.filePath, { readOnly: true });
+        try {
+          return Object.fromEntries(
+            reader
+              .prepare(
+                "SELECT key, revision FROM singleton_state WHERE key IN ('search_preferences', 'campaign_state', 'profile')",
+              )
+              .all()
+              .map((row) => [String(row.key), Number(row.revision)]),
+          );
+        } finally {
+          reader.close();
+        }
+      };
+      const before = revisions();
+
+      await repository.commitDiscoveryFeedbackUpdate(job.id, (current) => ({
+        result: "committed",
+        savedJob: SavedJobSchema.parse({ ...current.job!, status: "archived" }),
+        searchPreferences: current.searchPreferences,
+        campaignState: current.campaignState,
+        discoveryState: current.discoveryState,
+      }));
+
+      expect(revisions()).toEqual(before);
+      expect(
+        (await repository.listSavedJobs()).find((entry) => entry.id === job.id),
+      ).toMatchObject({ status: "archived" });
+      await repository.close();
+    } finally {
+      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
     }
   });
 
@@ -521,9 +549,7 @@ describe("file repository cross-handle discovery concurrency", () => {
   });
 
   test("singleton revision increments only for applied discovery commits", async () => {
-    const temp = await createTempRepository(
-      "nestor-db-discovery-revision-",
-    );
+    const temp = await createTempRepository("nestor-db-discovery-revision-");
     try {
       const repository = await temp.createRepository();
       try {
@@ -557,11 +583,9 @@ describe("file repository cross-handle discovery concurrency", () => {
                 sourceJobId: "target_revision_rollback",
               }),
             ],
-            updateDiscoveryState: (current) =>
-              ({
-                ...current,
-                runState: "not-a-run-state",
-              }) as unknown as JobFinderDiscoveryState,
+            updateDiscoveryState: () => {
+              throw new Error("typed update failed");
+            },
           }),
         ).rejects.toThrow();
 
@@ -651,9 +675,7 @@ describe("incremental per-run discovery appends", () => {
       updateDiscoveryState: (current) => ({
         ...current,
         discoveryLedger: [
-          ...current.discoveryLedger.filter(
-            (entry) => entry.id !== "ledger_2",
-          ),
+          ...current.discoveryLedger.filter((entry) => entry.id !== "ledger_2"),
           createLedgerEntry("ledger_2"),
         ],
       }),

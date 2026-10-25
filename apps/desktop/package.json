@@ -9,8 +9,9 @@
   "scripts": {
     "qa": "node ./scripts/agent-qa/cli.mjs",
     "qa:test": "node --test ./scripts/agent-qa/support.test.mjs",
-    "dev": "node ./scripts/prepare-resume-parser-sidecar.mjs --mode best-effort && electron-vite dev",
+    "dev": "node ./scripts/prepare-resume-parser-sidecar.mjs --mode best-effort && electron-vite dev --ignoreConfigWarning",
     "build": "node ./scripts/prepare-resume-parser-sidecar.mjs --mode best-effort && electron-vite build",
+    "start": "node ./scripts/prepare-resume-parser-sidecar.mjs --mode best-effort && electron-vite preview --ignoreConfigWarning",
     "package:dir": "pnpm run prepare:resume-parser-sidecar -- --target win32-x64 && pnpm build && electron-builder --config electron-builder.json --dir",
     "package:win": "pnpm run prepare:resume-parser-sidecar -- --target win32-x64 && pnpm build && electron-builder --config electron-builder.json --win",
     "lint": "eslint electron.vite.config.ts src --ext .ts,.tsx",

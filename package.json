@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/run-turbo.mjs dev --parallel",
     "desktop:dev": "pnpm --filter @nestor/desktop dev",
+    "desktop:start": "pnpm --filter @nestor/desktop start",
     "build": "node scripts/run-turbo.mjs build",
     "format": "prettier . --write --ignore-unknown",
     "format:check": "prettier . --check --ignore-unknown",

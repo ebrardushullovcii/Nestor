@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import type { AgentDebugFindings } from "@nestor/contracts";
 import { createJobFinderWorkspaceService } from "./index";
@@ -191,7 +191,7 @@ describe("createJobFinderWorkspaceService", () => {
     });
   });
 
-  test("marks lingering running source-debug runs as interrupted on workspace load", async () => {
+  test("marks lingering running source-debug runs as interrupted in the background without a snapshot", async () => {
     const repository = createInMemoryJobFinderRepository({
       ...createSeed(),
       discovery: {
@@ -256,6 +256,12 @@ describe("createJobFinderWorkspaceService", () => {
       documentManager: createDocumentManager(),
     });
 
+    await vi.waitFor(async () =>
+      expect(
+        (await repository.readDiscoveryBootstrapProjection())
+          .activeSourceDebugRun,
+      ).toBeNull(),
+    );
     const snapshot = await workspaceService.getWorkspaceSnapshot();
     const runs = await repository.listSourceDebugRuns();
 

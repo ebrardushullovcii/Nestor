@@ -8,6 +8,7 @@ import {
   isDiscoveryWorthOpeningResult,
   type DiscoveryResultGroupId,
 } from "@nestor/job-finder/discovery-result-bands";
+import { createPerObjectCache } from "../../lib/identity-memo";
 
 /**
  * Banding rules moved to `@nestor/job-finder/discovery-result-bands` so a
@@ -25,6 +26,15 @@ export {
   type DiscoveryResultGroupId,
 };
 
+/**
+ * A row's band, read once per row object. The band is a pure function of the
+ * row, and grouping, counting and dividing the list asked for it several times
+ * per job on every render.
+ */
+const getRowResultGroup = createPerObjectCache((job: JobListRow) =>
+  getDiscoveryResultGroup(job),
+);
+
 export interface DiscoveryResultGroupHeading {
   count: number;
   description: string;
@@ -38,7 +48,7 @@ export interface DiscoveryResultGroupHeading {
  * against — but they are never counted as recommended results.
  */
 export function isDiscoveryUncheckedResult(job: JobListRow): boolean {
-  return getDiscoveryResultGroup(job) === "unchecked";
+  return getRowResultGroup(job) === "unchecked";
 }
 
 /**
@@ -48,8 +58,37 @@ export function isDiscoveryUncheckedResult(job: JobListRow): boolean {
  * behind "also found" is a judgement and no judgement was made.
  */
 export function isDiscoveryAlsoFoundResult(job: JobListRow): boolean {
-  const group = getDiscoveryResultGroup(job);
+  const group = getRowResultGroup(job);
   return group === "weaker" || group === "mismatches";
+}
+
+// Not "shortlisted": taking a job off Shortlisted writes that status, and the
+// job is back to waiting on a decision. Being in Shortlisted is the review
+// queue, which the caller passes in.
+const DECIDED_JOB_STATUSES: ReadonlySet<JobListRow["status"]> = new Set([
+  "drafting",
+  "ready_for_review",
+  "approved",
+  "submitted",
+  "assessment",
+  "interview",
+  "rejected",
+  "offer",
+  "withdrawn",
+]);
+
+/**
+ * A job the person already decided on: in Shortlisted or applied to. Find
+ * jobs is the list of jobs still waiting on a decision, so these leave it the
+ * way a hidden job does. With 200 shortlisted, the first four pages were rows
+ * whose checkbox could not be ticked, and the list, the badge, "Select all"
+ * and the triage progress each printed a different number.
+ */
+export function isDiscoveryDecidedJob(
+  job: JobListRow,
+  shortlistedJobIds: ReadonlySet<string>,
+): boolean {
+  return shortlistedJobIds.has(job.id) || DECIDED_JOB_STATUSES.has(job.status);
 }
 
 /**
@@ -97,6 +136,17 @@ const DISCOVERY_RESULT_GROUP_ORDER: Record<DiscoveryResultGroupId, number> = {
  * still decide order inside a band; they must not split the same caption into
  * two runs with a differently-captioned band between them.
  */
+/** The band order of two rows: negative when `left`'s band comes first. */
+export function compareDiscoveryResultGroups(
+  left: JobListRow,
+  right: JobListRow,
+): number {
+  return (
+    DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(left)] -
+    DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(right)]
+  );
+}
+
 export function orderDiscoveryResultsByGroup(
   jobs: readonly JobListRow[],
 ): JobListRow[] {
@@ -104,8 +154,8 @@ export function orderDiscoveryResultsByGroup(
     .map((job, sourceIndex) => ({ job, sourceIndex }))
     .sort((left, right) => {
       const groupOrder =
-        DISCOVERY_RESULT_GROUP_ORDER[getDiscoveryResultGroup(left.job)] -
-        DISCOVERY_RESULT_GROUP_ORDER[getDiscoveryResultGroup(right.job)];
+        DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(left.job)] -
+        DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(right.job)];
       return groupOrder || left.sourceIndex - right.sourceIndex;
     })
     .map(({ job }) => job);
@@ -184,9 +234,27 @@ export function buildDiscoveryResultGroupHeadings(
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupHeading> {
+  return buildRunHeadings(
+    jobs.map((job) => job.id),
+    jobs.map(getRowResultGroup),
+    ranked,
+    options,
+  );
+}
+
+/**
+ * The same headings from the list's ids and bands in order, which Find jobs
+ * reads from the database instead of holding every row (ADR 0075).
+ */
+export function buildRunHeadings(
+  ids: readonly string[],
+  groups: readonly DiscoveryResultGroupId[],
+  ranked: boolean,
+  options: DiscoveryResultGroupHeadingOptions = {},
+): ReadonlyMap<string, DiscoveryResultGroupHeading> {
   const headings = new Map<string, DiscoveryResultGroupHeading>();
-  forEachHeadedDiscoveryResultRun(jobs, ranked, options, (run) => {
-    headings.set(jobs[run.headingIndex]!.id, {
+  forEachHeadedDiscoveryResultRun(groups, ranked, options, (run) => {
+    headings.set(ids[run.headingIndex]!, {
       count: run.end - run.start,
       description: groupCopy[run.group].description,
       id: run.group,
@@ -211,10 +279,25 @@ export function buildDiscoveryHeadedGroupByJobId(
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupId> {
+  return buildRunHeadedGroups(
+    jobs.map((job) => job.id),
+    jobs.map(getRowResultGroup),
+    ranked,
+    options,
+  );
+}
+
+/** {@link buildDiscoveryHeadedGroupByJobId} from ids and bands in order. */
+export function buildRunHeadedGroups(
+  ids: readonly string[],
+  groups: readonly DiscoveryResultGroupId[],
+  ranked: boolean,
+  options: DiscoveryResultGroupHeadingOptions = {},
+): ReadonlyMap<string, DiscoveryResultGroupId> {
   const headed = new Map<string, DiscoveryResultGroupId>();
-  forEachHeadedDiscoveryResultRun(jobs, ranked, options, (run) => {
+  forEachHeadedDiscoveryResultRun(groups, ranked, options, (run) => {
     for (let index = run.headingIndex; index < run.visibleEnd; index += 1) {
-      headed.set(jobs[index]!.id, run.group);
+      headed.set(ids[index]!, run.group);
     }
   });
   return headed;
@@ -244,7 +327,7 @@ interface DiscoveryResultRun {
  * filed under the previous band's label.
  */
 function forEachHeadedDiscoveryResultRun(
-  jobs: readonly JobListRow[],
+  groups: readonly DiscoveryResultGroupId[],
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions,
   visit: (run: DiscoveryResultRun) => void,
@@ -254,13 +337,15 @@ function forEachHeadedDiscoveryResultRun(
   }
 
   const windowStart = Math.max(0, options.window?.start ?? 0);
-  const windowEnd = Math.min(jobs.length, options.window?.end ?? jobs.length);
-  const groups = jobs.map((job) => getDiscoveryResultGroup(job));
+  const windowEnd = Math.min(
+    groups.length,
+    options.window?.end ?? groups.length,
+  );
   let start = 0;
-  while (start < jobs.length) {
+  while (start < groups.length) {
     const group = groups[start]!;
     let end = start + 1;
-    while (end < jobs.length && groups[end] === group) {
+    while (end < groups.length && groups[end] === group) {
       end += 1;
     }
 

@@ -51,7 +51,9 @@ import {
   extractModelJsonFromPayload,
   parseModelApiMode,
   parseModelReasoningEffort,
+  resolveTaskReasoningEffortsFromEnvironment,
   type ModelReasoningEffort,
+  type ModelReasoningTask,
   type ModelUsagePayload,
 } from "./openai-compatible-transport";
 import {
@@ -68,9 +70,11 @@ import {
 } from "./openai-compatible-request-compaction";
 import {
   buildFitEvidenceInstructions,
+  buildFitScoringInstructions,
   buildJobFitAssessmentPayload,
-  buildJobFitJudgingPayload,
+  buildJobFitJudgingRequest,
   buildJobFitJudgingPrompt,
+  buildJobFitJudgingResponseSchema,
   normalizeJobFitJudgments,
 } from "./openai-compatible-fit";
 import {
@@ -98,6 +102,7 @@ import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 import {
   buildModelRequestHeaders,
   createInstanceConversationKey,
+  isOpenCodeBaseUrl,
   modelConversationKeys,
 } from "./model-request-identity";
 
@@ -116,7 +121,7 @@ const DEFAULT_RESUME_DRAFT_TIMEOUT_MS = 600_000;
  * collapsed into the safe fallback.
  */
 const DEFAULT_AGENT_TURN_TIMEOUT_MS = 300_000;
-/** Browser-agent turns and page reads think briefly; see `agentReasoningEffort`. */
+/** Tool-calling work that names no task thinks briefly; see `agentReasoningEffort`. */
 const DEFAULT_AGENT_TURN_REASONING_EFFORT: ModelReasoningEffort = "low";
 const DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS = 600_000;
 const DEFAULT_RESUME_IMPORT_STAGE_TIMEOUT_MS: Record<
@@ -132,6 +137,19 @@ const SEARCH_RESULTS_EXTRACTION_PAGE_TEXT_LIMIT = 8_000;
 const JOB_DETAIL_EXTRACTION_PAGE_TEXT_LIMIT = 12_000;
 const SEARCH_RESULTS_MAX_MODEL_JOBS = 12;
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
+
+/** Sampling support was verified on this route, not on arbitrary models. */
+function isStableFitRoute(route: {
+  model: string;
+  baseUrl: string;
+  apiMode: "responses" | "chat_completions";
+}): boolean {
+  return (
+    route.apiMode === "responses" &&
+    route.model === DEFAULT_TEXT_MODEL &&
+    isOpenCodeBaseUrl(route.baseUrl)
+  );
+}
 
 /** Token usage in one shape whatever API reported it. */
 export function normalizeModelUsage(usage: ModelUsagePayload): {
@@ -165,13 +183,12 @@ function buildResumeRewriteProposalPrompt(
         ? "Conservative mode: stay very close to the cited wording and propose only clear, low-risk improvements."
         : "Balanced mode: improve structure and relevance while keeping every factual statement directly supported by cited evidence.";
 
+  // The strategy's own values travel in the payload's `strategy`, after the
+  // evidence. Naming them here made every job's instructions differ, so a
+  // batch's requests could not share a cached prefix with the AI service.
   const strategyGuidance = strategy
     ? [
-        `Apply the named resume strategy "${strategy.strategyName}" for the ${strategy.roleFamily} role family.`,
-        `Strategy provenance: ${strategy.effectiveSource}; reason: ${strategy.effectiveReason}`,
-        `Use the ${strategy.headlinePolicy} headline policy, ${strategy.skillsPolicy} skills policy, and ${strategy.coveragePolicy} coverage policy.`,
-        `The selected base resume document is ${strategy.baseResumeDocumentId}; do not invent facts outside the supplied grounding evidence.`,
-        `Evidence boundaries: exact claims ${strategy.evidenceBoundaries.allowExactClaims ? "allowed" : "not allowed"}; paraphrased claims ${strategy.evidenceBoundaries.allowParaphrasedClaims ? "allowed" : "not allowed"}; at most ${strategy.evidenceBoundaries.maxEvidenceRefsPerBullet} evidence references per bullet. Each line is fact-checked against the candidate's evidence before approval.`,
+        "Apply the resume strategy in the payload's strategy: its strategyName for its roleFamily, its headlinePolicy, skillsPolicy and coveragePolicy, and its evidenceBoundaries (whether exact and paraphrased claims are allowed, and at most maxEvidenceRefsPerBullet evidence references per bullet). baseResumeDocumentId names the selected base resume; do not invent facts outside the supplied grounding evidence. Each line is fact-checked against the candidate's evidence before approval.",
       ]
     : [];
 
@@ -185,10 +202,10 @@ function buildResumeRewriteProposalPrompt(
       : "Use job-description wording only when the candidate evidence supports the same skill or work. Never stuff keywords, copy employer language without evidence, or add target-company claims.";
 
   return [
-    'You write the tailored resume for this exact job: evidence-linked prose, and the choice of what to show. The application owns identity metadata, chronology and rendering. You see every role, achievement, project and skill the candidate saved; decide which of them this job needs and how much room each gets. The resume should fit on targetPageCount pages: give the most relevant recent roles the most bullets (up to six), older or unrelated roles one or two or none, mark a role or project the job does not need with "hidden": true, and return the additionalSkills worth listing. Anything you leave off stays on the candidate\'s draft, hidden, for them to show again; it is never deleted.',
+    'You write the tailored resume for this exact job: evidence-linked prose, and the choice of what to show. The application owns identity metadata, chronology and rendering. You see every role, achievement, project and skill the candidate saved; decide which of them this job needs and how much room each gets. The resume should fit on targetPageCount pages; lengthBudget gives about how many words of summary and bullets fit there, so stay within it: give the most relevant recent roles the most bullets (up to six), older or unrelated roles one or two or none, mark a role or project the job does not need with "hidden": true, and return the additionalSkills worth listing. Give every bullet a priority: 1 must stay, 2 useful, 3 first to go. When the render runs over targetPageCount, the priority 3 bullets and then the priority 2 bullets are left off without asking you again; each shown role keeps at least one bullet. Anything you leave off stays on the candidate\'s draft, hidden, for them to show again; it is never deleted.',
     returnGuidance,
     'When targetLanguage is supplied, write the resume in that language in this writing pass. When it is "the language the listing is written in", determine it from the actual listing, following the source resume only if the listing language cannot be determined. Include languagePresentation: {"language":"the language actually written","listingLanguage":"the language of the actual posting, or null if unknown","translations":[{"id":"exact languageFields id","text":"final text"}]}. Translations are sparse display edits for fields that need translation: headings, headline, roles, skills, dates, credentials, and retained source prose. Omit translations for unchanged fields and for prose already written in the target language by your summary, experienceEntries or projectEntries proposal. Keep proper names, every source fact and qualifier. When all displayed fields already use the target language, return an empty translations array; do not reword the resume to translate it into the same language. The preview supplies the assembled languageFields; use those exact IDs to finish any source fields still in another language.',
-    'Use this sparse shape: {"summary":{"text":"...","evidenceRefs":["..."]},"experienceEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."],"inferred":true,"sourceAchievementIds":["experience:record:achievement:0"]}]},{"profileRecordId":"...","hidden":true}],"projectEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"outcome":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."]}]}],"additionalSkills":["..."]}. For a role you show, list exactly the bullets it should show. Omit every unchanged field.',
+    'Use this sparse shape: {"summary":{"text":"...","evidenceRefs":["..."]},"experienceEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."],"inferred":true,"sourceAchievementIds":["experience:record:achievement:0"],"priority":1}]},{"profileRecordId":"...","hidden":true}],"projectEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"outcome":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."]}]}],"additionalSkills":["..."]}. For a role you show, list exactly the bullets it should show. Omit every unchanged field.',
     "Every proposed text must cite exact IDs from groundingEvidence.items. Experience and project proposals may cite items with the same profileRecordId; in aggressive mode they may additionally cite profile-scope items (for example profile:skills, profile:skillGroup:coreSkills, profile:summary) to anchor stack- and domain-aware wording.",
     "Outside aggressive mode, use only claims, numbers, technologies, scope, and outcomes stated in the cited evidence. In every mode, never add dates, titles, employers, credentials, seniority, causality, or absolutes, and never add leadership the cited evidence does not support.",
     "Write for the exact target job. Make the candidate's supported match obvious in the opening lines, and prioritize the job's most important supported skills and accomplishments over generic career description.",
@@ -275,6 +292,24 @@ export function createOpenAiCompatibleJobFinderAiClient(
     : null;
   const agentReasoningEffort =
     validatedOptions?.agentReasoningEffort ?? validatedOptions?.reasoningEffort;
+  function reasoningEffortFor(
+    task: ModelReasoningTask | undefined,
+  ): ModelReasoningEffort | undefined {
+    if (!task) return agentReasoningEffort;
+    const configured = validatedOptions?.taskReasoningEfforts?.[task];
+    if (configured) return configured;
+    // Muse already has the complete evidence and proposal shape. Keep its
+    // writing effort separate from full listing reads and the agent loop;
+    // the independent claim check and repairs still run at their own effort.
+    if (
+      task === "resume_writer" &&
+      validatedOptions?.model === DEFAULT_TEXT_MODEL
+    )
+      return "medium";
+    return task === "resume_writer" || task === "listing_read"
+      ? validatedOptions?.reasoningEffort
+      : agentReasoningEffort;
+  }
   const status = AgentProviderStatusSchema.parse({
     kind: "openai_compatible",
     ready: configuredOptions.success,
@@ -315,6 +350,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       conversationKey?: string;
       /** Overrides the client's effort for this one request. */
       reasoningEffort?: ModelReasoningEffort | undefined;
+      jsonSchema?: { name: string; schema: Record<string, unknown> };
     },
   ): Promise<unknown> {
     if (!validatedOptions) {
@@ -334,6 +370,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
         DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
       systemPrompt,
       userPayload,
+      // Column names and row positions must survive together. The batch
+      // builder already bounds evidence; generic array trimming would
+      // silently change its meaning when a small context window is used.
+      preserveFullPayload: operation === "judgeJobFits",
     });
 
     if (options?.signal?.aborted) {
@@ -354,10 +394,18 @@ export function createOpenAiCompatibleJobFinderAiClient(
         body: buildModelRequestBody({
           apiMode,
           model: validatedOptions.model,
+          // Muse's Responses route defaults to temperature 1. Fit verdicts
+          // should repeat for the same facts. This route accepts zero even
+          // with reasoning enabled; other model routes may reject it.
+          ...((operation === "judgeJobFits" || operation === "assessJobFit") &&
+          isStableFitRoute({ ...validatedOptions, apiMode })
+            ? { temperature: 0 }
+            : {}),
           reasoningEffort:
             options?.reasoningEffort ?? validatedOptions.reasoningEffort,
           reasoningSummary: resilience.streaming !== false,
           jsonOutput: true,
+          jsonSchema: options?.jsonSchema,
           messages: [
             {
               role: "system",
@@ -516,7 +564,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           timeoutMs:
             validatedOptions?.requestTimeoutMs ??
             DEFAULT_RESUME_DRAFT_TIMEOUT_MS,
-          conversationKey: modelConversationKeys.resumeForJob(input.job),
+          conversationKey: modelConversationKeys.resumeWriting(input.profile),
         },
       );
       return completeTailoredResumeDraft(payload, input);
@@ -601,7 +649,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         "tailorResume",
         buildResumeRewriteProposalPrompt(input.searchPreferences.tailoringMode),
         buildGroundedResumeRewriteModelPayload(input),
-        { conversationKey: modelConversationKeys.resumeForJob(input.job) },
+        { conversationKey: modelConversationKeys.resumeWriting(input.profile) },
       );
       return completeTailoredResumeDraft(payload, {
         profile: input.profile,
@@ -612,14 +660,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
       });
     },
     async assessJobFit(input) {
-      const { signal, ...assessmentInput } = input;
+      const { signal, background, ...assessmentInput } = input;
       const payload = await fetchModelJson(
         "assessJobFit",
         [
-          "You assess how well a job matches a candidate profile.",
+          "You assess how well a job fits the person whose profile is given.",
           buildFitEvidenceInstructions(),
+          buildFitScoringInstructions(),
           "Return JSON only.",
-          "Use a 0-100 score, 1-3 reasons, and up to 3 gaps.",
+          "Give 1-3 reasons and up to 3 gaps.",
           "Keep explanations specific to the provided profile and job.",
           "Include requirements for every explicit language and level, enrollment or availability window, education, portfolio, experience, and named tool in the full listing. Compare each with the profile; absence is missing or unknown, never support. A conflict needs explicit contradictory evidence. Use assessmentDate for availability windows.",
           "Each requirement has id, category (skill, experience, seniority, location, work_mode, work_authorization, domain), label, importance (required, preferred, inferred), status (supported, partial, missing, unknown, conflict), jobEvidence (quote from the listing), resumeEvidence (array of {sourceKind: profile_skill, experience, project, or profile; sourceId: string or null; label; detail}), and explanation. Use skill for languages and tools, experience for education, enrollment, availability and portfolio. Keep required country restrictions separate from remote work mode.",
@@ -627,8 +676,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
         ].join(" "),
         buildJobFitAssessmentPayload(assessmentInput),
         {
-          conversationKey: modelConversationKeys.jobFit(input.job),
+          conversationKey: modelConversationKeys.listingReading(input.profile),
           ...(signal ? { signal } : {}),
+          reasoningEffort: reasoningEffortFor(
+            background ? "fit_batch" : "listing_read",
+          ),
         },
       );
       return JobFitAssessmentSchema.parse(payload);
@@ -638,18 +690,43 @@ export function createOpenAiCompatibleJobFinderAiClient(
       if (rest.jobs.length === 0) {
         return [];
       }
+      // Short request-local ids avoid repeating opaque workspace ids in both
+      // directions. Only ids in this batch can be mapped back to a saved job.
+      const jobs = rest.jobs.map((job, index) => ({
+        ...job,
+        jobId: String(index),
+      }));
+      const structured =
+        validatedOptions !== null &&
+        isStableFitRoute({
+          ...validatedOptions,
+          apiMode: validatedOptions.apiMode ?? "chat_completions",
+        });
       const payload = await fetchModelJson(
         "judgeJobFits",
-        buildJobFitJudgingPrompt(),
-        buildJobFitJudgingPayload(rest),
+        buildJobFitJudgingPrompt(structured),
+        buildJobFitJudgingRequest({ ...rest, jobs }),
         {
+          conversationKey: modelConversationKeys.fitJudging(input.profile),
           ...(signal ? { signal } : {}),
-          reasoningEffort: agentReasoningEffort,
+          reasoningEffort: reasoningEffortFor("fit_batch"),
+          ...(structured
+            ? {
+                jsonSchema: buildJobFitJudgingResponseSchema(
+                  jobs.map((job) => job.jobId),
+                ),
+              }
+            : {}),
         },
       );
-      return normalizeJobFitJudgments(
-        payload,
-        new Set(rest.jobs.map((job) => job.jobId)),
+      const jobIds = new Map(
+        jobs.map((job, index) => [job.jobId, rest.jobs[index]!.jobId]),
+      );
+      return normalizeJobFitJudgments(payload, new Set(jobIds.keys())).map(
+        (judgment) => ({
+          ...judgment,
+          jobId: jobIds.get(judgment.jobId)!,
+        }),
       );
     },
     async checkResumeClaims(input) {
@@ -657,17 +734,41 @@ export function createOpenAiCompatibleJobFinderAiClient(
       if (rest.claims.length === 0) {
         return [];
       }
+      // These are reference keys, not candidate facts. Short request-local
+      // IDs avoid making the checker read and repeat hundreds of opaque
+      // persistence IDs. Keep their source identity alongside the complete
+      // text, and restore the original IDs before any verdict is stored.
+      const evidenceIds = new Map(
+        rest.evidence.map((entry, index) => [String(index + 1), entry.id]),
+      );
+      const modelInput = {
+        ...rest,
+        evidence: rest.evidence.map((entry, index) => ({
+          ...entry,
+          id: String(index + 1),
+          sourceId: entry.id,
+        })),
+      };
       const payload = await fetchModelJson(
         "checkResumeClaims",
         buildResumeClaimCheckPrompt(),
-        buildResumeClaimCheckPayload(rest),
+        buildResumeClaimCheckPayload(modelInput),
         {
+          conversationKey: modelConversationKeys.resumeClaimChecking(
+            rest.evidence,
+          ),
           ...(timeoutMs !== undefined ? { timeoutMs } : {}),
           ...(signal ? { signal } : {}),
-          reasoningEffort: agentReasoningEffort,
+          reasoningEffort: reasoningEffortFor("claim_check"),
         },
       );
-      return normalizeResumeClaimChecks(payload, rest);
+      return normalizeResumeClaimChecks(payload, modelInput).map((check) => ({
+        ...check,
+        evidenceIds: check.evidenceIds.flatMap((id) => {
+          const original = evidenceIds.get(id);
+          return original === undefined ? [] : [original];
+        }),
+      }));
     },
     async extractJobsFromPage(input) {
       const maxJobs = Math.max(0, Math.floor(input.maxJobs));
@@ -718,7 +819,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           timeoutMs,
           ...(input.signal ? { signal: input.signal } : {}),
           conversationKey: modelConversationKeys.pageExtraction(input.pageUrl),
-          reasoningEffort: agentReasoningEffort,
+          reasoningEffort: reasoningEffortFor("page_read"),
         },
       );
 
@@ -737,8 +838,14 @@ export function createOpenAiCompatibleJobFinderAiClient(
         );
       }
 
+      // A writer turn is a whole resume: it gets the draft budget, which also
+      // covers one stalled stream (two minutes of silence) and its retry.
+      // Under the agent-turn limit, one stall plus a slow retry failed it.
       const timeoutMs =
-        validatedOptions.requestTimeoutMs ?? DEFAULT_AGENT_TURN_TIMEOUT_MS;
+        validatedOptions.requestTimeoutMs ??
+        (options?.reasoningTask === "resume_writer"
+          ? DEFAULT_RESUME_DRAFT_TIMEOUT_MS
+          : DEFAULT_AGENT_TURN_TIMEOUT_MS);
 
       if (options?.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
@@ -758,7 +865,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           body: buildModelRequestBody({
             apiMode,
             model: validatedOptions.model,
-            reasoningEffort: agentReasoningEffort,
+            reasoningEffort: reasoningEffortFor(options?.reasoningTask),
             reasoningSummary: streamingEnabled,
             // Usage for the context budget; only asked for where the caller
             // listens to the stream, so older callers send the same body.
@@ -1108,18 +1215,31 @@ export function createJobFinderAiClientFromEnvironment(
     };
   }
 
-  const primaryClient = createOpenAiCompatibleJobFinderAiClient({
-    apiKey,
+  const primaryRoute = {
     baseUrl: env.NESTOR_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model: env.NESTOR_AI_MODEL ?? DEFAULT_TEXT_MODEL,
     apiMode:
       parseModelApiMode(env.NESTOR_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
+  };
+  const taskReasoningEfforts = resolveTaskReasoningEffortsFromEnvironment(env);
+  if (
+    isStableFitRoute(primaryRoute) &&
+    !parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT)
+  ) {
+    // Repeated and shuffled fit replays were steadier and cheaper at low.
+    // Keep other routes' defaults and explicit operator overrides intact.
+    taskReasoningEfforts.fit_batch = "low";
+  }
+  const primaryClient = createOpenAiCompatibleJobFinderAiClient({
+    apiKey,
+    ...primaryRoute,
     reasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_REASONING_EFFORT) ??
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     agentReasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_AGENT_REASONING_EFFORT) ??
       DEFAULT_AGENT_TURN_REASONING_EFFORT,
+    taskReasoningEfforts,
     label: "AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
@@ -1140,6 +1260,10 @@ export function createJobFinderAiClientFromEnvironment(
     reasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_AGGRESSIVE_REASONING_EFFORT) ??
       DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
+    // The writer and resume edits keep the aggressive effort; its fact checks
+    // use the same check effort as every other level. At the writer's effort
+    // one check took about two minutes on a real resume.
+    taskReasoningEfforts: resolveTaskReasoningEffortsFromEnvironment(env),
     label: "Aggressive AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,

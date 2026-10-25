@@ -1,7 +1,9 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
-  SavedJobDiscoveryProvenanceSchema,
-  SavedJobSchema,
+  captureDiscoverySavedIdentityBasis,
+  readDiscoveryPreparation,
+  readPreparedSavedJobIdentity,
+  writeDiscoveryPreparation,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
   type CandidateProfile,
@@ -22,10 +24,9 @@ import type { MatchAssessmentPostingInput } from "./match-assessment-posting-inp
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
 import {
   MATCH_ASSESSMENT_SCORER_VERSION,
-  createMatchAssessmentContextFingerprint,
+  createFitVerdictFingerprint,
   createMatchAssessmentPostingFingerprint,
 } from "./match-assessment-session";
-import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import { preserveCompletedAssessment } from "./fit-judgment-apply";
 import { applyFitJudgment, toFitJudgment } from "./fit-judgment";
 import { buildBookkeepingDimensions } from "./matching-dimensions";
@@ -33,8 +34,14 @@ import { canonicalizeLocationAliases } from "./location-normalization";
 import {
   createJobIdentityDigest,
   createJobIdentityIndex,
+  compactJobIdentity,
+  rememberPreparedJobIdentity,
+  readPackedListingContent,
+  type JobIdentityInput,
   hasEquivalentListingContentIdentity,
+  type JobIdentityIndex,
 } from "./job-identity";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
   attributeLegacySighting,
@@ -463,6 +470,23 @@ function buildKeywordSignals(posting: JobPosting): JobKeywordSignal[] {
 }
 
 function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
+  const carried = readDiscoveryPreparation(posting)?.screeningHints;
+  if (
+    carried &&
+    carried.basis.location === posting.location &&
+    carried.basis.summary === posting.summary &&
+    carried.basis.description === posting.description &&
+    (
+      ["minimumQualifications", "preferredQualifications", "workMode"] as const
+    ).every(
+      (field) =>
+        carried.basis[field].length === posting[field].length &&
+        carried.basis[field].every(
+          (value, index) => value === posting[field][index],
+        ),
+    )
+  )
+    return carried.value;
   const remoteHintSource = [
     posting.location,
     posting.summary,
@@ -486,7 +510,7 @@ function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
     posting.workMode.includes("flexible") ||
     /\bremote\b/i.test(remoteHintSource);
 
-  return {
+  const value: SavedJob["screeningHints"] = {
     sponsorshipText:
       normalizedText.includes("visa sponsorship") ||
       normalizedText.includes("work authorization")
@@ -518,6 +542,20 @@ function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
     requiresConsentInterrupt: null,
     requiresConsentInterruptKind: null,
   };
+  writeDiscoveryPreparation(posting, {
+    screeningHints: {
+      basis: {
+        location: posting.location,
+        summary: posting.summary,
+        description: posting.description,
+        minimumQualifications: [...posting.minimumQualifications],
+        preferredQualifications: [...posting.preferredQualifications],
+        workMode: [...posting.workMode],
+      },
+      value,
+    },
+  });
+  return value;
 }
 
 function mergeKeywordSignals(
@@ -565,15 +603,16 @@ function hasWeakerIncomingDetailEvidence(
   posting: JobPosting,
   existingJob: SavedJob,
 ): boolean {
+  const incomingRank = jobPostingDetailQualityRank(
+    assessJobPostingDetailQuality(posting),
+  );
+  if (incomingRank === jobPostingDetailQualityValues.length - 1) return false;
   const existingQuality = strongestDetailQuality(
     existingJob.detailQuality,
     assessJobPostingDetailQuality(existingJob),
   );
 
-  return (
-    jobPostingDetailQualityRank(assessJobPostingDetailQuality(posting)) <
-    jobPostingDetailQualityRank(existingQuality)
-  );
+  return incomingRank < jobPostingDetailQualityRank(existingQuality);
 }
 
 // Preserved groups cover every resume-affecting content field verbatim so a
@@ -631,9 +670,9 @@ export function enrichDiscoveredPosting(
     ...posting,
     title:
       existingJob &&
-      hasEquivalentListingContentIdentity(posting, existingJob) &&
       normalizeText(existingJob.title).length >
-        normalizeText(posting.title).length
+        normalizeText(posting.title).length &&
+      hasEquivalentListingContentIdentity(posting, existingJob)
         ? existingJob.title
         : posting.title,
     providerUpdatedAt: selectLatestProviderUpdate(
@@ -734,19 +773,25 @@ export function enrichDiscoveredPosting(
     isLikelyAccessGateListingUrl(posting.canonicalUrl) &&
     !isLikelyAccessGateListingUrl(existingJob.canonicalUrl)
   ) {
-    return {
-      ...preserveRicherExistingDetail(enrichedPosting, existingJob),
-      title: existingJob.title,
-      canonicalUrl: existingJob.canonicalUrl,
-      applicationUrl: existingJob.applicationUrl,
-    };
+    return prepareDiscoveryPosting(
+      {
+        ...preserveRicherExistingDetail(enrichedPosting, existingJob),
+        title: existingJob.title,
+        canonicalUrl: existingJob.canonicalUrl,
+        applicationUrl: existingJob.applicationUrl,
+      },
+      existingJob,
+    );
   }
 
   if (existingJob && hasWeakerIncomingDetailEvidence(posting, existingJob)) {
-    return preserveRicherExistingDetail(enrichedPosting, existingJob);
+    return prepareDiscoveryPosting(
+      preserveRicherExistingDetail(enrichedPosting, existingJob),
+      existingJob,
+    );
   }
 
-  return enrichedPosting;
+  return prepareDiscoveryPosting(enrichedPosting);
 }
 
 function matchesLocationPhrase(
@@ -973,7 +1018,7 @@ export function createMatchAssessment<
 }
 
 const NOT_JUDGED_EXPLANATION =
-  "Not judged yet. The AI judges this job against your profile and goals after a search, or when you choose Read and assess listing.";
+  "Not judged yet. The AI judges this job against your profile and goals after a search, or when you choose Judge fit.";
 
 export async function createMatchAssessmentAsync(
   aiClient: JobFinderAiClient,
@@ -981,10 +1026,12 @@ export async function createMatchAssessmentAsync(
   searchPreferences: JobSearchPreferences,
   posting: JobPosting & { matchAssessment?: MatchAssessment | null },
   signal?: AbortSignal,
+  options: { background?: boolean } = {},
 ): Promise<MatchAssessment> {
   signal?.throwIfAborted();
   const assistedAssessment = await aiClient.assessJobFit({
     ...(signal ? { signal } : {}),
+    ...(options.background ? { background: true } : {}),
     assessmentDate: new Date().toISOString().slice(0, 10),
     profile,
     searchPreferences,
@@ -1026,13 +1073,11 @@ export async function createMatchAssessmentAsync(
     {
       source: "full",
       judgedAt: new Date().toISOString(),
-      contextFingerprint: createMatchAssessmentContextFingerprint(
+      contextFingerprint: createFitVerdictFingerprint(
         profile,
         searchPreferences,
       ),
-      postingFingerprint: createMatchAssessmentPostingFingerprint(
-        createMatchAssessmentPostingInput(posting),
-      ),
+      postingFingerprint: createMatchAssessmentPostingFingerprint(posting),
     },
   );
   const completed = applyFitJudgment(withRequirements, judgment);
@@ -1088,7 +1133,7 @@ function assembleMergedDiscoveredJob(input: {
 }): SavedJob {
   const { matchAssessment, enrichedPosting, posting, existingJob } = input;
 
-  return SavedJobSchema.parse({
+  return {
     ...enrichedPosting,
     id: existingJob?.id ?? toSavedJobId(posting),
     // A discovery recrawl refreshes shared listing content, not the plans that
@@ -1107,15 +1152,35 @@ function assembleMergedDiscoveredJob(input: {
     discoveryFeedback: existingJob?.discoveryFeedback ?? null,
     resumeApplicationMode: existingJob?.resumeApplicationMode ?? null,
     latestMatchAssessmentAudit: existingJob?.latestMatchAssessmentAudit ?? null,
-  });
+    provenance: (enrichedPosting as Partial<SavedJob>).provenance ?? [],
+    resumeTailoringMode:
+      (enrichedPosting as Partial<SavedJob>).resumeTailoringMode ?? null,
+  };
 }
+
+// Ranks of a job list a merge already computed. A search merges source after
+// source into the same working list, and sorting every saved job twice per
+// source was a large share of its main-process time; the list one merge
+// returns is the list the next one starts from.
+const visibleRankCache = new WeakMap<
+  readonly SavedJob[],
+  ReadonlyMap<string, number>
+>();
+const mergeInventories = new WeakMap<
+  readonly SavedJob[],
+  Map<string, SavedJob>
+>();
 
 function buildVisibleDiscoveryRankById(
   jobs: readonly SavedJob[],
 ): ReadonlyMap<string, number> {
-  return new Map(
+  const cached = visibleRankCache.get(jobs);
+  if (cached) return cached;
+  const ranks = new Map(
     orderVisibleDiscoveryJobs(jobs).map((job, index) => [job.id, index + 1]),
   );
+  visibleRankCache.set(jobs, ranks);
+  return ranks;
 }
 
 function selectLatestDiscoveryTimestamp(
@@ -1147,24 +1212,46 @@ export function mergeDiscoveredPostings(
   signal?: AbortSignal,
   assessPosting?: (posting: JobPosting) => MatchAssessment,
   auditJobIds?: ReadonlySet<string>,
+  options?: {
+    /**
+     * An index over exactly `savedJobs` (by `toSightingIdentityInput`) that
+     * the caller keeps between merges. The merge adds and replaces rows in it,
+     * so afterwards it covers the merged jobs before their audit update.
+     */
+    identityIndex?: JobIdentityIndex<SavedJob>;
+    /**
+     * False when only a changed assessment should be audited. A search
+     * re-reads thousands of known jobs; ranking every saved job for each
+     * slice of a board, to record that a job's place in the queue moved
+     * while its assessment did not, cost seconds per board.
+     */
+    recordRankOnlyAudits?: boolean;
+    /** Search merges hand their result straight to the next merge. */
+    reuseInventory?: boolean;
+  },
 ): MergeDiscoveryResult {
   // Check if already aborted
   if (signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");
   }
 
-  const identityIndex = createJobIdentityIndex(
-    savedJobs,
-    toSightingIdentityInput,
-  );
-  const previousJobsById = new Map(savedJobs.map((job) => [job.id, job]));
-  const previousRankById = buildVisibleDiscoveryRankById(savedJobs);
+  const identityIndex =
+    options?.identityIndex ??
+    createJobIdentityIndex(savedJobs, toSightingIdentityInput);
+  const reuseInventory =
+    options?.reuseInventory === true && options.recordRankOnlyAudits === false;
+  const previousJobsById = reuseInventory
+    ? new Map<string, SavedJob>()
+    : new Map(savedJobs.map((job) => [job.id, job]));
   const newJobIds = new Set<string>();
   let validatedCount = 0;
   let duplicatesMerged = 0;
   let invalidSkipped = 0;
 
-  const nextJobsById = new Map(savedJobs.map((job) => [job.id, job]));
+  const nextJobsById =
+    (reuseInventory ? mergeInventories.get(savedJobs) : undefined) ??
+    new Map(savedJobs.map((job) => [job.id, job]));
+  if (reuseInventory) mergeInventories.delete(savedJobs);
 
   for (const posting of discoveredPostings) {
     // Check for cancellation periodically
@@ -1193,6 +1280,13 @@ export function mergeDiscoveredPostings(
     validatedCount += 1;
     const existingJob =
       identityIndex.find({ ...posting, matchAcrossSources: true }) ?? undefined;
+    if (
+      reuseInventory &&
+      existingJob &&
+      !newJobIds.has(existingJob.id) &&
+      !previousJobsById.has(existingJob.id)
+    )
+      previousJobsById.set(existingJob.id, existingJob);
 
     // Enrich before assessing so the stored assessment fingerprint describes
     // exactly the content this merge persists. Enrichment derives fields the
@@ -1227,18 +1321,21 @@ export function mergeDiscoveredPostings(
         : []),
       provenance,
     ]);
-    const enrichedPosting = existingJob
-      ? settleCanonicalRoute(
-          enrichDiscoveredPosting(posting, existingJob),
-          existingJob,
-          mergedProvenance,
-          posting,
-        )
-      : enrichDiscoveredPosting(posting, existingJob);
+    const enrichedPosting = prepareDiscoveryPosting(
+      existingJob
+        ? settleCanonicalRoute(
+            enrichDiscoveredPosting(posting, existingJob),
+            existingJob,
+            mergedProvenance,
+            posting,
+          )
+        : enrichDiscoveredPosting(posting, existingJob),
+      existingJob,
+    );
     const matchAssessment = assessPosting
       ? assessPosting(enrichedPosting)
       : createMatchAssessment(profile, searchPreferences, enrichedPosting);
-    let mergedJob = SavedJobSchema.parse({
+    let mergedJob: SavedJob = {
       ...assembleMergedDiscoveredJob({
         matchAssessment,
         enrichedPosting,
@@ -1246,7 +1343,7 @@ export function mergeDiscoveredPostings(
         existingJob,
       }),
       provenance: mergedProvenance,
-    });
+    };
 
     if (!existingJob && nextJobsById.has(mergedJob.id)) {
       const baseId = `${mergedJob.id}_${createJobIdentityDigest(posting)}`;
@@ -1256,7 +1353,7 @@ export function mergeDiscoveredPostings(
         availableId = `${baseId}_${collisionIndex}`;
         collisionIndex += 1;
       }
-      mergedJob = SavedJobSchema.parse({ ...mergedJob, id: availableId });
+      mergedJob = { ...mergedJob, id: availableId };
     }
 
     if (existingJob) {
@@ -1271,33 +1368,80 @@ export function mergeDiscoveredPostings(
   }
 
   const jobsBeforeAudit = [...nextJobsById.values()];
-  const currentRankById = buildVisibleDiscoveryRankById(jobsBeforeAudit);
+  const isAudited = (jobId: string) =>
+    previousJobsById.has(jobId) && (!auditJobIds || auditJobIds.has(jobId));
+  // Ranks are only read for audited jobs; a batch of only new jobs, or an
+  // audit list naming no saved job, sorts nothing.
+  const auditsAny =
+    (auditJobIds
+      ? [...auditJobIds].some(isAudited)
+      : previousJobsById.size > 0) &&
+    (options?.recordRankOnlyAudits !== false ||
+      jobsBeforeAudit.some((job) => {
+        if (!isAudited(job.id)) return false;
+        const previous = previousJobsById.get(job.id)?.matchAssessment;
+        return (
+          previous !== job.matchAssessment &&
+          JSON.stringify(previous) !== JSON.stringify(job.matchAssessment)
+        );
+      }));
+  const recordRanks = options?.recordRankOnlyAudits !== false;
+  const previousRankById =
+    auditsAny && recordRanks ? buildVisibleDiscoveryRankById(savedJobs) : null;
+  const currentRankById =
+    auditsAny && recordRanks
+      ? buildVisibleDiscoveryRankById(jobsBeforeAudit)
+      : null;
   const auditRecordedAt = selectLatestDiscoveryTimestamp(discoveredPostings);
-  const mergedJobs = jobsBeforeAudit.map((job) => {
-    const previousJob = previousJobsById.get(job.id);
-    if (!previousJob || (auditJobIds && !auditJobIds.has(job.id))) {
-      return job;
-    }
+  const mergedJobs = !auditsAny
+    ? jobsBeforeAudit
+    : jobsBeforeAudit.map((job) => {
+        const previousJob = previousJobsById.get(job.id);
+        if (!previousJob || !isAudited(job.id)) {
+          return job;
+        }
+        // Only changed merge rows need an assessment audit. Re-parsing an
+        // untouched inventory row copied its listing, provenance and verdicts.
+        if (
+          options?.recordRankOnlyAudits === false &&
+          (previousJob === job ||
+            JSON.stringify(previousJob.matchAssessment) ===
+              JSON.stringify(job.matchAssessment))
+        )
+          return job;
 
-    const audit = createMatchAssessmentChangeAudit({
-      previous: previousJob.matchAssessment,
-      current: job.matchAssessment,
-      previousRank: previousRankById.get(job.id) ?? null,
-      currentRank: currentRankById.get(job.id) ?? null,
-      recordedAt: auditRecordedAt,
-    });
+        const audit = createMatchAssessmentChangeAudit({
+          previous: previousJob.matchAssessment,
+          current: job.matchAssessment,
+          previousRank: previousRankById?.get(job.id) ?? null,
+          currentRank: currentRankById?.get(job.id) ?? null,
+          recordedAt: auditRecordedAt,
+        });
 
-    return SavedJobSchema.parse({
-      ...job,
-      latestMatchAssessmentAudit: hasMeaningfulMatchAssessmentChange(audit)
-        ? audit
-        : previousJob.latestMatchAssessmentAudit,
-    });
-  });
+        const latestMatchAssessmentAudit = hasMeaningfulMatchAssessmentChange(
+          audit,
+        )
+          ? audit
+          : previousJob.latestMatchAssessmentAudit;
+        if (latestMatchAssessmentAudit === job.latestMatchAssessmentAudit)
+          return job;
+        // Both the job and audit have already crossed their schema boundaries.
+        const audited = {
+          ...job,
+          latestMatchAssessmentAudit,
+        };
+        identityIndex.replace(job, audited);
+        nextJobsById.set(audited.id, audited);
+        return audited;
+      });
+  // An audit never moves a job in the order, so the merged list ranks as
+  // the list before it; the next merge starts from this list.
+  if (currentRankById) visibleRankCache.set(mergedJobs, currentRankById);
+  if (reuseInventory) mergeInventories.set(mergedJobs, nextJobsById);
 
   return {
     mergedJobs,
-    newJobs: mergedJobs.filter((job) => newJobIds.has(job.id)),
+    newJobs: [...newJobIds].map((id) => nextJobsById.get(id)!),
     validatedCount,
     duplicatesMerged,
     invalidSkipped,
@@ -1309,8 +1453,7 @@ function uniqueProvenance(
 ): SavedJobDiscoveryProvenance[] {
   const kept = new Map<string, SavedJobDiscoveryProvenance>();
 
-  for (const value of values) {
-    const parsed = SavedJobDiscoveryProvenanceSchema.parse(value);
+  for (const parsed of values) {
     const key = `${parsed.targetId}:${parsed.adapterKind}:${parsed.resolvedAdapterKind ?? "none"}:${parsed.startingUrl}`;
     const first = kept.get(key);
     if (!first) {
@@ -1354,12 +1497,37 @@ function uniqueProvenance(
  * A saved job's identity for matching new sightings: its own fields plus the
  * listing links its other sources showed.
  */
-export function toSightingIdentityInput(job: SavedJob): SavedJob & {
-  alternateListingUrls: string[];
-  matchAcrossSources: true;
-} {
-  return {
-    ...job,
+const sightingIdentities = new WeakMap<SavedJob, JobIdentityInput>();
+
+export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
+  const immutable = Object.isFrozen(job);
+  const cached = immutable ? sightingIdentities.get(job) : undefined;
+  if (cached) return cached;
+  const saved = readPreparedSavedJobIdentity(job);
+  const identity: JobIdentityInput = {
+    source: job.source,
+    sourceJobId: job.sourceJobId,
+    canonicalUrl: job.canonicalUrl,
+    applicationUrl: job.applicationUrl,
+    providerKey: job.providerKey,
+    providerBoardToken: job.providerBoardToken,
+    providerIdentifier: job.providerIdentifier,
+    title: job.title,
+    seniority: job.seniority,
+    company: job.company,
+    location: job.location,
+    ...(saved
+      ? saved.content
+        ? {
+            exactContent: {
+              ...saved.content,
+              read: () => readPackedListingContent(saved.content!.packed),
+            },
+          }
+        : {}
+      : { description: job.description }),
+    postedAt: job.postedAt,
+    postedAtText: job.postedAtText,
     matchAcrossSources: true,
     alternateListingUrls: job.provenance.flatMap((entry) =>
       entry.listingUrl && entry.listingUrl !== job.canonicalUrl
@@ -1367,6 +1535,38 @@ export function toSightingIdentityInput(job: SavedJob): SavedJob & {
         : [],
     ),
   };
+  if (saved) rememberPreparedJobIdentity(identity, saved);
+  const preparation = readDiscoveryPreparation(job);
+  if (preparation && !saved)
+    writeDiscoveryPreparation(identity, {
+      ...(preparation.content ? { content: preparation.content } : {}),
+      ...(preparation.identity ? { identity: preparation.identity } : {}),
+    });
+  // The run's indexes keep identity facts, never a saved row's large text or
+  // its unrelated fingerprints/normalized posting. Compressed evidence is
+  // inflated only to prove an actual content-alias collision.
+  const compact = compactJobIdentity(identity);
+  if (!saved && !immutable) {
+    const content = compact.exactContent;
+    const keys = readDiscoveryPreparation(compact)!.identity!;
+    writeDiscoveryPreparation(job, {
+      savedIdentity: {
+        basis: captureDiscoverySavedIdentityBasis(job),
+        value: {
+          version: 1,
+          local: keys.local,
+          acrossSources: keys.acrossSources,
+          content: content?.packed
+            ? { digest: content.digest, packed: content.packed }
+            : null,
+        },
+      },
+    });
+  }
+  if (immutable) {
+    sightingIdentities.set(job, compact);
+  }
+  return compact;
 }
 
 const SIGHTING_ROUTE_FIELDS = [
@@ -1434,7 +1634,10 @@ export function applySightingRoute<T extends JobPosting>(
     providerBoardToken: sighting.providerBoardToken ?? null,
     providerIdentifier: sameProvider ? job.providerIdentifier : null,
   } as T;
-  return { ...routed, atsProvider: detectAtsProvider(routed) } as T;
+  return prepareDiscoveryPosting({
+    ...routed,
+    atsProvider: detectAtsProvider(routed),
+  } as T);
 }
 
 function settleCanonicalRoute(

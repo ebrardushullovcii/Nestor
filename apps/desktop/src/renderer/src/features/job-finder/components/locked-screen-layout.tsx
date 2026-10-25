@@ -2,7 +2,6 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -56,18 +55,6 @@ function normalizeWheelDeltaY(
     return deltaY * pageSize;
   }
   return deltaY;
-}
-
-export function getLockedScreenLayoutHeight(
-  topHeight: number,
-  lockTopContent: boolean,
-): string | undefined {
-  // The grid already owns the natural content height. Adding the measured
-  // header height here creates a second, synthetic scroll range; short setup
-  // routes can then scroll onto a blank canvas below their real content.
-  void topHeight;
-  void lockTopContent;
-  return undefined;
 }
 
 /**
@@ -278,16 +265,23 @@ export function LockedScreenLayout({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const topRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const [topHeight, setTopHeight] = useState(0);
+  const scrollResetKeyRef = useRef(scrollResetKey);
+  // The header height is read when a wheel, key or scroll needs it, when
+  // layout is already up to date. Measuring it on mount forced a full layout
+  // of the new screen before its first paint and rendered the layout twice.
+  const readTopHeight = () =>
+    Math.round(topRef.current?.getBoundingClientRect().height ?? 0);
 
   // `main` is intentionally overflow-hidden for locked routes, so this
-  // nested element is the route's scroll owner. Reset it before the first
-  // paint on every layout mount and when the caller changes the route/view
-  // identity; otherwise browser restoration/route reuse can leave the route
-  // header underneath the fixed shell. Disable CSS scroll anchoring on this
-  // owner as well: status rows and first-result hydration may change the
-  // header height after entry, but must not invent a partial scroll position.
-  // Explicit wheel/keyboard/first-result writes still own later scrolling.
+  // nested element is the route's scroll owner. Reset it before paint when
+  // the caller changes the route/view identity; otherwise route reuse can
+  // leave the route header underneath the fixed shell. A freshly mounted
+  // owner already starts at the top, and writing its scroll position forced
+  // a layout of the whole new screen, so mount only turns anchoring off.
+  // Disable CSS scroll anchoring on this owner: status rows and first-result
+  // hydration may change the header height after entry, but must not invent
+  // a partial scroll position. Explicit wheel/keyboard/first-result writes
+  // still own later scrolling.
   useLayoutEffect(() => {
     const scrollArea = scrollRef.current;
     const topContentNode = topRef.current;
@@ -295,49 +289,24 @@ export function LockedScreenLayout({
       return undefined;
     }
 
+    scrollArea.style.overflowAnchor = "none";
+    if (topContentNode) {
+      topContentNode.style.overflowAnchor = "none";
+    }
+    if (scrollResetKeyRef.current === scrollResetKey) {
+      return undefined;
+    }
+    scrollResetKeyRef.current = scrollResetKey;
+
     scrollArea.scrollLeft = 0;
     scrollArea.scrollTop = 0;
-    scrollArea.style.overflowAnchor = "none";
     if (topContentNode) {
       topContentNode.scrollLeft = 0;
       topContentNode.scrollTop = 0;
-      topContentNode.style.overflowAnchor = "none";
     }
 
     return undefined;
   }, [lockTopContent, scrollResetKey]);
-
-  useLayoutEffect(() => {
-    const node = topRef.current;
-
-    if (!node) {
-      return undefined;
-    }
-
-    const updateTopHeight = () => {
-      // Round to whole pixels so sub-pixel ResizeObserver chatter cannot
-      // oscillate setState and trip "Maximum update depth exceeded" while the
-      // sticky footer and locked scrolling are mounted.
-      const nextHeight = Math.round(node.getBoundingClientRect().height);
-      setTopHeight((current) =>
-        current === nextHeight ? current : nextHeight,
-      );
-    };
-
-    updateTopHeight();
-
-    const observer = new ResizeObserver(() => {
-      updateTopHeight();
-    });
-
-    observer.observe(node);
-    window.addEventListener("resize", updateTopHeight);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateTopHeight);
-    };
-  }, []);
 
   // Snap the route header fully in or fully out once scrolling settles. Any
   // input source can otherwise leave the header band half-scrolled under the
@@ -347,7 +316,7 @@ export function LockedScreenLayout({
   useEffect(() => {
     const scrollArea = scrollRef.current;
 
-    if (!scrollArea || !lockTopContent || topHeight <= 0) {
+    if (!scrollArea || !lockTopContent) {
       return undefined;
     }
 
@@ -359,7 +328,7 @@ export function LockedScreenLayout({
         direction,
         maxScrollTop: getScrollRange(scrollArea),
         scrollTop: scrollArea.scrollTop,
-        topHeight,
+        topHeight: readTopHeight(),
       });
 
       if (settleTarget === null) {
@@ -401,7 +370,7 @@ export function LockedScreenLayout({
       }
       scrollArea.removeEventListener("scroll", handleScroll);
     };
-  }, [lockTopContent, topHeight]);
+  }, [lockTopContent]);
 
   useEffect(() => {
     const content = contentRef.current;
@@ -473,6 +442,7 @@ export function LockedScreenLayout({
       const paneTargets = new Map<HTMLElement, number>();
       let didManualConsumption = false;
 
+      const topHeight = readTopHeight();
       const consumeLockedHeader = () => {
         const headerTarget = getLockedHeaderWheelTarget({
           deltaY: remainingDeltaY,
@@ -693,6 +663,7 @@ export function LockedScreenLayout({
       let nextOuterScrollTop = initialOuterScrollTop;
       let nextNestedScrollTop: number | null = null;
 
+      const topHeight = readTopHeight();
       const consumeLockedHeader = () => {
         const headerTarget = getLockedHeaderWheelTarget({
           deltaY: remainingDeltaY,
@@ -790,12 +761,9 @@ export function LockedScreenLayout({
         capture: true,
       });
     };
-  }, [lockTopContent, topHeight]);
+  }, [lockTopContent]);
 
   const layoutStyle: CSSProperties = {
-    ...(getLockedScreenLayoutHeight(topHeight, lockTopContent)
-      ? { height: getLockedScreenLayoutHeight(topHeight, lockTopContent) }
-      : {}),
     ...(reserveRightRail
       ? { paddingRight: "min(31rem, calc(100vw - 32rem))" }
       : {}),

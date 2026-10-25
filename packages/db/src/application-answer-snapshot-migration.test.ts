@@ -79,6 +79,10 @@ describe("approved application answer snapshot migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       runMigrations(database);
+      // The simulated older schema predates column-aware change-feed triggers.
+      database.exec(
+        "DROP TRIGGER workspace_feed_application_answer_snapshots_update",
+      );
       database.exec(
         "ALTER TABLE application_answer_snapshots DROP COLUMN digest",
       );
@@ -112,6 +116,10 @@ describe("approved application answer snapshot migration", () => {
     const database = new DatabaseSync(":memory:");
     try {
       runMigrations(database);
+      // The simulated older schema predates column-aware change-feed triggers.
+      database.exec(
+        "DROP TRIGGER workspace_feed_application_answer_snapshots_update",
+      );
       database.exec(
         "ALTER TABLE application_answer_snapshots DROP COLUMN digest",
       );

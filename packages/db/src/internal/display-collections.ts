@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
@@ -22,7 +22,12 @@ import type {
 } from "../repository-types";
 import { APPLY_COLLECTION_ORDER_BY_SQL } from "../apply-collection-support";
 import { freezeProjection } from "./saved-job-projection";
+import {
+  createResumeApprovalProjection,
+  createTailoredAssetFileProjection,
+} from "./resume-approval-state";
 import { parsePersistedRowValue, type StateCollectionTable } from "./state";
+import type { ResumeStateFold } from "./resume-approval-fold";
 
 /**
  * This is a borrowed read path, not a canonical repository cache. TEMP markers
@@ -31,14 +36,22 @@ import { parsePersistedRowValue, type StateCollectionTable } from "./state";
  */
 export function createDisplayCollectionsReader(database: DatabaseSync) {
   const readVersion = database.prepare("PRAGMA data_version");
+  const foldPreparers = new Map<
+    string,
+    (fold: ResumeStateFold) => () => void
+  >();
+  let cachedDraftHasApproval: (id: string) => boolean | undefined = () =>
+    undefined;
 
   function collection<T extends { id: string }>(
     table: StateCollectionTable,
     schema: SchemaParser<T>,
     orderBy: string,
     where = "1",
+    { hasApproval }: { hasApproval?: (row: T) => boolean } = {},
   ): () => readonly T[] {
     const prefix = `display_${table}`;
+    const rowsSql = `id, value FROM ${table}`;
     database.exec(`
       CREATE TEMP TABLE ${prefix}_epoch (revision INTEGER NOT NULL);
       INSERT INTO ${prefix}_epoch VALUES (0);
@@ -58,7 +71,7 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
     `);
     const epoch = database.prepare(`SELECT revision FROM ${prefix}_epoch`);
     const all = database.prepare(
-      `SELECT id, value FROM ${table} WHERE ${where} ORDER BY ${orderBy}`,
+      `SELECT ${rowsSql} WHERE ${where} ORDER BY ${orderBy}`,
     );
     const ids = database.prepare(
       `SELECT id FROM ${table} WHERE ${where} ORDER BY ${orderBy}`,
@@ -66,36 +79,79 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
     const changes = database.prepare(
       `SELECT id FROM ${prefix}_changes WHERE revision > ?`,
     );
-    const changedRows = database.prepare(`SELECT id, value FROM ${table}
+    const changedRows = database.prepare(`SELECT ${rowsSql}
       WHERE (${where}) AND id IN (SELECT value FROM json_each(?))`);
     const clear = database.prepare(
       `DELETE FROM ${prefix}_changes WHERE revision <= ?`,
     );
+    if (table === "resume_drafts" || table === "tailored_assets") {
+      const pending = database.prepare(
+        `SELECT revision FROM ${prefix}_changes WHERE id = ? AND revision > ?`,
+      );
+      const clearFold = database.prepare(
+        `DELETE FROM ${prefix}_changes WHERE id = ?`,
+      );
+      if (hasApproval) {
+        cachedDraftHasApproval = (id) => {
+          const body = rowsById.get(id);
+          if (
+            !body ||
+            Number(readVersion.get()?.data_version) !== cachedVersion ||
+            pending.get(id, cachedEpoch)
+          )
+            return undefined;
+          return hasApproval(body);
+        };
+      }
+      foldPreparers.set(table, ({ id, patch }) => {
+        // Reuse only a body whose exact pre-fold version is already cached.
+        // Other writers and earlier unconsumed edits still take the normal read.
+        const body = rowsById.get(id);
+        if (
+          !body ||
+          Number(readVersion.get()?.data_version) !== cachedVersion ||
+          pending.get(id, cachedEpoch)
+        )
+          return () => {};
+        return () => {
+          rowsById.set(id, Object.freeze({ ...body, ...patch }));
+          clearFold.run(id);
+        };
+      });
+    }
     let snapshot: readonly T[] | null = null;
     let rowsById = new Map<string, T>();
     let cachedEpoch = -1;
     let cachedVersion = -1;
-    const parse = (row: { id?: unknown; value?: unknown }) =>
-      freezeProjection(
-        parsePersistedRowValue({
-          tableName: table,
-          rowId: String(row.id),
-          rawValue: String(row.value),
-          schema,
-        }),
+    /** Rows of one SELECT; a marked table marks those it validated. */
+    const readRows = (
+      statement: StatementSync,
+      ...params: SQLInputValue[]
+    ): T[] => {
+      return statement.all(...params).map((row) =>
+        freezeProjection(
+          parsePersistedRowValue<T>({
+            database,
+            tableName: table,
+            rowId: String(row.id),
+            rawValue: String(row.value),
+            schema,
+          }),
+        ),
       );
+    };
 
     return () => {
       const revision = Number(epoch.get()?.revision);
       const version = Number(readVersion.get()?.data_version);
       // A rollback may reuse an epoch. Reads within a transaction must neither
       // enter the committed cache nor consume that transaction's change markers.
-      if (database.isTransaction) return Object.freeze(all.all().map(parse));
+      if (database.isTransaction) return Object.freeze(readRows(all));
       if (snapshot && revision === cachedEpoch && version === cachedVersion)
         return snapshot;
       let next: T[];
       if (!snapshot || version !== cachedVersion) {
-        next = all.all().map(parse);
+        next = readRows(all);
       } else {
         const orderedIds = ids.all().map((row) => String(row.id));
         const dirty = new Set(
@@ -105,10 +161,9 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
         // previous latest-only set, even though that row itself did not change.
         for (const id of orderedIds) if (!rowsById.has(id)) dirty.add(id);
         const replacements = new Map(
-          changedRows.all(JSON.stringify([...dirty])).map((row) => {
-            const value = parse(row);
-            return [value.id, value] as const;
-          }),
+          readRows(changedRows, JSON.stringify([...dirty])).map(
+            (value) => [value.id, value] as const,
+          ),
         );
         next = orderedIds.map((id) => {
           const row = replacements.get(id) ?? rowsById.get(id);
@@ -135,10 +190,18 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
       TailoredAssetSchema,
       "id ASC",
     ),
+    // About 18 MB of drafts on a large workspace: 0.3 s to validate.
     resumeDrafts: collection(
       "resume_drafts",
       ResumeDraftSchema,
       "updated_at DESC, id ASC",
+      "1",
+      {
+        hasApproval: (draft) =>
+          draft.status === "approved" ||
+          draft.approvedAt !== null ||
+          draft.approvedExportId !== null,
+      },
     ),
     resumeExportArtifacts: collection(
       "resume_export_artifacts",
@@ -210,11 +273,13 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
     )`,
     ),
   };
-  return (): Promise<JobFinderDisplayCollections> => {
+  const projectResumeApprovals = createResumeApprovalProjection(database);
+  const projectTailoredFiles = createTailoredAssetFileProjection(database);
+  const read = (): Promise<JobFinderDisplayCollections> => {
     try {
       return Promise.resolve({
-        tailoredAssets: readers.tailoredAssets(),
-        resumeDrafts: readers.resumeDrafts(),
+        tailoredAssets: projectTailoredFiles(readers.tailoredAssets()),
+        resumeDrafts: projectResumeApprovals(readers.resumeDrafts()),
         resumeExportArtifacts: readers.resumeExportArtifacts(),
         resumeResearchArtifacts: readers.resumeResearchArtifacts(),
         applyRuns: readers.applyRuns(),
@@ -235,4 +300,9 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
       );
     }
   };
+  return Object.assign(read, {
+    draftHasApproval: (id: string) => cachedDraftHasApproval(id),
+    prepareResumeStateFold: (fold: ResumeStateFold) =>
+      foldPreparers.get(fold.table)?.(fold) ?? (() => {}),
+  });
 }

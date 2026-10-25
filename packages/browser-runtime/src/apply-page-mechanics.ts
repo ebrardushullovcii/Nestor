@@ -14,11 +14,9 @@ import type {
   RawApplyLink,
   RawApplyPage,
 } from "@nestor/contracts";
-import {
-  describeBrowserError,
-  isPageReplacedError,
-} from "@nestor/contracts";
+import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
+import { readPageLinkedText } from "./page-linked-text";
 
 import {
   closePrepareOnlyAuthorizedFormActionWindow,
@@ -519,11 +517,29 @@ export async function readApplyStepLabel(
 }
 
 async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
-  const [controls, actions, links, bodyText, validationErrors, stepLabel] =
-    await Promise.all([
-      page
-        .locator(APPLY_CONTROL_SELECTOR)
-        .evaluateAll((elements): RawApplyControl[] => {
+  const selectors = {
+    controls: APPLY_CONTROL_SELECTOR,
+    actions: APPLY_ACTION_SELECTOR,
+    links: APPLY_LINK_SELECTOR,
+    validationErrors: "[role='alert'], [aria-live='assertive']",
+    headings: "h1, h2, h3, [role='heading']",
+    clickables: APPLY_CLICKABLE_SELECTOR,
+  };
+  // One DOM snapshot, preserving selector order and shadow-root access.
+  const [snapshot, stepLabel, openedTabs] = await Promise.all([
+    page
+      .locator(Object.values(selectors).join(", "))
+      .evaluateAll((elements, selectors) => {
+        const matching = (selector: string) =>
+          elements.filter((element) => element.matches(selector));
+        const safe = <T>(read: () => T, fallback: T): T => {
+          try {
+            return read();
+          } catch {
+            return fallback;
+          }
+        };
+        const controls = ((elements: Element[]): RawApplyControl[] => {
           const labelText = (element: Element | null): string => {
             if (!element) return "";
             const clone = element.cloneNode(true) as Element;
@@ -733,10 +749,8 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
                 "",
             };
           });
-        }),
-      page
-        .locator(APPLY_ACTION_SELECTOR)
-        .evaluateAll((elements): RawApplyAction[] =>
+        })(matching(selectors.controls));
+        const actions = ((elements: Element[]): RawApplyAction[] =>
           elements.map((element, index) => {
             const html = element as HTMLElement;
             const input = element instanceof HTMLInputElement ? element : null;
@@ -775,55 +789,112 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
                   }
                 : {}),
             };
-          }),
-        ),
-      page
-        .locator(APPLY_LINK_SELECTOR)
-        .evaluateAll((elements): RawApplyLink[] =>
-          // More links than this on one page are never the way to a form.
-          elements.slice(0, 400).map((element, index) => {
-            const html = element as HTMLElement;
-            const anchor =
-              element instanceof HTMLAnchorElement ? element : null;
-            const style = window.getComputedStyle(html);
-            const rect = html.getBoundingClientRect();
-            return {
-              index,
-              label:
-                element.getAttribute("aria-label")?.trim() ||
-                html.innerText.trim() ||
-                element.getAttribute("title")?.trim() ||
-                "",
-              // `href` on the element is already resolved against the page for
-              // a web address, and left as written for anything else.
-              href: anchor?.href || element.getAttribute("href") || "",
-              target: anchor?.target.trim() ?? "",
-              visible:
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                style.opacity !== "0" &&
-                html.getClientRects().length > 0,
-              topOffset: Math.round(rect.top + window.scrollY),
-            };
-          }),
-        )
-        .catch(() => [] as RawApplyLink[]),
-      page
-        .locator("body")
-        .innerText({ timeout: 5_000 })
-        .then((text) => text.slice(0, 20_000))
-        .catch(() => ""),
-      page
-        .locator("[role='alert'], [aria-live='assertive']")
-        .evaluateAll((elements) =>
-          elements
-            .map((element) => (element as HTMLElement).innerText.trim())
-            .filter((text) => text.length > 0 && text.length < 300)
-            .slice(0, 12),
-        )
-        .catch(() => [] as string[]),
-      readApplyStepLabel(page),
-    ]);
+          }))(matching(selectors.actions));
+        const links = safe(
+          () =>
+            ((elements: Element[]): RawApplyLink[] =>
+              elements.map((element, index) => {
+                const html = element as HTMLElement;
+                const anchor =
+                  element instanceof HTMLAnchorElement ? element : null;
+                const style = window.getComputedStyle(html);
+                const rect = html.getBoundingClientRect();
+                return {
+                  index,
+                  label:
+                    element.getAttribute("aria-label")?.trim() ||
+                    html.innerText.trim() ||
+                    element.getAttribute("title")?.trim() ||
+                    "",
+                  // `href` on the element is already resolved against the page for
+                  // a web address, and left as written for anything else.
+                  href: anchor?.href || element.getAttribute("href") || "",
+                  target: anchor?.target.trim() ?? "",
+                  visible:
+                    style.display !== "none" &&
+                    style.visibility !== "hidden" &&
+                    style.opacity !== "0" &&
+                    html.getClientRects().length > 0,
+                  topOffset: Math.round(rect.top + window.scrollY),
+                };
+              }))(matching(selectors.links)),
+          [],
+        );
+        const validationErrors = safe(
+          () =>
+            ((elements: Element[]) =>
+              elements
+                .map((element) => (element as HTMLElement).innerText.trim())
+                .filter((text) => text.length > 0 && text.length < 300)
+                .slice(0, 12))(matching(selectors.validationErrors)),
+          [],
+        );
+        const headings = safe(
+          () =>
+            ((elements: Element[]): RawApplyHeading[] =>
+              elements.slice(0, 60).flatMap((element) => {
+                const html = element as HTMLElement;
+                const text = html.innerText.trim().slice(0, 300);
+                if (!text) return [];
+                const explicit = element.getAttribute("aria-level");
+                const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
+                return [
+                  {
+                    level: Number.parseInt(explicit ?? fromTag ?? "2", 10) || 2,
+                    text,
+                  },
+                ];
+              }))(matching(selectors.headings)),
+          [],
+        );
+        const clickables = safe(
+          () =>
+            ((elements: Element[]): RawApplyClickable[] =>
+              elements.slice(0, 300).flatMap((element, index) => {
+                const html = element as HTMLElement;
+                const style = window.getComputedStyle(html);
+                const rect = html.getBoundingClientRect();
+                const label = (
+                  element.getAttribute("aria-label")?.trim() ||
+                  html.innerText.trim() ||
+                  element.getAttribute("title")?.trim() ||
+                  ""
+                ).slice(0, 300);
+                if (!label) return [];
+                return [
+                  {
+                    index,
+                    label,
+                    role: element.getAttribute("role")?.toLowerCase() ?? "",
+                    tagName: element.tagName.toLowerCase(),
+                    visible:
+                      style.display !== "none" &&
+                      style.visibility !== "hidden" &&
+                      style.opacity !== "0" &&
+                      html.getClientRects().length > 0,
+                    topOffset: Math.round(rect.top + window.scrollY),
+                  },
+                ];
+              }))(matching(selectors.clickables)),
+          [],
+        );
+        return {
+          controls,
+          actions,
+          links,
+          validationErrors,
+          headings,
+          clickables,
+          url: window.location.href,
+          title: document.title,
+          bodyText: document.body?.innerText.slice(0, 20_000) ?? "",
+          loading: document.readyState !== "complete",
+        };
+      }, selectors),
+    readApplyStepLabel(page),
+    readOpenedTabs(page),
+  ]);
+  const { controls } = snapshot;
 
   // A list the page draws itself does not report its own selection, so it is
   // read separately before anything decides the control is empty.
@@ -869,73 +940,11 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
     enrichedControls,
   );
 
-  const [headings, clickables, openedTabs, loading] = await Promise.all([
-    page
-      .locator("h1, h2, h3, [role='heading']")
-      .evaluateAll((elements): RawApplyHeading[] =>
-        elements.slice(0, 60).flatMap((element) => {
-          const html = element as HTMLElement;
-          const text = html.innerText.trim().slice(0, 300);
-          if (!text) return [];
-          const explicit = element.getAttribute("aria-level");
-          const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
-          return [
-            {
-              level: Number.parseInt(explicit ?? fromTag ?? "2", 10) || 2,
-              text,
-            },
-          ];
-        }),
-      )
-      .catch(() => [] as RawApplyHeading[]),
-    page
-      .locator(APPLY_CLICKABLE_SELECTOR)
-      .evaluateAll((elements): RawApplyClickable[] =>
-        elements.slice(0, 300).flatMap((element, index) => {
-          const html = element as HTMLElement;
-          const style = window.getComputedStyle(html);
-          const rect = html.getBoundingClientRect();
-          const label = (
-            element.getAttribute("aria-label")?.trim() ||
-            html.innerText.trim() ||
-            element.getAttribute("title")?.trim() ||
-            ""
-          ).slice(0, 300);
-          if (!label) return [];
-          return [
-            {
-              index,
-              label,
-              role: element.getAttribute("role")?.toLowerCase() ?? "",
-              tagName: element.tagName.toLowerCase(),
-              visible:
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                style.opacity !== "0" &&
-                html.getClientRects().length > 0,
-              topOffset: Math.round(rect.top + window.scrollY),
-            },
-          ];
-        }),
-      )
-      .catch(() => [] as RawApplyClickable[]),
-    readOpenedTabs(page),
-    page.evaluate(() => document.readyState !== "complete").catch(() => false),
-  ]);
-
   return {
-    url: page.url(),
-    title: await page.title().catch(() => null),
-    bodyText,
-    headings,
+    ...snapshot,
     controls: controlsWithChoices,
-    actions,
-    links,
-    clickables,
     openedTabs,
-    validationErrors,
     stepLabel,
-    loading,
   };
 }
 
@@ -1368,6 +1377,70 @@ export function createPlaywrightApplyPageMechanics(
 ): ApplyRawPageHands {
   return {
     readPage: () => readRawApplyPage(page),
+    readLinkedText: () => readPageLinkedText(page),
+    checkAction: async (ref): Promise<ApplyWriteResult> => {
+      const locator = actionLocator(page, ref);
+      if (!locator)
+        return { ok: false, error: `No action named ${ref} on this page.` };
+      try {
+        return await locator.evaluate(
+          (element): ApplyWriteResult => {
+            if (
+              !(element instanceof HTMLElement) ||
+              element.matches(":disabled, [aria-disabled='true']")
+            )
+              return {
+                ok: false,
+                error: "The intended button is unavailable.",
+              };
+            element.scrollIntoView({
+              block: "center",
+              inline: "center",
+              behavior: "instant",
+            });
+            const rect = element.getBoundingClientRect();
+            const root = element.getRootNode();
+            const hit = (
+              root instanceof ShadowRoot ? root : document
+            ).elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
+            if (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              hit &&
+              (hit === element || element.contains(hit))
+            )
+              return {
+                ok: true,
+                observedValue: "The intended button is reachable.",
+              };
+            const covering =
+              hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
+              hit;
+            const text = (covering?.textContent ?? "")
+              .replace(/\s+/gu, " ")
+              .trim()
+              .slice(0, 300);
+            return {
+              ok: false,
+              error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
+            };
+          },
+          undefined,
+          { timeout: 5_000 },
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          error: describeWriteFailure(
+            error,
+            "The intended button could not be checked.",
+          ),
+        };
+      }
+    },
     fillText: async (ref, value): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
@@ -1375,11 +1448,8 @@ export function createPlaywrightApplyPageMechanics(
       }
       try {
         await locator.fill(value, { timeout: 5_000 });
-        // Some controlled inputs accept the synthetic input event and then
-        // immediately clear themselves because the site did not accept the
-        // value. Recording that as a successful write makes the agent revisit
-        // the same empty field indefinitely.
-        await page.waitForTimeout(300);
+        // Check immediate acceptance here. The apply workflow checks retention
+        // after 300 ms, sharing that window across a batch of typed answers.
         const observedValue = await locator.inputValue({ timeout: 2_000 });
         if (value.trim().length > 0 && observedValue.trim().length === 0) {
           return {
@@ -1445,9 +1515,6 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
-        await locator
-          .scrollIntoViewIfNeeded({ timeout: 2_000 })
-          .catch(() => undefined);
         // A covered native input used to spend five seconds failing the
         // pointer check before DOM activation. Detect that geometry up front;
         // reachable controls still use Playwright's normal pointer events.
@@ -1464,6 +1531,14 @@ export function createPlaywrightApplyPageMechanics(
                 }
                 if (element.checked === input.checked) return true;
                 if (input.coveredOnly) {
+                  // setChecked scrolls for its pointer action. The hit test
+                  // only needs current geometry, without a separate wait for
+                  // animation-frame stability on a hidden page.
+                  element.scrollIntoView({
+                    block: "center",
+                    inline: "center",
+                    behavior: "instant",
+                  });
                   const rect = element.getBoundingClientRect();
                   const root = element.getRootNode();
                   const hit = (
@@ -1748,11 +1823,7 @@ export function createPlaywrightApplyPageMechanics(
     },
     readText: async (ref) => {
       if (!ref) {
-        return page
-          .locator("body")
-          .innerText({ timeout: 5_000 })
-          .then((text) => text.slice(0, 40_000))
-          .catch(() => "");
+        return page.locator("body").innerText({ timeout: 5_000 });
       }
       const locator =
         controlLocator(page, ref) ??
@@ -1762,10 +1833,7 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator) {
         return "";
       }
-      return locator
-        .innerText({ timeout: 5_000 })
-        .then((text) => text.slice(0, 40_000))
-        .catch(() => "");
+      return locator.innerText({ timeout: 5_000 });
     },
   };
 }

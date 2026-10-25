@@ -1,4 +1,7 @@
-import { ModelRequestHttpError } from "./model-request-transport";
+import {
+  ModelRequestHttpError,
+  ModelRequestTimeoutError,
+} from "./model-request-transport";
 
 export interface AiProviderAccessFailure {
   readonly reason: "funding" | "authentication" | "permission";
@@ -11,7 +14,7 @@ const ACCESS_FAILURES = new Map<number, AiProviderAccessFailure>([
     {
       reason: "funding",
       message:
-        "The AI service is unavailable because its provider rejected the request for insufficient funds. Nothing was changed. Try again after the service is restored.",
+        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
     },
   ],
   [
@@ -19,7 +22,7 @@ const ACCESS_FAILURES = new Map<number, AiProviderAccessFailure>([
     {
       reason: "authentication",
       message:
-        "The AI service is unavailable because its provider could not authenticate the request. Nothing was changed. Try again after the service is restored.",
+        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
     },
   ],
   [
@@ -27,7 +30,7 @@ const ACCESS_FAILURES = new Map<number, AiProviderAccessFailure>([
     {
       reason: "permission",
       message:
-        "The AI service is unavailable because its provider denied access to the service. Nothing was changed. Try again after the service is restored.",
+        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
     },
   ],
 ]);
@@ -55,19 +58,55 @@ export function getAiProviderAccessFailure(
   return null;
 }
 
-/**
- * The provider was still refusing for too many requests after the transport's
- * own retries. Callers running many model requests at once should send fewer.
- */
-export function isAiProviderRateLimited(error: unknown): boolean {
+function hasModelRequestStatus(
+  error: unknown,
+  matches: (status: number) => boolean,
+): boolean {
   const visited = new Set<Error>();
   let current = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
     if (!(current instanceof Error) || visited.has(current)) return false;
     visited.add(current);
     try {
-      if (current instanceof ModelRequestHttpError && current.status === 429)
+      if (current instanceof ModelRequestHttpError && matches(current.status))
         return true;
+      current = current.cause;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * The provider was still refusing for too many requests after the transport's
+ * own retries. Callers running many model requests at once should send fewer.
+ */
+export function isAiProviderRateLimited(error: unknown): boolean {
+  return hasModelRequestStatus(error, (status) => status === 429);
+}
+
+/**
+ * The AI service turned the request away for load or its own fault (429 or
+ * 5xx), or never finished answering, even after the transport's retries.
+ * Nothing is wrong with the request: the same work can run later, so it is
+ * put off rather than failed.
+ */
+export function isAiServiceBusy(error: unknown): boolean {
+  return (
+    hasModelRequestStatus(error, (status) => status === 429 || status >= 500) ||
+    hasCause(error, (cause) => cause instanceof ModelRequestTimeoutError)
+  );
+}
+
+function hasCause(error: unknown, matches: (cause: Error) => boolean): boolean {
+  const visited = new Set<Error>();
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
+    if (!(current instanceof Error) || visited.has(current)) return false;
+    visited.add(current);
+    try {
+      if (matches(current)) return true;
       current = current.cause;
     } catch {
       return false;

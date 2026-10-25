@@ -245,14 +245,15 @@ export function ResumeWorkspaceEditorPanel(
             {helperMessage}
           </p>
           {props.draft.generationMethod === "ai" ? (
-            <div
-              className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 px-3 py-2 text-(length:--text-body) leading-6 text-foreground"
+            // A fact, not a second "read it, then approve": the approve
+            // band above already asks for the read-through.
+            <p
+              className="text-(length:--text-small) leading-5 text-foreground-muted"
               data-resume-ai-assistance-disclosure
               role="note"
             >
-              This draft was created with AI assistance. Review the full draft
-              against your experience and saved evidence before approval.
-            </div>
+              This draft was created with AI assistance from your profile.
+            </p>
           ) : null}
           {draftProvenanceMessage ? (
             <div

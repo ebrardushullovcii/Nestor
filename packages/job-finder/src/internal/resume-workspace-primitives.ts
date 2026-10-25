@@ -102,9 +102,7 @@ export function createSourceRef(
   snippet: string | null,
 ): ResumeDraftSourceRef {
   return {
-    id: createUniqueId(
-      `resume_source_${sourceKind}${sourceId ? `_${sourceId}` : ""}`,
-    ),
+    id: createUniqueId("resume_source"),
     sourceKind,
     sourceId,
     snippet,

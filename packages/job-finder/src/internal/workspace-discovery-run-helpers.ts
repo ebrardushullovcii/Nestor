@@ -1,7 +1,4 @@
 import {
-  DiscoveryRunRecordSchema,
-  DiscoveryRunReportSchema,
-  DiscoveryTimingSummarySchema,
   DISCOVERY_RUN_JOB_BUDGET_MAX,
   browserRunWaitReasonValues,
   discoveryActivityStageValues,
@@ -9,6 +6,7 @@ import {
   type DiscoveryRunRecord,
   type DiscoveryRunReport,
   type DiscoveryTargetExecution,
+  type DiscoveryTimingSummary,
 } from "@nestor/contracts";
 
 import {
@@ -59,7 +57,7 @@ function buildDiscoveryTimingSummary(
   events: readonly DiscoveryActivityEvent[],
   startedAt: string,
   completedAt: string,
-) {
+): DiscoveryTimingSummary {
   const stageTimeline = computeTimelineSummary({
     startedAt,
     completedAt,
@@ -85,7 +83,7 @@ function buildDiscoveryTimingSummary(
       })),
   });
 
-  return DiscoveryTimingSummarySchema.parse({
+  return {
     totalDurationMs: stageTimeline.totalDurationMs,
     firstActivityMs: stageTimeline.firstEventMs,
     firstCandidateMs: calculateFirstMilestoneMs(
@@ -118,7 +116,7 @@ function buildDiscoveryTimingSummary(
         durationMs,
       }),
     ),
-  });
+  };
 }
 
 function summarizeTargetExecutions(
@@ -148,7 +146,7 @@ function summarizeTargetExecutions(
     // A source whose listing was empty is marked "warning" so Home can say,
     // neutrally, that it found nothing. Listings it skipped because they are
     // already saved count as found: a quiet re-run did find them.
-    const health =
+    const health: DiscoveryRunRecord["summary"]["sourceHealth"][number]["health"] =
       execution.state === "completed"
         ? execution.jobsFound +
             execution.duplicatesMerged +
@@ -198,14 +196,14 @@ export function completeTargetExecution(
 
   const executionSummary = summarizeTargetExecutions(nextRun.targetExecutions);
 
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...nextRun,
     summary: {
       ...nextRun.summary,
       ...executionSummary,
       targetsCompleted: countCompletedTargetExecutions(nextRun),
     },
-  });
+  };
 }
 
 export function finalizeRunningTargetExecutions(
@@ -286,7 +284,7 @@ export function buildDiscoveryRunReport(
     (sum, source) => sum + (source.jobsInspected ?? 0),
     0,
   );
-  return DiscoveryRunReportSchema.parse({
+  return {
     sources: run.targetExecutions.map((source) => ({
       targetId: source.targetId,
       inspected: source.jobsInspected ?? null,
@@ -323,6 +321,7 @@ export function buildDiscoveryRunReport(
         }
       : {}),
     version: 2,
+    alreadyHere: null,
     measuredAt,
     found: counted ? inspected : found,
     unique:
@@ -352,7 +351,7 @@ export function buildDiscoveryRunReport(
           0,
         )
       : duplicates,
-  });
+  };
 }
 
 /**
@@ -372,18 +371,18 @@ export function applyDiscoveryRunRetentionCounts(
   const report =
     run.summary.report ?? buildDiscoveryRunReport(run, counts.measuredAt);
 
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...run,
     summary: {
       ...run.summary,
-      report: DiscoveryRunReportSchema.parse({
+      report: {
         ...report,
         alreadyHere: counts.alreadyHere ?? report.alreadyHere,
         retained: counts.retained,
         worthOpening: counts.worthOpening,
-      }),
+      },
     },
-  });
+  };
 }
 
 export function finalizeDiscoveryRun(
@@ -391,7 +390,7 @@ export function finalizeDiscoveryRun(
   state: "completed" | "cancelled" | "failed",
   completedAt: string,
 ): DiscoveryRunRecord {
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...run,
     state,
     completedAt,
@@ -406,7 +405,7 @@ export function finalizeDiscoveryRun(
       ),
       report: buildDiscoveryRunReport(run, completedAt),
     },
-  });
+  };
 }
 
 export function recoverInterruptedDiscoveryRun(
@@ -459,10 +458,10 @@ export function recoverInterruptedDiscoveryRun(
     }),
   );
 
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...finalizeDiscoveryRun(recoveredRun, "failed", completedAt),
     runPhase: "interrupted",
-  });
+  };
 }
 
 /**

@@ -150,7 +150,7 @@ function buildContext(overrides: {
     isCurrentResumeWorkspaceJob: () => false,
     liveDiscoveryEvents: [],
     latestWorkspaceRef: overrides.latestWorkspaceRef ?? { current: workspace },
-    locationPathname: "/job-finder/home",
+    getLocationPathname: () => "/job-finder/home",
     navigate: vi.fn(),
     navigateSafely: vi.fn(),
     profileCopilotBusy: false,
@@ -1043,7 +1043,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     expect(batchMessage).not.toMatch(/more jobs still need a resume/);
   });
 
-  it("treats a start with no eligible jobs as a deterministic no-op", async () => {
+  it("a start with no eligible jobs starts nothing and says why", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
       .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
@@ -1061,9 +1061,10 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
 
     expect(generateResume).not.toHaveBeenCalled();
     expect(getTailoredDraftPreparation().status).toBe("idle");
-    expect(getActionMessages().filter((message) => message !== null)).toEqual(
-      [],
-    );
+    // A press that does nothing used to say nothing either.
+    expect(getActionMessages().filter((message) => message !== null)).toEqual([
+      "These jobs already have their resumes.",
+    ]);
   });
 
   it("stops a disposed controller's batch tail after the active items settle without any further writes", async () => {

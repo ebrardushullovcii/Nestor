@@ -11,6 +11,7 @@ import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { resolveAnswerMemoryMatch } from "./answer-memory";
+import { formatQuestionPrompt } from "../applications/applications-recovery-state";
 
 const matchStatusCopy = {
   exact: "Exact saved-question match. Review it before choosing to use it.",
@@ -73,7 +74,7 @@ export function AnswerMemoryEditor(props: {
           </Badge>
         </div>
         <p className="text-sm font-medium text-foreground">
-          {props.question.prompt}
+          {formatQuestionPrompt(props.question.prompt)}
         </p>
         <p className="text-xs leading-5 text-muted-foreground">
           {matchStatusCopy[match.status]}

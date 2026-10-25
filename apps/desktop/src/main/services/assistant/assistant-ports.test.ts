@@ -47,6 +47,7 @@ vi.mock("../job-finder/test-api", () => ({
   isDesktopTestApiEnabled: () => false,
 }));
 vi.mock("../job-finder/workspace-updates", () => ({
+  createSearchProgressPublisher: vi.fn(() => vi.fn()),
   publishJobFinderWorkspaceUpdate: vi.fn(),
 }));
 vi.mock("../job-finder/workspace-service", () => ({
@@ -64,6 +65,7 @@ import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
+import { createSearchProgressPublisher } from "../job-finder/workspace-updates";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
@@ -267,7 +269,7 @@ describe("assistant approved resume files", () => {
 });
 
 describe("assistant interactive workspace reads", () => {
-  it("polls search startup through the projection and forwards the same search request", async () => {
+  it("returns the activity's run id without polling and forwards the same search request", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-13T12:00:00.000Z"));
     const run = DiscoveryRunRecordSchema.parse({
@@ -276,24 +278,21 @@ describe("assistant interactive workspace reads", () => {
       startedAt: new Date().toISOString(),
     });
     const idle = { activeDiscoveryRun: null, recentDiscoveryRuns: [] };
-    const running = { activeDiscoveryRun: run, recentDiscoveryRuns: [] };
     const getWorkspaceSnapshot = vi.fn(() => {
       throw new Error(
         "Canonical reads are forbidden while polling search startup",
       );
     });
-    const getWorkspaceProjection = vi
-      .fn()
-      .mockResolvedValueOnce(idle)
-      .mockResolvedValueOnce(idle)
-      .mockResolvedValueOnce(idle)
-      .mockResolvedValue(running);
+    const getWorkspaceProjection = vi.fn().mockResolvedValue(idle);
     let finish!: () => void;
     const runAgentDiscovery = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
+      (onActivity: (event: { runId: string }) => void) => {
+        onActivity({ runId: run.id });
+        return (
+        new Promise<{ activeDiscoveryRun: typeof run; recentDiscoveryRuns: [] }>((resolve) => {
+          finish = () => resolve({ activeDiscoveryRun: run, recentDiscoveryRuns: [] });
+        }));
+      },
     );
     vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
       getWorkspaceSnapshot,
@@ -316,7 +315,11 @@ describe("assistant interactive workspace reads", () => {
       runId: run.id,
       message: "The search started.",
     });
-    expect(getWorkspaceProjection).toHaveBeenCalledTimes(4);
+    expect(getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(createSearchProgressPublisher).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(createSearchProgressPublisher).mock.results[0]?.value,
+    ).toHaveBeenCalledTimes(1);
     expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
     expect(runAgentDiscovery).toHaveBeenCalledWith(
       expect.any(Function),

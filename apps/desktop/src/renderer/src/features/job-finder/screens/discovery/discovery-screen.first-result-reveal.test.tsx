@@ -20,6 +20,7 @@ vi.mock("../../hooks/use-job-detail", () => ({
     retry: () => undefined,
   }),
   clearJobDetailCache: () => undefined,
+  prefetchJobDetail: () => undefined,
 }));
 
 const state = vi.hoisted(() => ({
@@ -61,19 +62,24 @@ vi.mock("./discovery-filters-panel", () => ({
     <section aria-label="Current search">Current search</section>
   ),
 }));
-vi.mock("./discovery-results-panel", () => ({
-  DiscoveryResultsPanel: (props: {
-    latestRunVerdict?: unknown;
-    areAlsoFoundShown?: unknown;
-    jobs: readonly SavedJob[];
-    onSelectJob: (jobId: string) => void;
-  }) => {
+vi.mock("./discovery-results-panel", async () => {
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
+  DiscoveryResultsPanel: (
+    props: Parameters<typeof useFixtureListReport>[0] & {
+      latestRunVerdict?: unknown;
+      onSelectJob: (jobId: string) => void;
+    },
+  ) => {
     state.latestRunVerdicts.push(props.latestRunVerdict);
     state.alsoFoundShown.push(props.areAlsoFoundShown);
+    const jobs = useFixtureListReport(props);
     return (
       <section aria-label="Job results">
         Job results
-        {props.jobs.map((job) => (
+        {jobs.map((job) => (
           <button
             key={job.id}
             data-collection-item-id={job.id}
@@ -85,9 +91,13 @@ vi.mock("./discovery-results-panel", () => ({
       </section>
     );
   },
-}));
+  };
+});
 
-import { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",
@@ -152,7 +162,7 @@ interface ScreenOverrides {
 function buildScreen(overrides?: ScreenOverrides) {
   return (
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={{ message: null }}
         activeRun={null}
         browserSession={browserSession}
@@ -164,7 +174,6 @@ function buildScreen(overrides?: ScreenOverrides) {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={overrides?.jobs ?? []}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -311,7 +320,7 @@ describe("DiscoveryScreen first-result reveal", () => {
   });
 });
 
-it("reveals a selected detail at stacked widths and returns to its row", () => {
+it("reveals a selected detail at stacked widths and returns to its row", async () => {
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({ matches: false })),
@@ -325,6 +334,7 @@ it("reveals a selected detail at stacked widths and returns to its row", () => {
   try {
     const job = createJob("selected_row");
     render(buildScreen({ jobs: [job], selectedJob: job }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("button", { name: "selected_row" }));
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
     expect(scrollIntoView.mock.instances.at(-1)).toBe(

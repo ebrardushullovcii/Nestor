@@ -1,3 +1,4 @@
+import { takePrefetchedResumeWorkspace } from "@renderer/features/job-finder/lib/resume-workspace-prefetch";
 import { useToast } from "@renderer/components/ui/toast";
 import { isActionNews, isActionSuccessToast } from "./action-news-toast";
 import { stopAssistantUiResumeBatch } from "./use-job-finder-page-controller-actions";
@@ -10,6 +11,7 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   ResumeAssistantMessage,
+  ResumeDraft,
   ResumeImportProgressEvent,
 } from "@nestor/contracts";
 import { useJobFinderWorkspace } from "@renderer/features/job-finder/hooks/use-job-finder-workspace";
@@ -238,6 +240,9 @@ export function composeResumeWorkspaceLeaveConfirmation(
   };
 }
 
+/** Quiet time after the last autosave before the open resume reloads. */
+const RESUME_AUTOSAVE_REFRESH_DELAY_MS = 8000;
+
 export function useJobFinderPageController() {
   const location = useLocation();
   const routerNavigate = useNavigate();
@@ -248,7 +253,10 @@ export function useJobFinderPageController() {
   // an action that navigates as part of its own completion can stay visible on
   // the destination route.
   const navigate = useCallback(
-    (path: string, options?: { replace?: boolean; state?: unknown }) => {
+    (
+      path: string,
+      options?: { flushSync?: boolean; replace?: boolean; state?: unknown },
+    ) => {
       noteJobFinderNavigation(path);
       void routerNavigate(path, options);
     },
@@ -286,19 +294,31 @@ export function useJobFinderPageController() {
         latestLocationPathnameRef.current;
       // A finished action on a screen that reports outcomes as toasts. Only a
       // success qualifies; failures stay inline next to what they concern.
-      if (isActionSuccessToast(resolved, ownerPath)) {
+      // An action that can be undone says so in a toast on any screen.
+      if (
+        isActionSuccessToast(resolved, ownerPath) ||
+        (resolved.undo && resolved.tone === "success" && resolved.message)
+      ) {
         const link = resolved.actionLink ?? null;
+        const undo = resolved.undo ?? null;
         showToast({
           title: resolved.message!,
           tone: resolved.toastTone ?? "success",
-          ...(link
+          ...(undo
             ? {
                 action: {
-                  label: link.label,
-                  onClick: () => navigate(link.route),
+                  label: resolved.undoLabel ?? "Undo",
+                  onClick: undo,
                 },
               }
-            : {}),
+            : link
+              ? {
+                  action: {
+                    label: link.label,
+                    onClick: () => navigate(link.route),
+                  },
+                }
+              : {}),
         });
         actionStateRef.current = { message: null };
         actionMessageOwnerPathRef.current = null;
@@ -1018,6 +1038,40 @@ export function useJobFinderPageController() {
     [actions, isCurrentResumeWorkspaceJob, applyResumeWorkspaceSnapshot],
   );
 
+  // After an autosave the studio already holds the saved text; the full
+  // reload waits until no save has come for a few seconds.
+  const autosaveRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const adoptAutosavedResumeDraft = useCallback(
+    (draft: ResumeDraft) => {
+      applyResumeWorkspaceSnapshot((current) =>
+        current && current.draft.id === draft.id
+          ? { ...current, draft }
+          : current,
+      );
+      if (autosaveRefreshTimerRef.current)
+        clearTimeout(autosaveRefreshTimerRef.current);
+      autosaveRefreshTimerRef.current = setTimeout(() => {
+        autosaveRefreshTimerRef.current = null;
+        if (!isCurrentResumeWorkspaceJob(draft.jobId)) return;
+        void refreshResumeWorkspace(draft.jobId).catch(() => undefined);
+      }, RESUME_AUTOSAVE_REFRESH_DELAY_MS);
+    },
+    [
+      applyResumeWorkspaceSnapshot,
+      isCurrentResumeWorkspaceJob,
+      refreshResumeWorkspace,
+    ],
+  );
+  useEffect(
+    () => () => {
+      if (autosaveRefreshTimerRef.current)
+        clearTimeout(autosaveRefreshTimerRef.current);
+    },
+    [],
+  );
+
   // The assistant (or any background work) can change the open resume.
   // Follow workspace updates so the studio shows the saved draft instead of a
   // stale copy that a later Save would be refused for (ADR 0037).
@@ -1105,6 +1159,15 @@ export function useJobFinderPageController() {
       };
     }
 
+    // The review pass reads the next resume ahead; showing it at once keeps
+    // "Approve and next" from flashing a loading card. The read below still
+    // runs and replaces it.
+    const prefetched = takePrefetchedResumeWorkspace(activeResumeWorkspaceJobId);
+    if (prefetched) {
+      applyResumeWorkspaceSnapshot(prefetched);
+      setResumeAssistantMessages(prefetched.assistantMessages);
+      setResumeAssistantPending(false);
+    }
     const requestToken = resumeWorkspaceRequestTokenRef.current + 1;
     resumeWorkspaceRequestTokenRef.current = requestToken;
     void getResumeWorkspace(activeResumeWorkspaceJobId)
@@ -1186,7 +1249,10 @@ export function useJobFinderPageController() {
   // question whenever unsaved work is actually at risk.
   const navigateFromShell = useCallback(
     (path: string) => {
-      void navigate(path);
+      // The router wraps a plain navigate in a transition, which rendered the
+      // next screen in 5 ms slices over several frames; a click should land
+      // in the next frame.
+      void navigate(path, { flushSync: true });
     },
     [navigate],
   );
@@ -1268,13 +1334,19 @@ export function useJobFinderPageController() {
   // the route that owns it. The raw state is kept intact so in-flight actions
   // can complete without racing a disposal; the ownership ref is stamped by
   // every write through `applyScopedActionState`.
-  const scopedActionState = useMemo<ActionState>(() => {
-    const ownerPath = actionMessageOwnerPathRef.current;
-    if (ownerPath !== null && ownerPath !== location.pathname) {
-      return { message: null };
-    }
-    return actionState;
-  }, [actionState, location.pathname]);
+  // Keyed on whether the message shows here, not on the route itself, so a
+  // route change leaves the page context (and every screen reading it) alone.
+  const actionOwnerPath = actionMessageOwnerPathRef.current;
+  const actionStateHiddenHere =
+    actionOwnerPath !== null && actionOwnerPath !== location.pathname;
+  const scopedActionState = useMemo<ActionState>(
+    () => (actionStateHiddenHere ? { message: null } : actionState),
+    [actionState, actionStateHiddenHere],
+  );
+  const getLocationPathname = useCallback(
+    () => latestLocationPathnameRef.current,
+    [],
+  );
 
   const context = useMemo<JobFinderPageContext | null>(() => {
     if (!readyWorkspaceState || !workspace || !actions) {
@@ -1298,7 +1370,7 @@ export function useJobFinderPageController() {
       discoveryRunFeedback,
       liveDiscoveryEvents,
       latestWorkspaceRef,
-      locationPathname: location.pathname,
+      getLocationPathname,
       navigate: (path, options) => {
         void navigate(path, options);
       },
@@ -1314,6 +1386,7 @@ export function useJobFinderPageController() {
         setApplyCopilotVisualCheckpointRequest(request);
       },
       refreshResumeWorkspace,
+      adoptAutosavedResumeDraft,
       resumeAssistantRequestTokenRef,
       selectedApplicationAttempt,
       selectedApplicationRecord,
@@ -1368,7 +1441,7 @@ export function useJobFinderPageController() {
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
     liveDiscoveryEvents,
-    location.pathname,
+    getLocationPathname,
     navigate,
     navigateFromShell,
     canImportResume,
@@ -1381,6 +1454,7 @@ export function useJobFinderPageController() {
     saveState,
     importResumeGuardMessage,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     selectedApplicationAttempt,
     selectedApplicationRecord,
     selectedDiscoveryJob,

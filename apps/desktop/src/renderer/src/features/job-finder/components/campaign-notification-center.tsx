@@ -1,4 +1,5 @@
 import type { CampaignNotification } from "@nestor/contracts";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@renderer/components/ui/button";
 import { buildJobFinderContextRoute } from "../lib/job-finder-context-navigation";
 import { JOB_FINDER_ROUTE_PATHS } from "../lib/job-finder-route-hrefs";
@@ -84,19 +85,27 @@ function compareNewestFirst(
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
+// The same shape the rest of Job Finder uses. `toLocaleString()` printed
+// "9/10/2026, 1:19:52 AM" — a numeric month/day that reads as 9 October
+// outside the US, with seconds nobody needs. One formatter for every row:
+// building one per notification cost Home about 10 ms per render.
+const createdAtFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  month: "short",
+});
+
 function formatCreatedAt(createdAt: string): string {
   const parsed = Date.parse(createdAt);
   if (Number.isNaN(parsed)) return createdAt;
-  // The same shape the rest of Job Finder uses. `toLocaleString()` printed
-  // "9/10/2026, 1:19:52 AM" — a numeric month/day that reads as 9 October
-  // outside the US, with seconds nobody needs.
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  }).format(new Date(parsed));
+  return createdAtFormat.format(new Date(parsed));
 }
+
+// The box shows about four notifications; a workspace can hold hundreds, and
+// rendering them all made Home lay out more than a thousand elements on every
+// visit. The list grows by this many as the end scrolls into view.
+const NOTIFICATION_BATCH = 24;
 
 export function CampaignNotificationCenter(props: {
   errorMessage?: string | null;
@@ -128,6 +137,25 @@ export function CampaignNotificationCenter(props: {
   onNavigate?: (route: string) => void;
 }) {
   const notifications = [...props.notifications].sort(compareNewestFirst);
+  const [shownCount, setShownCount] = useState(NOTIFICATION_BATCH);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const moreRef = useRef<HTMLLIElement | null>(null);
+  const hasMore =
+    typeof IntersectionObserver !== "undefined" &&
+    notifications.length > shownCount;
+  useEffect(() => {
+    const more = moreRef.current;
+    if (!hasMore || !more) return undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting)
+          setShownCount((count) => count + NOTIFICATION_BATCH);
+      },
+      { root: listRef.current, rootMargin: "200px" },
+    );
+    observer.observe(more);
+    return () => observer.disconnect();
+  }, [hasMore, shownCount]);
   const applicationRecoveryRecords = new Map(
     (props.applicationRecoveryRecords ?? []).map((record) => [
       record.jobId,
@@ -225,8 +253,14 @@ export function CampaignNotificationCenter(props: {
             </p>
           ) : null}
           {hasNotifications ? (
-            <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
-              {notifications.map((notification) => {
+            <ul
+              className="grid max-h-80 gap-2 overflow-y-auto pr-1"
+              ref={listRef}
+            >
+              {(hasMore
+                ? notifications.slice(0, shownCount)
+                : notifications
+              ).map((notification) => {
                 const pending = props.pendingNotificationId(notification.id);
                 return (
                   <li
@@ -298,6 +332,9 @@ export function CampaignNotificationCenter(props: {
                   </li>
                 );
               })}
+              {hasMore ? (
+                <li aria-hidden="true" className="h-px" ref={moreRef} />
+              ) : null}
             </ul>
           ) : null}
         </>

@@ -1,19 +1,12 @@
 // @vitest-environment jsdom
 
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DISCOVERY_RESULTS_PAGE_SIZE,
-  DiscoveryResultsPanel,
 } from "./discovery-results-panel";
 import {
   buildDiscoveryResultGroupHeadings,
@@ -25,6 +18,10 @@ import {
   orderDiscoveryResultsByGroup,
 } from "./discovery-result-groups";
 import { createDiscoveryRunSucceededFeedback } from "./discovery-run-feedback";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -103,16 +100,17 @@ afterEach(() => {
 });
 
 describe("discovery result bands", () => {
-  it("keeps the header to a plain count and leaves the run report to the banner", () => {
+  it("keeps the header to a plain count and leaves the run report to the banner", async () => {
     const runReportLabel = "57 found · 35 new · 15 kept · 47 duplicates merged";
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[job({ id: "report", score: 72 })]}
         onSelectJob={vi.fn()}
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
     const banner = createDiscoveryRunSucceededFeedback(null, runReportLabel);
 
     // The list says how many rows it holds; the finished search's own
@@ -123,7 +121,7 @@ describe("discovery result bands", () => {
     expect(banner.headline).toContain(runReportLabel);
   });
 
-  it("keeps location counts within the visible result set", () => {
+  it("keeps location counts within the visible result set", async () => {
     const inArea = {
       ...job({ id: "chicago", score: 72 }),
       location: "Chicago, IL",
@@ -133,7 +131,7 @@ describe("discovery result bands", () => {
       },
     };
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         inAreaJobCount={2}
         jobs={[inArea]}
@@ -143,6 +141,7 @@ describe("discovery result bands", () => {
         totalLocationJobCount={15}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(
       screen.getByText(/1 of 1 assessed jobs in or near Chicago, IL/u),
@@ -351,9 +350,9 @@ describe("discovery result bands", () => {
     }
   });
 
-  it("renders each divider directly above the rows it counts", () => {
+  it("renders each divider directly above the rows it counts", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[
@@ -366,6 +365,7 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(
       screen
@@ -409,9 +409,9 @@ describe("discovery result bands", () => {
     ]);
   });
 
-  it("divides weaker results in the list instead of presenting one flat ranking", () => {
+  it("divides weaker results in the list instead of presenting one flat ranking", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[
@@ -423,6 +423,7 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const heading = screen.getByTestId("discovery-results-group-weaker");
     expect(heading.textContent).toContain("Weaker matches (1)");
@@ -433,7 +434,7 @@ describe("discovery result bands", () => {
 
   // 10 leading matches then 60 weaker rows: the weaker band opens on page 1
   // and continues onto page 2.
-  function renderPaginatedBands(): void {
+  async function renderPaginatedBands(): Promise<void> {
     const jobs = [
       ...Array.from({ length: 10 }, (_, index) =>
         job({ id: `strong_${index}`, score: 72 }),
@@ -445,7 +446,7 @@ describe("discovery result bands", () => {
     expect(jobs.length).toBeGreaterThan(DISCOVERY_RESULTS_PAGE_SIZE);
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -453,10 +454,11 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
   }
 
-  it("counts a band heading over the whole band, the way the reveal control does", () => {
-    renderPaginatedBands();
+  it("counts a band heading over the whole band, the way the reveal control does", async () => {
+    await renderPaginatedBands();
 
     // Page 1 shows 10 matches then the first 40 of 60 weaker rows. A
     // page-scoped "(40)" here and "(20)" on page 2 sat under one control
@@ -467,10 +469,11 @@ describe("discovery result bands", () => {
     ).toContain("Weaker matches (60)");
   });
 
-  it("still draws the band divider on a page that opens mid-band", () => {
-    renderPaginatedBands();
+  it("still draws the band divider on a page that opens mid-band", async () => {
+    await renderPaginatedBands();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
 
     // Page 2 is entirely the continuation of the weaker band. Without a
     // divider here it is indistinguishable from a page of real matches, and
@@ -480,13 +483,13 @@ describe("discovery result bands", () => {
     ).toContain("Weaker matches (60)");
   });
 
-  it("makes revealing the also-found pool change the count, the label, and the list", () => {
+  it("makes revealing the also-found pool change the count, the label, and the list", async () => {
     const shown = [job({ id: "strong_a", score: 72 })];
     const mismatch = job({ id: "off_a", score: 18 });
     const onToggleAlsoFound = vi.fn();
 
     const { rerender } = render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         areAlsoFoundShown={false}
         browserSession={browserSession}
         hasCompletedSearch
@@ -498,6 +501,7 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(screen.getByText("1 job")).toBeTruthy();
     // The accessible name is exactly the visible label, so the reveal is
@@ -505,10 +509,11 @@ describe("discovery result bands", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Show weaker matches (1)" }),
     );
+    await flushFindJobsQueries();
     expect(onToggleAlsoFound).toHaveBeenCalledTimes(1);
 
     rerender(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         areAlsoFoundShown
         browserSession={browserSession}
         hasCompletedSearch
@@ -520,24 +525,27 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(
       screen.getByRole("button", { name: "Hide weaker matches (1)" }),
     ).toBeTruthy();
-    expect(screen.getByText("2 jobs")).toBeTruthy();
+    // The matches keep the number the sidebar shows; the revealed pool is
+    // named beside it rather than folded into a third total.
+    expect(screen.getByText("1 match + 1 weaker")).toBeTruthy();
     expect(
       screen.getByTestId("discovery-results-group-mismatches").textContent,
     ).toContain("Clear mismatches (1)");
   });
 
-  it("names the revealed pool on both of its dividers, in the reveal control's words", () => {
+  it("names the revealed pool on both of its dividers, in the reveal control's words", async () => {
     // One vocabulary from the count through the control to the divider. The
     // summary line and the button called the pool "also found" while the
     // dividers underneath called its two halves "Weaker matches" and "Clear
     // mismatches", so nothing on screen connected what was revealed with what
     // was then labelled.
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         alsoFoundCount={2}
         areAlsoFoundShown
         browserSession={browserSession}
@@ -553,9 +561,10 @@ describe("discovery result bands", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(screen.getByTestId("discovery-result-count").textContent).toContain(
-      "3 jobs",
+      "1 match + 2 weaker",
     );
     expect(
       screen.getByRole("button", { name: "Hide weaker matches (2)" }),
@@ -576,7 +585,7 @@ describe("discovery result bands", () => {
 });
 
 describe("discovery three-band result counts", () => {
-  it("prints all three populations when nothing was checked past the titles", () => {
+  it("prints all three populations when nothing was checked past the titles", async () => {
     // The r15 live shape: 13 title-only rows plus 2 rows with a real hard
     // conflict. Reporting "13 worth opening" claims 13 checks that never ran;
     // reporting "13 also found" demotes them by a score the app withheld.
@@ -585,7 +594,7 @@ describe("discovery three-band result counts", () => {
     );
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         alsoFoundCount={2}
         areAlsoFoundShown={false}
         browserSession={browserSession}
@@ -597,6 +606,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     // The header counts the rows on the list; the band divider below it is
     // where "matched on the title alone" is said.
@@ -605,7 +615,7 @@ describe("discovery three-band result counts", () => {
     );
   });
 
-  it("keeps one evidenced match apart from the title-only remainder", () => {
+  it("keeps one evidenced match apart from the title-only remainder", async () => {
     // The r9 shape: one row with checked evidence, fourteen title matches.
     const jobs = [
       job({ id: "evidenced", score: 64 }),
@@ -615,7 +625,7 @@ describe("discovery three-band result counts", () => {
     ];
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -623,6 +633,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(screen.getByTestId("discovery-result-count").textContent).toContain(
       "15 jobs",
@@ -635,7 +646,7 @@ describe("discovery three-band result counts", () => {
     expect(countDiscoveryDefaultVisibleResults(jobs)).toBe(15);
   });
 
-  it("labels an all-unchecked list, where the claim matters most", () => {
+  it("labels an all-unchecked list, where the claim matters most", async () => {
     // The live r16 state: fourteen rows, every one matched on its title
     // alone. With the heading suppressed this rendered as a bare list with no
     // statement anywhere that these were never read — the exact honesty gap
@@ -646,7 +657,7 @@ describe("discovery three-band result counts", () => {
     );
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -654,6 +665,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const headings = screen.getAllByTestId(/^discovery-results-group-/u);
     // Exactly one, at the top, covering every row.
@@ -682,7 +694,7 @@ describe("discovery three-band result counts", () => {
         srOnly: true,
         // The divider is a plain div outside the arrow-key traversal, so the
         // reason the visible rows gave up survives on the row itself.
-        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       })),
     );
   });
@@ -714,13 +726,13 @@ describe("discovery three-band result counts", () => {
     ).toEqual(["mismatches"]);
   });
 
-  it("drops the row restatement only under the divider that already makes it", () => {
+  it("drops the row restatement only under the divider that already makes it", async () => {
     // Three title-only rows, two bands. The two under the unchecked divider
     // say nothing more; the one banded as a mismatch by an observed conflict
     // keeps its chip and its caption, because the divider above THAT run says
     // nothing about what was read.
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         alsoFoundCount={1}
         areAlsoFoundShown
         browserSession={browserSession}
@@ -741,6 +753,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     for (const id of ["unchecked_a", "unchecked_b"]) {
       expect(screen.queryByTestId(`discovery-result-fit-${id}`)).toBeNull();
@@ -763,12 +776,12 @@ describe("discovery three-band result counts", () => {
     ).toBeNull();
   });
 
-  it("keeps the row restatement when no divider is drawn at all", () => {
+  it("keeps the row restatement when no divider is drawn at all", async () => {
     // Dividers only exist in the canonical best-match order. Sorted any other
     // way there is nothing above the row making the claim, so the row keeps
     // making it itself.
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[job({ id: "title_only", score: 44, titleOnly: true })]}
@@ -776,10 +789,12 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Sort results" }), {
       target: { value: "company" },
     });
+    await flushFindJobsQueries();
 
     expect(screen.queryAllByTestId(/^discovery-results-group-/u)).toEqual([]);
     expect(
@@ -790,9 +805,9 @@ describe("discovery three-band result counts", () => {
     ).toContain("The AI judges each job against your profile");
   });
 
-  it("names the unchecked band and says what would fill it in", () => {
+  it("names the unchecked band and says what would fill it in", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[
@@ -803,13 +818,14 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const heading = screen.getByTestId("discovery-results-group-unchecked");
     expect(heading.textContent).toContain("Not yet assessed (1)");
     expect(heading.textContent).not.toContain("The full requirements");
   });
 
-  it("heads the band on a page that opens mid-list even when it is the main band", () => {
+  it("heads the band on a page that opens mid-list even when it is the main band", async () => {
     // 60 leading matches then 10 weaker rows: page 2 opens inside the main
     // band. Leaving it unlabelled makes a continuation page read as the start
     // of the results.
@@ -824,7 +840,7 @@ describe("discovery three-band result counts", () => {
     expect(jobs.length).toBeGreaterThan(DISCOVERY_RESULTS_PAGE_SIZE);
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -832,8 +848,10 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
 
     // The count names the whole matches band (60), not the 10 of it that this
     // page happens to carry.
@@ -846,7 +864,7 @@ describe("discovery three-band result counts", () => {
     ).toContain("Weaker matches (10)");
   });
 
-  it("returns to the first page when the also-found pool is revealed", () => {
+  it("returns to the first page when the also-found pool is revealed", async () => {
     // Revealing appends rows to the end of the ranking. On any later page
     // nothing on screen moves, so the control reads as a visible no-op.
     const jobs = Array.from({ length: 70 }, (_, index) =>
@@ -854,7 +872,7 @@ describe("discovery three-band result counts", () => {
     );
 
     const { rerender } = render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         alsoFoundCount={1}
         areAlsoFoundShown={false}
         browserSession={browserSession}
@@ -866,6 +884,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const firstRowId = (): string | null =>
       document
@@ -873,10 +892,11 @@ describe("discovery three-band result counts", () => {
         ?.getAttribute("data-job-result-id") ?? null;
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
     expect(firstRowId()).toBe("strong_54");
 
     rerender(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         alsoFoundCount={1}
         areAlsoFoundShown
         browserSession={browserSession}
@@ -888,6 +908,7 @@ describe("discovery three-band result counts", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(firstRowId()).toBe("strong_0");
     expect(
@@ -897,14 +918,14 @@ describe("discovery three-band result counts", () => {
 });
 
 describe("stacked-width detail affordance", () => {
-  it("tells the user where the inspector went, only on the selected row", () => {
+  it("tells the user where the inspector went, only on the selected row", async () => {
     const jobs = [
       job({ id: "first", score: 72 }),
       job({ id: "second", score: 64 }),
     ];
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -912,6 +933,7 @@ describe("stacked-width detail affordance", () => {
         selectedJob={jobs[0]!}
       />,
     );
+    await flushFindJobsQueries();
 
     const cue = screen.getByTestId("discovery-result-details-below-first");
     const unselectedCue = screen.getByTestId(
@@ -947,7 +969,7 @@ describe("stacked-width detail affordance", () => {
     expect(cue.className).toContain("xl:hidden");
   });
 
-  it("does not scroll anything for the default selection", () => {
+  it("does not scroll anything for the default selection", async () => {
     const jobs = [job({ id: "first", score: 72 })];
     // jsdom does not implement scrollIntoView at all, so it is installed for
     // the duration of this test and removed again afterwards.
@@ -960,7 +982,7 @@ describe("stacked-width detail affordance", () => {
 
     try {
       render(
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={browserSession}
           hasCompletedSearch
           jobs={jobs}
@@ -968,6 +990,7 @@ describe("stacked-width detail affordance", () => {
           selectedJob={jobs[0]!}
         />,
       );
+      await flushFindJobsQueries();
 
       // The default highlight is not a user action. Yanking the viewport on
       // load would be worse than the missing cue it replaces.
@@ -978,10 +1001,10 @@ describe("stacked-width detail affordance", () => {
   });
 });
 
-it("offers Show after all weaker results have been hidden", () => {
+it("offers Show after all weaker results have been hidden", async () => {
   const onShowAlsoFound = vi.fn();
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       hasCompletedSearch
       jobs={[]}
@@ -994,17 +1017,18 @@ it("offers Show after all weaker results have been hidden", () => {
       onShowAlsoFound={onShowAlsoFound}
     />,
   );
+  await flushFindJobsQueries();
   fireEvent.click(
     screen.getByRole("button", { name: "Show weaker matches (31)" }),
   );
   expect(onShowAlsoFound).toHaveBeenCalledOnce();
 });
 
-it("offers wider places and an area source before shortlisting outside-area jobs", () => {
+it("offers wider places and an area source before shortlisting outside-area jobs", async () => {
   const outside = job({ id: "outside", score: 72 });
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[outside]}
         selectedJob={null}
@@ -1017,16 +1041,17 @@ it("offers wider places and an area source before shortlisting outside-area jobs
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   expect(screen.getByRole("link", { name: "Widen your places" })).toBeTruthy();
   expect(
     screen.getByRole("link", { name: "add a source for your area" }),
   ).toBeTruthy();
 });
 
-it("separates pending place checks from assessed location totals", () => {
+it("separates pending place checks from assessed location totals", async () => {
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[
           job({ id: "read", score: 72 }),
@@ -1042,6 +1067,7 @@ it("separates pending place checks from assessed location totals", () => {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getByText(
       /0 of 1 assessed jobs in or near Bradford · 1 awaiting place checks/,
@@ -1049,9 +1075,9 @@ it("separates pending place checks from assessed location totals", () => {
   ).toBeTruthy();
 });
 
-it("sorts comparable Best match scores highest first and explains the priority", () => {
+it("sorts comparable Best match scores highest first and explains the priority", async () => {
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       jobs={[
         job({ id: "lower", score: 84 }),
@@ -1061,6 +1087,7 @@ it("sorts comparable Best match scores highest first and explains the priority",
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
   expect(
     screen
       .getByText("Role highest")
@@ -1074,49 +1101,12 @@ it("sorts comparable Best match scores highest first and explains the priority",
   ).toContain("reachable places come first, then fit score");
 });
 
-it("keeps assessment in the toolbar and reads the current page's unjudged listings first", () => {
-  const jobs = Array.from({ length: 70 }, (_, index) =>
-    job({ id: `unread_${index}`, score: 0, titleOnly: true }),
-  );
-  const onAssess = vi.fn(() => new Promise<void>(() => undefined));
-  render(
-    <DiscoveryResultsPanel
-      browserSession={browserSession}
-      jobs={jobs}
-      selectedJob={null}
-      onSelectJob={vi.fn()}
-      onAssessJobListing={onAssess}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  const firstId = document
-    .querySelector("[data-job-result-id]")
-    ?.getAttribute("data-job-result-id");
-  const button = screen.getByRole("button", {
-    name: "Assess next 20 listings",
-  });
-  expect(
-    screen.getByTestId("discovery-results-group-unchecked").contains(button),
-  ).toBe(false);
-  expect(
-    button.compareDocumentPosition(
-      screen.getByTestId("discovery-results-group-unchecked"),
-    ) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).not.toBe(0);
-  expect(screen.queryByTestId("discovery-best-match-order")).toBeNull();
-  fireEvent.click(button);
-  expect(onAssess).toHaveBeenCalledWith(firstId);
-  expect(
-    screen.getByRole("region", { name: "Job results list" }).className,
-  ).toContain("min-h-[360px]");
-});
-
-it("counts places from the visible result set and does not offer widening mid-search", () => {
+it("counts places from the visible result set and does not offer widening mid-search", async () => {
   const local = job({ id: "local", score: 85 });
   local.matchAssessment.locationReach = "in_area";
   const unread = job({ id: "unread", score: 0, titleOnly: true });
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       jobs={[local, unread]}
       selectedJob={null}
@@ -1128,54 +1118,18 @@ it("counts places from the visible result set and does not offer widening mid-se
       isSearchInProgress
     />,
   );
+  await flushFindJobsQueries();
   expect(screen.getByTestId("discovery-result-count").textContent).toContain(
     "1 of 1 assessed jobs in or near Bristol · 1 awaiting place checks",
   );
   expect(screen.queryByTestId("discovery-no-area-matches")).toBeNull();
 });
 
-it("keeps the assessment batch running when an assessed row moves out of the unchecked group", async () => {
-  const first = job({ id: "first", score: 0, titleOnly: true });
-  const second = job({ id: "second", score: 0, titleOnly: true });
-  let release!: () => void;
-  const onAssess = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
-  const props = {
-    browserSession,
-    selectedJob: null,
-    onSelectJob: vi.fn(),
-    onAssessJobListing: onAssess,
-  };
-  const view = render(
-    <DiscoveryResultsPanel {...props} jobs={[first, second]} />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Assess next 2 listings" }),
-  );
-  expect(onAssess).toHaveBeenCalledWith("first");
-  view.rerender(
-    <DiscoveryResultsPanel
-      {...props}
-      jobs={[job({ id: "first", score: 85 }), second]}
-    />,
-  );
-  expect(screen.getByText(/Assessing listings · 0 of 2 finished/)).toBeTruthy();
-  await act(async () => {
-    release();
-    await Promise.resolve();
-  });
-  expect(onAssess).toHaveBeenCalledWith("second");
-});
-
-it("offers weaker matches when an assessment empties the leading list", () => {
+it("offers weaker matches when an assessment empties the leading list", async () => {
   const onToggle = vi.fn();
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[]}
         selectedJob={null}
@@ -1185,6 +1139,7 @@ it("offers weaker matches when an assessment empties the leading list", () => {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   fireEvent.click(screen.getByRole("button", { name: "Show weaker matches" }));
   expect(onToggle).toHaveBeenCalledOnce();
 });

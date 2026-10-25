@@ -1,19 +1,19 @@
 import { app, BrowserWindow, Menu, ipcMain, powerMonitor } from "electron";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync, truncateSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDesktopEnvironment } from "./setup/env";
 import { configureInterviewMediaPermissions } from "./setup/interview-media-permissions";
 import { areAdvancedInterviewSurfacesEnabled } from "./setup/interview-surface-mode";
 import { registerCoreDesktopRoutes } from "./setup/register-core-routes";
 import { getEmbeddedBrowser } from "./services/browser/embedded-browser";
-import { migrateLegacyDesktopUserData } from "./setup/legacy-user-data-migration";
 import {
-  configureDesktopUserDataDirectory,
-  getDesktopStartupDiagnosticsPath,
-} from "./setup/user-data-directory";
+  hasSingleInstanceLock,
+  startupDiagnosticsPath,
+} from "./setup/desktop-startup";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
+import { createWorkspaceQueryHost } from "./setup/workspace-query-host";
+import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-instance";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
@@ -25,27 +25,18 @@ import type * as CampaignSchedulerApi from "./services/job-finder/campaign-sched
 import type * as JobFinderServicesApi from "./services/job-finder";
 import type * as LiveAssistantApi from "./services/live-assistant";
 
-loadDesktopEnvironment();
-const configuredUserDataDirectory = configureDesktopUserDataDirectory(app);
-try {
-  // Before the single-instance lock, the first thing that touches userData.
-  migrateLegacyDesktopUserData(app, {
-    configuredDirectory: configuredUserDataDirectory,
-  });
-} catch (error) {
-  // A failed rename leaves the old directory whole; the app still opens.
-  console.warn("Could not move the pre-rename user data directory.", error);
-}
-
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-const startupDiagnosticsPath = getDesktopStartupDiagnosticsPath();
-
 function recordStartupDiagnostic(message: string, error?: unknown) {
   if (!startupDiagnosticsPath || process.env.ELECTRON_ENABLE_LOGGING !== "1") {
     return;
   }
 
   try {
+    // Developer diagnostics are never read by a screen or a product decision.
+    if (
+      existsSync(startupDiagnosticsPath) &&
+      statSync(startupDiagnosticsPath).size > 1024 * 1024
+    )
+      truncateSync(startupDiagnosticsPath, 0);
     const detail =
       error instanceof Error
         ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
@@ -116,6 +107,9 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
+const workspaceQueryHost = hasSingleInstanceLock
+  ? createWorkspaceQueryHost()
+  : null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -127,6 +121,8 @@ let disposeInterviewSessionControls = () => {};
 // shutdown commits, the latch is permanent. Feature routes also lazily load
 // their own services on demand.
 const deferredBackgroundInit = createDeferredBackgroundInitController({
+  // Counted from the window's page load, not its creation; see below.
+  scheduleDelayMs: 150,
   advancedInterviewSurfacesEnabled,
   loadJobFinderServices,
   loadCampaignSchedulerModule,
@@ -185,7 +181,9 @@ function loadLiveAssistantRoutes(): Promise<void> {
 function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
+    workspaceQueryHost?.attach(window);
     getEmbeddedBrowser().attachWindow(window);
+    registerFinishedWorkWindow(window);
     return window;
   } catch (error) {
     recordStartupDiagnostic("main window creation failed", error);
@@ -280,7 +278,10 @@ void app
       return;
     }
     recordStartupDiagnostic("main window created");
-    deferredBackgroundInit.schedule();
+    // Service initialization shares main's thread with the window's load.
+    mainWindow.webContents.once("did-finish-load", () =>
+      deferredBackgroundInit.schedule(),
+    );
     mainWindow.on("closed", () => {
       deferredBackgroundInit.cancelScheduled();
       closeInterviewOverlayWindows();
@@ -320,6 +321,12 @@ function startCampaignScheduler(
   powerMonitor.on("suspend", onPowerSuspend);
   powerMonitor.on("resume", onPowerResume);
   campaignScheduler.start();
+  // An Apply queue that was running or waiting for tomorrow carries on.
+  void import("./routes/job-finder")
+    .then((routes) => routes.resumeApplyQueueAfterRestart())
+    .catch((error: unknown) => {
+      console.error("Could not carry on the Apply queue.", error);
+    });
 }
 
 async function stopCampaignScheduler(): Promise<void> {
@@ -396,14 +403,25 @@ app.on("before-quit", (event) => {
   // Actual service shutdown begins: the deferred-init latch is permanent
   // from here on, so no cancel or late release can resurrect it mid-teardown.
   deferredBackgroundInit.commitQuitTeardown();
+  // The read connection must release the WAL before the writer closes and
+  // records its clean-close fingerprint.
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
-    () =>
-      Promise.all([
+    async () => {
+      await workspaceQueryHost?.close();
+      // The assistant or scheduler may itself be waiting for the opening view.
+      // Cancel that wait before awaiting either service's shutdown.
+      if (jobFinderServicesPromise) {
+        const { beginJobFinderWorkspaceShutdown } =
+          await jobFinderServicesPromise;
+        beginJobFinderWorkspaceShutdown();
+      }
+      await Promise.all([
         stopCampaignScheduler().then(shutdownJobFinderServicesIfLoaded),
         shutdownLiveAssistantIfLoaded(),
-      ]).then(() => undefined),
+      ]);
+    },
     jobFinderShutdownTimeoutMs,
     () => {
       console.warn(

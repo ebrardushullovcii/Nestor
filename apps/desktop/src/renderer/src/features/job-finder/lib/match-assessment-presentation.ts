@@ -109,9 +109,25 @@ export function getMatchAssessmentPresentation(
   // Renderer presentation fails closed for legacy or malformed payloads that
   // may have been cast past the schema boundary. A score without both binding
   // fingerprints is never presented as an authoritative current assessment.
-  const isProvisional =
-    isProvisionalMatchAssessment(job) || !hasAssessmentBinding;
-  const isNotJudged = getFitEvidenceDepth(job.matchAssessment).isNotJudged;
+  return presentFitFacts({
+    isProvisional: isProvisionalMatchAssessment(job) || !hasAssessmentBinding,
+    isNotJudged: getFitEvidenceDepth(job.matchAssessment).isNotJudged,
+    scoreIsUpperBound: Boolean(job.matchAssessment.scoreIsUpperBound),
+    score: job.matchAssessment.score,
+  });
+}
+
+/**
+ * The fit wording from its four facts. Find jobs' query rows carry these
+ * facts as columns, so a list row and the inspector say the same thing.
+ */
+export function presentFitFacts(facts: {
+  isProvisional: boolean;
+  isNotJudged: boolean;
+  scoreIsUpperBound: boolean;
+  score: number;
+}): MatchAssessmentPresentation {
+  const { isProvisional, isNotJudged, score } = facts;
   const isScoreWithheld = isProvisional || isNotJudged;
 
   if (isProvisional) {
@@ -143,15 +159,15 @@ export function getMatchAssessmentPresentation(
   // A ceiling is not a measurement: the number is the most this listing can
   // earn while its gaps stand, which is why unrelated jobs kept printing the
   // same "71% fit".
-  if (job.matchAssessment.scoreIsUpperBound) {
+  if (facts.scoreIsUpperBound) {
     return {
       isProvisional,
       isNotJudged,
       isScoreWithheld,
-      headlineScoreAriaLabel: `Overall fit: up to ${job.matchAssessment.score} percent`,
-      headlineScoreLabel: `Up to ${job.matchAssessment.score}% fit`,
+      headlineScoreAriaLabel: `Overall fit: up to ${score} percent`,
+      headlineScoreLabel: `Up to ${score}% fit`,
       withheldReason: FIT_UPPER_BOUND_REASON,
-      breakdownScoreLabel: `Up to ${job.matchAssessment.score}% fit`,
+      breakdownScoreLabel: `Up to ${score}% fit`,
     };
   }
 
@@ -159,10 +175,10 @@ export function getMatchAssessmentPresentation(
     isProvisional,
     isNotJudged,
     isScoreWithheld,
-    headlineScoreAriaLabel: `Overall fit: ${job.matchAssessment.score} percent`,
-    headlineScoreLabel: `${job.matchAssessment.score}% fit`,
+    headlineScoreAriaLabel: `Overall fit: ${score} percent`,
+    headlineScoreLabel: `${score}% fit`,
     withheldReason: null,
-    breakdownScoreLabel: `${job.matchAssessment.score}% fit`,
+    breakdownScoreLabel: `${score}% fit`,
   };
 }
 

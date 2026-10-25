@@ -74,6 +74,38 @@ function workspaceWith(discoveryJobs = [job()]): JobFinderWorkspaceSnapshot {
 }
 
 describe("renderer workspace list projection", () => {
+  it("omits queried inventories per response without changing another window's legacy projection", () => {
+    const workspace = workspaceWith();
+    workspace.companyJobs = workspace.discoveryJobs;
+    workspace.dismissedDiscoveryJobs = workspace.discoveryJobs;
+    const queried = toRendererWorkspaceSnapshot(workspace, true);
+    expect(queried.discoveryJobs).toEqual([]);
+    expect(queried.companyJobs).toEqual([]);
+    expect(queried.dismissedDiscoveryJobs).toEqual([]);
+    const legacy = toRendererWorkspaceSnapshot(workspace, false);
+    expect(legacy.discoveryJobs).toHaveLength(1);
+    expect(legacy.companyJobs).toHaveLength(1);
+    expect(legacy.dismissedDiscoveryJobs).toHaveLength(1);
+    expect(workspace.discoveryJobs).toHaveLength(1);
+  });
+  it("does not open lazy listing or provenance bodies when sending list rows", () => {
+    const full = job();
+    const lazy = Object.freeze({
+      ...full,
+      get description(): string {
+        throw new Error("listing detail opened");
+      },
+      provenance: full.provenance.map((entry) =>
+        Object.freeze({
+          ...entry,
+          get listingFacts(): typeof entry.listingFacts {
+            throw new Error("sighting detail opened");
+          },
+        }),
+      ),
+    });
+    expect(toRendererJob(lazy).id).toBe(full.id);
+  });
   it("omits complete resume bodies and unused attempt/result evidence while selected/canonical data stays complete", () => {
     const at = "2026-10-13T10:00:00.000Z";
     const body = "Synthetic full document and historical capture".repeat(200);
@@ -252,6 +284,7 @@ describe("renderer workspace list projection", () => {
           score: 80,
           recommendation: "strong_fit",
           roleExplanation: explained,
+          reasons: ["Synthetic judged reason."],
           summary: "Synthetic one-line summary.",
         },
       },
@@ -259,6 +292,7 @@ describe("renderer workspace list projection", () => {
     const row = toRendererJob(full);
     expect(JobListRowSchema.parse(row)).toEqual(row);
     expect(JSON.stringify(row)).not.toContain(explained);
+    expect(JSON.stringify(row)).not.toContain("Synthetic judged reason.");
     expect(row.matchAssessment).toMatchObject({
       score: 80,
       contextFingerprint: "context",

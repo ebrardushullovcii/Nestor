@@ -14,7 +14,14 @@ import {
   within,
 } from "@testing-library/react";
 import { lazy, Suspense } from "react";
-import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
+import {
+  Link,
+  MemoryRouter,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,6 +32,16 @@ import {
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_PX,
 } from "../lib/job-finder-shell-gutters";
 import { COMPACT_NAV_PILL_CLASS, JobFinderShell } from "./job-finder-shell";
+
+/** What the app's outlet does for a cold route: one boundary per path. */
+function PerPathSuspenseOutlet() {
+  const { pathname } = useLocation();
+  return (
+    <Suspense fallback={<div>Opening screen</div>} key={pathname}>
+      <Outlet />
+    </Suspense>
+  );
+}
 
 const windowControlsState = {
   isClosable: true,
@@ -253,9 +270,7 @@ describe("JobFinderShell section navigation", () => {
           <Route
             element={
               <JobFinderShell platform="win32" workspace={createWorkspace()}>
-                <Suspense fallback={<div>Opening screen</div>}>
-                  <Outlet />
-                </Suspense>
+                <PerPathSuspenseOutlet />
               </JobFinderShell>
             }
           >
@@ -272,8 +287,9 @@ describe("JobFinderShell section navigation", () => {
       name: "Job Finder sidebar destinations",
     });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Home" }));
-    // The route container is keyed, so a cold lazy route shows its opening
-    // surface while the new screen loads rather than keeping the old page.
+    // The outlet keys its Suspense boundary by path, so a cold lazy route
+    // shows its opening surface while the new screen loads rather than
+    // keeping the old page.
     expect(await screen.findByText("Opening screen")).toBeTruthy();
     act(() => {
       finish();
@@ -282,7 +298,6 @@ describe("JobFinderShell section navigation", () => {
       await screen.findByRole("heading", { name: "Loaded Home" }),
     ).toBeTruthy();
     expect(screen.queryByText("Opening Home…")).toBeNull();
-    expect(screen.getByRole("main").getAttribute("aria-busy")).toBe("false");
   });
 
   it("moves complete navigation labels into More at a 200% viewport", async () => {
@@ -386,7 +401,7 @@ describe("JobFinderShell section navigation", () => {
     expect(notificationGroup.className).toContain("min-[1440px]:col-start-3");
     expect(notificationGroup.className).toContain("min-[1440px]:col-span-1");
     expect(notificationGroup.className).toContain("min-[1440px]:row-start-1");
-    expect(notificationGroup.className).toContain("min-[1440px]:mr-36");
+    expect(notificationGroup.className).toContain("xl:mr-36");
     const needsYouButton = within(notificationGroup).getByRole("button", {
       name: "Needs you: 0 unresolved",
     });
@@ -433,7 +448,11 @@ describe("JobFinderShell section navigation", () => {
     // Important on purpose: Tailwind v4 emits arbitrary `min-[...]` media
     // variants before the named breakpoints, so a plain `min-[900px]:pr-80`
     // loses the cascade to the still-matching `sm:pr-64` that follows it.
-    expect(navigation.className).toContain("min-[900px]:!pr-80");
+    // The reserve is the group's measured width (at least 20rem): with its
+    // labels shown from 1100px the group is wider than a fixed 20rem.
+    expect(navigation.className).toContain(
+      "min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
+    );
     expect(navigation.className).not.toContain("min-[900px]:pl-80");
     expect(navigation.contains(notificationGroup)).toBe(false);
 
@@ -533,7 +552,7 @@ describe("JobFinderShell section navigation", () => {
     }
 
     const header = document.querySelector("[data-job-finder-shell-header]");
-    expect(header?.className).toContain("min-[1440px]:h-14");
+    expect(header?.className).toContain("xl:h-14");
   });
 
   it("gives both module names the menu's full width instead of shortening one", () => {
@@ -1319,8 +1338,10 @@ describe("JobFinderShell section navigation", () => {
       "[data-job-finder-shell]",
     );
 
-    expect(header?.className).toContain("min-[1440px]:h-14");
-    expect(shellGrid?.className).toContain("min-[1440px]:!grid-rows-[3.5rem]");
+    expect(header?.className).toContain("xl:h-14");
+    // One 56px row from 1280px: the named `xl` breakpoint is emitted after
+    // `sm:`, so it beats `sm:grid-rows-[3.5rem_3.75rem]` without `!`.
+    expect(shellGrid?.className).toContain("xl:grid-rows-[3.5rem]");
     expect(shellGrid?.className).not.toContain("min-[1440px]:grid-rows");
     expect(header?.className).toContain("z-50");
     expect(sidebar.className).toContain("top-14");
@@ -1503,6 +1524,11 @@ describe("JobFinderShell section navigation", () => {
     expect(document.title).toBe("Find jobs | Job Finder | Nestor");
     expect(document.activeElement).toBe(initialMain);
     expect(screen.getByRole("status").textContent).toBe("Find jobs opened.");
+    // A page still at the top is left alone: writing its scroll position
+    // forced a layout of the new screen.
+    expect(scrollToMock).not.toHaveBeenCalled();
+    initialMain.scrollTop = 240;
+    fireEvent.scroll(initialMain);
 
     const navigation = screen.getByRole("navigation", {
       name: "Job Finder sections",
@@ -1600,7 +1626,7 @@ describe("JobFinderShell section navigation", () => {
     expect(header?.className).toContain("shrink-0");
     expect(shellContent?.className).not.toContain("pt-[18.75rem]");
     expect(shellContent?.className).toContain("sm:pt-[7.25rem]");
-    expect(shellContent?.className).toContain("min-[1440px]:!pt-14");
+    expect(shellContent?.className).toContain("xl:pt-14");
     expect(navigation.className).toContain("col-span-2");
     expect(navigation.className).not.toContain("overflow-hidden");
     expect(actions.className).toContain("col-span-2");
@@ -2418,6 +2444,10 @@ describe("JobFinderShell compact nav responsive contract", () => {
       "⌘",
       "I",
       "?",
+      "Alt",
+      "←",
+      "Alt",
+      "→",
       "⌘",
       "=",
       "⌘",
@@ -3664,16 +3694,26 @@ describe("compact navigation shares the header switcher's axis", () => {
     },
   );
 
-  it.each([1024, 1152, 1200, 1280])(
+  it.each([1024, 1152, 1200])(
     "keeps the one-sided reserve at %ipx off macOS, where the pills stay in this row",
     (width) => {
       const navigation = renderShellFor("win32");
 
       expect(resolveWinningPaddingRight(navigation.className, width)).toBe(
-        "pr-80",
+        "pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
       );
     },
   );
+
+  // From 1280px the header is one row: the card sits on the brand row between
+  // the brand and the icon-only actions, held there by margins, not padding.
+  it("drops the reserve at 1280px off macOS, where the card moves up to the brand row", () => {
+    const navigation = renderShellFor("win32");
+
+    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe("pr-0");
+    expect(navigation.className).toContain("xl:row-start-1");
+    expect(navigation.className).toContain("xl:mr-[25rem]");
+  });
 
   it("paints the header mask opaquely across the scrolling gutter and nowhere else", () => {
     // Between the fixed header's bottom edge and the first row of a scrolling

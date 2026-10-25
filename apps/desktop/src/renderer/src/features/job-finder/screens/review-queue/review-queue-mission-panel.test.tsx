@@ -175,6 +175,18 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onStartApplyCopilot).toHaveBeenCalledWith({ jobId: "job_1" });
   });
 
+  it("holds Apply while all work is paused and says how to continue", () => {
+    const props = renderPanel({ applicationWorkPaused: true });
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("apply-outcome").textContent).toBe(
+      "All work is paused. Press Continue to start it again.",
+    );
+    fireEvent.click(apply);
+    expect(props.onStartApplyCopilot).not.toHaveBeenCalled();
+  });
+
   it("carries none of the old readiness chrome", () => {
     renderPanel();
 
@@ -193,7 +205,7 @@ describe("ReviewQueueMissionPanel", () => {
       screen.getByRole("button", { name: "Open the listing" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Remove from shortlist" }),
+      screen.getByRole("button", { name: "Move back to Find jobs" }),
     ).toBeTruthy();
   });
 
@@ -263,6 +275,91 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onGenerateResume).toHaveBeenCalledWith("job_1");
   });
 
+  it("says a level rewrite the app closed during did not finish, and offers it again", () => {
+    // STAB-010: Aggressive was saved, the app closed while it was writing,
+    // and the approved Light resume was named Aggressive with no retry.
+    const props = renderPanel({
+      selectedItem: {
+        ...createApprovedItem(),
+        resumeTailoringMode: "aggressive",
+        resumeWrittenTailoringMode: "conservative",
+      },
+    });
+
+    expect(
+      screen.getByTestId("interrupted-resume-rewrite").textContent,
+    ).toContain(
+      "The rewrite at Aggressive did not finish. This is still the Light resume, and it stays approved.",
+    );
+    expect(
+      screen
+        .getByRole("radio", { name: /^Light/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rewrite at Aggressive" }),
+    );
+    expect(props.onSetJobResumeApplicationMode).toHaveBeenCalledWith(
+      "job_1",
+      "tailored_per_job",
+      "aggressive",
+    );
+  });
+
+  it("names the review step, not Apply, when an Aggressive built-in resume must be read", () => {
+    renderPanel({
+      selectedAsset: createReadyAsset({
+        storagePath: null,
+        generationMethod: "deterministic",
+        generationReason: "provider_failed",
+      }),
+      selectedItem: createItem({
+        assetStatus: "ready",
+        resumeAssetId: "asset_1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" },
+      }),
+    });
+
+    expect(screen.getByTestId("shortlisted-state-line").textContent).toBe(
+      "AI could not write this resume, so it keeps your saved wording. Try again, or review it and use it as it is.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Review the resume" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+  });
+
+  it("offers to write the resume for a job whose resume kept the original wording", () => {
+    const onApproveResumeAndApply = vi.fn();
+    const props = renderPanel({
+      onApproveResumeAndApply,
+      selectedAsset: createReadyAsset({
+        storagePath: null,
+        generationMethod: "deterministic",
+        generationReason: "listing_text_missing",
+      }),
+      selectedItem: createItem({
+        assetStatus: "ready",
+        resumeAssetId: "asset_1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" },
+        resumeWrittenWithoutListing: true,
+      }),
+    });
+
+    // The job's own level stays chosen and choosable: writing uses it.
+    const aggressive = screen.getByRole("radio", { name: /Aggressive/ });
+    expect(aggressive.getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByText("Not possible for this job")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create the resume" }));
+    expect(props.onGenerateResume).toHaveBeenCalledWith("job_1");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply with your original wording" }),
+    );
+    expect(onApproveResumeAndApply).toHaveBeenCalledWith("job_1");
+  });
+
   it("does not offer an AI retry once the built-in resume is approved", () => {
     renderPanel({
       selectedAsset: createReadyAsset({
@@ -293,8 +390,12 @@ describe("ReviewQueueMissionPanel", () => {
     // The primary already opens the resume, so it is not offered twice.
     expect(screen.queryByRole("button", { name: "Edit resume" })).toBeNull();
     expect(screen.getByTestId("shortlisted-state-line").textContent).toContain(
-      "keep or remove the flagged lines",
+      "Read the resume through, then approve it.",
     );
+    // ADR 0051: no line-by-line chore for Aggressive stretches.
+    expect(
+      screen.getByTestId("shortlisted-state-line").textContent,
+    ).not.toMatch(/flagged lines/);
   });
 
   it("shows a moving clock while the resume is written", () => {
@@ -515,17 +616,19 @@ describe("ReviewQueueMissionPanel", () => {
 
 it("explains that changing a written level starts a draft before the click", () => {
   renderPanel();
+  // The chosen level's description, then what another level costs.
   expect(
-    screen.getByText(
-      "Choosing another level writes a new draft. Original uses your file unchanged.",
-    ),
+    screen.getByText(/Choosing another level writes a new draft\./),
   ).toBeTruthy();
+  expect(
+    screen.getByRole("radio", { name: /Light/ }).getAttribute("title"),
+  ).toContain("Writes a new draft.");
 });
 
 it("lets a person remove a job during writing and explains remaining AI work", () => {
   const props = renderPanel({ isJobPending: () => true });
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove from shortlist" }),
+    screen.getByRole("button", { name: "Move back to Find jobs" }),
   );
   expect(props.onRemoveReviewJob).toHaveBeenCalledWith("job_1");
   expect(screen.getByText(/Removing this job stops the draft/)).toBeTruthy();

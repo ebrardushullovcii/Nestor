@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import {
   Select,
   SelectContent,
@@ -18,9 +19,11 @@ import {
 import {
   isApplicationTrackedAsSentByPerson,
   isApplicationWithdrawnByPerson,
+  type ApplicationCrmMutationInput,
   type ApplicationCrmStageDefinition,
   type ApplicationRecord,
   type ApplyJobResultListRow,
+  type JobFinderExactApplicationTarget,
 } from "@nestor/contracts";
 import {
   applicationCrmDataForView,
@@ -32,7 +35,22 @@ import {
 } from "./applications-crm-model";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { resolveApplyStatePresentation } from "./apply-state";
+import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
 import type { ApplyRunContext } from "./applications-recovery-state";
+import {
+  clearSettledApplicationFormOpenStates,
+  describeFormOpenOutcome,
+  formOpenPhaseLabel,
+  openApplicationForm,
+  resolveRowFormAction,
+  useApplicationFormOpenStates,
+  type FinishInBrowserHandler,
+} from "./application-form-open";
+import { getApplyResultDestinationUrl } from "./applications-detail-panel-helpers";
+import { describeReopenPhase } from "../../lib/job-finder-browser-handoff-copy";
 import { Input } from "@renderer/components/ui/input";
 import { matchesCollectionSearch } from "../../components/collection-search-toolbar";
 import { Button } from "@renderer/components/ui/button";
@@ -63,6 +81,20 @@ import {
 import { StatusBadge } from "../../components/status-badge";
 import { Link } from "react-router-dom";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import {
+  handleListSearchEscape,
+  LIST_SEARCH_ATTRIBUTE,
+} from "../../lib/list-search-focus";
+import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+  type RowMenuEntry,
+} from "../../lib/row-context-menu";
+import { resolveApplicationMoveBack } from "./application-move-back";
+import {
+  isAnyString,
+  useRememberedString,
+} from "../../hooks/use-remembered-string";
 import { getAttemptLabel } from "../../lib/job-finder-utils";
 import {
   formatApplicationEmployerAriaLabel,
@@ -79,9 +111,15 @@ import {
   getApplicationReadableNextStepLabel,
   getApplicationStagePresentation,
 } from "./applications-status";
+import {
+  describeApplicationQueueHold,
+  type ApplicationQueueHold,
+} from "./application-queue-hold";
 
 interface ApplicationsRecordsPanelProps {
   progressNow?: number | undefined;
+  /** Jobs the Apply queue set aside before they started, by job id. */
+  queueHolds?: ReadonlyMap<string, ApplicationQueueHold>;
   activeFilter: ApplicationsViewFilter;
   applicationRecords: readonly ApplicationRecord[];
   /** Stages the person named in the tracker, shown by those names. */
@@ -116,14 +154,30 @@ interface ApplicationsRecordsPanelProps {
   readApplyRunContext?: (
     result: ApplyJobResultListRow | null,
   ) => ApplyRunContext | null;
-  /** The mode chosen in Settings; decides what a finished fill means. */
+  /** The mode chosen in Settings; a retry runs in it and is named for it. */
   applyMode?: ApplyMode;
+  /**
+   * The detail panel's own ways to open a form, so a row's Open form shows
+   * the same steps and the same outcome as the panel.
+   */
+  onFinishInBrowser?: FinishInBrowserHandler;
+  onStartApplyCopilot?: (input: JobFinderExactApplicationTarget) => void;
+  isApplyPending?: boolean;
+  /** All work is paused: a row's Try again waits for Continue. */
+  applicationWorkPaused?: boolean;
+  /** Applications -> Shortlisted for an unsent application. */
+  onReturnToShortlist?: (record: ApplicationRecord) => void;
+  /** Mark withdrawn and Archive, offered on a sent application's row. */
+  onMutateApplicationCrm?: (
+    command: ApplicationCrmMutationInput,
+  ) => Promise<void>;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
   selectedRecord: ApplicationRecord | null;
 }
 
 export function ApplicationsRecordsPanel({
+  queueHolds,
   activeFilter,
   applicationRecords: sourceRecords,
   customStages,
@@ -136,12 +190,42 @@ export function ApplicationsRecordsPanel({
   liveRunLinesByJobId,
   latestApplyResultByRecordId,
   readApplyRunContext,
+  applyMode,
+  onFinishInBrowser,
+  onStartApplyCopilot,
+  isApplyPending = false,
+  applicationWorkPaused = false,
+  onReturnToShortlist,
+  onMutateApplicationCrm,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
 }: ApplicationsRecordsPanelProps) {
-  const [query, setQuery] = useState("");
-  const [pipelineStage, setPipelineStage] = useState("all");
+  const formOpenStates = useApplicationFormOpenStates();
+  // The record whose Prepare again was pressed here, until its run starts.
+  const [preparingRecordId, setPreparingRecordId] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!isApplyPending) setPreparingRecordId(null);
+  }, [isApplyPending]);
+  useEffect(() => clearSettledApplicationFormOpenStates, []);
+  // Kept when moving to another screen and back, and after a restart.
+  const [query, setQuery] = useRememberedString(
+    "applications.query",
+    "",
+    isAnyString,
+  );
+  const [pipelineStage, setPipelineStage] = useRememberedString(
+    "applications.stage",
+    "all",
+    isAnyString,
+  );
+  const latestResults = useMemo(
+    () => [...(latestApplyResultByRecordId?.values() ?? [])],
+    [latestApplyResultByRecordId],
+  );
+  const pageStates = useApplicationPageStates(latestResults);
   function stateFor(record: ApplicationRecord) {
     const result = latestApplyResultByRecordId?.get(record.id) ?? null;
     return result
@@ -153,6 +237,7 @@ export function ApplicationsRecordsPanel({
               : "fill_only",
           result,
           run: readApplyRunContext?.(result) ?? null,
+          pageNeedsPreparing: pageNeedsPreparing(pageStates.get(result.id)),
           recordCrm: record.crm,
           recordLatestBlocker: record.latestBlocker,
           recordLastActionLabel: record.lastActionLabel,
@@ -251,21 +336,53 @@ export function ApplicationsRecordsPanel({
     },
     [applicationRecords, onSelectRecord],
   );
-  // A single record used to wrap five chips onto two rows in a narrow list
-  // column. "All" and "Waiting on you" always stay (they are the two views a
-  // user switches between), plus any view that actually holds something and
-  // the active view so the current selection can never disappear.
-  const visibleFilters = useMemo(
-    () =>
-      APPLICATION_FILTERS.filter(
-        (filterOption) =>
-          filterOption === "all" ||
-          filterOption === "needs_action" ||
-          filterOption === activeFilter ||
-          filterCounts[filterOption] > 0,
-      ),
-    [activeFilter, filterCounts],
+  // A filter is shown only when choosing it would change the list: a view
+  // that holds some but not all of the applications, plus the active one so
+  // the current choice never disappears. "All 4" beside "Waiting on you 0"
+  // offered two buttons that could not change anything.
+  const nonArchivedRecords = useMemo(
+    () => sourceRecords.filter((record) => !record.crm?.archivedAt),
+    [sourceRecords],
   );
+  // Judged on every unarchived application, not the searched ones, so the
+  // chips do not come and go while the person types.
+  const choiceCounts = Object.fromEntries(
+    APPLICATION_FILTERS.map((filter) => [
+      filter,
+      nonArchivedRecords.filter((record) =>
+        matchesApplicationsFilter(record, filter, stateFor(record)?.kind),
+      ).length,
+    ]),
+  ) as Record<ApplicationsViewFilter, number>;
+  const filterChoices = APPLICATION_FILTERS.filter(
+    (filterOption) =>
+      filterOption !== "all" &&
+      (filterOption === activeFilter ||
+        (choiceCounts[filterOption] > 0 &&
+          choiceCounts[filterOption] < choiceCounts.all)),
+  );
+  const visibleFilters: readonly ApplicationsViewFilter[] =
+    filterChoices.length > 0 || activeFilter !== "all"
+      ? ["all", ...filterChoices]
+      : [];
+  // The stage picker lists only the stages the applications are in, and only
+  // shows when they are in more than one.
+  const presentStages = useMemo(
+    () =>
+      new Set(
+        nonArchivedRecords.map(
+          (record) => applicationCrmDataForView(record).stage,
+        ),
+      ),
+    [nonArchivedRecords],
+  );
+  const stageOptions = APPLICATION_CRM_STAGE_ORDER.filter(
+    (stage) => presentStages.has(stage) || stage === pipelineStage,
+  );
+  const showsStagePicker = presentStages.size > 1 || pipelineStage !== "all";
+  const showsSearch = nonArchivedRecords.length > 1 || query.length > 0;
+  const showsToolbar =
+    showsSearch || showsStagePicker || visibleFilters.length > 0;
   const pagedRecords = useMemo(
     () =>
       applicationRecords.slice(
@@ -276,19 +393,15 @@ export function ApplicationsRecordsPanel({
   );
 
   return (
-    // `xl:h-full` left a short list as a tall empty bordered rectangle beside
-    // a scrolling detail pane. Capping instead of filling lets the panel end
-    // where its content ends while a long list still scrolls inside it, and
-    // `sticky`/`self-start` keep it pinned to the top of its column instead of
-    // riding away with any surrounding scroll and leaving a dead half-screen.
-    // The column is sized by its content and capped by the viewport, not
-    // stretched to it: a 470x780 panel holding one 100px card left ~670px of
-    // empty space beside a detail pane that needed the room.
-    <section className="surface-panel-shell @container/tracker relative flex min-w-0 flex-col overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) xl:sticky xl:top-0 xl:max-h-full xl:min-h-0 xl:self-start">
+    // The list fills its column like Find jobs and Shortlisted, so the three
+    // list screens have the same frame and the pager sits in the same place.
+    // A panel that ended under its last row made Applications look like a
+    // different kind of page.
+    <section className="surface-panel-shell @container/tracker relative flex min-w-0 flex-col overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) xl:h-full xl:min-h-0">
       {/* One toolbar row. The page title and the "All" chip already say what
           this list is and how many it holds, so the panel repeats neither.
           A narrow column wraps the chips onto a second, shorter line. */}
-      {hasAnyApplications ? (
+      {hasAnyApplications && showsToolbar ? (
         <div
           aria-labelledby={filterGroupId}
           className="flex min-h-12 w-full min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b border-(--surface-panel-border) px-3 py-2"
@@ -298,31 +411,40 @@ export function ApplicationsRecordsPanel({
           <span className="sr-only" id={filterGroupId}>
             Application filters
           </span>
-          <Input
-            size="toolbar"
-            className="min-w-40 flex-1"
-            aria-label="Search applications"
-            placeholder="Search applications"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <Select value={pipelineStage} onValueChange={setPipelineStage}>
-            <SelectTrigger
-              aria-label="Hiring stage"
+          {showsSearch ? (
+            <Input
               size="toolbar"
-              className="w-36"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All stages</SelectItem>
-              {APPLICATION_CRM_STAGE_ORDER.map((stage) => (
-                <SelectItem key={stage} value={stage}>
-                  {APPLICATION_CRM_STAGE_NAMES[stage]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              className="min-w-40 flex-1"
+              aria-label="Search applications"
+              placeholder="Search applications"
+              title="Search this list (/)"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) =>
+                handleListSearchEscape(event, query, setQuery)
+              }
+              {...{ [LIST_SEARCH_ATTRIBUTE]: "" }}
+            />
+          ) : null}
+          {showsStagePicker ? (
+            <Select value={pipelineStage} onValueChange={setPipelineStage}>
+              <SelectTrigger
+                aria-label="Hiring stage"
+                size="toolbar"
+                className="w-36"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All stages</SelectItem>
+                {stageOptions.map((stage) => (
+                  <SelectItem key={stage} value={stage}>
+                    {APPLICATION_CRM_STAGE_NAMES[stage]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           {visibleFilters.map((filterOption) => (
             <Button
               aria-label={formatApplicationFilterAccessibleLabel(
@@ -419,8 +541,12 @@ export function ApplicationsRecordsPanel({
                     record.automationMode === "autonomous_submit"
                       ? "apply_for_me"
                       : "fill_only",
+                  ...(applyMode ? { nextRunMode: applyMode } : {}),
                   result: latestResult,
                   run: readApplyRunContext?.(latestResult) ?? null,
+                  pageNeedsPreparing: pageNeedsPreparing(
+                    pageStates.get(latestResult.id),
+                  ),
                   pendingQuestionCount:
                     record.questionSummary.total -
                     record.questionSummary.answered,
@@ -435,9 +561,20 @@ export function ApplicationsRecordsPanel({
                 })
               : null;
             const hiringStage = trackedHiringStageBadge(record, customStages);
+            const queueHold = latestResult
+              ? undefined
+              : queueHolds?.get(record.jobId);
             const stage = hiringStage
               ? hiringStage
-              : applyState
+              : queueHold
+                ? {
+                    label: describeApplicationQueueHold(
+                      queueHold,
+                      record.company,
+                    ),
+                    tone: "warning" as const,
+                  }
+                : applyState
                 ? {
                     label: applyState.title,
                     tone:
@@ -445,11 +582,13 @@ export function ApplicationsRecordsPanel({
                         ? ("positive" as const)
                         : applyState.cancelledByPerson
                           ? ("muted" as const)
-                          : applyState.kind === "could_not_apply"
-                            ? ("critical" as const)
-                            : applyState.kind === "needs_you"
-                              ? ("warning" as const)
-                              : ("active" as const),
+                          : applyState.formClosed
+                            ? ("warning" as const)
+                            : applyState.kind === "could_not_apply"
+                              ? ("critical" as const)
+                              : applyState.kind === "needs_you"
+                                ? ("warning" as const)
+                                : ("active" as const),
                   }
                 : getApplicationStagePresentation(record);
             // One status word per row. The stage badge is it; a second badge
@@ -482,11 +621,116 @@ export function ApplicationsRecordsPanel({
               isApplicationTrackedAsSentByPerson(record.crm) ||
               isApplicationWithdrawnByPerson(record.crm)
                 ? nextTrackerStepLabel(record)
-                : preparationNextStep;
+                : queueHold?.waitingForChoice
+                  ? "Choose in Safeguards"
+                  : preparationNextStep;
+            // A form that closed before a send was seen is not a failed
+            // application, whatever stage the run left on the tracker.
             const rowStageLabel =
-              applyState?.kind === "applied"
+              applyState?.kind === "applied" ||
+              applyState?.formClosed ||
+              queueHold
                 ? stage.label
                 : applicationCrmStageLabelForView(record, customStages);
+            const formAction =
+              latestResult && applyState
+                ? resolveRowFormAction({
+                    result: latestResult,
+                    applyState,
+                    canOpen: Boolean(onFinishInBrowser),
+                    canPrepare: Boolean(onStartApplyCopilot),
+                  })
+                : null;
+            const formOpenState = latestResult
+              ? (formOpenStates.get(latestResult.id) ?? null)
+              : null;
+            const formOpenPhase =
+              formAction?.kind === "prepare"
+                ? isApplyPending && preparingRecordId === record.id
+                  ? describeReopenPhase("opening")
+                  : null
+                : formOpenPhaseLabel(formOpenState);
+            const formOpenOutcome =
+              formAction?.kind === "open" &&
+              formOpenState &&
+              "outcome" in formOpenState
+                ? formOpenState.outcome
+                : null;
+            const runFormAction = () => {
+              if (!formAction || !latestResult || formOpenPhase) return;
+              if (formAction.kind === "prepare") {
+                if (applicationWorkPaused) return;
+                setPreparingRecordId(record.id);
+                onStartApplyCopilot?.({
+                  jobId: record.jobId,
+                  applicationRecordId: record.id,
+                });
+                return;
+              }
+              if (!onFinishInBrowser) return;
+              void openApplicationForm(onFinishInBrowser, {
+                jobId: latestResult.jobId,
+                resultId: latestResult.id,
+                runId: latestResult.runId,
+                applicationRecordId:
+                  latestResult.applicationRecordId ?? record.id,
+                destinationUrl: getApplyResultDestinationUrl(
+                  latestResult.privacyReceipt,
+                ),
+              });
+            };
+            // One way back per row: an unsent application returns to
+            // Shortlisted; a sent one stays, and the menu says why.
+            const moveBack = resolveApplicationMoveBack(
+              record,
+              applyState?.kind,
+            );
+            const mutateCrm = (
+              mutation: ApplicationCrmMutationInput["mutation"],
+            ) =>
+              onMutateApplicationCrm?.({
+                applicationRecordId: record.id,
+                expectedRevision: applicationCrmDataForView(record).revision,
+                mutation,
+              });
+            const moveBackMenu: RowMenuEntry[] =
+              moveBack === "to_shortlisted" && onReturnToShortlist
+                ? [
+                    "separator",
+                    {
+                      id: "move-back-to-shortlisted",
+                      label: "Move back to Shortlisted",
+                      run: () => onReturnToShortlist(record),
+                    },
+                  ]
+                : moveBack === "sent" && onMutateApplicationCrm
+                  ? [
+                      "separator",
+                      {
+                        id: "sent-stays",
+                        label: "It was sent, so it cannot move back",
+                        enabled: false,
+                        run: () => undefined,
+                      },
+                      {
+                        id: "mark-withdrawn",
+                        label: "Mark withdrawn",
+                        run: () =>
+                          mutateCrm({
+                            type: "set_stage",
+                            stage: "withdrawn",
+                            customStageId: null,
+                            note: null,
+                          }),
+                      },
+                      {
+                        id: "archive",
+                        label: "Archive",
+                        run: () =>
+                          mutateCrm({ type: "set_archived", archived: true }),
+                      },
+                    ]
+                  : [];
             const recordStateDescriptionId = `applications-record-${record.id}-state-description`;
             const relatedJob = relatedJobsById.get(record.jobId);
             const employerLine = [
@@ -521,18 +765,48 @@ export function ApplicationsRecordsPanel({
                     slot. Selecting row 1 then row 2 used to move every row
                     below by tens of pixels. */}
                 <SelectableRow
-                  aria-describedby={recordStateDescriptionId}
+                  as="div"
                   className={jobFinderListRowClassName}
-                  aria-keyshortcuts="ArrowUp ArrowDown Home End"
-                  aria-label={`View details for ${employerAriaLabel}`}
-                  data-collection-item-id={record.id}
-                  onClick={() => onSelectRecord(record.id)}
-                  onKeyDown={(event) =>
-                    handleRecordRowKeyDown(event, record.id)
+                  onContextMenu={(event) =>
+                    openRowContextMenu(event, [
+                      {
+                        id: "open",
+                        label: "Open",
+                        run: () => onSelectRecord(record.id),
+                      },
+                      ...(formAction
+                        ? [
+                            {
+                              id: "open-form",
+                              label: formAction.label,
+                              run: runFormAction,
+                            },
+                          ]
+                        : []),
+                      ...moveBackMenu,
+                      ...listingRowMenuEntries(relatedJob?.canonicalUrl),
+                    ])
                   }
                   selected={selectedRecord?.id === record.id}
                 >
-                  <div className={jobFinderListRowLinesClassName}>
+                  <button
+                    aria-current={
+                      selectedRecord?.id === record.id ? "true" : undefined
+                    }
+                    aria-describedby={recordStateDescriptionId}
+                    aria-keyshortcuts="ArrowUp ArrowDown Home End"
+                    aria-label={`View details for ${employerAriaLabel}`}
+                    className={cn(
+                      jobFinderListRowLinesClassName,
+                      "w-full text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                    )}
+                    data-collection-item-id={record.id}
+                    onClick={() => onSelectRecord(record.id)}
+                    onKeyDown={(event) =>
+                      handleRecordRowKeyDown(event, record.id)
+                    }
+                    type="button"
+                  >
                     {/* Title line, with the one badge slot trailing it - the
                         same slot Find jobs and Shortlisted use. The row's own
                         description below already reads "Stage <label>", so no
@@ -560,20 +834,89 @@ export function ApplicationsRecordsPanel({
                     </SelectableRowLine>
                     {/* One status line only: the stage badge already names the
                         state, so the latest-activity sentence (which often
-                        repeated this exact next step) is not shown twice. */}
-                    <SelectableRowLine
-                      className={cn(
-                        jobFinderListRowStatusClassName,
-                        "font-medium text-primary",
-                      )}
+                        repeated this exact next step) is not shown twice.
+                        Opening the form from this row reports here, in the
+                        same words the detail panel uses. */}
+                    {formOpenPhase ? (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "flex items-center gap-2 pr-28 text-foreground-soft",
+                        )}
+                        role="status"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+                        />
+                        <span className="min-w-0 truncate">
+                          {formOpenPhase}
+                        </span>
+                      </SelectableRowLine>
+                    ) : formOpenOutcome && applyState ? (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "pr-28",
+                          formOpenOutcome.kind === "opened_application_page"
+                            ? "text-foreground-soft"
+                            : "text-(--warning-text)",
+                        )}
+                        data-handoff-outcome={formOpenOutcome.kind}
+                        role="status"
+                        title={describeFormOpenOutcome(formOpenOutcome, {
+                          readyToSend: applyState.kind === "ready_to_send",
+                        })}
+                      >
+                        {describeFormOpenOutcome(formOpenOutcome, {
+                          readyToSend: applyState.kind === "ready_to_send",
+                        })}
+                      </SelectableRowLine>
+                    ) : (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "font-medium text-primary",
+                          formAction ? "pr-28" : null,
+                        )}
+                      >
+                        {/* The button beside this line already names the
+                            step; "Next: Apply again" next to "Apply again"
+                            said it twice. */}
+                        {liveLine
+                          ? `Now: ${liveLine}`
+                          : formAction?.kind === "prepare" &&
+                              applicationWorkPaused
+                            ? APPLICATION_WORK_PAUSED_REASON
+                            : nextStepLabel &&
+                                nextStepLabel !== formAction?.label
+                              ? `Next: ${nextStepLabel}`
+                              : null}
+                      </SelectableRowLine>
+                    )}
+                  </button>
+                  {formAction ? (
+                    <Button
+                      className="absolute right-4 bottom-2.5"
+                      data-testid="applications-row-form-action"
+                      disabled={
+                        formOpenPhase !== null ||
+                        (formAction.kind === "prepare" && applicationWorkPaused)
+                      }
+                      onClick={runFormAction}
+                      title={
+                        formAction.kind === "prepare" && applicationWorkPaused
+                          ? APPLICATION_WORK_PAUSED_REASON
+                          : undefined
+                      }
+                      pending={formOpenPhase !== null}
+                      size="xs"
+                      type="button"
+                      variant="secondary"
                     >
-                      {liveLine
-                        ? `Now: ${liveLine}`
-                        : nextStepLabel
-                          ? `Next: ${nextStepLabel}`
-                          : null}
-                    </SelectableRowLine>
-                  </div>
+                      {formAction.label}
+                    </Button>
+                  ) : null}
                   <span className="sr-only" id={recordStateDescriptionId}>
                     {/* The visible badge is deduplicated; the description
                         still names a failed attempt for assistive tech, since

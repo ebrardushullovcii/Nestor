@@ -14,6 +14,55 @@ import {
 } from "./openai-compatible-transport";
 
 describe("Responses API transport", () => {
+  test("sends an explicitly requested strict response schema", () => {
+    const jsonSchema = {
+      name: "judgments",
+      schema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    };
+    expect(
+      buildModelRequestBody({
+        apiMode: "responses",
+        model: "verified-model",
+        messages: [],
+        jsonOutput: true,
+        jsonSchema,
+      }),
+    ).toHaveProperty("text.format", {
+      type: "json_schema",
+      strict: true,
+      ...jsonSchema,
+    });
+  });
+
+  test("only adds a sampling control when the caller requested one", () => {
+    const input = {
+      apiMode: "responses" as const,
+      model: "muse-spark-1.3-contributor",
+      reasoningEffort: "medium" as const,
+      messages: [{ role: "user" as const, content: "Judge these facts." }],
+    };
+    expect(buildModelRequestBody(input)).not.toHaveProperty("temperature");
+    expect(buildModelRequestBody({ ...input, temperature: 0 })).toMatchObject({
+      temperature: 0,
+      reasoning: { effort: "medium" },
+    });
+    expect(
+      buildModelRequestBody({ ...input, apiMode: "chat_completions" }),
+    ).not.toHaveProperty("temperature");
+    expect(
+      buildModelRequestBody({
+        ...input,
+        apiMode: "chat_completions",
+        reasoningEffort: undefined,
+      }),
+    ).toHaveProperty("temperature", 0.2);
+  });
+
   test("keeps ordinary text and image-only defaults on separate OpenCode Go routes", () => {
     expect(DEFAULT_OPENCODE_GO_BASE_URL).toBe("https://opencode.ai/zen/go/v1");
     expect({

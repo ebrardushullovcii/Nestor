@@ -880,10 +880,26 @@ export const ResumeValidationIssueSchema = z.object({
 });
 export type ResumeValidationIssue = z.infer<typeof ResumeValidationIssueSchema>;
 
+/**
+ * The severity an issue is treated and shown with. Length is a quiet note,
+ * never a blocker (ADR 0051), but drafts checked before that decision still
+ * carry page overflow saved as an error, which held their approval back
+ * behind a red "Blocks approval" box.
+ */
+export function getResumeValidationIssueSeverity(
+  issue: Pick<ResumeValidationIssue, "severity"> & {
+    category?: ResumeValidationCategory;
+  },
+): ResumeValidationSeverity {
+  return issue.category === "page_overflow" ? "info" : issue.severity;
+}
+
 export function isBlockingResumeValidationIssue(
-  issue: Pick<ResumeValidationIssue, "severity">,
+  issue: Pick<ResumeValidationIssue, "severity"> & {
+    category?: ResumeValidationCategory;
+  },
 ): boolean {
-  return issue.severity === "error";
+  return getResumeValidationIssueSeverity(issue) === "error";
 }
 
 /**
@@ -1333,13 +1349,26 @@ export type ResumeResearchArtifactSummary = z.infer<
   typeof ResumeResearchArtifactSummarySchema
 >;
 
-/** Two completed resumes establish an observed average or measured queue throughput. */
+/**
+ * Two completed resumes establish an observed average or measured queue
+ * throughput. With `inFlight` known, the rest is counted in waves of that
+ * many resumes written side by side: ten at once finish together, not one
+ * after another.
+ */
 export function estimateResumeBatchMinutesLeft(
   durationsMs: readonly number[],
   remainingCount: number,
   observed?: { elapsedMs: number; completedCount: number },
+  inFlight?: number,
 ): number | null {
   if (durationsMs.length < 2 || remainingCount <= 0) return null;
+  if (inFlight !== undefined && inFlight > 0) {
+    const average =
+      durationsMs.reduce((sum, duration) => sum + duration, 0) /
+      durationsMs.length;
+    const waves = Math.ceil(remainingCount / inFlight);
+    return Math.max(1, Math.ceil((average * waves) / 60_000));
+  }
   if (observed && observed.completedCount >= 2 && observed.elapsedMs > 0)
     return Math.max(
       1,

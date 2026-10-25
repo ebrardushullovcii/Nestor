@@ -7,6 +7,8 @@ import type {
 import { ListChecks, X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "../status-badge";
+import type { RecentChange } from "../../lib/recent-changes";
+import { RecentChangesSection } from "./recent-changes-section";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
@@ -14,6 +16,7 @@ import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
   type JobFinderTaskCenterItem,
+  isStaleFinishedTask,
 } from "./job-finder-task-center-model";
 
 interface JobFinderTaskCenterProps {
@@ -37,10 +40,11 @@ interface JobFinderTaskCenterProps {
   onPrepareRemainingJobs?:
     | ((jobIds: readonly string[]) => void | Promise<unknown>)
     | undefined;
+  /** Puts back one of the person's recent moves. */
+  onUndoRecentChange?: ((change: RecentChange) => Promise<boolean>) | undefined;
 }
 
-const CLEARED_ACTIVITY_STORAGE_KEY =
-  "nestor.job-finder.cleared-activity.v1";
+const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v1";
 
 function readClearedActivityIds(): ReadonlySet<string> {
   try {
@@ -68,8 +72,10 @@ function taskTone(status: JobFinderTaskCenterItem["status"]) {
   if (status === "completed") {
     return "positive" as const;
   }
+  // A run that failed or was cut short can be run again; amber says "look
+  // at this" without the alarm red reserves for something at risk.
   if (status === "failed" || status === "interrupted") {
-    return "critical" as const;
+    return "warning" as const;
   }
   return "muted" as const;
 }
@@ -273,7 +279,10 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
   const taskCountsLabel = describeTaskCenterCounts(model);
   const visibleItems = model.items.filter(
-    (item) => !isFinishedActivity(item) || !clearedActivityIds.has(item.id),
+    (item) =>
+      !isFinishedActivity(item) ||
+      (!clearedActivityIds.has(item.id) &&
+        !isStaleFinishedTask(item, Date.now())),
   );
   const finishedItems = visibleItems.filter(isFinishedActivity);
 
@@ -325,7 +334,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
         {/* One name at every width. "Tasks" read as a to-do list for the
             person, which is what Needs you is; this panel is what Job Finder
             itself is doing, so it is named for that. */}
-        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden">
+        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
           Activity
         </span>
         {/* One zero rule for every count in the shell: a badge never renders
@@ -349,38 +358,41 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           off the top of the window, and swallowed clicks on the toolbar. */}
       <section
         aria-label="Activity"
-        className="surface-popover-solid absolute right-0 top-12 grid max-h-[min(38rem,calc(100vh-8rem))] w-[min(34rem,calc(100vw-2rem))] gap-3 overflow-x-hidden overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-4 shadow-(--modal-shadow)"
+        className="surface-popover-solid absolute right-0 top-12 grid max-h-[min(38rem,calc(100vh-8rem))] w-[min(34rem,calc(100vw-2rem))] gap-3 overflow-x-hidden overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-4 shadow-(--modal-shadow) motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="grid gap-1">
             <h2 className="font-display text-(--text-headline)">Activity</h2>
             <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-              What Job Finder is doing now, and how its latest runs ended. Steps
-              only you can do are in Needs you.
+              {/* Promise last runs only while there are some to show. */}
+              {finishedItems.length > 0
+                ? "What Job Finder is doing now and how its last runs ended."
+                : "What Job Finder is doing now."}
             </p>
           </div>
-          <Button
-            aria-label="Close Activity"
-            className="shrink-0"
-            onClick={() => closePanel(true)}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <X aria-hidden="true" className="size-4" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            {finishedItems.length > 0 ? (
+              <Button
+                onClick={clearFinishedActivity}
+                size="compact"
+                type="button"
+                variant="ghost"
+              >
+                Clear finished
+              </Button>
+            ) : null}
+            <Button
+              aria-label="Close Activity"
+              className="shrink-0"
+              onClick={() => closePanel(true)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
         </div>
-
-        {finishedItems.length > 0 ? (
-          <Button
-            onClick={clearFinishedActivity}
-            size="compact"
-            type="button"
-            variant="ghost"
-          >
-            Clear finished
-          </Button>
-        ) : null}
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
@@ -417,12 +429,16 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
                   </div>
 
                   <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-(length:--text-small) leading-5">
-                    <dt className="text-foreground-muted">Stage</dt>
-                    <dd className="text-foreground">
-                      {visibleStatus === "stopping"
-                        ? "Stopping"
-                        : item.stageLabel}
-                    </dd>
+                    {/* "STOPPED" on the badge and "Stage: Stopped" under it
+                        said one thing twice. */}
+                    {visibleStatus === "stopping" ||
+                    item.stageLabel.trim().toLowerCase() ===
+                      statusLabel(visibleStatus).toLowerCase() ? null : (
+                      <>
+                        <dt className="text-foreground-muted">Stage</dt>
+                        <dd className="text-foreground">{item.stageLabel}</dd>
+                      </>
+                    )}
                     <dt className="text-foreground-muted">Progress</dt>
                     <dd className="text-foreground">{item.countLabel}</dd>
                     {item.historyEstimateLabel ? (
@@ -489,6 +505,12 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
             })}
           </div>
         )}
+        {props.onUndoRecentChange ? (
+          <RecentChangesSection
+            onUndo={props.onUndoRecentChange}
+            workspace={props.workspace}
+          />
+        ) : null}
       </section>
     </details>
   );

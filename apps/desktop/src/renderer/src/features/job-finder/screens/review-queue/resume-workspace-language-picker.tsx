@@ -21,6 +21,11 @@ export function ResumeWorkspaceLanguagePicker(props: {
   writtenLanguage: string | null;
   listingLanguage?: string | null;
   disabled: boolean;
+  /**
+   * Sits inside the studio header row instead of on a row of its own; the
+   * "translates this draft" hint becomes the field's tooltip.
+   */
+  inline?: boolean;
   onWrite: (language: string | null) => void;
 }) {
   const [requestedLanguage, setRequestedLanguage] = useState<
@@ -44,10 +49,19 @@ export function ResumeWorkspaceLanguagePicker(props: {
     // Sits between the header panel and the status strip: the same 8px gap
     // the other rows here use, and inset to line up with the header's text.
     <div
-      className="mt-2 flex flex-wrap items-center gap-2 px-5 text-sm"
+      className={
+        props.inline
+          ? "flex flex-wrap items-center gap-2 text-sm"
+          : "mt-2 flex flex-wrap items-center gap-2 px-5 text-sm"
+      }
       data-resume-language-picker
     >
-      <label className="flex items-center gap-2">
+      <label
+        className="flex items-center gap-2"
+        {...(props.inline
+          ? { title: "Choosing a language translates this draft." }
+          : {})}
+      >
         Resume language
         <select
           aria-label="Resume language"
@@ -100,7 +114,11 @@ export function ResumeWorkspaceLanguagePicker(props: {
           </Button>
         </>
       ) : null}
-      <span className="text-xs text-foreground-muted">
+      <span
+        className={
+          props.inline ? "sr-only" : "text-xs text-foreground-muted"
+        }
+      >
         Choosing a language translates this draft.
       </span>
     </div>

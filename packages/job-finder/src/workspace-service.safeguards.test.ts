@@ -11,7 +11,7 @@ import {
   createInMemoryJobFinderRepository,
   type JobFinderRepositorySeed,
 } from "@nestor/db";
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";
 import {
@@ -572,9 +572,14 @@ describe("workspace service high-volume safeguards", () => {
   );
 
   test("a blocker appearing while jobs run stops new launches and lets the running job finish", async () => {
-    // Apply to all prepares two jobs at once (ADR 0036). Job two is already
-    // running when job one's blocker for job three appears: job two may
-    // finish, job three must never be launched.
+    // With two preparations at once (ADR 0036; the default is wider now, the
+    // stop rule is the same at any width), job two is already running when
+    // job one's blocker for job three appears: job two may finish, job three
+    // must never be launched.
+    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "2");
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
     const seed = seedWithCompanies();
     seed.settings = {
       ...seed.settings,

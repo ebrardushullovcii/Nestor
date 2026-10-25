@@ -341,26 +341,34 @@ export function useProfileSetupForms(input: {
   // searchPreferences arrive with a new object identity even when nothing in
   // them changed; content fingerprints, not identity, decide when a form may
   // be reseeded so unrelated commits cannot erase dirty drafts.
+  // Computed on the first render only: as useRef arguments they were
+  // rebuilt on every render (six walks of the profile and of every saved
+  // source) and thrown away, about 40 ms per Profile tab switch.
+  const [initialFingerprints] = useState(() => ({
+    profile: buildComparableValueFingerprint(input.profile),
+    reviewCandidates: buildComparableValueFingerprint(
+      input.latestResumeImportReviewCandidates,
+    ),
+    searchPreferences: buildComparableValueFingerprint(input.searchPreferences),
+  }));
   const loadedProfileContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.profile),
+    initialFingerprints.profile,
   );
   const loadedReviewCandidatesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.latestResumeImportReviewCandidates),
+    initialFingerprints.reviewCandidates,
   );
   const loadedSearchPreferencesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.searchPreferences),
+    initialFingerprints.searchPreferences,
   );
   // Seen-fingerprints advance on every effect run (including conflicted
   // merges) so repeated snapshots cannot re-trigger handling, while the
   // loaded-fingerprints above only move when a form actually adopts content.
-  const seenProfileContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.profile),
-  );
+  const seenProfileContentFingerprintRef = useRef(initialFingerprints.profile);
   const seenReviewCandidatesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.latestResumeImportReviewCandidates),
+    initialFingerprints.reviewCandidates,
   );
   const seenSearchPreferencesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.searchPreferences),
+    initialFingerprints.searchPreferences,
   );
   // The newest canonical values seen from the workspace. Screens save against
   // these, so own-save echo detection matches the payload the save emitted
@@ -846,20 +854,26 @@ export function useProfileSetupForms(input: {
     const preferencesChangedSinceSeen =
       incomingPreferencesFingerprint !==
       seenSearchPreferencesContentFingerprintRef.current;
+    // Only an edited form can be echoing its own save. Building and checking
+    // both payloads cost 30-45 ms on every visit to Profile, edited or not.
     const draftPreferencesValues = preferencesForm.getValues();
-    const savedPreferencesPayload = buildSearchPreferencesPayload(
-      latestSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const pendingCanonicalPreferencesPayload = buildSearchPreferencesPayload(
-      pendingCanonicalSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const savedPreferencesEchoFingerprints = new Set(
-      [savedPreferencesPayload, pendingCanonicalPreferencesPayload]
+    const isEchoOfSavedPayload = () => {
+      const savedPreferencesPayload = buildSearchPreferencesPayload(
+        latestSearchPreferencesRef.current,
+        draftPreferencesValues,
+      ).payload;
+      const pendingCanonicalPreferencesPayload = buildSearchPreferencesPayload(
+        pendingCanonicalSearchPreferencesRef.current,
+        draftPreferencesValues,
+      ).payload;
+      return [savedPreferencesPayload, pendingCanonicalPreferencesPayload]
         .filter((payload) => payload !== undefined)
-        .map((payload) => buildComparableValueFingerprint(payload)),
-    );
+        .some(
+          (payload) =>
+            buildComparableValueFingerprint(payload) ===
+            incomingPreferencesFingerprint,
+        );
+    };
     const ownPreferences = ownSaveRef.current.preferences;
     const ownPreferencesOverlay = ownPreferences
       ? mergeDirtyEditorValues(
@@ -870,7 +884,7 @@ export function useProfileSetupForms(input: {
       : null;
     const isSavedPreferencesDraftEcho =
       preferencesForm.formState.isDirty &&
-      (savedPreferencesEchoFingerprints.has(incomingPreferencesFingerprint) ||
+      (isEchoOfSavedPayload() ||
         (preferencesChangedSinceSeen &&
           ownPreferencesOverlay?.status === "merged" &&
           buildComparableValueFingerprint(ownPreferencesOverlay.value) ===

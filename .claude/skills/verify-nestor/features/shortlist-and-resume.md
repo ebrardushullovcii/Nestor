@@ -4,7 +4,7 @@ The person shortlists the jobs they want. On Shortlisted, each job gets a resume
 
 ## Sub-features
 
-- `shortlist-add`: "Shortlist job" in Find jobs' job details; notification "Job added to Shortlisted."
+- `shortlist-add`: "Shortlist job" (or key S) in Find jobs' job details; the triage bar counts it ("N of M gone through") and offers Undo (key U). Outside a triage pass (a row's right-click menu) the toast says "Job added to Shortlisted." with Undo; a bulk shortlist says "Shortlisted N jobs." with Undo all.
 - `shortlist-list`: Shortlisted page, plan combobox, one row per job with its state ("No resume yet", "Writing the resume…", "Ready to apply").
 - `resume-level`: radiogroup "Resume level for this job" (Original, Light, Tailored default, Aggressive).
 - `resume-create`: "Create the resume", progress bar "Resume preparation in progress", status "Resume created for this job."
@@ -20,7 +20,7 @@ The person shortlists the jobs they want. On Shortlisted, each job gets a resume
 
 Preconditions: a finished search on `up --ai live`.
 
-- **Shortlist.** In Find jobs, click a result in list "Results" (journey: `getByRole("list", { name: "Results" }).getByRole("button", { name: /^Frontend Engineer,/ })`), then `$V/drive click "Shortlist job"`, `$V/drive wait "Job added to Shortlisted."`. Proof: `$V/db saved_jobs 1 "<job title>"` with `status` `shortlisted` (or `drafting`).
+- **Shortlist.** In Find jobs, click a result in list "Results" (journey: `getByRole("list", { name: "Results" }).getByRole("button", { name: /^Frontend Engineer,/ })`), then `$V/drive click "Shortlist job"`, `$V/drive wait Undo --role button`. Proof: `$V/db saved_jobs 1 "<job title>"` with `status` `shortlisted` (or `drafting`).
 - **Open Shortlisted.** `$V/drive click Shortlisted --role button --within "Job Finder sidebar destinations"`.
 - **Create the resume.** `$V/drive click "Create the resume"`; wait until the progress bar "Resume preparation in progress" is gone and the "Apply" button shows. Measured 30 s for Tailored. Proof: shot of the preview, `$V/db resume_drafts 1`, `$V/db tailored_assets 1`.
 - Whole flow: `journeys/job-finder-replica.mjs shortlist`, then `resume`.

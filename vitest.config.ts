@@ -7,6 +7,30 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      "@nestor/job-list-policy/text": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/shared.ts",
+      ),
+      "@nestor/job-list-policy/identity": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/job-identity.ts",
+      ),
+      "@nestor/job-list-policy/tie-break-reason": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/tie-break-reason.ts",
+      ),
+      "@nestor/job-list-policy/ordering": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/ordering.ts",
+      ),
+      "@nestor/job-list-policy/sources": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/sources.ts",
+      ),
+      "@nestor/job-list-policy": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/index.ts",
+      ),
       "@nestor/ai-providers": path.resolve(
         currentDir,
         "packages/ai-providers/src/index.ts",
@@ -29,6 +53,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/assistant/attention.ts",
       ),
+      "@nestor/job-finder/discovery-cpu": path.resolve(
+        currentDir,
+        "packages/job-finder/src/discovery-cpu.ts",
+      ),
       "@nestor/job-finder/discovery-ordering": path.resolve(
         currentDir,
         "packages/job-finder/src/discovery-ordering.ts",
@@ -41,7 +69,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/resume-record-identity.ts",
       ),
-      "@nestor/job-finder/plan-safeguard-pauses": path.resolve(currentDir, "packages/job-finder/src/plan-safeguard-pauses.ts"),
+      "@nestor/job-finder/plan-safeguard-pauses": path.resolve(
+        currentDir,
+        "packages/job-finder/src/plan-safeguard-pauses.ts",
+      ),
       "@nestor/job-finder/resume-identity": path.resolve(
         currentDir,
         "packages/job-finder/src/internal/resume-identity.ts",
@@ -54,11 +85,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/source-health.ts",
       ),
-      "@nestor/job-finder/application-submission-runtime-main":
-        path.resolve(
-          currentDir,
-          "packages/job-finder/src/application-submission-runtime-main.ts",
-        ),
+      "@nestor/job-finder/application-submission-runtime-main": path.resolve(
+        currentDir,
+        "packages/job-finder/src/application-submission-runtime-main.ts",
+      ),
       "@nestor/job-finder": path.resolve(
         currentDir,
         "packages/job-finder/src/index.ts",

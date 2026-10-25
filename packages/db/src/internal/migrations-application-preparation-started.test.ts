@@ -30,6 +30,8 @@ describe("durable application preparation start migration", () => {
     try {
       runMigrations(database);
       database.exec(`
+        -- The simulated older schema predates column-aware change-feed triggers.
+        DROP TRIGGER workspace_feed_apply_job_results_update;
         DROP INDEX apply_job_results_preparation_local_date_run_job_idx;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_at;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_local_date;
@@ -123,6 +125,8 @@ describe("durable application preparation start migration", () => {
     try {
       runMigrations(database);
       database.exec(`
+        -- The simulated older schema predates column-aware change-feed triggers.
+        DROP TRIGGER workspace_feed_apply_job_results_update;
         DROP INDEX apply_job_results_preparation_local_date_run_job_idx;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_at;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_local_date;
@@ -213,6 +217,8 @@ describe("durable application preparation start migration", () => {
     try {
       runMigrations(database);
       database.exec(`
+        -- The simulated older schema predates column-aware change-feed triggers.
+        DROP TRIGGER workspace_feed_apply_job_results_update;
         DROP INDEX apply_job_results_preparation_local_date_run_job_idx;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_at;
         ALTER TABLE apply_job_results DROP COLUMN application_preparation_started_local_date;

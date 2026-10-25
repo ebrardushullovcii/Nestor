@@ -6,7 +6,6 @@ import {
   fireEvent,
   render,
   screen,
-  within,
 } from "@testing-library/react";
 import { ApplicationRecordSchema } from "@nestor/contracts";
 import type {
@@ -297,7 +296,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
     // never two names for one job. Once on the selected row (rows keep their
     // badge when selected) and once in the detail header.
     expect(screen.getAllByText("Ready to apply").length).toBe(2);
-    expect(screen.queryByText("Review resume")).toBeNull();
+    expect(screen.queryByText("To review")).toBeNull();
   });
 
   it("delegates the create-all run to the page controller without owning it", () => {
@@ -391,7 +390,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
   });
 
   it.each([0, 1, 2])(
-    "keeps a ready batch within %i remaining daily slots",
+    "queues every ready job whatever the day has left (%i remaining)",
     async (remaining) => {
       const onStartAutoApplyQueue = vi
         .fn<
@@ -416,24 +415,15 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
         })),
       });
 
-      if (remaining === 0) {
-        expect(screen.queryByTestId("apply-all-ready")).toBeNull();
-        expect(onStartAutoApplyQueue).not.toHaveBeenCalled();
-        return;
-      }
+      // The Apply queue waits for tomorrow by itself (ADR 0058).
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("button", {
-            name:
-              remaining === 1
-                ? "Apply to the 1 ready job"
-                : "Apply to all 2 ready jobs",
-          }),
+          screen.getByRole("button", { name: "Prepare all 2 ready" }),
         );
         await Promise.resolve();
       });
       expect(onStartAutoApplyQueue).toHaveBeenCalledWith(
-        ["job_a", "job_b"].slice(0, remaining),
+        ["job_a", "job_b"],
         "prepare_only",
       );
     },
@@ -479,7 +469,12 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
 
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("button", { name: "Apply to all 2 ready jobs" }),
+          screen.getByRole("button", {
+            name:
+              applicationAutomationMode === "autonomous_submit"
+                ? "Apply to all 2 ready"
+                : "Prepare all 2 ready",
+          }),
         );
         await Promise.resolve();
       });
@@ -654,8 +649,8 @@ describe("ReviewQueueScreen locked pane scroll regions", () => {
 
     const column = screen.getByTestId("review-queue-workspace-column");
     expect(
-      within(column).getAllByText("Tailored resume v1").length,
-    ).toBeGreaterThan(0);
+      column.querySelector("[data-resume-preview-card]"),
+    ).toBeTruthy();
     expect(
       column.querySelectorAll("[data-locked-pane-scroll-region]"),
     ).toHaveLength(0);
@@ -721,7 +716,7 @@ describe("ReviewQueueScreen job details honesty", () => {
     // full assessment with the job detail.
     expect(
       await screen.findAllByText(
-        "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        "The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       ),
     ).toHaveLength(1);
     expect(
@@ -1015,11 +1010,7 @@ it("offers no second button for unfinished jobs that Create missing resumes alre
     },
     onPrepareTailoredDrafts,
   });
-  expect(
-    screen.queryByText(
-      "The previous resume batch did not finish. Finished resumes were kept.",
-    ),
-  ).toBeNull();
+  expect(screen.queryByText(/resume batch did not finish/)).toBeNull();
   expect(screen.queryByRole("button", { name: "Continue batch" })).toBeNull();
   fireEvent.click(
     screen.getByRole("button", { name: "Create 2 missing resumes" }),
@@ -1045,11 +1036,36 @@ it("keeps the unfinished-batch notice when the batch carries a per-job choice", 
     },
     onPrepareTailoredDrafts,
   });
-  expect(
-    screen.getByText("1 unfinished resume is saved in this batch."),
-  ).toBeTruthy();
+  // A quiet line under the title, not a box above the list (issue #50).
+  const line = screen.getByText(
+    "The last resume batch did not finish: 1 resume not written yet.",
+  );
+  expect(line.closest("[data-page-header-status]")).toBeTruthy();
+  expect(document.querySelector("[data-interrupted-resume-notice]")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Continue batch" }));
   expect(onPrepareTailoredDrafts).toHaveBeenCalledWith(["unfinished"]);
+});
+
+it("says nothing about a batch whose unfinished jobs already have a resume or need one", () => {
+  const withResume = {
+    ...createEligibleItem("written_meanwhile"),
+    assetStatus: "ready",
+    resumeAssetId: "asset_written_meanwhile",
+    resumeReview: { status: "needs_review" },
+  } as unknown as ReviewQueueItem;
+  renderScreen({
+    queue: [createEligibleItem("unfinished"), withResume],
+    resumeBatchCheckpoint: {
+      id: "batch",
+      jobIds: ["finished", "unfinished", "written_meanwhile"],
+      activeJobIds: [],
+      completedJobIds: ["finished"],
+      done: false,
+      stopRequested: false,
+    },
+  });
+  expect(screen.queryByText(/resume batch/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Continue batch" })).toBeNull();
 });
 
 it("does not call a live assistant queue interrupted, and recovers unfinished existing drafts", () => {
@@ -1108,7 +1124,9 @@ it("offers the saved batch when its jobs are outside the current campaign", () =
     onPrepareTailoredDrafts,
   });
   expect(
-    screen.getByText("1 unfinished resume is saved in this batch."),
+    screen.getByText(
+      "The last resume batch did not finish: 1 resume not written yet.",
+    ),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Continue batch" }));
   expect(onPrepareTailoredDrafts).toHaveBeenCalledWith(["elsewhere"]);
@@ -1171,9 +1189,7 @@ it("a 200-job unfinished batch of missing resumes is picked up by Create missing
     resumeBatchCheckpoint: checkpoint,
     onPrepareTailoredDrafts,
   });
-  expect(
-    screen.queryByRole("button", { name: "Dismiss resume batch notice" }),
-  ).toBeNull();
+  expect(screen.queryByText(/resume batch/)).toBeNull();
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
   );
@@ -1237,7 +1253,9 @@ it("shows a durable provider pause reason and retains a dismissible Continue con
   fireEvent.click(screen.getByRole("button", { name: "Continue batch" }));
   expect(onPrepareTailoredDrafts).toHaveBeenCalledWith(checkpoint.jobIds);
   fireEvent.click(
-    screen.getByRole("button", { name: "Dismiss resume batch notice" }),
+    screen.getByRole("button", {
+      name: /^Hide for now: The resume batch is paused/,
+    }),
   );
   expect(
     screen.queryByText(/The resume batch is paused.*insufficient funds/),

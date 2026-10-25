@@ -59,7 +59,8 @@ describe("company reconciliation evidence at scale", () => {
         expect(cold.companies).toHaveLength(input.companyCount);
         expect(cold.summary.createdMergeCandidates).toEqual([]);
         expect(companyParse).toHaveBeenCalledTimes(input.companyCount);
-        expect(jobParse).toHaveBeenCalledTimes(input.jobCount);
+        // Frozen jobs are repository display rows, validated when read.
+        expect(jobParse).not.toHaveBeenCalled();
         expect(recordParse).toHaveBeenCalledTimes(
           fixture.applicationRecords.length,
         );
@@ -462,19 +463,24 @@ describe("company reconciliation evidence at scale", () => {
   });
 
   test("duplicate lookup stays bounded for 10000 unrelated openings at one employer", () => {
-    const fixture = createCompanyScaleFixture({
-      jobCount: 10_000,
-      companyCount: 1,
-    });
-    const selected = company("selected", fixture.jobs[0]!.company, {
-      jobIds: fixture.jobs.map((job) => job.id),
-    });
-    const started = performance.now();
-    expect(
-      projectCompanyDuplicateJobs({ company: selected, jobs: fixture.jobs }),
-    ).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(4_000);
-  }, 10_000);
+    const timeLookup = (jobCount: number) => {
+      const fixture = createCompanyScaleFixture({ jobCount, companyCount: 1 });
+      const selected = company("selected", fixture.jobs[0]!.company, {
+        jobIds: fixture.jobs.map((job) => job.id),
+      });
+      const started = performance.now();
+      expect(
+        projectCompanyDuplicateJobs({ company: selected, jobs: fixture.jobs }),
+      ).toEqual([]);
+      return performance.now() - started;
+    };
+    // Ten times the openings may cost about ten times as long; comparing
+    // pairs would cost a hundred. A ratio holds on a busy machine where a
+    // fixed budget in milliseconds did not.
+    const small = timeLookup(1_000);
+    const large = timeLookup(10_000);
+    expect(large).toBeLessThan(Math.max(small, 50) * 30);
+  }, 60_000);
 
   test("immutable evidence caching does not hide changes to mutable nested inputs", () => {
     const fixture = createCompanyScaleFixture({ jobCount: 1, freeze: false });
@@ -487,7 +493,13 @@ describe("company reconciliation evidence at scale", () => {
       createCompanyId,
     };
     expect(reconcileCompanies(input).ok).toBe(true);
+    // Ownership does not validate unused listing fields on our typed rows.
     job.keySkills.push(42 as unknown as string);
-    expect(reconcileCompanies(input).ok).toBe(false);
+    job.provenance[0]!.listingUrl = "https://changed-employer.example.test/role";
+    const next = reconcileCompanies(input);
+    expect(next.ok).toBe(true);
+    // A new row is a carrier-free control; mutable sighting links must not
+    // be hidden by the evidence memo on the shallow-frozen original.
+    expect(next).toEqual(reconcileCompanies({ ...input, jobs: [{ ...job }] }));
   });
 });

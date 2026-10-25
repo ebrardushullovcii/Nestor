@@ -236,7 +236,12 @@ export function ProfileScreen(props: {
     return () => onProfileSurfaceDirtyChange(false);
   }, [hasUserDraftChanges, onProfileSurfaceDirtyChange]);
 
+  // A freshly mounted section already starts at the top; resetting it on
+  // mount only forced a layout of the whole new screen.
+  const scrolledSectionRef = useRef(activeSection);
   useEffect(() => {
+    if (scrolledSectionRef.current === activeSection) return;
+    scrolledSectionRef.current = activeSection;
     resetProfileSectionScroll();
   }, [activeSection]);
 
@@ -433,7 +438,10 @@ export function ProfileScreen(props: {
     searchPreferences.discovery.targets.map((target) => [target.id, target]),
   );
   const draftTargets = preferencesForm.watch("discoveryTargets");
-  const hasUnsavedSearchPreferenceChanges =
+  // Asked only when a source action is pressed: fingerprinting the saved and
+  // draft preferences (every source included) on each render cost about 20 ms
+  // per Profile render.
+  const hasUnsavedSearchPreferenceChanges = () =>
     preferencesForm.formState.isDirty ||
     buildComparableValueFingerprint(searchPreferences) !==
       buildComparableValueFingerprint(
@@ -468,7 +476,7 @@ export function ProfileScreen(props: {
   }
 
   function handleRunDiscoveryForTarget(targetId: string) {
-    if (hasUnsavedSearchPreferenceChanges) {
+    if (hasUnsavedSearchPreferenceChanges()) {
       setValidationMessage(unsavedProfileSourceActionMessage);
       return;
     }
@@ -481,7 +489,7 @@ export function ProfileScreen(props: {
     targetId: string,
     options?: { readabilityTimeoutMs?: number },
   ) {
-    if (hasUnsavedSearchPreferenceChanges) {
+    if (hasUnsavedSearchPreferenceChanges()) {
       setValidationMessage(unsavedProfileSourceActionMessage);
       return;
     }
@@ -662,7 +670,7 @@ export function ProfileScreen(props: {
       topContent={
         <>
           <PageHeaderStack
-            title="Your profile"
+            title="Profile"
             description="Everything Job Finder knows about you. Edit any field or ask the assistant."
             statusItems={profileStatusItems}
             actions={
@@ -679,6 +687,7 @@ export function ProfileScreen(props: {
 
           {profileSetupState.status === "completed" ? (
             <ProfileReadyBanner
+              completedAt={profileSetupState.completedAt}
               completionIdentity={`${profile.id}:${profileSetupState.completedAt ?? "completed"}`}
             />
           ) : null}
@@ -869,6 +878,7 @@ export function ProfileScreen(props: {
                   <ProfileActiveSectionContent
                     activeSection={activeSection}
                     requestedFileKind={searchParams.get("kind")}
+                    requestedSourceFilter={searchParams.get("show")}
                     activeDiscoveryRun={activeDiscoveryRun}
                     onSaveNow={handleSaveAll}
                     backgroundArrays={backgroundArrays}
@@ -904,7 +914,10 @@ export function ProfileScreen(props: {
                   />
                 </fieldset>
                 {activeSection === "basics" ? (
-                  <div className="mt-6" data-profile-resume-review>
+                  <div
+                    className="mt-6 [content-visibility:auto] [contain-intrinsic-size:auto_480px]"
+                    data-profile-resume-review
+                  >
                     <ProfileResumePanel
                       importDisabledReason={importResumeGuardMessage}
                       isProfileReady={profileSetupState.status === "completed"}

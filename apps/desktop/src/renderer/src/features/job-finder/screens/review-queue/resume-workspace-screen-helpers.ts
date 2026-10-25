@@ -110,7 +110,6 @@ export function getAvailableExportToApprove(input: {
 
 export function buildWorkspaceStatusCopy(input: {
   approvalBlockedReason: string | null;
-  availableExportToApprove: ReturnType<typeof getAvailableExportToApprove>;
   draft: ResumeDraft;
   selectedTemplateApprovalEligible: boolean;
   selectedTemplateLane: ResumeTemplateDeliveryLane;
@@ -118,7 +117,6 @@ export function buildWorkspaceStatusCopy(input: {
 }) {
   const {
     approvalBlockedReason,
-    availableExportToApprove,
     draft,
     hasUnsavedChanges,
     selectedTemplateApprovalEligible,
@@ -137,9 +135,7 @@ export function buildWorkspaceStatusCopy(input: {
         ? `This ${selectedTemplateLane === "share_ready" ? "share-ready" : "selected"} template can still be exported, but approval stays disabled until you switch back to an apply-safe template.`
         : draft.approvedExportId
           ? "This resume is approved. Any new edit or template change will require approval again."
-          : availableExportToApprove
-            ? "This resume is ready to approve."
-            : "Review the preview, then approve when you are ready.";
+          : "";
   const approvalStateLabel = approvalBlockedReason
     ? "Approval needs decisions"
     : selectedTemplateApprovalEligible

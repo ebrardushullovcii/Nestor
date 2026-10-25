@@ -4,7 +4,10 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -44,9 +47,9 @@ function createJob(index: number): SavedJob {
   });
 }
 
-function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
-  return render(
-    <DiscoveryResultsPanel
+async function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       hasCompletedSearch
       jobs={jobs}
@@ -54,6 +57,8 @@ function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
       selectedJob={selected}
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 function boxClasses(row: HTMLElement): string {
@@ -76,9 +81,9 @@ describe("Find jobs result rows adopt the shared selectable-row contract", () =>
   // jsdom performs no layout, so this is a class-signature invariant, not a
   // measured one: it proves the row declares the same box-metric classes in
   // both states. Rendered pixel geometry is the capture harness's job.
-  it("keeps an identical box-metric class signature whether or not a row is selected", () => {
+  it("keeps an identical box-metric class signature whether or not a row is selected", async () => {
     const jobs = [createJob(0), createJob(1)];
-    const { container, rerender } = renderResults(jobs, jobs[0] ?? null);
+    const { container, rerender } = await renderResults(jobs, jobs[0] ?? null);
 
     const selectedFirst = container.querySelector<HTMLElement>(
       `[data-job-result-id="${jobs[0]!.id}"]`,
@@ -100,7 +105,7 @@ describe("Find jobs result rows adopt the shared selectable-row contract", () =>
     expect(unselectedSecond.getAttribute("data-selected")).toBe("false");
 
     rerender(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -108,6 +113,7 @@ describe("Find jobs result rows adopt the shared selectable-row contract", () =>
         selectedJob={jobs[1] ?? null}
       />,
     );
+    await flushFindJobsQueries();
 
     const movedFirst = container.querySelector<HTMLElement>(
       `[data-job-result-id="${jobs[0]!.id}"]`,
@@ -125,9 +131,9 @@ describe("Find jobs result rows adopt the shared selectable-row contract", () =>
     expect(movedFirst.getAttribute("aria-current")).toBeNull();
   });
 
-  it("renders no content line conditionally on selection", () => {
+  it("renders no content line conditionally on selection", async () => {
     const jobs = [createJob(0), createJob(1)];
-    const { container } = renderResults(jobs, jobs[0] ?? null);
+    const { container } = await renderResults(jobs, jobs[0] ?? null);
 
     const lineCount = (jobId: string) =>
       container.querySelector<HTMLElement>(`[data-job-result-id="${jobId}"]`)
@@ -136,9 +142,9 @@ describe("Find jobs result rows adopt the shared selectable-row contract", () =>
     expect(lineCount(jobs[0]!.id)).toBe(lineCount(jobs[1]!.id));
   });
 
-  it("states the reconciling kept total beside the banded count", () => {
+  it("states the reconciling kept total beside the banded count", async () => {
     const jobs = [createJob(0), createJob(1)];
-    renderResults(jobs, null);
+    await renderResults(jobs, null);
 
     // Home and Search history describe the same run as "n new jobs saved"; the
     // banded headline must add up to that same number.

@@ -2,6 +2,7 @@ import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { createJobFinderWorkspaceDeltaTracker } from "./workspace-delta";
+import { rememberRowChanges } from "@nestor/core";
 
 const SCALE_OPERATION_BUDGET_MS = 1_000;
 
@@ -45,6 +46,54 @@ function createWorkspace(input: {
 }
 
 describe("Job Finder workspace delta tracker", () => {
+  it("diffs only nominated rows on an exact immutable lineage, even from a held baseline", () => {
+    const a = { id: "job-1", title: "Original" };
+    const b = { id: "job-2", title: "Added" };
+    const changed = { ...a, title: "Updated" };
+    const guarded = (rows: readonly Record<string, unknown>[]) =>
+      new Proxy(Object.freeze([...rows]), {
+        get(target, key, receiver) {
+          if (
+            key === Symbol.iterator ||
+            (typeof key === "string" && /^\d+$/.test(key))
+          )
+            throw new Error("Unchanged collection was walked");
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      });
+    const first = guarded([a]);
+    const second = guarded([changed, b]);
+    const third = guarded([a]);
+    rememberRowChanges(first, second, [
+      { id: a.id, before: a, after: changed },
+      { id: b.id, before: undefined, after: b },
+    ]);
+    rememberRowChanges(second, third, [
+      { id: a.id, before: changed, after: a },
+      { id: b.id, before: b, after: undefined },
+    ]);
+    const workspace = (jobs: readonly Record<string, unknown>[]) =>
+      createWorkspace({
+        generatedAt: "2026-08-09T10:00:00.000Z",
+        jobIds: [],
+        selectedJobId: null,
+        discoveryJobs: jobs,
+      });
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    tracker.synchronize(null, workspace(first));
+    expect(tracker.synchronize(1, workspace(second))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [changed, b], removedIds: [] } },
+    });
+    expect(tracker.synchronize(1, workspace(third))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [], removedIds: [] } },
+    });
+    expect(tracker.synchronize(2, workspace(third))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [a], removedIds: [b.id] } },
+    });
+  });
   it("returns a bounded entity delta with the current selection", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();
     const initial = createWorkspace({
@@ -587,5 +636,131 @@ describe("Job Finder workspace delta tracker", () => {
       expect(fallbackResult.snapshot).toBe(current);
     }
     expect(fallbackDurationMs).toBeLessThan(SCALE_OPERATION_BUDGET_MS);
+  });
+
+  it("sends only real changes after a view saved by an earlier run of the app", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const saved = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [
+        { id: "job-1", title: "Engineer", detailRevision: "old-1" },
+        { id: "job-2", title: "Designer", detailRevision: "old-2" },
+      ],
+    });
+    const loaded = createWorkspace({
+      generatedAt: "2026-08-09T10:00:05.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [
+        { id: "job-1", title: "Engineer", detailRevision: "new-7" },
+        { id: "job-2", title: "Senior designer", detailRevision: "new-8" },
+      ],
+    });
+
+    tracker.synchronize(null, saved, { earlierProcess: true });
+    const result = tracker.synchronize(1, loaded);
+
+    // Only the job whose content changed travels; a new detail revision on
+    // an unchanged row does not make it a change.
+    expect(result).toMatchObject({
+      kind: "delta",
+      delta: {
+        discoveryJobs: {
+          upserts: [{ id: "job-2", title: "Senior designer" }],
+          removedIds: [],
+        },
+      },
+    });
+  });
+
+  it("still treats a new detail revision as a change within one run", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const first = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [{ id: "job-1", detailRevision: "r1" }],
+    });
+    const second = createWorkspace({
+      generatedAt: "2026-08-09T10:00:01.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [{ id: "job-1", detailRevision: "r2" }],
+    });
+
+    tracker.synchronize(null, first);
+
+    expect(tracker.synchronize(1, second)).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [{ id: "job-1" }] } },
+    });
+  });
+
+  it("answers a window's change with a delta from the revision it holds", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const window = {};
+    const jobIds = Array.from({ length: 50 }, (_, index) => `job-${index}`);
+    const initial = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds,
+      selectedJobId: null,
+    });
+    const changed = {
+      ...initial,
+      generatedAt: "2026-08-09T10:00:01.000Z",
+      profile: { summary: "Edited summary" },
+    } as JobFinderRendererWorkspaceSnapshot;
+
+    tracker.synchronize(null, initial);
+    tracker.noteHeldRevision(window, 1);
+    const answer = tracker.respond(window, changed);
+
+    expect(answer).toMatchObject({
+      kind: "delta",
+      delta: {
+        baseRevision: 1,
+        currentRevision: 2,
+        replaced: { profile: { summary: "Edited summary" } },
+        discoveryJobs: { upserts: [], removedIds: [] },
+      },
+    });
+  });
+
+  it("sends the whole view to a window holding nothing main still has, keeping other baselines", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const held = {};
+    const fresh = {};
+    const initial = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: ["job-1"],
+      selectedJobId: null,
+    });
+    const next = createWorkspace({
+      generatedAt: "2026-08-09T10:00:01.000Z",
+      jobIds: ["job-1", "job-2"],
+      selectedJobId: null,
+    });
+
+    tracker.synchronize(null, initial);
+    tracker.noteHeldRevision(held, 1);
+
+    expect(tracker.respond(fresh, next)).toMatchObject({
+      kind: "snapshot",
+      currentRevision: 2,
+      snapshot: next,
+    });
+    expect(tracker.respond(undefined, next)).toMatchObject({
+      kind: "snapshot",
+    });
+    // The other window's revision 1 is still a usable baseline.
+    expect(tracker.respond(held, next)).toMatchObject({
+      kind: "delta",
+      delta: { baseRevision: 1 },
+    });
+
+    tracker.noteHeldRevision(held, 0);
+    expect(tracker.respond(held, next)).toMatchObject({ kind: "snapshot" });
   });
 });

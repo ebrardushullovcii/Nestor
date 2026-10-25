@@ -1,7 +1,6 @@
 import { useId } from "react";
 import { Switch } from "@renderer/components/ui/switch";
 import { cn } from "@renderer/lib/utils";
-import { FieldLabel } from "@renderer/components/ui/field";
 
 interface ToggleFieldProps {
   checked: boolean;
@@ -33,7 +32,14 @@ export function ToggleField({
         className,
       )}
     >
-      <FieldLabel htmlFor={switchId}>{label}</FieldLabel>
+      {/* A switch's label is a sentence, not a form-field caption: the
+          uppercase field label made it read as a section eyebrow. */}
+      <label
+        className="text-(length:--text-body) font-semibold leading-5 text-foreground"
+        htmlFor={switchId}
+      >
+        {label}
+      </label>
       <div className="flex min-w-0 flex-1 items-start justify-between gap-4">
         <span
           id={descriptionId}

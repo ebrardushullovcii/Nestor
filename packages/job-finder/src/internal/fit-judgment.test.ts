@@ -60,11 +60,12 @@ describe("judgeJobFitsInBatches", () => {
     expect(judgments.size).toBe(100);
   });
 
-  test("asks a failed batch once more and keeps the others' verdicts", async () => {
+  test("a failed batch is not asked again here and the others keep their verdicts", async () => {
     let calls = 0;
     const judgeJobFits = vi.fn((input: JudgeJobFitsInput) => {
       calls += 1;
       if (calls === 1) {
+        // The request layer already retried this one (ADR 0020).
         return Promise.reject(
           new Error("The backend is temporarily overloaded."),
         );
@@ -77,32 +78,14 @@ describe("judgeJobFitsInBatches", () => {
       aiClient: { judgeJobFits },
       profile: seed.profile,
       searchPreferences: seed.searchPreferences,
-      jobs: jobs(3),
+      jobs: jobs(25),
       contextFingerprint: "ctx",
-      retryDelayMs: 1,
+      batchSize: 20,
+      concurrency: 1,
     });
 
     expect(judgeJobFits).toHaveBeenCalledTimes(2);
-    expect(judgments.size).toBe(3);
-  });
-
-  test("leaves a batch unjudged when the retry fails too", async () => {
-    const judgeJobFits = vi.fn(() =>
-      Promise.reject(new Error("The backend is temporarily overloaded.")),
-    );
-    const seed = createSeed();
-
-    const judgments = await judgeJobFitsInBatches({
-      aiClient: { judgeJobFits },
-      profile: seed.profile,
-      searchPreferences: seed.searchPreferences,
-      jobs: jobs(3),
-      contextFingerprint: "ctx",
-      retryDelayMs: 1,
-    });
-
-    expect(judgeJobFits).toHaveBeenCalledTimes(2);
-    expect(judgments.size).toBe(0);
+    expect(judgments.size).toBe(5);
   });
 });
 

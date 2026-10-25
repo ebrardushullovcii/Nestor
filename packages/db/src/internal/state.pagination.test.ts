@@ -1,11 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, test } from "vitest";
-import {
-  ProfileCopilotMessageSchema,
-  SavedJobSchema,
-} from "@nestor/contracts";
+import { ProfileCopilotMessageSchema, SavedJobSchema } from "@nestor/contracts";
 
 import { listCollectionValues, listValues, stateTableNames } from "./state";
+import { ensureSavedJobRelations } from "./saved-job-storage";
 
 describe("state collection pagination", () => {
   test("supports complete reads, exact windows, and offset-only traversal", () => {
@@ -22,6 +20,7 @@ describe("state collection pagination", () => {
       );
     `);
 
+    ensureSavedJobRelations(database);
     const jobs = Array.from({ length: 7 }, (_, index) =>
       SavedJobSchema.parse({
         id: `job_${index}`,

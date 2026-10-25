@@ -1,4 +1,8 @@
-import { FitJudgmentSchema, type JobPosting } from "@nestor/contracts";
+import {
+  FitJudgmentSchema,
+  readPreparedMatchAssessmentPostingFingerprint,
+  type JobPosting,
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
@@ -6,6 +10,7 @@ import {
   type MatchAssessmentPostingInput,
 } from "./match-assessment-posting-input";
 import { createMatchAssessment } from "./matching";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import {
   MATCH_ASSESSMENT_SCORER_VERSION,
   createMatchAssessmentPostingFingerprint,
@@ -137,6 +142,28 @@ const postingInputMutations = {
 } satisfies Record<keyof MatchAssessmentPostingInput, PostingMutation>;
 
 describe("match assessment session", () => {
+  test("a lost symbol carrier recomputes the same fit fingerprint from the full body", () => {
+    const posting = prepareDiscoveryPosting(createSeed().savedJobs[0]!);
+    const expected = createMatchAssessmentPostingFingerprint(posting);
+    const cloned = structuredClone(posting);
+    expect(readPreparedMatchAssessmentPostingFingerprint(cloned)).toBeNull();
+    const readBody = vi.fn(() => posting.description);
+    Object.defineProperty(cloned, "description", {
+      enumerable: true,
+      get: readBody,
+    });
+    expect(createMatchAssessmentPostingFingerprint(cloned)).toBe(expected);
+    expect(readBody).toHaveBeenCalledOnce();
+  });
+
+  test("nested edits cannot keep a stale carried fit fingerprint", () => {
+    const posting = prepareDiscoveryPosting(createSeed().savedJobs[0]!);
+    const before = createMatchAssessmentPostingFingerprint(posting);
+    posting.screeningHints.remoteGeographies.push("Changed geography");
+    expect(readPreparedMatchAssessmentPostingFingerprint(posting)).toBeNull();
+    expect(createMatchAssessmentPostingFingerprint(posting)).not.toBe(before);
+  });
+
   test("computes one assessment for repeated budget and merge reads", () => {
     const seed = createSeed();
     const calculate = vi.fn(createMatchAssessment);
@@ -157,8 +184,8 @@ describe("match assessment session", () => {
       scorerVersion: MATCH_ASSESSMENT_SCORER_VERSION,
       contextFingerprint: session.contextFingerprint,
     });
-    expect(first.postingFingerprint).toMatch(/^match_posting_v4_logic15_/u);
-    expect(session.contextFingerprint).toMatch(/^match_context_v4_logic15_/u);
+    expect(first.postingFingerprint).toMatch(/^match_posting_v4_logic16_/u);
+    expect(session.contextFingerprint).toMatch(/^match_context_v4_logic16_/u);
   });
 
   test("does not reuse an assessment persisted under the previous scoring logic", () => {
@@ -204,7 +231,7 @@ describe("match assessment session", () => {
     >,
   )("invalidates persisted assessments when %s changes", (_field, mutate) => {
     const seed = createSeed();
-    const posting = seed.savedJobs[0]!;
+    const posting = prepareDiscoveryPosting(seed.savedJobs[0]!);
     const baselineSession = createMatchAssessmentSession({
       profile: seed.profile,
       searchPreferences: seed.searchPreferences,
@@ -212,6 +239,9 @@ describe("match assessment session", () => {
     });
     const persisted = baselineSession.assess(posting);
     const changedPosting = mutate(posting);
+    expect(
+      readPreparedMatchAssessmentPostingFingerprint(changedPosting),
+    ).toBeNull();
     const calculate = vi.fn(createMatchAssessment);
     const resumedSession = createMatchAssessmentSession({
       profile: seed.profile,

@@ -51,7 +51,7 @@ export const DISCOVERY_CLEAR_MISMATCH_SCORE_FLOOR = 35;
 export const DISCOVERY_WEAKER_MATCH_SCORE_FLOOR = 50;
 
 export const FIT_NOT_JUDGED_REASON =
-  "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.";
+  "The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.";
 
 export interface FitEvidenceDepth {
   /** The model has not judged this job yet (ADR 0041). */

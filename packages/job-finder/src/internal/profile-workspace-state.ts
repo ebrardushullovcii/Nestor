@@ -122,13 +122,21 @@ export async function deriveAndPersistProfileSetupState(
       searchPreferences: input.searchPreferences,
     }),
   });
-  const discoveryState = await ctx.repository.readDiscoveryDisplayProjection();
+  // Search history can complete only an in-progress, otherwise ready setup.
+  // Completed or incomplete setups derive the same result without that read.
+  const hasRunSearch =
+    nextState.status === "in_progress" &&
+    evaluateProfileSetupReadiness(input.profile, input.searchPreferences)
+      .materiallyComplete &&
+    (await ctx.repository.readDiscoveryRunStates()).some(
+      (run) => !run.isActive,
+    );
   const derivedState = deriveProfileSetupState(
     input.profile,
     input.searchPreferences,
     {
       currentState: nextState,
-      hasRunSearch: discoveryState.recentRuns.length > 0,
+      hasRunSearch,
       now,
     },
   );

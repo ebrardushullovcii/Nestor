@@ -1,4 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
+import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
+import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebar } from "../assistant/assistant-sidebar";
 import { AssistantToggle } from "../assistant/assistant-toggle";
@@ -11,7 +13,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -25,7 +26,6 @@ import {
   House,
   Keyboard,
   Layers3,
-  LoaderCircle,
   Minus,
   Search,
   Settings,
@@ -78,6 +78,8 @@ import {
   selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
+import { useSearchLiveCounts } from "../lib/search-change-feed";
+import { useLaunchReads } from "../lib/launch-reads";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
@@ -92,6 +94,7 @@ import {
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { useJobFinderShellShortcuts } from "../lib/use-job-finder-shell-shortcuts";
+import { useHistoryNavigationShortcuts } from "../lib/use-history-navigation-shortcuts";
 import { getDefaultProfileRoute } from "../lib/job-finder-utils";
 import { JobFinderShellBrand } from "./job-finder-shell-brand";
 import {
@@ -104,6 +107,7 @@ import {
   JOB_FINDER_SHORTCUTS_DIALOG_LABEL,
   JobFinderShortcutsDialog,
 } from "./job-finder-shortcuts-dialog";
+import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
 
 interface JobFinderShellProps {
   children: ReactNode;
@@ -117,6 +121,7 @@ interface JobFinderShellProps {
   onPrepareRemainingJobs?: (
     jobIds: readonly string[],
   ) => void | Promise<unknown>;
+  onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
   onStopTailoredDraftPreparation?: () => void;
   platform: "darwin" | "linux" | "win32";
@@ -197,7 +202,6 @@ const WINDOWS_CAPTION_CONTROLS_INSET = "8.5rem";
 // painted over the left edge of this header outside native fullscreen.
 const MACOS_TRAFFIC_LIGHT_INSET = "5.5rem";
 const MORE_MENU_WIDTH_PX = 264;
-const NO_GLOBAL_SEARCH_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [];
 const MORE_MENU_DESIRED_HEIGHT_PX = 440;
 
 interface CompactRouteScrollEdges {
@@ -263,7 +267,10 @@ export const DESTINATION_COUNT_ATTENTION_CLASS =
  * carries the qualifier.
  */
 export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS =
-  "absolute -top-2.5 -right-3.5 shrink-0";
+  // Anchored by its left edge at the icon's right side so a wide "99+" grows
+  // into the free rail instead of back over the glyph; anchored on the right
+  // it covered the top of the Find jobs and Shortlisted icons.
+  "absolute -top-2 left-[calc(100%-0.625rem)] shrink-0";
 
 /* ------------------------------------------------------------------------ *
  * Shell chrome.
@@ -282,9 +289,9 @@ export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS =
  * 3:1 non-text floor in both themes.
  */
 export const SHELL_HEADER_CLASS =
-  "relative z-50 shrink-0 overflow-visible border-b border-(--surface-panel-shell-border) bg-(--shell-header-bg) backdrop-blur-sm sm:fixed sm:inset-x-0 sm:top-0 min-[1440px]:h-14";
+  "relative z-50 shrink-0 overflow-visible border-b border-(--surface-panel-shell-border) bg-(--shell-header-bg) backdrop-blur-sm sm:fixed sm:inset-x-0 sm:top-0 xl:h-14";
 export const SHELL_HEADER_GRID_CLASS =
-  "job-finder-shell-grid grid grid-rows-[3.5rem_auto_auto] items-stretch overflow-visible pl-2 pr-2 sm:grid-rows-[3.5rem_3.75rem] sm:pl-3 sm:pr-3 min-[1440px]:!grid-rows-[3.5rem]";
+  "job-finder-shell-grid grid grid-rows-[3.5rem_auto_auto] items-stretch overflow-visible pl-2 pr-2 sm:grid-rows-[3.5rem_3.75rem] sm:pl-3 sm:pr-3 xl:grid-rows-[3.5rem]";
 /**
  * The module switcher is the subtitle of the brand lockup in the header
  * (`JobFinderShellBrand`), so there is exactly one instance at every width and
@@ -354,7 +361,7 @@ export function SidebarDestinationLabel({
 export const SHELL_ROOT_CLASS =
   "flex h-dvh min-h-0 flex-col overflow-hidden text-foreground";
 export const SHELL_CONTENT_CLASS =
-  "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] min-[1440px]:!pt-14 min-[1440px]:pl-(--job-finder-side-width)";
+  "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] xl:pt-14 min-[1440px]:pl-(--job-finder-side-width)";
 export const SHELL_MAIN_SCROLLING_CLASS = cn(
   "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
   "screen-scroll-area overflow-y-auto px-3 min-[1440px]:px-4",
@@ -408,7 +415,7 @@ interface ScreenCountBadgeProps {
   markerOnly?: boolean | undefined;
 }
 
-function ScreenCountBadge({
+export function ScreenCountBadge({
   count,
   kind,
   markerOnly,
@@ -545,6 +552,7 @@ export function JobFinderShell({
   onDismissSavedStatus,
   onNavigate,
   onPrepareRemainingJobs,
+  onUndoRecentChange,
   onRetrySave,
   onStopTailoredDraftPreparation,
   platform,
@@ -557,7 +565,19 @@ export function JobFinderShell({
   const isWindows = platform === "win32";
   const location = useLocation();
   const navigate = useNavigate();
+  const stepHistory = useCallback(
+    (step: -1 | 1) => {
+      void navigate(step);
+    },
+    [navigate],
+  );
   const mainRef = useRef<HTMLElement | null>(null);
+  // Whether the person left the page scrolled. Writing a scroll position
+  // forces a layout of the new screen, so a page already at the top is left
+  // alone; scroll events land before the next frame's callbacks.
+  const isMainScrolledRef = useRef(false);
+  const routeContainerRef = useRef<HTMLDivElement | null>(null);
+  const enteredPathRef = useRef(location.pathname);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
   const [windowControlsState, setWindowControlsState] =
@@ -567,9 +587,9 @@ export function JobFinderShell({
       isMaximized: false,
       isMinimizable: true,
     });
-  const [routeAnnouncement, setRouteAnnouncement] = useState("");
-  const [isNavigationPending, startNavigationTransition] = useTransition();
-  const [openingScreenLabel, setOpeningScreenLabel] = useState("");
+  // The live region is written directly: as state, the announcement re-rendered
+  // the whole shell twice on every navigation.
+  const routeAnnouncementRef = useRef<HTMLSpanElement | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     getInitialSidebarCollapsedState,
   );
@@ -603,16 +623,37 @@ export function JobFinderShell({
   >(null);
   const [compactRouteScrollEdges, setCompactRouteScrollEdges] =
     useState<CompactRouteScrollEdges>(NO_ROUTE_SCROLL_EDGES);
-  // The palette index used to be rebuilt on every workspace commit even while
-  // the palette was closed. It is only ever read by the open dialog, so it is
-  // built on demand and stays a stable empty list the rest of the time.
-  const globalSearchEntries = useMemo(
-    () =>
-      isGlobalSearchOpen
-        ? buildJobFinderGlobalSearchEntries(workspace)
-        : NO_GLOBAL_SEARCH_ENTRIES,
-    [isGlobalSearchOpen, workspace],
+  // The header actions sit over the compact navigation row below 1280px, and
+  // with their labels shown (1100px and up) they are wider than the fixed
+  // 20rem the row reserved, so the destinations ran under Search and
+  // Activity. The row reserves the group's measured width instead.
+  const headerActionsRef = useRef<HTMLDivElement | null>(null);
+  const [headerActionsWidth, setHeaderActionsWidth] = useState<number | null>(
+    null,
   );
+  useLayoutEffect(() => {
+    const actions = headerActionsRef.current;
+    if (!actions) return undefined;
+    const measure = () => {
+      setHeaderActionsWidth(Math.ceil(actions.getBoundingClientRect().width));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, []);
+  // The palette index is only ever read by the open dialog, so it is built on
+  // demand (at idle once the palette shows, or by the first query), once per
+  // workspace, and never while the palette is closed.
+  const loadGlobalSearchEntries = useMemo(() => {
+    let entries: readonly JobFinderGlobalSearchEntry[] | null = null;
+    return () => {
+      // The palette lists every job: one full read if the lists fell behind.
+      readFullWorkspaceIfBehind();
+      return (entries ??= buildJobFinderGlobalSearchEntries(workspace));
+    };
+  }, [workspace]);
 
   const activeScreen = useMemo(
     () => getActiveScreen(location.pathname),
@@ -637,8 +678,14 @@ export function JobFinderShell({
   // named for its population. No count is derived inline here any more: four
   // of them used to count something other than what their destination page
   // prints, and nothing could hold the two together.
+  const launchCounts = useLaunchReads().counts;
+  const searchCounts = useSearchLiveCounts(workspace);
   const screenDefinitions = useMemo<readonly ShellScreenDefinition[]>(() => {
     const campaignJobIds = selectCampaignJobIds(workspace);
+    // Until the jobs load, the three list badges come from the database, and
+    // so do they during a search on screens that do not sync for it.
+    const openingCounts =
+      workspace.hydration?.phase === "bootstrap" ? launchCounts : searchCounts;
 
     return [
       {
@@ -659,7 +706,8 @@ export function JobFinderShell({
         id: "discovery",
         label: "Find jobs",
         count: toDestinationBadgeCount(
-          countDiscoveryVisibleJobs(workspace, campaignJobIds),
+          openingCounts?.discovery ??
+            countDiscoveryVisibleJobs(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: Compass,
@@ -668,7 +716,8 @@ export function JobFinderShell({
         id: "review-queue",
         label: "Shortlisted",
         count: toDestinationBadgeCount(
-          countShortlistedJobs(workspace, campaignJobIds),
+          openingCounts?.shortlisted ??
+            countShortlistedJobs(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: ClipboardCheck,
@@ -677,7 +726,8 @@ export function JobFinderShell({
         id: "applications",
         label: "Applications",
         count: toDestinationBadgeCount(
-          countApplicationRecords(workspace, campaignJobIds),
+          openingCounts?.applications ??
+            countApplicationRecords(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: FileText,
@@ -741,7 +791,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [workspace]);
+  }, [launchCounts, searchCounts, workspace]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",
@@ -761,6 +811,12 @@ export function JobFinderShell({
   );
   const compactPrimaryScreens = primaryScreens.slice(0, compactVisibleCount);
   const compactHiddenScreens = primaryScreens.slice(compactVisibleCount);
+  // Measured again only when the destinations change. A count changing its
+  // badge's width reaches the observer below; re-measuring on every
+  // workspace update forced a page layout after each Find jobs decision.
+  const primaryScreenKey = primaryScreens
+    .map((screen) => `${screen.id}:${screen.label}`)
+    .join("|");
   useLayoutEffect(() => {
     const scroll = compactRouteScrollRef.current;
     const measurement = compactMeasureRef.current;
@@ -794,7 +850,7 @@ export function JobFinderShell({
     observer.observe(scroll);
     observer.observe(measurement);
     return () => observer.disconnect();
-  }, [primaryScreens]);
+  }, [primaryScreenKey]);
   // Grouped by what each destination *is*, not by which part of the product
   // introduced it. The person's own files live under Profile › Files now, so
   // the workspace group is Settings alone.
@@ -921,6 +977,9 @@ export function JobFinderShell({
   }, [isMoreOpen, moreMenuItemCount]);
 
   useLayoutEffect(() => {
+    // The header strip only shows below 1440px; scrolling a hidden pill into
+    // view still forced a layout of the whole new screen.
+    if (window.matchMedia?.("(min-width: 1440px)").matches) return;
     compactRouteScrollRef.current
       ?.querySelector<HTMLElement>('[aria-current="page"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -963,17 +1022,23 @@ export function JobFinderShell({
     const usesNarrowShellReflow =
       window.matchMedia?.("(max-width: 639px)").matches ?? false;
     document.title = `${activeScreenLabel} | Job Finder | Nestor`;
-    setRouteAnnouncement("");
+    const announcement = routeAnnouncementRef.current;
+    if (announcement) announcement.textContent = "";
     if (!hasDestinationAnchor) {
-      main?.scrollTo({ top: 0 });
+      if (isMainScrolledRef.current) main?.scrollTo({ top: 0 });
       main?.focus({ preventScroll: true });
     }
     if (usesNarrowShellReflow && !hasDestinationAnchor) {
       main?.scrollIntoView({ block: "start" });
     }
+    // The new screen is already there; it settles in over 160 ms.
+    if (enteredPathRef.current !== location.pathname) {
+      enteredPathRef.current = location.pathname;
+      animateIn(routeContainerRef.current, ENTER_FROM_BELOW);
+    }
 
     const frame = window.requestAnimationFrame(() => {
-      if (!hasDestinationAnchor) {
+      if (!hasDestinationAnchor && isMainScrolledRef.current) {
         main?.scrollTo({ top: 0 });
       }
       try {
@@ -983,7 +1048,8 @@ export function JobFinderShell({
       } catch {
         // Navigation timing is diagnostic only and must never block routing.
       }
-      setRouteAnnouncement(`${activeScreenLabel} opened.`);
+      if (announcement)
+        announcement.textContent = `${activeScreenLabel} opened.`;
     });
 
     return () => {
@@ -1069,14 +1135,14 @@ export function JobFinderShell({
       // Navigation timing is diagnostic only and must never block routing.
     }
 
-    setOpeningScreenLabel(screenLabelMap[nextScreen as JobFinderScreen]);
-    startNavigationTransition(() => {
-      if (onNavigate) {
-        onNavigate(nextPath);
-      } else {
-        void navigate(nextPath);
-      }
-    });
+    // Straight to the screen in one commit. Every screen's code is fetched
+    // ahead of time, and a cold one shows its own opening surface, so a
+    // transition only made each click wait while React rendered in slices.
+    if (onNavigate) {
+      onNavigate(nextPath);
+    } else {
+      void navigate(nextPath);
+    }
   }
 
   // The switch's only destination: the other module. Selecting the module the
@@ -1208,6 +1274,13 @@ export function JobFinderShell({
     ...(assistant ? { onToggleAssistant: assistant.toggle } : {}),
     onToggleSidebar: toggleSidebar,
   });
+  useHistoryNavigationShortcuts(stepHistory);
+  useEffect(
+    // A clicked "Search finished" notice opens the screen it is about.
+    () =>
+      window.nestor?.jobFinder?.onOpenRoute?.((route) => void navigate(route)),
+    [navigate],
+  );
 
   return (
     <div
@@ -1373,11 +1446,22 @@ export function JobFinderShell({
             // `min-[1440px]:!pt-14`); do not drop it back to a plain utility.
             className={cn(
               "col-span-2 col-start-1 row-start-2 flex min-w-0 items-center justify-center overflow-visible sm:col-span-1 sm:col-start-1 sm:justify-center min-[1440px]:hidden",
+              // From 1280px the header is one row: the card moves up between
+              // the brand and the (icon-only) actions, sized to its content
+              // so the rest of the row stays a window drag area.
+              "xl:row-start-1 xl:justify-self-center",
               isMac
-                ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0"
-                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-80",
+                ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0 xl:ml-56 xl:mr-[17rem]"
+                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))] xl:!pr-0 xl:ml-40 xl:mr-[25rem]",
             )}
-            style={noDragRegionStyle}
+            style={
+              headerActionsWidth === null
+                ? noDragRegionStyle
+                : ({
+                    ...noDragRegionStyle,
+                    "--job-finder-header-actions-width": `${headerActionsWidth}px`,
+                  } as CSSProperties)
+            }
           >
             <div
               className="relative flex w-fit min-w-0 max-w-full flex-nowrap items-center gap-1 overflow-visible rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-1 sm:gap-1.5"
@@ -1537,7 +1621,7 @@ export function JobFinderShell({
                   ? createPortal(
                       <div
                         aria-label="More"
-                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl"
+                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
                         data-job-finder-more-menu
                         data-side={moreMenuPlacement?.side ?? "bottom"}
                         style={boundedFloatingSurfaceStyle(moreMenuPlacement)}
@@ -1756,8 +1840,9 @@ export function JobFinderShell({
               "col-span-2 col-start-1 row-start-3 flex min-w-0 items-center justify-center gap-1.5 pr-2 max-[899px]:gap-1 max-[899px]:pr-1 sm:absolute sm:z-40 sm:w-auto sm:justify-end min-[1440px]:gap-2 min-[1440px]:!static min-[1440px]:col-span-1 min-[1440px]:col-start-3 min-[1440px]:row-start-1",
               isMac
                 ? "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[900px]:!top-0 min-[900px]:!h-14"
-                : "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[1440px]:mr-36 min-[1440px]:!h-14 min-[1440px]:!z-40",
+                : "sm:right-0 sm:top-14 sm:h-[3.75rem] xl:top-0 xl:h-14 xl:mr-36 min-[1440px]:!z-40",
             )}
+            ref={headerActionsRef}
             role="group"
             style={noDragRegionStyle}
           >
@@ -1788,6 +1873,7 @@ export function JobFinderShell({
                 }
               }}
               onPrepareRemainingJobs={onPrepareRemainingJobs}
+              onUndoRecentChange={onUndoRecentChange}
               onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
               resumeImportProgress={resumeImportProgress}
               tailoredDraftPreparation={tailoredDraftPreparation}
@@ -1823,7 +1909,7 @@ export function JobFinderShell({
                 {/* A bare bell and a number read as an unlabelled glyph pill
                     beside the task-center pill. The compact navigation row
                     reserves the width this label needs. */}
-                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden">
+                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
                   Needs you
                 </span>
                 {actionScreen.count !== null ? (
@@ -2000,7 +2086,7 @@ export function JobFinderShell({
 
       {isGlobalSearchOpen ? (
         <JobFinderGlobalSearchDialog
-          entries={globalSearchEntries}
+          entries={loadGlobalSearchEntries}
           focusRequest={globalSearchFocusRequest}
           onClose={() => setIsGlobalSearchOpen(false)}
           onNavigate={handleGlobalSearchNavigate}
@@ -2017,10 +2103,9 @@ export function JobFinderShell({
         aria-atomic="true"
         aria-live="polite"
         className="sr-only"
+        ref={routeAnnouncementRef}
         role="status"
-      >
-        {routeAnnouncement}
-      </span>
+      />
 
       {/* Content passes under the fixed header with no seam, so a title or a
           card sitting at the boundary paints sliced through its glyphs. The
@@ -2030,7 +2115,7 @@ export function JobFinderShell({
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden sm:block min-[1440px]:top-14 min-[1440px]:left-(--job-finder-side-width)",
+          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden sm:block xl:top-14 min-[1440px]:left-(--job-finder-side-width)",
           SHELL_HEADER_MASK_HEIGHT_CLASS,
           "bg-(--shell-header-bg)",
         )}
@@ -2047,40 +2132,32 @@ export function JobFinderShell({
         }}
       >
         <main
-          aria-busy={isNavigationPending}
           aria-label={activeScreenLabel}
           className={
             usesLockedScreenLayout
               ? SHELL_MAIN_LOCKED_CLASS
               : SHELL_MAIN_SCROLLING_CLASS
           }
+          onScroll={(event) => {
+            isMainScrolledRef.current = event.currentTarget.scrollTop > 0;
+          }}
           ref={mainRef}
           tabIndex={-1}
         >
-          {isNavigationPending ? (
-            <div
-              className="pointer-events-none absolute right-5 top-3 z-20 flex items-center gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) px-3 py-2 text-xs text-foreground-soft"
-              role="status"
-            >
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-3 motion-safe:animate-spin"
-              />
-              Opening {openingScreenLabel}…
-            </div>
-          ) : null}
           <div
             className={cn(
               SHELL_ROUTE_CONTAINER_BASE_CLASS,
               usesLockedScreenLayout ? "h-full min-h-0" : "min-h-full",
             )}
             data-job-finder-route-container
-            key={location.pathname}
+            ref={routeContainerRef}
             // One rhythm token for every route root, declared by the wrapper
             // that owns the route rather than picked per screen.
             style={SHELL_ROUTE_SECTION_GAP_STYLE}
           >
-            <StartupResetRecoveryBanner />
+            {/* Each screen mounts fresh per path inside the outlet, except
+                the kept lists, so the container itself is not keyed. */}
+            <StartupResetRecoveryBanner key={location.pathname} />
             {children}
           </div>
         </main>

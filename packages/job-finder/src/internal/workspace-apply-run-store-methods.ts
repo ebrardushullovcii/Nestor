@@ -7,6 +7,7 @@ import {
   type ApplyRunDetails,
 } from "@nestor/contracts";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { readSavedJob } from "./read-saved-job";
 
 function parsePersistedTimestamp(value: string) {
   const parsed = Date.parse(value);
@@ -221,11 +222,10 @@ export function createWorkspaceApplyRunStoreMethods(
     jobId: string,
     applicationRecordId?: string | null,
   ): Promise<ApplicationPacket> {
-    const [details, savedJobs] = await Promise.all([
+    const [details, job] = await Promise.all([
       getApplyRunDetails(runId, jobId, applicationRecordId),
-      ctx.repository.listSavedJobs(),
+      readSavedJob(ctx.repository, jobId),
     ]);
-    const job = savedJobs.find((entry) => entry.id === jobId);
     if (!job) {
       throw new Error(`Unable to export unknown job '${jobId}'.`);
     }

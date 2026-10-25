@@ -284,6 +284,94 @@ describe("describeApplyOutcome", () => {
 });
 
 describe("buildMissionPanelState", () => {
+  it("shows a rewrite in progress instead of the last failure after Try again", () => {
+    const failedAsset = {
+      ...createReadyAsset(),
+      status: "failed",
+      failureMessage:
+        "The AI could not write this resume, so nothing was changed. Try again.",
+      failedAt: "2026-08-20T00:01:00.000Z",
+    } as TailoredAsset;
+    const input = {
+      browserSession: createBrowserSession(),
+      isApplyPending: false,
+      selectedAsset: failedAsset,
+      selectedItem: createItem({ assetStatus: "failed" }),
+      selectedJob: createJob(),
+    };
+
+    const running = buildMissionPanelState({
+      ...input,
+      isJobPending: () => true,
+    });
+    expect(running.isGenerating).toBe(true);
+    expect(running.hasGenerationFailure).toBe(false);
+    expect(running.primaryApplicationAction).toMatchObject({
+      blocker: null,
+      kind: "waiting",
+      label: "Writing the resume…",
+    });
+    expect(running.readinessDescription).toBe(
+      "Writing the resume… You can leave this page; it finishes on its own.",
+    );
+
+    // A batch run reports where the resume is.
+    expect(
+      buildMissionPanelState({
+        ...input,
+        isJobPending: () => true,
+        resumeRunStage: "processing",
+      }).readinessDescription,
+    ).toBe(
+      "Checking it against your profile… You can leave this page; it finishes on its own.",
+    );
+
+    const settled = buildMissionPanelState({
+      ...input,
+      isJobPending: () => false,
+    });
+    expect(settled.hasGenerationFailure).toBe(true);
+    expect(settled.primaryApplicationAction).toMatchObject({
+      enabled: true,
+      label: "Try again",
+    });
+  });
+
+  it("offers to write the resume when the saved one was written without the listing", () => {
+    const state = buildMissionPanelState({
+      browserSession: createBrowserSession(),
+      isApplyPending: false,
+      isJobPending: () => false,
+      selectedAsset: {
+        ...createReadyAsset(),
+        generationMethod: "deterministic",
+        generationReason: "listing_text_missing",
+      } as TailoredAsset,
+      selectedItem: createItem({
+        assetStatus: "ready",
+        resumeAssetId: "asset_1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" },
+        resumeWrittenWithoutListing: true,
+      }),
+      selectedJob: createJob(),
+    });
+
+    expect(state.needsTailoredResume).toBe(true);
+    expect(state.primaryApplicationAction).toMatchObject({
+      enabled: true,
+      kind: "generate_resume",
+      label: "Create the resume",
+      recovery: {
+        kind: "approve_and_apply",
+        label: "Apply with your original wording",
+      },
+    });
+    expect(state.readinessDescription).toBe(
+      "The listing text was not captured, so this resume keeps your original wording. Creating the resume reads the listing again and tailors it.",
+    );
+  });
+
   it("lets the failure box name the cause without a generic line above it", () => {
     const cause =
       "Your profile changed while this resume was being written, so it was not saved. Try again to write it from your updated profile.";
@@ -347,7 +435,7 @@ describe("buildMissionPanelState", () => {
       label: "Review the resume",
     });
     expect(state.readinessDescription).toBe(
-      "Aggressive resumes stretch a little past your saved evidence. Read it, keep or remove the flagged lines, then approve it.",
+      "Read the resume through, then approve it.",
     );
   });
 

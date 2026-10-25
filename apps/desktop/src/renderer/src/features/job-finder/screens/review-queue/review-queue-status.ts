@@ -43,6 +43,8 @@ export interface TailoredDraftPreparationViewState {
   writingCount?: number;
   processingCount?: number;
   waitingCount?: number;
+  /** Where each job of the running batch is, as the main process reports it. */
+  stageByJobId?: Readonly<Record<string, ResumeRunStage>>;
 }
 
 export interface TailoredDraftPreparationProgress {
@@ -72,6 +74,88 @@ export interface ReviewQueueWorkflowStatus {
   tone: BadgeTone;
 }
 
+/**
+ * One name for a job that still needs its resume: the status tab, the row
+ * badge and the detail header all use it.
+ */
+export const NEEDS_RESUME_LABEL = "Needs a resume";
+
+/**
+ * A resume waiting for the person's read: the status tab, the row badge and
+ * the detail header. A state, not a verb: "Review resume" sat beside the
+ * "Review the resume" button and read as a second button.
+ */
+export const TO_REVIEW_LABEL = "To review";
+
+/**
+ * A ready job an Apply press queued that no run has taken yet. It read
+ * "Ready to apply" beside "Today's limit is reached", as if nothing held it.
+ */
+export const IN_APPLY_QUEUE_LABEL = "In the apply queue";
+
+/**
+ * True when the job's saved resume kept the person's own wording because the
+ * listing text was not there when it was written, and the person has not
+ * approved it as it is. Nothing was tailored, so the job still needs its
+ * resume (ADR 0049); writing it reads the listing again first.
+ */
+export function needsTailoredResume(
+  item: Pick<
+    ReviewQueueItem,
+    | "assetStatus"
+    | "resumeApplicationMode"
+    | "resumeReview"
+    | "resumeWrittenWithoutListing"
+  > | null,
+): boolean {
+  return Boolean(
+    item &&
+    item.resumeApplicationMode !== "original_resume" &&
+    item.resumeWrittenWithoutListing &&
+    item.assetStatus === "ready" &&
+    item.resumeReview.status !== "approved",
+  );
+}
+
+/**
+ * Whether the job's resume is being written right now, and whether the last
+ * attempt failed, in the order the row badge uses: a run in progress outranks
+ * the last one's failure. "Try again" used to leave the failure box and a
+ * disabled Try again on screen for the whole rewrite.
+ */
+export function getResumeRunState(
+  item: ReviewQueueItem | null,
+  asset: TailoredAssetSummary | null | undefined,
+  isPending: boolean,
+): { hasFailure: boolean; isWriting: boolean } {
+  const failed = hasResumeGenerationFailure(item, asset);
+  const isWriting =
+    item !== null &&
+    item.resumeApplicationMode !== "original_resume" &&
+    (isPending || (!failed && isResumeGenerationInProgress(item)));
+  return { hasFailure: failed && !isPending && !isWriting, isWriting };
+}
+
+/** The stages a resume run reports while it is still going. */
+export type ResumeRunStage = "queued" | "writing" | "processing";
+
+/**
+ * What a running resume is doing, in one calm sentence. Only the batch run
+ * reports stages; a single run has none and says it is writing.
+ */
+export function describeResumeRunStage(
+  stage: ResumeRunStage | null | undefined,
+): string {
+  switch (stage) {
+    case "queued":
+      return "Waiting its turn while other resumes are written.";
+    case "processing":
+      return "Checking it against your profile…";
+    default:
+      return "Writing the resume…";
+  }
+}
+
 export interface ApplyReadinessStatus {
   label: string;
   tone: "active" | "critical" | "muted" | "positive";
@@ -92,6 +176,8 @@ export function getReviewQueueWorkflowStatus(
   preparedJobIds?: ReadonlySet<string>,
   /** Jobs with a preparation attempt that is still running. */
   applicationPreparingJobIds?: ReadonlySet<string>,
+  /** Jobs waiting in the Apply queue for a run to take them. */
+  queuedJobIds?: ReadonlySet<string>,
 ): ReviewQueueWorkflowStatus {
   if (!item) {
     return {
@@ -133,12 +219,16 @@ export function getReviewQueueWorkflowStatus(
     };
   }
 
+  if (queuedJobIds?.has(item.jobId)) {
+    return { label: IN_APPLY_QUEUE_LABEL, tone: "active" };
+  }
+
   if (item.assetStatus === "not_started") {
     // Original with nothing imported has no file to send; Apply stays off and
     // the label says what unblocks it.
     return item.resumeApplicationMode === "original_resume"
       ? { label: "Import your resume", tone: "warning" }
-      : { label: "No resume yet", tone: "muted" };
+      : { label: NEEDS_RESUME_LABEL, tone: "muted" };
   }
 
   if (item.assetStatus === "generating" || item.assetStatus === "queued") {
@@ -148,11 +238,18 @@ export function getReviewQueueWorkflowStatus(
     };
   }
 
+  // Same words as the status tab it sits under: a resume that kept the
+  // person's wording because the listing was not read was never tailored
+  // (ADR 0049). The row used to say it was to review inside "Needs a resume".
+  if (needsTailoredResume(item)) {
+    return { label: NEEDS_RESUME_LABEL, tone: "muted" };
+  }
+
   // An Aggressive draft is read by the person before it is used (ADR 0018),
   // so the row says so instead of promising Apply.
   if (needsPersonResumeReview(item, asset)) {
     return {
-      label: "Review resume",
+      label: TO_REVIEW_LABEL,
       tone: "active",
     };
   }
@@ -182,7 +279,7 @@ export function getReviewQueueWorkflowStatus(
   }
 
   return {
-    label: "Review resume",
+    label: TO_REVIEW_LABEL,
     tone: "active",
   };
 }
@@ -253,12 +350,17 @@ export function isResumeGenerationInProgress(
  * in place, still "ready", and Apply approved and sent it; the only rewrite
  * sat inside the guided-edits popup. Original sends the imported file, so
  * moving to it rewrites nothing, and a job with no resume yet keeps its
- * "Create the resume" step.
+ * "Create the resume" step. The level the resume was written at counts over
+ * the saved one, so picking the level of a rewrite a restart cut off runs it
+ * again.
  */
 export function shouldRewriteResumeAfterLevelChange(input: {
   item: Pick<
     ReviewQueueItem,
-    "assetStatus" | "resumeApplicationMode" | "resumeTailoringMode"
+    | "assetStatus"
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
   >;
   /** The saved strength a job without its own level is written at. */
   defaultTailoringMode: TailoringMode;
@@ -274,7 +376,9 @@ export function shouldRewriteResumeAfterLevelChange(input: {
   const currentLevel =
     input.item.resumeApplicationMode === "original_resume"
       ? "original_resume"
-      : (input.item.resumeTailoringMode ?? input.defaultTailoringMode);
+      : (input.item.resumeWrittenTailoringMode ??
+        input.item.resumeTailoringMode ??
+        input.defaultTailoringMode);
   const nextLevel = input.nextTailoringMode ?? input.defaultTailoringMode;
   return currentLevel !== nextLevel;
 }
@@ -356,7 +460,7 @@ export function isQueueStageReady(
     return true;
   }
 
-  if (needsPersonResumeReview(item)) {
+  if (needsPersonResumeReview(item) || needsTailoredResume(item)) {
     return false;
   }
 
@@ -768,7 +872,7 @@ export function getApplyReadinessStatus(params: {
     };
   }
 
-  // An in-flight run wins over "No resume yet": both flags are true while a
+  // An in-flight run wins over "Needs a resume": both flags are true while a
   // draft is being written, and the readiness description already orders
   // them this way.
   if (isGenerating) {
@@ -780,14 +884,14 @@ export function getApplyReadinessStatus(params: {
 
   if (needsGeneration) {
     return {
-      label: "No resume yet",
+      label: NEEDS_RESUME_LABEL,
       tone: "muted",
     };
   }
 
   if (!hasReadyApprovedAsset) {
     return {
-      label: resumeReviewStatus === "stale" ? "Out of date" : "Review resume",
+      label: resumeReviewStatus === "stale" ? "Out of date" : TO_REVIEW_LABEL,
       tone: "critical",
     };
   }
@@ -859,6 +963,89 @@ export function describeSavedResumeLevel(level: TailoringMode): string {
       : "Tailored";
 }
 
+/**
+ * The level a shortlisted row names, or null when the job follows the
+ * profile's level and the list cannot know it without the profile. A job
+ * with its own level names the level its resume was written at: after a
+ * rewrite a restart cut off, the saved level is one the text never had.
+ */
+export function describeQueueItemResumeLevel(
+  item: Pick<
+    ReviewQueueItem,
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
+  >,
+): string | null {
+  if (item.resumeApplicationMode === "original_resume") return "Original";
+  return item.resumeTailoringMode
+    ? describeSavedResumeLevel(
+        item.resumeWrittenTailoringMode ?? item.resumeTailoringMode,
+      )
+    : null;
+}
+
+/**
+ * A level rewrite that did not finish: the job's own level is saved, but
+ * its resume is still the one written at another level (the app closed
+ * while it was writing). Null when the resume matches its level.
+ */
+export function describeInterruptedResumeRewrite(
+  item: Pick<
+    ReviewQueueItem,
+    | "assetStatus"
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
+  >,
+): { chosen: TailoringMode; chosenLabel: string; writtenLabel: string } | null {
+  const chosen = item.resumeTailoringMode;
+  const written = item.resumeWrittenTailoringMode;
+  if (
+    item.resumeApplicationMode === "original_resume" ||
+    item.assetStatus !== "ready" ||
+    !chosen ||
+    !written ||
+    chosen === written
+  )
+    return null;
+  return {
+    chosen,
+    chosenLabel: describeSavedResumeLevel(chosen),
+    writtenLabel: describeSavedResumeLevel(written),
+  };
+}
+
+/**
+ * Captions that only repeat the row's status badge in other words. A row
+ * used to read "REVIEW RESUME" and, under it, "Resume ready — review it
+ * before applying"; the status is said once now, and the caption line is
+ * kept for what the badge cannot say (kept wording, a kept previous resume,
+ * lines to decide).
+ */
+const CAPTIONS_REPEATING_STATUS: Readonly<Record<string, readonly string[]>> = {
+  [NEEDS_RESUME_LABEL]: ["No resume yet"],
+  "Writing resume": ["Writing the resume…"],
+  "Resume failed": ["Resume failed — try again"],
+  [TO_REVIEW_LABEL]: ["Resume ready — review it before applying"],
+  "Ready to apply": ["Resume approved", "Resume ready — Apply approves it"],
+  [IN_APPLY_QUEUE_LABEL]: [
+    "Resume approved",
+    "Resume ready — Apply approves it",
+  ],
+  "Out of date": ["Resume is out of date — refresh it"],
+};
+
+/** The row's caption, or null when it would only repeat the status badge. */
+export function getReviewQueueRowCaption(
+  statusLabel: string,
+  caption: string,
+): string | null {
+  return CAPTIONS_REPEATING_STATUS[statusLabel]?.includes(caption)
+    ? null
+    : caption;
+}
+
 /** What the action line says after a resume run for one job finished. */
 export const AI_UNAVAILABLE_RESUME_RESULT_MESSAGE =
   "AI was unavailable, so this resume keeps your saved wording. Press Try again with AI when you are ready.";
@@ -892,15 +1079,20 @@ export type ShortlistStatusFilter =
   | "ready"
   | "in_applications";
 
+/**
+ * Tab names, shorter than the row badges they count: five or six tabs with
+ * their counts have to fit the list column at 1440 px, where "Needs a resume"
+ * and "Ready to apply" pushed the last tab under a scrollbar.
+ */
 export const SHORTLIST_STATUS_FILTER_LABELS: Record<
   ShortlistStatusFilter,
   string
 > = {
   all: "All",
-  needs_resume: "Needs a resume",
+  needs_resume: "No resume",
   writing: "Writing",
-  to_review: "To review",
-  ready: "Ready to apply",
+  to_review: TO_REVIEW_LABEL,
+  ready: "Ready",
   in_applications: "In Applications",
 };
 
@@ -921,10 +1113,18 @@ export function getShortlistStatusFilter(
     case "In Applications":
       return "in_applications";
   }
-  if (canWriteResume || workflowLabel === "Resume failed")
+  if (
+    canWriteResume ||
+    workflowLabel === NEEDS_RESUME_LABEL ||
+    workflowLabel === "Resume failed"
+  )
     return "needs_resume";
-  if (workflowLabel === "Review resume") return "to_review";
-  if (workflowLabel === "Ready to apply") return "ready";
+  if (workflowLabel === TO_REVIEW_LABEL) return "to_review";
+  if (
+    workflowLabel === "Ready to apply" ||
+    workflowLabel === IN_APPLY_QUEUE_LABEL
+  )
+    return "ready";
   return null;
 }
 

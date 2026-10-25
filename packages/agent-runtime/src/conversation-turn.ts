@@ -103,6 +103,8 @@ export interface ConversationTurnCeilings {
 export interface RunConversationTurnOptions {
   model: ConversationModel;
   tools: ConversationTool[];
+  /** Optional lazy catalog; execution still uses the host's validated registry. */
+  getToolDefinitions?: () => readonly AgentLoopToolDefinition[];
   /**
    * Builds the full model input before every call from the turn's own new
    * messages. The caller owns the system prompt, the context block, the
@@ -203,8 +205,7 @@ export function withStatusArgument(
           ...definition.function.parameters.properties,
           [STATUS_ARGUMENT]: {
             type: "string",
-            description:
-              "Optional. A short note (at most 12 words) the person sees while this runs, such as 'Checking which jobs match your target roles'.",
+            description: "Optional activity note, at most 12 words.",
           },
         },
       },
@@ -310,12 +311,10 @@ export async function runConversationTurn(
   const toolsByName = new Map(
     options.tools.map((tool) => [tool.definition.function.name, tool]),
   );
-  const definitions = options.tools.map((tool) =>
-    withStatusArgument(tool.definition),
-  );
   const turnMessages: AgentLoopMessage[] = [];
   const usage = emptyUsage();
   let modelCalls = 0;
+  let emptyReplies = 0;
   let step = 0;
 
   const emit = async (event: ConversationTurnEvent) => {
@@ -360,6 +359,10 @@ export async function runConversationTurn(
     await readSteering();
 
     const messages = await options.assembleMessages(turnMessages);
+    const definitions = (
+      options.getToolDefinitions?.() ??
+      options.tools.map((tool) => tool.definition)
+    ).map(withStatusArgument);
     modelCalls += 1;
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
@@ -401,6 +404,12 @@ export async function runConversationTurn(
 
     const toolCalls = response.toolCalls ?? [];
     const content = response.content?.trim() ?? "";
+    if (!toolCalls.length && !content) {
+      if (++emptyReplies > 1) return result("model_failed", { error: new Error("The model returned no reply or executable tool call.") });
+      turnMessages.push({ role: "user", content: "[System note] The last response had no text or executable tool call. Use an offered tool or answer plainly. Do not claim work completed without a result." });
+      continue;
+    }
+    emptyReplies = 0;
     if (toolCalls.length === 0) {
       // Conversation mode: plain words are the reply.
       turnMessages.push({
@@ -425,6 +434,7 @@ export async function runConversationTurn(
     }
 
     let redirected = false;
+    let batchSucceeded = true;
     for (const [index, toolCall] of toolCalls.entries()) {
       const tool = toolsByName.get(toolCall.function.name);
       if (redirected) {
@@ -473,6 +483,7 @@ export async function runConversationTurn(
         break;
       }
       if (!tool) {
+        batchSucceeded = false;
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,
@@ -500,6 +511,7 @@ export async function runConversationTurn(
           options.signal,
         );
       } catch (error) {
+        batchSucceeded = false;
         if (options.signal?.aborted || isAbortError(error)) {
           turnMessages.push({
             role: "tool",
@@ -560,14 +572,20 @@ export async function runConversationTurn(
         });
       }
       if (outcome.kind === "finish") {
-        // A conversation has no finish tool; treat one as the reply.
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,
-          content: "Finished.",
+          content: outcome.finish.output ?? outcome.finish.reason,
         });
-        return result("replied", { reply: outcome.finish.reason });
+        await emit({ type: "tool_finished", toolCallId: toolCall.id, toolName: toolCall.function.name, label, outcome: "done", summary: outcome.finish.reason.slice(0, 300) });
+        // A completion request never drops other calls or hides an earlier failure.
+        if (batchSucceeded && index === toolCalls.length - 1) {
+          turnMessages.push({ role: "assistant", content: outcome.finish.reason });
+          return result("replied", { reply: outcome.finish.reason });
+        }
+        continue;
       }
+      if (outcome.status === "failed" || outcome.status === "refused") batchSucceeded = false;
       let content = outcome.content;
       if (content.length > resultLimit) {
         const note = options.storeOverflow

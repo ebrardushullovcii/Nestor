@@ -1,63 +1,48 @@
+import { shutdownDiscoveryFeedWorkers } from "./discovery-cpu";
 import { createJobFinderWorkspaceServiceAsync } from "./create-workspace-service";
 
-let jobFinderWorkspaceServicePromise:
+let servicePromise:
   | ReturnType<typeof createJobFinderWorkspaceServiceAsync>
   | undefined;
-
-let jobFinderWorkspaceServiceOverrideEnv: Partial<NodeJS.ProcessEnv> | null =
-  null;
+let overrideEnv: Partial<NodeJS.ProcessEnv> | null = null;
+let closing = false;
 
 export function getJobFinderWorkspaceService() {
-  if (jobFinderWorkspaceServicePromise) {
-    return jobFinderWorkspaceServicePromise;
-  }
-
+  if (servicePromise) return servicePromise;
+  if (closing) return Promise.reject(new Error("The workspace is closing."));
   const creation = createJobFinderWorkspaceServiceAsync(
-    jobFinderWorkspaceServiceOverrideEnv ?? undefined,
+    overrideEnv ?? undefined,
   );
-  jobFinderWorkspaceServicePromise = creation;
-
+  servicePromise = creation;
   void creation.catch(() => {
-    // A failed startup must not stay memoized forever; a later caller retries
-    // initialization while in-flight and successful creations stay single-flight.
-    if (jobFinderWorkspaceServicePromise === creation) {
-      jobFinderWorkspaceServicePromise = undefined;
-    }
+    if (servicePromise === creation) servicePromise = undefined;
   });
-
   return creation;
 }
 
+export function beginJobFinderWorkspaceShutdown(): void {
+  closing = true;
+}
+
 export async function setJobFinderWorkspaceServiceTestEnv(
-  envOverrides: Partial<NodeJS.ProcessEnv> | null,
+  env: Partial<NodeJS.ProcessEnv> | null,
 ) {
   await shutdownJobFinderWorkspaceService();
-  jobFinderWorkspaceServiceOverrideEnv = envOverrides;
+  overrideEnv = env;
+  closing = false;
 }
 
 export async function shutdownJobFinderWorkspaceService() {
-  const servicePromise = jobFinderWorkspaceServicePromise;
-  jobFinderWorkspaceServicePromise = undefined;
-
-  if (!servicePromise) {
-    return;
-  }
-
-  const service = await servicePromise.catch((error) => {
-    console.warn(
-      "[Desktop] Job Finder workspace service was not created before shutdown.",
-      error,
-    );
+  const opening = servicePromise;
+  servicePromise = undefined;
+  if (!opening) return;
+  const service = await opening.catch((error: unknown) => {
+    console.warn("[Desktop] Workspace did not open before shutdown.", error);
     return undefined;
   });
-  if (!service) {
-    return;
-  }
-
-  await service.shutdown().catch((error) => {
-    console.warn(
-      "[Desktop] Failed to shut down Job Finder workspace service cleanly.",
-      error,
-    );
-  });
+  if (service)
+    await service.shutdown().catch((error: unknown) => {
+      console.warn("[Desktop] Workspace shutdown failed.", error);
+    });
+  await shutdownDiscoveryFeedWorkers();
 }

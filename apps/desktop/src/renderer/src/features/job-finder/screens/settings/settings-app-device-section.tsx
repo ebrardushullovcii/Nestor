@@ -26,6 +26,14 @@ const appearanceThemeOptions: ReadonlyArray<{
   { label: "Dark", value: "dark" },
 ];
 
+function zoomKeysSentence(): string {
+  const mod =
+    typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
+      ? "⌘"
+      : "Ctrl";
+  return `${mod} + and ${mod} − make text bigger or smaller; ${mod} 0 sets it back.`;
+}
+
 interface SettingsAppDeviceSectionProps {
   /** Reports staged theme edits so a stale shell save retry is retired. */
   onSettingsDraftEdited?: () => void;
@@ -97,6 +105,29 @@ export function SettingsAppDeviceSection({
     [],
   );
 
+  const saveTheme = (theme: AppearanceTheme) => {
+    void runSectionSave({
+      execute: async () => {
+        try {
+          const saved = await onUpdateAppearanceTheme(theme);
+          if (saved === false) {
+            // The persisted theme is still the old one; showing the new one
+            // would be the app lying about what it stored.
+            revertThemePreview();
+          }
+          return saved;
+        } catch (error) {
+          revertThemePreview();
+          throw error;
+        }
+      },
+      failedMessage:
+        "Appearance was not saved. Retry before leaving this page.",
+      savedMessage: "Appearance saved.",
+    });
+  };
+  // A theme is one click: it shows and saves at once, like the switch below.
+  // Picking one used to wait for a separate Save appearance press.
   const updateSelectedTheme = (theme: AppearanceTheme) => {
     if (isSavePending) {
       return;
@@ -105,6 +136,7 @@ export function SettingsAppDeviceSection({
     applyAppearancePreference(theme, getSystemPrefersDark());
     resetSectionSave();
     onSettingsDraftEdited?.();
+    if (theme !== settings.appearanceTheme) saveTheme(theme);
   };
   // A switch acts when flipped: this layout choice saves at once instead of
   // waiting for Save appearance, and goes back if the save fails.
@@ -127,29 +159,12 @@ export function SettingsAppDeviceSection({
       revert();
     }
   };
+  // Retry after a failed save.
   const saveAppearanceTheme = () => {
     if (!hasUnsavedChanges || isSavePending) {
       return;
     }
-    void runSectionSave({
-      execute: async () => {
-        try {
-          const saved = await onUpdateAppearanceTheme(selectedTheme);
-          if (saved === false) {
-            // The persisted theme is still the old one; showing the new one
-            // would be the app lying about what it stored.
-            revertThemePreview();
-          }
-          return saved;
-        } catch (error) {
-          revertThemePreview();
-          throw error;
-        }
-      },
-      failedMessage:
-        "Appearance was not saved. Retry before leaving this page.",
-      savedMessage: "Appearance saved. Job Finder now uses this theme.",
-    });
+    saveTheme(selectedTheme);
   };
 
   useRegisterSettingsDirtySection({
@@ -173,8 +188,7 @@ export function SettingsAppDeviceSection({
             Appearance
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            Use system if you want Job Finder to follow the OS, or pin a theme
-            when you want a stable visual working environment.
+            Follow your system's light or dark mode, or pick one.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -217,9 +231,9 @@ export function SettingsAppDeviceSection({
       <div className="grid gap-1">
         <h4 className="font-medium">Text size</h4>
         <p className="text-sm text-foreground-soft">
-          Use View → Zoom In to make text bigger, Zoom Out to make it smaller,
-          or Actual Size to reset it. Your chosen size is remembered when you
-          reopen Nestor.
+          {/* The window has no menu bar on Windows, so the keys are named
+              rather than a View menu nobody can open. */}
+          {zoomKeysSentence()} Nestor keeps the size you pick.
         </p>
       </div>
       {onUpdateWorkspaceBehavior ? (
@@ -227,11 +241,9 @@ export function SettingsAppDeviceSection({
           checked={draftCollapseSideMenu}
           className="max-w-xl"
           description="Fold the side menu to icons when the assistant opens beside the page, and open it again when the assistant closes."
-          hint={
-            sideMenuSaveFailed
-              ? "That change was not saved. Try the switch again."
-              : "Saved as soon as you flip it. Folding or opening the menu yourself always wins."
-          }
+          {...(sideMenuSaveFailed
+            ? { hint: "That change was not saved. Try the switch again." }
+            : {})}
           label="Collapse the side menu while the assistant is open"
           onCheckedChange={updateCollapseSideMenu}
         />

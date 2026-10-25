@@ -17,7 +17,8 @@ import {
  * - failed  -> the failure sentence, announced, with a Retry button
  * - dirty   -> "Not saved yet."
  * - saved   -> the section's own confirmation, announced
- * - clean   -> "No unsaved changes." (also the stated reason the save is off)
+ * - clean   -> "No unsaved changes." for screen readers only (the stated
+ *              reason the save is off); on screen the greyed button says it
  *
  * The saved confirmation was previously computed by every section and then
  * dropped on the floor: a committed save flipped straight back to "No unsaved
@@ -65,18 +66,29 @@ export function SettingsSectionSaveControl({
       ? `Retry ${subject}`
       : `Save ${subject}`;
 
+  // A section with nothing to save shows no button at all. Five greyed
+  // "Save …" buttons down the page read as five chores; the button now
+  // appears beside the section the moment something in it changes.
+  if (!isOutstanding && !isSavePending && !hasFailed && !hasSaved) {
+    return null;
+  }
+
   return (
     <div className="grid min-w-0 max-w-full justify-items-end gap-1.5">
-      <Button
-        aria-describedby={isSavePending ? undefined : feedbackId}
-        disabled={!isOutstanding || isSavePending || isSaveDisabled}
-        onClick={onSave}
-        pending={isSavePending}
-        type="button"
-        variant="primary"
-      >
-        {buttonLabel}
-      </Button>
+      {/* Once saved, the confirmation alone stands; a greyed button beside
+          it said nothing more. */}
+      {hasSaved && !isOutstanding ? null : (
+        <Button
+          aria-describedby={isSavePending ? undefined : feedbackId}
+          disabled={!isOutstanding || isSavePending || isSaveDisabled}
+          onClick={onSave}
+          pending={isSavePending}
+          type="button"
+          variant="primary"
+        >
+          {buttonLabel}
+        </Button>
+      )}
       {isSavePending ? null : hasFailed ? (
         <p
           className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-destructive"
@@ -97,14 +109,19 @@ export function SettingsSectionSaveControl({
         </p>
       ) : (
         <p
-          className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-foreground-soft"
+          className={
+            isOutstanding
+              ? "min-w-0 max-w-80 break-words text-right text-xs leading-4 text-foreground-soft"
+              : "sr-only"
+          }
           data-settings-save-state={isOutstanding ? "dirty" : "clean"}
           id={feedbackId}
         >
           {isOutstanding ? "Not saved yet." : "No unsaved changes."}
         </p>
       )}
-      {effect && !isSavePending ? (
+      {/* When a change takes effect matters while there is one to save. */}
+      {effect && !isSavePending && isOutstanding ? (
         <p
           className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-foreground-muted"
           data-settings-save-effect

@@ -2,7 +2,10 @@ import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createMatchAssessment } from "./matching";
 import { canonicalizeLocationAliases } from "./location-normalization";
-import { createMatchAssessmentSession } from "./match-assessment-session";
+import {
+  createMatchAssessmentSession,
+  MATCH_ASSESSMENT_SCORER_VERSION,
+} from "./match-assessment-session";
 import { applyDiscoveryTitleTriage } from "./workspace-source-intelligence";
 
 describe("US country aliases in saved search places", () => {
@@ -71,7 +74,7 @@ describe("US country aliases in saved search places", () => {
     });
     const refreshed = resumed.assessPersisted(posting, stale);
     expect(refreshed).not.toBe(stale);
-    expect(refreshed.scorerVersion).toBe(16);
+    expect(refreshed.scorerVersion).toBe(MATCH_ASSESSMENT_SCORER_VERSION);
     expect(refreshed.dimensions.preferenceAlignment.state).not.toBe("conflict");
     expect(calculate).toHaveBeenCalledTimes(2);
   });

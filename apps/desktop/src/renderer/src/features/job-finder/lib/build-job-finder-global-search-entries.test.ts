@@ -181,10 +181,11 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     expect(lastJob?.subtitle).toContain(
       "Saved on this device, not in this search plan",
     );
-    expect(countDiscoveryVisibleJobs(workspace)).toBe(50);
+    // Every job of the plan is shortlisted, so none waits in Find jobs.
+    expect(countDiscoveryVisibleJobs(workspace)).toBe(0);
     expect(countShortlistedJobs(workspace)).toBe(50);
     const planless = { ...workspace, activeCampaignId: "missing" };
-    expect(countDiscoveryVisibleJobs(planless)).toBe(3003);
+    expect(countDiscoveryVisibleJobs(planless)).toBe(3003 - 75);
     expect(countShortlistedJobs(planless)).toBe(75);
     expect(jobs[3002]).not.toHaveProperty("description");
   });
@@ -346,5 +347,22 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     );
     expect(unassignedJob?.campaignId).toBeNull();
     expect(unassignedJob?.subtitle).toBe("Initech · Remote");
+  });
+});
+
+describe("screens in the workspace search", () => {
+  it("finds a screen by name or by a word for it, under any plan", () => {
+    const workspace = buildWorkspaceFixture("campaign_1");
+    const entries = buildJobFinderGlobalSearchEntries(workspace);
+    const first = (query: string) =>
+      searchJobFinderEntries(entries, query, { campaignId: "campaign_1" })[0];
+
+    expect(first("sett")).toMatchObject({ kind: "screen" });
+    expect(first("sett")?.entries[0]?.title).toBe("Settings");
+    expect(first("send for me")?.entries[0]).toMatchObject({
+      title: "Applying settings",
+      href: "/job-finder/settings#settings-application-authority",
+    });
+    expect(first("shortl")?.entries[0]?.href).toBe("/job-finder/review-queue");
   });
 });

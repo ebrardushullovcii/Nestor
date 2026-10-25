@@ -16,10 +16,8 @@ import {
   RESUME_DRAFT_EXPECTED_WAIT_LABEL,
 } from "./review-queue-progress";
 import {
+  getResumeRunState,
   getReviewQueueWorkflowStatus,
-  hasResumeGenerationFailure,
-  isResumeGenerationInProgress,
-  needsPersonResumeReview,
   needsResumeGeneration,
 } from "./review-queue-status";
 import { formatDateOnly } from "../../lib/job-finder-utils";
@@ -69,17 +67,11 @@ export function ReviewQueuePreviewPanel({
   queue,
   selectedAsset,
   selectedItem,
-  selectedJob,
 }: ReviewQueuePreviewPanelProps) {
   const needsGeneration = needsResumeGeneration(selectedItem);
-  const hasGenerationFailure = hasResumeGenerationFailure(
-    selectedItem,
-    selectedAsset,
-  );
-  const isGenerating =
-    selectedItem?.resumeApplicationMode !== "original_resume" &&
-    !hasGenerationFailure &&
-    (isResumeGenerationInProgress(selectedItem) || isSelectedJobPending);
+  // A rewrite in progress outranks the last attempt's failure.
+  const { hasFailure: hasGenerationFailure, isWriting: isGenerating } =
+    getResumeRunState(selectedItem, selectedAsset, isSelectedJobPending);
   const showGenerationState =
     needsGeneration || isGenerating || hasGenerationFailure;
   const preview = useTailoredAssetDetail(
@@ -100,13 +92,11 @@ export function ReviewQueuePreviewPanel({
   const previewLabel =
     previewState === "missing" ? "Resume issue" : workflowStatus.label;
   // When the listing text was never captured, nothing could be tailored and
-  // the document is the person's own resume. The stored asset label still says
-  // "Tailored Resume", which contradicts the explanation on this same screen,
-  // so the document is named for what it actually is.
-  const documentLabel = selectedAsset
-    ? describeUntailorableListing(selectedAsset)
-      ? "Your original resume"
-      : selectedAsset.label
+  // the document keeps the person's own wording; the card says so in the
+  // row's words. It is not "your original resume": that is the imported file
+  // Original sends.
+  const untailorableBadgeLabel = selectedAsset
+    ? (describeUntailorableListing(selectedAsset)?.badgeLabel ?? null)
     : null;
 
   return (
@@ -124,7 +114,7 @@ export function ReviewQueuePreviewPanel({
       <header className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
         {/* An eyebrow is a label, not a heading: as an `h2` it polluted the
             document outline and rendered a 19px level at 11px. */}
-        <p className="font-display text-(length:--text-eyebrow) font-semibold uppercase tracking-(--tracking-caps) text-foreground">
+        <p className="text-(length:--text-small) font-semibold leading-5 text-foreground">
           Resume
         </p>
         {/* The workspace header above this panel already shows the workflow
@@ -399,17 +389,20 @@ export function ReviewQueuePreviewPanel({
           )}
           {...(stacked ? {} : { "data-locked-pane-scroll-region": true })}
         >
-          <div className="surface-card-tint relative grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) p-6 text-(length:--text-body) leading-[1.48] text-foreground">
-            <div className="grid items-end gap-3 border-b border-(--surface-panel-border) pb-4 sm:grid-cols-[1fr_auto]">
-              <strong className="text-[1.1rem] text-(--text-headline)">
-                {selectedJob?.title ?? selectedItem.title}
-              </strong>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <span className="text-[0.9rem] text-foreground-soft">
-                  {documentLabel}
-                </span>
-              </div>
-            </div>
+          <div
+            // Lines of a wide pane ran past 100 characters; the resume reads
+            // at a book's measure.
+            className="surface-card-tint relative grid max-w-[82ch] gap-4 rounded-(--radius-field) border border-(--surface-panel-border) p-6 text-(length:--text-body) leading-[1.48] text-foreground"
+            data-resume-preview-card
+          >
+            {/* The pane header already names the job and the level row above
+                names the resume, so the card opens on the resume itself. Only
+                a resume that kept the person's wording says so here. */}
+            {untailorableBadgeLabel ? (
+              <p className="text-(length:--text-small) text-foreground-soft">
+                {untailorableBadgeLabel}
+              </p>
+            ) : null}
             {selectedItem.resumeReview.status === "approved" ? (
               <p className="text-(length:--text-small) text-foreground-soft">
                 Approved {formatDateOnly(selectedItem.resumeReview.approvedAt)}
@@ -417,36 +410,20 @@ export function ReviewQueuePreviewPanel({
                 this is the file that goes out.
               </p>
             ) : null}
-            {selectedItem.resumeReview.status === "needs_review" ? (
-              <p className="text-(length:--text-small) text-foreground-soft">
-                {needsPersonResumeReview(selectedItem, selectedAsset)
-                  ? "Review this resume, decide any flagged lines, then approve it before applying."
-                  : "This is the resume as it stands. Edit it if you like; Apply approves it."}
-              </p>
-            ) : null}
+            {/* What to do with the resume (read it and approve it, or let
+                Apply approve it) is the Next step box's line, with its
+                button; it is not repeated here. */}
             {selectedItem.resumeReview.status === "stale" ? (
               <p className="text-(length:--text-small) text-(--warning-text)">
                 This approved resume is out of date. Open it and approve the
                 current version.
               </p>
             ) : null}
-            {/* The panel header above already carries the one primary action
-                for this state ("Review and approve resume"); a second boxed
-                "Next step" with the same destination was a duplicate CTA. A
-                quiet text link keeps the destination reachable from here. */}
-            {selectedItem.resumeReview.status !== "approved" ? (
-              <Button
-                className="h-auto w-fit px-0 text-sm"
-                onClick={() => onEditResumeWorkspace(selectedItem.jobId)}
-                size="compact"
-                type="button"
-                variant="link"
-              >
-                Edit resume
-              </Button>
-            ) : null}
             {preview.loading ? (
-              <p role="status">Loading resume preview…</p>
+              // Shown only if the preview takes longer than a blink.
+              <p className="delayed-appear" role="status">
+                Loading resume preview…
+              </p>
             ) : null}
             {preview.error ? (
               <div role="alert">

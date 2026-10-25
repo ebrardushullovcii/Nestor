@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Suspense } from "react";
 import type { ReactElement } from "react";
 import { createDiscoveryRunInterruptedFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
+import type * as LaunchReadsModule from "@renderer/features/job-finder/lib/launch-reads";
+import type { LaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   JobFinderApplicationsRoute,
@@ -16,6 +18,19 @@ import {
   JobFinderProfileRoute,
   JobFinderReviewQueueRoute,
 } from "./job-finder-page-routes";
+
+// What the window read from the database at launch; empty unless a test sets
+// it, as the real reads are before they answer.
+const launch = vi.hoisted(() => ({
+  reads: { counts: null, home: null, context: null, findJobs: null } as unknown,
+}));
+vi.mock(
+  "@renderer/features/job-finder/lib/launch-reads",
+  async (importOriginal) => ({
+    ...(await importOriginal<typeof LaunchReadsModule>()),
+    useLaunchReads: () => launch.reads,
+  }),
+);
 
 // The review-queue route reads applicationPolicy.defaultResumeStrategyId from
 // the active campaign, so the fixture must be a schema-valid campaign. Parsing
@@ -377,6 +392,7 @@ describe("canonical route first paint", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    launch.reads = { counts: null, home: null, context: null, findJobs: null };
   });
 
   it("mounts the real Find jobs heading immediately without a suspense fallback or deferred surface timer", () => {
@@ -451,6 +467,47 @@ describe("canonical route first paint", () => {
     expect(onOpenBrowserSession.mock.calls[0]).toEqual([]);
   });
 
+  it("does not tell a workspace still loading its saved jobs to run a first search", () => {
+    const context = createContext();
+    context.workspace = {
+      ...context.workspace,
+      hydration: {
+        phase: "bootstrap",
+        deferredCollections: ["discovery_jobs", "applications"],
+      },
+    };
+    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
+
+    expect(screen.getByText("Loading your workspace")).toBeTruthy();
+    expect(screen.queryByText("Run your first search")).toBeNull();
+  });
+
+  it("shows the full Home on its first view, with Find jobs' counts from the database", () => {
+    const page = (total: number) => ({ rows: [], total });
+    launch.reads = {
+      counts: null,
+      home: null,
+      context: null,
+      findJobs: { focused: page(7), wide: page(31) },
+    } as unknown as LaunchReads;
+    const context = createContext();
+    context.workspace = {
+      ...context.workspace,
+      discoveryJobs: [],
+      hydration: {
+        phase: "bootstrap",
+        deferredCollections: ["discovery_jobs"],
+      },
+    };
+    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
+
+    expect(screen.queryByText("Loading your workspace")).toBeNull();
+    expect(screen.getByTestId("home-next-step")).toBeTruthy();
+    const findJobs = screen.getByRole("button", { name: /^Find jobs/u });
+    expect(findJobs.textContent).toContain("7");
+    expect(findJobs.textContent).toContain("+ 24 weaker");
+  });
+
   it("mounts the real Your profile heading immediately without a suspense fallback or deferred surface timer", () => {
     const { setTimeoutSpy } = renderCanonicalRoute(
       "/job-finder/profile",
@@ -458,7 +515,7 @@ describe("canonical route first paint", () => {
     );
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Your profile" }),
+      screen.getByRole("heading", { level: 1, name: "Profile" }),
     ).toBeTruthy();
     expect(screen.queryByText("Loading screen")).toBeNull();
     expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
@@ -475,6 +532,71 @@ describe("canonical route first paint", () => {
     ).toBeTruthy();
     expect(screen.queryByText("Loading screen")).toBeNull();
     expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "/job-finder/review-queue",
+      "Shortlisted",
+      <JobFinderReviewQueueRoute key="q" />,
+    ],
+    [
+      "/job-finder/applications",
+      "Applications",
+      <JobFinderApplicationsRoute key="a" />,
+    ],
+  ] as const)(
+    "opens %s from Home's first view while every job is still loading",
+    (path, heading, element) => {
+      // A long conversion holds the full load for a minute; these screens
+      // read only the jobs past Find jobs, which the first view has.
+      const firstView = createContext();
+      firstView.workspace = {
+        ...firstView.workspace,
+        hydration: {
+          phase: "bootstrap",
+          deferredCollections: ["discovery_jobs"],
+        },
+      };
+      renderCanonicalRoute(path, element, firstView);
+      expect(
+        screen.getByRole("heading", { level: 1, name: heading }),
+      ).toBeTruthy();
+      expect(screen.queryByText("Loading your workspace")).toBeNull();
+      cleanup();
+
+      const bootstrap = createContext();
+      bootstrap.workspace = {
+        ...bootstrap.workspace,
+        hydration: {
+          phase: "bootstrap",
+          deferredCollections: [
+            "discovery_jobs",
+            "review_queue",
+            "applications",
+          ],
+        },
+      };
+      renderCanonicalRoute(path, element, bootstrap);
+      expect(screen.getByText("Loading your workspace")).toBeTruthy();
+    },
+  );
+
+  it("opens a shortlisted job's full details as a link to that job (STAB-004)", async () => {
+    const context = createContext();
+    renderCanonicalRoute(
+      "/job-finder/review-queue",
+      <JobFinderReviewQueueRoute />,
+      context,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open full job details" }),
+    );
+    // Find jobs lists only jobs still waiting on a decision; without the
+    // link a shortlisted job left it empty.
+    expect(context.onNavigateSafely).toHaveBeenCalledWith(
+      "/job-finder/discovery?jobId=job_a",
+    );
   });
 
   it("mounts the real Shortlisted heading immediately with no placeholder, suspense fallback, or deferred surface timer", () => {

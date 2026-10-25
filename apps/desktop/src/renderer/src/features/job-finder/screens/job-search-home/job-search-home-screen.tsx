@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type {
   ApplicationAutomationMode,
@@ -10,6 +10,8 @@ import type {
   ResumeImportProgressEvent,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
+import { cn } from "@renderer/lib/cn";
+import type { ApplyQueueControlAction } from "../../lib/apply-queue-view";
 import {
   PageHeaderStack,
   type PageStatusItem,
@@ -18,20 +20,25 @@ import { CampaignNotificationCenter } from "../../components/campaign-notificati
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { listApplicationsAwaitingUser } from "../../lib/needs-you-count";
+import { useApplicationPageStates } from "../../hooks/use-application-page-states";
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
 import type { ActionState } from "../../lib/job-finder-types";
 import type { TailoredDraftPreparationViewState } from "../review-queue/review-queue-status";
 import {
   buildJobSearchHomeModel,
+  type HomeFindJobsCounts,
   type HomeAction,
   type HomeButton,
 } from "./job-search-home-model";
+import { useRememberNextStepHeight } from "./home-next-step-size";
 
 export { buildInterruptedSearchRetryRequest } from "./job-search-home-model";
 
 export interface JobSearchHomeScreenProps {
   workspace: JobFinderRendererWorkspaceSnapshot;
+  /** Find jobs' counts from the database while its lists still load. */
+  findJobsCounts?: HomeFindJobsCounts | null;
   /**
    * What the last press on this page came to, in a sentence. A refusal
    * (Apply held back by a resume, a send that could not start) is shown here
@@ -68,6 +75,7 @@ export interface JobSearchHomeScreenProps {
   onResumeSetup?: (step: ProfileSetupStep) => void;
   onSelectCampaign: (campaignId: string) => void;
   onStopApply?: (runId: string) => void;
+  onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
   onStopResumes?: () => void;
   onStopSearch?: (runId: string) => void;
 }
@@ -166,16 +174,80 @@ export function listCurrentUnreadNotifications(
         notification.kind === "blocked_work" &&
         ((notification.jobId && sentJobIds.has(notification.jobId)) ||
           supersededByNewerAttempt(notification) ||
-          sourceBlockResolved(notification))
+          sourceBlockResolved(notification) ||
+          isRetiredGateNotification(notification))
       ),
   );
+}
+
+/**
+ * Blocks that no longer exist. ADR 0051 removed the hold on roles the resume
+ * writer left off, but notifications saved while it existed still said the
+ * resume "leaves out 2 roles that Job Finder wants you to confirm first", a
+ * step the app no longer asks for and nothing on screen can do.
+ */
+const RETIRED_GATE_NOTICE_PATTERNS: readonly RegExp[] = [
+  /wants you to confirm first/iu,
+  /confirm the hidden roles? (?:is|are) intentional/iu,
+];
+
+export function isRetiredGateNotification(
+  notification: Pick<CampaignNotification, "body" | "title">,
+): boolean {
+  const text = `${notification.title} ${notification.body ?? ""}`;
+  return RETIRED_GATE_NOTICE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 const PANEL_CLASS =
   "surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5";
 
+const DISMISSED_HOME_PROBLEMS_KEY = "nestor.home.dismissed-problems-v1";
+
+type DismissedHomeProblems = Readonly<Record<string, string>>;
+
+function readDismissedHomeProblems(): DismissedHomeProblems {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(DISMISSED_HOME_PROBLEMS_KEY) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Remembers that the person hid a quiet Home line for its current cause, so
+ * it stays hidden until the cause changes (ADR 0051: a fact the app cannot
+ * fix gets at most a notice dismissed for good).
+ */
+export function rememberDismissedHomeProblem(
+  problemId: string,
+  dismissKey: string,
+): DismissedHomeProblems {
+  const next = { ...readDismissedHomeProblems(), [problemId]: dismissKey };
+  try {
+    window.localStorage.setItem(
+      DISMISSED_HOME_PROBLEMS_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    // This visit still hides it.
+  }
+  return next;
+}
+
 export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   const [now, setNow] = useState(Date.now);
+  const nextStepRef = useRef<HTMLElement>(null);
+  useRememberNextStepHeight(nextStepRef);
+  const [dismissedProblemKeys, setDismissedProblemKeys] =
+    useState<DismissedHomeProblems>(readDismissedHomeProblems);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -199,12 +271,17 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   // would not open, a source that needs sign-in) keeps its own callout with
   // its own corrective action. A finished search is a status fact and reads
   // as the line under the title instead.
+  const applicationPageStates = useApplicationPageStates(
+    props.workspace.applyJobResults,
+  );
   const model = buildJobSearchHomeModel({
     now,
     workspace: props.workspace,
+    applicationPageStates,
     tasks,
     tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,
+    findJobsCounts: props.findJobsCounts ?? null,
     canRunDiscovery: Boolean(props.onRunDiscovery),
     applicationAutomationMode:
       props.applicationAutomationMode ?? "prepare_only",
@@ -241,8 +318,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     props.discoveryRunFeedback.status !== "cancelled" &&
     !failureSupersededByCompletedRun &&
     !missingStartingPageCoveredBySourceFix &&
-    // The next step already names the broken source and where to fix it.
+    // The next step already names the broken source and where to fix it,
+    // or the failed search and why; a banner above it said it again.
     model.next.id !== "source_failed" &&
+    !(
+      model.next.id === "search_failed" &&
+      props.discoveryRunFeedback.recovery?.kind !== "browser_session"
+    ) &&
     model.next.id !== "sources" &&
     // A source to correct is Home's card or problem line, which follow the
     // sources as they are now; this callout kept naming a source the person
@@ -336,6 +418,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
       case "stop_apply":
         props.onStopApply?.(action.runId);
         return;
+      case "apply_queue":
+        props.onControlApplyQueue?.(action.action);
+        return;
       case "stop_resumes":
         props.onStopResumes?.();
         return;
@@ -372,7 +457,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   return (
     // The header stack owns its 12px seam; the -mb-2 cancels the part of
     // the 20px grid gap that would double it.
-    <section className="grid min-w-0 gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
+    // Home is one column: at 1920 its card and tiles ran 1600px wide around
+    // a 68-character sentence. It keeps a readable width instead.
+    <section className="grid min-w-0 max-w-[76rem] grid-cols-[minmax(0,1fr)] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
       <PageHeaderStack
         actions={
           // While paused the next-step card below offers Resume; the header
@@ -407,12 +494,26 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         }
         description="Your search, shortlisted jobs, and applications."
         statusItems={[
-          ...model.problems.map((problem): PageStatusItem => {
+          ...model.problems.flatMap((problem): PageStatusItem[] => {
             const button = problem.button;
-            return {
+            const dismissKey = problem.dismissKey;
+            if (
+              dismissKey !== undefined &&
+              dismissedProblemKeys[problem.id] === dismissKey
+            )
+              return [];
+            const item: PageStatusItem = {
               id: problem.id,
-              tone: problem.tone === "critical" ? "critical" : "warning",
+              ...(problem.tone ? { tone: problem.tone } : {}),
               text: problem.text,
+              ...(dismissKey !== undefined
+                ? {
+                    onHide: () =>
+                      setDismissedProblemKeys(
+                        rememberDismissedHomeProblem(problem.id, dismissKey),
+                      ),
+                  }
+                : {}),
               ...(button
                 ? {
                     // Going to the screen that owns the problem is a link;
@@ -432,6 +533,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                   }
                 : {}),
             };
+            return [item];
           }),
           { id: "run-summary", text: model.statusLine },
         ]}
@@ -445,7 +547,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
           data-testid="home-now"
         >
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <h2 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+            <h2 className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
               Happening now
             </h2>
             {!model.paused ? (
@@ -467,11 +569,17 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                 className="flex min-w-0 flex-wrap items-center justify-between gap-3"
                 key={item.id}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="min-w-0 break-words text-sm font-medium text-(--text-headline)">
                     <span
+                      key={`${item.title}:${item.detail ?? ""}`}
                       aria-hidden="true"
-                      className="mr-2 inline-block size-2 animate-pulse rounded-full bg-primary align-middle"
+                      className={cn(
+                        "mr-2 inline-block size-2 rounded-full align-middle",
+                        item.active === false
+                          ? "bg-foreground-muted"
+                          : "motion-safe:animate-pulse-brief bg-primary",
+                      )}
                     />
                     {item.title}
                   </p>
@@ -565,8 +673,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-primary/40 bg-primary/10 p-5"
         data-home-next-step={model.next.id}
         data-testid="home-next-step"
+        ref={nextStepRef}
       >
-        <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+        <p className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
           Next step
         </p>
         <h2
@@ -616,6 +725,31 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
             </Button>
           ))}
         </div>
+        {model.next.also && model.next.also.length > 0 ? (
+          <ul className="m-0 grid list-none gap-1 p-0" data-home-next-step-also>
+            {model.next.also.map((line) => (
+              <li
+                className="min-w-0 text-(length:--text-small) leading-5 text-foreground-muted"
+                data-home-also={line.id}
+                key={line.id}
+              >
+                {line.text}
+                {line.link ? (
+                  <>
+                    {" "}
+                    <button
+                      className="inline cursor-pointer rounded-sm text-foreground-soft underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => line.link && run(line.link.action)}
+                      type="button"
+                    >
+                      {line.link.label}
+                    </button>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {model.stages ? (

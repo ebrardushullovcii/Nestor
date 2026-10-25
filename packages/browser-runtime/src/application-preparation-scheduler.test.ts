@@ -1,10 +1,23 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   applicationSiteKey,
+  applicationPreparationConcurrency,
   createApplicationPreparationScheduler,
 } from "./application-preparation-scheduler";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+test.each([
+  [undefined, 16],
+  ["16", 16],
+  ["99", 16],
+  ["1", 1],
+  ["0", 1],
+  ["bad", 16],
+  ["2.5", 16],
+] as const)("application concurrency %s resolves to %i", (value, expected) => {
+  expect(applicationPreparationConcurrency(value)).toBe(expected);
+});
 
 describe("application preparation ownership", () => {
   test("different sites overlap within the configured limit", async () => {

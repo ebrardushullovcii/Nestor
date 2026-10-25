@@ -8,6 +8,7 @@ import type {
 } from "@nestor/browser-runtime";
 import type {
   ApplyJobResult,
+  ResumeDraftProcessor,
   JobFinderDiscoveryState,
   FitJudgmentProgress,
   JobFinderWorkspaceSnapshot,
@@ -20,6 +21,7 @@ import type {
   UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import type { createListingActivityIdentityIndex } from "./listing-activity-identity-index";
 import type {
   CandidateAssetResolver,
   JobFinderDocumentManager,
@@ -69,11 +71,16 @@ export interface WorkspaceServiceContext {
   visionProvider?: ResumeVisionProvider;
   browserRuntime: BrowserSessionRuntime;
   documentManager: JobFinderDocumentManager;
+  resumeDraftProcessor?: ResumeDraftProcessor;
   candidateAssetResolver?: CandidateAssetResolver;
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;
+  listingActivityIdentityIndex?: ReturnType<
+    typeof createListingActivityIdentityIndex
+  >;
   listingAssessmentGenerationRef?: MutableRef<number>;
   listingAssessmentAbortControllerRef?: MutableRef<AbortController>;
   withListingAssessmentSlot?: <T>(
@@ -82,6 +89,8 @@ export interface WorkspaceServiceContext {
   isWorkspaceClosing?: () => boolean;
   fitJudgmentProgressRef?: MutableRef<FitJudgmentProgress | null>;
   onListingAssessmentFinished?: () => void;
+  onShortlistResumeChanged?: () => void;
+  onSavedJobsRescored?: () => void;
   activeDiscoveryAbortControllerRef: MutableRef<AbortController | null>;
   /**
    * The run id the in-flight discovery pipeline belongs to. A stop request
@@ -119,6 +128,13 @@ export interface WorkspaceServiceContext {
    * they cannot await the recovery promise that is waiting for them.
    */
   readWorkspaceSnapshot: () => Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * The display projection (borrowed, frozen rows), also without recovery.
+   * A finished search answers with this: a canonical read re-parsed every
+   * saved job (about 14 s of the main process with 12,000 jobs) for a
+   * snapshot its callers then discard or convert for display.
+   */
+  readWorkspaceProjection?: () => Promise<JobFinderWorkspaceSnapshot>;
   getActiveCampaignId: () => Promise<string | null>;
   resumeApplicationUserAction: (
     request: UserActionRequest,
@@ -164,6 +180,9 @@ export interface WorkspaceServiceContext {
   staleApprovedResumeDrafts: (
     staleReason: string,
     jobIds?: readonly string[],
+    profileInputs?: Parameters<
+      NonNullable<JobFinderRepository["staleResumeDrafts"]>
+    >[0]["profileInputs"],
   ) => Promise<void>;
   openRunBrowserSession: (
     source: JobSource,

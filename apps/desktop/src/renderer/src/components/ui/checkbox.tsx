@@ -24,21 +24,26 @@ function Checkbox({
         // staying a washed-out --primary block.
         // A partly selected group ("indeterminate") uses the checked fill with
         // a dash, so "some" reads as a state of its own rather than "none".
-        "peer size-4 shrink-0 rounded-none border border-(--control-border) bg-input outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) data-[state=checked]:border-primary-fill data-[state=checked]:bg-primary-fill data-[state=checked]:text-primary-fill-foreground data-[state=indeterminate]:border-primary-fill data-[state=indeterminate]:bg-primary-fill data-[state=indeterminate]:text-primary-fill-foreground disabled:data-[state=checked]:border-(--disabled-border) disabled:data-[state=checked]:bg-(--disabled-surface) disabled:data-[state=checked]:text-(--disabled-foreground)",
+        "peer group/checkbox size-4 shrink-0 rounded-none border border-(--control-border) bg-input outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) data-[state=checked]:border-primary-fill data-[state=checked]:bg-primary-fill data-[state=checked]:text-primary-fill-foreground data-[state=indeterminate]:border-primary-fill data-[state=indeterminate]:bg-primary-fill data-[state=indeterminate]:text-primary-fill-foreground disabled:data-[state=checked]:border-(--disabled-border) disabled:data-[state=checked]:bg-(--disabled-surface) disabled:data-[state=checked]:text-(--disabled-foreground)",
         className,
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator
+      {/* A plain mark the box state shows or hides. Radix's Indicator wraps
+          each mark in Presence, which reads the computed style of every box
+          as it mounts; a Profile tab with 25 boxes spent about 0.2 s in the
+          style recalculations that forced. */}
+      <span
+        aria-hidden="true"
         data-slot="checkbox-indicator"
-        className="grid place-content-center text-current transition-none"
+        className="grid place-content-center text-current transition-none group-data-[state=unchecked]/checkbox:hidden"
       >
         {props.checked === "indeterminate" ? (
           <MinusIcon className="size-3" />
         ) : (
           <CheckIcon className="size-3" />
         )}
-      </CheckboxPrimitive.Indicator>
+      </span>
     </CheckboxPrimitive.Root>
   );
 }

@@ -1,4 +1,5 @@
 import {
+  getDiscoveryRunPhase,
   recoverInterruptedDiscoveryRun,
   type JobFinderDiscoveryState,
 } from "@nestor/contracts";
@@ -18,11 +19,23 @@ import type { JobFinderRepository } from "@nestor/db";
  *
  * Idempotent: a run already carrying a terminal phase is returned untouched,
  * so re-running this on the next start changes nothing.
+ *
+ * Read only each run's state and phase to decide whether recovery is needed.
+ * The canonical update loads evidence only when something was left running.
  */
 export async function recoverInterruptedDiscoveryRuns(
-  repository: Pick<JobFinderRepository, "commitDiscoveryStateUpdate">,
+  repository: Pick<
+    JobFinderRepository,
+    "commitDiscoveryStateUpdate" | "readDiscoveryRunStates"
+  >,
   now: string = new Date().toISOString(),
 ): Promise<void> {
+  const states = await repository.readDiscoveryRunStates();
+  const leftRunning = states.some(
+    (run) => getDiscoveryRunPhase(run) === "in_progress",
+  );
+  if (!leftRunning) return;
+
   await repository.commitDiscoveryStateUpdate(
     (current): JobFinderDiscoveryState => {
       const recoveredActiveRun = current.activeRun

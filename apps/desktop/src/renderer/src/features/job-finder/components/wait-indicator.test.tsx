@@ -330,11 +330,16 @@ describe("lazy-route fallback", () => {
       return;
     }
 
+    // The page hands its fallback to the kept-routes outlet, whose Suspense
+    // boundaries paint it while a screen's code loads.
     const fallback = pageSource.slice(
-      pageSource.indexOf("<Suspense"),
-      pageSource.indexOf("<Outlet"),
+      pageSource.indexOf("<JobFinderKeptRoutesOutlet"),
+      pageSource.indexOf("readyMarker="),
     );
     expect(fallback).toContain("RouteSkeleton");
     expect(fallback).not.toContain("fillAvailableViewport");
+    expect(readSource("pages/job-finder-kept-routes.tsx")).toContain(
+      "<Suspense fallback={props.fallback}",
+    );
   });
 });

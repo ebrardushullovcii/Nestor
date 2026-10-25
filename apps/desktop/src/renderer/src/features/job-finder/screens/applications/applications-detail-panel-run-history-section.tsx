@@ -52,16 +52,18 @@ function RunHistoryEntry(props: {
           tone={
             result.state === "submitted"
               ? "positive"
-              : result.state === "blocked" ||
-                  result.state === "failed" ||
-                  result.state === "skipped" ||
-                  result.state === "cancelled"
-                ? "critical"
-                : "active"
+              : result.summary === PREPARED_PAGE_CLOSED_SUMMARY
+                ? "warning"
+                : result.state === "blocked" ||
+                    result.state === "failed" ||
+                    result.state === "skipped" ||
+                    result.state === "cancelled"
+                  ? "critical"
+                  : "active"
           }
         >
           {result.summary === PREPARED_PAGE_CLOSED_SUMMARY
-            ? "Prepare again"
+            ? "Form closed"
             : result.state === "cancelled"
               ? "Cancelled by you"
               : applicationState.kind === "ready_to_send" &&
@@ -108,7 +110,9 @@ export function ApplicationsDetailPanelRunHistorySection(props: {
 }) {
   const { applyRunHistory, onSelectApplyRun, selectedApplyRunId } = props;
 
-  if (!applyRunHistory.length) {
+  // One run is the state the status line above already gives; the list only
+  // earns its place once there is an earlier run to compare or open.
+  if (applyRunHistory.length < 2) {
     return null;
   }
 
@@ -121,15 +125,9 @@ export function ApplicationsDetailPanelRunHistorySection(props: {
 
   return (
     <section className="surface-card-tint grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
-      <div className="grid gap-1">
-        <h3 className={cn(APPLICATION_DETAIL_FACT_LABEL_CLASS, "text-primary")}>
-          Current preparation run
-        </h3>
-        <p className="text-(length:--text-small) leading-6 text-foreground-soft">
-          The selected run drives recovery actions above. Older runs stay
-          available for reference only.
-        </p>
-      </div>
+      <h3 className={cn(APPLICATION_DETAIL_FACT_LABEL_CLASS, "text-primary")}>
+        Preparation runs
+      </h3>
       <RunHistoryEntry
         isSelected
         onSelect={() => onSelectApplyRun(selectedEntry.result.runId)}

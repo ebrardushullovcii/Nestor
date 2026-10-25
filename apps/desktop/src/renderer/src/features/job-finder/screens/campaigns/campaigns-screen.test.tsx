@@ -2657,6 +2657,30 @@ it("reports dirty plan edits to the navigation guard and clears them after save 
   expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 });
 
+it("says once that the default plan follows Profile's job sites", () => {
+  const existing = {
+    ...campaign("inherit", "My job search", "precision"),
+    description:
+      "Your main search. Follows the job sites switched on in Profile.",
+    sourceTargetIds: [],
+    sourceSelectionMode: "profile" as const,
+  } as JobSearchCampaign;
+  render(
+    <CampaignsScreen
+      activeCampaignId="inherit"
+      campaigns={[existing]}
+      pending={false}
+      onSaveCampaign={vi.fn()}
+      onSelectCampaign={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Your main search.")).toBeTruthy();
+  expect(
+    screen.getByText("Searches the 1 job site switched on in Profile."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Follows the job sites/u)).toBeNull();
+});
+
 it("shows inherited enabled sources, and unchecking the last one saves an empty explicit selection", () => {
   const existing = {
     ...campaign("inherit", "Inherited", "precision"),
@@ -2673,7 +2697,9 @@ it("shows inherited enabled sources, and unchecking the last one saves an empty 
       onSelectCampaign={vi.fn()}
     />,
   );
-  expect(screen.getByText("Uses 1 of your 1 job sites.")).toBeTruthy();
+  expect(
+    screen.getByText("Searches the 1 job site switched on in Profile."),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getByLabelText<HTMLInputElement>("Example jobs").checked).toBe(
     true,
@@ -2885,7 +2911,7 @@ it("uses the shared run report for the plan card without replacing new jobs with
   expect(details.textContent).toContain("25 new to you");
   expect(details.textContent).toContain("22 kept");
   expect(details.textContent).toContain(
-    "52 postings seen · 25 unique jobs · 25 new to you · 22 kept by this plan · 27 duplicates merged · 0 rejected · 0 deferred · 7 pages covered",
+    "52 postings seen · 25 unique jobs · 25 new to you · 22 kept by this plan · 27 duplicates merged · 7 pages covered",
   );
   expect(details.textContent).not.toContain("22 new to you");
 });

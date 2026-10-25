@@ -193,11 +193,25 @@ function ProposalPart(props: {
         Suggested: {part.summary}
       </span>
       <ul className="grid gap-1 text-[12px] text-muted-foreground">
-        {part.items.map((item) => (
-          <li className="whitespace-pre-wrap" key={item.id}>
-            {item.detail ? `${item.label}\n${item.detail}` : item.label}
-          </li>
-        ))}
+        {part.items.map((item) => {
+          // A field change reads "Current x: …" then "Proposed x: …". Two
+          // near-identical paragraphs buried the change, so the current
+          // text waits behind a disclosure and the proposal leads.
+          const lines = item.detail?.split("\n") ?? [];
+          const current = lines.filter((line) => /^Current[ :]/u.test(line));
+          const rest = lines.filter((line) => !/^Current[ :]/u.test(line));
+          return (
+            <li className="grid gap-1 whitespace-pre-wrap" key={item.id}>
+              <span>{[item.label, ...rest].join("\n")}</span>
+              {current.length > 0 ? (
+                <details>
+                  <summary className="cursor-pointer">Current text</summary>
+                  <span className="mt-1 block">{current.join("\n")}</span>
+                </details>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {part.status === "pending" ? (
         <div className="flex gap-2">

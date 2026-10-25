@@ -135,6 +135,11 @@ export async function withResumeClaimChecks(input: {
   now?: () => string;
   signal?: AbortSignal;
   getRemainingBudgetMs?: () => number;
+  /**
+   * False reuses the verdicts already known and asks the model nothing; the
+   * rest stay unchecked until the draft is saved (the live preview).
+   */
+  askModel?: boolean;
 }): Promise<ResumeDraft> {
   input.signal?.throwIfAborted();
   const { draft, profile } = input;
@@ -172,34 +177,61 @@ export async function withResumeClaimChecks(input: {
     text: entry.text,
   }));
   const tailoringStrength = input.tailoringStrength ?? "balanced";
-  // What the verdicts depend on: the evidence and how far the person let the
-  // resume stretch. A change to either has the lines checked again.
+  const jobContext = [
+    input.job.title,
+    input.job.company,
+    input.job.description,
+    [
+      ...input.job.responsibilities,
+      ...input.job.minimumQualifications,
+      ...input.job.preferredQualifications,
+    ],
+  ];
+  const evidenceTexts = evidence.map((entry) => entry.text);
+  const importedResume = profile?.baseResume.textContent ?? "";
+  // What a line's verdict depends on: the line itself (its content hash),
+  // the evidence, the job and how far the person let the resume stretch.
+  // Editing one line has only that line checked again.
   const evidenceKey = fnv1a32(
     JSON.stringify([
+      "resume-fact-check-2026-10-21-per-line-v4",
+      jobContext,
+      evidenceTexts,
+      importedResume,
+      tailoringStrength,
+    ]),
+  );
+  // Verdicts stored before v4 were also keyed on every visible line. One
+  // stored for this very draft is current and is re-keyed, not re-checked.
+  const legacyEvidenceKey = fnv1a32(
+    JSON.stringify([
       "resume-fact-check-2026-10-14-context-v3",
-      [
-        input.job.title,
-        input.job.company,
-        input.job.description,
-        [
-          ...input.job.responsibilities,
-          ...input.job.minimumQualifications,
-          ...input.job.preferredQualifications,
-        ],
-      ],
+      jobContext,
       resumeLines.map((line) => [
         line.section,
         resumeClaimContentHash(line.text),
       ]),
-      evidence.map((entry) => entry.text),
-      profile?.baseResume.textContent ?? "",
+      evidenceTexts,
+      importedResume,
       tailoringStrength,
     ]),
   );
   const stored = new Map(
     (draft.claimChecks ?? [])
-      .filter((check) => check.evidenceKey === evidenceKey)
-      .map((check) => [check.contentHash, check] as const),
+      .filter(
+        (check) =>
+          check.evidenceKey === evidenceKey ||
+          check.evidenceKey === legacyEvidenceKey,
+      )
+      .map(
+        (check) =>
+          [
+            check.contentHash,
+            check.evidenceKey === evidenceKey
+              ? check
+              : { ...check, evidenceKey },
+          ] as const,
+      ),
   );
   const kept = new Map<string, ResumeClaimCheck>();
   const pending = new Map<string, (typeof claims)[number]>();
@@ -212,9 +244,10 @@ export async function withResumeClaimChecks(input: {
     else if (!kept.has(contentHash)) pending.set(contentHash, claim);
   }
 
-  const checkResumeClaims = input.aiClient.checkResumeClaims?.bind(
-    input.aiClient,
-  );
+  const checkResumeClaims =
+    input.askModel === false
+      ? undefined
+      : input.aiClient.checkResumeClaims?.bind(input.aiClient);
   if (checkResumeClaims && pending.size > 0) {
     const now = input.now ?? (() => new Date().toISOString());
     const entries = [...pending.entries()];
@@ -242,7 +275,9 @@ export async function withResumeClaimChecks(input: {
         },
         evidence,
         resumeLines,
-        resumeText: profile?.baseResume.textContent ?? null,
+        // The imported resume is already in the evidence, line by line with
+        // ids the verdict can cite; sending it whole as well doubled it.
+        resumeText: null,
         claims: batch.map(([, claim], index) => ({
           id: `line_${index + 1}`,
           section:
@@ -301,6 +336,8 @@ export function settleResumeClaimLines(input: {
   draft: ResumeDraft;
   profile: CandidateProfile | undefined;
   stretchesAreThePersons: boolean;
+  /** A failed re-check restores saved wording instead of trying another fix. */
+  useSavedWordingOnly?: boolean;
 }): ResumeDraft | null {
   const { draft } = input;
   const checks = new Map(
@@ -344,7 +381,7 @@ export function settleResumeClaimLines(input: {
     const failed =
       check.verdict === "unsupported" ||
       (check.verdict === "stretch" && !input.stretchesAreThePersons);
-    if (check.fix === null) {
+    if (input.useSavedWordingOnly || check.fix === null) {
       if (!failed) return null;
       changed = true;
       return savedWording && savedWording !== claim.text.trim()
@@ -393,24 +430,26 @@ export function settleResumeClaimLines(input: {
       shown.push(fix);
       return { ...bullet, text: fix };
     });
-  // An empty model fix removes a generated summary with nothing safe to keep.
+  // A rejected summary falls back to the person's saved summary, as the
+  // sanitizer does before checking. Keep that text on the saved draft too:
+  // otherwise a later preview restores it while the editor stays empty.
+  // Without a saved summary it is left off (ADR 0051): keeping the rejected
+  // text would leave the person to repair the app's own line before approval.
   const fixText = (
     text: string | null,
     origin: ResumeLine["origin"],
     field: "section_text" | "entry_summary",
     sectionId: string,
+    savedWording: string | null = null,
   ): string | null => {
     if (!text?.trim()) return text;
-    const fix = fixFor(
-      { text, origin, field, sectionId },
-      field === "section_text"
-        ? (input.profile?.summary?.trim() ?? null)
-        : null,
-    );
+    const fix = fixFor({ text, origin, field, sectionId }, savedWording);
     if (fix === null) return text;
-    if (!fix || repeatsAShownLine(fix, text)) return null;
-    shown.push(fix);
-    return fix;
+    const replacement =
+      !fix || repeatsAShownLine(fix, text) ? savedWording : fix;
+    if (!replacement) return null;
+    shown.push(replacement);
+    return replacement;
   };
 
   const fixed: ResumeDraft = {
@@ -425,6 +464,9 @@ export function settleResumeClaimLines(input: {
               section.origin,
               "section_text",
               section.id,
+              section.kind === "summary"
+                ? input.profile?.summary?.trim() || null
+                : null,
             ),
             bullets: fixBullets(section.bullets, "section_bullet", section.id),
             entries: section.entries.map((entry) =>
@@ -463,7 +505,17 @@ export async function withResumeClaimFixes(
   input.signal?.throwIfAborted();
   const settled = settleResumeClaimLines(input);
   if (!settled) return input.draft;
-  return withResumeClaimChecks({ ...input, draft: settled });
+  const checked = await withResumeClaimChecks({ ...input, draft: settled });
+  // Do not keep a rewrite the model just rejected or start another model
+  // loop. The saved source wording needs no check; without it the line is
+  // left off, as for a failed line with no fix (ADR 0051).
+  return (
+    settleResumeClaimLines({
+      ...input,
+      draft: checked,
+      useSavedWordingOnly: true,
+    }) ?? checked
+  );
 }
 
 /**

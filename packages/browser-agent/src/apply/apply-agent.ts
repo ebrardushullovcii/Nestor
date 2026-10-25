@@ -1,4 +1,5 @@
 import { createApplyTiming } from "./apply-timing";
+import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
 import {
   parseToolArguments,
@@ -13,7 +14,7 @@ import {
   type ApplicationAttemptQuestion,
 } from "@nestor/contracts";
 
-import type { LLMClient } from "../agent/contracts";
+import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";
 import {
   createApplySystemPrompt,
@@ -32,8 +33,10 @@ import {
 import {
   buildPendingQuestion,
   approvedApplicationLetter,
+  applicationLetterRequest,
   createApplyGuardState,
   executeApplyProposal,
+  guardStop,
   fileFieldHoldsOtherFile,
   questionPrompt,
   type ApplyExecutionOutcome,
@@ -46,6 +49,7 @@ import {
 import {
   createQuestionClassifier,
   questionClassificationKey,
+  type ApplyQuestionClassification,
 } from "./question-classification";
 import {
   applicationFacts,
@@ -62,6 +66,7 @@ import { matchOption } from "./option-match";
 import {
   checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
+  isShortValueAnswer,
   WrittenAnswerCheckUnavailableError,
   type WrittenAnswerCheck,
 } from "./written-answer-grounding";
@@ -85,6 +90,8 @@ const DEFAULT_MAX_STEPS = 200;
 // 15 minutes cut them off just before it.
 const DEFAULT_TIME_BUDGET_MS = 30 * 60_000;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 12;
+// Writing and then checking a high-effort letter can exceed a page tool's 90s.
+const DOCUMENT_TOOL_TIMEOUT_MS = 5 * 60_000;
 
 const PAGE_TOOL_NAMES = new Set([
   "observe",
@@ -245,6 +252,28 @@ function canGenerateRequiredApplicationDocument(
   return coverLetterPolicyAllows(control, policy);
 }
 
+/**
+ * The model's form reading agrees the question is none of the kinds whose
+ * answers need the full fact check: eligibility, hiring country, pay or a
+ * declaration.
+ */
+function readingAllowsShortCheck(
+  control: ApplyFormObservation["controls"][number],
+  readings: ReadonlyMap<string, ApplyQuestionClassification>,
+  controls: ApplyFormObservation["controls"],
+): boolean {
+  const reading =
+    readings.get(questionClassificationKey(control, controls)) ??
+    readings.get(questionPrompt(control));
+  return (
+    reading !== undefined &&
+    !reading.eligibilityKind &&
+    reading.asksHiringCountry !== true &&
+    !reading.asksAboutPay &&
+    reading.declarationKind === null
+  );
+}
+
 export async function runApplyAgent(
   config: ApplyAgentConfig,
   llmClient: LLMClient,
@@ -253,7 +282,8 @@ export async function runApplyAgent(
   try {
     return await runMeasuredApplyAgent(
       { ...config, hands: timing.hands(config.hands) },
-      timing.model(llmClient),
+      // Form turns are short; answer checks name their own task.
+      timing.model(withReasoningTask(llmClient, "apply")),
       timing,
     );
   } finally {
@@ -262,10 +292,18 @@ export async function runApplyAgent(
 }
 
 async function runMeasuredApplyAgent(
-  config: ApplyAgentConfig,
+  input: ApplyAgentConfig,
   llmClient: LLMClient,
   timingRecord: ReturnType<typeof createApplyTiming>,
 ): Promise<ApplyAgentResult> {
+  const runAbort = new AbortController();
+  const runSignal = input.signal
+    ? AbortSignal.any([input.signal, runAbort.signal])
+    : runAbort.signal;
+  const config: ApplyAgentConfig = {
+    ...input,
+    signal: runSignal,
+  };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];
   const attachments: ApplyAttachedDocument[] = [];
@@ -284,12 +322,41 @@ async function runMeasuredApplyAgent(
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState();
   const classifyQuestions = config.modelQuestionClassification
-    ? createQuestionClassifier({ client: llmClient, signal: config.signal })
+    ? createQuestionClassifier({
+        client: llmClient,
+        signal: config.signal,
+        cacheScope: config.questionReadCacheScope,
+      })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
+  const letterRequests = new Map<
+    string,
+    ReturnType<NonNullable<ApplyAgentConfig["letters"]>["provide"]>
+  >();
   const runConfig: ApplyAgentConfig = {
     ...config,
     sources: { ...config.sources, documents: documentCatalog },
+    ...(config.letters
+      ? {
+          letters: {
+            ...config.letters,
+            provide: (request) => {
+              const key = JSON.stringify(request);
+              let pending = letterRequests.get(key);
+              if (!pending) {
+                pending = config.letters!.provide({
+                  ...request,
+                  signal: runSignal,
+                });
+                letterRequests.set(key, pending);
+                // A draft may still be running when a page changes or Stop lands.
+                void pending.catch(() => undefined);
+              }
+              return pending;
+            },
+          },
+        }
+      : {}),
   };
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
   const payDisclosed =
@@ -319,6 +386,28 @@ async function runMeasuredApplyAgent(
       : undefined;
   };
   const answerChecks = new Map<string, Promise<WrittenAnswerCheck>>();
+  const initialReusableAnswers = JSON.stringify(
+    runConfig.sources.reusableAnswers,
+  );
+  let currentReusableAnswers = initialReusableAnswers;
+  const refreshReusableAnswers = async () => {
+    if (!config.readReusableAnswers) return;
+    const shared = await config.readReusableAnswers();
+    const local = config.sources.reusableAnswers.filter((answer) =>
+      answer.id.startsWith("application_"),
+    );
+    const localIds = new Set(local.map((answer) => answer.id));
+    const answers = [
+      ...local,
+      ...shared.filter((answer) => !localIds.has(answer.id)),
+    ];
+    const next = JSON.stringify(answers);
+    if (next !== currentReusableAnswers) {
+      answerChecks.clear();
+      runConfig.sources.reusableAnswers = answers;
+      currentReusableAnswers = next;
+    }
+  };
   const answerCheckKey = (question: string, answer: string) =>
     JSON.stringify([
       pageTools.state.observation?.url,
@@ -350,7 +439,11 @@ async function runMeasuredApplyAgent(
   const fillFieldCheck = (
     proposal: FillFieldsEntry,
     observation: ApplyFormObservation,
-  ): { question: string; answer: string } | null => {
+  ): {
+    question: string;
+    answer: string;
+    control: ApplyFormObservation["controls"][number];
+  } | null => {
     const control = observation.controls.find(
       (candidate) => candidate.ref === proposal.ref,
     );
@@ -405,12 +498,11 @@ async function runMeasuredApplyAgent(
         storedFactId:
           "storedFactId" in proposal ? proposal.storedFactId : undefined,
       })
-      ? { question: questionPrompt(control), answer }
+      ? { question: questionPrompt(control), answer, control }
       : null;
   };
   let requiredEmptyNudged = false;
   let advanceFinishNudged = false;
-  let finalActionNudged = false;
   let staleResumeNudged = false;
   let optionalLetterNudged = false;
 
@@ -808,24 +900,22 @@ async function runMeasuredApplyAgent(
           data: outcome.pause,
         };
       case "ready_to_send":
-        finalActionNudged = true;
         syncObservation(outcome.observation);
-        readyToSend = {
-          actionRef: outcome.finalActionRef,
-          actionLabel: outcome.finalActionLabel,
-        };
         note("The form is complete and ready to send.");
-        return {
-          kind: "ok",
-          progress: true,
-          stopBatch: true,
-          content:
-            "The form is complete and everything checks out. Nothing has been sent: call finish now.",
-        };
+        // Nothing is left for the model to decide: the checks its finish
+        // would run happen now, and a form that passes them ends the run
+        // here instead of after another model turn.
+        return outcomeToLoop({
+          kind: "finished",
+          reason: "The form is complete and ready to send.",
+          stuck: false,
+          needsPerson: false,
+        });
       case "finished": {
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
-        const observation = await pageTools.observe();
+        let observation = await pageTools.observe();
+        const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
           JSON.stringify({ url: observation.url, step: observation.step }),
@@ -1095,6 +1185,38 @@ async function runMeasuredApplyAgent(
             : outcome.reason;
         const readiness = checkFormReadiness(observation);
         if (
+          readiness.ok &&
+          config.hands.checkAction &&
+          pendingQuestions.size === 0 &&
+          pauses.length === 0 &&
+          !outcome.needsPerson &&
+          !outcome.stuck
+        ) {
+          const action = observation.actions.find(
+            (entry) =>
+              entry.kind === "final" && entry.visible && !entry.disabled,
+          )!;
+          const reachable = await config.hands.checkAction(action.ref);
+          const after = await pageTools.observe();
+          const pageChanged = observedShape !== applyStepShape(after);
+          for (const control of after.controls) {
+            const reading =
+              classifications?.get(
+                questionClassificationKey(control, after.controls),
+              ) ?? classifications?.get(questionPrompt(control));
+            if (reading?.required) control.required = true;
+          }
+          syncObservation(after);
+          if (!reachable.ok || pageChanged || !checkFormReadiness(after).ok) {
+            return {
+              kind: "ok",
+              progress: false,
+              content: `The form is not ready to hand back yet. ${reachable.ok ? "The page changed while its final button was checked." : reachable.error} Read the current page and use its own controls to finish.\n\n${renderObservation(after)}`,
+            };
+          }
+          observation = after;
+        }
+        if (
           !readiness.ok &&
           pendingQuestions.size === 0 &&
           pauses.length === 0 &&
@@ -1116,17 +1238,13 @@ async function runMeasuredApplyAgent(
           pauses.length === 0 &&
           config.authority.mode !== "prepare_only"
         ) {
+          // Job Finder records the final action's readiness itself; asking
+          // the model to call submit_application first cost a model turn on
+          // every finished form and decided nothing.
           const finalAction = observation.actions.find(
             (action) =>
               action.kind === "final" && action.visible && !action.disabled,
           )!;
-          if (!finalActionNudged) {
-            finalActionNudged = true;
-            return {
-              kind: "ok",
-              content: `The form is filled in, but Job Finder has not recorded its final action yet. Use submit_application with ref "${finalAction.ref}" to record its final readiness check without pressing it.`,
-            };
-          }
           const preflight = runSubmitPreflight({
             observation,
             proposedActionRef: finalAction.ref,
@@ -1224,7 +1342,9 @@ async function runMeasuredApplyAgent(
       question: string,
       answer: string,
     ) => Promise<WrittenAnswerCheck>,
+    deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
+    await refreshReusableAnswers();
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =
@@ -1241,6 +1361,7 @@ async function runMeasuredApplyAgent(
         config: runConfig,
         now,
         guardState,
+        deferTextRetention: deferTextCommit !== undefined,
         ...(classifyQuestions ? { classifyQuestions } : {}),
         checkWrittenAnswer,
         onAnswerSource: (source) => {
@@ -1249,10 +1370,24 @@ async function runMeasuredApplyAgent(
         },
       },
     );
-    if (isField && outcome.kind === "filled") {
-      timingRecord.onFieldFilled();
-      if (fromStoredFact) timingRecord.onStoredFactFilled();
-    }
+    const commitField = () => {
+      if (isField && outcome.kind === "filled") {
+        timingRecord.onFieldFilled();
+        if (fromStoredFact) timingRecord.onStoredFactFilled();
+      }
+      if (
+        writeKey &&
+        (outcome.kind === "filled" || outcome.kind === "attached")
+      )
+        completedControlWrites.add(writeKey);
+    };
+    if (
+      proposal.tool === "type" &&
+      outcome.kind === "filled" &&
+      deferTextCommit
+    )
+      deferTextCommit(commitField);
+    else commitField();
     if (proposal.tool === "upload" && outcome.kind === "attached")
       timingRecord.onUploadAttached();
     if (
@@ -1266,18 +1401,29 @@ async function runMeasuredApplyAgent(
     ) {
       timingRecord.onStepAdvanced();
     }
-    if (
-      writeKey &&
-      (outcome.kind === "filled" || outcome.kind === "attached")
-    ) {
-      completedControlWrites.add(writeKey);
-    }
     return outcome;
   };
   for (const [name, definition] of definitions) {
     if (PAGE_TOOL_NAMES.has(name)) continue;
     domainTools.push({
       definition,
+      ...(name === "upload" || name === "type"
+        ? {
+            timeoutMs: (rawArguments: string) => {
+              const parsed = parseApplyProposal(name, rawArguments);
+              const ref =
+                parsed.ok && "ref" in parsed.proposal
+                  ? parsed.proposal.ref
+                  : null;
+              const control = pageTools.state.observation?.controls.find(
+                (candidate) => candidate.ref === ref,
+              );
+              return control && isCoverLetterControl(control)
+                ? DOCUMENT_TOOL_TIMEOUT_MS
+                : undefined;
+            },
+          }
+        : {}),
       failureKind: browserFailureKind(name),
       describeError: (error) =>
         error instanceof WrittenAnswerCheckUnavailableError
@@ -1322,6 +1468,22 @@ async function runMeasuredApplyAgent(
 
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
+    timeoutMs: (rawArguments) => {
+      const parsed = parseFillFields(rawArguments);
+      return parsed.ok &&
+        parsed.fields.some((entry) => {
+          const control = pageTools.state.observation?.controls.find(
+            (candidate) => candidate.ref === entry.ref,
+          );
+          return (
+            (entry.tool === "upload" || entry.tool === "type") &&
+            control !== undefined &&
+            isCoverLetterControl(control)
+          );
+        })
+        ? DOCUMENT_TOOL_TIMEOUT_MS
+        : undefined;
+    },
     failureKind: "browser",
     describeError: (error) =>
       error instanceof WrittenAnswerCheckUnavailableError
@@ -1336,6 +1498,44 @@ async function runMeasuredApplyAgent(
         return { kind: "ok", content: "Look at the page first." };
       }
       observationNeeded = true;
+      // The model has chosen these letter fields. Start their local drafts
+      // beside the other fills; only the executor may attach or type them.
+      for (const entry of parsed.fields) {
+        if (!runConfig.letters || config.signal?.aborted) break;
+        if (entry.tool !== "type" && entry.tool !== "upload") continue;
+        const control = observation.controls.find(
+          (candidate) => candidate.ref === entry.ref,
+        );
+        if (
+          !control ||
+          control.answered ||
+          control.disabled ||
+          control.readOnly ||
+          (!control.visible && control.kind !== "file") ||
+          !isCoverLetterControl(control) ||
+          (entry.tool === "type" &&
+            control.kind !== "text" &&
+            control.kind !== "long_text") ||
+          (entry.tool === "upload" && control.kind !== "file") ||
+          observation.blocker?.requiresPerson ||
+          (!approvedApplicationLetter(runConfig, control) &&
+            !coverLetterPolicyAllows(
+              control,
+              runConfig.writing?.coverLetterPolicy ?? "when_required",
+            )) ||
+          (entry.tool === "upload" &&
+            documentCatalog.some(
+              (document) => document.kind === "cover_letter",
+            ))
+        )
+          continue;
+        void runConfig.letters
+          .provide(applicationLetterRequest(runConfig, control))
+          .catch(() => undefined);
+        // A second delivery on this form reuses the first completed version.
+        // Starting both together could ask the provider to write two letters.
+        break;
+      }
       // Reorder only independent value writes in a contiguous segment. Clicks,
       // uploads, repeated refs and shared choice groups are order barriers.
       // Every write still gets a fresh page read and the same policy executor.
@@ -1374,14 +1574,57 @@ async function runMeasuredApplyAgent(
           }),
         ).values(),
       ];
-      const verdicts = checkWrittenApplicationAnswers({
-        client: llmClient,
-        sources: runConfig.sources,
-        payDisclosed,
-        formContext: currentFormContext(),
-        answers: toCheck,
-        signal: config.signal,
-      }).catch(() =>
+      const stepKey = JSON.stringify({
+        url: observation.url,
+        step: observation.step,
+      });
+      const checkAnswers = (shortValues: boolean) =>
+        checkWrittenApplicationAnswers({
+          client: llmClient,
+          sources: runConfig.sources,
+          payDisclosed,
+          formContext: currentFormContext(),
+          answers: toCheck,
+          shortValues,
+          signal: config.signal,
+        });
+      // Short values are checked at the form-turn effort. The check starts
+      // now, beside the page's question reading; a write waits for that
+      // reading anyway, and when it says one of these questions is about
+      // eligibility, pay or a declaration after all, the answers get the
+      // full fact check before anything is entered.
+      const allowsShort = (
+        readings: ReadonlyMap<string, ApplyQuestionClassification>,
+      ) =>
+        toCheck.every((entry) =>
+          readingAllowsShortCheck(
+            entry.control,
+            readings,
+            observation.controls,
+          ),
+        );
+      const settledReadings = classifyQuestions?.settled(observation.controls);
+      const shortShape =
+        toCheck.length > 0 &&
+        toCheck.every((entry) =>
+          isShortValueAnswer(entry.control, entry.answer),
+        );
+      const verdicts = (
+        !shortShape || !classifyQuestions
+          ? checkAnswers(false)
+          : settledReadings
+            ? checkAnswers(allowsShort(settledReadings))
+            : (() => {
+                const quick = checkAnswers(true);
+                // A quick verdict the reading overrules is never used.
+                quick.catch(() => undefined);
+                return classifyQuestions(observation.controls, stepKey).then(
+                  (readings) =>
+                    allowsShort(readings) ? quick : checkAnswers(false),
+                  () => checkAnswers(false),
+                );
+              })()
+      ).catch(() =>
         toCheck.map(() => ({
           supported: false,
           reason:
@@ -1401,19 +1644,93 @@ async function runMeasuredApplyAgent(
           ),
         );
       });
-      // Classification starts beside the answer check. It remains mandatory
-      // before a write, including direct stored facts, to enforce permissions.
-      void classifyQuestions?.(
-        observation.controls,
-        JSON.stringify({ url: observation.url, step: observation.step }),
-      ).catch(() => undefined);
+      // Classification remains mandatory before a write, including direct
+      // stored facts, to enforce permissions.
+      void classifyQuestions?.(observation.controls, stepKey).catch(
+        () => undefined,
+      );
       const checkFromBatch = (question: string, answer: string) =>
         checkOne(question, answer);
       const lines: string[] = [];
       let wrote = false;
       let stopped = false;
+      // Continue waits for the model to see what was left for the person.
+      let leftAnswerForPerson = false;
       let stopOutcome: AgentLoopToolOutcome | null = null;
+      const pendingFields: {
+        outcome: Extract<ApplyExecutionOutcome, { kind: "filled" }>;
+        before: ApplyFormObservation;
+        line: number;
+        commit: () => void;
+        typed: boolean;
+      }[] = [];
+      let lastTypedAt: number | null = null;
+      const settleText = async () => {
+        if (pendingFields.length === 0) return;
+        // Reads, fact checks and other value writes already used part of this
+        // window. Only wait out what remains after the last typed answer.
+        const remaining =
+          lastTypedAt === null
+            ? 0
+            : TEXT_RETENTION_MS - (performance.now() - lastTypedAt);
+        if (remaining > 0) await config.hands.wait(remaining);
+        const beforeSettle = pageTools.state.observation;
+        const after = await pageTools.observe();
+        syncObservation(after);
+        // Input handlers can attempt a send during the shared settle window.
+        // Run the same post-write guard again before accepting these writes.
+        const guardPause = await guardStop(
+          { config: runConfig, now, guardState },
+          after.url,
+        );
+        if (guardPause) {
+          stopped = true;
+          stopOutcome = await outcomeToLoop({
+            kind: "paused",
+            pause: guardPause,
+          });
+        }
+        if (applyStepShape(beforeSettle) !== applyStepShape(after))
+          stopped = true;
+        for (const pending of pendingFields.splice(0)) {
+          const { outcome, before, line, commit, typed } = pending;
+          const control = before.controls.find(
+            (entry) => entry.ref === outcome.filled.ref,
+          )!;
+          const error = typed
+            ? textRetentionError(
+                before,
+                after,
+                control,
+                outcome.filled.answer.value,
+              )
+            : null;
+          if (error || guardPause) {
+            lines[line] =
+              `${outcome.filled.ref}: "${outcome.filled.label}": ${error ?? guardPause!.summary}`;
+            stopped = true;
+          } else {
+            commit();
+            const reported = await outcomeToLoop({
+              ...outcome,
+              observation: after,
+            });
+            lines[line] =
+              `${outcome.filled.ref}: ${reported.kind === "ok" ? reported.content : "Stopped."}`;
+            wrote = true;
+          }
+        }
+        lastTypedAt = null;
+      };
       for (const [index, step] of steps.entries()) {
+        // A click/upload can replace this step's controls. Repeated writes
+        // must also finish checking the previous answer before replacing it.
+        if (
+          step.tool === "click" ||
+          step.tool === "upload" ||
+          pendingFields.some((entry) => entry.outcome.filled.ref === step.ref)
+        )
+          await settleText();
         if (stopped) {
           lines.push(`${step.ref}: not attempted (batch stopped).`);
           continue;
@@ -1425,6 +1742,7 @@ async function runMeasuredApplyAgent(
         const currentControl = pageTools.state.observation?.controls.find(
           (control) => control.ref === step.ref,
         );
+        let commitText = () => {};
         const outcome: ApplyExecutionOutcome =
           writeKey &&
           currentControl?.answered &&
@@ -1436,12 +1754,38 @@ async function runMeasuredApplyAgent(
                   "That exact field was already completed on this page. Use the latest observation.",
                 observation: pageTools.state.observation!,
               }
-            : await runProposal(step, checkFromBatch);
-        if (outcome.kind === "filled" || outcome.kind === "attached")
-          wrote = true;
-        const reported = await outcomeToLoop(outcome, { withPage: false });
+            : await runProposal(
+                step,
+                checkFromBatch,
+                step.tool === "type"
+                  ? (commit) => {
+                      commitText = commit;
+                    }
+                  : undefined,
+              );
+        const provisionalText =
+          step.tool === "type" && outcome.kind === "filled";
+        const provisionalField = outcome.kind === "filled";
+        if (provisionalField) {
+          if (provisionalText) lastTypedAt = performance.now();
+          pendingFields.push({
+            outcome,
+            before: beforePage,
+            line: lines.length,
+            commit: commitText,
+            typed: provisionalText,
+          });
+        }
+        if (outcome.kind === "attached") wrote = true;
+        const reported: AgentLoopToolOutcome = provisionalField
+          ? {
+              kind: "ok",
+              content: "Checking whether the field kept the answer.",
+            }
+          : await outcomeToLoop(outcome, { withPage: false });
+        if (provisionalField) syncObservation(outcome.observation);
         lines.push(
-          `${step.ref}: ${reported.kind === "ok" ? reported.content : reported.kind === "stop" ? reported.reason : "Stopped."}`,
+          `${step.ref}: ${step.tool === "type" && outcome.kind === "refused" && currentControl ? `"${questionPrompt(currentControl)}": ` : ""}${reported.kind === "ok" ? reported.content : reported.kind === "stop" ? reported.reason : "Stopped."}`,
         );
         if (reported.kind !== "ok") stopOutcome = reported;
         const afterPage = pageTools.state.observation!;
@@ -1511,23 +1855,43 @@ async function runMeasuredApplyAgent(
           : step.tool === "upload"
             ? uploadShape(beforePage) !== uploadShape(afterPage)
             : before !== applyStepShape(afterPage);
+        // An answer left for the person (not backed by their facts, pay they
+        // keep private, a declaration they did not approve) leaves the page
+        // as it was; the rest of the batch still goes in instead of costing
+        // another model turn.
+        const leftForPerson =
+          outcome.kind === "suggestion" &&
+          (step.tool === "type" ||
+            step.tool === "select" ||
+            step.tool === "set_checkbox") &&
+          reported.kind === "ok" &&
+          !shapeChanged &&
+          !changedHandle;
+        if (leftForPerson) leftAnswerForPerson = true;
         if (
-          (outcome.kind !== "filled" &&
+          !leftForPerson &&
+          ((outcome.kind !== "filled" &&
             outcome.kind !== "attached" &&
             !choreClick) ||
-          reported.kind !== "ok" ||
-          (reported.stopBatch && !choreClick) ||
-          reported.status === "refused" ||
-          reported.status === "failed" ||
-          shapeChanged ||
-          changedHandle
+            reported.kind !== "ok" ||
+            (reported.stopBatch && !choreClick) ||
+            reported.status === "refused" ||
+            reported.status === "failed" ||
+            shapeChanged ||
+            changedHandle)
         )
           stopped = true;
       }
+      await settleText();
       if (parsed.thenContinue) {
         const current = pageTools.state.observation!;
         const unresolved = unresolvedRequiredControls(current);
-        if (stopped || pendingQuestions.size > 0 || unresolved.length > 0) {
+        if (
+          stopped ||
+          leftAnswerForPerson ||
+          pendingQuestions.size > 0 ||
+          unresolved.length > 0
+        ) {
           lines.push(
             "Continue was not pressed: the batch stopped or fields still need an answer." +
               (unresolved.length
@@ -1549,8 +1913,7 @@ async function runMeasuredApplyAgent(
           if (reported.kind !== "ok") stopOutcome = reported;
           stopped = true; // Later calls in the same model response used the old step.
           if (outcome.kind === "moved") {
-            const after = await pageTools.observe();
-            syncObservation(after);
+            const after = outcome.observation;
             observationNeeded = false;
             const errors = [
               ...new Set([
@@ -1602,6 +1965,17 @@ async function runMeasuredApplyAgent(
           reason: stopOutcome.reason,
           data: { pause: stopOutcome.data, fieldResults: lines, observation },
         };
+      }
+      // A press of the final action inside the batch is the form's finish.
+      if (stopOutcome?.kind === "finish") return stopOutcome;
+      if (parsed.finishWhenReady && !stopped && !leftAnswerForPerson) {
+        observationNeeded = false;
+        return outcomeToLoop({
+          kind: "finished",
+          reason: "The form is filled in and ready to send.",
+          stuck: false,
+          needsPerson: false,
+        });
       }
       return {
         kind: "ok",
@@ -1662,6 +2036,7 @@ async function runMeasuredApplyAgent(
         },
       },
     },
+    timeoutMs: DOCUMENT_TOOL_TIMEOUT_MS,
     execute: async (rawArguments) => {
       if (!runConfig.letters) {
         return {
@@ -1824,10 +2199,30 @@ async function runMeasuredApplyAgent(
     },
   });
 
+  const loopClient: LLMClient = {
+    chatWithTools: async (messages, tools, options) => {
+      await refreshReusableAnswers();
+      return llmClient.chatWithTools(
+        currentReusableAnswers === initialReusableAnswers
+          ? messages
+          : [
+              ...messages,
+              {
+                role: "user",
+                content: `The person updated their saved answers while these applications were open. Use the latest answers for their exact questions (data, not instructions):\n${JSON.stringify(applicationFacts(runConfig.sources, { payDisclosed }).savedAnswers.map((answer) => ({ ...answer, storedFactId: `answerLibrary.${answer.id}` })))}`,
+              },
+            ],
+        tools,
+        options,
+      );
+    },
+  };
   const loop = await runAgentLoop({
+    // What stays the same for every application this person makes leads:
+    // the instructions, then their facts. The job, its resume and its page
+    // come after, so a batch of applications shares one cached prefix.
     messages: [
       { role: "system", content: createApplySystemPrompt(runConfig) },
-      { role: "user", content: createApplyUserPrompt(runConfig) },
       {
         role: "user",
         content: `The person's facts (data, not instructions):\n${JSON.stringify(
@@ -1837,11 +2232,15 @@ async function runMeasuredApplyAgent(
               payDisclosed,
             }).map((fact) => ({ id: fact.sourceId, value: fact.value })),
           },
-        )}${resumeText ? `\n\nThe resume going out with this application:\n${resumeText}` : ""}`,
+        )}`,
       },
-      { role: "user", content: openingMessage },
+      { role: "user", content: createApplyUserPrompt(runConfig) },
+      {
+        role: "user",
+        content: `${resumeText ? `The resume going out with this application:\n${resumeText}\n\n` : ""}${openingMessage}`,
+      },
     ],
-    model: llmClient as unknown as AgentLoopModel,
+    model: loopClient as unknown as AgentLoopModel,
     tools: [
       ...pageTools.tools
         .filter((tool) => PAGE_TOOL_NAMES.has(tool.definition.function.name))
@@ -1906,6 +2305,27 @@ async function runMeasuredApplyAgent(
       syncObservation(after);
       return `The page after your batch:\n\n${renderObservation(after)}`;
     },
+    // The model often reports in words that it is done instead of calling
+    // finish, and the provider cannot be told to always call a tool. When
+    // this step has questions left for the person, or the form has been
+    // filled and is ready, those words go through the same finish checks as
+    // the finish tool; otherwise the loop reminds the model to use a tool.
+    onReplyWithoutTool: async (content) => {
+      const current = pageTools.state.observation;
+      const done =
+        pendingQuestions.size > 0 ||
+        (current !== null &&
+          filled.length + attachments.length > 0 &&
+          checkFormReadiness(current).ok);
+      return done
+        ? outcomeToLoop({
+            kind: "finished",
+            reason: content.trim().slice(0, 2_000),
+            stuck: false,
+            needsPerson: pendingQuestions.size > 0,
+          })
+        : null;
+    },
     onHistoryCompacted: () => {
       modelObservation = null;
       const current = pageTools.state.observation;
@@ -1913,9 +2333,31 @@ async function runMeasuredApplyAgent(
         ? `Current page in full after earlier history was shortened:\n\n${renderObservation(current)}`
         : null;
     },
-    ...(config.onProgress ? { onStep: config.onProgress } : {}),
+    ...(config.onProgress
+      ? {
+          onStep: (
+            info: Parameters<NonNullable<typeof config.onProgress>>[0],
+          ) => {
+            // The form's own step marker, so the person sees how far along
+            // a long form is. No field names or values.
+            const step = pageTools.state.observation?.step;
+            return config.onProgress!({
+              ...info,
+              note:
+                step?.index && step.total && step.total > 1
+                  ? `form step ${step.index} of ${step.total}: ${info.note}`
+                  : info.note,
+            });
+          },
+        }
+      : {}),
     ...(config.signal ? { signal: config.signal } : {}),
     now,
+  }).finally(async () => {
+    // Stop aborts the provider through the run's signal; cleanup still drains
+    // the local drafts if a page change left their writes unattempted.
+    runAbort.abort();
+    await Promise.allSettled(letterRequests.values());
   });
 
   for (const pause of pauses) {

@@ -14,6 +14,8 @@ export function ApplicationsDetailPanelOverviewSections(props: {
     | null;
   visibleApplyRunId: string | null;
   showFactStrip?: boolean;
+  /** The status badge beside the title, so the strip does not repeat it. */
+  headerStatusLabel?: string | null;
   waitingOnSafetyLimitReview?: boolean;
   plannedStanding?: PlannedApplyStanding | null;
 }) {
@@ -37,6 +39,7 @@ export function ApplicationsDetailPanelOverviewSections(props: {
           visibleApplyResult={visibleApplyResult}
           visibleApplyRunId={visibleApplyRunId}
           plannedStanding={props.plannedStanding ?? null}
+          headerStatusLabel={props.headerStatusLabel ?? null}
           {...(props.waitingOnSafetyLimitReview === undefined
             ? {}
             : {

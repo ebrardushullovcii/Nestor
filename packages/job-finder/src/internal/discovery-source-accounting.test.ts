@@ -13,6 +13,10 @@ import {
   createAgentBrowserRuntime,
   createWorkspaceServiceHarness,
 } from "../workspace-service.test-support";
+import { withSavedJobSearchBehavior } from "./job-search-behavior";
+import { createMatchAssessmentSession } from "./match-assessment-session";
+import { createMatchAssessment } from "./matching";
+import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 
 function makeWorld(
   extra: Partial<Parameters<typeof createWorkspaceServiceHarness>[0]> = {},
@@ -185,6 +189,33 @@ it("rechecks a shared job for each plan and keeps the first plan's model verdict
   ).toBe(true);
 });
 
+it("keeps the plan's own verdict through a search after a profile edit until the job is judged again", async () => {
+  const world = makeWorld();
+  const before = await world.workspaceService.getWorkspaceSnapshot();
+  const plan = before.campaigns.find(
+    (entry) => entry.id === before.activeCampaignId,
+  )!;
+  await world.workspaceService.runCampaignNow({ campaignId: plan.id });
+  const jobId = (await world.repository.getCampaignState())!.campaigns.find(
+    (entry) => entry.id === plan.id,
+  )!.jobIds[0]!;
+  // The person edits a fact the model reads; every verdict is now out of
+  // date, and this search's judging does not answer for the job.
+  const profile = await world.repository.getProfile();
+  await world.repository.saveProfile({
+    ...profile,
+    summary: `${profile.summary ?? ""} Also leads synthetic design reviews.`,
+  });
+  world.judge.mockImplementation(() => Promise.resolve([]));
+  await world.workspaceService.runCampaignNow({ campaignId: plan.id });
+  const job = (await world.repository.listSavedJobs()).find(
+    (entry) => entry.id === jobId,
+  )!;
+  // The older verdict stands until a new one arrives, rather than the job
+  // dropping back to "Not judged yet" and being bought again.
+  expect(job.planAssessments?.[plan.id]?.judgment?.score).toBe(90);
+});
+
 it("attributes listings and covered pages to the observed source rather than the starting source", async () => {
   const world = makeWorld();
   const preferences = await world.repository.getSearchPreferences();
@@ -242,66 +273,109 @@ it("attributes listings and covered pages to the observed source rather than the
   });
 });
 
-it("reads and judges supplied and selected jobs first within the per-search budgets", async () => {
-  const seed = createSeed();
-  const base = seed.savedJobs[0]!;
-  const jobs = Array.from({ length: 105 }, (_, index) =>
-    SavedJobSchema.parse({
-      ...base,
-      id: `prior-${index}`,
-      source: "target_site",
-      sourceJobId: `prior-${index}`,
-      canonicalUrl: `https://jobs.example.test/prior-${index}`,
-      title: `Product designer ${index}`,
-      status: index === 63 ? "shortlisted" : "discovered",
-      personSupplied: index === 64,
-      detailQuality: "card_only",
-      listingDetailFetch: null,
-      matchAssessment: {
-        ...base.matchAssessment,
-        score: index === 64 ? 10 : 90,
-        judgment: null,
+it.each([false, true])(
+  "keeps older-job budgets and picked-job priority when refreshing a rubric: %s",
+  async (olderRubric) => {
+    const seed = createSeed();
+    const base = seed.savedJobs[0]!;
+    const jobs = Array.from({ length: 105 }, (_, index) =>
+      SavedJobSchema.parse({
+        ...base,
+        id: `prior-${index}`,
+        source: "target_site",
+        sourceJobId: `prior-${index}`,
+        canonicalUrl: `https://jobs.example.test/prior-${index}`,
+        title: `Product designer ${index}`,
+        status: index === 63 ? "shortlisted" : "discovered",
+        personSupplied: index === 64,
+        detailQuality: "card_only",
+        listingDetailFetch: null,
+        matchAssessment: {
+          ...base.matchAssessment,
+          score: index === 64 ? 10 : 90,
+          judgment: null,
+        },
+      }),
+    );
+    const reads: string[] = [];
+    const world = makeWorld({
+      fetchListingHtml: (url) => {
+        reads.push(url);
+        return Promise.resolve({
+          status: 200,
+          html: "<main>Product designer. Lead design reviews and provide a portfolio.</main>",
+          finalUrl: url,
+        });
       },
-    }),
-  );
-  const reads: string[] = [];
-  const world = makeWorld({
-    fetchListingHtml: (url) => {
-      reads.push(url);
-      return Promise.resolve({
-        status: 200,
-        html: "<main>Product designer. Lead design reviews and provide a portfolio.</main>",
-        finalUrl: url,
+    });
+    if (olderRubric) {
+      const profile = await world.repository.getProfile();
+      const session = createMatchAssessmentSession({
+        profile,
+        searchPreferences: withSavedJobSearchBehavior(
+          enrichSearchPreferencesFromProfile(
+            await world.repository.getSearchPreferences(),
+            profile,
+          ),
+          await world.repository.getSettings(),
+        ),
+        calculate: createMatchAssessment,
       });
-    },
-  });
-  await world.repository.commitSavedJobDelta({ upserts: jobs });
-  await world.workspaceService.runDiscoveryForTarget(
-    "board",
-    () => undefined,
-    new AbortController().signal,
-  );
-  expect(reads.slice(0, 2)).toEqual(
-    expect.arrayContaining([jobs[63]!.canonicalUrl, jobs[64]!.canonicalUrl]),
-  );
-  // ADR 0041 budgets: at most 60 listing reads per search, and at most 100
-  // fit judgments of older jobs the search did not find and the person did
-  // not pick; the rest are read and judged on the next search.
-  expect(reads.length).toBeLessThanOrEqual(60);
-  const judgedIds = world.judge.mock.calls.flatMap(([input]) =>
-    input.jobs.map((job) => job.jobId),
-  );
-  const priorIds = new Set(jobs.map((job) => job.id));
-  const olderJudged = judgedIds.filter(
-    (jobId) =>
-      priorIds.has(jobId) && jobId !== jobs[63]!.id && jobId !== jobs[64]!.id,
-  );
-  expect(olderJudged.length).toBe(100);
-  expect(judgedIds).toEqual(
-    expect.arrayContaining([jobs[63]!.id, jobs[64]!.id]),
-  );
-  expect(new Set(judgedIds).size).toBe(judgedIds.length);
-});
+      for (const job of jobs) {
+        job.matchAssessment = session.assess(job, {
+          source: "batch",
+          judgedAt: "2026-10-20T10:00:00Z",
+          contextFingerprint: session.verdictFingerprint,
+          postingFingerprint: session.remember(job, job.matchAssessment)
+            .postingFingerprint,
+          score: 77,
+          recommendation: "review_before_applying",
+          role: "exact",
+          roleExplanation: null,
+          preferences: "aligned",
+          preferencesExplanation: null,
+          locationReach: "in_area",
+          reasons: [],
+          gaps: [],
+          summary: null,
+          listingClosed: false,
+          listingClosedEvidence: null,
+        });
+        job.matchAssessment.scorerVersion = 17;
+      }
+    }
+    await world.repository.commitSavedJobDelta({ upserts: jobs });
+    await world.workspaceService.runDiscoveryForTarget(
+      "board",
+      () => undefined,
+      new AbortController().signal,
+    );
+    expect(reads.slice(0, 2)).toEqual(
+      expect.arrayContaining([jobs[63]!.canonicalUrl, jobs[64]!.canonicalUrl]),
+    );
+    // ADR 0041 budgets, scaled to the search: older jobs the search did not
+    // find are read (6 per searched source, at most 60) and judged (10 per
+    // source, at most 100); the rest wait for the next search. A shortlisted
+    // job goes first but shares that allowance; only the job the person
+    // supplied is outside it. This one searched a single source.
+    const olderUrls = new Set(
+      jobs.filter((_, index) => index !== 64).map((job) => job.canonicalUrl),
+    );
+    expect(reads.filter((url) => olderUrls.has(url))).toHaveLength(6);
+    const judgedIds = world.judge.mock.calls.flatMap(([input]) =>
+      input.jobs.map((job) => job.jobId),
+    );
+    const priorIds = new Set(jobs.map((job) => job.id));
+    const olderJudged = judgedIds.filter(
+      (jobId) => priorIds.has(jobId) && jobId !== jobs[64]!.id,
+    );
+    expect(olderJudged.length).toBe(10);
+    expect(judgedIds).toEqual(
+      expect.arrayContaining([jobs[63]!.id, jobs[64]!.id]),
+    );
+    expect(new Set(judgedIds).size).toBe(judgedIds.length);
+  },
+);
 
 it("uses the selected plan's roles when a person assesses a listing", async () => {
   const world = makeWorld({

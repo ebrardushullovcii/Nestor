@@ -9,7 +9,11 @@ import {
 } from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import { resetDiscoveryAutoJudgeForTests } from "./discovery-assessment-continuation";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -60,7 +64,7 @@ function createJobs(count = JOB_COUNT): SavedJob[] {
   });
 }
 
-function renderResults(
+async function renderResults(
   jobs: readonly SavedJob[],
   options?: {
     discoveryTargets?: readonly JobDiscoveryTarget[];
@@ -69,8 +73,8 @@ function renderResults(
     selectedJob?: SavedJob | null;
   },
 ) {
-  return render(
-    <DiscoveryResultsPanel
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       discoveryTargets={options?.discoveryTargets ?? []}
       hasCompletedSearch
@@ -87,6 +91,8 @@ function renderResults(
       }
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 function getFirstResultJobId(): string | null {
@@ -106,39 +112,29 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel result sorting", () => {
-  it("keeps both assessment controls in the toolbar on every results page", () => {
-    const onJudge = vi.fn(() => Promise.resolve());
-    const onAssess = vi.fn(() => Promise.resolve());
+  it("judges unscored jobs on its own and reports it in the toolbar", async () => {
+    resetDiscoveryAutoJudgeForTests();
+    const onJudge = vi.fn(() => new Promise<void>(() => undefined));
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={createJobs()}
         selectedJob={null}
         onSelectJob={vi.fn()}
         onJudgeUnjudgedJobs={onJudge}
-        onAssessJobListing={onAssess}
       />,
     );
-    const all = screen.getByRole("button", { name: "Judge fit for all 60" });
-    const next = screen.getByRole("button", {
-      name: "Assess next 20 listings",
-    });
-    expect(all.closest("header")).toBe(next.closest("header"));
-    expect(all.closest("header")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
+    expect(onJudge).toHaveBeenCalledOnce();
     expect(
-      screen
-        .getByRole("button", { name: "Judge fit for all 60" })
-        .closest("header"),
-    ).not.toBeNull();
+      screen.queryByRole("button", { name: /Judge fit|Assess next/ }),
+    ).toBeNull();
     expect(
-      screen
-        .getByRole("button", { name: "Assess next 20 listings" })
-        .closest("header"),
+      screen.getByText("Judging fit for 60 jobs").closest("header"),
     ).not.toBeNull();
   });
-  it("shows a compact source line with the full configured name available to assistive technology", () => {
+  it("shows a compact source line with the full configured name available to assistive technology", async () => {
     const source = JobDiscoveryTargetSchema.parse({
       id: "target_results_source",
       label: "A configured source name that can exceed the row width",
@@ -157,7 +153,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
       ],
     });
 
-    renderResults([job], { discoveryTargets: [source] });
+    await renderResults([job], { discoveryTargets: [source] });
 
     const sourceLine = screen.getByTestId(`discovery-result-source-${job.id}`);
     expect(sourceLine.textContent).toContain(
@@ -169,7 +165,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
     expect(sourceLine.querySelector(".truncate")).toBeTruthy();
   });
 
-  it("names an unknown employer plainly instead of a 'Listing ·' company", () => {
+  it("names an unknown employer plainly instead of a 'Listing ·' company", async () => {
     const source = JobDiscoveryTargetSchema.parse({
       id: "target_wellfound",
       label: "Wellfound",
@@ -192,7 +188,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
       ],
     });
 
-    renderResults([job], { discoveryTargets: [source] });
+    await renderResults([job], { discoveryTargets: [source] });
 
     const sourceLine = screen.getByTestId(`discovery-result-source-${job.id}`);
     expect(sourceLine.textContent).toContain("Employer not listed ·");
@@ -206,8 +202,8 @@ describe("DiscoveryResultsPanel result sorting", () => {
     );
   });
 
-  it("keeps the shipped best-match ranking as the default sort", () => {
-    renderResults(createJobs());
+  it("keeps the shipped best-match ranking as the default sort", async () => {
+    await renderResults(createJobs());
 
     expect(
       screen.getByRole<HTMLSelectElement>("combobox", {
@@ -218,8 +214,8 @@ describe("DiscoveryResultsPanel result sorting", () => {
     expect(screen.getByText("1–50 of 60")).toBeTruthy();
   });
 
-  it("styles the compact sort select with canonical field tokens and focus hierarchy", () => {
-    renderResults(createJobs(2));
+  it("styles the compact sort select with canonical field tokens and focus hierarchy", async () => {
+    await renderResults(createJobs(2));
 
     const select = screen.getByRole<HTMLSelectElement>("combobox", {
       name: "Sort results",
@@ -244,16 +240,18 @@ describe("DiscoveryResultsPanel result sorting", () => {
     expect(select.className).not.toContain("--surface-panel-border");
   });
 
-  it("re-orders by company across page boundaries and restarts pagination", () => {
+  it("re-orders by company across page boundaries and restarts pagination", async () => {
     const jobs = createJobs();
-    const { container } = renderResults(jobs);
+    const { container } = await renderResults(jobs);
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
     expect(getFirstResultJobId()).toBe("sort_job_049");
 
     fireEvent.change(screen.getByRole("combobox", { name: "Sort results" }), {
       target: { value: "company" },
     });
+    await flushFindJobsQueries();
 
     expect(getFirstResultJobId()).toBe("sort_job_059");
     expect(screen.getByText("1–50 of 60")).toBeTruthy();
@@ -262,20 +260,21 @@ describe("DiscoveryResultsPanel result sorting", () => {
     ).toHaveLength(50);
   });
 
-  it("orders recency newest-first using available listing dates", () => {
-    renderResults(createJobs(12));
+  it("orders recency newest-first using available listing dates", async () => {
+    await renderResults(createJobs(12));
 
     expect(screen.getByRole("option", { name: "Newest first" })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Sort results" }), {
       target: { value: "recent" },
     });
+    await flushFindJobsQueries();
 
     // postedAt steps down from 2026-08-20 for every tenth job; newest wins.
     expect(getFirstResultJobId()).toBe("sort_job_000");
   });
 
-  it("keeps the inspected job when sorting moves the selection off-page", () => {
+  it("keeps the inspected job when sorting moves the selection off-page", async () => {
     const jobs = createJobs().map((job, index) =>
       index === 0
         ? ({ ...job, company: "Zeta Corp" } as SavedJob)
@@ -283,7 +282,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
     );
     const onDisplayedSelectedJobIdChange = vi.fn();
 
-    renderResults(jobs, {
+    await renderResults(jobs, {
       onDisplayedSelectedJobIdChange,
       selectedJob: jobs[0] ?? null,
     });
@@ -293,6 +292,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Sort results" }), {
       target: { value: "company" },
     });
+    await flushFindJobsQueries();
 
     // The selected Zeta job sinks to the end of the list (page two); the
     // inspector keeps the same job ID until another row is selected.

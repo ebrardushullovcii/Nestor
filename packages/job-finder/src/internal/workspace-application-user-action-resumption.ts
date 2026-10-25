@@ -90,6 +90,7 @@ import type {
   TaskLocalApplicationCredentials,
   WorkspaceServiceContext,
 } from "./workspace-service-context";
+import { readSavedJob } from "./read-saved-job";
 
 type ExactApplicationScope = {
   runId: string;
@@ -639,7 +640,7 @@ async function readExactLineage(input: {
   | { status: "current"; lineage: ApplicationResumptionLineage }
   | { status: "stale"; detail: string; runEnded?: boolean }
 > {
-  const [runs, results, checkpoints, savedJobs, applicationRecords] =
+  const [runs, results, checkpoints, job, applicationRecords] =
     await Promise.all([
       input.ctx.repository.listApplyRuns({ id: input.scope.runId }),
       input.ctx.repository.listApplyJobResults({
@@ -653,7 +654,7 @@ async function readExactLineage(input: {
         resultId: input.scope.resultId,
         applicationRecordId: input.scope.applicationRecordId,
       }),
-      input.ctx.repository.listSavedJobs(),
+      readSavedJob(input.ctx.repository, input.scope.jobId),
       input.ctx.repository.listApplicationRecords(),
     ]);
   const run = runs.find((entry) => entry.id === input.scope.runId) ?? null;
@@ -662,7 +663,6 @@ async function readExactLineage(input: {
   const checkpoint =
     checkpoints.find((entry) => entry.id === input.scope.replayCheckpointId) ??
     null;
-  const job = savedJobs.find((entry) => entry.id === input.scope.jobId) ?? null;
   const applicationRecord =
     applicationRecords.find(
       (entry) => entry.id === input.scope.applicationRecordId,

@@ -38,6 +38,13 @@ vi.mock("electron", () => ({
 import "./index";
 
 type ExposedJobFinderApi = {
+  runAgentDiscovery: Window["nestor"]["jobFinder"]["runAgentDiscovery"];
+  runAgentDiscoveryCommand: Window["nestor"]["jobFinder"]["runAgentDiscoveryCommand"];
+  cancelDiscoveryRunCommand: Window["nestor"]["jobFinder"]["cancelDiscoveryRunCommand"];
+  reopenApplicationPage: (
+    input: { resultId: string },
+    onProgress?: (progress: unknown) => void,
+  ) => Promise<unknown>;
   generateResumeForBatch: (
     input: ResumeBatchGenerationInput,
   ) => Promise<ResumeBatchGenerationResult>;
@@ -808,5 +815,79 @@ it("validates thin resume batch receipts and progress, then detaches its listene
   expect(mockIpcRendererOff).toHaveBeenCalledWith(
     "job-finder:resume-batch-progress",
     handle,
+  );
+});
+
+it("reopen validates progress for the requested result and removes its listener after failure", async () => {
+  mockInvoke.mockReset();
+  mockIpcRendererOn.mockClear();
+  let reject!: (error: Error) => void;
+  mockInvoke.mockReturnValueOnce(
+    new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  );
+  const progress = vi.fn();
+  const pending = exposedJobFinder.reopenApplicationPage(
+    { resultId: "result" },
+    progress,
+  );
+  const [channel, handler] = mockIpcRendererOn.mock.calls[0]! as [
+    string,
+    (_event: unknown, payload: unknown) => void,
+  ];
+  handler({}, { resultId: "result", phase: "refilling" });
+  handler({}, { resultId: "other", phase: "ready" });
+  handler({}, { resultId: "result", phase: "submitted" });
+  expect(progress).toHaveBeenCalledExactlyOnceWith({
+    resultId: "result",
+    phase: "refilling",
+  });
+  reject(new Error("offline"));
+  await expect(pending).rejects.toThrow("offline");
+  expect(mockIpcRendererOff).toHaveBeenCalledWith(channel, handler);
+  expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
+    "job-finder:reopen-application-page",
+    expect.objectContaining({ resultId: "result" }),
+  );
+});
+
+it("shares the discovery request lock and releases the activity listener for command calls", async () => {
+  mockInvoke.mockReset();
+  let finish!: (value: unknown) => void;
+  mockInvoke.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const activity = vi.fn();
+  const pending = exposedJobFinder.runAgentDiscoveryCommand(
+    activity,
+    "target_test",
+  );
+  await vi.waitFor(() =>
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "job-finder:run-agent-discovery-command",
+      expect.objectContaining({ targetId: "target_test" }),
+    ),
+  );
+  await expect(exposedJobFinder.runAgentDiscovery()).rejects.toThrow(
+    "already running",
+  );
+  const channel: unknown = mockIpcRendererOn.mock.calls.at(-1)![0];
+  const reply = { outcome: "completed", runId: "command_run", newJobs: 4 };
+  finish(reply);
+  expect(await pending).toEqual(reply);
+  expect(mockIpcRendererOff).toHaveBeenCalledWith(
+    channel,
+    expect.any(Function),
+  );
+  mockInvoke.mockResolvedValueOnce({ runId: "command_run", accepted: true });
+  expect(
+    await exposedJobFinder.cancelDiscoveryRunCommand("command_run"),
+  ).toEqual({ runId: "command_run", accepted: true });
+  expect(mockInvoke).toHaveBeenLastCalledWith(
+    "job-finder:cancel-discovery-run-command",
+    { runId: "command_run" },
   );
 });

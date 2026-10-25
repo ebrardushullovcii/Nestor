@@ -56,9 +56,22 @@ export type {
 } from "./application-authority-repository-types";
 export { createInMemoryJobFinderRepository } from "./in-memory-repository";
 export {
+  patchDiscoveryLedger,
+  readDiscoveryLedgerChanges,
+  type DiscoveryLedgerChange,
+} from "./internal/discovery-ledger-patch";
+export {
   createFileJobFinderRepository,
   WorkspaceDatabaseRecoveryRequiredError,
 } from "./file-repository";
+export { readCleanCloseFingerprint } from "./internal/clean-close-marker";
+export { subscribeWorkspaceCommits } from "./workspace-commits";
+export {
+  createWorkspaceQueryRepository,
+  prepareWorkspaceQueryDatabase,
+  type WorkspaceQueryRepository,
+} from "./workspace-query-repository";
+export { readSavedJobProjectionChanges } from "./internal/saved-job-projection";
 export {
   createFileLiveAssistantRepository,
   type LiveAssistantRepository,
@@ -69,3 +82,4 @@ export {
   type AssistantRepositoryOptions,
   type AssistantTranscriptItem,
 } from "./assistant-repository";
+export { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";

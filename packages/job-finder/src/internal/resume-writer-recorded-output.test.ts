@@ -113,7 +113,11 @@ describe("recorded synthetic writer and checker responses", () => {
         ...base,
         draft: generated(record.bad, record.kind),
       });
-      expect(checker.mock.calls[0]![0].resumeText).toBe(record.original);
+      // The imported resume reaches the checker once, as cited evidence.
+      expect(checker.mock.calls[0]![0].resumeText).toBeNull();
+      expect(
+        checker.mock.calls[0]![0].evidence.map((entry) => entry.text),
+      ).toContain(record.original);
       const fixed = await withResumeClaimFixes({
         ...base,
         draft: checked,
@@ -168,11 +172,13 @@ describe("recorded synthetic writer and checker responses", () => {
       draft: checked,
       stretchesAreThePersons: false,
     });
+    // Removing the generated summary restores saved wording (ADR 0051),
+    // while the person's earlier achievement remains exactly as written.
     expect(
       fixed.sections
         .filter((section) => section.included)
         .map((section) => section.text),
-    ).toEqual([original, null]);
+    ).toEqual([original, seed.profile.summary]);
   });
 
   test("R3-015/R3-097 preserves omitted source achievements, skill limits, qualifications and dates", () => {

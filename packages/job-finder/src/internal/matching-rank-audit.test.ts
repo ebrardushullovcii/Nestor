@@ -120,6 +120,73 @@ describe("discovery match-assessment audit persistence", () => {
     expect(result.newJobs[0]?.latestMatchAssessmentAudit).toBeNull();
   });
 
+  it("records no queue-rank-only audit for a search's re-read job, but still audits a changed assessment", () => {
+    const first = createSavedJob("existing-first", 80);
+    const stable = createSavedJob("existing-second", 70);
+    const discoveredAt = "2026-08-09T10:05:00.000Z";
+    const incomingSaved = createSavedJob("new-best", 95);
+    const seed = createSeed();
+    const provenance = (
+      posting: Parameters<typeof mergeDiscoveredPostings>[3][number],
+    ) => ({
+      targetId: "target_rank_audit",
+      adapterKind: "auto" as const,
+      resolvedAdapterKind: "target_site" as const,
+      startingUrl: posting.canonicalUrl,
+      discoveredAt: posting.discoveredAt,
+      collectionMethod: posting.collectionMethod,
+      providerKey: posting.providerKey,
+      providerBoardToken: posting.providerBoardToken,
+      titleTriageOutcome: posting.titleTriageOutcome,
+    });
+    const reread = JobPostingSchema.parse({
+      ...stable,
+      lastSeenAt: discoveredAt,
+    });
+    const quiet = mergeDiscoveredPostings(
+      seed.profile,
+      seed.searchPreferences,
+      [first, stable],
+      [JobPostingSchema.parse({ ...incomingSaved, discoveredAt }), reread],
+      provenance,
+      undefined,
+      (posting) =>
+        posting.sourceJobId === "new-best"
+          ? incomingSaved.matchAssessment
+          : stable.matchAssessment,
+      new Set([stable.id]),
+      { recordRankOnlyAudits: false },
+    );
+    expect(
+      quiet.mergedJobs.find((job) => job.id === stable.id)
+        ?.latestMatchAssessmentAudit,
+    ).toBeNull();
+
+    const rescored = createAssessment(
+      stable.matchAssessment,
+      55,
+      "match_posting_v4_existing_second_updated",
+    );
+    const changed = mergeDiscoveredPostings(
+      seed.profile,
+      seed.searchPreferences,
+      [first, stable],
+      [reread],
+      provenance,
+      undefined,
+      () => rescored,
+      new Set([stable.id]),
+      { recordRankOnlyAudits: false },
+    );
+    expect(
+      changed.mergedJobs
+        .find((job) => job.id === stable.id)
+        ?.latestMatchAssessmentAudit?.outputChanges.map(
+          (change) => change.code,
+        ),
+    ).toContain("score_changed");
+  });
+
   it("keeps the prior meaningful audit when a refresh changes nothing", () => {
     const current = createSavedJob("stable", 80);
     const priorAudit = createMatchAssessmentChangeAudit({

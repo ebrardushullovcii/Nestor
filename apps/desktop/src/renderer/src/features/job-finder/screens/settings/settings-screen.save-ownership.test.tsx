@@ -84,7 +84,10 @@ function createCallbacks() {
       (input: UpdateWorkspaceBehaviorInput) => Promise<boolean>
     >(() => Promise.resolve(true)),
     onUpdateAiBehavior: vi.fn<
-      (input: UpdateAiBehaviorInput) => Promise<boolean>
+      (
+        input: UpdateAiBehaviorInput,
+        options?: { undo?: () => void },
+      ) => Promise<boolean>
     >(() => Promise.resolve(true)),
   };
 }
@@ -100,7 +103,9 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         isWorkspaceResetPending={false}
         onResetWorkspace={callbacks.onResetWorkspace}
         onSettingsDraftEdited={callbacks.onSettingsDraftEdited}
-        onUpdateAiBehavior={(input) => callbacks.onUpdateAiBehavior(input)}
+        onUpdateAiBehavior={(input, options) =>
+          callbacks.onUpdateAiBehavior(input, options)
+        }
         onUpdateAppearanceTheme={(theme) =>
           callbacks.onUpdateAppearanceTheme(theme)
         }
@@ -204,7 +209,7 @@ describe("Settings save ownership", () => {
     vi.clearAllMocks();
   });
 
-  it("says whether every section is saved, not just one of them", () => {
+  it("shows no save button in a section with nothing to save", () => {
     renderScreen(parseSettings(), createCallbacks());
 
     for (const label of [
@@ -214,47 +219,63 @@ describe("Settings save ownership", () => {
       WORKSPACE_BEHAVIOR_LABEL,
     ]) {
       const region = screen.getByRole("region", { name: label });
-      const state = region.querySelector("[data-settings-save-state]");
-      expect(state?.getAttribute("data-settings-save-state")).toBe("clean");
-      expect(state?.textContent).toBe("No unsaved changes.");
+      expect(region.querySelector("[data-settings-save-state]")).toBeNull();
+      expect(
+        within(region).queryByRole("button", { name: /^Save / }),
+      ).toBeNull();
     }
   });
 
-  it("describes each disabled save with the reason it is disabled", () => {
-    renderScreen(parseSettings(), createCallbacks());
+  it("saves an AI behavior choice at once, with an Undo for the toast and no reminder", async () => {
+    const callbacks = createCallbacks();
+    renderScreen(parseSettings(), callbacks);
 
-    const region = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
+    const region = screen.getByRole("region", { name: "AI behavior" });
+    const replies = within(region).getByRole("radiogroup", {
+      name: "How the profile assistant replies",
     });
-    const save = within(region).getByRole<HTMLButtonElement>("button", {
-      name: "Save browser & saved jobs",
-    });
-
-    expect(save.disabled).toBe(true);
-    const reasonId = save.getAttribute("aria-describedby");
-    expect(reasonId).toBeTruthy();
-    expect(document.getElementById(reasonId ?? "")?.textContent).toBe(
-      "No unsaved changes.",
+    fireEvent.click(
+      within(replies)
+        .getAllByRole("radio")
+        .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
     );
+
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith(
+      expect.objectContaining({ aiBehavior: expect.any(Object) as unknown }),
+      { undo: expect.any(Function) as unknown },
+    );
+    await waitFor(() =>
+      expect(within(region).getByText(/AI behavior saved/)).toBeTruthy(),
+    );
+    expect(
+      within(region).queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
+    expect(unsavedBar()).toBeNull();
   });
 
-  it("hides the save reminder until a section is dirty, then names that section and commits only it", async () => {
+  it("names a section in the save reminder only while it owes a save, and the bar commits only it", async () => {
     const callbacks = createCallbacks();
+    callbacks.onUpdateAiBehavior.mockResolvedValueOnce(false);
     renderScreen(parseSettings(), callbacks);
 
     expect(unsavedBar()).toBeNull();
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
+    const ai = screen.getByRole("region", { name: "AI behavior" });
+    const replies = within(ai).getByRole("radiogroup", {
+      name: "How the profile assistant replies",
     });
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-
-    const bar = unsavedBar();
-    expect(bar).not.toBeNull();
-    expect(bar?.getAttribute("data-settings-unsaved-count")).toBe("1");
-    expect(bar?.textContent).toContain(
-      `Unsaved changes in ${WORKSPACE_BEHAVIOR_LABEL}.`,
+    fireEvent.click(
+      within(replies)
+        .getAllByRole("radio")
+        .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
     );
+
+    // The choice saved at once and failed: now it is outstanding.
+    await waitFor(() => expect(unsavedBar()).not.toBeNull());
+    const bar = unsavedBar();
+    expect(bar?.getAttribute("data-settings-unsaved-count")).toBe("1");
+    expect(bar?.textContent).toContain("Unsaved changes in AI behavior.");
 
     // The bar is pinned inside the viewport, so the commit never drifts
     // thousands of pixels away from the control it commits.
@@ -263,9 +284,27 @@ describe("Settings save ownership", () => {
 
     fireEvent.click(
       within(bar as HTMLElement).getByRole("button", {
-        name: "Save browser & saved jobs",
+        name: "Save AI behavior",
       }),
     );
+
+    await waitFor(() =>
+      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(2),
+    );
+    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
+    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(unsavedBar()).toBeNull());
+  });
+
+  it("saves a Browser & saved jobs switch when it is flipped", async () => {
+    const callbacks = createCallbacks();
+    renderScreen(parseSettings(), callbacks);
+
+    const workspace = screen.getByRole("region", {
+      name: WORKSPACE_BEHAVIOR_LABEL,
+    });
+    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
 
     await waitFor(() =>
       expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
@@ -273,13 +312,13 @@ describe("Settings save ownership", () => {
         keepSessionAlive: true,
       }),
     );
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
-
+    // No Save press and no reminder: the switch acts like the theme.
+    expect(
+      within(workspace).queryByRole("button", {
+        name: "Save browser & saved jobs",
+      }),
+    ).toBeNull();
     await waitFor(() => expect(unsavedBar()).toBeNull());
-
-    // The section that committed reports its own confirmation, so "saved"
-    // and "never touched" are no longer the same quiet state.
     expect(
       within(workspace).getByText("Browser & saved jobs saved."),
     ).toBeTruthy();
@@ -359,34 +398,49 @@ describe("Settings save ownership", () => {
     );
   });
 
-  it("names every dirty section and offers no save when more than one is outstanding", () => {
+  it("names every dirty section and offers no save when more than one is outstanding", async () => {
     const callbacks = createCallbacks();
+    callbacks.onUpdateAiBehavior.mockResolvedValueOnce(false);
     renderScreen(parseSettings(), callbacks);
 
-    const appDevice = screen.getByRole("region", { name: "App & device" });
-    fireEvent.click(within(appDevice).getByRole("button", { name: "Light" }));
-
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
+    // AI behavior saves on click; a failed save leaves it outstanding.
+    const ai = screen.getByRole("region", { name: "AI behavior" });
+    const replies = within(ai).getByRole("radiogroup", {
+      name: "How the profile assistant replies",
     });
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
+    const unchecked = within(replies)
+      .getAllByRole("radio")
+      .find((radio) => radio.getAttribute("aria-checked") !== "true");
+    fireEvent.click(unchecked!);
+    await waitFor(() =>
+      expect(
+        within(ai).getByRole("button", { name: "Retry AI behavior" }),
+      ).toBeTruthy(),
+    );
+
+    const tracker = screen.getByRole("region", { name: "Tracker" });
+    fireEvent.click(
+      within(tracker).getByRole("checkbox", {
+        name: /Mark applications for follow-up/,
+      }),
+    );
 
     const bar = unsavedBar() as HTMLElement;
     expect(bar.getAttribute("data-settings-unsaved-count")).toBe("2");
     expect(bar.textContent).toContain("Unsaved changes in 2 sections");
-    expect(bar.textContent).toContain("App & device");
-    expect(bar.textContent).toContain(WORKSPACE_BEHAVIOR_LABEL);
+    expect(bar.textContent).toContain("AI behavior");
+    expect(bar.textContent).toContain("Tracker");
 
     // One button cannot honestly say what it would write, so the bar only
     // navigates while two sections are outstanding.
     const barButtons = within(bar).getAllByRole("button");
     expect(barButtons.map((button) => button.textContent)).toEqual([
-      "Go to App & device",
-      `Go to ${WORKSPACE_BEHAVIOR_LABEL}`,
+      "Go to AI behavior",
+      "Go to Tracker",
     ]);
     fireEvent.click(barButtons[0]!);
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(callbacks.onUpdateTrackerCrm).not.toHaveBeenCalled();
   });
 
   it("keeps the bar up while a failed section is still unsaved", async () => {
@@ -397,12 +451,8 @@ describe("Settings save ownership", () => {
     const workspace = screen.getByRole("region", {
       name: WORKSPACE_BEHAVIOR_LABEL,
     });
+    // The switch saves when flipped; this save fails.
     fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-    fireEvent.click(
-      within(workspace).getByRole("button", {
-        name: "Save browser & saved jobs",
-      }),
-    );
 
     await waitFor(() =>
       expect(
@@ -422,21 +472,16 @@ describe("Settings appearance preview", () => {
     delete document.documentElement.dataset.theme;
   });
 
-  it("applies the theme on click and keeps Save as the persistence commit", async () => {
+  it("applies and saves the theme on click", async () => {
     const callbacks = createCallbacks();
     renderScreen(parseSettings({ appearanceTheme: "dark" }), callbacks);
 
     const appDevice = screen.getByRole("region", { name: "App & device" });
     fireEvent.click(within(appDevice).getByRole("button", { name: "Light" }));
 
-    // The click itself is the preview: no IPC round trip stands between the
-    // user and any evidence that the control worked.
+    // The click itself shows the theme and saves it; there is no separate
+    // Save appearance press.
     expect(document.documentElement.dataset.theme).toBe("light");
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
-
-    fireEvent.click(
-      within(appDevice).getByRole("button", { name: "Save appearance" }),
-    );
     await waitFor(() =>
       expect(callbacks.onUpdateAppearanceTheme).toHaveBeenCalledWith("light"),
     );
@@ -450,11 +495,6 @@ describe("Settings appearance preview", () => {
 
     const appDevice = screen.getByRole("region", { name: "App & device" });
     fireEvent.click(within(appDevice).getByRole("button", { name: "Light" }));
-    expect(document.documentElement.dataset.theme).toBe("light");
-
-    fireEvent.click(
-      within(appDevice).getByRole("button", { name: "Save appearance" }),
-    );
 
     // A failed save leaves the app wearing what is actually persisted.
     await waitFor(() =>
@@ -467,8 +507,11 @@ describe("Settings appearance preview", () => {
     ).toBe(false);
   });
 
-  it("reverts the preview when the screen is left without saving", () => {
+  it("puts the saved theme back when the screen is left before its save lands", () => {
     const callbacks = createCallbacks();
+    callbacks.onUpdateAppearanceTheme.mockReturnValueOnce(
+      new Promise<boolean>(() => undefined),
+    );
     const view = renderScreen(
       parseSettings({ appearanceTheme: "dark" }),
       callbacks,
@@ -483,7 +526,6 @@ describe("Settings appearance preview", () => {
     });
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
   });
 });
 

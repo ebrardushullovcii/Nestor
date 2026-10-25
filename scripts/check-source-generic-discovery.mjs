@@ -49,6 +49,7 @@ const rootDir = path.resolve(import.meta.dirname, "..");
 // of scope for both identifier and literal layers.
 
 export const SCANNED_SOURCE_PREFIXES = [
+  "packages/job-list-policy/src/",
   "packages/browser-agent/src/",
   "packages/job-finder/src/internal/",
 ];
@@ -72,6 +73,7 @@ export const SOURCE_EXCLUSIONS = [
 ];
 
 export const IMPORT_SCAN_ROOTS = [
+  "packages/job-list-policy/src/",
   "packages/browser-agent/src/",
   "packages/browser-runtime/src/",
   "packages/job-finder/src/",

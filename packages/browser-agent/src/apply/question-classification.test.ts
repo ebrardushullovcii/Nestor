@@ -252,3 +252,236 @@ test("reads only the new question when a conditional field appears and keeps ear
   await classify(first, "step1");
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
+
+function clientReplyingSparse(args: unknown): LLMClient {
+  return {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify(args),
+            },
+          },
+        ],
+      }),
+    ),
+  } as unknown as LLMClient;
+}
+
+test("reuses a complete identical model read across applications, without sharing mutable results", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: true, declarationKind: null },
+  ]);
+  const cacheScope = {};
+  const first = await createQuestionClassifier({ client, cacheScope })(
+    controls(),
+  );
+  first.get("Pay")!.asksAboutPay = false;
+  const nextControls = controls();
+  nextControls[0].ref = "another-application";
+  nextControls[0].value = "Annual";
+  const next = await createQuestionClassifier({ client, cacheScope })(
+    nextControls,
+  );
+  expect(next.get("Pay")?.asksAboutPay).toBe(true);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
+
+test("shared reads require the full same request and AI-client scope", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: true, declarationKind: null },
+  ]);
+  const cacheScope = {};
+  for (const questions of [
+    controls(),
+    controls("Pay", ["Annual"], true),
+    controls("Pay", ["Hourly"]),
+    controls("Rate"),
+  ]) {
+    await createQuestionClassifier({ client, cacheScope })(questions);
+  }
+  await createQuestionClassifier({ client, cacheScope: {} })(controls());
+  expect(client.chatWithTools).toHaveBeenCalledTimes(5);
+});
+
+test("incomplete, failed and cancelled reads never become reusable model decisions", async () => {
+  const cacheScope = {};
+  const client = clientReplying([]);
+  await expect(
+    createQuestionClassifier({ client, cacheScope })(controls()),
+  ).rejects.toThrow("every question");
+  vi.mocked(client.chatWithTools).mockRejectedValueOnce(new Error("offline"));
+  await expect(
+    createQuestionClassifier({ client, cacheScope })(controls()),
+  ).rejects.toThrow("offline");
+  vi.mocked(client.chatWithTools).mockResolvedValue({
+    toolCalls: [
+      {
+        id: "complete",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+        },
+      },
+    ],
+  });
+  const abort = new AbortController();
+  vi.mocked(client.chatWithTools).mockImplementationOnce(() => {
+    abort.abort(new Error("Stopped"));
+    return Promise.resolve({
+      toolCalls: [
+        {
+          id: "cancelled",
+          type: "function",
+          function: {
+            name: "report_question_kinds",
+            arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+          },
+        },
+      ],
+    });
+  });
+  await expect(
+    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
+      controls(),
+    ),
+  ).rejects.toThrow("Stopped");
+  await createQuestionClassifier({ client, cacheScope })(controls());
+  await expect(
+    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
+      controls(),
+    ),
+  ).rejects.toThrow("Stopped");
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+});
+
+test("bounds shared question reads and reads an evicted page with the model again", async () => {
+  const cacheScope = {};
+  const client = clientReplying([
+    { index: 0, asksAboutPay: false, declarationKind: null },
+  ]);
+  for (let page = 0; page < 65; page++)
+    await createQuestionClassifier({ client, cacheScope })(
+      controls(`Page ${page}`),
+    );
+  await createQuestionClassifier({ client, cacheScope })(controls("Page 64"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(65);
+  await createQuestionClassifier({ client, cacheScope })(controls("Page 0"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(66);
+});
+
+test("plain questions are named by index and only flagged ones are spelled out", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0, 2],
+    flagged: [
+      {
+        index: 1,
+        eligibilityKind: null,
+        asksAboutPay: true,
+        asksCurrentPay: false,
+        asksHiringCountry: false,
+        required: true,
+        declarationKind: null,
+      },
+    ],
+  });
+  const result = await classifyApplicationQuestions({
+    client,
+    questions: [
+      { prompt: "Full name", kind: "text", options: [] },
+      { prompt: "Gehaltsvorstellung", kind: "text", options: [] },
+      { prompt: "Portfolio link", kind: "text", options: [] },
+    ],
+  });
+  expect(result.get("Full name")).toEqual({
+    asksAboutPay: false,
+    asksCurrentPay: false,
+    asksHiringCountry: false,
+    declarationKind: null,
+  });
+  expect(result.get("Gehaltsvorstellung")).toMatchObject({
+    asksAboutPay: true,
+    required: true,
+  });
+  expect(result.get("Portfolio link")?.declarationKind).toBeNull();
+  const tool = vi.mocked(client.chatWithTools).mock.calls[0]?.[1]?.[0];
+  expect(tool?.function.parameters.required).toEqual([
+    "plainIndexes",
+    "flagged",
+  ]);
+});
+
+test("a question listed as plain and flagged keeps its flagged reading", async () => {
+  const result = await classifyApplicationQuestions({
+    client: clientReplyingSparse({
+      plainIndexes: [0],
+      flagged: [
+        {
+          index: 0,
+          eligibilityKind: null,
+          asksAboutPay: false,
+          asksCurrentPay: false,
+          asksHiringCountry: false,
+          required: false,
+          declarationKind: "terms_acceptance",
+        },
+      ],
+    }),
+    questions: [
+      { prompt: "I accept the terms", kind: "checkbox", options: [] },
+    ],
+  });
+  expect(result.get("I accept the terms")?.declarationKind).toBe(
+    "terms_acceptance",
+  );
+});
+
+test("a question left out of both lists is not taken as plain", async () => {
+  const classify = createQuestionClassifier({
+    client: clientReplyingSparse({ plainIndexes: [], flagged: [] }),
+  });
+  await expect(classify(controls())).rejects.toThrow("every question");
+});
+
+test("settled readings are offered only once every question has come back", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const client = {
+    chatWithTools: vi.fn(async () => {
+      await gate;
+      return {
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+            },
+          },
+        ],
+      };
+    }),
+  } as unknown as LLMClient;
+  const classify = createQuestionClassifier({ client });
+  const pending = classify(controls());
+  expect(classify.settled(controls())).toBeUndefined();
+  release();
+  await pending;
+  expect(classify.settled(controls())?.get("Pay")).toEqual({
+    asksAboutPay: false,
+    asksCurrentPay: false,
+    asksHiringCountry: false,
+    declarationKind: null,
+  });
+  expect(classify.settled(controls("Rate"))).toBeUndefined();
+});

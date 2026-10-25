@@ -21,6 +21,11 @@ function buildProfileCoreFieldId(field: string) {
   return `profile-core-field-${field}`;
 }
 
+// Below the first screen: the browser skips their layout and paint until they
+// come near it and keeps the real height once shown, so nothing moves.
+const PROFILE_LATER_SECTION_CLASS =
+  "grid content-start gap-(--gap-card) [content-visibility:auto] [contain-intrinsic-size:auto_640px]";
+
 export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
   const { control, register, setValue, watch } = profileForm;
   const listFieldOptions = {
@@ -98,7 +103,7 @@ export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
         </ProfileOptionalSection>
       </section>
 
-      <section className="grid content-start gap-(--gap-card)">
+      <section className={PROFILE_LATER_SECTION_CLASS}>
         <ProfileSectionHeader
           eyebrow="Your story"
           title="Positioning"
@@ -269,7 +274,7 @@ export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
         </ProfileOptionalSection>
       </section>
 
-      <section className="grid content-start gap-(--gap-card)">
+      <section className={PROFILE_LATER_SECTION_CLASS}>
         <ProfileSectionHeader
           eyebrow="Skills"
           title="Skills"

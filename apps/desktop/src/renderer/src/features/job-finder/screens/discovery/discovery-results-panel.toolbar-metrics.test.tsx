@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS,
-  DiscoveryResultsPanel,
 } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -49,9 +52,9 @@ function createJobs(count: number): SavedJob[] {
   });
 }
 
-function renderResults(jobs: readonly SavedJob[]) {
-  return render(
-    <DiscoveryResultsPanel
+async function renderResults(jobs: readonly SavedJob[]) {
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       discoveryTargets={[]}
       hasCompletedSearch
@@ -60,6 +63,8 @@ function renderResults(jobs: readonly SavedJob[]) {
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 /**
@@ -89,8 +94,8 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel toolbar control metrics", () => {
-  it("gives every toolbar control the one shared box metric", () => {
-    renderResults(createJobs(3));
+  it("gives every toolbar control the one shared box metric", async () => {
+    await renderResults(createJobs(3));
 
     const controls = getToolbarControls();
     // Filters disclosure, sort field, sort direction.
@@ -106,8 +111,8 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     ).toEqual([sharedClasses, sharedClasses]);
   });
 
-  it("keeps the toolbar row free of the heights and radii that made it ragged", () => {
-    renderResults(createJobs(3));
+  it("keeps the toolbar row free of the heights and radii that made it ragged", async () => {
+    await renderResults(createJobs(3));
 
     for (const control of getToolbarControls()) {
       // `h-6` was the sort-direction toggle's `xs` height (24px) beside a
@@ -121,8 +126,8 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     }
   });
 
-  it("draws every toolbar boundary with an interactive border token", () => {
-    renderResults(createJobs(3));
+  it("draws every toolbar boundary with an interactive border token", async () => {
+    await renderResults(createJobs(3));
 
     for (const control of getToolbarControls()) {
       // A control's only boundary must clear the non-text contrast floor;
@@ -137,8 +142,8 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     }
   });
 
-  it("wraps the toolbar as whole control groups rather than splitting one", () => {
-    renderResults(createJobs(3));
+  it("wraps the toolbar as whole control groups rather than splitting one", async () => {
+    await renderResults(createJobs(3));
 
     const toolbar = screen.getByTestId("discovery-results-toolbar");
     // At the compact desktop width and at the 1024px minimum the row has to
@@ -156,8 +161,8 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     expect(sortGroup?.className).not.toContain("gap-1 ");
   });
 
-  it("keeps the sort control semantics, options and aria wiring unchanged", () => {
-    renderResults(createJobs(3));
+  it("keeps the sort control semantics, options and aria wiring unchanged", async () => {
+    await renderResults(createJobs(3));
 
     const select = screen.getByRole<HTMLSelectElement>("combobox", {
       name: "Sort results",
@@ -168,7 +173,7 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     ).toEqual([
       ["fit", "Best match"],
       ["recent", "Newest first"],
-      ["company", "Company A to Z"],
+      ["company", "Company A–Z"],
     ]);
     expect(select.value).toBe("fit");
     // Each option carries its own direction, so there is no flip control.

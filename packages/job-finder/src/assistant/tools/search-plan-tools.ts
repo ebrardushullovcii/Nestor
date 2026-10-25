@@ -1,3 +1,4 @@
+import { executeJobFinderAction } from "../action-registry";
 import {
   getDefaultCampaignConfiguration,
   isRunnableJobDiscoveryTarget,
@@ -6,6 +7,7 @@ import {
   SaveJobSearchCampaignInputSchema,
   type AssistantChangeReceipt,
   type JobSearchCampaign,
+  type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { z } from "zod";
 import { deepEqual, diffValues, undoChangeEntries } from "../change-diff";
@@ -218,7 +220,7 @@ export const saveSearchPlanTool = defineTool({
       schedule,
     });
     session.assertCurrent();
-    const after = await service.saveCampaign(request);
+    const after = await executeJobFinderAction("save-campaign", request, { service }) as JobFinderWorkspaceSnapshot;
     const created = after.campaigns.filter(
       (plan) =>
         plan.name === input.name &&

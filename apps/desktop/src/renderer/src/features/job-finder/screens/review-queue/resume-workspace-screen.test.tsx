@@ -2099,9 +2099,11 @@ describe("ResumeWorkspaceScreen", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/did not cover the whole resume/)).toBeNull();
     const failure = screen.getByRole("alert");
+    // The picker sits in the header row; the failure is the line under it.
     expect(
       document
         .querySelector("[data-resume-language-picker]")
+        ?.closest("section")
         ?.parentElement?.contains(failure),
     ).toBe(true);
     expect(screen.queryByText("Ready to approve")).toBeNull();

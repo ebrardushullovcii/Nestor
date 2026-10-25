@@ -15,6 +15,22 @@ function getDraftLineage(draft: ResumeDraft): ResumePreviewLineage {
   return { jobId: draft.jobId, draftId: draft.id };
 }
 
+/**
+ * What the preview is drawn from: the draft without the fields a save
+ * changes (time, status, approval). A save a second after typing used to
+ * render the same text again, twice, each a main-process render.
+ */
+function getPreviewContentKey(draft: ResumeDraft): string {
+  return JSON.stringify({
+    ...draft,
+    updatedAt: null,
+    status: null,
+    approvedAt: null,
+    approvedExportId: null,
+    staleReason: null,
+  });
+}
+
 function isSameLineage(
   lineage: ResumePreviewLineage | null,
   target: ResumePreviewLineage,
@@ -46,12 +62,15 @@ export function useResumeWorkspacePreview(input: {
   const previewLineageRef = useRef<ResumePreviewLineage | null>(null);
   const previewRequestRef = useRef(0);
   const previewTimeoutRef = useRef<number | null>(null);
+  // Content key of the preview on screen or being rendered.
+  const previewContentKeyRef = useRef<string | null>(null);
 
   const refreshPreview = useCallback(
     (targetDraft: ResumeDraft) => {
       const requestId = previewRequestRef.current + 1;
       previewRequestRef.current = requestId;
       const targetLineage = getDraftLineage(targetDraft);
+      previewContentKeyRef.current = getPreviewContentKey(targetDraft);
 
       // Stale-while-revalidate: keep the last good frame for this exact job and
       // draft on screen while the next revision renders; anything else (cold
@@ -96,6 +115,7 @@ export function useResumeWorkspacePreview(input: {
           // The previously shown frame no longer reflects this revision, so drop
           // it instead of presenting stale content as current.
           previewLineageRef.current = null;
+          previewContentKeyRef.current = null;
           setPreview(null);
           setPreviewStatus("error");
           setPreviewError(getPreviewErrorMessage(error));
@@ -112,6 +132,7 @@ export function useResumeWorkspacePreview(input: {
       }
       previewRequestRef.current += 1;
       previewLineageRef.current = null;
+      previewContentKeyRef.current = null;
       setPreview(null);
       setPreviewError(null);
       setPreviewStatus("idle");
@@ -119,6 +140,14 @@ export function useResumeWorkspacePreview(input: {
     }
 
     const targetLineage = getDraftLineage(draft);
+    if (
+      isSameLineage(previewLineageRef.current, targetLineage) &&
+      previewContentKeyRef.current === getPreviewContentKey(draft)
+    ) {
+      // Only the save's own fields changed; the frame (or the render in
+      // flight) already shows this text.
+      return;
+    }
     if (!isSameLineage(previewLineageRef.current, targetLineage)) {
       // Job or draft switched: drop any foreign preview immediately instead of
       // leaving it visible until the debounced refresh lands.
@@ -151,6 +180,7 @@ export function useResumeWorkspacePreview(input: {
     }
     previewRequestRef.current += 1;
     previewLineageRef.current = null;
+    previewContentKeyRef.current = null;
     setPreview(null);
     setPreviewError(null);
     setPreviewStatus("idle");

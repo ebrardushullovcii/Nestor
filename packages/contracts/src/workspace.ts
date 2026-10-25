@@ -1,3 +1,4 @@
+import { PreparedApplicationFormSchema } from "./prepared-application-form";
 import { z } from "zod";
 
 import {
@@ -124,12 +125,37 @@ import {
   ResumeStrategyRecommendationSourceSchema,
   ResumeStrategySkillsPolicySchema,
 } from "./job-finder-intelligence";
+import { ApplyQueueSchema } from "./apply-queue";
 
 export const JobFinderJobActionInputSchema = z.object({
   jobId: NonEmptyStringSchema,
 });
 export type JobFinderJobActionInput = z.infer<
   typeof JobFinderJobActionInputSchema
+>;
+
+/**
+ * Moves an unsent application back to Shortlisted: its prepared form closes,
+ * nothing is sent, and its history stays. Undo names the job.
+ */
+export const JobFinderReturnApplicationToShortlistInputSchema = z.object({
+  applicationRecordId: NonEmptyStringSchema,
+});
+export type JobFinderReturnApplicationToShortlistInput = z.infer<
+  typeof JobFinderReturnApplicationToShortlistInputSchema
+>;
+
+/**
+ * Clearing a resume's approval. Undo of an approval names the status the
+ * draft had before it, so the resume goes back to To review as it was
+ * instead of reading as stale.
+ */
+export const JobFinderClearResumeApprovalInputSchema =
+  JobFinderJobActionInputSchema.extend({
+    restoreStatus: z.enum(["draft", "needs_review"]).optional(),
+  });
+export type JobFinderClearResumeApprovalInput = z.infer<
+  typeof JobFinderClearResumeApprovalInputSchema
 >;
 
 /** Send for me: the filled-in forms the agent sends, one after another. */
@@ -334,6 +360,7 @@ export type JobFinderResumeWorkspaceQuery = z.infer<
 
 export const JobFinderSaveResumeDraftInputSchema = z.object({
   draft: ResumeDraftSchema,
+  autosaveSessionId: NonEmptyStringSchema.optional(),
 });
 export type JobFinderSaveResumeDraftInput = z.infer<
   typeof JobFinderSaveResumeDraftInputSchema
@@ -898,6 +925,11 @@ export const JobFinderSettingsSchema = z.object({
    * it): read it through `collapsesSideMenuWithAssistant`.
    */
   collapseSideMenuWithAssistant: z.boolean().optional(),
+  /**
+   * Start writing a job's resume as soon as it is shortlisted (ADR 0076).
+   * Absent means on: read it through `writesResumesOnShortlist`.
+   */
+  writeResumesOnShortlist: z.boolean().optional(),
   humanReviewRequired: z.boolean(),
   allowAutoSubmitOverride: z.boolean(),
   /** The person's ordinary default for new application runs. */
@@ -915,6 +947,13 @@ export const JobFinderSettingsSchema = z.object({
   aiBehavior: AiBehaviorPreferenceSchema.default({}).optional(),
 });
 export type JobFinderSettings = z.infer<typeof JobFinderSettingsSchema>;
+
+/** On unless the person turned it off. */
+export function writesResumesOnShortlist(
+  settings: Pick<JobFinderSettings, "writeResumesOnShortlist">,
+): boolean {
+  return settings.writeResumesOnShortlist !== false;
+}
 
 /** On unless the person turned it off. */
 export function collapsesSideMenuWithAssistant(
@@ -943,6 +982,19 @@ export type JobFinderDiscoveryState = z.infer<
   typeof JobFinderDiscoveryStateSchema
 >;
 
+/** Shell fields only; history, pending jobs and ledger are deferred. */
+export const DiscoveryBootstrapStateSchema = JobFinderDiscoveryStateSchema.pick(
+  {
+    sessions: true,
+    runState: true,
+    activeRun: true,
+    activeSourceDebugRun: true,
+  },
+);
+export type DiscoveryBootstrapState = z.infer<
+  typeof DiscoveryBootstrapStateSchema
+>;
+
 // Keep repository schema declarations small as application receipt fields grow.
 const PersistedApplicationRecordSchema: z.ZodType<
   z.output<typeof ApplicationRecordSchema>,
@@ -958,6 +1010,7 @@ const PersistedDiscoveryStateSchema: z.ZodType<
 > = JobFinderDiscoveryStateSchema;
 
 const JobFinderRepositoryStateShape = {
+  preparedApplicationForms: z.array(PreparedApplicationFormSchema).optional(),
   profile: CandidateProfileSchema,
   searchPreferences: JobSearchPreferencesSchema,
   profileSetupState: ProfileSetupStateSchema.default({}),
@@ -1473,6 +1526,7 @@ const WorkspaceSnapshotCoreSchema = z.object({
   campaignNotifications: z.array(CampaignNotificationSchema).default([]),
   dashboard: JobFinderDashboardSummarySchema,
   activityControl: JobFinderActivityControlSchema.default({}),
+  applyQueue: ApplyQueueSchema.nullable().default(null),
 });
 const SnapshotIntelligenceSchema = JobFinderIntelligenceStateSchema.default({});
 const WorkspaceSnapshotBaseSchema: z.ZodObject<
@@ -1816,6 +1870,39 @@ export type JobFinderWorkspaceSyncInput = z.infer<
   typeof JobFinderWorkspaceSyncInputSchema
 >;
 
+export const JobFinderResumePdfExportOutcomeSchema = z
+  .object({
+    outcome: z.enum(["saved", "cancelled"]),
+    outputPath: NonEmptyStringSchema.nullable().default(null),
+  })
+  .strict();
+
+/**
+ * What the PDF export route sends: its outcome and the workspace as a sync
+ * result. The window turns it back into a JobFinderResumePdfExportResult.
+ * Sending (and validating) the whole workspace with every export cost an
+ * approval over a second.
+ */
+export type JobFinderResumePdfExportReply = z.infer<
+  typeof JobFinderResumePdfExportOutcomeSchema
+> & {
+  workspace: JobFinderWorkspaceSyncResult;
+};
+
+/**
+ * The revision a window now shows, sent each time it commits one. Main
+ * answers that window's next change with a delta from it instead of the
+ * whole workspace. 0 means the window holds no revision main knows.
+ */
+export const JobFinderWorkspaceHeldRevisionSchema = z
+  .object({
+    revision: WorkspaceRevisionSchema,
+  })
+  .strict();
+export type JobFinderWorkspaceHeldRevision = z.infer<
+  typeof JobFinderWorkspaceHeldRevisionSchema
+>;
+
 type JobFinderWorkspaceSyncResultValue =
   | {
       kind: "delta";
@@ -1851,6 +1938,44 @@ export const JobFinderWorkspaceSyncResultSchema = z.discriminatedUnion("kind", [
 ]) as z.ZodType<JobFinderWorkspaceSyncResultValue>;
 export type JobFinderWorkspaceSyncResult = z.infer<
   typeof JobFinderWorkspaceSyncResultSchema
+>;
+
+/**
+ * What the agent-discovery IPC route answers: the terminal outcome and what
+ * changed relative to the revision the window holds. A finished search used
+ * to answer with the whole workspace (tens of megabytes with thousands of
+ * jobs), which also made the window's next refresh send it all again.
+ */
+export type JobFinderAgentDiscoveryReply = {
+  outcome: JobFinderAgentDiscoveryOutcome;
+  sync: JobFinderWorkspaceSyncResult;
+};
+export const JobFinderAgentDiscoveryReplySchema = z
+  .object({
+    outcome: JobFinderAgentDiscoveryOutcomeSchema,
+    sync: JobFinderWorkspaceSyncResultSchema,
+  })
+  .strict() as z.ZodType<JobFinderAgentDiscoveryReply>;
+
+/** Search commands answer with committed run facts, never a workspace view. */
+export const JobFinderDiscoveryCommandReplySchema = z
+  .object({
+    outcome: JobFinderAgentDiscoveryOutcomeSchema,
+    runId: NonEmptyStringSchema.nullable(),
+    newJobs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type JobFinderDiscoveryCommandReply = z.infer<
+  typeof JobFinderDiscoveryCommandReplySchema
+>;
+export const JobFinderDiscoveryCancellationReplySchema = z
+  .object({
+    runId: NonEmptyStringSchema,
+    accepted: z.boolean(),
+  })
+  .strict();
+export type JobFinderDiscoveryCancellationReply = z.infer<
+  typeof JobFinderDiscoveryCancellationReplySchema
 >;
 
 export const SaveCandidateProfileInputSchema = CandidateProfileSchema;
@@ -1895,6 +2020,7 @@ export const UpdateWorkspaceBehaviorInputSchema = z.object({
   keepSessionAlive: z.boolean().optional(),
   discoveryOnly: z.boolean().optional(),
   collapseSideMenuWithAssistant: z.boolean().optional(),
+  writeResumesOnShortlist: z.boolean().optional(),
 });
 export type UpdateWorkspaceBehaviorInput = z.infer<
   typeof UpdateWorkspaceBehaviorInputSchema
@@ -1950,6 +2076,38 @@ export const DesktopWindowCloseGuardStateSchema = z.object({
 });
 export type DesktopWindowCloseGuardState = z.infer<
   typeof DesktopWindowCloseGuardStateSchema
+>;
+
+/**
+ * A right-click menu the window asks main to show as the system's own menu.
+ * Main answers with the chosen item's id, or null when it was dismissed.
+ */
+export const DesktopContextMenuItemSchema = z.union([
+  z
+    .object({
+      id: z.string().trim().min(1).max(80),
+      label: z.string().trim().min(1).max(120),
+      enabled: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal("separator") }).strict(),
+]);
+export type DesktopContextMenuItem = z.infer<
+  typeof DesktopContextMenuItemSchema
+>;
+
+export const DesktopContextMenuInputSchema = z
+  .object({ items: z.array(DesktopContextMenuItemSchema).min(1).max(24) })
+  .strict();
+export type DesktopContextMenuInput = z.infer<
+  typeof DesktopContextMenuInputSchema
+>;
+
+export const DesktopContextMenuResultSchema = z
+  .object({ id: z.string().nullable() })
+  .strict();
+export type DesktopContextMenuResult = z.infer<
+  typeof DesktopContextMenuResultSchema
 >;
 
 /**

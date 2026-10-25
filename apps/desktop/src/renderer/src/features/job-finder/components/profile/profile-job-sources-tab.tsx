@@ -1,4 +1,4 @@
-import { useDeferredValue, useId, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type {
   DiscoveryRunRecord,
@@ -8,8 +8,9 @@ import type {
   SourceDebugRunRecord,
   SourceInstructionArtifact,
 } from "@nestor/contracts";
-import { Badge } from "@renderer/components/ui/badge";
+import { StatusBadge } from "../status-badge";
 import { Button } from "@renderer/components/ui/button";
+import { PageNavigation } from "../page-navigation";
 import {
   isSourceCheckQueueActive,
   startSourceCheckQueue,
@@ -24,9 +25,13 @@ import {
   deriveSourceHealthSignals,
   describeEnabledSourceHealth,
   describeLatestSourceCheck,
-  isEnabledSourceNeedingAttention,
   type SourceRuntimeSignals,
 } from "@nestor/job-finder/source-health";
+import {
+  isSourceNeedingAttention,
+  SOURCES_NEEDING_ATTENTION_FILTER,
+  SOURCES_NEEDING_ATTENTION_LABEL,
+} from "../../lib/source-attention";
 import type { SearchPreferencesEditorValues } from "../../lib/profile-editor";
 import { PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES } from "./profile-deep-link-focus";
 import { ProfileDiscoveryTargetRow } from "./profile-discovery-target-row";
@@ -49,8 +54,12 @@ const sourceFilterOptions: ReadonlyArray<{
   { id: "all", label: "All" },
   { id: "enabled", label: "Enabled" },
   { id: "disabled", label: "Disabled" },
-  { id: "needs_attention", label: "Needs attention" },
+  { id: SOURCES_NEEDING_ATTENTION_FILTER, label: SOURCES_NEEDING_ATTENTION_LABEL },
 ];
+
+function parseSourceFilter(value: string | null | undefined): SourceFilter {
+  return sourceFilterOptions.find((option) => option.id === value)?.id ?? "all";
+}
 
 function getSourceHost(startingUrl: string): string {
   return deriveJobSourceLabel(startingUrl);
@@ -160,15 +169,15 @@ export function filterJobSources(
       normalizedQuery.length === 0 ||
       target.label.toLocaleLowerCase().includes(normalizedQuery) ||
       target.startingUrl.toLocaleLowerCase().includes(normalizedQuery);
-    // Same shared interpretation as the Home source-health badge: attention
-    // is scoped to enabled sources so disabled entries never inflate active
-    // health counts.
+    // The same definition Home counts in its "need attention" line:
+    // attention is scoped to enabled sources so disabled entries never
+    // inflate active health counts.
     const matchesFilter =
       filter === "all" ||
       (filter === "enabled" && target.enabled) ||
       (filter === "disabled" && !target.enabled) ||
       (filter === "needs_attention" &&
-        isEnabledSourceNeedingAttention(target, signals));
+        isSourceNeedingAttention(target, signals));
 
     return matchesQuery && matchesFilter ? [{ index, target }] : [];
   });
@@ -176,7 +185,7 @@ export function filterJobSources(
 
 interface SourcePagerProps {
   "aria-label": string;
-  children: ReactNode;
+  children?: ReactNode;
   className: string;
   currentPage: number;
   moveToPage: (nextPage: number) => void;
@@ -185,39 +194,29 @@ interface SourcePagerProps {
   previousAriaLabel?: string;
 }
 
+/** The same numbered pager the three lists use, with this list's range. */
 function SourcePager(props: SourcePagerProps) {
   return (
     <nav aria-label={props["aria-label"]} className={props.className}>
-      <Button
-        {...(props.previousAriaLabel
-          ? { "aria-label": props.previousAriaLabel }
-          : {})}
-        disabled={props.currentPage === 0}
-        onClick={() => props.moveToPage(Math.max(0, props.currentPage - 1))}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Previous
-      </Button>
       {props.children}
-      <Button
-        {...(props.nextAriaLabel ? { "aria-label": props.nextAriaLabel } : {})}
-        disabled={props.currentPage >= props.pageCount - 1}
-        onClick={() =>
-          props.moveToPage(Math.min(props.pageCount - 1, props.currentPage + 1))
-        }
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Next
-      </Button>
+      <PageNavigation
+        nextLabel={props.nextAriaLabel ?? "Next"}
+        onPageChange={(nextPage) => props.moveToPage(nextPage - 1)}
+        page={props.currentPage + 1}
+        pageCount={props.pageCount}
+        pending={false}
+        previousLabel={props.previousAriaLabel ?? "Previous"}
+      />
     </nav>
   );
 }
 
 interface ProfileJobSourcesTabProps {
+  /**
+   * The filter the link asked for (`show=needs_attention` from Home's line),
+   * so the count the person just read is the list they land on.
+   */
+  requestedFilter?: string | null;
   isBrowserSessionPending: (targetId: string) => boolean;
   isSourceDebugPending: (targetId: string) => boolean;
   isSourceInstructionPending: (targetId: string) => boolean;
@@ -252,7 +251,12 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
   const searchInputId = useId();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const [filter, setFilter] = useState<SourceFilter>("all");
+  const [filter, setFilter] = useState<SourceFilter>(() =>
+    parseSourceFilter(props.requestedFilter),
+  );
+  useEffect(() => {
+    if (props.requestedFilter) setFilter(parseSourceFilter(props.requestedFilter));
+  }, [props.requestedFilter]);
   const [page, setPage] = useState(0);
   const [expandedTargetId, setExpandedTargetId] = useState<string | null>(null);
   const [sourceUrlDraft, setSourceUrlDraft] = useState("");
@@ -315,6 +319,38 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
         (target) => target.id === checkQueue.launched?.targetId,
       )
     : undefined;
+  // Each filter's count over the searched sources. A filter that would
+  // show all of them or none of them is not offered; the active one stays.
+  const filterCounts = useMemo(() => {
+    const counts: Record<SourceFilter, number> = {
+      all: 0,
+      disabled: 0,
+      enabled: 0,
+      needs_attention: 0,
+    };
+    for (const option of sourceFilterOptions) {
+      counts[option.id] = filterJobSources(
+        discoveryTargets,
+        deferredQuery,
+        option.id,
+        sourceHealthSignals,
+      ).length;
+    }
+    return counts;
+  }, [deferredQuery, discoveryTargets, sourceHealthSignals]);
+  const filterChoices = sourceFilterOptions.filter(
+    (option) =>
+      option.id !== "all" &&
+      (option.id === filter ||
+        (filterCounts[option.id] > 0 &&
+          filterCounts[option.id] < filterCounts.all)),
+  );
+  const visibleFilterOptions =
+    filterChoices.length > 0
+      ? sourceFilterOptions.filter(
+          (option) => option.id === "all" || filterChoices.includes(option),
+        )
+      : [];
   const checkableFilteredSources = filteredSources
     .map((entry) => entry.target)
     .filter((target) => target.enabled && isRunnableJobDiscoveryTarget(target));
@@ -400,12 +436,18 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     }
   };
 
+  // A tick is the whole act too, like a Settings switch: it saves at once
+  // instead of turning the page's footer to "Unsaved changes".
   const toggleTarget = (targetId: string, enabled: boolean) => {
     updateDiscoveryTargets(
       discoveryTargets.map((target) =>
         target.id === targetId ? { ...target, enabled } : target,
       ),
     );
+    if (props.onSaveNow) {
+      const saveNow = props.onSaveNow;
+      window.setTimeout(() => saveNow(), 0);
+    }
   };
 
   const moveToPage = (nextPage: number) => {
@@ -435,7 +477,7 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
             {isAddOpen ? "Close" : "Add sources"}
           </Button>
         }
-        description="Manage every public careers page or job board Job Finder can check. A site you add is turned on for search straight away; turn one off in its row to leave it out."
+        description="The careers pages and job boards Job Finder searches."
         eyebrow="Discovery library"
         headingId="profile-job-sources-heading"
         title="Job sources"
@@ -487,101 +529,96 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
           </div>
         ) : null}
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
-          <div className="grid gap-(--gap-field)">
-            <FieldLabel htmlFor={searchInputId}>Find a source</FieldLabel>
-            <ProfileInput
-              autoComplete="off"
-              id={searchInputId}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(0);
-                setExpandedTargetId(null);
-              }}
-              placeholder="Search by company, board, or URL"
-              type="search"
-              value={query}
-            />
-          </div>
-          <div
-            aria-label="Filter job sources"
-            className="flex flex-wrap gap-2"
-            role="group"
-          >
-            {sourceFilterOptions.map((option) => (
-              <Button
-                aria-pressed={filter === option.id}
-                key={option.id}
-                onClick={() => setLibraryView(option.id)}
-                size="sm"
-                type="button"
-                variant={filter === option.id ? "primary" : "outline"}
-              >
-                {option.label}
-              </Button>
-            ))}
-            {anySourceCheckRunning ? (
-              <Button
-                disabled={!checkQueueActive}
-                onClick={() => stopSourceCheckQueue()}
-                size="sm"
-                title={
-                  checkQueueActive
-                    ? "Stops after the check that is running now."
-                    : undefined
-                }
-                type="button"
-                variant="outline"
-              >
-                {checkQueueActive
-                  ? `Checking ${Math.min(checkQueue.done + 1, checkQueue.total)} of ${checkQueue.total}${checkingTarget ? ` · ${checkingTarget.label}` : ""} · Stop`
-                  : "Checking one source…"}
-              </Button>
-            ) : (
-              <Button
-                disabled={checkableFilteredSources.length === 0}
-                onClick={() =>
-                  startSourceCheckQueue(
-                    checkableFilteredSources.map((target) => target.id),
-                  )
-                }
-                size="sm"
-                title="Runs Check source on every enabled source in the current filter, one after another. Each check takes about five minutes, so ten sources is most of an hour."
-                type="button"
-                variant="outline"
-              >
-                {checkableFilteredSources.length === 1
-                  ? "Check this source"
-                  : `Check all ${checkableFilteredSources.length} sources`}
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-(--surface-panel-border) pt-3">
+        {/* One toolbar: search, the filters that would change the list,
+            Check all, the count and the pager. A "Find a source" label row and
+            a "Source library" heading row above the list said nothing the
+            field and the rows do not. */}
+        <div
+          className={`flex min-w-0 flex-wrap items-center gap-2 ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.base} ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.fixedHeader} ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.internalScroller}`}
+        >
           <h3
-            className={`${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.base} text-[0.98rem] font-semibold text-(--text-headline) outline-none ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.fixedHeader} ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.internalScroller}`}
+            className="sr-only"
             id="profile-job-sources-list-heading"
             tabIndex={-1}
           >
             Source library
           </h3>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
-            {pageCount > 1 ? (
-              <SourcePager
-                aria-label="Job source pages (top of list)"
-                className="flex flex-wrap items-center gap-2"
-                currentPage={currentPage}
-                moveToPage={moveToPage}
-                nextAriaLabel="Next source page (top of list)"
-                pageCount={pageCount}
-                previousAriaLabel="Previous source page (top of list)"
-              >
-                <span className="text-(length:--text-small) text-foreground-muted">
-                  Page {currentPage + 1} of {pageCount}
-                </span>
-              </SourcePager>
-            ) : null}
+          <label className="sr-only" htmlFor={searchInputId}>
+            Find a source
+          </label>
+          <ProfileInput
+            autoComplete="off"
+            className="min-w-56 flex-1"
+            id={searchInputId}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+              setExpandedTargetId(null);
+            }}
+            placeholder="Find a source by company, board, or URL"
+            type="search"
+            value={query}
+          />
+          {visibleFilterOptions.length > 1 ? (
+            <div
+              aria-label="Filter job sources"
+              className="flex flex-wrap gap-1.5"
+              role="group"
+            >
+              {visibleFilterOptions.map((option) => (
+                <Button
+                  aria-pressed={filter === option.id}
+                  key={option.id}
+                  onClick={() => setLibraryView(option.id)}
+                  size="sm"
+                  type="button"
+                  variant={filter === option.id ? "primary" : "outline"}
+                >
+                  {option.label}
+                  {option.id === "all" ? null : (
+                    <span aria-hidden="true" className="tabular-nums opacity-75">
+                      {filterCounts[option.id]}
+                    </span>
+                  )}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {anySourceCheckRunning ? (
+            <Button
+              disabled={!checkQueueActive}
+              onClick={() => stopSourceCheckQueue()}
+              size="sm"
+              title={
+                checkQueueActive
+                  ? "Stops after the check that is running now."
+                  : undefined
+              }
+              type="button"
+              variant="outline"
+            >
+              {checkQueueActive
+                ? `Checking ${Math.min(checkQueue.done + 1, checkQueue.total)} of ${checkQueue.total}${checkingTarget ? ` · ${checkingTarget.label}` : ""} · Stop`
+                : "Checking one source…"}
+            </Button>
+          ) : checkableFilteredSources.length > 0 ? (
+            <Button
+              onClick={() =>
+                startSourceCheckQueue(
+                  checkableFilteredSources.map((target) => target.id),
+                )
+              }
+              size="sm"
+              title="Runs Check source on every enabled source in the current filter, one after another. Each check takes about five minutes, so ten sources is most of an hour."
+              type="button"
+              variant="outline"
+            >
+              {checkableFilteredSources.length === 1
+                ? "Check this source"
+                : `Check all ${checkableFilteredSources.length} sources`}
+            </Button>
+          ) : null}
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <p
               aria-atomic="true"
               aria-live="polite"
@@ -592,6 +629,17 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                 ? `${discoveryTargets.length} ${discoveryTargets.length === 1 ? "source" : "sources"}`
                 : `${filteredSources.length} of ${discoveryTargets.length} sources`}
             </p>
+            {pageCount > 1 ? (
+              <SourcePager
+                aria-label="Job source pages (top of list)"
+                className="flex flex-wrap items-center gap-2"
+                currentPage={currentPage}
+                moveToPage={moveToPage}
+                nextAriaLabel="Next source page (top of list)"
+                pageCount={pageCount}
+                previousAriaLabel="Previous source page (top of list)"
+              />
+            ) : null}
           </div>
         </div>
 
@@ -742,9 +790,13 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                           {/* No Enabled/Disabled badge: the "Include in
                               search" checkbox on this row states it. */}
                           {needsAttention ? (
-                            <Badge title={health.reason} variant="destructive">
-                              Needs attention
-                            </Badge>
+                            // Amber, not red: a source that failed is
+                            // retried by the next search.
+                            <span title={health.reason}>
+                              <StatusBadge tone="warning">
+                                Needs attention
+                              </StatusBadge>
+                            </span>
                           ) : null}
                         </div>
                         <p
@@ -782,12 +834,9 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                               toggleTarget(target.id, checked === true)
                             }
                           />
-                          <span>
-                            Include in search
-                            <span className="ml-1.5 text-(length:--text-tiny) uppercase tracking-(--tracking-mono) text-foreground-muted">
-                              {target.enabled ? "On" : "Off"}
-                            </span>
-                          </span>
+                          {/* The tick says on or off; a word beside it
+                              said it again. */}
+                          <span>Include in search</span>
                         </label>
                         <Button
                           aria-label={`Check ${displayName}`}

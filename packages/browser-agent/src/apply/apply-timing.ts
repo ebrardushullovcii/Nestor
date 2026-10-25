@@ -110,6 +110,14 @@ export function createApplyTiming(now: () => Date) {
       observe: () => measure("observe", "pageReadMs", hands.observe),
       readText: (ref) =>
         measure("read_text", "pageReadMs", () => hands.readText(ref)),
+      ...(hands.checkAction
+        ? {
+            checkAction: (ref: string) =>
+              measure("check_action", "pageReadMs", () =>
+                hands.checkAction!(ref),
+              ),
+          }
+        : {}),
       fillText: (ref, value) =>
         measure("type", "writeMs", () => hands.fillText(ref, value)),
       chooseOption: (ref, value) =>

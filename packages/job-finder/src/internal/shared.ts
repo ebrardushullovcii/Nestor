@@ -1,11 +1,5 @@
-export function normalizeText(value: string): string {
-  return value
-    .replace(/(^|[^a-z0-9])c\s*\+\s*\+(?=$|[^a-z0-9])/gi, "$1cplusplus")
-    .replace(/(^|[^a-z0-9])c\s*#(?=$|[^a-z0-9])/gi, "$1csharp")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+import { normalizeText } from "@nestor/job-list-policy/text";
+export { normalizeText } from "@nestor/job-list-policy/text";
 
 export function tokenize(value: string): string[] {
   return normalizeText(value).split(/\s+/).filter(Boolean);

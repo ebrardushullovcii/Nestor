@@ -355,6 +355,30 @@ describe("a job the person asked to skip", () => {
     });
     expect(presentation.sentence).toContain("Nothing was sent");
   });
+
+  it("offers Prepare again when the saved mode only fills forms in", () => {
+    const presentation = resolveApplyStatePresentation({
+      mode: "apply_for_me",
+      nextRunMode: "fill_only",
+      recordLastActionLabel: APPLICATION_SKIPPED_BY_PERSON_LABEL,
+      result: buildResult({ state: "skipped", summary: "Not started." }),
+    });
+    expect(presentation.actionLabel).toBe("Prepare again");
+  });
+});
+
+describe("a retry named for the saved mode", () => {
+  it("says Apply again in Send for me, whatever mode the old run used", () => {
+    const presentation = resolveApplyStatePresentation({
+      mode: "fill_only",
+      nextRunMode: "apply_for_me",
+      result: buildResult({ state: "cancelled", summary: "Cancelled by you" }),
+    });
+    expect(presentation).toMatchObject({
+      action: "try_again",
+      actionLabel: "Apply again",
+    });
+  });
 });
 
 describe("a job its batch stopped around", () => {
@@ -614,9 +638,14 @@ it("offers Prepare again for a lost prepared form", () => {
     blockerReason: "unexpected_navigation",
     latestQuestionCount: 2,
   });
+  // Nothing failed: the form closed before a send was seen.
   expect(
     resolveApplyStatePresentation({ mode: "fill_only", result }),
-  ).toMatchObject({ title: "Could not apply", actionLabel: "Prepare again" });
+  ).toMatchObject({
+    title: "Form closed",
+    actionLabel: "Prepare again",
+    formClosed: true,
+  });
 });
 
 it("a queued job remains queued after a preparation timestamp was written", () => {

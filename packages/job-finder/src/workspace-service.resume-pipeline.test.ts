@@ -116,7 +116,9 @@ test("200 jobs roll from 50 writers into two local processors without workspace 
   ).toBe(true);
   expect(peakModels).toBe(50);
   expect(peakLocal).toBe(2);
-  expect(observedProcessingPeak).toBe(2);
+  // Final fact checks run beside each other; only rendering waits for one
+  // of the two local slots.
+  expect(observedProcessingPeak).toBeGreaterThan(2);
   expect(allAssets).not.toHaveBeenCalled();
   expect(allJobs).not.toHaveBeenCalled();
   expect((await repository.listResumeDrafts()).length).toBe(200);
@@ -231,7 +233,7 @@ test("reset aborts the writer request and frees capacity for the restored worksp
   await workspaceService.shutdown();
 });
 
-test("resume listing model checks share the 50-writer capacity instead of the background two-job queue", async () => {
+test("resume listing reads share the 50-writer capacity and ask for no fit verdict", async () => {
   const seed = fixture(60);
   seed.savedJobs = seed.savedJobs.map((job) => ({
     ...job,
@@ -243,17 +245,6 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
     },
   }));
   const aiClient = createAiClient();
-  aiClient.extractJobsFromPage = (input) =>
-    Promise.resolve([
-      {
-        ...seed.savedJobs[0]!,
-        canonicalUrl: input.pageUrl,
-        description:
-          seed.savedJobs[0]!.description +
-          " Additional accessible product interface and state management responsibilities.",
-        detailQuality: "detail_enriched",
-      },
-    ]);
   let release!: () => void;
   const wait = new Promise<void>((resolve) => {
     release = resolve;
@@ -261,33 +252,29 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
   let active = 0,
     peak = 0,
     started = 0;
-  aiClient.assessJobFit = async () => {
+  aiClient.extractJobsFromPage = async (input) => {
     started++;
     active++;
     peak = Math.max(peak, active);
     try {
       await wait;
-      return {
-        score: 80,
-        reasons: ["Synthetic matching skill"],
-        gaps: [],
-        requirements: [
-          {
-            id: "synthetic_react",
-            category: "skill",
-            label: "React",
-            importance: "required",
-            status: "supported",
-            jobEvidence: "Build React interfaces",
-            resumeEvidence: [],
-            explanation: "Synthetic fit assessment",
-          },
-        ],
-      };
+      return [
+        {
+          ...seed.savedJobs[0]!,
+          canonicalUrl: input.pageUrl,
+          description:
+            seed.savedJobs[0]!.description +
+            " Additional accessible product interface and state management responsibilities.",
+          detailQuality: "detail_enriched",
+        },
+      ];
     } finally {
       active--;
     }
   };
+  // The writer needs the listing's text, not a fresh verdict.
+  const assess = vi.fn(aiClient.assessJobFit.bind(aiClient));
+  aiClient.assessJobFit = assess;
   const { workspaceService } = createWorkspaceServiceHarness({
     seed,
     aiClient,
@@ -317,6 +304,7 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
     ),
   ).toBe(true);
   expect(peak).toBe(50);
+  expect(assess).not.toHaveBeenCalled();
   await workspaceService.shutdown();
 }, 30_000);
 
@@ -325,6 +313,10 @@ test("resume writing reuses the complete listing without forcing another full fi
   seed.savedJobs[0] = {
     ...seed.savedJobs[0]!,
     detailQuality: "detail_enriched",
+    description:
+      "Build accessible interfaces and reliable services with our product team. "
+        .repeat(12)
+        .trim(),
     listingDetailFetch: {
       attemptedAt: "2026-10-13T00:00:00.000Z",
       outcome: "enriched",
@@ -334,6 +326,7 @@ test("resume writing reuses the complete listing without forcing another full fi
   };
   const aiClient = createAiClient();
   const assess = vi.spyOn(aiClient, "assessJobFit");
+  const write = vi.spyOn(aiClient, "createResumeDraft");
   const fetchListingHtml = vi.fn((url: string) =>
     Promise.resolve({
       status: 200,
@@ -352,6 +345,10 @@ test("resume writing reuses the complete listing without forcing another full fi
   expect(receipt.outcome).toMatch(/written|fallback/);
   expect(assess).not.toHaveBeenCalled();
   expect(fetchListingHtml).not.toHaveBeenCalled();
+  expect(write).toHaveBeenCalledOnce();
+  expect(write.mock.calls[0]?.[0].job.description).toBe(
+    seed.savedJobs[0].description,
+  );
   await workspaceService.shutdown();
 });
 

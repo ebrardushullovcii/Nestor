@@ -80,6 +80,8 @@ export interface AgentLoopModel {
 /** What the model said when it finished, in its own words plus typed extras. */
 export interface AgentLoopFinish {
   reason: string;
+  /** Optional verified tool output retained in the conversation transcript. */
+  output?: string;
   stuck: boolean;
   needsPerson: boolean;
   data: Record<string, unknown>;
@@ -111,6 +113,8 @@ export interface AgentLoopToolContext {
 
 export interface AgentLoopTool {
   definition: AgentLoopToolDefinition;
+  /** A bounded local task may need longer than an ordinary page operation. */
+  timeoutMs?: number | ((rawArguments: string) => number | undefined);
   /** Only page tools count repeated thrown failures as a dead browser. */
   failureKind?: "browser" | "tool";
   /** Converts a page-library exception into safe, plain words for the model. */
@@ -171,11 +175,26 @@ export interface AgentLoopOptions {
    * it can always look at the page anew. Null keeps every answer whole.
    */
   staleToolResultChars?: number | null;
+  /**
+   * How many of the newest tool answers stay whole. Defaults to four; a host
+   * whose answers are long page views can keep fewer.
+   */
+  staleToolResultKeepRecent?: number;
+  /** Old long answers to collect before shortening them. Defaults to four. */
+  staleToolResultBatchSize?: number;
   /** Output cap for one model turn. Omit to use the provider default. */
   modelMaxOutputTokens?: number;
   parallelToolCalls?: boolean;
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
+  /**
+   * A reply with words and no tool call. The host may take it as a step of
+   * its own (most often the model reporting that it is done) instead of the
+   * loop spending a turn asking for a tool. Null keeps the default reminder.
+   */
+  onReplyWithoutTool?: (
+    content: string,
+  ) => Promise<AgentLoopToolOutcome | null>;
   onHistoryCompacted?: () => string | null;
   /** Called for every attempted tool, including failures. */
   onToolTiming?: (step: { toolName: string; durationMs: number }) => void;
@@ -322,6 +341,8 @@ function shortenStaleToolResults(
   messages: AgentLoopMessage[],
   openingCount: number,
   maxChars: number,
+  keepRecent: number,
+  batchSize: number,
 ): AgentLoopMessage[] {
   const stale: number[] = [];
   let seen = 0;
@@ -330,13 +351,13 @@ function shortenStaleToolResults(
     if (message?.role !== "tool") continue;
     seen += 1;
     if (
-      seen > STALE_TOOL_RESULT_KEEP_RECENT &&
+      seen > keepRecent &&
       message.content.length > maxChars + STALE_TOOL_RESULT_NOTE.length + 2
     ) {
       stale.push(index);
     }
   }
-  if (stale.length < STALE_TOOL_RESULT_BATCH) {
+  if (stale.length < batchSize) {
     return messages;
   }
   const next = [...messages];
@@ -390,6 +411,16 @@ export async function runAgentLoop(
     options.staleToolResultChars === undefined
       ? DEFAULT_STALE_TOOL_RESULT_CHARS
       : options.staleToolResultChars;
+  const staleToolResultKeepRecent = Math.max(
+    1,
+    Math.floor(
+      options.staleToolResultKeepRecent ?? STALE_TOOL_RESULT_KEEP_RECENT,
+    ),
+  );
+  const staleToolResultBatchSize = Math.max(
+    1,
+    Math.floor(options.staleToolResultBatchSize ?? STALE_TOOL_RESULT_BATCH),
+  );
 
   let messages: AgentLoopMessage[] = [...options.messages];
   const openingCount = messages.length;
@@ -572,6 +603,32 @@ export async function runAgentLoop(
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
       messages.push({ role: "assistant", content: response.content ?? "" });
+      const hosted = (response.content ?? "").trim()
+        ? await options.onReplyWithoutTool?.(response.content ?? "")
+        : null;
+      if (hosted?.kind === "finish") {
+        await note(
+          `finished in words${hosted.finish.stuck ? " as stuck" : ""}${hosted.finish.needsPerson ? " (needs the person)" : ""}: ${hosted.finish.reason}`,
+        );
+        return result("finished", endSentence(hosted.finish.reason), {
+          finish: hosted.finish,
+        });
+      }
+      if (hosted?.kind === "stop") {
+        await note(`stopped: ${hosted.reason}`);
+        return result("stopped", endSentence(hosted.reason), {
+          stop: {
+            reason: hosted.reason,
+            ...(hosted.data !== undefined ? { data: hosted.data } : {}),
+          },
+        });
+      }
+      if (hosted?.kind === "ok") {
+        if (hosted.progress) markProgress();
+        messages.push({ role: "user", content: hosted.content });
+        await note("answered without a tool; the host replied");
+        continue;
+      }
       messages.push({
         role: "user",
         content:
@@ -638,6 +695,12 @@ export async function runAgentLoop(
       }
 
       const toolStartedAt = now().getTime();
+      const deadlineMs = Math.max(
+        1,
+        (typeof tool.timeoutMs === "function"
+          ? tool.timeoutMs(toolCall.function.arguments)
+          : tool.timeoutMs) ?? toolTimeoutMs,
+      );
       let outcome: AgentLoopToolOutcome;
       try {
         outcome = await withToolDeadline(
@@ -645,7 +708,7 @@ export async function runAgentLoop(
             step: steps,
             ...(options.signal ? { signal: options.signal } : {}),
           }),
-          toolTimeoutMs,
+          deadlineMs,
           options.signal,
         );
         if (tool.failureKind === "browser") {
@@ -672,7 +735,7 @@ export async function runAgentLoop(
           // A hung step is reported as a fact and counted like a dead page:
           // three in a row end the run in plain words instead of a freeze.
           consecutiveBrowserFailures += 1;
-          const failure = `That step took longer than ${Math.round(toolTimeoutMs / 1000)} seconds and was given up.`;
+          const failure = `That step took longer than ${Math.round(deadlineMs / 1000)} seconds and was given up.`;
           await note(`${toolCall.function.name} → took too long`);
           if (consecutiveBrowserFailures >= browserFailureLimit) {
             ended = result(
@@ -826,6 +889,8 @@ export async function runAgentLoop(
         messages,
         openingCount,
         staleToolResultChars,
+        staleToolResultKeepRecent,
+        staleToolResultBatchSize,
       );
     }
     const beforeCompaction = messages;

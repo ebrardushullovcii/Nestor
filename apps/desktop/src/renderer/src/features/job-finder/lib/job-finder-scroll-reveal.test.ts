@@ -88,7 +88,9 @@ describe("resolveJobFinderRevealChromeMode", () => {
     expect(resolveJobFinderRevealChromeMode(639)).toBe("static-header");
     expect(resolveJobFinderRevealChromeMode(640)).toBe("fixed-header");
     expect(resolveJobFinderRevealChromeMode(1279)).toBe("fixed-header");
-    expect(resolveJobFinderRevealChromeMode(1439)).toBe("fixed-header");
+    // From 1280px the shell header is one 56px row.
+    expect(resolveJobFinderRevealChromeMode(1280)).toBe("wide-fixed-header");
+    expect(resolveJobFinderRevealChromeMode(1439)).toBe("wide-fixed-header");
     expect(resolveJobFinderRevealChromeMode(1440)).toBe("wide-fixed-header");
   });
 });
@@ -116,10 +118,10 @@ describe("resolveJobFinderRevealClearancePx", () => {
         (JOB_FINDER_FIXED_HEADER_HEIGHT_PX + JOB_FINDER_REVEAL_TOP_GAP_PX) / 16
       }rem]`,
     );
-    // The wide token stays important: it has to beat the still-matching
-    // `sm:` token, which Tailwind v4 emits after every arbitrary variant.
+    // The wide token is the named `xl` breakpoint, emitted after `sm:`, so it
+    // beats the still-matching `sm:` token without `!`.
     expect(JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.wideFixedHeader).toBe(
-      `min-[1440px]:!scroll-mt-[${
+      `xl:scroll-mt-[${
         (JOB_FINDER_WIDE_HEADER_HEIGHT_PX + JOB_FINDER_REVEAL_TOP_GAP_PX) / 16
       }rem]`,
     );

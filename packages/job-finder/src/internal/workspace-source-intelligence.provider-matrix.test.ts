@@ -1,8 +1,27 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { JobDiscoveryTarget, JobSource } from "@nestor/contracts";
+import {
+  readDiscoveryPreparation,
+  readPreparedDiscoveryFingerprints,
+  readPreparedBodySalaryRange,
+  type JobDiscoveryTarget,
+  type JobSource,
+} from "@nestor/contracts";
+import {
+  setDiscoveryFeedExecutor,
+  takePreparedDiscoveryPosting,
+} from "./discovery-feed-executor";
 
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
+import { toProviderAwarePosting } from "./discovery-posting-normalization";
+import { preparePublicProviderFeed } from "./workspace-source-intelligence";
+import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+import { extractSalaryRangeFromListingBody } from "./matching-compensation";
+import {
+  buildJobIdentityAliases,
+  rememberPreparedListingContent,
+  prepareListingContent,
+} from "./job-identity";
 import {
   collectPublicProviderJobs,
   inferSourceIntelligenceFromTarget,
@@ -54,7 +73,8 @@ const providerCases = [
           title: "Frontend Engineer",
           absolute_url: "https://job-boards.greenhouse.io/acme/jobs/1001",
           location: { name: "Remote" },
-          content: "<p>Build accessible web applications.</p>",
+          content:
+            "<p>Build accessible web applications. We offer EUR 96,000 per year.</p>",
           updated_at: "2026-07-30T10:00:00.000Z",
         },
       ],
@@ -135,10 +155,111 @@ const providerCases = [
 ] as const;
 
 afterEach(() => {
+  setDiscoveryFeedExecutor(null);
   vi.restoreAllMocks();
 });
 
 describe("public provider ATS acceptance matrix", () => {
+  test("reattaches explicit preparation after the real worker transport drops symbols", async () => {
+    const { target, payload } = providerCases[0];
+    const intelligence = inferSourceIntelligenceFromTarget({
+      target,
+      currentArtifact: null,
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    setDiscoveryFeedExecutor(async (task) =>
+      structuredClone(await preparePublicProviderFeed(task)),
+    );
+    const result = await collectPublicProviderJobs({
+      target,
+      artifact: { intelligence },
+      source: "target_site",
+      prepareForDiscovery: true,
+    });
+    expect(result.jobs).toHaveLength(1);
+    const raw = result.jobs[0]!;
+    expect(readDiscoveryPreparation(raw)?.identity).toBeDefined();
+    expect(readPreparedBodySalaryRange(raw)).toBe("EUR 96,000 per year");
+    expect(readPreparedDiscoveryFingerprints(raw)).toEqual(
+      createDiscoveryListingFingerprints(structuredClone(raw)),
+    );
+    const normalized = takePreparedDiscoveryPosting(raw)!;
+    expect(normalized).not.toBeNull();
+    expect(readDiscoveryPreparation(normalized)?.identity).toBeDefined();
+    expect(readPreparedBodySalaryRange(normalized)).toBe(
+      extractSalaryRangeFromListingBody(normalized.description),
+    );
+    expect(readPreparedDiscoveryFingerprints(normalized)).toEqual(
+      createDiscoveryListingFingerprints(structuredClone(normalized)),
+    );
+  });
+  test.each(providerCases)(
+    "$name prepares exactly the same posting, fingerprints and identity evidence off main",
+    async ({ target, payload }) => {
+      const intelligence = inferSourceIntelligenceFromTarget({
+        target,
+        currentArtifact: null,
+      });
+      const base = {
+        payload: JSON.stringify(payload),
+        target,
+        intelligence,
+        source: "target_site" as const,
+      };
+      const raw = await preparePublicProviderFeed({
+        ...base,
+        prepareForDiscovery: false,
+      });
+      // Match a worker message: symbol metadata stays in the producer.
+      const prepared = structuredClone(
+        await preparePublicProviderFeed({
+          ...base,
+          prepareForDiscovery: true,
+        }),
+      );
+      expect(prepared.skippedMalformedCount).toBe(raw.skippedMalformedCount);
+      const expected = raw.jobs.map((posting) =>
+        toProviderAwarePosting({
+          posting,
+          target,
+          intelligence,
+          adapterKind: "target_site",
+          collectionMethod: "api",
+          discoveryMethod: "public_api",
+        }),
+      );
+      expect(
+        prepared.jobs.map((job) => ({ ...job, discoveredAt: "" })),
+      ).toEqual(raw.jobs.map((job) => ({ ...job, discoveredAt: "" })));
+      expect(
+        prepared.preparations.map(({ normalized }, index) => ({
+          ...prepared.jobs[index],
+          ...normalized,
+          discoveredAt: "",
+        })),
+      ).toEqual(
+        expected.map((job) => ({ ...structuredClone(job), discoveredAt: "" })),
+      );
+      prepared.preparations.forEach((evidence, index) => {
+        const job = { ...prepared.jobs[index]!, ...evidence.normalized };
+        expect(evidence.fingerprints).toEqual(
+          createDiscoveryListingFingerprints(expected[index]!),
+        );
+        expect(evidence.content).toEqual(
+          prepareListingContent(job.description),
+        );
+        const aliases = buildJobIdentityAliases(job);
+        rememberPreparedListingContent(job, evidence.content);
+        expect(buildJobIdentityAliases(job)).toEqual(aliases);
+      });
+    },
+  );
   test.each(providerCases.slice(0, 3))(
     "$name uses the employer board identity for hostname and URL source labels",
     async ({ target: originalTarget, payload }) => {

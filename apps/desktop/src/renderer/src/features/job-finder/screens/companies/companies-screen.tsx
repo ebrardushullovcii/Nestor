@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CompanyEntity,
   CompanyIntelligenceMutationInput,
@@ -36,6 +36,12 @@ interface CompaniesScreenProps {
   actionMessage: string | null;
   companies: readonly CompanyEntity[];
   discoveryJobs: readonly JobListRow[];
+  /**
+   * Whether any saved job or application exists. `discoveryJobs` holds only
+   * jobs already tied to a company, so it is empty exactly when the list has
+   * never been built and cannot tell the screen to build it.
+   */
+  hasSavedJobs?: boolean;
   isLoading?: boolean;
   isMergePending: (companyId: string) => boolean;
   isMutationPending: (companyId: string) => boolean;
@@ -99,9 +105,12 @@ function CompanyCard(props: {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={companyPreferenceTones[company.preference]}>
-            {companyPreferenceLabels[company.preference]}
-          </StatusBadge>
+          {/* Neutral is the default the select below already shows. */}
+          {company.preference !== "neutral" ? (
+            <StatusBadge tone={companyPreferenceTones[company.preference]}>
+              {companyPreferenceLabels[company.preference]}
+            </StatusBadge>
+          ) : null}
           {pendingMerges > 0 ? (
             <StatusBadge tone="critical">
               {pendingMerges} merge review{pendingMerges === 1 ? "" : "s"}
@@ -112,7 +121,7 @@ function CompanyCard(props: {
 
       <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Last seen available
           </dt>
           <dd className="text-foreground-soft">
@@ -120,7 +129,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Needs verification
           </dt>
           <dd className="text-foreground-soft">
@@ -128,7 +137,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Reported closed
           </dt>
           <dd className="text-foreground-soft">
@@ -136,7 +145,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Applications
           </dt>
           <dd className="text-foreground-soft">
@@ -147,7 +156,7 @@ function CompanyCard(props: {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="grid gap-1 text-sm">
-          <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <span className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Company tracking
           </span>
           <select
@@ -240,136 +249,129 @@ function MergeReviewSection(props: {
     setPage((current) => Math.min(current, pageCount));
   }, [pageCount]);
 
-  if (pendingCompanies.length === 0) {
-    return (
-      <section className="grid gap-3 rounded-(--radius-field) border border-border-subtle p-4">
-        <h3 className="font-semibold text-(--text-headline)">
-          Duplicate employer review
-        </h3>
-        <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-          No ambiguous company identities need your decision right now. Company
-          intelligence never merges employers silently; near matches always
-          appear here for an explicit merge or reject.
-        </p>
-      </section>
-    );
-  }
+  // Nothing to decide, nothing shown. Possible duplicates are optional
+  // tidying, so they wait folded under the list instead of leading the page.
+  if (pendingCandidates.length === 0) return null;
 
   return (
-    <section
-      aria-labelledby="company-merge-review-heading"
-      className="grid gap-3 rounded-(--radius-field) border border-destructive/25 p-4"
+    <details
+      className="group rounded-(--radius-field) border border-border-subtle p-4"
+      data-testid="company-merge-review"
     >
-      <div>
+      <summary className="cursor-pointer">
         <h3
-          className="font-semibold text-(--text-headline)"
+          className="inline font-semibold text-(--text-headline)"
           id="company-merge-review-heading"
         >
           Duplicate employer review
-        </h3>
-        <p className="mt-1 text-(length:--text-small) leading-5 text-foreground-soft">
-          These companies may be the same employer. Merge only when you are
-          certain; rejecting keeps them separate. Aliases and history are
-          preserved on merge.
+        </h3>{" "}
+        <span className="text-(length:--text-small) text-foreground-soft">
+          {pendingCandidates.length} possible
+        </span>
+      </summary>
+      <div className="mt-3 grid gap-3">
+        <p className="text-(length:--text-small) leading-5 text-foreground-soft">
+          These may be the same employer. Merging keeps aliases and history;
+          rejecting keeps them separate.
         </p>
-      </div>
-      <ul className="grid gap-3">
-        {pendingCompanies.map(({ company, candidates }) => (
-          <li
-            className="surface-card-tint grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) p-4"
-            data-company-merge-review={company.id}
-            key={company.id}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="grid gap-1">
-                <p className="font-semibold text-(--text-headline)">
-                  {company.canonicalName}
-                </p>
-                <p className="text-(length:--text-tiny) text-foreground-muted">
-                  {company.aliases.map((alias) => alias.alias).join(", ") ||
-                    "No aliases yet"}
-                </p>
-              </div>
-              <Button
-                onClick={() =>
-                  props.onNavigate(`/job-finder/companies/${company.id}`)
-                }
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Review
-              </Button>
-            </div>
-            <ul className="grid gap-2">
-              {candidates.map((candidate) => (
-                <li
-                  className="flex flex-wrap items-start justify-between gap-3 rounded-(--radius-field) border border-border-subtle px-3 py-2"
-                  data-company-merge-candidate={candidate.candidateCompanyId}
-                  key={candidate.candidateCompanyId}
+        <ul className="grid gap-3">
+          {pendingCompanies.map(({ company, candidates }) => (
+            <li
+              className="surface-card-tint grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) p-4"
+              data-company-merge-review={company.id}
+              key={company.id}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="grid gap-1">
+                  <p className="font-semibold text-(--text-headline)">
+                    {company.canonicalName}
+                  </p>
+                  <p className="text-(length:--text-tiny) text-foreground-muted">
+                    {company.aliases.map((alias) => alias.alias).join(", ") ||
+                      "No aliases yet"}
+                  </p>
+                </div>
+                <Button
+                  onClick={() =>
+                    props.onNavigate(`/job-finder/companies/${company.id}`)
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
                 >
-                  <div className="grid min-w-0 flex-1 gap-1">
-                    <p className="text-(length:--text-small) font-medium leading-5 text-foreground">
-                      Possible match:{" "}
-                      {companyById.get(candidate.candidateCompanyId)
-                        ?.canonicalName ?? candidate.candidateCompanyId}
-                    </p>
-                    <p className="text-(length:--text-small) leading-5 text-foreground">
-                      {candidate.reason}
-                    </p>
-                    <p className="text-(length:--text-tiny) text-foreground-muted">
-                      Merging would combine every job, application, contact,
-                      note, and evidence record into one company.
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button
-                      disabled={props.isPending(company.id)}
-                      onClick={() => {
-                        void props.onReview({
-                          companyId: company.id,
-                          candidateId: candidate.candidateCompanyId,
-                          decision: "rejected",
-                        });
-                      }}
-                      pending={props.isPending(company.id)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      disabled={props.isPending(company.id)}
-                      onClick={() => {
-                        void props.onReview({
-                          companyId: company.id,
-                          candidateId: candidate.candidateCompanyId,
-                          decision: "accepted",
-                        });
-                      }}
-                      pending={props.isPending(company.id)}
-                      size="sm"
-                      type="button"
-                      variant="secondary"
-                    >
-                      Merge
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-      <CollectionPagination
-        itemLabel="merge candidates"
-        onPageChange={setPage}
-        page={currentPage}
-        pageSize={COLLECTION_PAGE_SIZE}
-        totalCount={pendingCandidates.length}
-      />
-    </section>
+                  Review
+                </Button>
+              </div>
+              <ul className="grid gap-2">
+                {candidates.map((candidate) => (
+                  <li
+                    className="flex flex-wrap items-start justify-between gap-3 rounded-(--radius-field) border border-border-subtle px-3 py-2"
+                    data-company-merge-candidate={candidate.candidateCompanyId}
+                    key={candidate.candidateCompanyId}
+                  >
+                    <div className="grid min-w-0 flex-1 gap-1">
+                      <p className="text-(length:--text-small) font-medium leading-5 text-foreground">
+                        Possible match:{" "}
+                        {companyById.get(candidate.candidateCompanyId)
+                          ?.canonicalName ?? candidate.candidateCompanyId}
+                      </p>
+                      <p className="text-(length:--text-small) leading-5 text-foreground">
+                        {candidate.reason}
+                      </p>
+                      <p className="text-(length:--text-tiny) text-foreground-muted">
+                        Merging would combine every job, application, contact,
+                        note, and evidence record into one company.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        disabled={props.isPending(company.id)}
+                        onClick={() => {
+                          void props.onReview({
+                            companyId: company.id,
+                            candidateId: candidate.candidateCompanyId,
+                            decision: "rejected",
+                          });
+                        }}
+                        pending={props.isPending(company.id)}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Reject
+                      </Button>
+                      <Button
+                        disabled={props.isPending(company.id)}
+                        onClick={() => {
+                          void props.onReview({
+                            companyId: company.id,
+                            candidateId: candidate.candidateCompanyId,
+                            decision: "accepted",
+                          });
+                        }}
+                        pending={props.isPending(company.id)}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Merge
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+        <CollectionPagination
+          itemLabel="merge candidates"
+          onPageChange={setPage}
+          page={currentPage}
+          pageSize={COLLECTION_PAGE_SIZE}
+          totalCount={pendingCandidates.length}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -377,6 +379,7 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const autoRefreshed = useRef(false);
 
   const jobById = useMemo(
     () => indexCompanyJobs(props.discoveryJobs),
@@ -418,6 +421,18 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, pageCount));
   }, [pageCount]);
+
+  // The list is built from saved jobs and applications; with none built yet
+  // the screen builds it once itself instead of asking for a button press.
+  const needsFirstBuild =
+    !props.isLoading &&
+    listableCompanies.length === 0 &&
+    (props.hasSavedJobs ?? props.discoveryJobs.length > 0);
+  useEffect(() => {
+    if (!needsFirstBuild || autoRefreshed.current) return;
+    autoRefreshed.current = true;
+    void props.onRefresh().catch(() => undefined);
+  }, [needsFirstBuild, props.onRefresh]);
 
   if (props.isLoading) {
     return (
@@ -483,25 +498,27 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
         </p>
       ) : null}
 
-      <MergeReviewSection
-        companies={props.companies}
-        isPending={props.isMergePending}
-        onNavigate={props.onNavigate}
-        onReview={props.onReviewCompanyMerge}
-      />
-
-      {listableCompanies.length === 0 ? (
+      {listableCompanies.length === 0 &&
+      (props.isRefreshPending ||
+        (needsFirstBuild && !autoRefreshed.current)) ? (
+        <EmptyState
+          className="min-h-40 px-5 py-6"
+          title="Listing your employers"
+          description="Building the list from your saved jobs and applications."
+        />
+      ) : listableCompanies.length === 0 ? (
         <div className="grid gap-3">
           <EmptyState
             className="min-h-40 px-5 py-6"
-            title="No companies reconciled yet"
-            description="This is where the employers from your saved jobs and started applications appear. Choose Refresh from jobs and applications to build the list from what you already have."
+            title="No companies yet"
+            description="Employers from your saved jobs and applications appear here."
           />
           <div className="flex justify-center">
             <Button
               onClick={handleRefresh}
               pending={props.isRefreshPending}
               type="button"
+              variant="outline"
             >
               Refresh from jobs and applications
             </Button>
@@ -556,6 +573,13 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
           )}
         </>
       )}
+
+      <MergeReviewSection
+        companies={props.companies}
+        isPending={props.isMergePending}
+        onNavigate={props.onNavigate}
+        onReview={props.onReviewCompanyMerge}
+      />
     </section>
   );
 }

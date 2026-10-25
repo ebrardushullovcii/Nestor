@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+
 import {
   JobFinderResumeWorkspaceSchema,
   resolveEffectiveResumeTailoringStrength,
@@ -12,15 +15,8 @@ import {
   type TailoringMode,
   type WorkHistoryReviewSuggestion,
 } from "@nestor/contracts";
-import { createMatchAssessmentAsync } from "./matching";
-import {
-  createMatchAssessmentContextFingerprint,
-  createMatchAssessmentPostingFingerprint,
-} from "./match-assessment-session";
-import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
-import { jobNeedsFitJudgment } from "./fit-judgment";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
-import { readPlanAssessment, withPlanAssessment } from "./plan-assessment";
+import { readPlanAssessment } from "./plan-assessment";
 import { fnv1a32 } from "@nestor/core";
 import {
   buildResumeRenderDocument,
@@ -199,9 +195,15 @@ export async function sanitizeAndCheckResumeDraft(
     fixGeneratedLines?: boolean;
     signal?: AbortSignal;
     getRemainingBudgetMs?: () => number;
+    /** False keeps the verdicts already known and asks the model nothing. */
+    askModel?: boolean;
   } = {},
 ): Promise<ResumeDraft> {
-  const sanitized = sanitizeResumeDraft(input);
+  const sanitize = async (draft: ResumeDraft) =>
+    ctx.resumeDraftProcessor
+      ? await ctx.resumeDraftProcessor.sanitize({ ...input, draft })
+      : sanitizeResumeDraft({ ...input, draft });
+  const sanitized = await sanitize(input.draft);
   const tailoringStrength = await resolveEffectiveResumeTailoringStrengthForJob(
     ctx,
     input.job.id,
@@ -211,6 +213,7 @@ export async function sanitizeAndCheckResumeDraft(
     job: input.job,
     profile: input.profile,
     tailoringStrength,
+    ...(options.askModel === false ? { askModel: false } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.getRemainingBudgetMs
       ? { getRemainingBudgetMs: options.getRemainingBudgetMs }
@@ -220,13 +223,16 @@ export async function sanitizeAndCheckResumeDraft(
     ...checkInput,
     draft: sanitized,
   });
-  return options.fixGeneratedLines
-    ? withResumeClaimFixes({
-        ...checkInput,
-        draft: checked,
-        stretchesAreThePersons: tailoringStrength === "aggressive",
-      })
-    : checked;
+  if (!options.fixGeneratedLines) return checked;
+  const fixed = await withResumeClaimFixes({
+    ...checkInput,
+    draft: checked,
+    stretchesAreThePersons: tailoringStrength === "aggressive",
+  });
+  // Settling can empty a summary that sanitizing fills with the person's own.
+  // Export sanitizes the saved draft and refuses it when the content moves,
+  // so the saved draft has to be sanitized last too.
+  return fixed === checked ? fixed : sanitize(fixed);
 }
 
 function countVisibleEntries(draft: ResumeDraft): number {
@@ -488,16 +494,19 @@ export async function assertResumeProfileRevisionCurrent(
 export async function loadResumeWorkspaceState(
   ctx: WorkspaceServiceContext,
   jobId: string,
+  yieldBetweenReads = false,
 ): Promise<LoadedResumeWorkspaceState> {
   const templates = ctx.documentManager.listResumeTemplates();
-  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] =
-    await Promise.all([
-      ctx.repository.getProfileWithRevision(),
-      ctx.repository.getSettings(),
-      ctx.repository.listSavedJobsByIds([jobId]),
-      ctx.repository.getTailoredAssetByJobId(jobId),
-      ctx.repository.getResumeDraftByJobId(jobId),
-    ]);
+  const profilePromise = ctx.repository.getProfileWithRevision();
+  if (yieldBetweenReads) await yieldToEventLoop();
+  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] = await Promise.all([
+    profilePromise,
+    ctx.repository.getSettings(),
+    ctx.repository.listSavedJobsByIds([jobId]),
+    ctx.repository.getTailoredAssetByJobId(jobId),
+    ctx.repository.getResumeDraftByJobId(jobId),
+  ]);
+  if (yieldBetweenReads) await yieldToEventLoop();
   const settings = normalizeJobFinderSettings(rawSettings, templates);
   const job = savedJobs.find((entry) => entry.id === jobId);
 
@@ -550,7 +559,9 @@ export async function ensureResumeDraft(
     job: state.job,
     profile: state.profile,
   });
-  const validation = validateResumeDraft({
+  const validation = await (
+    ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+  )({
     draft: sanitizedDraft,
     job: state.job,
     profile: state.profile,
@@ -653,13 +664,43 @@ export async function previewResumeDraft(
   signal?: AbortSignal,
 ): Promise<JobFinderResumePreview> {
   throwIfResumePreviewAborted(signal);
-  const state = await loadResumeWorkspaceState(ctx, draft.jobId);
+  const state = await loadResumeWorkspaceState(ctx, draft.jobId, true);
   throwIfResumePreviewAborted(signal);
   await assertResumeProfileRevisionCurrent(
     ctx,
     state.profileRevision,
     "preparing this resume preview",
   );
+  // Opening the studio, coming back to it and pressing Refresh render the
+  // same draft again; each render checked every line and built the page
+  // (0.15-0.3 s of the app's main thread). The answer for the same draft,
+  // stored draft, profile revision, settings, templates and job is reused.
+  const previewKey = createHash("sha256")
+    .update(JSON.stringify(draft))
+    .update(
+      JSON.stringify([
+        state.draft
+          ? [
+              state.draft.id,
+              state.draft.updatedAt,
+              state.draft.status,
+              state.draft.approvedAt,
+              state.draft.approvedExportId,
+            ]
+          : null,
+        state.profileRevision,
+        state.settings,
+        state.templates.map(({ id, label }) => [id, label]),
+      ]),
+    )
+    .update(JSON.stringify(state.job))
+    .digest("base64url");
+  const previews =
+    rememberedPreviews.get(ctx) ?? new Map<string, JobFinderResumePreview>();
+  rememberedPreviews.set(ctx, previews);
+  const remembered = previews.get(previewKey);
+  if (remembered) return remembered;
+
   const persistedDraft = state.draft
     ? normalizeResumeDraftTemplate(state.draft, state.templates)
     : null;
@@ -694,13 +735,21 @@ export async function previewResumeDraft(
             ? "Unsaved changes differ from the last approved export. Save and export a fresh PDF before applying."
             : null,
         } satisfies ResumeDraft);
-  const sanitizedDraft = await sanitizeAndCheckResumeDraft(ctx, {
-    draft: normalizedDraft,
-    job: state.job,
-    profile: state.profile,
-  });
+  // The live preview follows typing, so it stays deterministic: lines keep
+  // the verdicts they already have and new wording is checked on save.
+  const sanitizedDraft = await sanitizeAndCheckResumeDraft(
+    ctx,
+    {
+      draft: normalizedDraft,
+      job: state.job,
+      profile: state.profile,
+    },
+    { askModel: false, ...(signal ? { signal } : {}) },
+  );
   const renderedAt = new Date().toISOString();
-  const validation = validateResumeDraft({
+  const validation = await (
+    ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+  )({
     draft: sanitizedDraft,
     job: state.job,
     profile: state.profile,
@@ -726,7 +775,7 @@ export async function previewResumeDraft(
     "completing this resume preview",
   );
 
-  return {
+  const result: JobFinderResumePreview = {
     draftId: sanitizedDraft.id,
     revisionKey: createDraftRevisionKey(sanitizedDraft),
     html: preview.html,
@@ -744,7 +793,21 @@ export async function previewResumeDraft(
       entryCount: countVisibleEntries(sanitizedDraft),
     },
   };
+  previews.delete(previewKey);
+  previews.set(previewKey, result);
+  for (const key of previews.keys()) {
+    if (previews.size <= REMEMBERED_PREVIEWS) break;
+    previews.delete(key);
+  }
+  return result;
 }
+
+/** Recent previews kept per workspace (each is one rendered page of HTML). */
+const REMEMBERED_PREVIEWS = 8;
+const rememberedPreviews = new WeakMap<
+  WorkspaceServiceContext,
+  Map<string, JobFinderResumePreview>
+>();
 
 export async function fetchAndPersistResearch(
   ctx: WorkspaceServiceContext,
@@ -821,15 +884,6 @@ export async function fetchAndPersistResearch(
 
   return refreshedArtifacts;
 }
-
-interface ResumeListingCheck {
-  state: "checking" | "failed" | "complete";
-  key: string;
-}
-const resumeListingChecks = new WeakMap<
-  WorkspaceServiceContext,
-  Map<string, ResumeListingCheck>
->();
 
 const comparisonLanguages = new WeakMap<
   WorkspaceServiceContext,
@@ -958,15 +1012,10 @@ export async function buildResumeWorkspace(
   ctx: WorkspaceServiceContext,
   jobId: string,
 ): Promise<JobFinderResumeWorkspace> {
-  const listingGeneration = ctx.listingAssessmentGenerationRef?.current ?? 0;
-  const isCurrentListingCheck = () =>
-    listingGeneration === (ctx.listingAssessmentGenerationRef?.current ?? 0) &&
-    !ctx.isWorkspaceClosing?.();
   const {
     job: initialJob,
     draft,
     profile,
-    profileRevision,
     tailoredAsset,
   } = await ensureResumeDraft(ctx, jobId);
   const [
@@ -996,90 +1045,9 @@ export async function buildResumeWorkspace(
     ? searchPreferencesForCampaignRun(activePlan)
     : profilePreferences;
   const job = readPlanAssessment(initialJob, planId);
-  const checks =
-    resumeListingChecks.get(ctx) ?? new Map<string, ResumeListingCheck>();
-  resumeListingChecks.set(ctx, checks);
-  const contextFingerprint = createMatchAssessmentContextFingerprint(
-    profile,
-    searchPreferences,
-  );
-  const postingFingerprint = createMatchAssessmentPostingFingerprint(
-    createMatchAssessmentPostingInput(job),
-  );
-  const checkKey = `${listingGeneration}:${planId ?? ""}:${contextFingerprint}:${postingFingerprint}`;
-  let check = checks.get(jobId);
-  if (
-    job.matchAssessment.requirementsSource !== "model" ||
-    jobNeedsFitJudgment(job, contextFingerprint) ||
-    (planId && !job.planAssessments?.[planId])
-  ) {
-    if (!check || check.key !== checkKey) {
-      check = { state: "checking", key: checkKey };
-      checks.set(jobId, check);
-      const runningCheck = check;
-      void (async () => {
-        try {
-          const check = async (signal?: AbortSignal) => {
-            signal?.throwIfAborted();
-            if (!isCurrentListingCheck()) return;
-            const assessment = await createMatchAssessmentAsync(
-              ctx.aiClient,
-              profile,
-              searchPreferences,
-              job,
-              signal,
-            );
-            await assertResumeProfileRevisionCurrent(
-              ctx,
-              profileRevision,
-              "checking listing requirements",
-              profile,
-            );
-            const [currentPreferences, currentCampaignState] =
-              await Promise.all([
-                ctx.repository.getSearchPreferences(),
-                ctx.repository.getCampaignState(),
-              ]);
-            const currentPlan = currentCampaignState?.campaigns.find(
-              (plan) => plan.id === planId,
-            );
-            const currentGoals = currentPlan
-              ? searchPreferencesForCampaignRun(currentPlan)
-              : currentPreferences;
-            if (
-              createMatchAssessmentContextFingerprint(profile, currentGoals) !==
-              createMatchAssessmentContextFingerprint(
-                profile,
-                searchPreferences,
-              )
-            ) {
-              throw new Error("Search goals changed during the listing check.");
-            }
-            signal?.throwIfAborted();
-            if (!isCurrentListingCheck()) return;
-            await ctx.repository.commitSavedJobDelta({
-              updateJobIds: [jobId],
-              update: (current) =>
-                current.id === jobId &&
-                createMatchAssessmentPostingFingerprint(
-                  createMatchAssessmentPostingInput(current),
-                ) === postingFingerprint
-                  ? withPlanAssessment(current, planId, assessment)
-                  : current,
-            });
-            runningCheck.state = "complete";
-          };
-          if (ctx.withListingAssessmentSlot)
-            await ctx.withListingAssessmentSlot(check);
-          else await check();
-        } catch {
-          runningCheck.state = "failed";
-        } finally {
-          if (isCurrentListingCheck()) ctx.onListingAssessmentFinished?.();
-        }
-      })();
-    }
-  }
+  // The listing's full read runs when the person asks for it (Read and
+  // assess) or when a resume is written; opening the workspace or the
+  // assistant reading the resume does not spend a model call on it.
 
   const normalizedExports = exports.map((artifact) => ({
     ...artifact,
@@ -1136,10 +1104,6 @@ export async function buildResumeWorkspace(
       : storedValidation;
 
   return JobFinderResumeWorkspaceSchema.parse({
-    listingCheckState:
-      check?.state === "checking" || check?.state === "failed"
-        ? check.state
-        : null,
     job,
     draft: {
       ...draft,

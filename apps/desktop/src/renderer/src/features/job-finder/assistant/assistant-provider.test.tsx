@@ -142,4 +142,24 @@ describe("assistant context capture in the provider", () => {
     });
     expect(captured!.list?.selectedIds).toEqual(["a"]);
   });
+
+  it("peeks the record the screen would send as this, for the header", () => {
+    function Sources() {
+      const value = useAssistant();
+      value?.registerContext("screen", () => ({
+        focus: { kind: "job", id: "job_1", label: "Designer at Acme" },
+      }));
+      value?.registerContext("panel", () => ({ focus: null }), 1);
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/job-finder/discovery"]}>
+        <AssistantProvider>
+          <Probe />
+          <Sources />
+        </AssistantProvider>
+      </MemoryRouter>,
+    );
+    expect(assistant?.peekFocus()?.label).toBe("Designer at Acme");
+  });
 });

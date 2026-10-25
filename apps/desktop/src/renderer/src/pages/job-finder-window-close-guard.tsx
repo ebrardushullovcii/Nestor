@@ -26,6 +26,61 @@ import {
 
 let mirroredConfirmation: JobFinderLeaveConfirmation | null = null;
 
+/** Saves a pending edit now; resolves false when the save failed. */
+type PendingCloseSave = () => Promise<boolean>;
+
+/**
+ * Edits that save themselves shortly after typing (Resume Studio) and have
+ * not saved yet. A close waits for them to save instead of asking.
+ */
+const pendingCloseSaves = new Map<symbol, PendingCloseSave>();
+
+/** What main was last told; a close decision in progress holds it. */
+let sentBlocked = false;
+let closeDecisionHeld = false;
+
+function syncCloseGuardState(): void {
+  if (closeDecisionHeld) {
+    // Dropping protection mid-decision would cancel the close being saved.
+    return;
+  }
+  const blocked = mirroredConfirmation !== null || pendingCloseSaves.size > 0;
+  if (blocked === sentBlocked) {
+    return;
+  }
+  sentBlocked = blocked;
+
+  try {
+    void window.nestor.window.setCloseGuardState({ blocked });
+  } catch {
+    // Renderer tests run without the preload bridge; protection state is
+    // meaningless there because no native window can close.
+  }
+}
+
+/**
+ * Registers (or with `null` clears) an edit that saves itself and is not
+ * saved yet, so closing the window saves it first.
+ */
+export function setPendingCloseSave(
+  key: symbol,
+  save: PendingCloseSave | null,
+): void {
+  if (save) pendingCloseSaves.set(key, save);
+  else pendingCloseSaves.delete(key);
+  syncCloseGuardState();
+}
+
+/** Saves every pending edit; true when all of them saved. */
+async function savePendingEdits(): Promise<boolean> {
+  const results = await Promise.all(
+    [...pendingCloseSaves.values()].map((save) => save().catch(() => false)),
+  );
+  return results.every(Boolean);
+}
+
+const LATEST_EDITS_NOT_SAVED = "Your latest resume edits could not be saved";
+
 export function getJobFinderWindowCloseConfirmation(): JobFinderLeaveConfirmation | null {
   return mirroredConfirmation;
 }
@@ -38,21 +93,8 @@ export function getJobFinderWindowCloseConfirmation(): JobFinderLeaveConfirmatio
 export function applyJobFinderWindowCloseGuard(
   confirmation: JobFinderLeaveConfirmation | null,
 ): void {
-  const wasBlocked = mirroredConfirmation !== null;
   mirroredConfirmation = confirmation;
-
-  if (wasBlocked === (confirmation !== null)) {
-    return;
-  }
-
-  try {
-    void window.nestor.window.setCloseGuardState({
-      blocked: confirmation !== null,
-    });
-  } catch {
-    // Renderer tests run without the preload bridge; protection state is
-    // meaningless there because no native window can close.
-  }
+  syncCloseGuardState();
 }
 
 /**
@@ -64,6 +106,7 @@ export function applyJobFinderWindowCloseGuard(
  */
 type HeldCloseRequest =
   | { kind: "idle" }
+  | { kind: "saving"; requestId: string }
   | { kind: "deferred"; requestId: string }
   | {
       kind: "parked";
@@ -119,22 +162,49 @@ export function JobFinderWindowCloseGuard() {
 
         // Answer from the latest mirrored guard state: clean sessions close
         // immediately; dirty ones wait for the dialog below.
-        const confirmation = getJobFinderWindowCloseConfirmation();
+        const decide = (unsavedEdits: boolean) => {
+          const mirrored = getJobFinderWindowCloseConfirmation();
+          const confirmation: JobFinderLeaveConfirmation | null = unsavedEdits
+            ? {
+                title: "Close Nestor?",
+                description: "Your unsaved changes will be lost.",
+                reasons: [
+                  ...(mirrored?.reasons ?? []),
+                  LATEST_EDITS_NOT_SAVED,
+                ],
+              }
+            : mirrored;
 
-        if (!confirmation) {
-          sendCloseResolution(request.requestId, "proceed");
+          if (!confirmation) {
+            transitionHeld({ kind: "idle" });
+            sendCloseResolution(request.requestId, "proceed");
+            return;
+          }
+
+          transitionHeld(
+            hasOpenJobFinderOverlays()
+              ? { kind: "deferred", requestId: request.requestId }
+              : {
+                  kind: "parked",
+                  requestId: request.requestId,
+                  confirmation,
+                },
+          );
+        };
+
+        if (pendingCloseSaves.size === 0) {
+          decide(false);
           return;
         }
 
-        transitionHeld(
-          hasOpenJobFinderOverlays()
-            ? { kind: "deferred", requestId: request.requestId }
-            : {
-                kind: "parked",
-                requestId: request.requestId,
-                confirmation,
-              },
-        );
+        // Edits typed a moment ago save first; only a failed save asks.
+        transitionHeld({ kind: "saving", requestId: request.requestId });
+        closeDecisionHeld = true;
+        void savePendingEdits().then((saved) => {
+          closeDecisionHeld = false;
+          decide(!saved);
+          syncCloseGuardState();
+        });
       });
     } catch {
       // Bridge unavailable (tests) — no native window can request a close.

@@ -50,12 +50,12 @@ test("reserves space for another form and blocks admission under memory pressure
     });
   expect(
     waitingFormsHaveCapacity(
-      measure(WAITING_FORM_MEMORY_BUDGET - 96 * 1024 * 1024),
+      measure(WAITING_FORM_MEMORY_BUDGET - 256 * 1024 * 1024),
     ),
   ).toBe(true);
   expect(
     waitingFormsHaveCapacity(
-      measure(WAITING_FORM_MEMORY_BUDGET - 95 * 1024 * 1024),
+      measure(WAITING_FORM_MEMORY_BUDGET - 255 * 1024 * 1024),
     ),
   ).toBe(false);
   expect(measure(WAITING_FORM_MEMORY_BUDGET + 1024).overBudget).toBe(true);

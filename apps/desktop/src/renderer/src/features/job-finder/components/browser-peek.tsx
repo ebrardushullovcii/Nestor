@@ -490,7 +490,7 @@ export function BrowserPeek(props: {
         {/* Same collapse as Tasks and Needs you: below 1100px the toolbar has
             to fit beside the section nav, and this label was the one that
             never gave way, so the toolbar overflowed onto "More". */}
-        <span className="browser-trigger-label hidden min-[900px]:inline max-[1099px]:!hidden">
+        <span className="browser-trigger-label hidden min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
           Browser
         </span>
       </button>

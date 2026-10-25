@@ -22,7 +22,13 @@ import {
   type BrowserVisualObservationSet,
 } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+
+// The first import of the runtime loads most of the browser stack; on a busy
+// machine that alone outran the first test's five seconds.
+beforeAll(async () => {
+  await import("./playwright-browser-runtime");
+}, 60_000);
 
 test("navigation failures distinguish an unreachable site from a blocked browser", async () => {
   const { classifyBrowserNavigationFailure } =
@@ -1801,7 +1807,9 @@ describe("playwright browser runtime", () => {
         navigationHostnames: ["example.com"],
         siteLabel: "Sign-in Jobs",
         dedicatedPage: true,
-        onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+        onAutomationPage: (claimedPage) => {
+          claimed.push(claimedPage);
+        },
       });
 
       expect(result.agentMetadata?.parkedTab).toEqual({
@@ -1904,7 +1912,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
 
         expect(result.warning).toBeNull();
@@ -1925,7 +1935,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
         expect(repeated.jobs).toEqual(result.jobs);
         expect(repeated.agentMetadata?.steps).toBe(0);
@@ -1937,6 +1949,103 @@ describe("playwright browser runtime", () => {
       }
     },
   );
+
+  test.each([false, true])("runAgentDiscovery keeps page-reader goals and rejections after a starting navigation (timeout=%s)", async (timeout) => {
+    vi.resetModules();
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-browser-runtime-agent-selection-context-"),
+    );
+    let readBack: Awaited<
+      ReturnType<browserAgent.JobExtractor["extractJobsFromPage"]>
+    > = [];
+    vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof browserAgent>()),
+      runJobSearchAgent: vi.fn(async (input: browserAgent.JobSearchAgentInput) => {
+        readBack = await input.jobExtractor.extractJobsFromPage({
+          pageText: "Senior Engineer at Example",
+          pageUrl: "https://example.com/jobs",
+          pageType: "search_results",
+          maxJobs: 12,
+          selectionContext: '{"targetRoles":["Engineer"]}',
+        });
+        return { jobs: [], steps: 1, incomplete: false, transcriptMessageCount: 2 };
+      }),
+    }));
+    try {
+      const chromeExecutablePath = join(userDataDir, "chrome.exe");
+      await writeFile(chromeExecutablePath, "", "utf8");
+      const debugPort = await reserveFreePort();
+      let pageUrl = "about:blank";
+      const page = {
+        bringToFront: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        evaluate: vi.fn().mockResolvedValue(200),
+        goto: vi.fn().mockImplementation((url: string) => { pageUrl = url; return timeout
+          ? Promise.reject(Object.assign(new Error("Navigation timed out"), { name: "TimeoutError" }))
+          : Promise.resolve({ status: () => 200 }); }),
+        isClosed: () => false,
+        url: () => pageUrl,
+      };
+      const fakeContext = {
+        newPage: vi.fn().mockResolvedValue(page),
+        pages: () => [page],
+      };
+      const fakeBrowser = {
+        close: vi.fn(),
+        contexts: () => [fakeContext],
+        isConnected: () => true,
+        once: vi.fn(() => fakeBrowser),
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({}),
+        } as Response),
+      );
+      execFileMock.mockImplementation((...args: unknown[]) => {
+        maybeInvokeExecFileCallback(args);
+      });
+      spawnMock.mockReturnValue(createMockChildProcess({ pid: 54649 }));
+      connectOverCDPMock.mockResolvedValue(fakeBrowser);
+      const rejected = {
+        ...createTestJob(),
+        searchRejection: { category: "place" as const, reason: "US only." },
+      };
+      const jobExtractor = vi.fn().mockResolvedValue([rejected]);
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
+      const runtime = createBrowserAgentRuntime({
+        userDataDir,
+        chromeExecutablePath,
+        debugPort,
+        jobExtractor,
+      });
+      const discoveryResult = await runtime.runAgentDiscovery!("target_site", {
+        maxSteps: 3,
+        targetJobCount: 1,
+        userProfile: createTestProfile(),
+        searchPreferences: { targetRoles: [], locations: [] },
+        startingUrls: ["https://example.com/jobs"],
+        navigationHostnames: ["example.com"],
+        siteLabel: "Example Jobs",
+      });
+      expect(discoveryResult.warning).toBeNull();
+      expect(page.goto).toHaveBeenCalled();
+      expect(jobExtractor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selectionContext: '{"targetRoles":["Engineer"]}',
+        }),
+      );
+      expect(readBack[0]?.searchRejection).toEqual({
+        category: "place",
+        reason: "US only.",
+      });
+    } finally {
+      vi.doUnmock("@nestor/browser-agent");
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
 
   test("runAgentDiscovery reuses an already-open matching page instead of navigating a blank tab", async () => {
     const userDataDir = await mkdtemp(
@@ -3658,11 +3767,11 @@ describe("managed context active service worker gate", () => {
     const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-reservation-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
-      // A form page, not the idle startup tab (that one may be closed for room).
+      // A blank tab can belong to another worker still opening its page.
       await harness.fakePage.goto("https://held.example/primary");
       const otherPages = Array.from({ length: 5 }, (_, index) => ({
         isClosed: () => false,
-        url: () => `https://held.example/${index}`,
+        url: () => index === 0 ? "about:blank" : `https://held.example/${index}`,
         close: vi.fn().mockResolvedValue(undefined),
       }));
       let resolveNewPage!: (page: typeof harness.secondaryPage) => void;

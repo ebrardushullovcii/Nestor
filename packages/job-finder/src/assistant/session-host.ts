@@ -1,3 +1,4 @@
+import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
@@ -7,11 +8,13 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   createTokenCalibrator,
   estimateJsonTokens,
+  estimateTokens,
   runConversationTurn,
   type AgentLoopMessage,
   type ConversationModel,
   type ConversationTurnEvent,
   type TokenCalibrator,
+  withStatusArgument,
 } from "@nestor/agent-runtime";
 import {
   AssistantNavigationAcknowledgmentSchema,
@@ -59,20 +62,19 @@ import {
   migrateLegacyChats,
 } from "./legacy-migration";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
-import {
-  ASSISTANT_SYSTEM_PROMPT,
-  buildContextBlock,
-  buildProfileDigest,
-} from "./prompt";
+import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
 import { readRunStatus } from "./run-watch";
 import { closeStoppedTurn } from "./turn-closure";
 import { allJobs, createJobCaveats } from "./tools/format";
 import {
   AssistantToolError,
+  assistantModelToolDefinition,
   toConversationTool,
   type AssistantHandleStore,
   type AssistantToolOutputs,
   type AssistantTurnSession,
+  assistantToolGroupValues,
+  type AssistantToolGroup,
 } from "./tool-kit";
 import {
   buildAssistantToolCatalog,
@@ -230,6 +232,7 @@ function titleFrom(text: string): string {
 }
 
 export class AssistantSessionHost {
+  private readonly resolvingProposals = new Map<string, Promise<AssistantMessage>>();
   private readonly navigationRequests = new Map<
     string,
     {
@@ -652,6 +655,10 @@ export class AssistantSessionHost {
       if (run.kind === "discovery") await this.ports.cancelSearch(run.id);
       else if (run.kind === "apply_batch" || run.kind === "apply_run") {
         await this.service.cancelApplyRun(run.id);
+      } else if (run.kind === "apply_queue") {
+        await this.ports.executeAction?.("control-apply-queue", { action: "stop", queueId: run.id });
+      } else if (run.kind === "source_check") {
+        await this.service.cancelSourceDebug(run.id);
       } else if (run.kind === "resume_generation")
         cancelBackgroundBatch(run.id);
     } catch (error) {
@@ -732,12 +739,23 @@ export class AssistantSessionHost {
     ]);
 
     const session = this.createTurnSession(live, handle);
-    const catalog = buildAssistantToolCatalog({
-      mode: this.options.catalogMode ?? "flat",
+    const catalogMode = this.options.catalogMode ?? "grouped";
+    const loadedGroups = new Set<AssistantToolGroup>();
+    const loadedToolNames = new Set<string>();
+    const catalogOptions = {
+      mode: catalogMode,
       browserAvailable: Boolean(this.ports.browser),
       screen: live.sourceMessage?.context?.screen ?? null,
+      onLoadToolNames: (names: readonly string[]) => { for (const name of names) loadedToolNames.add(name); },
+      onLoadGroups: (groups: readonly AssistantToolGroup[]) => {
+        for (const group of groups) loadedGroups.add(group);
+      },
+    };
+    const allTools = buildAssistantToolCatalog({
+      ...catalogOptions,
+      loadedGroups: assistantToolGroupValues,
     });
-    const tools = catalog.map((definition) =>
+    const tools = allTools.map((definition) =>
       this.withOperationRecord(
         toConversationTool(
           definition,
@@ -748,16 +766,15 @@ export class AssistantSessionHost {
         definition.effect,
       ),
     );
-    const toolSchemaTokens = estimateJsonTokens(
-      catalog.map((definition) => ({
-        name: definition.name,
-        description: definition.description,
-        parameters: definition.parameters,
-      })),
-    );
     const calibrator = this.calibratorFor(conversationId);
-    const snapshot = await this.readWorkspaceSnapshot();
-    const systemPrompt = `${ASSISTANT_SYSTEM_PROMPT}\n\n${buildProfileDigest(snapshot)}`;
+    const systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+    const contextTime = this.now();
+    const definitions = () =>
+      buildAssistantToolCatalog({
+        ...catalogOptions,
+        loadedGroups: [...loadedGroups],
+        loadedToolNames: [...loadedToolNames],
+      }).map(assistantModelToolDefinition);
     let lastEstimate = 0;
 
     this.startStallWatch(live);
@@ -766,6 +783,7 @@ export class AssistantSessionHost {
       result = await runConversationTurn({
         model: handle.createModel(conversationId),
         tools,
+        getToolDefinitions: definitions,
         signal: live.controller.signal,
         isCurrent: () => live.generation === live.turn.generation,
         ceilings: {
@@ -792,7 +810,7 @@ export class AssistantSessionHost {
             plan: await session.plans.active(),
             grants: await session.grants.list(),
             pendingQuestions: [],
-            now: this.now(),
+            now: contextTime,
           });
           const messages = await assembleModelInput({
             repository: this.repository,
@@ -802,7 +820,9 @@ export class AssistantSessionHost {
             turnMessages,
             contextWindowTokens: handle.capabilities.contextWindowTokens,
             maxOutputTokens: handle.capabilities.maxOutputTokens,
-            toolSchemaTokens,
+            toolSchemaTokens: estimateJsonTokens(
+              definitions().map(withStatusArgument),
+            ),
             calibrator,
             summarize: handle.summarize
               ? (prompt) => handle.summarize!(conversationId, prompt)
@@ -820,10 +840,11 @@ export class AssistantSessionHost {
             budgetOverrideTokens: this.options.budgetOverrideTokens ?? null,
             pinnedAfterSummary: () => this.describeOrderedLists(conversationId),
           });
-          lastEstimate = messages.reduce(
-            (sum, message) => sum + Math.ceil(message.content.length / 3.6) + 6,
-            0,
-          );
+          // Provider usage includes tools too; treating that as message-only
+          // usage inflated the learned ratio and compacted history too early.
+          lastEstimate =
+            estimateTokens(messages) +
+            estimateJsonTokens(definitions().map(withStatusArgument));
           return messages;
         },
         onEvent: (event) =>
@@ -1348,7 +1369,7 @@ export class AssistantSessionHost {
             resultSummary:
               outcome.kind === "ok"
                 ? outcome.content.split("\n")[0]!.slice(0, 2_000)
-                : null,
+                : outcome.kind === "finish" ? outcome.finish.reason : null,
             endedAt: this.now(),
           });
           return outcome;
@@ -2314,9 +2335,18 @@ export class AssistantSessionHost {
   // Proposals and undo
   // ---------------------------------------------------------------------------
 
-  async resolveProposal(
-    input: AssistantResolveProposalInput,
-  ): Promise<AssistantMessage> {
+  resolveProposal(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+    const key = `${input.conversationId}:${input.proposalId}`;
+    const existing = this.resolvingProposals.get(key);
+    if (existing) return existing;
+    const work = this.resolveProposalOnce(input);
+    this.resolvingProposals.set(key, work);
+    void work.finally(() => this.resolvingProposals.delete(key)).catch(() => undefined);
+    return work;
+  }
+
+  private async resolveProposalOnce(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+    let afterConfirmation: (() => Promise<unknown>) | null = null;
     const message = await this.repository.getMessage(input.messageId);
     if (!message || message.conversationId !== input.conversationId) {
       throw new Error("That message is gone.");
@@ -2378,7 +2408,21 @@ export class AssistantSessionHost {
         (item) => !input.itemIds?.length || input.itemIds.includes(item.id),
       );
       const session = this.detachedSession(input.conversationId, message.id);
-      if (proposal.kind === "profile_operations") {
+      if (proposal.kind === "job_finder_action") {
+        if (proposal.status !== "pending") return message;
+        for (const item of chosen) {
+          const work = () => executeRegisteredAssistantAction(item.payload, {
+            service: this.service, ports: this.ports, session,
+          }, true);
+          const payload = item.payload as { actionId?: string };
+          if (payload.actionId === "reset-workspace" || payload.actionId === "confirm-personal-workspace-restore") {
+            afterConfirmation = work;
+          } else {
+            const result = await work();
+            if (result.status === "refused") throw new Error(result.summary);
+          }
+        }
+      } else if (proposal.kind === "profile_operations") {
         const result = await this.service.applyAssistantProfileOperations({
           operations: chosen.map(
             (item) => item.payload as ProfileCopilotPatchOperation,
@@ -2456,6 +2500,22 @@ export class AssistantSessionHost {
       message: updated,
     });
     this.ports.publishWorkspaceUpdate();
+    // Reset and restore replace this conversation; finish its confirmation first.
+    if (afterConfirmation) {
+      try {
+        const result = await afterConfirmation() as { status?: string; summary?: string };
+        if (result.status === "refused") throw new Error(result.summary);
+      } catch (error) {
+        // A failed replacement keeps the original conversation and its retry card.
+        if (await this.repository.getMessage(message.id)) {
+          const proposal = await this.repository.getProposal(part.proposalId);
+          if (proposal) await this.repository.upsertProposal({ ...proposal, status: "pending", resolvedAt: null });
+          await this.repository.upsertMessage(message);
+          await this.emit(input.conversationId, null, { type: "message_updated", message });
+        }
+        throw error;
+      }
+    }
     return updated;
   }
 

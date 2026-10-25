@@ -1,8 +1,12 @@
-import type { SavedJob } from "@nestor/contracts";
-import type { JobFinderRepository } from "@nestor/db";
+import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
+import { createInMemoryJobFinderRepository, type JobFinderRepository } from "@nestor/db";
+import { copyView } from "@nestor/core";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
-import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
+import {
+  createDiscoverySavedJobWriter,
+  markSupersedingDiscoveryUpdate,
+} from "./discovery-saved-job-writer";
 
 function deferred() {
   let resolve = () => {};
@@ -73,6 +77,101 @@ function harness(size: number) {
 }
 
 describe("discovery saved-job checkpoint writer", () => {
+  test("plan and sighting patches preserve concurrent user and other-plan edits without reading a listing", async () => {
+    const repository = createInMemoryJobFinderRepository(createSeed());
+    const original = (await repository.listSavedJobs())[0]!;
+    const baseline = { ...original };
+    const read = vi.fn(() => { throw new Error("Metadata persistence opened a listing"); });
+    Object.defineProperty(baseline, "description", { enumerable: true, configurable: true, get: read });
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>((input) => repository.commitSavedJobDelta(input));
+    const merge = vi.fn((current: SavedJob) => current);
+    const writer = createDiscoverySavedJobWriter({
+      persistedJobs: [baseline], toStoredJob: (job) => job, merge, commit,
+      persistDiscovery: (update) => repository.commitDiscoveryStateUpdate(update),
+    });
+    await repository.commitSavedJobDelta({ updateJobIds: [original.id], update: (job) => ({
+      ...job, status: "shortlisted", planAssessments: { ...job.planAssessments, concurrent_plan: job.matchAssessment },
+    }) });
+    const intended = copyView(baseline, {
+      lastSeenAt: "2026-10-24T00:00:00.000Z",
+      firstSeenAt: null,
+      planAssessments: { ...baseline.planAssessments, search_plan: baseline.matchAssessment },
+    });
+    writer.stage(intended);
+    await writer.persist();
+    const [input] = commit.mock.calls[0]!;
+    expect(input.updateJobIds).toEqual([]);
+    expect(input.update).toBeUndefined();
+    expect(input.upserts).toEqual([]);
+    expect(input.sightings).toEqual([{ id: original.id, firstSeenAt: null, lastSeenAt: intended.lastSeenAt }]);
+    expect(input.planAssessments).toEqual([{ jobId: original.id, planId: "search_plan", assessment: original.matchAssessment }]);
+    expect(merge).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    const current = (await repository.listSavedJobsByIds([original.id]))[0]!;
+    expect(current.status).toBe("shortlisted");
+    expect(current.planAssessments?.search_plan).toEqual(original.matchAssessment);
+    expect(current.planAssessments?.concurrent_plan).toEqual(original.matchAssessment);
+    expect(current.firstSeenAt).toBeNull();
+    expect(current.lastSeenAt).toBe(intended.lastSeenAt);
+    expect(current.description).toBe(original.description);
+    await writer.persist();
+    expect(commit).toHaveBeenCalledTimes(1);
+    await repository.close();
+  });
+
+  test("a failed metadata commit keeps its patch pending until the atomic retry succeeds", async () => {
+    const baseline = createSeed().savedJobs[0]!;
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(async () => {});
+    commit.mockRejectedValueOnce(new Error("metadata transaction failed"));
+    const writer = createDiscoverySavedJobWriter({ persistedJobs: [baseline], toStoredJob: (job) => job, merge: (current) => current, commit, persistDiscovery: async () => {} });
+    writer.stage(copyView(baseline, { planAssessments: { ...baseline.planAssessments, retry_plan: baseline.matchAssessment } }));
+    await expect(writer.persist()).rejects.toThrow("metadata transaction failed");
+    await writer.persist();
+    expect(commit.mock.calls[1]?.[0].planAssessments).toEqual(commit.mock.calls[0]?.[0].planAssessments);
+    expect(commit.mock.calls[1]?.[0].update).toBeUndefined();
+    await writer.persist();
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
+
+  test("material fields and creating an empty plan map use the complete typed write", async () => {
+    for (const change of [{ description: "Changed listing body" }, { planAssessments: {} }]) {
+      const baseline = { ...createSeed().savedJobs[0]!, planAssessments: undefined };
+      const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(async () => {});
+      const writer = createDiscoverySavedJobWriter({ persistedJobs: [baseline], toStoredJob: (job) => job, merge: (current) => current, commit, persistDiscovery: async () => {} });
+      writer.stage(copyView(baseline, change));
+      await writer.persist();
+      expect(commit.mock.calls[0]?.[0].updateJobIds).toEqual([baseline.id]);
+      expect(commit.mock.calls[0]?.[0].planAssessments).toEqual([]);
+      expect(commit.mock.calls[0]?.[0].sightings).toEqual([]);
+    }
+  });
+
+  test("unchanged lazy detail versions are never opened to compare a checkpoint", async () => {
+    const baseline = createSeed().savedJobs[0]!;
+    const read = vi.fn(() => {
+      throw new Error("Untouched body was opened");
+    });
+    Object.defineProperty(baseline, "description", {
+      enumerable: true,
+      configurable: true,
+      get: read,
+    });
+    const intended = copyView(baseline, {});
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(
+      async () => {},
+    );
+    const writer = createDiscoverySavedJobWriter({
+      persistedJobs: [baseline],
+      toStoredJob: (job) => job,
+      merge: (current) => current,
+      commit,
+      persistDiscovery: async () => {},
+    });
+    writer.stage(intended);
+    await writer.persist();
+    expect(read).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+  });
   test.each([3_000, 10_000])(
     "only reads and copies touched rows with %i saved jobs",
     async (size) => {
@@ -181,5 +280,45 @@ describe("discovery saved-job checkpoint writer", () => {
     expect(h.upsertIds).toEqual([]);
     expect(h.readIds).toEqual([restored.id]);
     expect(h.toStoredJob).toHaveBeenCalledTimes(1);
+  });
+
+  test("saves asked for together share one write, applying the last whole-state update and what follows it", async () => {
+    const template = createSeed().savedJobs[0]!;
+    const written: SavedJob[][] = [];
+    const applied: string[] = [];
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(
+      (input) => {
+        written.push([...(input.upserts ?? [])]);
+        input.updateDiscoveryState?.({} as JobFinderDiscoveryState);
+        return Promise.resolve();
+      },
+    );
+    const writer = createDiscoverySavedJobWriter({
+      persistedJobs: [],
+      toStoredJob: (job) => job,
+      merge: (current) => current,
+      commit,
+      persistDiscovery: () => Promise.resolve(),
+      coalesce: true,
+    });
+    const step = (name: string) => (state: JobFinderDiscoveryState) => {
+      applied.push(name);
+      return state;
+    };
+    writer.stage({ ...template, id: "first_source_job" });
+    const first = writer.persist(markSupersedingDiscoveryUpdate(step("first")));
+    writer.stage({ ...template, id: "second_source_job" });
+    const second = writer.persist(
+      markSupersedingDiscoveryUpdate(step("second")),
+    );
+    const runOnly = writer.persist(step("run state"));
+    await Promise.all([first, second, runOnly]);
+
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(written[0]?.map((job) => job.id).sort()).toEqual([
+      "first_source_job",
+      "second_source_job",
+    ]);
+    expect(applied).toEqual(["second", "run state"]);
   });
 });

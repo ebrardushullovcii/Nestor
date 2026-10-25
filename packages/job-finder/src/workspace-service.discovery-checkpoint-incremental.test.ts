@@ -1,5 +1,10 @@
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import { createFileJobFinderRepository } from "@nestor/db";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createJobFinderWorkspaceService } from "./index";
 import {
   JobPostingSchema,
   DiscoveryRunResultSchema,
@@ -11,7 +16,10 @@ import {
   createAgentAiClient,
   createAgentBrowserRuntime,
   createSeed,
+  createSavedJob,
   createWorkspaceServiceHarness,
+  createDocumentManager,
+  createResearchAdapter,
 } from "./workspace-service.test-support";
 import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
 import * as discoverySavedJobWriter from "./internal/discovery-saved-job-writer";
@@ -84,6 +92,7 @@ function createIncrementalRuntime(input: {
   checkpoints: Array<ReturnType<typeof JobPostingSchema.parse>[]>;
   finalJobs: ReturnType<typeof JobPostingSchema.parse>[];
   failAfterCheckpoints?: boolean;
+  agentMetadata?: { pagesCovered: number; coveredPageUrls?: string[] };
 }): BrowserSessionRuntime {
   return {
     ...createAgentBrowserRuntime([]),
@@ -113,7 +122,7 @@ function createIncrementalRuntime(input: {
         throw new DOMException("Aborted", "AbortError");
       }
 
-      return {
+      return DiscoveryRunResultSchema.parse({
         source,
         startedAt: "2026-03-20T10:00:00.000Z",
         completedAt: "2026-03-20T10:00:05.000Z",
@@ -121,8 +130,8 @@ function createIncrementalRuntime(input: {
         inventoryCompleteness: "partial" as const,
         warning: null,
         jobs: input.finalJobs,
-        agentMetadata: null,
-      };
+        agentMetadata: input.agentMetadata ?? null,
+      });
     },
   };
 }
@@ -149,6 +158,175 @@ function createHarness(seedOverrides?: { discoveryOnly?: boolean }) {
 }
 
 describe("discovery checkpoint incremental persistence", () => {
+  test.each([
+    {
+      checkpoints: 1,
+      agentMetadata: { pagesCovered: 2 },
+    },
+    {
+      checkpoints: 1,
+      agentMetadata: {
+        pagesCovered: 2,
+        coveredPageUrls: [
+          "https://example.com/jobs",
+          "https://example.com/jobs?page=2",
+        ],
+      },
+    },
+    { checkpoints: 2, agentMetadata: { pagesCovered: 2 } },
+  ])(
+    "finishes browser page accounting after frozen checkpoint saves: %j",
+    async ({ checkpoints, agentMetadata }) => {
+      const first = createCollectedJob({ token: "first-page" });
+      const second = createCollectedJob({ token: "second-page" });
+      const events: DiscoveryActivityEvent[] = [];
+      const browserRuntime = createIncrementalRuntime({
+        checkpoints: checkpoints === 1 ? [[first]] : [[first], [first, second]],
+        finalJobs: checkpoints === 1 ? [first] : [first, second],
+        agentMetadata,
+        // Real browser tool calls give the queued checkpoint write time to
+        // finish. A tight fixture loop otherwise accounts pages before save.
+        onCheckpointSaved: async (revision) => {
+          await vi.waitFor(() =>
+            expect(
+              events.filter(
+                (event) =>
+                  event.stage === "persistence" &&
+                  (event.jobsPersisted ?? 0) > 0,
+              ).length,
+            ).toBeGreaterThanOrEqual(revision),
+          );
+        },
+      });
+      const { seed } = createHarness();
+      const directory = await mkdtemp(
+        path.join(os.tmpdir(), "nestor-checkpoint-counts-"),
+      );
+      const repository = await createFileJobFinderRepository({
+        filePath: path.join(directory, "workspace.sqlite"),
+        seed,
+      });
+      try {
+        const workspaceService = createJobFinderWorkspaceService({
+          repository,
+          browserRuntime,
+          aiClient: createAgentAiClient(),
+          documentManager: createDocumentManager(),
+          researchAdapter: createResearchAdapter(),
+          exportFileVerifier: { exists: () => Promise.resolve(true) },
+        });
+        const snapshot = await workspaceService.runDiscoveryForTarget(
+          "target_incremental",
+          (event) => events.push(event),
+          new AbortController().signal,
+        );
+        const run = snapshot.recentDiscoveryRuns[0]!;
+        expect(run.state).toBe("completed");
+        expect(run.targetExecutions[0]!.state).toBe("completed");
+        expect(
+          run.targetExecutions[0]!.sourceCounts!.reduce(
+            (n, row) => n + (row.pagesCovered ?? 0),
+            0,
+          ),
+        ).toBe(2);
+        expect(
+          events.filter(
+            (event) =>
+              event.stage === "persistence" && (event.jobsPersisted ?? 0) > 0,
+          ).length,
+        ).toBeGreaterThanOrEqual(checkpoints);
+      } finally {
+        await repository.close();
+        await rm(directory, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100,
+        });
+      }
+    },
+  );
+  test("reads a completed source while another collects, without applying facts early or reading twice", async () => {
+    const job = createCollectedJob({ token: "read_ahead" });
+    const { seed } = createHarness();
+    seed.searchPreferences.discovery.targets.push({
+      ...seed.searchPreferences.discovery.targets[0]!,
+      id: "target_slow",
+      label: "Slow target",
+      startingUrl: "https://slow.example.test/jobs",
+    });
+    let readDone!: () => void;
+    let slowRuns = 0;
+    const prepared = new Promise<void>((resolve) => {
+      readDone = resolve;
+    });
+    const browserRuntime: BrowserSessionRuntime = {
+      ...createAgentBrowserRuntime([]),
+      async runAgentDiscovery(source, options) {
+        const slow = options.siteLabel === "Slow target";
+        if (slow) {
+          await prepared;
+          if (++slowRuns === 1) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            const saved = await repository.listSavedJobs();
+            expect(
+              saved.find((row) => row.sourceJobId === job.sourceJobId)
+                ?.description,
+            ).toBe(job.description);
+            expect(
+              saved.find((row) => row.sourceJobId === job.sourceJobId)
+                ?.listingDetailFetch,
+            ).toBeNull();
+          }
+        }
+        return {
+          source,
+          startedAt: "2026-03-20T10:00:00.000Z",
+          completedAt: "2026-03-20T10:00:05.000Z",
+          querySummary: "Read ahead fixture",
+          inventoryCompleteness: "complete",
+          warning: null,
+          jobs: slow ? [] : [job],
+          agentMetadata: null,
+        };
+      },
+    };
+    const fetchListingHtml = vi.fn((url: string) =>
+      Promise.resolve({
+        status: 200,
+        html: "<p>Build and operate a design system with product teams.</p>",
+        finalUrl: url,
+      }),
+    );
+    const aiClient = {
+      ...createAgentAiClient(),
+      extractJobsFromPage: () => {
+        readDone();
+        return Promise.resolve([
+          {
+            ...job,
+            description:
+              "Build and operate a design system with product teams. Own delivery, design reviews, accessibility and prototyping across web and native applications.",
+          },
+        ]);
+      },
+    };
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime,
+      aiClient,
+      fetchListingHtml,
+    });
+    await workspaceService.runAgentDiscovery();
+    const saved = await repository.listSavedJobs();
+    expect(
+      saved.find((row) => row.sourceJobId === job.sourceJobId)?.description,
+    ).toContain("Own delivery");
+    expect(fetchListingHtml).toHaveBeenCalledOnce();
+    await workspaceService.runAgentDiscovery();
+    expect(fetchListingHtml).toHaveBeenCalledOnce();
+  }, 15_000);
+
   test("keeps checkpoint jobs and records a blocked source even when detail retrieval returns partial jobs", async () => {
     const job = createCollectedJob({ token: "before_bot_check" });
     const runtime = createIncrementalRuntime({
@@ -224,6 +402,77 @@ describe("discovery checkpoint incremental persistence", () => {
       parkedTab: { tabId: "tab_bot_check" },
     });
   });
+
+  test("read-ahead and final enrichment share sixty reads when a source keeps more jobs", async () => {
+    const jobs = Array.from({ length: 75 }, (_, index) =>
+      createCollectedJob({ token: `bounded_read_${index}` }),
+    );
+    const { seed } = createHarness();
+    const older = Array.from({ length: 6 }, (_, index) =>
+      createSavedJob({
+        ...createSeed().savedJobs[0]!,
+        id: `older_${index}`,
+        sourceJobId: `older_${index}`,
+        canonicalUrl: `https://archive.example.test/old/${index}`,
+        status: "discovered",
+        detailQuality: "card_only",
+        listingDetailFetch: null,
+        provenance: [],
+      }),
+    );
+    seed.savedJobs = older;
+    const byUrl = new Map(
+      [...jobs, ...older].map((job) => [job.canonicalUrl, job]),
+    );
+    const fetchListingHtml = vi.fn((url: string) =>
+      Promise.resolve({
+        status: 200,
+        html: "<p>Own a product design system and lead delivery across teams.</p>",
+        finalUrl: url,
+      }),
+    );
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime: createIncrementalRuntime({
+        checkpoints: [],
+        finalJobs: jobs,
+      }),
+      fetchListingHtml,
+      aiClient: {
+        ...createAgentAiClient(),
+        extractJobsFromPage: (input) =>
+          Promise.resolve([
+            {
+              ...byUrl.get(input.pageUrl)!,
+              description:
+                "Own the design system across web and native products. Lead design reviews, prototyping, accessibility, and delivery with engineers and product managers.",
+            },
+          ]),
+      },
+    });
+    const initial = await workspaceService.getWorkspaceSnapshot();
+    const plan = initial.campaigns[0]!;
+    await repository.saveCampaignState({
+      activeCampaignId: plan.id,
+      notifications: [],
+      campaigns: [{ ...plan, jobIds: older.map((job) => job.id) }],
+    });
+    await workspaceService.runDiscoveryForTarget(
+      "target_incremental",
+      () => {},
+      new AbortController().signal,
+    );
+    expect(fetchListingHtml).toHaveBeenCalledTimes(60);
+    expect(new Set(fetchListingHtml.mock.calls.map(([url]) => url)).size).toBe(
+      60,
+    );
+    const saved = await repository.listSavedJobs();
+    expect(saved).toHaveLength(81);
+    expect(saved.filter((job) => job.listingDetailFetch)).toHaveLength(60);
+    expect(
+      fetchListingHtml.mock.calls.every(([url]) => !url.includes("/old/")),
+    ).toBe(true);
+  }, 15_000);
 
   test("commits distinct checkpoint jobs mid-run and keeps final counts additive for repeated sources", async () => {
     const jobA = createCollectedJob({ token: "a" });

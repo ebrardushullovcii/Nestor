@@ -7,17 +7,22 @@ import {
   screen,
 } from "@testing-library/react";
 import type { SavedJob } from "@nestor/contracts";
-import { afterEach, expect, it, vi } from "vitest";
-import { DiscoveryAssessmentContinuation } from "./discovery-assessment-continuation";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { isDiscoveryUncheckedResult } from "./discovery-result-groups";
+import {
+  DiscoveryAssessmentContinuation,
+  resetDiscoveryAutoJudgeForTests,
+} from "./discovery-assessment-continuation";
 
+beforeEach(() => resetDiscoveryAutoJudgeForTests());
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
-it("offers a bounded continuation and shows progress while a listing is being read", async () => {
-  const jobs = Array.from(
-    { length: 130 },
+function unreadJobs(count: number) {
+  return Array.from(
+    { length: count },
     (_, index) =>
       ({
         id: `unread_${index}`,
@@ -25,166 +30,9 @@ it("offers a bounded continuation and shows progress while a listing is being re
         matchAssessment: { judgment: null },
       }) as SavedJob,
   );
-  let release: () => void = () => undefined;
-  const onAssess = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
-  render(
-    <DiscoveryAssessmentContinuation
-      jobs={jobs}
-      isSearchRunning={false}
-      onAssess={onAssess}
-    />,
-  );
+}
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "Assess next 20 listings" }),
-  );
-  expect(onAssess).toHaveBeenCalledWith("unread_0");
-  expect(
-    screen.getByText(/Assessing listings · 0 of 20 finished/),
-  ).toBeTruthy();
-  await act(() => {
-    release();
-    return Promise.resolve();
-  });
-  expect(onAssess).toHaveBeenCalledWith("unread_1");
-  expect(
-    screen.getByText(/Assessing listings · 1 of 20 finished/),
-  ).toBeTruthy();
-});
-
-it("does not offer another assessment while discovery is running", () => {
-  const job = {
-    id: "unread",
-    discoveryMethod: "browser_agent",
-    matchAssessment: {},
-  } as SavedJob;
-  render(
-    <DiscoveryAssessmentContinuation
-      jobs={[job]}
-      isSearchRunning
-      onAssess={vi.fn()}
-    />,
-  );
-  expect(screen.queryByRole("button")).toBeNull();
-});
-
-it("keeps the whole-plan count while the next twenty begin with the visible page", async () => {
-  const jobs = Array.from(
-    { length: 100 },
-    (_, index) =>
-      ({
-        id: `unread_${index}`,
-        discoveryMethod: "browser_agent",
-        matchAssessment: { score: 0, judgment: null },
-      }) as SavedJob,
-  );
-  const onAssess = vi.fn(() => Promise.resolve());
-  render(
-    <DiscoveryAssessmentContinuation
-      jobs={jobs}
-      preferredJobs={[jobs[90]!, jobs[91]!, jobs[90]!]}
-      isSearchRunning={false}
-      onAssess={onAssess}
-      onJudgeAll={() => Promise.resolve()}
-    />,
-  );
-  expect(
-    screen.getByRole("button", { name: "Judge fit for all 100" }),
-  ).toBeTruthy();
-  await act(async () => {
-    fireEvent.click(
-      screen.getByRole("button", { name: "Assess next 20 listings" }),
-    );
-    await Promise.resolve();
-  });
-  expect(onAssess).toHaveBeenCalledTimes(20);
-  expect(onAssess.mock.calls.slice(0, 3)).toEqual([
-    ["unread_90"],
-    ["unread_91"],
-    ["unread_0"],
-  ]);
-});
-
-it("explains navigation and stops before the next listing after unmount", async () => {
-  let release!: () => void;
-  const onAssess = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
-  const jobs = ["visible-first", "second"].map(
-    (id) =>
-      ({
-        id,
-        discoveryMethod: "browser_agent",
-        matchAssessment: { judgment: null },
-      }) as SavedJob,
-  );
-  const view = render(
-    <DiscoveryAssessmentContinuation
-      jobs={jobs}
-      isSearchRunning={false}
-      onAssess={onAssess}
-    />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Assess next 2 listings" }),
-  );
-  expect(
-    screen.getByText(
-      /Leaving this page stops the batch after the current listing/,
-    ),
-  ).toBeTruthy();
-  view.unmount();
-  await act(async () => {
-    release();
-    await Promise.resolve();
-  });
-  expect(onAssess).toHaveBeenCalledExactlyOnceWith("visible-first");
-});
-
-it("uses the actual singular count and shows the service failure", async () => {
-  const job = {
-    id: "one",
-    discoveryMethod: "browser_agent",
-    matchAssessment: { judgment: null },
-  } as SavedJob;
-  render(
-    <DiscoveryAssessmentContinuation
-      jobs={[job]}
-      isSearchRunning={false}
-      onAssess={vi
-        .fn()
-        .mockRejectedValue(new Error("The AI is unavailable. Try again."))}
-    />,
-  );
-  await act(() => {
-    fireEvent.click(
-      screen.getByRole("button", { name: "Assess next 1 listing" }),
-    );
-    return Promise.resolve();
-  });
-  expect(screen.getByRole("alert").textContent).toBe(
-    "The AI is unavailable. Try again.",
-  );
-});
-
-it("judges every unjudged job at once and says how many are left", async () => {
-  const jobs = Array.from(
-    { length: 130 },
-    (_, index) =>
-      ({
-        id: `unread_${index}`,
-        discoveryMethod: "browser_agent",
-        matchAssessment: { judgment: null },
-      }) as SavedJob,
-  );
+it("judges jobs without a fit score on its own, once per session", async () => {
   let finish: () => void = () => undefined;
   const onJudgeAll = vi.fn(
     () =>
@@ -192,30 +40,79 @@ it("judges every unjudged job at once and says how many are left", async () => {
         finish = resolve;
       }),
   );
-  render(
+  const view = render(
     <DiscoveryAssessmentContinuation
-      jobs={jobs}
+      uncheckedCount={(unreadJobs(130)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
-      onAssess={vi.fn()}
       onJudgeAll={onJudgeAll}
     />,
   );
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "Judge fit for all 130" }),
-  );
   expect(onJudgeAll).toHaveBeenCalledOnce();
-  expect(screen.getByText(/Judging fit · 130 left/)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Assess next/ })).toBeNull();
-
+  expect(screen.getByRole("status").textContent).toContain(
+    "Judging fit for 130 jobs",
+  );
+  expect(screen.queryByRole("button")).toBeNull();
   await act(() => {
     finish();
     return Promise.resolve();
   });
-  expect(screen.queryByText(/Judging fit ·/)).toBeNull();
+  view.unmount();
+
+  render(
+    <DiscoveryAssessmentContinuation
+      uncheckedCount={(unreadJobs(130)).filter(isDiscoveryUncheckedResult).length}
+      isSearchRunning={false}
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+  expect(onJudgeAll).toHaveBeenCalledOnce();
 });
 
-it("shows backend progress after returning to the page and keeps saved counts visible", () => {
+it("waits for a running search and judges again once it ends", () => {
+  const onJudgeAll = vi.fn(() => new Promise<void>(() => undefined));
+  const view = render(
+    <DiscoveryAssessmentContinuation
+      uncheckedCount={(unreadJobs(3)).filter(isDiscoveryUncheckedResult).length}
+      isSearchRunning
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+  expect(onJudgeAll).not.toHaveBeenCalled();
+  view.rerender(
+    <DiscoveryAssessmentContinuation
+      uncheckedCount={(unreadJobs(3)).filter(isDiscoveryUncheckedResult).length}
+      isSearchRunning={false}
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+  expect(onJudgeAll).toHaveBeenCalledOnce();
+});
+
+it("offers one quiet retry when the pass could not run", async () => {
+  const onJudgeAll = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Fit judging is unavailable right now."))
+    .mockResolvedValueOnce(undefined);
+  render(
+    <DiscoveryAssessmentContinuation
+      uncheckedCount={(unreadJobs(1)).filter(isDiscoveryUncheckedResult).length}
+      isSearchRunning={false}
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+  await act(() => Promise.resolve());
+  expect(screen.getByRole("status").textContent).toContain(
+    "1 job has no fit score yet",
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await Promise.resolve();
+  });
+  expect(onJudgeAll).toHaveBeenCalledTimes(2);
+});
+
+it("shows backend progress after returning to the page", () => {
   const fitJudgmentProgress = {
     planId: "plan",
     phase: "judging" as const,
@@ -225,22 +122,23 @@ it("shows backend progress after returning to the page and keeps saved counts vi
     startedAt: "2026-10-13T01:00:00.000Z",
     updatedAt: "2026-10-13T01:00:30.000Z",
   };
+  const onJudgeAll = vi.fn(() => Promise.resolve());
   const view = render(
     <DiscoveryAssessmentContinuation
-      jobs={[]}
+      uncheckedCount={(unreadJobs(110)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={fitJudgmentProgress}
+      onJudgeAll={onJudgeAll}
     />,
   );
+  // A pass already running in main is not started again.
+  expect(onJudgeAll).not.toHaveBeenCalled();
   expect(screen.getByRole("status").textContent).toContain(
-    "20 of 130 scores saved",
-  );
-  expect(screen.getByRole("status").textContent).toContain(
-    "Waiting for the model",
+    "Judging fit · 20 of 130 scored",
   );
   view.rerender(
     <DiscoveryAssessmentContinuation
-      jobs={[]}
+      uncheckedCount={(unreadJobs(90)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={{
         ...fitJudgmentProgress,
@@ -248,12 +146,10 @@ it("shows backend progress after returning to the page and keeps saved counts vi
         processed: 40,
         phase: "saving",
       }}
+      onJudgeAll={onJudgeAll}
     />,
   );
-  expect(screen.getByRole("status").textContent).toContain(
-    "40 of 130 scores saved",
-  );
-  expect(screen.getByRole("status").textContent).toContain("Saving this batch");
+  expect(screen.getByRole("status").textContent).toContain("40 of 130 scored");
 });
 
 it("keeps elapsed time moving while a model batch is pending", () => {
@@ -261,7 +157,7 @@ it("keeps elapsed time moving while a model batch is pending", () => {
   vi.setSystemTime(new Date("2026-10-13T01:00:00.000Z"));
   render(
     <DiscoveryAssessmentContinuation
-      jobs={[]}
+      uncheckedCount={([]).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={{
         planId: "plan",
@@ -274,8 +170,20 @@ it("keeps elapsed time moving while a model batch is pending", () => {
       }}
     />,
   );
-  expect(screen.getByText("0s elapsed")).toBeTruthy();
+  expect(screen.getByText("0s")).toBeTruthy();
   void act(() => vi.advanceTimersByTime(4000));
-  expect(screen.getByText("4s elapsed")).toBeTruthy();
-  expect(screen.getByText(/0 of 60 scores saved/)).toBeTruthy();
+  expect(screen.getByText("4s")).toBeTruthy();
+});
+
+it("stays out of the way when every job has a score", () => {
+  const onJudgeAll = vi.fn(() => Promise.resolve());
+  const view = render(
+    <DiscoveryAssessmentContinuation
+      uncheckedCount={([]).filter(isDiscoveryUncheckedResult).length}
+      isSearchRunning={false}
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+  expect(onJudgeAll).not.toHaveBeenCalled();
+  expect(view.container.textContent).toBe("");
 });

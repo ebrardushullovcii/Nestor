@@ -49,7 +49,13 @@ import type {
   FinishInBrowserHandler,
   FinishInBrowserInput,
 } from "./applications-detail-panel-recovery-actions-section";
+import { openApplicationForm } from "./application-form-open";
+import { resolveApplicationMoveBack } from "./application-move-back";
 import { ApplicationsDetailPanelRecoverySections } from "./applications-detail-panel-recovery-sections";
+import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
 import {
   ApplicationsDetailPanelSubmitApprovalSection,
   isAwaitingPreparationApproval,
@@ -61,10 +67,16 @@ import {
   listPendingApplicationQuestions,
 } from "./applications-status";
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
+import {
+  describeApplicationQueueHold,
+  type ApplicationQueueHold,
+} from "./application-queue-hold";
 
 function buildLiveAssistantApplicationHref(input: {
   record: ApplicationRecord;
-  relatedJob: JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number] | null;
+  relatedJob:
+    | JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]
+    | null;
 }) {
   const { record, relatedJob } = input;
   const employerLine = formatApplicationEmployerLine({
@@ -79,7 +91,8 @@ function buildLiveAssistantApplicationHref(input: {
       ? `Latest application activity: ${record.lastActionLabel}`
       : null,
     relatedJob?.matchAssessment.judgment?.summary
-      ? `Job fit: ${relatedJob.matchAssessment.judgment.summary}` : null,
+      ? `Job fit: ${relatedJob.matchAssessment.judgment.summary}`
+      : null,
   ].filter((entry): entry is string => Boolean(entry));
   const params = new URLSearchParams({
     source: "job_application",
@@ -100,6 +113,10 @@ function buildLiveAssistantApplicationHref(input: {
 
 interface ApplicationsDetailPanelProps {
   progressNow?: number | undefined;
+  /** Jobs the Apply queue set aside before they started, by job id. */
+  queueHolds?: ReadonlyMap<string, ApplicationQueueHold>;
+  /** Applications -> Shortlisted, shown only for an unsent application. */
+  onReturnToShortlist?: (record: ApplicationRecord) => void;
   answerDraft?: QuestionAnswerDraft | undefined;
   answerDraftRestored?: boolean;
   onAnswerDraftChange?: (draft: QuestionAnswerDraft) => void | Promise<void>;
@@ -108,7 +125,9 @@ interface ApplicationsDetailPanelProps {
   customStages?: readonly ApplicationCrmStageDefinition[];
   /** What each result's run is doing, so a planned job is never "Filling in". */
   readApplyRunContext?: (
-    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
+    result:
+      | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+      | null,
   ) => ApplyRunContext | null;
   applyRunDetails: ApplyRunDetails | null;
   applyRunDetailsTarget: {
@@ -133,6 +152,8 @@ interface ApplicationsDetailPanelProps {
   hasAnyApplications: boolean;
   hasVisibleApplications: boolean;
   isApplyPending: boolean;
+  /** All work is paused: no control here may start an application. */
+  applicationWorkPaused?: boolean;
   isApplyRequestPending: (requestId: string) => boolean;
   isApplyRunPending: (runId: string) => boolean;
   onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
@@ -193,6 +214,9 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  queueHolds,
+  onReturnToShortlist,
+  applyMode,
   activeFilter,
   customStages,
   readApplyRunContext,
@@ -210,6 +234,7 @@ export function ApplicationsDetailPanel({
   hasAnyApplications,
   hasVisibleApplications,
   isApplyPending,
+  applicationWorkPaused = false,
   isApplyRequestPending,
   isApplyRunPending,
   onApproveApplyRun,
@@ -246,6 +271,14 @@ export function ApplicationsDetailPanel({
   onPrepareApplicationAgain,
 }: ApplicationsDetailPanelProps) {
   const visibleApplyResult = effectiveSelectedApplyResult;
+  const pageStateResults = useMemo(
+    () => (visibleApplyResult ? [visibleApplyResult] : []),
+    [visibleApplyResult],
+  );
+  const applicationPageState =
+    useApplicationPageStates(pageStateResults).get(
+      visibleApplyResult?.id ?? "",
+    ) ?? null;
   const pendingQuestions = selectedRecord
     ? listPendingApplicationQuestions({
         applicationAttempts,
@@ -283,6 +316,7 @@ export function ApplicationsDetailPanel({
           draftRestored: answerDraftRestored ?? false,
           jobLocation: selectedRecordJob?.location,
           questions: pendingQuestions,
+          runSends: selectedRecord?.automationMode === "autonomous_submit",
           isPending: isUserActionPending?.(answerRequest.id) ?? false,
           waitingForTurn: selectedRecordJob
             ? isSameSiteApplicationActive(
@@ -394,15 +428,22 @@ export function ApplicationsDetailPanel({
             ? ("positive" as const)
             : selectedApplyState.cancelledByPerson
               ? ("muted" as const)
-              : selectedApplyState.kind === "could_not_apply"
-                ? ("critical" as const)
-                : selectedApplyState.kind === "needs_you"
-                  ? ("warning" as const)
-                  : ("active" as const),
+              : selectedApplyState.formClosed
+                ? ("warning" as const)
+                : selectedApplyState.kind === "could_not_apply"
+                  ? ("critical" as const)
+                  : selectedApplyState.kind === "needs_you"
+                    ? ("warning" as const)
+                    : ("active" as const),
       }
     : selectedRecord
       ? getApplicationStagePresentation(selectedRecord)
       : null;
+  // Set aside by the Apply queue before it started: not being prepared.
+  const selectedQueueHold =
+    selectedRecord && !visibleApplyResult
+      ? queueHolds?.get(selectedRecord.jobId)
+      : undefined;
   const selectedStage = selectedHiringStage ?? selectedApplyStage;
   // Prepare-only runs never reach a "submitted" status, so the tracker stage
   // the user records by hand is the path that actually enables this.
@@ -452,11 +493,15 @@ export function ApplicationsDetailPanel({
   const recoverySection = selectedRecord ? (
     <ApplicationsDetailPanelRecoverySections
       progressNow={progressNow}
+      queueHold={queueHolds?.get(selectedRecord.jobId) ?? null}
+      company={selectedRecord.company}
+      {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
       dailyPreparationCapacity={dailyPreparationCapacity}
       excludedQueueRecoveryEntries={excludedQueueRecoveryEntries}
       isApplyPending={isApplyPending}
+      applicationWorkPaused={applicationWorkPaused}
       onStartApplyCopilot={onStartApplyCopilot}
       {...(onReviewResumePdf ? { onReviewResumePdf } : {})}
       onStartAutoApplyQueue={onStartAutoApplyQueue}
@@ -503,6 +548,7 @@ export function ApplicationsDetailPanel({
       }
       selectedRun={selectedRun}
       visibleApplyRunContext={readApplyRunContext?.(visibleApplyResult) ?? null}
+      applicationPageState={applicationPageState}
       visibleApplyResult={visibleApplyResult}
     />
   ) : null;
@@ -536,13 +582,16 @@ export function ApplicationsDetailPanel({
           {/* Reference links, not actions: text links read as "also
               available" rather than as one more thing to do. */}
           <Button
+            aria-label={`View ${selectedRecordEmployerDisplay} in Companies`}
             className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
             onClick={() => onOpenCompany(selectedRecordCompanyId)}
             size="compact"
             type="button"
             variant="link"
           >
-            View {selectedRecordEmployerDisplay} in Companies
+            {/* The employer is named just above; a long name ran past the
+                panel edge here. */}
+            View in Companies
           </Button>
           {canPrepareInterview ? (
             <Button
@@ -581,8 +630,38 @@ export function ApplicationsDetailPanel({
           </a>
         </Button>
       ) : null}
+      {onReturnToShortlist &&
+      resolveApplicationMoveBack(selectedRecord, selectedApplyState?.kind) ===
+        "to_shortlisted" ? (
+        <div>
+          <Button
+            className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
+            onClick={() => onReturnToShortlist(selectedRecord)}
+            size="compact"
+            type="button"
+            variant="link"
+          >
+            Move back to Shortlisted
+          </Button>
+        </div>
+      ) : null}
     </>
   ) : null;
+
+  const headerStatusLabel = showNotSubmittedPill
+    ? "Not sent"
+    : selectedRecord
+      ? (selectedHiringStage?.label ??
+        (visibleApplyResult
+          ? selectedApplyStage?.label
+          : selectedQueueHold
+            ? describeApplicationQueueHold(
+                selectedQueueHold,
+                selectedRecord.company,
+              )
+            : applicationCrmStageLabelForView(selectedRecord, customStages)) ??
+        null)
+      : "Nothing selected";
 
   return (
     <section
@@ -605,11 +684,11 @@ export function ApplicationsDetailPanel({
                 </span>
               ) : null}
             </>
-          ) : (
+          ) : hasAnyApplications ? (
             <strong className="text-(length:--text-body) text-muted-foreground">
               Nothing selected
             </strong>
-          )}
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {showNotSubmittedPill ? (
@@ -620,17 +699,11 @@ export function ApplicationsDetailPanel({
               Not sent
             </StatusBadge>
           ) : null}
-          {!showNotSubmittedPill ? (
+          {/* "Nothing selected" as a heading and again as a badge said it
+              twice; the badge is a record's stage, so only a record has one. */}
+          {!showNotSubmittedPill && selectedRecord ? (
             <StatusBadge tone={selectedStage ? selectedStage.tone : "muted"}>
-              {selectedRecord
-                ? (selectedHiringStage?.label ??
-                  (visibleApplyResult
-                    ? selectedApplyStage?.label
-                    : applicationCrmStageLabelForView(
-                        selectedRecord,
-                        customStages,
-                      )))
-                : "Nothing selected"}
+              {headerStatusLabel ?? ""}
             </StatusBadge>
           ) : null}
         </div>
@@ -657,6 +730,7 @@ export function ApplicationsDetailPanel({
             visibleApplyRunId={visibleApplyRunId}
             plannedStanding={selectedApplyState?.plannedStanding ?? null}
             showFactStrip={!needsPrimaryRecovery}
+            headerStatusLabel={headerStatusLabel}
             waitingOnSafetyLimitReview={
               selectedRun?.state === "paused_for_user_review" &&
               visibleApplyResult?.state === "planned"
@@ -690,6 +764,7 @@ export function ApplicationsDetailPanel({
               visibleApplyResult={visibleApplyResult}
               visibleApplyRunId={visibleApplyRunId}
               plannedStanding={selectedApplyState?.plannedStanding ?? null}
+              headerStatusLabel={headerStatusLabel}
               waitingOnSafetyLimitReview={
                 selectedRun?.state === "paused_for_user_review" &&
                 visibleApplyResult?.state === "planned"
@@ -701,12 +776,16 @@ export function ApplicationsDetailPanel({
           {applyPresentation?.state === "awaiting_your_review"
             ? null
             : documentsSection}
+          {/* Same spacing as the sections above: History and details sat
+              flush against Activity, with a wide gap before them. */}
           <div
+            className="grid min-w-0 gap-5"
             data-application-review-target
             ref={reviewTargetRef}
             tabIndex={-1}
           >
             <ApplicationsDetailPanelActivitySections
+              {...(applyMode ? { applyMode } : {})}
               applyRunDetailsError={applyRunDetailsError}
               applyRunDetailsStatus={applyRunDetailsStatus}
               applyRunHistory={applyRunHistory}
@@ -724,25 +803,30 @@ export function ApplicationsDetailPanel({
                 : {})}
               onOpenApplicationPage={
                 onFinishInBrowser && visibleApplyResult
-                  ? async () => {
-                      const outcome = await onFinishInBrowser({
-                        jobId: visibleApplyResult.jobId,
-                        resultId: visibleApplyResult.id,
-                        runId: visibleApplyResult.runId,
-                        applicationRecordId: selectedRecord.id,
-                        destinationUrl:
-                          selectedApplyRunDetails?.reviewCard?.pageUrl ??
-                          getApplyResultDestinationUrl(
-                            visibleApplyResult.privacyReceipt,
-                          ),
-                      });
+                  ? async (onReopenProgress) => {
+                      // The same open the status block and the row use, so
+                      // all three show the same step and outcome.
+                      const outcome = await openApplicationForm(
+                        onFinishInBrowser,
+                        {
+                          jobId: visibleApplyResult.jobId,
+                          resultId: visibleApplyResult.id,
+                          runId: visibleApplyResult.runId,
+                          applicationRecordId: selectedRecord.id,
+                          destinationUrl:
+                            selectedApplyRunDetails?.reviewCard?.pageUrl ??
+                            getApplyResultDestinationUrl(
+                              visibleApplyResult.privacyReceipt,
+                            ),
+                        },
+                        onReopenProgress,
+                      );
                       if (outcome?.kind !== "opened_application_page")
                         throw new Error(
-                          "The application page could not be opened. Prepare it again.",
+                          outcome?.kind === "failed" && outcome.reason
+                            ? outcome.reason
+                            : "The application page could not be opened. Prepare it again.",
                         );
-                      // The page is focused, but the browser may be minimized:
-                      // show it, as Open the Job Finder browser does.
-                      void window.nestor?.browser?.command({ type: "open" });
                     }
                   : undefined
               }
@@ -753,7 +837,8 @@ export function ApplicationsDetailPanel({
                 ? { onPrepareApplicationAgain }
                 : {})}
               applicationPageClosed={
-                selectedRecord?.nextActionLabel === "Prepare again"
+                selectedRecord?.nextActionLabel === "Prepare again" ||
+                pageNeedsPreparing(applicationPageState ?? undefined)
               }
               selectedApplyRunDetails={selectedApplyRunDetails}
               selectedApplyRunId={selectedApplyRunId}

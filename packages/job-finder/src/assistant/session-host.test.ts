@@ -1,6 +1,7 @@
 import {
   AssistantConversationSchema,
   AssistantMessageSchema,
+  AssistantProposalSchema,
   ApplicationPrivacyReceiptSchema,
   ApplicationRecordSchema,
   ApplyJobResultSchema,
@@ -380,11 +381,126 @@ describe("assistant session host", () => {
     ).mockResolvedValue(current);
     world.harness.workspaceService.getWorkspaceProjection = () =>
       world.harness.workspaceService.getWorkspaceSnapshot();
-    await sendAndWait(world.host, "Is this resume approved?");
+    await sendAndWait(
+      world.host,
+      "Is this resume approved?",
+      context({
+        focus: { kind: "job", id: current.reviewQueue[0]!.jobId, label: null },
+      }),
+    );
     expect(inputs[0]).toContain('"approved":true');
     expect(inputs[1]).toContain('"approved":false');
     expect(inputs[1]).toContain('"active":true');
     expect(inputs[1]).toContain("Is this resume approved?");
+  });
+
+  it("loads off-screen profile tools and refreshes facts without changing the system prefix", async () => {
+    const systems: string[] = [];
+    const offered: string[][] = [];
+    const userInputs: string[] = [];
+    let step = 0;
+    const world = setup({
+      modelHandle: {
+        ...createScriptedAssistantModelHandle(),
+        createModel: () => ({
+          chatWithTools(messages, definitions) {
+            systems.push(messages[0]!.content);
+            offered.push(
+              definitions.map((definition) => definition.function.name),
+            );
+            userInputs.push(
+              messages.filter((message) => message.role === "user").at(-1)!
+                .content,
+            );
+            const actions = [
+              {
+                name: "load_tools",
+                arguments: JSON.stringify({ groups: ["profile", "files"] }),
+              },
+              {
+                name: "edit_profile",
+                arguments: JSON.stringify({
+                  summary: "Change headline",
+                  mode: "apply",
+                  operations: [
+                    {
+                      operation: "replace_identity_fields",
+                      value: { headline: "Synthetic engineer" },
+                    },
+                  ],
+                }),
+              },
+            ];
+            const action = actions[step++];
+            return Promise.resolve(
+              action
+                ? {
+                    toolCalls: [
+                      {
+                        id: `call_${step}`,
+                        type: "function" as const,
+                        function: action,
+                      },
+                    ],
+                  }
+                : { content: "Your headline is saved. Undo is available." },
+            );
+          },
+        }),
+      },
+    });
+    const sent = await sendAndWait(
+      world.host,
+      "Change my headline to Synthetic engineer",
+      context({ screen: "home" }),
+    );
+    expect(offered[0]).toContain("load_tools");
+    expect(offered[0]).toContain("edit_profile");
+    expect(offered[0]).not.toContain("import_resume");
+    expect(offered[1]).toContain("import_resume");
+    expect(offered[1]).toContain("edit_profile");
+    expect(offered[2]).toContain("edit_profile");
+    expect(new Set(systems)).toEqual(new Set([ASSISTANT_SYSTEM_PROMPT]));
+    expect(userInputs[2]).toContain("Headline: Synthetic engineer");
+    const view = await world.host.readConversation({
+      conversationId: sent.conversationId,
+    });
+    const change = view.messages
+      .at(-1)!
+      .parts.find((part) => part.type === "change");
+    expect(change?.type).toBe("change");
+    if (change?.type !== "change") throw new Error("Expected Undo receipt");
+    await world.host.undoChange(sent.conversationId, change.receiptId);
+    expect(
+      (await world.harness.workspaceService.getWorkspaceSnapshot()).profile
+        .headline,
+    ).not.toBe("Synthetic engineer");
+  });
+
+  it.each(["candidate-assets:delete", "reset-workspace"])("accepts %s once, with confirmation saved before a workspace replacement", async (actionId) => {
+    const { host, repository, ports } = setup();
+    const conversation = await host.createConversation();
+    const proposal = AssistantProposalSchema.parse({ id: "proposal", conversationId: conversation.id, messageId: "proposal_message", kind: "job_finder_action", summary: "Confirm action", items: [{ id: "item", label: "Confirm action", payload: { actionId, input: actionId === "reset-workspace" ? {} : { assetId: "asset" } } }], createdAt: new Date().toISOString() });
+    await repository.upsertProposal(proposal);
+    await repository.upsertMessage(AssistantMessageSchema.parse({ id: "proposal_message", conversationId: conversation.id, role: "assistant", origin: "sidebar", parts: [{ type: "proposal", proposalId: proposal.id, kind: proposal.kind, summary: proposal.summary, status: "pending", source: { store: "assistant" } }], createdAt: new Date().toISOString() }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const execute = vi.fn(async () => {
+      if (actionId === "reset-workspace") expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
+      await gate;
+      return true;
+    });
+    ports.executeAction = execute;
+    const input = { conversationId: conversation.id, messageId: "proposal_message", proposalId: proposal.id, action: "accept" as const };
+    const first = host.resolveProposal(input);
+    const second = host.resolveProposal(input);
+    await waitFor(() => execute.mock.calls.length, (count) => count === 1);
+    release();
+    await Promise.all([first, second]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    await host.resolveProposal(input);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
   });
 
   it("persists the exact proposed summary on its review card", async () => {
@@ -1705,7 +1821,7 @@ describe("assistant session host", () => {
     ]);
     const toolSchemaTokens = estimateJsonTokens(
       buildAssistantToolCatalog({
-        mode: "flat",
+        mode: "grouped",
         browserAvailable: false,
         screen: "profile",
       }).map((definition) => ({

@@ -4,7 +4,11 @@ import {
   createSavedJob,
   createTempRepository,
 } from "../file-repository.test-support";
-import { createSavedJobProjectionReader } from "./saved-job-projection";
+import {
+  createSavedJobProjectionReader,
+  readSavedJobProjectionChanges,
+} from "./saved-job-projection";
+import { ensureSavedJobRelations } from "./saved-job-storage";
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -17,10 +21,11 @@ function fixture() {
   db.exec(
     "CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE progress (value INTEGER)",
   );
+  ensureSavedJobRelations(db);
   const put = (id: string, title = id) =>
     db
       .prepare(
-        "INSERT INTO saved_jobs VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+        "INSERT INTO saved_jobs(id, value) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
       )
       .run(id, JSON.stringify(createSavedJob({ id, title })));
   return { db, put, read: createSavedJobProjectionReader(db) };
@@ -37,11 +42,22 @@ test("progress-only writes reuse rows; a job change replaces only its immutable 
   expect(() => first[0]!.keySkills.push("accidental edit")).toThrow();
   put("a", "Changed");
   const changed = await read();
+  expect(
+    readSavedJobProjectionChanges(first, changed)?.rows.map((row) => row.id),
+  ).toEqual(["a"]);
   expect(changed[0]).toBe(first[0]);
   expect(changed[1]?.title).toBe("Changed");
+  expect(changed[1]?.provenance).toBe(first[1]?.provenance);
+  expect(changed[1]?.keySkills).toBe(first[1]?.keySkills);
+  expect(changed[1]?.matchAssessment).toBe(first[1]?.matchAssessment);
   expect(first[1]?.title).toBe("a");
   db.prepare("DELETE FROM saved_jobs WHERE id=?").run("B");
-  expect((await read()).map((job) => job.id)).toEqual(["a"]);
+  const removed = await read();
+  expect(removed.map((job) => job.id)).toEqual(["a"]);
+  expect(readSavedJobProjectionChanges(changed, removed)?.removedIds).toEqual([
+    "B",
+  ]);
+  expect(readSavedJobProjectionChanges(first, changed)).toBeNull();
 });
 
 test("a sighting's copy of the listing and an equal plan verdict share the job's values", async () => {
@@ -71,14 +87,12 @@ test("a sighting's copy of the listing and an equal plan verdict share the job's
       other: { ...base.matchAssessment, score: base.matchAssessment.score - 1 },
     },
   });
-  db.prepare("INSERT INTO saved_jobs VALUES (?, ?)").run(
+  db.prepare("INSERT INTO saved_jobs(id, value) VALUES (?, ?)").run(
     "a",
     JSON.stringify(job),
   );
   const [row] = await read();
-  expect(row?.provenance[0]?.listingFacts?.description).toBe(
-    base.description,
-  );
+  expect(row?.provenance[0]?.listingFacts?.description).toBe(base.description);
   expect(row?.planAssessments?.same).toBe(row?.matchAssessment);
   expect(row?.planAssessments?.other).not.toBe(row?.matchAssessment);
   expect(row?.planAssessments?.other?.score).toBe(
@@ -123,12 +137,13 @@ test("a post-commit caller cannot join an older projection still parsing its row
   const { put, read } = fixture();
   for (let i = 0; i < 250; i++) put(String(i));
   const reading = read();
-  put("249", "Updated during parsing");
+  // This row was read in the first page, regardless of the page's size.
+  put("0", "Updated during parsing");
   const afterCommit = read();
   expect(afterCommit).not.toBe(reading);
   const initial = await reading;
-  expect(initial.find((job) => job.id === "249")?.title).toBe("249");
-  expect((await afterCommit).find((job) => job.id === "249")?.title).toBe(
+  expect(initial.find((job) => job.id === "0")?.title).toBe("0");
+  expect((await afterCommit).find((job) => job.id === "0")?.title).toBe(
     "Updated during parsing",
   );
   expect(await read()).toBe(await afterCommit);
@@ -138,7 +153,10 @@ test("corrupt changed rows fail instead of serving stale data", async () => {
   const { db, put, read } = fixture();
   put("a");
   await read();
-  db.prepare("UPDATE saved_jobs SET value=? WHERE id=?").run("{}", "a");
+  db.prepare("UPDATE saved_jobs SET value=? WHERE id=?").run(
+    "invalid JSON",
+    "a",
+  );
   await expect(read()).rejects.toThrow("Corrupted persisted row");
   put("a", "Repaired");
   expect((await read())[0]?.title).toBe("Repaired");
@@ -180,4 +198,72 @@ test("another connection's commits invalidate cached rows and ordinary reads sta
     await repository.close();
     await fixture.cleanup();
   }
+});
+
+test("a full read pages through the jobs, and a write between pages lands on the next read", async () => {
+  const { put, read } = fixture();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`);
+  const reading = read();
+  // While the first pages are parsed, a job in a later page changes.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  put("job-0600", "Changed while reading");
+  const first = await reading;
+  expect(first).toHaveLength(650);
+  const next = await read();
+  expect(next.find((job) => job.id === "job-0600")?.title).toBe(
+    "Changed while reading",
+  );
+  expect(next.map((job) => job.id)).toEqual(first.map((job) => job.id));
+});
+
+test("many changed jobs are read again in pages, and a write between pages lands on the next read", async () => {
+  const { put, read } = fixture();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`);
+  const first = await read();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`, `Edited ${index}`);
+  const reading = read();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  put("job-0600", "Changed while reading");
+  const second = await reading;
+  expect(second).toHaveLength(650);
+  expect(second[1]?.title).toBe("Edited 1");
+  // The rows published before this read finished stay as they were.
+  expect(first[1]?.title).toBe("job-0001");
+  const third = await read();
+  expect(third.find((job) => job.id === "job-0600")?.title).toBe(
+    "Changed while reading",
+  );
+  expect(third[1]).toBe(second[1]);
+});
+
+test("jobs holding alike values share one frozen copy", async () => {
+  const { put, read } = fixture();
+  put("a");
+  put("b");
+  const [a, b] = await read();
+  expect(a!.normalizedCompensation).toEqual(b!.normalizedCompensation);
+  expect(a!.matchAssessment.dimensions).toBe(b!.matchAssessment.dimensions);
+  expect(a!.matchAssessment.compensationFit).toBe(
+    b!.matchAssessment.compensationFit,
+  );
+  expect(Object.isFrozen(a!.matchAssessment.dimensions)).toBe(true);
+});
+
+test("the cached ids answer only while the cached rows are current", async () => {
+  const { db, put, read } = fixture();
+  put("b");
+  put("a");
+  expect(read.currentIds()).toBeNull();
+  await read();
+  expect(read.currentIds()).toEqual(["a", "b"]);
+  put("c");
+  expect(read.currentIds()).toBeNull();
+  await read();
+  expect(read.currentIds()).toEqual(["a", "b", "c"]);
+  db.exec("BEGIN");
+  expect(read.currentIds()).toBeNull();
+  db.exec("ROLLBACK");
 });

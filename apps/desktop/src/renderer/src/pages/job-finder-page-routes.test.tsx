@@ -412,6 +412,77 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
     expect(onOpenBrowserSession).toHaveBeenCalledTimes(1);
   });
 
+  it("brings a closed form back, reporting each step, before handing it over", async () => {
+    const phases: string[] = [];
+    const order: string[] = [];
+    const onReopenApplicationPage = vi.fn(
+      (
+        resultId: string,
+        onProgress: (progress: {
+          resultId: string;
+          phase: "opening" | "refilling" | "verifying" | "ready";
+        }) => void,
+      ) => {
+        order.push("reopen");
+        for (const phase of [
+          "opening",
+          "refilling",
+          "verifying",
+          "ready",
+        ] as const)
+          onProgress({ resultId, phase });
+        return Promise.resolve({
+          resultId,
+          state: "open" as const,
+          reason: null,
+        });
+      },
+    );
+    const onFocusPreparedApplicationPage = vi.fn(() => {
+      order.push("focus");
+      return Promise.resolve(true);
+    });
+
+    const outcome = await runJobFinderApplicationBrowserHandoff({
+      onFocusPreparedApplicationPage,
+      onOpenBrowserSession: vi.fn(),
+      onPerformUserAction: vi.fn(),
+      readApplicationPageState: (resultId) =>
+        Promise.resolve({ resultId, state: "reopenable", reason: null }),
+      onReopenApplicationPage,
+      onReopenProgress: (phase) => phases.push(phase),
+      requests: [],
+      target,
+    });
+
+    expect(outcome).toEqual({ kind: "opened_application_page" });
+    expect(order).toEqual(["reopen", "focus"]);
+    expect(phases).toEqual(["opening", "refilling", "verifying", "ready"]);
+  });
+
+  it("keeps a form that did not come back saved and does not hand anything over", async () => {
+    const onFocusPreparedApplicationPage = vi.fn(() => Promise.resolve(true));
+
+    const outcome = await runJobFinderApplicationBrowserHandoff({
+      onFocusPreparedApplicationPage,
+      onOpenBrowserSession: vi.fn(),
+      onPerformUserAction: vi.fn(),
+      readApplicationPageState: (resultId) =>
+        Promise.resolve({ resultId, state: "reopenable", reason: null }),
+      onReopenApplicationPage: (resultId) =>
+        Promise.resolve({
+          resultId,
+          state: "reopenable",
+          reason: "reopen_failed",
+        }),
+      requests: [],
+      target,
+    });
+
+    expect(outcome).toMatchObject({ kind: "failed" });
+    expect(onFocusPreparedApplicationPage).not.toHaveBeenCalled();
+  });
+
   it("focuses the exact prepared result when review has no pending step", async () => {
     const onFocusPreparedApplicationPage = vi.fn(() => Promise.resolve(true));
     const onOpenBrowserSession = vi.fn();

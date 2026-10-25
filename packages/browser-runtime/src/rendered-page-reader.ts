@@ -6,7 +6,7 @@ export async function readRenderedPageHtml(
   url: string,
   options: {
     signal?: AbortSignal;
-    onPage?: (page: Page) => void;
+    onPage?: (page: Page) => void | Promise<void>;
   } = {},
 ): Promise<{ html: string; finalUrl: string }> {
   const address = new URL(url);
@@ -23,7 +23,7 @@ export async function readRenderedPageHtml(
   };
   options.signal?.addEventListener("abort", abort, { once: true });
   try {
-    options.onPage?.(page);
+    await options.onPage?.(page);
     options.signal?.throwIfAborted();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
     // Let script-loaded content finish. Busy sites still get a bounded read.

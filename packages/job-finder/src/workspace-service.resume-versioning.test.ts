@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { ResumeDraft } from "@nestor/contracts";
 import { ResumeDraftSchema } from "@nestor/contracts";
 import {
@@ -22,6 +22,103 @@ function findEditableTextSection(
 }
 
 describe("resume draft versioning", () => {
+  test("starts a new autosave revision after two idle minutes", async () => {
+    const { repository, workspaceService } = createWorkspaceServiceHarness();
+    await workspaceService.generateResume("job_ready");
+    let current = (await workspaceService.getResumeWorkspace("job_ready"))
+      .draft;
+    await workspaceService.saveResumeDraft(
+      {
+        ...current,
+        identity: { ...current.identity!, headline: "Before pause" },
+      },
+      "studio",
+    );
+    current = (await workspaceService.getResumeWorkspace("job_ready")).draft;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_001);
+    try {
+      await workspaceService.saveResumeDraft(
+        {
+          ...current,
+          identity: { ...current.identity!, headline: "After pause" },
+        },
+        "studio",
+      );
+      expect(
+        await repository.listResumeDraftRevisions(current.id),
+      ).toHaveLength(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test("groups only consecutive autosaves and restores the exact start of the group", async () => {
+    const { repository, workspaceService } = createWorkspaceServiceHarness();
+    await workspaceService.generateResume("job_ready");
+    const before = await workspaceService.getResumeWorkspace("job_ready");
+    let current = before.draft;
+    for (const headline of ["First edit", "Second edit", "Third edit"]) {
+      await workspaceService.saveResumeDraft(
+        { ...current, identity: { ...current.identity!, headline } },
+        "studio-a",
+      );
+      current = (await workspaceService.getResumeWorkspace("job_ready")).draft;
+    }
+    const grouped = await repository.listResumeDraftRevisions(current.id);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]!.snapshotDraft).toEqual(before.draft);
+    expect(grouped[0]!.afterHash).toBe(buildResumeDraftStateHash(current));
+
+    // A new studio visit starts another undo step even immediately afterwards.
+    await workspaceService.saveResumeDraft(
+      {
+        ...current,
+        identity: { ...current.identity!, headline: "Next visit" },
+      },
+      "studio-b",
+    );
+    expect(await repository.listResumeDraftRevisions(current.id)).toHaveLength(
+      2,
+    );
+    await workspaceService.restoreResumeDraftRevision(
+      "job_ready",
+      grouped[0]!.id,
+    );
+    const restored = (await workspaceService.getResumeWorkspace("job_ready"))
+      .draft;
+    expect(buildResumeDraftStateHash(restored)).toBe(
+      buildResumeDraftStateHash(before.draft),
+    );
+    expect(restored.approvedExportId).toBeNull();
+    expect(restored.status).toBe("needs_review");
+  });
+
+  test("an explicit save ends an autosave group and stale autosaves cannot overwrite it", async () => {
+    const { repository, workspaceService } = createWorkspaceServiceHarness();
+    await workspaceService.generateResume("job_ready");
+    let current = (await workspaceService.getResumeWorkspace("job_ready"))
+      .draft;
+    const edit = (headline: string) => ({
+      ...current,
+      identity: { ...current.identity!, headline },
+    });
+    await workspaceService.saveResumeDraft(edit("Autosaved"), "studio-a");
+    current = (await workspaceService.getResumeWorkspace("job_ready")).draft;
+    const stale = current;
+    await workspaceService.saveResumeDraft(edit("Explicit change"));
+    current = (await workspaceService.getResumeWorkspace("job_ready")).draft;
+    await expect(
+      workspaceService.saveResumeDraft(
+        { ...stale, identity: { ...stale.identity!, headline: "Stale edit" } },
+        "studio-a",
+      ),
+    ).rejects.toThrow("changed before");
+    await workspaceService.saveResumeDraft(edit("After action"), "studio-a");
+    const revisions = await repository.listResumeDraftRevisions(current.id);
+    expect(revisions).toHaveLength(3);
+    expect(revisions[0]!.snapshotDraft).toEqual(current);
+  });
+
   test("returns the committed revision when an edited bullet is trimmed during save", async () => {
     const { workspaceService } = createWorkspaceServiceHarness();
     await workspaceService.generateResume("job_ready");

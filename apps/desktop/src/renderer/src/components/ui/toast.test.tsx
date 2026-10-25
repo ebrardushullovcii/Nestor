@@ -7,7 +7,11 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ToastProvider, useToast } from "./toast";
+import {
+  ToastProvider,
+  useDismissToastsOnScreenChange,
+  useToast,
+} from "./toast";
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -45,6 +49,68 @@ it("keeps bulk Undo available for twenty seconds and holds it on hover", async (
   fireEvent.mouseLeave(screen.getByRole("status"));
   await act(() => vi.advanceTimersByTime(20000));
   expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+});
+
+function ScreenToasts({ screenKey }: { screenKey: string }) {
+  const { showToast } = useToast();
+  useDismissToastsOnScreenChange(screenKey);
+  return (
+    <>
+      <button
+        onClick={() =>
+          showToast({
+            title: "3 jobs added to Shortlisted.",
+            action: { label: "Open Shortlisted", onClick: vi.fn() },
+          })
+        }
+      >
+        Screen news
+      </button>
+      <button
+        onClick={() => showToast({ title: "Search finished", scope: "app" })}
+      >
+        App news
+      </button>
+    </>
+  );
+}
+
+it("drops a screen's toast when the person moves to another screen", async () => {
+  vi.useFakeTimers();
+  const view = render(
+    <ToastProvider>
+      <ScreenToasts screenKey="/job-finder/discovery" />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByText("Screen news"));
+  fireEvent.click(screen.getByText("App news"));
+  await act(() => vi.advanceTimersByTime(1000));
+  expect(screen.getByText("3 jobs added to Shortlisted.")).toBeTruthy();
+
+  view.rerender(
+    <ToastProvider>
+      <ScreenToasts screenKey="/job-finder/review-queue" />
+    </ToastProvider>,
+  );
+
+  // The shortlist news stayed on Find jobs; app-wide news stays.
+  expect(screen.queryByText("3 jobs added to Shortlisted.")).toBeNull();
+  expect(screen.getByText("Search finished")).toBeTruthy();
+});
+
+it("keeps a toast raised by the press that changed screen", () => {
+  const view = render(
+    <ToastProvider>
+      <ScreenToasts screenKey="/job-finder/discovery" />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByText("Screen news"));
+  view.rerender(
+    <ToastProvider>
+      <ScreenToasts screenKey="/job-finder/review-queue" />
+    </ToastProvider>,
+  );
+  expect(screen.getByText("3 jobs added to Shortlisted.")).toBeTruthy();
 });
 
 function mockLayout({

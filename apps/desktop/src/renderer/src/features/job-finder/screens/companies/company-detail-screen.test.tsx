@@ -612,9 +612,9 @@ describe("CompanyDetailScreen", () => {
     expect(screen.getByText("Needs verification")).toBeTruthy();
     expect(screen.getByText("Reported closed")).toBeTruthy();
     expect(screen.getByText("Active but rejected workflow")).toBeTruthy();
-    expect(screen.getByText(/Workflow: Rejected/)).toBeTruthy();
+    expect(screen.getByText(/· Rejected/)).toBeTruthy();
     expect(screen.getByText("Closed but shortlisted workflow")).toBeTruthy();
-    expect(screen.getByText(/Workflow: Shortlisted/)).toBeTruthy();
+    expect(screen.getAllByText(/· Shortlisted/).length).toBeGreaterThan(0);
     expect(screen.getByText("Listing availability is unknown.")).toBeTruthy();
     expect(
       screen.getByText(

@@ -3,6 +3,7 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   JobFinderDiscoveryStateSchema,
+  SourceDebugRunRecordSchema,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "../index";
@@ -49,13 +50,36 @@ function discoveryFixture() {
       },
     ],
     activity: [],
-    summary: { targetsPlanned: 1, outcome: "running" },
+    summary: {
+      targetsPlanned: 1,
+      outcome: "running",
+      sourceHealth: [
+        {
+          targetId: "target_checkpoint",
+          health: "warning",
+          durationMs: 27,
+          warnings: ["Synthetic source problem"],
+        },
+      ],
+    },
   });
   return JobFinderDiscoveryStateSchema.parse({
     ...createSeed().discovery,
     runState: "running",
     activeRun: run,
     recentRuns: [{ ...run, id: "previous_checkpoint", state: "failed" }],
+    recentSourceDebugRuns: [
+      SourceDebugRunRecordSchema.parse({
+        id: "recent_source_problem",
+        targetId: "target_checkpoint",
+        startedAt: "2026-10-13T10:00:00.000Z",
+        updatedAt: "2026-10-13T10:00:00.000Z",
+        targetLabel: "Synthetic source",
+        targetUrl: "https://jobs.example.com",
+        targetHostname: "jobs.example.com",
+        finalSummary: "Synthetic source access prompt",
+      }),
+    ],
     pendingDiscoveryJobs: [
       createSavedJob({ id: "pending_display", title: "Pending listing" }),
     ],
@@ -153,6 +177,43 @@ test("malformed discovery rows fail without disclosing their contents", async ()
   await expect(read()).rejects.toThrow("Corrupted persisted row");
 });
 
+test("bootstrap and recovery checks do not load deferred history, pending jobs or ledger", async () => {
+  const temp = await createTempRepository("nestor-discovery-bootstrap-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  const state = discoveryFixture();
+  await repo.commitDiscoveryStateUpdate(() => state);
+  const raw = new DatabaseSync(temp.filePath);
+  cleanup.push(() => raw.close());
+  for (const row of raw
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type='trigger'
+    AND tbl_name IN ('discovery_runs','discovery_ledger','discovery_pending_jobs')`,
+    )
+    .all())
+    raw.exec(`DROP TRIGGER "${String(row.name).replaceAll('"', '""')}"`);
+  raw.exec("DROP INDEX workspace_ledger_activity_idx");
+  // Deferred corruption must still fail a canonical read, but must not force
+  // the shell or phase check to read unrelated history and listing bodies.
+  raw.exec(`UPDATE discovery_runs SET value='private-invalid-history' WHERE active=0;
+    UPDATE discovery_ledger SET value='private-invalid-ledger';
+    UPDATE discovery_pending_jobs SET value='private-invalid-pending'`);
+  const bootstrap = await repo.readDiscoveryBootstrapProjection();
+  expect(bootstrap.activeRun?.id).toBe(state.activeRun?.id);
+  expect(bootstrap.activeRun?.targetExecutions[0]?.agentCheckpoint).toBeNull();
+  expect(bootstrap).not.toHaveProperty("recentRuns");
+  expect(bootstrap).not.toHaveProperty("discoveryLedger");
+  expect(bootstrap).not.toHaveProperty("pendingDiscoveryJobs");
+  expect(await repo.readDiscoveryRunStates()).toEqual([
+    { state: "running", runPhase: null, isActive: true },
+    { state: "failed", runPhase: null, isActive: false },
+  ]);
+  await expect(async () => repo.getDiscoveryState()).rejects.toThrow(
+    "Corrupted persisted row",
+  );
+});
+
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} discovery display/canonical parity`, () => {
     async function repository(): Promise<JobFinderRepository> {
@@ -171,6 +232,29 @@ for (const storage of ["memory", "file"] as const) {
       await repo.commitDiscoveryStateUpdate(() => canonical);
       const display = await repo.readDiscoveryDisplayProjection();
       expect(await repo.readDiscoveryDisplayProjection()).toBe(display);
+      const home = await repo.readDiscoveryHomeProjection([]);
+      expect(home).toEqual({
+        sessions: display.sessions,
+        runState: display.runState,
+        activeRun: display.activeRun,
+        recentRuns: display.recentRuns,
+        activeSourceDebugRun: display.activeSourceDebugRun,
+        recentSourceDebugRuns: display.recentSourceDebugRuns,
+        listingActivities: [],
+      });
+      expect(home).not.toHaveProperty("discoveryLedger");
+      expect(home).not.toHaveProperty("pendingDiscoveryJobs");
+      const bootstrap = await repo.readDiscoveryBootstrapProjection();
+      expect(bootstrap).toEqual({
+        sessions: display.sessions,
+        runState: display.runState,
+        activeRun: display.activeRun,
+        activeSourceDebugRun: display.activeSourceDebugRun,
+      });
+      expect(await repo.readDiscoveryRunStates()).toEqual([
+        { state: "running", runPhase: null, isActive: true },
+        { state: "failed", runPhase: null, isActive: false },
+      ]);
       expect(
         display.activeRun?.targetExecutions[0]?.agentCheckpoint,
       ).toBeNull();
@@ -282,4 +366,131 @@ test("other connections invalidate discovery display state and reopening retains
   expect((await repo.readDiscoveryDisplayProjection()).runState).toBe(
     "completed",
   );
+});
+
+test("display ledger follows in-place edits, appends, removals and moves in stored order", async () => {
+  const temp = await createTempRepository("nestor-discovery-display-ledger-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  const entry = (id: string, lastSeenAt = "2026-10-13T10:00:01.000Z") =>
+    DiscoveryLedgerEntrySchema.parse({
+      id,
+      source: "target_site",
+      targetId: "target_checkpoint",
+      canonicalUrl: `https://jobs.example.com/roles/${id}`,
+      title: `Listing ${id}`,
+      firstSeenAt: "2026-10-13T10:00:00.000Z",
+      lastSeenAt,
+    });
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: ["a", "b", "c", "d"].map((id) => entry(id)),
+  }));
+  const ids = async () =>
+    (await repo.readDiscoveryDisplayProjection()).discoveryLedger.map(
+      (row) => `${row.id}@${row.lastSeenAt}`,
+    );
+  const canonicalIds = async () =>
+    (await repo.getDiscoveryState()).discoveryLedger.map(
+      (row) => `${row.id}@${row.lastSeenAt}`,
+    );
+  const first = await repo.readDiscoveryDisplayProjection();
+  const unchanged = first.discoveryLedger[0];
+
+  // A sighting rewritten where it stands, and one listing appended.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      ...current.discoveryLedger.map((row) =>
+        row.id === "c" ? entry("c", "2026-10-14T10:00:00.000Z") : row,
+      ),
+      entry("e"),
+    ],
+  }));
+  const second = await repo.readDiscoveryDisplayProjection();
+  expect(second.discoveryLedger[0]).toBe(unchanged);
+  expect(await ids()).toEqual(await canonicalIds());
+  expect(await ids()).toEqual([
+    "a@2026-10-13T10:00:01.000Z",
+    "b@2026-10-13T10:00:01.000Z",
+    "c@2026-10-14T10:00:00.000Z",
+    "d@2026-10-13T10:00:01.000Z",
+    "e@2026-10-13T10:00:01.000Z",
+  ]);
+
+  // A listing seen again moves to the end.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      ...current.discoveryLedger.filter((row) => row.id !== "a"),
+      entry("a", "2026-10-15T10:00:00.000Z"),
+    ],
+  }));
+  expect(await ids()).toEqual(await canonicalIds());
+  expect((await ids()).at(-1)).toBe("a@2026-10-15T10:00:00.000Z");
+
+  // A removal, then a move to the front.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: current.discoveryLedger.filter((row) => row.id !== "b"),
+  }));
+  expect(await ids()).toEqual(await canonicalIds());
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      current.discoveryLedger.at(-1)!,
+      ...current.discoveryLedger.slice(0, -1),
+    ],
+  }));
+  expect((await ids())[0]).toBe("a@2026-10-15T10:00:00.000Z");
+  expect(await ids()).toEqual(await canonicalIds());
+});
+
+test("display refreshes consume repeated changes without losing later edits or caching a rollback", async () => {
+  const temp = await createTempRepository("nestor-discovery-display-repeated-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  await repo.commitDiscoveryStateUpdate(() => discoveryFixture());
+  const db = new DatabaseSync(temp.filePath);
+  cleanup.push(() => db.close());
+  const read = createDiscoveryDisplayProjectionReader(
+    db,
+    createSeed().discovery,
+  );
+  const initial = await read();
+  const title = db.prepare(
+    "UPDATE discovery_ledger SET value = json_set(value, '$.title', ?) WHERE id = 'ledger_display'",
+  );
+  title.run("First synthetic edit");
+  title.run("Latest synthetic edit");
+  const updated = await read();
+  expect(updated.discoveryLedger[0]?.title).toBe("Latest synthetic edit");
+  expect(initial.discoveryLedger[0]?.title).toBe("Ledger listing");
+  expect(await read()).toBe(updated);
+
+  db.exec("BEGIN");
+  title.run("Rolled back synthetic edit");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Rolled back synthetic edit",
+  );
+  db.exec("ROLLBACK");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Latest synthetic edit",
+  );
+  title.run("Next committed synthetic edit");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Next committed synthetic edit",
+  );
+  db.exec("DELETE FROM discovery_ledger WHERE id = 'ledger_display'");
+  expect((await read()).discoveryLedger).toEqual([]);
+  const recreated = {
+    ...discoveryFixture().discoveryLedger[0]!,
+    title: "Recreated synthetic listing",
+  };
+  db.prepare(
+    "INSERT INTO discovery_ledger(id, position, value) VALUES (?, ?, ?)",
+  ).run(recreated.id, 0, JSON.stringify(recreated));
+  expect((await read()).discoveryLedger).toEqual([recreated]);
 });

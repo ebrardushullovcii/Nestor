@@ -45,6 +45,7 @@ function stableStringify(value: unknown): string {
 }
 
 export function deepEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
   return stableStringify(left) === stableStringify(right);
 }
 

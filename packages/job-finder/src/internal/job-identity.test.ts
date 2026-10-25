@@ -28,6 +28,37 @@ function identity(overrides: Partial<JobIdentityInput> = {}): JobIdentityInput {
 }
 
 describe("job identity", () => {
+  test("a frozen query still invalidates cached keys when its listing-link array changes", () => {
+    const stored = identity();
+    const index = createJobIdentityIndex([stored], (value) => value);
+    const links = [stored.canonicalUrl!];
+    const query = Object.freeze(
+      identity({
+        sourceJobId: null,
+        canonicalUrl: "https://other.example.test/unknown",
+        applicationUrl: "https://other.example.test/apply",
+        postedAt: null,
+        postedAtText: null,
+        alternateListingUrls: links,
+      }),
+    );
+    expect(index.find(query)).toBe(stored);
+    links[0] = "https://other.example.test/another";
+    expect(index.find(query)).toBeNull();
+  });
+  test("cached mutable query facts cannot match after their identity changes", () => {
+    const stored = identity();
+    const index = createJobIdentityIndex([stored], (value) => value);
+    const query = { ...stored };
+    expect(index.find(query)).toBe(stored);
+    query.sourceJobId = "different";
+    query.canonicalUrl = "https://example.test/different";
+    query.applicationUrl = "https://example.test/different/apply";
+    query.title = "Office Administrator";
+    expect(index.find(query)).toBeNull();
+    Object.assign(query, stored);
+    expect(index.find(query)).toBe(stored);
+  });
   test("matches an aggregator listing to its ATS listing through the employer application URL", () => {
     const aggregator = identity();
     const index = createJobIdentityIndex([aggregator], (value) => value);

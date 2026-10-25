@@ -13,6 +13,17 @@ import {
 import { quarantineAgentAnswers } from "../agent-answer-migration";
 import { migrateDiscoveryStorage } from "./discovery-storage";
 import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
+import { ensureResumeApprovalState } from "./resume-approval-state";
+import { ensureWorkspaceReadIndex } from "./workspace-read-index";
+import {
+  migrateResumeStorage,
+  retireResumeReadValidation,
+} from "./resume-storage-migration";
+import { ensureResumeSourceTables } from "./resume-draft-storage";
+import { migratePreferenceStorage } from "./preference-storage";
+import { migrateSavedJobStorage } from "./saved-job-storage-migration";
+import { ensureSavedJobRelations } from "./saved-job-storage";
+import { withStorageMigrationBackups } from "./storage-migration-backup";
 
 /**
  * Exact column shape every application-authority table must have. The assert
@@ -239,7 +250,20 @@ function readLegacyDiscoveryRuns(
   );
 }
 
-export function runMigrations(database: DatabaseSync): void {
+export function runMigrations(
+  database: DatabaseSync,
+  options: { deferEvidenceConversion?: boolean } = {},
+): void {
+  function ensurePreparedApplicationForms(): void {
+    database.exec(`CREATE TABLE IF NOT EXISTS prepared_application_forms (
+      id TEXT PRIMARY KEY, value TEXT NOT NULL
+    )`);
+    database
+      .prepare(
+        "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+      )
+      .run(21, "durable_prepared_application_forms");
+  }
   function hasTable(tableName: string): boolean {
     return Boolean(
       database
@@ -2071,8 +2095,8 @@ export function runMigrations(database: DatabaseSync): void {
       assertApplicationAnswerSnapshotTableShape();
     }
 
-    migrateDiscoveryStorage(database);
-    ensureTailoredAssetJobIndex(database);
+    ensurePreparedApplicationForms();
+    migrateEvidenceStorage(database, options.deferEvidenceConversion);
     return;
   }
 
@@ -2331,6 +2355,7 @@ export function runMigrations(database: DatabaseSync): void {
     }
 
     if (currentVersion < 19) confirmLegacyAgentAnswers();
+
     assertApplicationAuthorityTableShape();
     assertApplicationAnswerSnapshotTableShape();
 
@@ -2339,6 +2364,27 @@ export function runMigrations(database: DatabaseSync): void {
     database.exec("ROLLBACK");
     throw error;
   }
-  migrateDiscoveryStorage(database);
-  ensureTailoredAssetJobIndex(database);
+  ensurePreparedApplicationForms();
+  migrateEvidenceStorage(database, options.deferEvidenceConversion);
+}
+
+function migrateEvidenceStorage(
+  database: DatabaseSync,
+  deferEvidenceConversion = false,
+): void {
+  withStorageMigrationBackups(database, () => {
+    migrateDiscoveryStorage(database);
+    ensureTailoredAssetJobIndex(database);
+    ensureResumeApprovalState(database);
+    migratePreferenceStorage(database);
+    if (deferEvidenceConversion) {
+      retireResumeReadValidation(database);
+      ensureResumeSourceTables(database);
+      ensureSavedJobRelations(database);
+    } else {
+      migrateResumeStorage(database);
+      migrateSavedJobStorage(database);
+    }
+    ensureWorkspaceReadIndex(database);
+  });
 }

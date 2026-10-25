@@ -499,6 +499,9 @@ export function parseWorkCountriesDraft(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Past this many sites the setup list gets its finder and count. */
+const SETUP_SOURCE_FINDER_MIN_COUNT = 5;
+
 const SPONSORSHIP_OPTIONS = [
   { value: "no", label: "No" },
   { value: "yes", label: "Yes" },
@@ -941,7 +944,7 @@ export function ProfileSetupTargetingStep(props: {
         >
           <div className="grid gap-1">
             <h3
-              className="scroll-mt-4 text-sm font-semibold text-foreground outline-none sm:scroll-mt-[8.25rem] min-[1440px]:!scroll-mt-[4.5rem]"
+              className="scroll-mt-4 text-sm font-semibold text-foreground outline-none sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
               id="profile-setup-job-sources-heading"
               tabIndex={-1}
             >
@@ -965,59 +968,66 @@ export function ProfileSetupTargetingStep(props: {
           ) : (
             <>
               {/* "Saved job sources are still off" already heads this step
-                  with a jump to this list; a second box here said it twice. */}
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                <div className="grid gap-(--gap-field)">
-                  <FieldLabel htmlFor={sourceSearchInputId}>
-                    Find a source
-                  </FieldLabel>
-                  <ProfileInput
-                    autoComplete="off"
-                    id={sourceSearchInputId}
-                    onChange={(event) =>
-                      setSourceLibraryView(event.target.value)
-                    }
-                    placeholder="Search by source name or URL"
-                    type="search"
-                    value={sourceQuery}
-                  />
+                  with a jump to this list; a second box here said it twice.
+                  A finder, counts and a page range are for long lists: with
+                  one or two sites they were four header rows over one row. */}
+              {discoveryTargets.length > SETUP_SOURCE_FINDER_MIN_COUNT ||
+              sourceQuery ? (
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <div className="grid gap-(--gap-field)">
+                    <FieldLabel htmlFor={sourceSearchInputId}>
+                      Find a source
+                    </FieldLabel>
+                    <ProfileInput
+                      autoComplete="off"
+                      id={sourceSearchInputId}
+                      onChange={(event) =>
+                        setSourceLibraryView(event.target.value)
+                      }
+                      placeholder="Search by source name or URL"
+                      type="search"
+                      value={sourceQuery}
+                    />
+                  </div>
+                  <p
+                    aria-atomic="true"
+                    aria-live="polite"
+                    className="text-sm text-foreground-muted"
+                    role="status"
+                  >
+                    {filteredSources.length === discoveryTargets.length
+                      ? `${discoveryTargets.length} sources`
+                      : `${filteredSources.length} of ${discoveryTargets.length} sources`}
+                  </p>
                 </div>
-                <p
-                  aria-atomic="true"
-                  aria-live="polite"
-                  className="text-sm text-foreground-muted"
-                  role="status"
-                >
-                  {filteredSources.length === discoveryTargets.length
-                    ? `${discoveryTargets.length} sources`
-                    : `${filteredSources.length} of ${discoveryTargets.length} sources`}
-                </p>
-              </div>
+              ) : null}
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/30 pt-3">
                 <h4
-                  className="scroll-mt-4 sm:scroll-mt-[8.25rem] min-[1440px]:!scroll-mt-[4.5rem] text-sm font-semibold text-foreground outline-none"
+                  className="scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem] text-sm font-semibold text-foreground outline-none"
                   id="profile-setup-job-sources-list-heading"
                   tabIndex={-1}
                 >
-                  Source catalog
+                  Your job sites
                 </h4>
-                {filteredSources.length > 0 ? (
+                {filteredSources.length > visibleSources.length ? (
                   <p className="text-xs text-foreground-muted">
                     {firstVisibleSourceNumber}–{lastVisibleSourceNumber} of{" "}
                     {filteredSources.length}
                   </p>
                 ) : null}
               </div>
-              <p
-                aria-atomic="true"
-                aria-live="polite"
-                className="-mt-2 text-(length:--text-body) leading-6 text-foreground-soft"
-                role="status"
-              >
-                {enabledSourceCount} of {discoveryTargets.length} sources
-                enabled for search
-              </p>
+              {enabledSourceCount < discoveryTargets.length ? (
+                <p
+                  aria-atomic="true"
+                  aria-live="polite"
+                  className="-mt-2 text-(length:--text-body) leading-6 text-foreground-soft"
+                  role="status"
+                >
+                  {enabledSourceCount} of {discoveryTargets.length} sources
+                  enabled for search
+                </p>
+              ) : null}
 
               {filteredSources.length === 0 ? (
                 <div className="rounded-(--radius-field) border border-border/30 px-4 py-5 text-center">
@@ -1069,12 +1079,19 @@ export function ProfileSetupTargetingStep(props: {
                               >
                                 {sourceLabel}
                               </p>
-                              <p
-                                className="mt-1 truncate text-sm text-foreground-muted"
-                                title={target.startingUrl}
-                              >
-                                {getProfileSetupSourceHost(target.startingUrl)}
-                              </p>
+                              {/* A site added without a name is named by its
+                                  address; saying it twice read as two things. */}
+                              {getProfileSetupSourceHost(target.startingUrl) !==
+                              sourceLabel ? (
+                                <p
+                                  className="mt-1 truncate text-sm text-foreground-muted"
+                                  title={target.startingUrl}
+                                >
+                                  {getProfileSetupSourceHost(
+                                    target.startingUrl,
+                                  )}
+                                </p>
+                              ) : null}
                               {guidance.label ? (
                                 <p className="mt-1 text-(length:--text-body) leading-6 text-foreground-soft">
                                   {guidance.label}

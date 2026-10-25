@@ -162,13 +162,14 @@ test("singleton cache observes local writes, key removal, external commits, and 
       )
       .run(JSON.stringify(intelligence("2026-10-13T10:04:00.000Z")));
     expect((await read()).updatedAt).toBe("2026-10-13T10:04:00.000Z");
-    raw
-      .prepare(
-        "UPDATE singleton_state SET value=? WHERE key='intelligence_state'",
-      )
-      .run("synthetic-private-invalid-json");
-    await expect(read()).rejects.toThrow("Corrupted persisted row");
-    await expect(read()).rejects.not.toThrow("synthetic-private-invalid-json");
+    expect(() =>
+      raw
+        .prepare(
+          "UPDATE singleton_state SET value=? WHERE key='intelligence_state'",
+        )
+        .run("synthetic-private-invalid-json"),
+    ).toThrow("malformed JSON");
+    expect((await read()).updatedAt).toBe("2026-10-13T10:04:00.000Z");
     raw.exec("DELETE FROM singleton_state WHERE key='intelligence_state'");
     expect(await read()).toEqual(JobFinderIntelligenceStateSchema.parse({}));
     raw

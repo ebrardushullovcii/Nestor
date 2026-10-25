@@ -154,6 +154,7 @@ describe("useResumeWorkspacePreview", () => {
         id: "draft_1",
         jobId: "job_1",
         updatedAt: "2026-04-27T00:01:00.000Z",
+        targetPageCount: 1 + 2,
       }),
       hasUnsavedChanges: true,
       onPreviewDraft,
@@ -183,6 +184,7 @@ describe("useResumeWorkspacePreview", () => {
         id: "draft_1",
         jobId: "job_1",
         updatedAt: "2026-04-27T00:01:00.000Z",
+        targetPageCount: 1 + 2,
       }),
       hasUnsavedChanges: true,
       onPreviewDraft,
@@ -231,6 +233,7 @@ describe("useResumeWorkspacePreview", () => {
         id: "draft_1",
         jobId: "job_1",
         updatedAt: "2026-04-27T00:01:00.000Z",
+        targetPageCount: 1 + 2,
       }),
       hasUnsavedChanges: true,
       onPreviewDraft,
@@ -245,6 +248,7 @@ describe("useResumeWorkspacePreview", () => {
         id: "draft_1",
         jobId: "job_1",
         updatedAt: "2026-04-27T00:02:00.000Z",
+        targetPageCount: 2 + 2,
       }),
       hasUnsavedChanges: true,
       onPreviewDraft,
@@ -277,6 +281,7 @@ describe("useResumeWorkspacePreview", () => {
         id: "draft_1",
         jobId: "job_1",
         updatedAt: "2026-04-27T00:01:00.000Z",
+        targetPageCount: 1 + 2,
       }),
       hasUnsavedChanges: true,
       onPreviewDraft,
@@ -301,6 +306,7 @@ describe("useResumeWorkspacePreview", () => {
           id: "draft_1",
           jobId: "job_1",
           updatedAt: "2026-04-27T00:01:00.000Z",
+          targetPageCount: 1 + 2,
         }),
       );
     });
@@ -380,6 +386,26 @@ describe("useResumeWorkspacePreview", () => {
     });
     expect(result.current.preview).toBeNull();
     expect(result.current.previewStatus).toBe("idle");
+  });
+
+  it("does not render again when a save only changed the draft's time and status", async () => {
+    const { onPreviewDraft, rerender, result } = await renderWithReadyPreview();
+
+    rerender({
+      draft: buildDraft({
+        id: "draft_1",
+        jobId: "job_1",
+        status: "needs_review",
+        updatedAt: "2026-04-27T00:01:00.000Z",
+      }),
+      hasUnsavedChanges: false,
+      onPreviewDraft,
+    });
+    await actAndFlush(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(pendingPreviews).toHaveLength(1);
+    expect(result.current.previewStatus).toBe("ready");
   });
 
   it("resetPreview clears state immediately and fences late responses", async () => {

@@ -18,7 +18,7 @@ import {
 import type { JobFinderRepository } from "@nestor/db";
 import type { JobFinderDocumentManager } from "./internal/workspace-service-contracts";
 import { isApprovedTailoredResumeReadyForApply } from "./internal/matching-review-queue";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { createAiClient } from "./workspace-service.test-runtimes";
 import {
   createBrowserRuntime,
@@ -3069,9 +3069,14 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("cancelling an active queue aborts every active preparation and never starts the next job", async () => {
-    // Apply to all prepares two jobs at once (ADR 0036), so Stop must abort
-    // both active preparations, not only the first, and the third job must
-    // never be launched.
+    // With two preparations at once (ADR 0036; the default is wider now, the
+    // rule is the same at any width), Stop must abort both active
+    // preparations, not only the first, and the third job must never be
+    // launched.
+    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "2");
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
     const seed = createSeed();
     const readyJob = seed.savedJobs.find((job) => job.id === "job_ready")!;
     const extraJob = (suffix: string) =>

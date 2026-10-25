@@ -1,4 +1,7 @@
 import type {
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryCancellationReply,
+  ResumeDraftProcessor,
   AddBrowserJobResult,
   ApplicationDocumentRevision,
   ApplicationQuestionRecord,
@@ -167,6 +170,12 @@ export interface JobFinderWorkspaceService {
    * by design and are marked in the snapshot hydration metadata.
    */
   getWorkspaceBootstrap(): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * Home's first view (ADR 0077): every collection Home reads except the
+   * Find jobs lists, which stay deferred. Null when the workspace cannot give
+   * one; the full snapshot follows either way.
+   */
+  getWorkspaceHomeSnapshot?(): Promise<JobFinderWorkspaceSnapshot | null>;
   getResumeImportState(): Promise<{
     activeVisionRunIds: readonly string[];
     resumeImportRuns: readonly ResumeImportRun[];
@@ -326,6 +335,14 @@ export interface JobFinderWorkspaceService {
     targetId?: string,
     searchRequest?: JobFinderSearchRequest,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  runAgentDiscoveryCommand(
+    onActivity?: (event: DiscoveryActivityEvent) => void,
+    targetId?: string,
+    searchRequest?: JobFinderSearchRequest,
+  ): Promise<JobFinderDiscoveryCommandReply>;
+  cancelDiscoveryRunCommand(
+    runId: string,
+  ): Promise<JobFinderDiscoveryCancellationReply>;
   runDiscoveryForTarget(
     targetId: string,
     onActivity?: (event: DiscoveryActivityEvent) => void,
@@ -422,6 +439,8 @@ export interface JobFinderWorkspaceService {
   queueJobForReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** One row-local shortlist commit, without constructing a workspace per job. */
   queueJobsForReview?(jobIds: readonly string[]): Promise<void>;
+  /** Starts resumes that shortlisting asked for and a restart left waiting. */
+  continueResumesOnShortlist?(): Promise<void>;
   saveResumeBatchCheckpoint(checkpoint: ResumeBatchCheckpoint): Promise<void>;
   setJobResumeApplicationMode(
     jobId: string,
@@ -532,7 +551,10 @@ export interface JobFinderWorkspaceService {
     draft: ResumeDraft,
     signal?: AbortSignal,
   ): Promise<JobFinderResumePreview>;
-  saveResumeDraft(draft: ResumeDraft): Promise<JobFinderWorkspaceSnapshot>;
+  saveResumeDraft(
+    draft: ResumeDraft,
+    autosaveSessionId?: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
   restoreResumeDraftRevision(
     jobId: string,
     revisionId: string,
@@ -561,7 +583,12 @@ export interface JobFinderWorkspaceService {
     jobId: string,
     exportId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  clearResumeApproval(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
+  /** Same export/approval gates, reusing a current PDF without a full snapshot. */
+  approveCurrentResume(jobId: string): Promise<void>;
+  clearResumeApproval(
+    jobId: string,
+    options?: { restoreStatus?: "draft" | "needs_review" },
+  ): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Acknowledges or removes one server-owned work-history review decision as
    * a real draft mutation. The command validates the exact projected
@@ -651,6 +678,18 @@ export interface JobFinderWorkspaceService {
   resolveApplyConsentRequest(
     requestId: string,
     action: "approve" | "decline",
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * Moves an unsent application back to Shortlisted: its prepared form
+   * closes, nothing is sent or prepared again, and its history and receipts
+   * stay. Refused for a sent application and while one is being filled in.
+   */
+  returnApplicationToShortlist(
+    applicationRecordId: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  /** Undo of the move: the application is listed in Applications again. */
+  undoReturnApplicationToShortlist(
+    jobId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
   revokeApplyRunApproval(runId: string): Promise<JobFinderWorkspaceSnapshot>;
   inspectPreparedApplicationPage(
@@ -822,6 +861,10 @@ export interface CampaignRunContext {
 }
 
 export interface JobFinderDocumentManager {
+  /** Drops replaced managed exports after their references have committed. */
+  pruneGeneratedResumeFiles?(): Promise<void>;
+  /** Releases an unpersisted PDF/HTML produced only to measure a draft. */
+  discardResumeArtifact?(artifact: RenderedResumeArtifact): Promise<void>;
   listResumeTemplates(): readonly ResumeTemplateDefinition[];
   renderResumePreview(
     input: {
@@ -916,6 +959,9 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  /** Host acknowledgement that the first display transfer has finished. */
+  backgroundWorkReady?: PromiseLike<void>;
+  resumeDraftProcessor?: ResumeDraftProcessor;
   onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;
   visionProvider?: ResumeVisionProvider;
@@ -938,7 +984,11 @@ export interface CreateJobFinderWorkspaceServiceOptions {
   /** Publishes the terminal snapshot of a queue resumed after restart. */
   onDetachedApplyRunFinished?: () => void;
   onResumeEvidenceFinished?: () => void;
+  /** A resume started by shortlisting was queued, written or withdrawn. */
+  onShortlistResumeChanged?: () => void;
   onListingAssessmentFinished?: () => void;
+  /** Saved jobs were rescored in the background after a profile or goal save. */
+  onSavedJobsRescored?: () => void;
   /**
    * Called when the person deliberately starts work (Search now, Apply, Run
    * now). The desktop host lifts a browser pause the person caused there

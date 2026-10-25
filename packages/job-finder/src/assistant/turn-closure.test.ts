@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { shortChangeTitle } from "./session-host";
 import { closeStoppedTurn } from "./turn-closure";
 
 describe("closing a stopped turn", () => {
@@ -41,8 +42,7 @@ describe("closing a stopped turn", () => {
 });
 
 describe("change card titles", () => {
-  it("keeps a long brief to its first sentence", async () => {
-    const { shortChangeTitle } = await import("./session-host");
+  it("keeps a long brief to its first sentence", () => {
     expect(
       shortChangeTitle(
         "Tailor this draft properly for the Comet role. Keep the summary short and move design systems first.",

@@ -1,5 +1,24 @@
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+import { createRequire } from "node:module";
+import type { Readability as ReadabilityClass } from "@mozilla/readability";
+import type { JSDOM as JSDOMClass } from "jsdom";
+
+// jsdom and Readability take about a third of a second to load, and only a
+// research read needs them; load them then, not with the app.
+const requireOnUse = createRequire(import.meta.url);
+let pageReader:
+  | { JSDOM: typeof JSDOMClass; Readability: typeof ReadabilityClass }
+  | undefined;
+function loadPageReader() {
+  pageReader ??= {
+    JSDOM: (requireOnUse("jsdom") as { JSDOM: typeof JSDOMClass }).JSDOM,
+    Readability: (
+      requireOnUse("@mozilla/readability") as {
+        Readability: typeof ReadabilityClass;
+      }
+    ).Readability,
+  };
+  return pageReader;
+}
 
 const STOP_WORDS = new Set([
   "about",
@@ -54,6 +73,7 @@ export function extractReadablePage(input: {
   url: string;
   html: string;
 }): ReadablePageResult {
+  const { JSDOM, Readability } = loadPageReader();
   const dom = new JSDOM(input.html, { url: input.url });
   const article = new Readability(dom.window.document).parse();
   const fallbackTitle = dom.window.document.title?.trim() || null;

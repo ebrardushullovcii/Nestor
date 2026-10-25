@@ -65,23 +65,43 @@ vi.mock("./discovery-detail-panel", () => ({
   ),
 }));
 vi.mock("./discovery-filters-panel", () => ({
-  DiscoveryFiltersPanel: () => (
-    <section aria-label="Current search">Current search</section>
+  DiscoveryFiltersPanel: ({ headerAction }: { headerAction?: ReactNode }) => (
+    <section aria-label="Current search">
+      Current search
+      {headerAction}
+    </section>
   ),
 }));
-vi.mock("./discovery-results-panel", () => ({
-  DiscoveryResultsPanel: ({ liveStatusLine }: { liveStatusLine?: string }) => (
-    <section aria-label="Job results">Job results {liveStatusLine}</section>
-  ),
-}));
+vi.mock("./discovery-results-panel", async () => {
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
+    DiscoveryResultsPanel: (
+      props: Parameters<typeof useFixtureListReport>[0] & {
+        liveStatusLine?: string;
+      },
+    ) => {
+      useFixtureListReport(props);
+      return (
+        <section aria-label="Job results">
+          Job results {props.liveStatusLine}
+        </section>
+      );
+    },
+  };
+});
 
 import { clearJobDetailCache } from "../../hooks/use-job-detail";
-import { DiscoveryScreen } from "./discovery-screen";
 import {
   createDiscoveryRunFailedFeedback,
   createDiscoveryRunStartedFeedback,
   type DiscoveryRunFeedback,
 } from "./discovery-run-feedback";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",
@@ -215,7 +235,7 @@ function buildScreen(overrides?: {
   });
   return (
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={overrides?.actionState ?? { message: null }}
         activeCampaignId={overrides?.activeCampaignId ?? null}
         activeRun={overrides?.activeRun ?? null}
@@ -232,7 +252,6 @@ function buildScreen(overrides?: {
         isTargetPending={() => false}
         jobs={overrides?.jobs ?? [createJob("strong")]}
         searchSelectivity={overrides?.searchSelectivity ?? null}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -852,7 +871,7 @@ it.each(["reading_listings", "judging_fit"] as const)(
 
 it.each([false, true])(
   "announces jobs moved to weaker matches once when a search finishes (shown: %s)",
-  (alreadyShown) => {
+  async (alreadyShown) => {
     const before = createJob("one");
     const after = {
       ...before,
@@ -880,6 +899,7 @@ it.each([false, true])(
         })}
       </ToastProvider>,
     );
+    await flushFindJobsQueries();
     view.rerender(
       <ToastProvider>
         {buildScreen({
@@ -889,6 +909,7 @@ it.each([false, true])(
         })}
       </ToastProvider>,
     );
+    await flushFindJobsQueries();
     expect(
       screen.getAllByText("1 job moved to weaker matches after the fit check."),
     ).toHaveLength(1);
@@ -901,21 +922,24 @@ it.each([false, true])(
         })}
       </ToastProvider>,
     );
+    await flushFindJobsQueries();
     expect(
       screen.getAllByText("1 job moved to weaker matches after the fit check."),
     ).toHaveLength(1);
   },
 );
 
-it("announces jobs that leave the plan once at the end of a search", () => {
+it("announces jobs that leave the plan once at the end of a search", async () => {
   const view = render(
     <ToastProvider>
       {buildScreen({ activeRun: runningRun, jobs: [createJob("leaving")] })}
     </ToastProvider>,
   );
+  await flushFindJobsQueries();
   view.rerender(
     <ToastProvider>{buildScreen({ activeRun: null, jobs: [] })}</ToastProvider>,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getAllByText("1 job left this plan after the fit check."),
   ).toHaveLength(1);
@@ -925,6 +949,7 @@ it("announces jobs that leave the plan once at the end of a search", () => {
   view.rerender(
     <ToastProvider>{buildScreen({ activeRun: null, jobs: [] })}</ToastProvider>,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getAllByText("1 job left this plan after the fit check."),
   ).toHaveLength(1);

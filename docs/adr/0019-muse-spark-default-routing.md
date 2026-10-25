@@ -5,6 +5,8 @@
 Accepted; supersedes the model selection in ADR 0010. The separate text and
 vision route configuration from ADR 0010 stays.
 
+Amended 2026-10-23: Muse resume writing has its own smaller reasoning budget.
+
 ## Context
 
 AI access ships bundled with the product: users never enter a key or choose a
@@ -22,6 +24,10 @@ and routed only aggressive resume tailoring to DeepSeek. OpenCode Go now offers
 - Default aggressive resume tailoring to `deepseek-v4.1-flash` through Chat
   Completions with `high` reasoning, on its own route so the whole aggressive
   lifecycle stays on one provider (ADR 0018).
+- Muse resume writing uses `medium` reasoning for its complete proposal;
+  other models keep their route's writing effort. The independent claim
+  check and re-check of fixes keep their own effort. The internal
+  `NESTOR_AI_RESUME_WRITER_REASONING_EFFORT` override applies to either route.
 - Keep every route independently overridable through the existing env vars.
 - Keep local Whisper or an explicit audio model for transcription.
 

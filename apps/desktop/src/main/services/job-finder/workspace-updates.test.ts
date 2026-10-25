@@ -7,6 +7,8 @@ import {
   withJobFinderWorkspaceUpdates,
   scheduleAnswerDraftWorkspaceUpdate,
   onJobFinderWorkspaceUpdate,
+  holdDiscoveryWorkspaceUpdates,
+  publishJobFinderWorkspaceUpdate,
 } from "./workspace-updates";
 
 describe("withJobFinderWorkspaceUpdates", () => {
@@ -33,6 +35,25 @@ describe("withJobFinderWorkspaceUpdates", () => {
     expect(send).toHaveBeenCalledTimes(3);
     expect(send).toHaveBeenLastCalledWith(JOB_FINDER_WORKSPACE_UPDATED_CHANNEL);
   });
+});
+
+it("holds legacy sync nudges during search while preserving main listeners", () => {
+  const send = vi.fn();
+  const target = { send, isDestroyed: () => false } as never;
+  const listener = vi.fn();
+  const stop = onJobFinderWorkspaceUpdate(listener);
+  const release = holdDiscoveryWorkspaceUpdates();
+  try {
+    publishJobFinderWorkspaceUpdate(target);
+    publishJobFinderWorkspaceUpdate(target);
+    expect(send).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledTimes(2);
+  } finally {
+    release();
+    stop();
+  }
+  publishJobFinderWorkspaceUpdate(target);
+  expect(send).toHaveBeenCalledTimes(1);
 });
 
 it("coalesces answer draft refreshes after the last saved keystroke", async () => {

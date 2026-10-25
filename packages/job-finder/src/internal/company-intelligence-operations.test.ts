@@ -20,6 +20,7 @@ import {
   projectCompanyDuplicateJobs,
   projectCompanyOpenings,
   reconcileCompanies,
+  reconcileCompaniesInTurns,
   reviewCompanyMerge,
   setCompanyPreference,
 } from "./company-intelligence-operations";
@@ -27,6 +28,63 @@ import {
 const now = "2026-08-15T10:00:00.000Z";
 const later = "2026-08-15T11:00:00.000Z";
 const latest = "2026-08-15T12:00:00.000Z";
+
+test("company reconciliation between turns preserves the synchronous decisions", async () => {
+  const input = {
+    companies: [makeCompany()],
+    jobs: [
+      makeJob({ id: "one", company: "Acme Inc" }),
+      makeJob({ id: "two", company: "New synthetic employer" }),
+    ],
+    applicationRecords: [],
+    now,
+    createCompanyId: (identity: { normalizedName: string }) =>
+      `company_${identity.normalizedName}`,
+  };
+  expect(await reconcileCompaniesInTurns(input)).toEqual(
+    reconcileCompanies(input),
+  );
+  expect(await reconcileCompaniesInTurns({ ...input, now: "invalid" })).toEqual(
+    reconcileCompanies({ ...input, now: "invalid" }),
+  );
+});
+
+test.each([false, true])(
+  "company ownership does not open unused listing evidence (frozen=%s)",
+  async (frozen) => {
+    const job = makeJob({ id: "one", company: "Acme Inc" });
+    const input = {
+      companies: [makeCompany()],
+      jobs: [job],
+      applicationRecords: [],
+      now,
+      createCompanyId: () => "synthetic_new_company",
+    };
+    const expected = reconcileCompanies(input);
+    const unopened = () => {
+      throw new Error("Company ownership opened a listing body");
+    };
+    for (const key of [
+      "description",
+      "summary",
+      "screeningHints",
+      "sourceIntelligence",
+    ])
+      Object.defineProperty(job, key, { enumerable: true, get: unopened });
+    job.provenance = job.provenance.map((entry) =>
+      Object.freeze(
+        Object.defineProperty({ ...entry }, "listingFacts", {
+          enumerable: true,
+          get: unopened,
+        }),
+      ),
+    );
+    Object.freeze(job.provenance);
+    if (frozen) Object.freeze(job);
+    expect(reconcileCompanies(input)).toEqual(expected);
+    expect(await reconcileCompaniesInTurns(input)).toEqual(expected);
+  },
+);
 
 describe("nextCompanyIntelligenceUpdatedAt", () => {
   test("uses now unless a current timestamp requires the next millisecond", () => {

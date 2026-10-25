@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import { ResumeProposalValidationError } from "@nestor/ai-providers";
+import { ResumeDraftSectionSchema } from "@nestor/contracts";
 import {
   createSeed,
   createAiClient,
@@ -34,6 +35,104 @@ function context() {
   });
   return { ...seed, job, draft };
 }
+
+test("generation ignores translations for known projects it left off without adding resume content", () => {
+  const { draft } = context();
+  const withoutProjects = {
+    ...draft,
+    sections: draft.sections.filter((section) => section.kind !== "projects"),
+  };
+  const presentation = {
+    language: "English",
+    translations: [
+      { id: "section_projects:label", text: "Unused project heading" },
+      {
+        id: "project_omitted_source_project:title",
+        text: "Unused project name",
+      },
+    ],
+  };
+  expect(() => applyResumeLanguage(withoutProjects, presentation)).toThrow(
+    ResumeProposalValidationError,
+  );
+  const translated = applyResumeLanguage(withoutProjects, presentation, [
+    "omitted_source_project",
+  ]);
+  expect(translated.sections).toEqual(withoutProjects.sections);
+  expect(translated.identity).toEqual(withoutProjects.identity);
+  expect(translated.writtenLanguage).toBe("English");
+  expect(() =>
+    applyResumeLanguage(
+      withoutProjects,
+      {
+        ...presentation,
+        translations: [
+          { id: "project_invented:title", text: "Unknown project" },
+        ],
+      },
+      ["omitted_source_project"],
+    ),
+  ).toThrow(ResumeProposalValidationError);
+  expect(() =>
+    applyResumeLanguage(
+      withoutProjects,
+      {
+        ...presentation,
+        translations: [
+          presentation.translations[1]!,
+          presentation.translations[1]!,
+        ],
+      },
+      ["omitted_source_project"],
+    ),
+  ).toThrow(ResumeProposalValidationError);
+});
+
+test("generation still translates retained project fields instead of ignoring them", () => {
+  const { draft } = context();
+  const section = ResumeDraftSectionSchema.parse({
+    id: "section_projects",
+    kind: "projects",
+    label: "Projects",
+    origin: "imported",
+    sortOrder: 99,
+    updatedAt: draft.updatedAt,
+    entries: [
+      {
+        id: "project_kept_project",
+        profileRecordId: "kept_project",
+        entryType: "project",
+        title: "Original project name",
+        origin: "imported",
+        sortOrder: 0,
+        updatedAt: draft.updatedAt,
+      },
+    ],
+  });
+  const entry = section.entries[0]!;
+  const withProject = {
+    ...draft,
+    sections: [
+      ...draft.sections.filter((section) => section.kind !== "projects"),
+      section,
+    ],
+  };
+  const translated = applyResumeLanguage(
+    withProject,
+    {
+      language: "English",
+      translations: [
+        { id: `${entry.id}:title`, text: "Translated project name" },
+      ],
+    },
+    ["kept_project"],
+  );
+  expect(
+    translated.sections
+      .find((candidate) => candidate.id === section?.id)
+      ?.entries.find((candidate) => candidate.id === entry.id)?.title,
+  ).toBe("Translated project name");
+});
 
 test("unknown and repeated writer fields return typed repair feedback without changing the source", () => {
   const { draft } = context();

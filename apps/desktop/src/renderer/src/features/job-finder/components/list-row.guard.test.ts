@@ -36,10 +36,11 @@ function collectProductionSources(dir: URL, prefix = ""): Map<string, string> {
   return sources;
 }
 
-/** The three list REGIONS — the scroll containers that own row spacing. */
+/** Scroll containers, including Find jobs' view during initial loading. */
 const LIST_PANEL_PATHS = [
   "screens/applications/applications-records-panel.tsx",
   "screens/discovery/discovery-results-panel.tsx",
+  "screens/discovery/find-jobs-launch.tsx",
   "screens/review-queue/review-queue-list-panel.tsx",
 ];
 
@@ -47,12 +48,14 @@ const LIST_PANEL_PATHS = [
  * Where each of those three lists renders its ROW. Usually the panel itself;
  * Shortlisted keeps its row in a module of its own so the row can be memoised
  * and a one-job update stops re-rendering the whole list. Still one list
- * treatment — a fourth entry here is a fourth list, which is the thing this
- * guard exists to catch.
+ * treatment. Find jobs also renders its first query page before the full
+ * workspace loads; those rows must use the same treatment too.
  */
 const LIST_ROW_PATHS = [
   "screens/applications/applications-records-panel.tsx",
   "screens/discovery/discovery-results-panel.tsx",
+  // The launch page's rows stand in for the results list until it loads.
+  "screens/discovery/find-jobs-launch.tsx",
   "screens/review-queue/review-queue-list-row.tsx",
 ];
 
@@ -77,7 +80,7 @@ describe("Job Finder list rows carry no chrome of their own", () => {
     const rowSources = [...sources.entries()].filter(([, source]) =>
       source.includes("<SelectableRow"),
     );
-    // All three lists, and no list left behind. A new list that renders rows
+    // Every list view, and no list left behind. A new list that renders rows
     // outside the shared treatment shows up here first.
     expect(rowSources.map(([path]) => path).sort()).toEqual(LIST_ROW_PATHS);
 
@@ -96,7 +99,7 @@ describe("Job Finder list rows carry no chrome of their own", () => {
     // because a `gap-*` between flat rows re-creates the card look the shared
     // treatment exists to remove.
     const offenders: string[] = [];
-    // Each of the three panels must be accounted for: either it routes through
+    // Each panel must be accounted for: either it routes through
     // the shared gap-free region class, or it declares its own `content-start`
     // region — and then that region must itself carry no row gap. Counting
     // panels rather than regex hits is what stops this passing on nothing.
@@ -130,8 +133,8 @@ describe("Job Finder list rows carry no chrome of their own", () => {
       }
     }
 
-    // Not a vacuous pass: all three lists have to be reached and accounted for.
-    expect(panelsAccountedFor).toBeGreaterThanOrEqual(3);
+    // Not a vacuous pass: every list view must be reached and accounted for.
+    expect(panelsAccountedFor).toBe(LIST_PANEL_PATHS.length);
     expect(offenders).toEqual([]);
   });
 });

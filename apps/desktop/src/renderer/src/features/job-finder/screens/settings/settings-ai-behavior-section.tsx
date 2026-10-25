@@ -1,8 +1,10 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
   AiBehaviorPreferenceSchema,
   CoverLetterPreferenceSchema,
+  writesResumesOnShortlist,
   type AiBehaviorPreference,
   type ApplicationAttestationKind,
   type CoverLetterLength,
@@ -16,6 +18,7 @@ import {
   type ProfileAssistantReplyStyle,
   type ResumeApproach,
   type UpdateAiBehaviorInput,
+  type UpdateWorkspaceBehaviorInput,
   type WrittenAnswerLength,
 } from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
@@ -47,8 +50,9 @@ import {
  * signing in, and creating accounts stay the person's (ADR 0012, ADR 0022),
  * and every stretched resume line still needs their confirmation (ADR 0018).
  *
- * One draft and one Save cover the whole section, so a person never has to
- * work out which of several buttons commits the card they just changed.
+ * A choice saves the moment it is picked, like every other Settings switch,
+ * and the saved toast offers Undo. Typed text saves when the person pauses or
+ * leaves the field. A Save button appears only to retry a failed save.
  */
 
 export const SETTINGS_AI_BEHAVIOR_LABEL = "AI behavior";
@@ -221,6 +225,9 @@ const lengthOptions: ReadonlyArray<{
   { label: "Detailed — a fuller page", value: "detailed" },
 ];
 
+/** Typed text saves this long after the last keystroke, or on leaving the field. */
+const TEXT_SAVE_DELAY_MS = 800;
+
 type AiBehaviorDraft = {
   behavior: AiBehaviorPreference;
   coverLetter: CoverLetterPreference;
@@ -265,18 +272,26 @@ function describeResumeApproach(approach: ResumeApproach): string {
   );
 }
 
-function GroupHeading(props: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
+// Title and one line. Each group used to carry an uppercase eyebrow that
+// repeated its own title ("RESUMES" over "Resumes").
+function GroupHeading(props: { title: string; description: string }) {
   return (
     <div className="grid min-w-0 gap-1">
-      <span className="label-mono-xs">{props.eyebrow}</span>
       <h4 className="font-semibold text-(--text-headline)">{props.title}</h4>
       <p className="max-w-[72ch] text-(length:--text-description) leading-5 text-foreground-soft">
         {props.description}
       </p>
+    </div>
+  );
+}
+
+function ChoiceField(props: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <p className="text-(length:--text-small) font-medium text-foreground">
+        {props.label}
+      </p>
+      {props.children}
     </div>
   );
 }
@@ -286,6 +301,11 @@ interface SettingsAiBehaviorSectionProps {
   onSettingsDraftEdited?: () => void;
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
+    options?: { undo?: () => void },
+  ) => Promise<boolean | void> | void;
+  /** Saves a switch at once, like the other switches in Settings. */
+  onUpdateWorkspaceBehavior?: (
+    input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;
   searchPreferences: Pick<JobSearchPreferences, "tailoringMode">;
   settings: JobFinderSettings;
@@ -294,9 +314,36 @@ interface SettingsAiBehaviorSectionProps {
 export function SettingsAiBehaviorSection({
   onSettingsDraftEdited,
   onUpdateAiBehavior,
+  onUpdateWorkspaceBehavior,
   searchPreferences,
   settings,
 }: SettingsAiBehaviorSectionProps) {
+  const savedWritesOnShortlist = writesResumesOnShortlist(settings);
+  const [writeOnShortlist, setWriteOnShortlist] = useState(
+    savedWritesOnShortlist,
+  );
+  const [writeOnShortlistFailed, setWriteOnShortlistFailed] = useState(false);
+  useEffect(() => {
+    setWriteOnShortlist(savedWritesOnShortlist);
+  }, [savedWritesOnShortlist]);
+  // A switch acts when flipped and goes back if the save fails.
+  const updateWriteOnShortlist = (checked: boolean) => {
+    setWriteOnShortlist(checked);
+    setWriteOnShortlistFailed(false);
+    const revert = () => {
+      setWriteOnShortlist(!checked);
+      setWriteOnShortlistFailed(true);
+    };
+    try {
+      void Promise.resolve(
+        onUpdateWorkspaceBehavior?.({ writeResumesOnShortlist: checked }),
+      ).then((saved) => {
+        if (saved === false) revert();
+      }, revert);
+    } catch {
+      revert();
+    }
+  };
   const toneId = useId();
   const lengthId = useId();
   const languageId = useId();
@@ -304,62 +351,156 @@ export function SettingsAiBehaviorSection({
   const saved = toDraft(settings, searchPreferences);
   const savedKey = JSON.stringify(toSavedInput(saved));
   const [draft, setDraft] = useState<AiBehaviorDraft>(saved);
+  const [seededKey, setSeededKey] = useState(savedKey);
   const { resetSectionSave, runSectionSave, saveState } =
     useSettingsSectionSave();
 
-  // Reseed only when the persisted values actually change, so an unrelated
-  // settings refresh never throws away a staged choice. The key is the saved
-  // input serialized, so the effect runs on a real change and nothing else.
-  useEffect(() => {
-    setDraft(toDraft(settings, searchPreferences));
-  }, [savedKey]);
+  // Saves run one at a time; a choice made while one is in flight is sent
+  // when it ends. These refs let timers and that follow-up see the newest
+  // draft and the values last sent.
+  const latestDraftRef = useRef(draft);
+  const sentRef = useRef({ draft: saved, key: savedKey });
+  const inFlightRef = useRef(false);
+  const textTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onUpdateRef = useRef(onUpdateAiBehavior);
+  onUpdateRef.current = onUpdateAiBehavior;
+
+  // Reseed only when the persisted values change from outside this section
+  // (the Assistant, another window). Our own save coming back changes nothing
+  // on screen, and an unrelated settings refresh never throws away a choice.
+  // Done during render, so mounting does not render the section twice.
+  if (seededKey !== savedKey) {
+    setSeededKey(savedKey);
+    if (!inFlightRef.current && savedKey !== sentRef.current.key) {
+      sentRef.current = { draft: saved, key: savedKey };
+      latestDraftRef.current = saved;
+      setDraft(saved);
+    }
+  }
 
   const isSavePending = saveState.status === "saving";
-  const hasUnsavedChanges = JSON.stringify(toSavedInput(draft)) !== savedKey;
+  // Only a failed save is left outstanding; everything else is on its way.
+  const hasUnsavedChanges =
+    saveState.status === "failed" &&
+    JSON.stringify(toSavedInput(draft)) !== savedKey;
 
-  const edit = (update: (current: AiBehaviorDraft) => AiBehaviorDraft) => {
-    if (isSavePending) {
+  const sendLatest = (options: { offerUndo: boolean }) => {
+    if (textTimerRef.current) {
+      clearTimeout(textTimerRef.current);
+      textTimerRef.current = null;
+    }
+    if (inFlightRef.current) {
       return;
     }
-    setDraft(update);
+    const next = latestDraftRef.current;
+    const input = toSavedInput(next);
+    const key = JSON.stringify(input);
+    if (key === sentRef.current.key) {
+      return;
+    }
+    const previous = sentRef.current;
+    sentRef.current = { draft: next, key };
+    inFlightRef.current = true;
+    let committed = false;
+    // Undo puts back what this save replaced, and saves that at once too.
+    const undo = () => {
+      latestDraftRef.current = previous.draft;
+      setDraft(previous.draft);
+      sendLatest({ offerUndo: false });
+    };
+    void runSectionSave({
+      execute: async () => {
+        const result = await onUpdateRef.current(
+          input,
+          options.offerUndo ? { undo } : undefined,
+        );
+        committed = result !== false;
+        return result;
+      },
+      failedMessage:
+        "AI behavior was not saved. Retry before leaving this page.",
+      savedMessage: options.offerUndo
+        ? "AI behavior saved. It applies from the next run."
+        : "AI behavior change undone.",
+    }).finally(() => {
+      inFlightRef.current = false;
+      if (!committed) {
+        // Retry sends the newest draft again.
+        sentRef.current = previous;
+        return;
+      }
+      // A choice made while this save ran goes out now.
+      sendLatest({ offerUndo: true });
+    });
+  };
+
+  const edit = (
+    update: (current: AiBehaviorDraft) => AiBehaviorDraft,
+    when: "now" | "after_typing" = "now",
+  ) => {
+    const next = update(latestDraftRef.current);
+    latestDraftRef.current = next;
+    setDraft(next);
     resetSectionSave();
     onSettingsDraftEdited?.();
+    if (when === "now") {
+      sendLatest({ offerUndo: true });
+      return;
+    }
+    if (textTimerRef.current) clearTimeout(textTimerRef.current);
+    textTimerRef.current = setTimeout(
+      () => sendLatest({ offerUndo: true }),
+      TEXT_SAVE_DELAY_MS,
+    );
   };
   const editBehavior = <Group extends keyof AiBehaviorPreference>(
     group: Group,
-    next: Partial<AiBehaviorPreference[Group]>,
+    next: (
+      current: AiBehaviorPreference[Group],
+    ) => Partial<AiBehaviorPreference[Group]>,
   ) =>
     edit((current) => ({
       ...current,
       behavior: {
         ...current.behavior,
-        [group]: { ...current.behavior[group], ...next },
+        [group]: {
+          ...current.behavior[group],
+          ...next(current.behavior[group]),
+        },
       },
     }));
-  const editCoverLetter = (next: Partial<CoverLetterPreference>) =>
-    edit((current) => ({
-      ...current,
-      coverLetter: { ...current.coverLetter, ...next },
-    }));
+  const editCoverLetter = (
+    next: Partial<CoverLetterPreference>,
+    when: "now" | "after_typing" = "now",
+  ) =>
+    edit(
+      (current) => ({
+        ...current,
+        coverLetter: { ...current.coverLetter, ...next },
+      }),
+      when,
+    );
+  const sendTypedText = () => sendLatest({ offerUndo: true });
 
-  const saveAiBehavior = () => {
-    if (!hasUnsavedChanges || isSavePending) {
-      return;
-    }
-    void runSectionSave({
-      execute: () => onUpdateAiBehavior(toSavedInput(draft)),
-      failedMessage:
-        "AI behavior was not saved. Retry before leaving this page.",
-      savedMessage: "AI behavior saved. It applies from the next run.",
-    });
-  };
+  // Typed text still waiting for its pause goes out when Settings closes.
+  useEffect(
+    () => () => {
+      if (textTimerRef.current) clearTimeout(textTimerRef.current);
+      if (inFlightRef.current) return;
+      const input = toSavedInput(latestDraftRef.current);
+      if (JSON.stringify(input) !== sentRef.current.key) {
+        void onUpdateRef.current(input);
+      }
+    },
+    [],
+  );
 
   useRegisterSettingsDirtySection({
     anchorId: "settings-ai-behavior",
     isDirty: hasOutstandingSectionChanges(hasUnsavedChanges, saveState),
     isSaving: isSavePending,
     label: SETTINGS_AI_BEHAVIOR_LABEL,
-    onSave: saveAiBehavior,
+    onSave: sendTypedText,
     order: 1,
     saveLabel: "Save AI behavior",
   });
@@ -377,16 +518,13 @@ export function SettingsAiBehaviorSection({
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            How the AI works for you: how it talks in the side chat, how picky
-            it is when it searches, how far it rewrites your resume, and what it
-            writes when it applies. These choices change what it does and how it
-            sounds, never what it is allowed to do. Sending follows your
-            Applying choice; signing in and creating accounts stay yours.
+            How it talks, how picky it is when it searches, how far it rewrites
+            your resume, and what it writes when it applies.
           </p>
         </div>
         <SettingsSectionSaveControl
           hasUnsavedChanges={hasUnsavedChanges}
-          onSave={saveAiBehavior}
+          onSave={sendTypedText}
           saveState={saveState}
           subject="AI behavior"
           effect="Applies from your next chat, search, resume, or application."
@@ -398,32 +536,33 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-profile-assistant"
       >
         <GroupHeading
-          eyebrow="Chat"
           title="Assistant"
-          description="The assistant in the side chat. Choose how much it volunteers and how long it talks."
+          description="The assistant in the side chat."
         />
-        <div className="grid min-w-0 gap-3 lg:grid-cols-[3fr_2fr]">
+        {/* Two separate choices, each under its own name. Side by side they
+          read as one row of five cards. */}
+        <ChoiceField label="Suggestions">
           <ChoiceCards
             aria-label="How much the assistant suggests"
             columns={3}
-            disabled={isSavePending}
             onChange={(initiative) =>
-              editBehavior("profileAssistant", { initiative })
+              editBehavior("profileAssistant", () => ({ initiative }))
             }
             options={initiativeOptions}
             value={draft.behavior.profileAssistant.initiative}
           />
+        </ChoiceField>
+        <ChoiceField label="Reply length">
           <ChoiceCards
             aria-label="How the profile assistant replies"
-            columns={2}
-            disabled={isSavePending}
+            columns={3}
             onChange={(replyStyle) =>
-              editBehavior("profileAssistant", { replyStyle })
+              editBehavior("profileAssistant", () => ({ replyStyle }))
             }
             options={replyStyleOptions}
             value={draft.behavior.profileAssistant.replyStyle}
           />
-        </div>
+        </ChoiceField>
       </article>
 
       <article
@@ -433,26 +572,25 @@ export function SettingsAiBehaviorSection({
         tabIndex={-1}
       >
         <GroupHeading
-          eyebrow="Find jobs"
           title="Finding jobs"
           description="How picky a search is. Best matches only also drops any job whose title, place, or work mode misses your preferences before it is saved; the other two keep those jobs and explain the gap."
         />
         <ChoiceCards
           aria-label="How picky a search is"
           columns={3}
-          disabled={isSavePending}
-          onChange={(selectivity) => editBehavior("jobSearch", { selectivity })}
+          onChange={(selectivity) =>
+            editBehavior("jobSearch", () => ({ selectivity }))
+          }
           options={selectivityOptions}
           value={draft.behavior.jobSearch.selectivity}
         />
         <ToggleField
           checked={draft.behavior.jobSearch.remoteCountsAsAnyLocation}
           description="A remote role for your country or region counts as a match for your locations, even when the office is somewhere else."
-          disabled={isSavePending}
           hint="Off means a remote posting still has to fit the places and work modes you listed."
           label="Count remote jobs as any location"
           onCheckedChange={(remoteCountsAsAnyLocation) =>
-            editBehavior("jobSearch", { remoteCountsAsAnyLocation })
+            editBehavior("jobSearch", () => ({ remoteCountsAsAnyLocation }))
           }
         />
       </article>
@@ -462,30 +600,47 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-resumes"
       >
         <GroupHeading
-          eyebrow="Resumes"
           title="Resumes"
           description="How far a resume for a job may go from the one you imported. This is the default for jobs you shortlist from now on; you can still pick a level job by job on Shortlisted."
         />
         <ChoiceCards
           aria-label="Default resume approach"
           columns={4}
-          disabled={isSavePending}
           onChange={(resumeApproach) =>
             edit((current) => ({ ...current, resumeApproach }))
           }
           options={resumeApproachOptions}
           value={draft.resumeApproach}
         />
-        <p
-          className="text-(length:--text-small) leading-5 text-foreground-soft"
-          data-testid="settings-ai-resume-approach-description"
-        >
-          {describeResumeApproach(draft.resumeApproach)}
-        </p>
+        {/* Aggressive gets its fuller warning below instead; printing both
+            explained the same stretch twice. */}
+        {draft.resumeApproach === "aggressive" ? null : (
+          <p
+            className="text-(length:--text-small) leading-5 text-foreground-soft"
+            data-testid="settings-ai-resume-approach-description"
+          >
+            {describeResumeApproach(draft.resumeApproach)}
+          </p>
+        )}
         {draft.resumeApproach === "aggressive" ? (
           <p className="text-sm leading-6 text-(--warning-text)" role="status">
             {STRONG_REWRITE_WARNING}
           </p>
+        ) : null}
+        {onUpdateWorkspaceBehavior ? (
+          <ToggleField
+            checked={writeOnShortlist}
+            description="A job's resume starts writing at this level as soon as you shortlist it, so it is ready when you open it."
+            hint={
+              writeOnShortlistFailed
+                ? "This was not saved. Try the switch again."
+                : writeOnShortlist
+                  ? "On: resumes start when you shortlist a job."
+                  : "Off: create resumes yourself from Shortlisted."
+            }
+            label="Write resumes when I shortlist"
+            onCheckedChange={updateWriteOnShortlist}
+          />
         ) : null}
       </article>
 
@@ -494,7 +649,6 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-applying"
       >
         <GroupHeading
-          eyebrow="Apply"
           title="Applying"
           description="What Job Finder writes while it fills in an application. Whether it sends the application is a separate choice, under Applying below."
         />
@@ -504,9 +658,8 @@ export function SettingsAiBehaviorSection({
             <ChoiceCards
               aria-label="When to write a cover letter"
               columns={3}
-              disabled={isSavePending}
               onChange={(coverLetterPolicy) =>
-                editBehavior("applying", { coverLetterPolicy })
+                editBehavior("applying", () => ({ coverLetterPolicy }))
               }
               options={coverLetterPolicyOptions}
               value={draft.behavior.applying.coverLetterPolicy}
@@ -517,9 +670,8 @@ export function SettingsAiBehaviorSection({
             <ChoiceCards
               aria-label="How long written answers are"
               columns={2}
-              disabled={isSavePending}
               onChange={(writtenAnswerLength) =>
-                editBehavior("applying", { writtenAnswerLength })
+                editBehavior("applying", () => ({ writtenAnswerLength }))
               }
               options={writtenAnswerLengthOptions}
               value={draft.behavior.applying.writtenAnswerLength}
@@ -543,22 +695,21 @@ export function SettingsAiBehaviorSection({
                   choice.kind,
                 )}
                 description={choice.description}
-                disabled={isSavePending}
                 key={choice.kind}
                 label={choice.label}
                 onCheckedChange={(checked) =>
-                  editBehavior("applying", {
+                  editBehavior("applying", (applying) => ({
                     preApprovedDeclarations: checked
                       ? [
                           ...new Set([
-                            ...draft.behavior.applying.preApprovedDeclarations,
+                            ...applying.preApprovedDeclarations,
                             choice.kind,
                           ]),
                         ]
-                      : draft.behavior.applying.preApprovedDeclarations.filter(
+                      : applying.preApprovedDeclarations.filter(
                           (kind) => kind !== choice.kind,
                         ),
-                  })
+                  }))
                 }
               />
             ))}
@@ -579,7 +730,6 @@ export function SettingsAiBehaviorSection({
               <Field>
                 <FieldLabel htmlFor={toneId}>How it should sound</FieldLabel>
                 <FormSelect
-                  disabled={isSavePending}
                   onValueChange={(value) =>
                     editCoverLetter({ tone: value as CoverLetterTone })
                   }
@@ -591,7 +741,6 @@ export function SettingsAiBehaviorSection({
               <Field>
                 <FieldLabel htmlFor={lengthId}>How long</FieldLabel>
                 <FormSelect
-                  disabled={isSavePending}
                   onValueChange={(value) =>
                     editCoverLetter({ length: value as CoverLetterLength })
                   }
@@ -604,10 +753,13 @@ export function SettingsAiBehaviorSection({
             <Field>
               <FieldLabel htmlFor={languageId}>Language</FieldLabel>
               <Input
-                disabled={isSavePending}
                 id={languageId}
+                onBlur={sendTypedText}
                 onChange={(event) =>
-                  editCoverLetter({ language: event.target.value || null })
+                  editCoverLetter(
+                    { language: event.target.value || null },
+                    "after_typing",
+                  )
                 }
                 placeholder="Leave empty to match the job posting"
                 value={draft.coverLetter.language ?? ""}
@@ -622,11 +774,14 @@ export function SettingsAiBehaviorSection({
                 A letter of your own, as an example
               </FieldLabel>
               <Textarea
-                disabled={isSavePending}
                 id={sampleId}
                 maxLength={8_000}
+                onBlur={sendTypedText}
                 onChange={(event) =>
-                  editCoverLetter({ sample: event.target.value || null })
+                  editCoverLetter(
+                    { sample: event.target.value || null },
+                    "after_typing",
+                  )
                 }
                 placeholder="Paste a letter you wrote yourself"
                 rows={5}

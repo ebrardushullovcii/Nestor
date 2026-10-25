@@ -7,10 +7,10 @@ export interface JobFinderRevealView {
 // Shell header geometry mirrors `job-finder-shell`: below the sm breakpoint
 // the page header scrolls in flow; from sm up it is fixed over the page
 // (`sm:fixed sm:inset-x-0 sm:top-0`) with content padded by 7.25rem (116px),
-// and once the persistent sidebar lands at 1440px the fixed band shrinks to
-// h-14 (`min-[1440px]:!pt-14`, 56px).
+// and from 1280px, where the navigation fits on the brand row, the fixed band
+// is one row: h-14 (`xl:pt-14`, 56px). The persistent sidebar lands at 1440px.
 export const JOB_FINDER_SM_MIN_VIEWPORT_WIDTH_PX = 640;
-export const JOB_FINDER_WIDE_SHELL_MIN_VIEWPORT_WIDTH_PX = 1440;
+export const JOB_FINDER_WIDE_SHELL_MIN_VIEWPORT_WIDTH_PX = 1280;
 export const JOB_FINDER_FIXED_HEADER_HEIGHT_PX = 116;
 export const JOB_FINDER_WIDE_HEADER_HEIGHT_PX = 56;
 // Shared breathing gap between a revealed target and whatever sits above it.
@@ -24,16 +24,13 @@ export const JOB_FINDER_ROUTE_HEADER_SCROLL_TOLERANCE_PX = 1;
 // height (116px + 16px = 132px = 8.25rem); the wide band adds the short fixed
 // header (56px + 16px = 72px = 4.5rem). Consumers must render these exact
 // tokens so native `scrollIntoView` reveals cannot drift from this geometry.
-// The wide token is important on purpose: Tailwind v4 emits arbitrary
-// `min-[…]`/`max-[…]` media variants BEFORE the named breakpoints, so at
-// >=1440px the still-matching `sm:scroll-mt-[8.25rem]` came later in the
-// stylesheet and won at equal specificity — every wide-band reveal cleared
-// 132px instead of the 72px this module computes. See
-// `tailwind-variant-order.test.ts`; do not drop it back to a plain utility.
+// The wide token is the named `xl` breakpoint (1280px), which Tailwind emits
+// after `sm`, so it wins without `!`. An arbitrary `min-[…]` variant would be
+// emitted before `sm` and lose to it (see `tailwind-variant-order.test.ts`).
 export const JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES = {
   base: "scroll-mt-4",
   fixedHeader: "sm:scroll-mt-[8.25rem]",
-  wideFixedHeader: "min-[1440px]:!scroll-mt-[4.5rem]",
+  wideFixedHeader: "xl:scroll-mt-[4.5rem]",
 } as const;
 
 export type JobFinderRevealChromeMode =

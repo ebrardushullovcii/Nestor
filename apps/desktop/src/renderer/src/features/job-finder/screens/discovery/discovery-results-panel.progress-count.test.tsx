@@ -6,9 +6,12 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DiscoveryResultsPanel,
   getDiscoveryProgressCountLabel,
 } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -49,9 +52,9 @@ function createJob(id: string, title: string): SavedJob {
   });
 }
 
-function renderStreamingResults(jobs: readonly SavedJob[]) {
-  return render(
-    <DiscoveryResultsPanel
+async function renderStreamingResults(jobs: readonly SavedJob[]) {
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       isSearchInProgress
       jobs={jobs}
@@ -59,6 +62,8 @@ function renderStreamingResults(jobs: readonly SavedJob[]) {
       selectedJob={jobs[0] ?? null}
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 afterEach(() => {
@@ -67,8 +72,8 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel streaming progress count", () => {
-  it("shows distinct source references for otherwise identical rows", () => {
-    renderStreamingResults([
+  it("shows distinct source references for otherwise identical rows", async () => {
+    await renderStreamingResults([
       {
         ...createJob("324107", "People Operations Manager"),
         company: "Bonial",
@@ -82,8 +87,8 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
     expect(screen.getByText(/Reference source-487864/)).toBeTruthy();
   });
 
-  it("reports the raw total only when nothing filters the list", () => {
-    renderStreamingResults([
+  it("reports the raw total only when nothing filters the list", async () => {
+    await renderStreamingResults([
       createJob("alpha", "Engineer alpha"),
       createJob("beta", "Designer beta"),
     ]);
@@ -93,15 +98,15 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
     ).toContain("2 results shown.");
   });
 
-  it("singularizes a single streaming match", () => {
-    renderStreamingResults([createJob("alpha", "Engineer alpha")]);
+  it("singularizes a single streaming match", async () => {
+    await renderStreamingResults([createJob("alpha", "Engineer alpha")]);
 
     expect(
       screen.getByTestId("discovery-results-status-line").textContent,
     ).toContain("1 result shown.");
   });
 
-  it("reports the visible subset when a persisted query hides results", () => {
+  it("reports the visible subset when a persisted query hides results", async () => {
     window.localStorage.setItem(
       COLLECTION_VIEW_STORAGE_KEY,
       JSON.stringify({
@@ -110,7 +115,7 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
         savedViews: [],
       }),
     );
-    renderStreamingResults([
+    await renderStreamingResults([
       createJob("alpha", "Engineer alpha"),
       createJob("beta", "Designer beta"),
     ]);
@@ -124,7 +129,7 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
     expect(screen.queryByText("Engineer alpha")).toBeNull();
   });
 
-  it("returns to the raw total after the query is cleared mid-run", () => {
+  it("returns to the raw total after the query is cleared mid-run", async () => {
     window.localStorage.setItem(
       COLLECTION_VIEW_STORAGE_KEY,
       JSON.stringify({
@@ -133,7 +138,7 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
         savedViews: [],
       }),
     );
-    renderStreamingResults([
+    await renderStreamingResults([
       createJob("alpha", "Engineer alpha"),
       createJob("beta", "Designer beta"),
     ]);
@@ -144,6 +149,7 @@ describe("DiscoveryResultsPanel streaming progress count", () => {
     fireEvent.change(screen.getByLabelText("Find a job"), {
       target: { value: "" },
     });
+    await flushFindJobsQueries();
 
     expect(
       screen.getByTestId("discovery-results-status-line").textContent,
@@ -166,10 +172,10 @@ describe("getDiscoveryProgressCountLabel", () => {
   });
 });
 
-it("reads the same report for the live line and source summary regardless of displayed inventory", () => {
+it("reads the same report for the live line and source summary regardless of displayed inventory", async () => {
   const run = round3SearchRun();
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       isSearchInProgress
       jobs={[createJob("one", "Designer")]}
@@ -178,6 +184,7 @@ it("reads the same report for the live line and source summary regardless of dis
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getByTestId("discovery-results-status-line").textContent,
   ).toContain("25 new to you · 22 kept by this plan · 27 duplicates merged");
@@ -187,7 +194,7 @@ it("reads the same report for the live line and source summary regardless of dis
   expect(
     screen.getByTestId("discovery-source-summaries").textContent,
   ).toContain(
-    "52 inspected · 25 saved · 0 rejected · 27 duplicates · 0 deferred · 7 pages covered",
+    "52 inspected · 25 saved · 27 duplicates · 7 pages covered",
   );
   expect(screen.queryByText(/28 listings recorded/)).toBeNull();
 });

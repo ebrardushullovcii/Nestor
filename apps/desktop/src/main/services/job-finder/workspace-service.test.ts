@@ -36,7 +36,7 @@ function deferredService(label: string) {
 }
 
 beforeEach(async () => {
-  await shutdownJobFinderWorkspaceService();
+  await setJobFinderWorkspaceServiceTestEnv(null);
 });
 
 afterEach(async () => {

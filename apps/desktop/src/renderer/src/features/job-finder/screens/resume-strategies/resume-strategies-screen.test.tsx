@@ -195,9 +195,10 @@ describe("ResumeStrategiesScreen", () => {
     const newStrategyButtons = screen.getAllByRole("button", {
       name: "New resume approach",
     });
-    expect(newStrategyButtons.length).toBe(2);
+    // The empty state holds the only button; the header does not repeat it.
+    expect(newStrategyButtons.length).toBe(1);
 
-    fireEvent.click(newStrategyButtons[1]!);
+    fireEvent.click(newStrategyButtons[0]!);
     expect(
       screen.getByRole("heading", { name: "Create resume approach" }),
     ).toBeTruthy();
@@ -649,9 +650,10 @@ describe("ResumeStrategiesScreen", () => {
       screen.getAllByRole("button", { name: "New resume approach" })[0]!,
     );
 
-    // Five editor policy selects plus the campaign default select.
+    // Five editor policy selects; with no approach saved there is no
+    // campaign default to pick, so that select is not shown.
     const selects = Array.from(container.querySelectorAll("select"));
-    expect(selects.length).toBe(6);
+    expect(selects.length).toBe(5);
     for (const select of selects) {
       for (const className of [
         "border-(--field-border)",

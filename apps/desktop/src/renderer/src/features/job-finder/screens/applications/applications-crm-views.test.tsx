@@ -125,7 +125,7 @@ describe("ApplicationsCrmViews", () => {
     expect(await screen.findByText("Previous stages restored")).toBeTruthy();
     expect(
       screen.queryByText(
-        "Closed steps stay closed. Prepare again to reopen the form.",
+        "Closed steps stay closed. Start the application again from its row to reopen the form.",
       ),
     ).toBeNull();
     expect(onBulkChange.mock.calls[1]?.[0]).toMatchObject({
@@ -1241,7 +1241,7 @@ test("Undo explains closed steps only when this stage change actually closed one
   fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
   expect(
     await screen.findByText(
-      "Closed steps stay closed. Prepare again to reopen the form.",
+      "Closed steps stay closed. Start the application again from its row to reopen the form.",
     ),
   ).toBeTruthy();
 });

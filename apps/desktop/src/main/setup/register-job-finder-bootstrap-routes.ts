@@ -1,11 +1,17 @@
-import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import {
   getDesktopTestDelayMs,
-  getJobFinderWorkspaceService,
   isDesktopTestApiEnabled,
-} from "../services/job-finder";
+} from "../services/job-finder/test-api";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-mode";
+
+// The workspace services are a large module graph. Loading them only when a
+// handler needs them keeps the graph off the window's initial load.
+async function getJobFinderWorkspaceService() {
+  const services = await import("../services/job-finder");
+  return services.getJobFinderWorkspaceService();
+}
 
 export const TEST_WORKSPACE_OPENING_HOLD_ENV =
   "NESTOR_TEST_WORKSPACE_OPENING_HOLD_MS";
@@ -43,22 +49,34 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
     return openingHoldPromise;
   };
 
-  ipcMain.handle("job-finder:get-workspace", async () => {
+  ipcMain.handle("job-finder:get-workspace", async (event) => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
       await (workspaceService.getWorkspaceProjection?.() ??
         workspaceService.getWorkspaceSnapshot()),
+      usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
     );
   });
 
-  ipcMain.handle("job-finder:get-workspace-bootstrap", async () => {
+  ipcMain.handle("job-finder:get-workspace-home", async (event) => {
+    await waitForOpeningHold();
+    const workspaceService = await getJobFinderWorkspaceService();
+    const home = await workspaceService.getWorkspaceHomeSnapshot?.();
+    return home
+      ? toRendererWorkspaceSnapshot(
+          home,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        )
+      : null;
+  });
+
+  ipcMain.handle("job-finder:get-workspace-bootstrap", async (event) => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
-      JobFinderWorkspaceSnapshotSchema.parse(
-        await workspaceService.getWorkspaceBootstrap(),
-      ),
+      await workspaceService.getWorkspaceBootstrap(),
+      usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
     );
   });
 }

@@ -348,11 +348,8 @@ describe("ResumeWorkspaceStudioShell", () => {
     expect(screen.queryByText("Approval eligible")).toBeNull();
     expect(screen.queryByText("Approval blocked")).toBeNull();
     expect(screen.queryByText("Saved draft")).toBeNull();
-    expect(
-      screen.getByText(
-        "The application PDF is built and checked when you approve.",
-      ),
-    ).toBeTruthy();
+    // Before approval there is no PDF to talk about, so nothing is said.
+    expect(document.querySelector("[data-resume-pdf-status]")).toBeNull();
   });
 
   it("moves clear approval behind its explanation and keeps approval out of the toolbars", () => {
@@ -1422,6 +1419,88 @@ describe("ResumeWorkspaceStudioShell", () => {
   });
 });
 
+describe("ResumeWorkspaceStudioShell review pass", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderReviewShell(overrides: {
+    canApproveResume?: boolean;
+    nextTitle?: string | null;
+  } = {}) {
+    const onApproveAndNext = vi.fn();
+    const onSkip = vi.fn();
+    const onApproveCurrentPdf = vi.fn();
+    render(
+      <ResumeWorkspaceStudioShell
+        approvalBlockedReason={null}
+        approvalStateLabel={null}
+        canApproveResume={overrides.canApproveResume ?? true}
+        canClearApproval={false}
+        editorPanel={<div>Editor</div>}
+        exportBlockedReason={null}
+        hasUnsavedChanges={false}
+        historyPanel={<div>History</div>}
+        isWorkspacePending={false}
+        mobileStudioTab="preview"
+        onApproveCurrentPdf={onApproveCurrentPdf}
+        onClearApproval={vi.fn()}
+        onContinueToShortlisted={vi.fn()}
+        onExportPdf={vi.fn()}
+        onReviewBlockingIssues={vi.fn()}
+        onSaveDraft={vi.fn()}
+        onSetMobileStudioTab={vi.fn()}
+        previewPane={<div>Preview</div>}
+        reviewFlow={{
+          reviewed: 12,
+          total: 193,
+          nextTitle:
+            overrides.nextTitle === undefined
+              ? "Staff Engineer"
+              : overrides.nextTitle,
+          failures: [],
+          onApproveAndNext,
+          onSkip: overrides.nextTitle === null ? null : onSkip,
+          onOpenJob: vi.fn(),
+        }}
+        selectedTemplateApprovalEligible
+        studioStatusMessage="Review the preview, then approve when you are ready."
+        templatePanel={<div>Templates</div>}
+      />,
+    );
+    return { onApproveAndNext, onApproveCurrentPdf, onSkip };
+  }
+
+  it("approves and opens the next resume from the button and from Ctrl+Enter, with the progress beside it", () => {
+    const { onApproveAndNext, onApproveCurrentPdf, onSkip } =
+      renderReviewShell();
+    expect(screen.getByText("12 of 193 reviewed")).toBeTruthy();
+    const approve = screen.getByRole("button", { name: /Approve and next/ });
+    expect(approve.getAttribute("aria-keyshortcuts")).toMatch(/\+Enter$/);
+    fireEvent.click(approve);
+    expect(onApproveAndNext).toHaveBeenCalledTimes(1);
+    expect(onApproveCurrentPdf).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(onApproveAndNext).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not approve from the keyboard while something blocks approval", () => {
+    const { onApproveAndNext } = renderReviewShell({ canApproveResume: false });
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(onApproveAndNext).not.toHaveBeenCalled();
+  });
+
+  it("says Approve resume on the last one and offers no Skip", () => {
+    renderReviewShell({ nextTitle: null });
+    expect(screen.getByRole("button", { name: /^Approve resume/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+  });
+});
+
 describe("ResumeWorkspaceStudioShell locked-pane ownership", () => {
   class ResizeObserverMock {
     observe() {}
@@ -1503,7 +1582,6 @@ describe("ResumeWorkspaceStudioShell locked-pane ownership", () => {
       "[data-resume-studio-attention-panel]",
       "[data-resume-validation-issues]",
       "[data-resume-set-aside-proposal-note]",
-      "[data-resume-pdf-status]",
     ]) {
       const node = container.querySelector<HTMLElement>(selector);
       expect(node, `${selector} renders`).toBeTruthy();

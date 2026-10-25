@@ -11,7 +11,11 @@ import {
   withResumeClaimChecks,
   withResumeClaimFixes,
 } from "./resume-claim-checks";
-import { resumeClaimContentHash } from "./resume-workspace-helpers";
+import {
+  buildResumeRenderDocument,
+  resumeClaimContentHash,
+  sanitizeResumeDraft,
+} from "./resume-workspace-helpers";
 
 const at = "2026-10-03T10:00:00.000Z";
 
@@ -429,6 +433,114 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
   });
 
   describe("fixing what the check did not pass", () => {
+    test.each(
+      ["aggressive", "balanced", "conservative"].flatMap((strength) =>
+        ["empty", "duplicate"].map((fix) => [strength, fix]),
+      ),
+    )(
+      "%s keeps the saved summary in the draft and preview after an %s model fix",
+      async (tailoringStrength, fixKind) => {
+        const { profile, job } = context();
+        const tag = `${tailoringStrength}-${fixKind}-summary-fallback`;
+        profile.summary = `Builds reliable software (${tag}).`;
+        const duplicate = `Maintained the synthetic project logs (${tag}).`;
+        const draft = draftWith([{ text: duplicate, origin: "ai_generated" }]);
+        const generated = `Invented executive scope (${tag}).`;
+        draft.sections[0]!.text = generated;
+        const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
+          Promise.resolve(
+            input.claims.map((claim) => ({
+              id: claim.id,
+              verdict:
+                claim.text === generated
+                  ? ("unsupported" as const)
+                  : ("supported" as const),
+              reason: "The evidence does not show executive scope.",
+              evidenceIds: [],
+              fix:
+                claim.text === generated
+                  ? fixKind === "duplicate"
+                    ? duplicate
+                    : ""
+                  : null,
+            })),
+          ),
+        );
+        const base = {
+          aiClient: { checkResumeClaims },
+          job,
+          profile,
+          tailoringStrength,
+        };
+        const fixed = await withResumeClaimFixes({
+          ...base,
+          draft: await withResumeClaimChecks({ ...base, draft }),
+          stretchesAreThePersons: tailoringStrength === "aggressive",
+        });
+        expect(fixed.sections[0]!.text).toBe(profile.summary);
+        const previewDraft = sanitizeResumeDraft({
+          draft: fixed,
+          profile,
+          job,
+        });
+        expect(buildResumeRenderDocument(profile, fixed)).toEqual(
+          buildResumeRenderDocument(profile, previewDraft),
+        );
+        expect(checkResumeClaims).toHaveBeenCalledOnce();
+        expect(checkResumeClaims.mock.calls[0]![0].evidence).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ text: profile.summary }),
+          ]),
+        );
+      },
+    );
+
+    test.each(["empty", "duplicate"])(
+      "without a profile summary, a rejected generated summary is left off after a %s model fix (ADR 0051)",
+      async (fixKind) => {
+        const { profile, job } = context();
+        profile.summary = null;
+        const tag = `no-profile-summary-${fixKind}`;
+        const duplicate = `Maintained the synthetic project logs (${tag}).`;
+        const generated = `Invented soft claims about teamwork (${tag}).`;
+        const draft = draftWith([{ text: duplicate, origin: "ai_generated" }]);
+        draft.sections[0]!.text = generated;
+        const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
+          Promise.resolve(
+            input.claims.map((claim) => ({
+              id: claim.id,
+              verdict:
+                claim.text === generated
+                  ? ("unsupported" as const)
+                  : ("supported" as const),
+              reason: "The evidence does not show these claims.",
+              evidenceIds: [],
+              fix:
+                claim.text === generated
+                  ? fixKind === "duplicate"
+                    ? duplicate
+                    : ""
+                  : null,
+            })),
+          ),
+        );
+        const base = { aiClient: { checkResumeClaims }, job, profile };
+        const fixed = await withResumeClaimFixes({
+          ...base,
+          draft: await withResumeClaimChecks({ ...base, draft }),
+          stretchesAreThePersons: true,
+        });
+        expect(fixed.sections[0]!.text).toBeNull();
+        expect(buildResumeRenderDocument(profile, fixed)).toEqual(
+          buildResumeRenderDocument(
+            profile,
+            sanitizeResumeDraft({ draft: fixed, profile, job }),
+          ),
+        );
+        expect(checkResumeClaims).toHaveBeenCalledOnce();
+      },
+    );
+
     // Verdicts are remembered for the session, so each test words its own lines.
     function lines(tag: string) {
       return {
@@ -569,7 +681,8 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
           bullet.included,
         ]),
       ).toContainEqual([line.invented, false]);
-      expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+      // Hiding the line leaves no new wording, so nothing is asked again.
+      expect(checkResumeClaims).toHaveBeenCalledTimes(1);
     });
 
     test("a fix that rewords a line already there hides the line too", async () => {
@@ -591,7 +704,7 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       ).toBe(false);
     });
 
-    test("a rewrite that still fails is not fixed again", async () => {
+    test("a rewrite that still fails is left off without a third check", async () => {
       const line = lines("again");
       const worse = "Cut cloud spend by 30% across ten teams (again).";
       const checkResumeClaims = checker(
@@ -602,6 +715,45 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       const fixed = await generateAndFix(line, checkResumeClaims, false);
 
       expect(fixed.sections[0]?.bullets[0]?.text).toBe(worse);
+      expect(fixed.sections[0]?.bullets[0]?.included).toBe(false);
+      expect(fixed.sections[0]?.bullets[3]?.included).toBe(true);
+      expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+    });
+
+    test("a failed rewrite restores its saved achievement without checking the person's wording", async () => {
+      const { profile, job } = context();
+      const experience = profile.experiences[0]!;
+      const source =
+        "Maintained the synthetic migration ledger (saved-recheck).";
+      experience.achievements = [source];
+      const invented = "Owned twelve migration teams (saved-recheck).";
+      const rewrite = "Led the migration programme (saved-recheck).";
+      const checkResumeClaims = checker(
+        { [invented]: "unsupported", [rewrite]: "unsupported" },
+        { [invented]: rewrite, [rewrite]: "Another unchecked rewrite." },
+      );
+      const draft = draftWith([{ text: invented, origin: "ai_generated" }]);
+      draft.sections[0]!.bullets[0]!.sourceRefs = [
+        {
+          id: "saved-recheck-source",
+          sourceKind: "profile",
+          sourceId: `experience:${experience.id}:achievement:0`,
+          snippet: source,
+        },
+      ];
+      const base = { aiClient: { checkResumeClaims }, job, profile };
+      const checked = await withResumeClaimChecks({ ...base, draft });
+      const fixed = await withResumeClaimFixes({
+        ...base,
+        draft: checked,
+        stretchesAreThePersons: true,
+      });
+      expect(fixed.sections[0]!.bullets[0]).toMatchObject({
+        text: source,
+        included: true,
+        origin: "ai_generated",
+        sourceRefs: draft.sections[0]!.bullets[0]!.sourceRefs,
+      });
       expect(checkResumeClaims).toHaveBeenCalledTimes(2);
     });
   });

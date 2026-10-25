@@ -85,6 +85,31 @@ export const modelConversationKeys = {
   resumeForJob(job: { source: string; sourceJobId: string }): string {
     return `resume:${job.source}:${job.sourceJobId}`;
   },
+  /**
+   * Writing a resume from the profile, for any job. The person's evidence and
+   * the writer's instructions lead every such request, so one session lets
+   * the gateway serve that prefix from its cache across a batch; keyed per
+   * job, ten resumes went to ten upstreams and none was cached.
+   */
+  resumeWriting(profile: { id: string }): string {
+    return `resume-writing:${profile.id}`;
+  },
+  /** The same evidence leads every resume check, across jobs and restarts. */
+  resumeClaimChecking(
+    evidence: ReadonlyArray<{ id: string; text: string }>,
+  ): string {
+    return `resume-claims:${createHash("sha256")
+      .update(JSON.stringify(evidence), "utf8")
+      .digest("hex")}`;
+  },
+  /** A full listing read; the person and goals lead, as in resumeWriting. */
+  listingReading(profile: { id: string }): string {
+    return `listing-reading:${profile.id}`;
+  },
+  /** Fit batches share the person's evidence and goals across searches. */
+  fitJudging(profile: { id: string }): string {
+    return `fit-judging:${profile.id}`;
+  },
   profileCopilot(profile: { id: string }): string {
     return `profile-copilot:${profile.id}`;
   },

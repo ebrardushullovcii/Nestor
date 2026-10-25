@@ -57,7 +57,7 @@ export function ProgressBar({
         data-progress-indeterminate
         role="progressbar"
       >
-        <div className="h-full w-full animate-pulse rounded-full bg-primary/70 motion-reduce:animate-none" />
+        <div className="h-full w-2/5 rounded-full bg-primary/70 motion-safe:animate-pulse-brief" />
       </div>
     )
   }

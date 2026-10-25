@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 const BrowserTabIdSchema = z.string().min(1).max(100);
+// Measured on a 16 GiB PC: replica forms used ~29 MiB private memory;
+// real boards varied from ~70 to ~200 MiB. Leave room for working tabs,
+// retained forms and popups; memory pressure reclaims idle prepared forms.
+export const EMBEDDED_BROWSER_MAX_WORKING_TABS = 16;
+export const EMBEDDED_BROWSER_MAX_TOTAL_TABS = 64;
 export const DesktopBrowserPresentationSchema = z.enum([
   "minimized",
   "peek",
@@ -39,7 +44,7 @@ export const DesktopBrowserStateSchema = z.object({
     "closing",
   ]),
   presentation: DesktopBrowserPresentationSchema,
-  tabs: z.array(DesktopBrowserTabSchema).max(8),
+  tabs: z.array(DesktopBrowserTabSchema).max(EMBEDDED_BROWSER_MAX_TOTAL_TABS),
   activeTabId: BrowserTabIdSchema.nullable(),
   activity: z.string().max(200).nullable(),
   attention: DesktopBrowserAttentionSchema.nullable(),

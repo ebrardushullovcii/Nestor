@@ -9,6 +9,8 @@ import {
 } from "@nestor/contracts";
 
 import {
+  buildWriterProfileOutline,
+  leaveOffBulletsByPriority,
   mergeImportCandidateSets,
   runProfileCopilotAgentTask,
   runResumeEditAgentTask,
@@ -103,12 +105,14 @@ describe("tool-using AI capabilities", () => {
   test("a clean proposal is written, rendered and checked in one model call", async () => {
     let calls = 0;
     let offeredTools: string[] = [];
+    let reasoningTask: string | undefined;
     const renderPreview = vi.fn(() => cleanPreview());
     const client: AgentCapableJobFinderAiClient = {
       ...createDeterministicJobFinderAiClient(),
-      chatWithTools(_messages, tools) {
+      chatWithTools(_messages, tools, options) {
         calls += 1;
         offeredTools = tools.map((tool) => tool.function.name);
+        reasoningTask = options?.reasoningTask;
         return Promise.resolve({
           toolCalls: [
             composeCall("compose", {
@@ -131,12 +135,71 @@ describe("tool-using AI capabilities", () => {
     });
 
     expect(calls).toBe(1);
+    // Writing has its own effort, separate from the rest of the agent loop.
+    expect(reasoningTask).toBe("resume_writer");
     expect(renderPreview).toHaveBeenCalledTimes(1);
     expect(offeredTools).not.toContain("read_resume_generation_context");
     expect(offeredTools).not.toContain("inspect_completed_resume");
     expect(result.summary).toContain("Builds reliable automation");
     expect(result.fullText).toContain("Builds reliable automation");
   });
+
+  test.each([0, 1, 2])(
+    "a JSON-encoded proposal with %s extra closing braces is decoded and checked without another writer call",
+    async (extraBraces) => {
+      const proposal = {
+        summary: {
+          text: "Builds reliable automation.",
+          evidenceRefs: ["profile:summary"],
+        },
+      };
+      const chatWithTools = vi.fn(() =>
+        Promise.resolve({
+          toolCalls: [
+            composeCall("encoded_proposal", {
+              proposal: JSON.stringify(proposal) + "}".repeat(extraBraces),
+            }),
+          ],
+        }),
+      );
+      const renderPreview = vi.fn<
+        NonNullable<CreateResumeDraftInput["renderPreview"]>
+      >(() => cleanPreview());
+      const result = await runResumeGenerationAgentTask({
+        client: { ...createDeterministicJobFinderAiClient(), chatWithTools },
+        substantivePrompt: "Write a grounded resume.",
+        request: { ...baseRequest(), renderPreview },
+      });
+      expect(chatWithTools).toHaveBeenCalledOnce();
+      expect(renderPreview).toHaveBeenCalledOnce();
+      expect(renderPreview.mock.calls[0]?.[0]).toMatchObject({
+        draft: { summary: proposal.summary.text },
+      });
+      expect(result.summary).toBe(proposal.summary.text);
+    },
+  );
+
+  test.each(["not JSON", "[]", "null", "42"])(
+    "an encoded proposal must still be a JSON object (%s)",
+    async (proposal) => {
+      const renderPreview = vi.fn(() => cleanPreview());
+      const client: AgentCapableJobFinderAiClient = {
+        ...createDeterministicJobFinderAiClient(),
+        chatWithTools: () =>
+          Promise.resolve({
+            toolCalls: [composeCall("invalid_encoded_proposal", { proposal })],
+          }),
+      };
+      await expect(
+        runResumeGenerationAgentTask({
+          client,
+          substantivePrompt: "Write a grounded resume.",
+          request: { ...baseRequest(), renderPreview },
+        }),
+      ).rejects.toThrow();
+      expect(renderPreview).not.toHaveBeenCalled();
+    },
+  );
 
   test("forwards same-route reasoning continuation through the resume model adapter", async () => {
     const continuation = {
@@ -164,8 +227,15 @@ describe("tool-using AI capabilities", () => {
       substantivePrompt: "Write a grounded resume.",
       request: {
         ...baseRequest(),
-        renderPreview: () =>
-          ++renders === 1 ? flaggedPreview() : cleanPreview(),
+        // A refused proposal is the one case the writer is asked again.
+        renderPreview: () => {
+          if (++renders === 1)
+            throw new ResumeProposalValidationError(
+              "The synthetic render refused this proposal.",
+              [],
+            );
+          return cleanPreview();
+        },
       },
     });
     expect(turns).toBe(2);
@@ -423,7 +493,23 @@ describe("tool-using AI capabilities", () => {
 
     expect(payloads).toHaveLength(1);
     const payload = payloads[0]!;
-    expect(payload.candidateProfile).toEqual(profile);
+    // Records by id beside the evidence; their wording is evidence.
+    expect(payload.candidateProfile).toEqual(
+      // The selected base resume differs from the profile's, so both stay.
+      buildWriterProfileOutline(profile, {
+        textContent: profile.baseResume.textContent,
+      }),
+    );
+    const evidenceTexts = new Set(
+      buildResumeGenerationEvidenceCatalog(request).map((item) => item.text),
+    );
+    for (const experience of profile.experiences) {
+      expect(evidenceTexts).toContain(experience.summary);
+      for (const achievement of experience.achievements)
+        expect(evidenceTexts).toContain(achievement);
+    }
+    for (const proof of profile.proofBank)
+      expect(evidenceTexts).toContain(proof.claim);
     expect(payload.targetJob).toMatchObject({
       description: request.job.description,
       minimumQualifications: request.job.minimumQualifications,
@@ -504,15 +590,19 @@ describe("tool-using AI capabilities", () => {
               vi.setSystemTime(Date.now() + 700_000);
               excludedMs += 700_000;
               vi.setSystemTime(Date.now() + previewMs);
-              // The first render is flagged, so a second call happens only
+              // The first proposal is refused, so a second call happens only
               // while the counted time is inside the budget.
-              return ++renders === 1 ? flaggedPreview() : cleanPreview();
+              if (++renders === 1)
+                throw new ResumeProposalValidationError(
+                  "The synthetic render refused this proposal.",
+                  [],
+                );
+              return cleanPreview();
             },
           },
         });
-        // Out of time after a flagged render, the flagged draft is kept
-        // rather than thrown away.
-        await expect(run).resolves.toBeTruthy();
+        if (expectedCalls === 2) await expect(run).resolves.toBeTruthy();
+        else await expect(run).rejects.toThrow(/timed out/u);
         expect(calls).toBe(expectedCalls);
       } finally {
         vi.useRealTimers();
@@ -628,72 +718,13 @@ describe("tool-using AI capabilities", () => {
     );
   });
 
-  test("resume generation repairs blocking preview validation without erasing person confirmations", async () => {
-    const proposal = {
-      summary: {
-        text: "Builds reliable automation.",
-        evidenceRefs: ["profile:summary"],
-      },
-    };
-    let renderCount = 0;
-    let repairSeen = false;
-    let personConfirmationCountSeen = false;
-    const renderPreview = vi.fn(() =>
-      ++renderCount === 1 ? flaggedPreview(2) : cleanPreview(),
-    );
+  test("a flagged render ends the writer in one call and keeps the draft for the check's fixes", async () => {
     let turn = 0;
+    const renderPreview = vi.fn(() => flaggedPreview(2));
     const client: AgentCapableJobFinderAiClient = {
       ...createDeterministicJobFinderAiClient(),
-      chatWithTools(messages) {
+      chatWithTools() {
         turn += 1;
-        if (turn === 2) {
-          const payload = JSON.parse(
-            messages.find((message) => message.role === "user")!.content,
-          ) as {
-            workingProposal: unknown;
-            lastCheck: { requiredModelRepairs: Array<{ id: string }> };
-          };
-          repairSeen =
-            payload.lastCheck.requiredModelRepairs.some(
-              (issue) => issue.id === "issue_claim_grounding_summary",
-            ) && JSON.stringify(payload.workingProposal).includes("reliable");
-          personConfirmationCountSeen = messages.some(
-            (message) =>
-              message.role === "tool" &&
-              message.content.includes('"personConfirmationCount":2'),
-          );
-        }
-        return Promise.resolve({
-          toolCalls: [composeCall(`compose_${turn}`, { proposal })],
-        });
-      },
-    };
-
-    await runResumeGenerationAgentTask({
-      client,
-      substantivePrompt: "Aggressive mode substantive resume instructions.",
-      request: { ...baseRequest(), renderPreview },
-    });
-
-    expect(turn).toBe(2);
-    expect(repairSeen).toBe(true);
-    expect(personConfirmationCountSeen).toBe(true);
-    expect(renderPreview).toHaveBeenCalledTimes(2);
-  });
-
-  test("a second flagged render tells the model to drop the flagged lines, and a third call is the last, kept for review", async () => {
-    let turn = 0;
-    const toolResults: string[] = [];
-    const client: AgentCapableJobFinderAiClient = {
-      ...createDeterministicJobFinderAiClient(),
-      chatWithTools(messages) {
-        turn += 1;
-        toolResults.push(
-          messages
-            .filter((message) => message.role === "tool")
-            .map((message) => message.content)
-            .join("\n"),
-        );
         return Promise.resolve({
           toolCalls: [
             composeCall(`compose_${turn}`, {
@@ -711,57 +742,131 @@ describe("tool-using AI capabilities", () => {
 
     const result = await runResumeGenerationAgentTask({
       client,
-      substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: { ...baseRequest(), renderPreview: () => flaggedPreview() },
+      substantivePrompt: "Aggressive mode substantive resume instructions.",
+      request: { ...baseRequest(), renderPreview },
     });
 
-    expect(turn).toBe(3);
-    expect(toolResults[1]).not.toContain("second flagged render");
-    expect(toolResults[2]).toContain("This is the second flagged render");
-    // Three calls of writing are not thrown away over a few lines: the last
-    // draft is kept, and its flagged lines are settled after the writer.
-    expect(result.summary).toContain("Builds reliable automation 3.");
+    // The flagged lines are settled from the check's own fixes when the
+    // resume is kept; the writer is not asked again.
+    expect(turn).toBe(1);
+    expect(renderPreview).toHaveBeenCalledTimes(1);
+    expect(result.summary).toContain("Builds reliable automation 1.");
     expect(result.notes.join(" ")).not.toContain("review");
   });
 
-  test("a clean draft over the page target gets one call to leave things off, then stands", async () => {
+  test("a clean draft over the page target leaves off its lowest-priority bullets without another call", async () => {
+    const achievements = [
+      "Led the synthetic billing migration for four teams.",
+      "Cut synthetic report time from two days to one hour.",
+      "Wrote the synthetic onboarding guide for new analysts.",
+      "Organised the synthetic team offsite agenda.",
+    ];
+    const request = baseRequest();
+    request.profile.experiences = [
+      CandidateExperienceSchema.parse({
+        id: "role_1",
+        title: "Analyst",
+        companyName: "Synthetic Co",
+        workMode: ["remote"],
+        achievements,
+      }),
+    ];
     let turn = 0;
-    const toolResults: string[] = [];
+    const payloads: Array<Record<string, unknown>> = [];
     const client: AgentCapableJobFinderAiClient = {
       ...createDeterministicJobFinderAiClient(),
       chatWithTools(messages) {
         turn += 1;
-        toolResults.push(
-          messages
-            .filter((message) => message.role === "tool")
-            .map((message) => message.content)
-            .join("\n"),
+        payloads.push(
+          JSON.parse(
+            messages.find((message) => message.role === "user")!.content,
+          ) as Record<string, unknown>,
         );
         return Promise.resolve({
-          toolCalls: [composeCall(`compose_${turn}`)],
+          toolCalls: [
+            composeCall(`compose_${turn}`, {
+              proposal: {
+                experienceEntries: [
+                  {
+                    profileRecordId: "role_1",
+                    bullets: achievements.map((text, index) => ({
+                      text,
+                      evidenceRefs: [`experience:role_1:achievement:${index}`],
+                      sourceAchievementIds: [
+                        `experience:role_1:achievement:${index}`,
+                      ],
+                      priority: [1, 2, 3, 3][index],
+                    })),
+                  },
+                ],
+              },
+            }),
+          ],
         });
       },
     };
+    const renderedBullets: number[] = [];
     const result = await runResumeGenerationAgentTask({
       client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
       request: {
-        ...baseRequest(),
-        renderPreview: () =>
-          Promise.resolve({
+        ...request,
+        targetPageCount: 2,
+        renderPreview: ({ draft }) => {
+          const bullets = draft.experienceEntries[0]?.bullets.length ?? 0;
+          renderedBullets.push(bullets);
+          return Promise.resolve({
             templateId: "classic_ats",
-            pageCount: 3,
+            pageCount: bullets > 2 ? 3 : 2,
             targetPageCount: 2,
             warnings: [],
             fileName: "preview.pdf",
             requiredModelRepairs: [],
-          }),
+          });
+        },
       },
     });
-    expect(turn).toBe(2);
-    expect(toolResults[1]).toContain("renders at 3 pages and should fit on 2");
-    expect(toolResults[1]).toContain("leave it off");
-    expect(result.summary).toBeTruthy();
+    // One writer call; the over-long render is shortened by its priorities.
+    expect(turn).toBe(1);
+    expect(payloads[0]?.lengthBudget).toEqual({
+      targetPageCount: 2,
+      approximateWords: 720,
+      approximateBullets: 30,
+    });
+    expect(renderedBullets).toEqual([4, 2]);
+    expect(result.experienceEntries[0]?.bullets).toEqual(
+      achievements.slice(0, 2),
+    );
+  });
+
+  test("bullets without a priority stay, and a role keeps its most important bullet", () => {
+    const proposal = {
+      experienceEntries: [
+        {
+          profileRecordId: "a",
+          bullets: [
+            { text: "x", evidenceRefs: [], priority: 3 },
+            { text: "y", evidenceRefs: [], priority: 2 },
+          ],
+        },
+        {
+          profileRecordId: "b",
+          bullets: [{ text: "z", evidenceRefs: [] }],
+        },
+      ],
+    };
+    expect(leaveOffBulletsByPriority(proposal, 2)).toEqual({
+      experienceEntries: [
+        {
+          profileRecordId: "a",
+          bullets: [{ text: "y", evidenceRefs: [], priority: 2 }],
+        },
+        { profileRecordId: "b", bullets: [{ text: "z", evidenceRefs: [] }] },
+      ],
+    });
+    expect(leaveOffBulletsByPriority(proposal.experienceEntries[1]!, 2)).toBe(
+      null,
+    );
   });
 
   test("resume generation keeps the last cleanly rendered AI draft when the call budget ends mid-revision", async () => {

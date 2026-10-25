@@ -1,17 +1,31 @@
 export type JobFinderPlatform = "darwin" | "linux" | "win32";
 
 export type JobFinderShortcutId =
+  | "focus-list-search"
   | "open-global-search"
   | "open-shortcuts"
   | "toggle-assistant"
   | "toggle-sidebar";
 
-export type JobFinderShortcutCombo = "/" | "?" | "mod+b" | "mod+i" | "mod+k";
+export type JobFinderShortcutCombo =
+  | "/"
+  | "?"
+  | "mod+b"
+  | "mod+enter"
+  | "mod+i"
+  | "mod+k"
+  | "mod+s";
 
 const LITERAL_KEY_COMBOS: readonly JobFinderShortcutCombo[] = ["/", "?"];
 
 function isLiteralKeyCombo(combo: JobFinderShortcutCombo): boolean {
   return LITERAL_KEY_COMBOS.includes(combo);
+}
+
+/** The key after the modifier, as a keycap names it ("K", "Enter"). */
+function modifierComboKeycap(combo: JobFinderShortcutCombo): string {
+  const key = combo.slice(4);
+  return key === "enter" ? "Enter" : key.toUpperCase();
 }
 
 export interface JobFinderShortcutDefinition {
@@ -30,8 +44,8 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
   },
   {
     combo: "/",
-    id: "open-global-search",
-    label: "Search your workspace",
+    id: "focus-list-search",
+    label: "Search this list, or your workspace off a list",
     scope: "Outside text fields, controls, and dialogs",
   },
   {
@@ -56,6 +70,16 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
     scope: "Outside text fields, controls, and dialogs",
   },
 ];
+
+/**
+ * Resume Studio's own combo while resumes wait for review: approve the open
+ * one and open the next. It is named on the button that does it rather than
+ * in the app-wide list, which holds no approve, delete or submit shortcut.
+ */
+export const RESUME_REVIEW_APPROVE_AND_NEXT_COMBO = "mod+enter" as const;
+
+/** Profile's own combo: save the page's unsaved changes, named on Save. */
+export const PROFILE_SAVE_COMBO = "mod+s" as const;
 
 export interface JobFinderKeyEventLike {
   altKey: boolean;
@@ -130,7 +154,7 @@ export function getJobFinderShortcutKeycaps(
   if (isLiteralKeyCombo(combo)) {
     return [combo];
   }
-  return [platform === "darwin" ? "⌘" : "Ctrl", combo.slice(4).toUpperCase()];
+  return [platform === "darwin" ? "⌘" : "Ctrl", modifierComboKeycap(combo)];
 }
 
 /** One-line rendering of a combo, for tooltips and title strings. */
@@ -141,7 +165,7 @@ export function formatJobFinderShortcutCombo(
   if (isLiteralKeyCombo(combo)) {
     return combo;
   }
-  const key = combo.slice(4).toUpperCase();
+  const key = modifierComboKeycap(combo);
   return platform === "darwin" ? `⌘${key}` : `Ctrl ${key}`;
 }
 
@@ -149,7 +173,8 @@ export function getJobFinderAriaKeyshortcuts(
   combo: Exclude<JobFinderShortcutCombo, "/">,
   platform: JobFinderPlatform,
 ): string {
-  return `${platform === "darwin" ? "Meta" : "Control"}+${combo.slice(4)}`;
+  const key = combo.slice(4);
+  return `${platform === "darwin" ? "Meta" : "Control"}+${key === "enter" ? "Enter" : key}`;
 }
 
 /** One combo, as the individual keycaps it is pressed with. */
@@ -157,7 +182,13 @@ export type JobFinderShortcutKeycaps = readonly string[];
 
 export interface JobFinderShortcutHelpEntry {
   combos: readonly JobFinderShortcutKeycaps[];
-  id: JobFinderShortcutId | "zoom-in" | "zoom-out" | "actual-size";
+  id:
+    | JobFinderShortcutId
+    | "history-back"
+    | "history-forward"
+    | "zoom-in"
+    | "zoom-out"
+    | "actual-size";
   /** Stable row key; an id can appear once per distinct scope. */
   rowId: string;
   label: string;
@@ -198,6 +229,20 @@ export function buildJobFinderShortcutHelp(
   const modifier = platform === "darwin" ? "⌘" : "Ctrl";
   return [
     ...entries.values(),
+    {
+      id: "history-back",
+      rowId: "history-back",
+      label: "Back to the previous screen",
+      scope: "Also the mouse's back button",
+      combos: [["Alt", "←"]],
+    },
+    {
+      id: "history-forward",
+      rowId: "history-forward",
+      label: "Forward again",
+      scope: "Also the mouse's forward button",
+      combos: [["Alt", "→"]],
+    },
     {
       id: "zoom-in",
       rowId: "zoom-in",

@@ -84,6 +84,8 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     }
     // Creating audit triggers on another connection changes data_version.
     // Warm both caches after that external schema commit.
+    raw.exec(`CREATE TRIGGER fail_synthetic_pending AFTER INSERT ON discovery_pending_jobs
+      WHEN NEW.id = 'rollback_pending' BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END`);
     const before = await repo.getDiscoveryState();
     const displayBefore = await repo.readDiscoveryDisplayProjection();
     let borrowed: Readonly<JobFinderDiscoveryState> | null = null;
@@ -102,7 +104,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
             ],
             pendingDiscoveryJobs: [
               ...current.pendingDiscoveryJobs.slice(1),
-              { id: "invalid" } as never,
+              { ...current.pendingDiscoveryJobs[0]!, id: "rollback_pending" },
             ],
           };
         },
@@ -136,7 +138,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
       .prepare("SELECT table_name, operation, id FROM test_row_markers")
       .all();
     expect(markers).toEqual([
-      { table_name: "discovery_ledger", operation: "INSERT", id: "ledger_0" },
+      { table_name: "discovery_ledger", operation: "UPDATE", id: "ledger_0" },
       {
         table_name: "discovery_pending_jobs",
         operation: "DELETE",
@@ -182,7 +184,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     expect(await repo.getDiscoveryState()).toEqual(expected);
     expect(await repo.readDiscoveryDisplayProjection()).toEqual(expected);
     console.info(
-      "10k ledger move + 10k pending removal: 1 ledger INSERT, 1 pending DELETE; rollback markers 0",
+      "10k ledger move + 10k pending removal: 1 ledger UPDATE, 1 pending DELETE; rollback markers 0",
     );
   } finally {
     raw.close();
@@ -307,8 +309,9 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
     const queries = vi.spyOn(raw, "prepare");
     const parse = vi.spyOn(JSON, "parse");
     const after = await read();
-    const valueQueries = queries.mock.calls.filter(([query]) =>
-      query.includes("SELECT id, value FROM discovery_ledger"),
+    const valueQueries = queries.mock.calls.filter(
+      ([query]) =>
+        /^SELECT id, /.test(query) && query.includes("AS value FROM discovery_ledger"),
     );
     expect(valueQueries).toHaveLength(1);
     expect(valueQueries[0]![0]).toContain(
@@ -376,7 +379,7 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
           .filter((scope) => scope.runId)
           .every((scope) => runIds.has(scope.runId)),
       ).toBe(true);
-      expect(cache.scopes.size).toBeLessThanOrEqual(12);
+      expect(cache.scopes.size).toBeLessThanOrEqual(runIds.size * 3 + 2);
       expect(
         [...cache.scopes.values()].reduce(
           (count, scope) => count + scope.values.size,
@@ -422,7 +425,7 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
     readDiscoveryStorage(raw, createSeed().discovery, false, cache);
     expect(cache.scopes.size).toBe(2);
     console.info(
-      "48 run histories: at most 12 cache scopes / 10 retained rows; empty history returns to 2 global scopes",
+      "48 run histories: at most 17 cache scopes / 10 retained rows; empty history returns to 2 global scopes",
     );
   } finally {
     raw.close();

@@ -8,7 +8,7 @@ import {
   UserActionRequestSchema,
   ApplicationPrivacyReceiptSchema,
 } from "@nestor/contracts";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import {
   createBrowserRuntime,
   createSeed,
@@ -430,6 +430,12 @@ test("restart does not call a missing-resume prerequisite a lost form", () => {
 });
 
 test("startup leaves stale prepared histories alone for a verified sent job", async () => {
+  // The record's own day, so the 14-day no-response follow-up cannot fire as
+  // the calendar moves on.
+  vi.useFakeTimers({ now: new Date(now), toFake: ["Date"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const seed = seedPages(["submitted", "awaiting_review"]);
   const sent = seed.applyJobResults[0]!;
   sent.privacyReceipt = ApplicationPrivacyReceiptSchema.parse({

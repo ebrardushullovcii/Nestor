@@ -20,6 +20,7 @@ import {
   formatStatusLabel,
 } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { StatusBadge } from "../../components/status-badge";
+import { formatQuestionPrompt } from "./applications-recovery-state";
 import {
   ExternalUrlLink,
   SavedFileLink,
@@ -72,12 +73,6 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
   );
   const resultVisualCheckpointCount =
     selectedApplyRunDetails?.result?.visualCheckpoints.length ?? 0;
-  const retainedVisualEvidenceCount = selectedApplyRunDetails
-    ? selectedApplyRunDetails.checkpoints.reduce(
-        (count, checkpoint) => count + checkpoint.visualEvidence.length,
-        0,
-      )
-    : 0;
   // Every replay checkpoint is also mirrored into the artifact refs with the
   // same label, so the disclosure printed the identical two entries twice
   // with the same URL under two different headings.
@@ -85,17 +80,19 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
     selectedApplyRunDetails?.artifactRefs ?? []
   ).filter((artifact) => artifact.kind !== "checkpoint");
 
+  // Counts the person can open below, in words: recorded steps and visual
+  // evidence are internal bookkeeping and read as "1 STEPS RECORDED".
   const recordedMetrics = (
     [
       {
-        label: "Questions",
+        label: ["question", "questions"],
         value: Math.max(
           selectedApplyRunDetails?.questionRecords.length ?? 0,
           selectedApplyRunDetails?.reviewCard?.answers.length ?? 0,
         ),
       },
       {
-        label: "Answers filled in",
+        label: ["answer filled in", "answers filled in"],
         value: Math.max(
           selectedApplyRunDetails?.answerRecords.filter(
             (answer) => answer.status === "filled",
@@ -105,15 +102,18 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ).length ?? 0,
         ),
       },
-      { label: "Artifacts", value: retainedArtifacts.length },
+      { label: ["file", "files"], value: retainedArtifacts.length },
       {
-        label: "Steps recorded",
-        value: selectedApplyRunDetails?.checkpoints.length ?? 0,
+        label: ["screenshot", "screenshots"],
+        value: resultVisualCheckpointCount,
       },
-      { label: "Screenshots", value: resultVisualCheckpointCount },
-      { label: "Visual evidence", value: retainedVisualEvidenceCount },
     ] as const
-  ).filter((metric) => metric.value > 0);
+  )
+    .filter((metric) => metric.value > 0)
+    .map((metric) => ({
+      label: metric.value === 1 ? metric.label[0] : metric.label[1],
+      value: metric.value,
+    }));
 
   if (!visibleApplyResult) {
     return null;
@@ -167,7 +167,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           )}
           {selectedApplyRunDetails.result?.visualCheckpoints.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Screenshots of the form</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Screenshots of the form</p>
               {selectedApplyRunDetails.result.visualCheckpoints.map(
                 (checkpoint) => (
                   <div
@@ -212,7 +212,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.questionRecords.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Questions on the form</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Questions on the form</p>
               {selectedApplyRunDetails.questionRecords.map((question) => {
                 const latestAnswer = getLatestAnswerForQuestion(
                   selectedApplyRunDetails.answerRecords,
@@ -224,14 +224,16 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
                     className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong>{question.prompt}</strong>
+                      <strong>{formatQuestionPrompt(question.prompt)}</strong>
                       <StatusBadge
                         tone={
                           question.status === "submitted" ||
                           question.status === "answered"
                             ? "positive"
                             : question.status === "skipped"
-                              ? "critical"
+                              ? // A skipped question is a fact about the run,
+                                // not an alarm: amber, as a held step is.
+                                "warning"
                               : "active"
                         }
                       >
@@ -288,7 +290,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.answerRecords.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Answers Job Finder filled in</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Answers Job Finder filled in</p>
               {selectedApplyRunDetails.answerRecords.map((answer) => (
                 <div
                   key={answer.id}
@@ -322,7 +324,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {retainedArtifacts.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Files Job Finder attached</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Files Job Finder attached</p>
               {retainedArtifacts.map((artifact) => (
                 <div
                   key={artifact.id}
@@ -350,7 +352,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.checkpoints.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Screenshots of each step</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Screenshots of each step</p>
               {selectedApplyRunDetails.checkpoints.map((checkpoint) => (
                 <div
                   key={checkpoint.id}
@@ -418,7 +420,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.consentRequests.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Consent requests</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Consent requests</p>
               <p className="text-(length:--text-small) leading-6 text-foreground-soft">
                 Consent requests and the Needs you list are two views of the
                 same paused preparation. Resolving it here also clears it in
@@ -766,7 +768,7 @@ function ApplicationQuestionAnswerEditor(props: {
   return (
     <div className="mt-3 grid gap-3 rounded-(--radius-field) border border-border/30 bg-background/55 p-3">
       <div>
-        <p className="label-mono-xs">Your prepared answer</p>
+        <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Your prepared answer</p>
         <p className="mt-1 text-(length:--text-small) leading-6 text-foreground-soft">
           {props.isBlocked
             ? "When all required answers are saved, this application continues in its chosen apply mode."
@@ -1042,7 +1044,9 @@ function MetricCard(props: { label: string; value: number }) {
       <strong className="text-(length:--text-field) font-semibold text-foreground">
         {value}
       </strong>
-      <span className="label-mono-xs">{label}</span>
+      <span className="text-(length:--text-small) text-foreground-soft">
+        {label}
+      </span>
     </div>
   );
 }
