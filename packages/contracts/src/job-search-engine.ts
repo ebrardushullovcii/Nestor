@@ -31,7 +31,11 @@ export type KnownJobUrlLookup = (
 
 export type ReadDiscoveryPostingPage = (
   url: string,
-  options: { signal?: AbortSignal; rendered?: boolean },
+  options: {
+    signal?: AbortSignal;
+    rendered?: boolean;
+    ready?: (html: string) => boolean;
+  },
 ) => Promise<{ html: string; finalUrl: string }>;
 
 /** Do not spread saved preferences: they also contain every source URL. */

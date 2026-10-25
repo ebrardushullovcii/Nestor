@@ -62,7 +62,7 @@ test("the model reads plain listing text with the card's employer and returns th
     posting,
     readPage: () =>
       Promise.resolve({
-        html: `<title>Board brand</title><script type="application/ld+json">${JSON.stringify({"@type":"JobPosting",title:posting.title,description:"Build APIs."})}</script><h1>Backend Engineer</h1><p>${description}</p>`,
+        html: `<title>Board brand</title><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: posting.title, description: "Build APIs." })}</script><h1>Backend Engineer</h1><p>${description}</p>`,
         finalUrl: posting.canonicalUrl,
       }),
     extractor: { extractJobsFromPage },
@@ -83,4 +83,26 @@ test("a failed full read cannot masquerade as a complete description", async () 
   expect(full.description).toBe("");
   expect(full.summary).toBe(posting.description);
   expect(full.listingDetailFetch?.outcome).toBe("fetch_failed");
+});
+
+test("a security interstitial is waited out once and can never become a listing description", async () => {
+  const html =
+    "<title>Just a moment...</title><h1>Just a moment...</h1><p>Performing security verification</p>";
+  const readPage = vi.fn(() =>
+    Promise.resolve({ html, finalUrl: posting.canonicalUrl }),
+  );
+  const extractJobsFromPage = vi.fn(() =>
+    Promise.resolve([
+      { ...posting, description: "A security check is loading." },
+    ]),
+  );
+  const result = await readPostingDetail({
+    posting,
+    readPage,
+    extractor: { extractJobsFromPage },
+  });
+  expect(readPage).toHaveBeenCalledTimes(2);
+  expect(extractJobsFromPage).not.toHaveBeenCalled();
+  expect(result.description).toBe("");
+  expect(result.listingDetailFetch?.outcome).toBe("fetch_failed");
 });

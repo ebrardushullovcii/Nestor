@@ -9,7 +9,22 @@ import {
   listingPageLinks,
   listingPageText,
   LISTING_PAGE_OMISSION_MARKER,
+  htmlToPlainText,
 } from "./listing-detail-extraction";
+import { isBotCheckInterstitial } from "./bot-check";
+
+function blockedByCheck(html: string): boolean {
+  const title = htmlToPlainText(
+    html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
+  );
+  return isBotCheckInterstitial({
+    title,
+    bodyTextExcerpt: listingPageText(html),
+    headings: [],
+    controls: [],
+    links: [],
+  });
+}
 
 /** Read a new listing once before any fit judgment or persistence checkpoint. */
 export async function readPostingDetail(input: {
@@ -31,6 +46,15 @@ export async function readPostingDetail(input: {
     let page = await input.readPage(posting.canonicalUrl, {
       ...(input.signal ? { signal: input.signal } : {}),
     });
+    if (blockedByCheck(page.html)) {
+      page = await input.readPage(posting.canonicalUrl, {
+        rendered: true,
+        ready: (html) => !blockedByCheck(html),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      if (blockedByCheck(page.html))
+        throw new Error("The listing is still behind a security check.");
+    }
     const structured = extractListingDetailFromHtml({
       html: page.html,
       url: page.finalUrl,
@@ -76,8 +100,11 @@ export async function readPostingDetail(input: {
     if (detail?.needsRenderedPage) {
       page = await input.readPage(posting.canonicalUrl, {
         rendered: true,
+        ready: (html) => !blockedByCheck(html),
         ...(input.signal ? { signal: input.signal } : {}),
       });
+      if (blockedByCheck(page.html))
+        throw new Error("The listing is still behind a security check.");
       detail = (await extract())[0];
     }
     if (!detail?.description.trim() || detail.needsRenderedPage)
