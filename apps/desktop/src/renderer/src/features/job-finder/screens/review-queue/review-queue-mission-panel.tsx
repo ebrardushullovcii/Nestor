@@ -36,7 +36,10 @@ import {
   describeAiUnavailableResume,
   describeUntailorableListing,
 } from "./resume-workspace-utils";
-import type { ResumeRunStage } from "./review-queue-status";
+import {
+  describeInterruptedResumeRewrite,
+  type ResumeRunStage,
+} from "./review-queue-status";
 
 const dailyCapacityLimitDescriptionId =
   "employer-application-daily-capacity-limit";
@@ -341,10 +344,24 @@ export function ReviewQueueMissionPanel({
       ? null
       : describeUntailorableListing(selectedAsset);
   const untailorableListingReasonId = "resume-choice-untailorable-listing";
+  // The app closed while this job's resume was being rewritten at its new
+  // level: the resume is still the old level's, so say so and offer the
+  // rewrite again. The picker shows the level the resume was written at.
+  const interruptedRewrite =
+    selectedItem && !isGenerating && !isSelectedJobPending
+      ? describeInterruptedResumeRewrite(selectedItem)
+      : null;
   const selectedResumeLevel = selectedItem
     ? untailorableListing
       ? "original"
-      : getSelectedResumeLevel(selectedItem)
+      : getSelectedResumeLevel(
+          interruptedRewrite
+            ? {
+                ...selectedItem,
+                resumeTailoringMode: selectedItem.resumeWrittenTailoringMode,
+              }
+            : selectedItem,
+        )
     : null;
   const selectedResumeLevelOption = RESUME_LEVEL_OPTIONS.find(
     (option) => option.id === selectedResumeLevel,
@@ -485,6 +502,37 @@ export function ReviewQueueMissionPanel({
             {resumeChoiceNote}
           </>
         )}
+        {interruptedRewrite ? (
+          <div
+            className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+            data-testid="interrupted-resume-rewrite"
+          >
+            <p
+              className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft"
+              role="note"
+            >
+              The rewrite at {interruptedRewrite.chosenLabel} did not finish.
+              This is still the {interruptedRewrite.writtenLabel} resume
+              {selectedItem.resumeReview.status === "approved"
+                ? ", and it stays approved."
+                : "."}
+            </p>
+            <Button
+              className={quietActionClassName}
+              onClick={() =>
+                onSetJobResumeApplicationMode(
+                  selectedItem.jobId,
+                  "tailored_per_job",
+                  interruptedRewrite.chosen,
+                )
+              }
+              type="button"
+              variant="link"
+            >
+              Rewrite at {interruptedRewrite.chosenLabel}
+            </Button>
+          </div>
+        ) : null}
         {usesOriginalResume &&
         originalResume &&
         selectedItem.resumeReview.status === "original_resume" ? (

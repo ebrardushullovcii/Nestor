@@ -1839,6 +1839,12 @@ export const TailoredAssetSchema = z.object({
   // many typed fixtures built from this shape, stay valid without churn.
   generationReason: AssetGenerationReasonSchema.nullable().optional(),
   generationDetail: NonEmptyStringSchema.nullable().optional(),
+  /**
+   * The level the text was written at. A job's level is saved before its
+   * rewrite runs, so a rewrite a restart cut off left the job naming a level
+   * the resume was never written at. Absent on assets written before this.
+   */
+  tailoringMode: TailoringModeSchema.nullable().optional(),
   notes: z.array(NonEmptyStringSchema).default([]),
   failureMessage: NonEmptyStringSchema.nullable().default(null),
   failedAt: IsoDateTimeSchema.nullable().default(null),
@@ -1910,6 +1916,8 @@ export const ReviewQueueItemSchema = z.object({
     ResumeApplicationModeSchema.default("tailored_per_job"),
   /** The per-job tailoring level, or `null` when the profile setting applies. */
   resumeTailoringMode: TailoringModeSchema.nullable().optional(),
+  /** The level the saved resume was written at, when the asset recorded it. */
+  resumeWrittenTailoringMode: TailoringModeSchema.nullable().optional(),
   resumeReview: ReviewQueueResumeReviewStateSchema.default({
     status: "not_started",
   }),

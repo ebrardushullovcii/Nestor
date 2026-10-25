@@ -308,6 +308,7 @@ export function buildReviewQueue(
         applicationStatus: job.status,
         resumeApplicationMode,
         resumeTailoringMode: job.resumeTailoringMode ?? null,
+        resumeWrittenTailoringMode: asset?.tailoringMode ?? null,
         assetStatus: asset?.status ?? "not_started",
         progressPercent: asset?.progressPercent ?? null,
         resumeAssetId: asset?.id ?? null,

@@ -275,6 +275,37 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onGenerateResume).toHaveBeenCalledWith("job_1");
   });
 
+  it("says a level rewrite the app closed during did not finish, and offers it again", () => {
+    // STAB-010: Aggressive was saved, the app closed while it was writing,
+    // and the approved Light resume was named Aggressive with no retry.
+    const props = renderPanel({
+      selectedItem: {
+        ...createApprovedItem(),
+        resumeTailoringMode: "aggressive",
+        resumeWrittenTailoringMode: "conservative",
+      },
+    });
+
+    expect(
+      screen.getByTestId("interrupted-resume-rewrite").textContent,
+    ).toContain(
+      "The rewrite at Aggressive did not finish. This is still the Light resume, and it stays approved.",
+    );
+    expect(
+      screen
+        .getByRole("radio", { name: /^Light/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rewrite at Aggressive" }),
+    );
+    expect(props.onSetJobResumeApplicationMode).toHaveBeenCalledWith(
+      "job_1",
+      "tailored_per_job",
+      "aggressive",
+    );
+  });
+
   it("names the review step, not Apply, when an Aggressive built-in resume must be read", () => {
     renderPanel({
       selectedAsset: createReadyAsset({

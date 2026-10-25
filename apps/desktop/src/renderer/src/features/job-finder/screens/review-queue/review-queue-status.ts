@@ -350,12 +350,17 @@ export function isResumeGenerationInProgress(
  * in place, still "ready", and Apply approved and sent it; the only rewrite
  * sat inside the guided-edits popup. Original sends the imported file, so
  * moving to it rewrites nothing, and a job with no resume yet keeps its
- * "Create the resume" step.
+ * "Create the resume" step. The level the resume was written at counts over
+ * the saved one, so picking the level of a rewrite a restart cut off runs it
+ * again.
  */
 export function shouldRewriteResumeAfterLevelChange(input: {
   item: Pick<
     ReviewQueueItem,
-    "assetStatus" | "resumeApplicationMode" | "resumeTailoringMode"
+    | "assetStatus"
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
   >;
   /** The saved strength a job without its own level is written at. */
   defaultTailoringMode: TailoringMode;
@@ -371,7 +376,9 @@ export function shouldRewriteResumeAfterLevelChange(input: {
   const currentLevel =
     input.item.resumeApplicationMode === "original_resume"
       ? "original_resume"
-      : (input.item.resumeTailoringMode ?? input.defaultTailoringMode);
+      : (input.item.resumeWrittenTailoringMode ??
+        input.item.resumeTailoringMode ??
+        input.defaultTailoringMode);
   const nextLevel = input.nextTailoringMode ?? input.defaultTailoringMode;
   return currentLevel !== nextLevel;
 }
@@ -958,15 +965,55 @@ export function describeSavedResumeLevel(level: TailoringMode): string {
 
 /**
  * The level a shortlisted row names, or null when the job follows the
- * profile's level and the list cannot know it without the profile.
+ * profile's level and the list cannot know it without the profile. A job
+ * with its own level names the level its resume was written at: after a
+ * rewrite a restart cut off, the saved level is one the text never had.
  */
 export function describeQueueItemResumeLevel(
-  item: Pick<ReviewQueueItem, "resumeApplicationMode" | "resumeTailoringMode">,
+  item: Pick<
+    ReviewQueueItem,
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
+  >,
 ): string | null {
   if (item.resumeApplicationMode === "original_resume") return "Original";
   return item.resumeTailoringMode
-    ? describeSavedResumeLevel(item.resumeTailoringMode)
+    ? describeSavedResumeLevel(
+        item.resumeWrittenTailoringMode ?? item.resumeTailoringMode,
+      )
     : null;
+}
+
+/**
+ * A level rewrite that did not finish: the job's own level is saved, but
+ * its resume is still the one written at another level (the app closed
+ * while it was writing). Null when the resume matches its level.
+ */
+export function describeInterruptedResumeRewrite(
+  item: Pick<
+    ReviewQueueItem,
+    | "assetStatus"
+    | "resumeApplicationMode"
+    | "resumeTailoringMode"
+    | "resumeWrittenTailoringMode"
+  >,
+): { chosen: TailoringMode; chosenLabel: string; writtenLabel: string } | null {
+  const chosen = item.resumeTailoringMode;
+  const written = item.resumeWrittenTailoringMode;
+  if (
+    item.resumeApplicationMode === "original_resume" ||
+    item.assetStatus !== "ready" ||
+    !chosen ||
+    !written ||
+    chosen === written
+  )
+    return null;
+  return {
+    chosen,
+    chosenLabel: describeSavedResumeLevel(chosen),
+    writtenLabel: describeSavedResumeLevel(written),
+  };
 }
 
 /**
