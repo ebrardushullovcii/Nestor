@@ -6,6 +6,14 @@ import {
   ApplicationStoreDemoInputSchema,
   ApplicationStoreDemoResultSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
+  ApplicationTargetSchema,
+  ApplicationRowSchema,
+  ApplicationsForJobsInputSchema,
+  ApplicationDetailsSchema,
+  NeedsYouListQuerySchema,
+  NeedsYouPageSchema,
+  AnswerNeedsYouInputSchema,
+  AnswerNeedsYouResultSchema,
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 
@@ -13,6 +21,8 @@ import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
 import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";
+import { getApplicationService } from "../services/applications";
+import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 
 export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
@@ -36,6 +46,42 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
         ApplicationListQuerySchema.parse(input ?? {}),
       ),
     ),
+  );
+  ipcMain.handle("job-finder:applications-for-jobs", (_event, input: unknown) => {
+    const { jobIds } = ApplicationsForJobsInputSchema.parse(input);
+    return ApplicationRowSchema.array().parse(getApplicationStore().forJobs(jobIds));
+  });
+  ipcMain.handle("job-finder:get-application-details", (_event, input: unknown) => {
+    const { id } = ApplicationTargetSchema.parse(input);
+    const store = getApplicationStore();
+    const application = store.getApplication(id);
+    if (!application) return null;
+    const work = store.getWork(id);
+    return ApplicationDetailsSchema.parse({ application,
+      summary: work?.execution.summary ?? null,
+      detail: work?.execution.detail ?? null,
+      resumeFileName: store.getResumeArtifact(id)?.fileName ?? null,
+      reviewCard: work?.reviewCard ?? null,
+      receipt: store.getSubmissionReceipt(id),
+    });
+  });
+  ipcMain.handle("job-finder:stop-application", async (_event, input: unknown) => {
+    const { id } = ApplicationTargetSchema.parse(input);
+    await getJobFinderWorkspaceService();
+    return (await getApplicationService()).stopApplication(id);
+  });
+  ipcMain.handle("job-finder:open-application", async (_event, input: unknown) => {
+    const { id } = ApplicationTargetSchema.parse(input);
+    await getJobFinderWorkspaceService();
+    const opened = await (await getApplicationService()).open(id);
+    if (opened) await getEmbeddedBrowser().command({ type: "open" });
+    return opened;
+  });
+  ipcMain.handle("job-finder:list-needs-you", (_event, input: unknown) =>
+    NeedsYouPageSchema.parse(getApplicationStore().needsYou.list(NeedsYouListQuerySchema.parse(input ?? {}))),
+  );
+  ipcMain.handle("job-finder:answer-needs-you", (_event, input: unknown) =>
+    AnswerNeedsYouResultSchema.parse(getApplicationStore().needsYou.answer(AnswerNeedsYouInputSchema.parse(input))),
   );
   ipcMain.handle(
     "job-finder:test-load-applications-store-demo",

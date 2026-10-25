@@ -471,7 +471,7 @@ export async function submitPreparedApplication(input: {
     runtimeInput: ApplicationSubmissionRuntimeInput,
   ) => Promise<ApplicationSubmissionRuntimeResult>;
 }): Promise<ApplicationSubmissionRuntimeResult> {
-  const outcomes = await input.repository.listSubmissionOutcomeRecords();
+  const outcomes = await input.repository.listSubmissionOutcomeRecords({ jobId: input.lineage.jobId });
   const capacity = deriveApplySubmissionCapacity({
     envelope: input.envelope,
     outcomes,

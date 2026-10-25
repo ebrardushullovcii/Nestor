@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./job-commands": "./src/job-commands.ts",
     "./resumes": "./src/resumes/index.ts",
+    "./applications": "./src/applications/index.ts",
     "./assistant-attention": "./src/assistant/attention.ts",
     "./discovery-ordering": "./src/discovery-ordering.ts",
     "./discovery-result-bands": "./src/discovery-result-bands.ts",

@@ -483,7 +483,9 @@ export interface ApplyAgentConfig {
   /** Reuse complete, identical model question reads within this AI client. */
   questionReadCacheScope?: object;
   /** Latest saved answers while other applications in this batch are open. */
-  readReusableAnswers?: () => Promise<readonly CandidateReusableAnswer[]>;
+  readReusableAnswers?: (
+    questions: readonly Pick<ApplicationAttemptQuestion, "prompt" | "kind" | "answerControlType" | "answerOptions" | "inputConstraints">[],
+  ) => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */
   safety?: ApplySafetyHooks;
   /** Writes and renders the letter this application sends, when it needs one. */

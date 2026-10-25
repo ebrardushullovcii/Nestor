@@ -19,6 +19,22 @@ CREATE INDEX IF NOT EXISTS applications_by_updated ON applications(updated_at DE
 CREATE INDEX IF NOT EXISTS applications_by_state ON applications(state, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS applications_queue ON applications(state, queued_at, id);
 
+-- Large preparation details are read only for the selected application.
+CREATE TABLE IF NOT EXISTS application_details (
+  application_id INTEGER PRIMARY KEY REFERENCES applications(id) ON DELETE CASCADE,
+  attempt INTEGER NOT NULL,
+  resume_artifact_json TEXT NOT NULL,
+  execution_json TEXT,
+  review_json TEXT,
+  authority_envelope_id TEXT
+);
+CREATE TABLE IF NOT EXISTS application_origins (
+  application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  origin TEXT NOT NULL,
+  PRIMARY KEY (application_id, origin)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS application_origins_by_site ON application_origins(origin, application_id);
+
 CREATE TABLE IF NOT EXISTS needs_you (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL CHECK (kind IN ('question', 'sign_in', 'captcha', 'mfa')),

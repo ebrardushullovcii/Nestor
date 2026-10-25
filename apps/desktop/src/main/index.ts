@@ -22,6 +22,7 @@ import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerTrackerRoutes } from "./routes/tracker";
 import { stopResumeService } from "./services/resumes";
+import { stopApplicationService } from "./services/applications";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -424,6 +425,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopApplicationService();
   stopResumeService();
   closeJobStore();
   disposeInterviewSessionControls();

@@ -104,6 +104,24 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
   };
 
   return {
+    /** Answers for the questions currently on a page, scoped before any AI call. */
+    answersForQuestions(applicationId: number, keys: readonly string[], siteOrigin: string): Array<{
+      id: string; key: string; prompt: string; answer: string; local: boolean;
+    }> {
+      if (keys.length === 0) return [];
+      const scope = FormAnswerScopeSchema.parse({ siteOrigin });
+      const records = sql(`SELECT 'saved:' || answer_key AS id, answer_key AS key, prompt, answer, 0 AS local
+        FROM form_answers WHERE answer_key IN (SELECT value FROM json_each(?))
+          AND country = '' AND site_origin IN ('', ?)
+        UNION ALL
+        SELECT 'application:' || t.id AS id, t.answer_key AS key, t.prompt, t.answer, 1 AS local
+        FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+        WHERE n.application_id = ? AND t.kind = 'question' AND t.answer IS NOT NULL
+          AND t.answer_key IN (SELECT value FROM json_each(?))`).all(
+          JSON.stringify(keys), scope.siteOrigin, applicationId, JSON.stringify(keys),
+        ) as Array<{ id: string; key: string; prompt: string; answer: string; local: number }>;
+      return records.map((row) => ({ ...row, local: row.local === 1 }));
+    },
     findAnswer: (key: string, scope: Partial<FormAnswerScope> = {}) =>
       findAnswerRecord(key, scope)?.answer ?? null,
 
