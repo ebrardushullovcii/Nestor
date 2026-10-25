@@ -257,6 +257,8 @@ export function ShortlistedScreen() {
         to: "found",
       });
       const { moveId } = result;
+      // The rows left at once; if the store moved none, show what it holds.
+      if (result.moved === 0) void latest.current.list.refresh();
       showToast({
         id: "shortlisted-move",
         title: `Moved ${plural(result.moved, "job")} back to Find jobs`,
