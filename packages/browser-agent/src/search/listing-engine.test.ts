@@ -12,6 +12,7 @@ import {
   screenCards,
 } from "./listing-engine";
 import { publicBoardFeed } from "./public-board-feed";
+import type { LLMClient } from "../agent/contracts";
 
 const source = {
   id: "source",
@@ -372,4 +373,36 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     }),
   ).toEqual([]);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  const fit = {
+    id: 1,
+    s: verdict.score,
+    why: verdict.summary,
+    r: [verdict.role.assessment, verdict.role.explanation],
+    p: [verdict.preferences.assessment, verdict.preferences.explanation],
+    c: [verdict.coverage.assessment, verdict.coverage.explanation],
+  };
+  const requests: number[][] = [];
+  const retryClient = {
+    chatWithTools: vi.fn(
+      (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
+        const data = JSON.parse(messages[1].content) as {
+          listings: { id: number }[];
+        };
+        requests.push(data.listings.map((item) => item.id));
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits: [{ ...fit, id: requests.length === 1 ? 1 : 2 }],
+          }),
+        });
+      },
+    ),
+  };
+  const repaired = await fitJobs({
+    client: retryClient,
+    profile,
+    goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
+    jobs: [job, { ...job, id: 2 }],
+  });
+  expect(requests).toEqual([[1, 2], [2]]);
+  expect(repaired.map((fit) => fit.id)).toEqual([1, 2]);
 });

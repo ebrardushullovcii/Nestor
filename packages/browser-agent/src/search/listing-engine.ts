@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { DiscoveryPageReadError } from "@nestor/contracts";
+import { DiscoveryPageReadError, JOB_FIT_BANDS } from "@nestor/contracts";
 import type {
   FoundJob,
   JobFitUpdate,
+  JobDetail,
   ListingCard,
   ListingSearchReader,
   ModelTokenUsage,
@@ -617,51 +618,65 @@ export async function fitJobs(
     ),
     6,
     async (batch) => {
-      const answer = await ask(
-        input,
-        'Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: 85–100 strong realistic choice, 65–84 worth applying, 40–64 stretch or material tradeoff, 0–39 poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON: {"fits":[{"id":integer,"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}]}. Optional "for" and "against" arrays may add up to 4 specific strengths or gaps ONLY when they add information absent from the explanations. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.',
-        {
-          person,
-          goals: input.goals,
-          request: input.request,
-          listings: batch.map((job) => ({
-            id: job.id,
-            title: job.title,
-            company: job.company,
-            location: job.location,
-            workModes: job.workModes,
-            employmentType: job.employmentType,
-            salaryText: job.salaryText,
-            seniority: job.seniority,
-            fullText: job.description,
-          })),
-        },
-        z.object({ fits: z.array(fitSchema) }),
-        Math.max(8000, batch.length * 350),
-        "fit_batch",
-      );
-      const ids = new Set(batch.map((job) => job.id));
-      if (
-        answer.fits.length !== ids.size ||
-        new Set(answer.fits.map((fit) => fit.id)).size !== ids.size ||
-        answer.fits.some((fit) => !ids.has(fit.id))
-      )
-        throw new Error(
-          "Fit response did not cover each merged job exactly once.",
+      const judge = async (batch: JobDetail[]) => {
+        const answer = await ask(
+          input,
+          `Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON: {"fits":[{"id":integer,"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}]}. Optional "for" and "against" arrays may add up to 4 specific strengths or gaps ONLY when they add information absent from the explanations. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
+          {
+            person,
+            goals: input.goals,
+            request: input.request,
+            listings: batch.map((job) => ({
+              id: job.id,
+              title: job.title,
+              company: job.company,
+              location: job.location,
+              workModes: job.workModes,
+              employmentType: job.employmentType,
+              salaryText: job.salaryText,
+              seniority: job.seniority,
+              fullText: job.description,
+            })),
+          },
+          z.object({ fits: z.array(fitSchema) }),
+          Math.max(8000, batch.length * 350),
+          "fit_batch",
         );
-      const fits = answer.fits.map((fit) => ({
-        id: fit.id,
-        score: fit.s,
-        summary: fit.why,
-        reasons: fit.for,
-        gaps: fit.against,
-        role: { assessment: fit.r[0], explanation: fit.r[1] },
-        preferences: { assessment: fit.p[0], explanation: fit.p[1] },
-        coverage: { assessment: fit.c[0], explanation: fit.c[1] },
-        scoredAt: new Date().toISOString(),
-      }));
-      output.push(...fits);
-      await input.onBatch?.(fits);
+        const ids = new Set(batch.map((job) => job.id));
+        if (
+          new Set(answer.fits.map((fit) => fit.id)).size !==
+            answer.fits.length ||
+          answer.fits.some((fit) => !ids.has(fit.id))
+        )
+          throw new Error(
+            "Fit response contained duplicate or unexpected jobs.",
+          );
+        const fits = answer.fits.map((fit) => ({
+          id: fit.id,
+          score: fit.s,
+          summary: fit.why,
+          reasons: fit.for,
+          gaps: fit.against,
+          role: { assessment: fit.r[0], explanation: fit.r[1] },
+          preferences: { assessment: fit.p[0], explanation: fit.p[1] },
+          coverage: { assessment: fit.c[0], explanation: fit.c[1] },
+          scoredAt: new Date().toISOString(),
+        }));
+        output.push(...fits);
+        await input.onBatch?.(fits);
+        const judged = new Set(fits.map((fit) => fit.id));
+        return batch.filter((job) => !judged.has(job.id));
+      };
+      const missing = await judge(batch);
+      // Preserve valid judgments. An omitted job has no fit to reuse; retry only that job,
+      // in smaller groups, once. The runner leaves any remaining omissions unscored.
+      await mapConcurrent(batches(missing, 8), 1, async (remaining) => {
+        try {
+          await judge(remaining);
+        } catch {
+          input.signal?.throwIfAborted();
+        }
+      });
     },
   );
   return output;

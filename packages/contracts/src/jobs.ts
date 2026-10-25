@@ -125,9 +125,15 @@ export const JobFitSchema = z.object({
   reasons: z.array(z.string()),
   gaps: z.array(z.string()),
   scoredAt: z.string(),
-  role: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
-  preferences: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
-  coverage: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
+  role: z
+    .object({ assessment: z.string(), explanation: z.string() })
+    .optional(),
+  preferences: z
+    .object({ assessment: z.string(), explanation: z.string() })
+    .optional(),
+  coverage: z
+    .object({ assessment: z.string(), explanation: z.string() })
+    .optional(),
 });
 export type JobFit = z.infer<typeof JobFitSchema>;
 
@@ -293,9 +299,12 @@ export const JobSearchSettingsSchema = z
 export type JobSearchSettings = z.infer<typeof JobSearchSettingsSchema>;
 export type JobSearchSettingsInput = z.input<typeof JobSearchSettingsSchema>;
 
+/** The score bands used by fit judgments, labels and pickiness. */
+export const JOB_FIT_BANDS = { strong: 85, good: 65, stretch: 40 } as const;
+
 /** The lowest fit each pickiness shows first. */
 export const PICKY_MIN_FIT: Record<JobSearchSettings["picky"], number | null> =
-  { open: null, balanced: 50, strict: 70 };
+  { open: null, balanced: JOB_FIT_BANDS.good, strict: JOB_FIT_BANDS.strong };
 
 export const jobSearchStateValues = [
   "running",
