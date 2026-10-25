@@ -28,7 +28,6 @@ Each line names the symbol or file to check before changing the behavior. If the
 - Approved resume exports are written only through `approveResumeExport()`; both repositories throw on `upsertResumeExportArtifact` with `isApproved: true`, on purpose.
 - Resume export intent is `approval | download`; `approval` renders and verifies without a native Save dialog (`ResumePdfExportIntentSchema`, `routes/job-finder.ts`).
 - One rule decides whether a resume claim blocks export, and assistant proposals are gated by it before display (`isBlockingResumeClaimAssessment`, `evaluateResumeProposalGrounding`).
-- Resume strategy policy is generation input only; it never approves, readies, or un-stales an artifact (`resume-strategy-application.ts`).
 - Repositories retain only the newest revisions per draft and drop older ones deliberately (`MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT`).
 - Apply refuses a missing or stale approved resume and re-verifies file existence plus SHA-256 before any browser work (`workspace-apply-run-support.ts`).
 - The approved answer-snapshot digest excludes lifecycle timestamps and the Profile revision so unrelated Profile writes cannot stale unchanged answers (`serializeApprovedApplicationAnswerSnapshotForDigest`).
@@ -65,12 +64,11 @@ Each line names the symbol or file to check before changing the behavior. If the
 - Submission evidence kinds are external only (`submissionOutcomeEvidenceKindValues`); there is no click or intent field, so intent can never prove submission.
 - `outcome_uncertain` permanently blocks automatic retry and forbids `finalSubmitOccurred` (`SubmissionOutcomeRecordSchema`, `application-submission-orchestrator.ts`).
 - `applicationPreparationStartedAt` and `applicationPreparationStartedLocalDate` are a pair: both absent is legacy unknown, both null is explicitly not begun (`apply.ts` refinement).
-- Volume caps are fixed service constants, `MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN` and `MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY`; cancelled-before-start work does not consume a slot (`application-preparation-capacity.ts`).
+- One run prepares at most `MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN` jobs; there is no daily limit.
 - `intermediateMutationsAuthorized` never authorizes final submission and requires exactly one job, one origin, and one resume digest (`application-authority-management.ts`).
 - `externalWrites` records a write only after an authorized request receives a 2xx/3xx response; filled answers stay `answered` until an actual submission (`playwright-application-flow.ts`).
 - Only login, signup, email-verification, and MFA blockers may resolve through source-access verification (`workspace-application-user-action.ts`); CAPTCHA and the rest wait for a capability-specific probe.
 - User-owned blockers are not technical-failure evidence (`isUserOwnedBlockerEvidence`).
-- Outcome recording rejects ambiguous job identity: multiple campaigns or application records require an explicit id (`RecordOutcomeInput` in `workspace-intelligence-methods.ts`).
 - The product-action registry exposes exactly the eight tools in `jobFinderProductActionToolNameValues`; none submits, creates accounts, or navigates arbitrarily.
 - Visual snapshots are evidence-only: `visual.ts` rejects selectors and directives, and capture requires the explicit `captureVisualSnapshots` opt-in rather than inference from a visual-capable client.
 

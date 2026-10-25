@@ -13,9 +13,8 @@ including final submission, when the user has selected and scoped that authority
 through product preferences or settings.
 
 The product goal is the outcome, not the current browser loop, state machine, or
-UI. The existing implementation remains prepare-only until a replacement
-authority contract is implemented and accepted; this decision does not turn an
-internal flag or legacy apply mode into submission permission.
+UI. This decision does not turn an internal flag or legacy apply mode into
+submission permission.
 
 ## Decision
 
@@ -27,7 +26,7 @@ Job Finder will support explicit application automation modes:
 - `autonomous_submit`: execute and submit within a user-defined authority envelope
 
 The authority envelope must be explicit, inspectable, revocable, and scoped. It
-must cover at least campaign or job scope, application volume, resume and answer
+must cover at least job scope, application volume, resume and answer
 policy, intermediate employer-site writes, account behavior, final submission,
 stop conditions, and expiry. Existing workspaces stay `prepare_only` until the
 user chooses a broader mode.
@@ -52,21 +51,13 @@ saved authority envelope before any external mutation. Final submission uses a
 separate preflight and outcome-verification path and is never retried when the
 site outcome is uncertain.
 
-The current 10-per-run and 20-per-local-day limits remain implementation defaults
-during migration. They may become user-configurable safeguards only through an
-explicit policy and contract change; they are not silently removed by this ADR.
-
-Before expanding the runtime, the team will compare the current orchestration
-against simpler deterministic, tool-first agent, and hybrid browser designs.
 Current discovery, profile editing, resume editing, and browser-control
 approaches may be replaced if another design produces better truthful outcomes.
 
 ## Consequences
 
-- The current prepare-only sealed-acceptance and blind-persona chain is paused;
-  it cannot certify the newly authorized end state.
-- Contracts, persistence, browser runtime, product copy, safeguards, receipts,
-  tests, and acceptance must distinguish the three modes explicitly.
+- Contracts, persistence, browser runtime, product copy, receipts and tests
+  must distinguish the three modes explicitly.
 - Final-submit controls may be used only by the new typed authority path. Legacy
   flags and current prepare-only APIs remain non-submitting.
 - Platform terms and account risk must be disclosed without pretending that a

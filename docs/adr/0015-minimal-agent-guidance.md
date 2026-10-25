@@ -1,10 +1,10 @@
 # ADR 0015: Minimal agent guidance
 
-Status: accepted (2026-09-04). Supersedes ADR 0005.
+Status: accepted (2026-09-04).
 
 ## Context
 
-ADR 0005 introduced a canonical documentation system: a registry, generated `CLAUDE.md` and Cursor adapters, fifteen package-level `AGENTS.md` files, `STATUS.md`/`TRACKS.md` as a handoff layer, exec plans, a history file, and a validator that enforced all of it. Session logs from Codex and Claude Code showed the cost: `STATUS.md` grew from 86 to 2,419 lines in four months of agent-written summaries, about 28 percent of edits in long sessions went to docs, the generated `CLAUDE.md` used `@` imports that injected roughly 455 KB into every Claude Code session, and the status docs steered agents into work the user had not asked for (ADR 0014). Package guides, the registry, the adapters, and vendored library skills were read ritually and rarely changed an outcome.
+An earlier decision introduced a canonical documentation system: a registry, generated `CLAUDE.md` and Cursor adapters, fifteen package-level `AGENTS.md` files, `STATUS.md`/`TRACKS.md` as a handoff layer, exec plans, a history file, and a validator that enforced all of it. Session logs from Codex and Claude Code showed the cost: `STATUS.md` grew from 86 to 2,419 lines in four months of agent-written summaries, about 28 percent of edits in long sessions went to docs, the generated `CLAUDE.md` used `@` imports that injected roughly 455 KB into every Claude Code session, and the status docs steered agents into work the user had not asked for. Package guides, the registry, the adapters, and vendored library skills were read ritually and rarely changed an outcome.
 
 ## Decision
 
@@ -16,6 +16,5 @@ ADR 0005 introduced a canonical documentation system: a registry, generated `CLA
 
 ## Consequences
 
-- `pnpm validate:docs-only`, `agents:sync`, `agents:check`, and `docs:check` are removed; `pnpm verify` no longer checks docs.
-- `docs/audits/` stays where it is because the release-evidence scripts fingerprint it, but it is a record, not guidance.
+- `pnpm validate:docs-only`, `agents:sync`, `agents:check`, and `docs:check` are removed.
 - Agents that need current state read git history and the code.

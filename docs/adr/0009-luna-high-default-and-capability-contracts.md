@@ -48,10 +48,4 @@ The benchmark also showed that model selection is not the main blocker in severa
 ### Mitigations
 
 - Migrate one capability family at a time behind contract tests and replayable synthetic fixtures.
-- Preserve deterministic fallbacks until each replacement passes direct-output and production-Electron acceptance.
-- Keep the full benchmark as the baseline and repeat only affected cases during implementation.
-
-## Evidence and plan
-
-- Benchmark: `docs/audits/AI_MODEL_CAPABILITY_BENCHMARK_FULL_2026-08-12.html`
-- Production acceptance: `docs/audits/LUNA_HIGH_AND_PRODUCTION_ACCEPTANCE_2026-08-12.html`
+- Preserve deterministic fallbacks until each replacement passes direct-output checks and a run in the built app.

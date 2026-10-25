@@ -8,10 +8,10 @@ The owner asked to generate resumes for selected jobs and reduce waiting through
 
 ## Decision
 
-- Shortlisted keeps Create N missing resumes and Apply to all N ready jobs. Choose jobs temporarily reveals resume checkboxes and a Create N resumes control. Cancel, starting the batch, leaving the page, or changing campaigns clears the selection. Selection is not persisted.
-- A batch writes missing first drafts only, up to ten jobs. Existing resumes, original-resume jobs, and jobs already in Applications are excluded. Each job keeps its own resume level and strategy.
+- Shortlisted keeps Create N missing resumes and Apply to all N ready jobs. Choose jobs temporarily reveals resume checkboxes and a Create N resumes control. Cancel, starting the batch, or leaving the page clears the selection. Selection is not persisted.
+- A batch writes missing first drafts only, up to ten jobs. Existing resumes, original-resume jobs, and jobs already in Applications are excluded.
 - At most two resumes are generated concurrently within a batch. Completion and failures are counted as jobs settle. One failure does not stop the others. Stop prevents new jobs from starting and lets active drafts finish. The batch survives sibling route changes; app restart does not resume its queue.
-- The controller owns the batch and rejects duplicate starts. Selected batches and their remaining counts stay scoped to the originating campaign and selected jobs.
+- The controller owns the batch and rejects duplicate starts. Selected batches and their remaining counts stay scoped to the selected jobs.
 - Applying remains sequential. The browser runtime currently serializes form work globally, and the application queue assumes one active job. Parallel applications require separate work on per-job progress, tab ownership, cancellation, and submission authority.
 
 ## Consequences

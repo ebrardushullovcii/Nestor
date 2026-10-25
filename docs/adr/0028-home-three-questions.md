@@ -1,6 +1,6 @@
 # ADR 0028: Home answers three questions, and the person's files live in Profile
 
-Status: accepted (2026-09-23); amended (2026-10-01).
+Status: accepted (2026-09-23); amended (2026-10-01). The Home layout is superseded by the 2026-10-25 scope in `docs/PRODUCT.md`: Home becomes a dashboard with charts. The count-owner rule and Profile › Files stand.
 
 ## Context
 
@@ -11,11 +11,10 @@ Documents was a destination of its own, under a "Workspace" group with Settings,
 ## Decision
 
 - Home answers exactly three questions. What is going on: one sentence under the title (the running work, or the last search and its counts, or the setup gap). What to do next: one card, one primary action, and the action completes the step in place when it can (Search now runs the search, Create N resumes writes them, Apply to all N starts the batch, Try again retries the failed ones); otherwise it opens the one page where the step happens. Where you are: three tiles, Find jobs / Shortlisted / Applications, whose numbers are the sidebar's own count owners, each with a one-line breakdown the badge cannot carry ("2 need a resume · 1 ready to apply", "1 ready to send · 2 applied").
-- The next step is chosen in one fixed order by a pure model (`job-search-home-model.ts`): safeguard pause, unfinished setup, no enabled source, Needs you, applications ready to send, applications to try again, resumes to review, ready jobs to apply to, missing resumes, then the search loop (first search; look through results; nothing found; search failed or stopped early; all caught up, search again). While a search, resume run, or application run is in flight and nothing else is waiting, the card says so and offers the page to watch.
+- The next step is chosen in one fixed order by a pure model (`job-search-home-model.ts`): unfinished setup, no enabled source, Needs you, applications ready to send, applications to try again, resumes to review, ready jobs to apply to, missing resumes, then the search loop (first search; look through results; nothing found; search failed or stopped early; all caught up, search again). While a search, resume run, or application run is in flight and nothing else is waiting, the card says so and offers the page to watch.
 - Work in flight lists under "Happening now" from the same task model the header's Tasks popover reads, each row with Stop and the page it belongs to. The global pause lives there too, and Resume replaces it in the header while paused. A failing enabled source, or a search outcome that needs the person, is one line with its one fix.
 - Pausing an application batch from Home lets the current application reach a safe checkpoint and holds the remaining, untouched jobs. Resume continues the same batch, including after an app restart. Prepared pages without a supported saved snapshot become a clear retry after a cold restart; supported snapshots can be refilled without AI or sending (ADR 0055). Work that may have submitted is never replayed.
-- A pending sample review is a real check of prepared application quality. It blocks further application preparation until the person reviews the sampled application, and Home and Find jobs link directly to that review. It does not block finding jobs, which does not prepare or submit an application.
-- Removed from Home: the source-health badge row, the second search box (the header has one), Results so far (Outcomes has it), Background work (Happening now has it), the standing Notifications panel (it renders only while a campaign notification is unread), and the plan selector until two plans exist.
+- Removed from Home: the source-health badge row, the second search box (the header has one), Background work (Happening now has it), and the standing Notifications panel.
 - Find jobs' badge, tile, and page count the same population: the rows Find jobs lists by default, without the weaker matches behind "Show weaker matches". The tile names the hidden count.
 - The person's files are a Profile tab, "Files", not a destination. Adding a file asks one thing, what it is; it is always attachable and kept until removed. Remove is one press with no dialog, and the file sits in a "Removed" list on the same tab for seven days with Restore. `/job-finder/documents` redirects there. The consent-scope and retention contract fields remain, with those values as defaults, so the main-process loader, lifecycle, and purge behaviour are unchanged.
 
@@ -24,7 +23,6 @@ Documents was a destination of its own, under a "Workspace" group with Settings,
 - Home renders a model; every count on it comes from `destination-counts.ts`, `needs-you-count.ts`, the Shortlisted readiness predicates, and the Applications state resolver, so it can only disagree with a page by reading a different owner, which no longer happens.
 - The dashboard's own `recommendedNextAction` is no longer rendered anywhere; the main-process summary still computes it for its other consumers.
 - The Documents screen, its candidate-asset component, and their tests are deleted; `settings-candidate-assets.tsx` is replaced by `profile-files-tab.tsx`.
-- Release-acceptance harnesses that assert on Home's tiles or on the Documents destination describe a surface that no longer exists and need rewriting before the next release candidate.
 
 Rejected alternatives: keeping four tiles including Needs you (it is the header pill and, when non-zero, the next step); a "Today" or "Overview" name for the page (the sidebar noun is Home, and neither name describes a next step); putting files under Applications (they are about the person, added before any application exists, and Profile already holds the resume).
 
@@ -33,8 +31,6 @@ Rejected alternatives: keeping four tiles including Needs you (it is the header 
 - ADR 0022, ADR 0026, ADR 0027
 
 ## Update (2026-10-01)
-
-The sample-review gate is removed. Automatic batches no longer create sample reviews. Pending automatic reviews are retired without recording them as reviewed; completed ones and reviews the person started stay. Sample reviews no longer block work. The Find jobs sample-review banner is gone.
 
 The owner wants permissions, not prohibitions: the person already chose to run automatic batches. They can review prepared applications in Applications when they want. Stall and safety guards remain, including final submission authority under ADR 0012 and ADR 0024.
 

@@ -41,6 +41,6 @@ This switch is blocked until intake filtering, listing activity and returned
 application semantics match the existing screens. Removing the flag and legacy
 arrays is part of the screen migration, not an optional cleanup.
 
-ADRs 0046 and 0011 still govern canonical discovery and independent plan semantics.
+ADR 0046 still governs canonical discovery.
 Older builds need not open a migrated database; forward migrations require backup
 and post-migration count checks.

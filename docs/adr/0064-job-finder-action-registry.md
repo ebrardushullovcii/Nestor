@@ -4,8 +4,8 @@ Status: accepted (2026-10-24).
 
 ## Context
 
-The sidebar covered most routine work, but queues, company notes, documents,
-resume approaches and several recovery controls were missing. Separate tool
+The sidebar covered most routine work, but queues, documents and several recovery
+controls were missing. Separate tool
 schemas and route bodies made the inventory overstate what worked. The owner
 asked for every user action under the same rules, less code, and simple
 requests that take 3–5 seconds.
@@ -30,7 +30,7 @@ requests that take 3–5 seconds.
   Duplicate presses share one pending execution. Reset and restore finish
   their confirmation record before replacing the chat they belong to.
 - Application starts use the same durable queue as the buttons: runs of ten,
-  the saved mode and daily limit, midnight/restart continuation, pause and
+  the saved mode, restart continuation, pause and
   removal. Preparing and sending keep the instruction-grant and submission
   boundaries from ADRs 0012, 0024 and 0039. No generic action tool bypasses them.
 - The model chooses tools. The initial catalog is small; `load_tools` loads

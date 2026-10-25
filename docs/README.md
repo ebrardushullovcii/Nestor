@@ -13,5 +13,3 @@ Read only what the task needs. Code shows current behavior; ADRs record delibera
 | AI model and provider setup                  | `docs/AI_PROVIDER_SETUP.md`                                                         |
 | domain vocabulary                            | `CONTEXT.md`                                                                        |
 | UI design references                         | `docs/Design/README.md`                                                             |
-
-Historical audit reports and evidence manifests live in `docs/audits/`. They are records of past runs that the release-evidence scripts fingerprint, not guidance; do not read them for current state.

@@ -57,9 +57,6 @@ Use a hybrid architecture with these fixed boundaries:
   test without removing bounded model help for genuinely uncertain pages.
 - Browser-runtime packages provide generic observation and execution hands;
   Job Finder retains workflow and authority policy.
-- Production application behavior remains prepare-only until the new typed
-  authority, preflight, idempotency, outcome, and receipt contracts are wired
-  through one vertical slice per mode.
 - Observation identity, unsupported-layout handling, iframe/upload coverage, and
   external verification channels require explicit implementation and focused
   live testing.

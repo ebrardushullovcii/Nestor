@@ -1,6 +1,6 @@
 # Safe Non-Submitting Apply Boundary
 
-Status: accepted
+Status: superseded by [ADR 0012](0012-user-scoped-autonomous-application-authority.md).
 
 Job Finder apply automation may assist with preparation, form context, recovery, resume approval checks, and reviewable application records, but it must stop before final submission unless the user explicitly re-authorizes live submit work in a new decision. This preserves user consent, avoids accidental applications, and keeps apply automation auditable while still letting the product provide useful non-submitting assistance.
 

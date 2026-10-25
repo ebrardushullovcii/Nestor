@@ -36,7 +36,7 @@ and routed only aggressive resume tailoring to DeepSeek. OpenCode Go now offers
 - A packaged build with only `NESTOR_AI_API_KEY` set behaves like the
   owner's dogfood setup; no local env file is needed to reproduce it.
 - `.env.example`, `docs/AI_PROVIDER_SETUP.md`, and the routing sentences in
-  `docs/ARCHITECTURE.md` and `docs/PRODUCT.md` describe this default.
+  `docs/ARCHITECTURE.md` describe this default.
 - Missing AI is presented to the user as a temporary outage, never as setup
   they failed to do (the product has no user-facing AI settings).
 

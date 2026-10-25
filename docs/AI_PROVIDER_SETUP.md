@@ -221,11 +221,7 @@ NESTOR_INTERVIEW_TEST_USE_LIVE_AI=1
 
 Production runs with the test API absent keep configured behavior unchanged,
 and explicitly configured local STT commands stay available under the test API
-because they execute offline. The release acceptance harness additionally
-strips every `NESTOR_INTERVIEW_*_API_KEY` variable plus the shared
-`NESTOR_AI_API_KEY`, `NESTOR_AI_VISION_API_KEY`, and
-`NESTOR_RESUME_VISION_API_KEY` keys (and this opt-in) from its launch
-environment, so no ambient developer-shell credential can win. The Job Finder
+because they execute offline. The Job Finder
 resume benchmarks keep their own documented `--use-configured-ai`
 `NESTOR_TEST_API_USE_LIVE_AI` exceptions; this Live Assistant switch is
 separate and narrower.
