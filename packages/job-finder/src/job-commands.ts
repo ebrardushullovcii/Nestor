@@ -5,13 +5,18 @@ import {
   type JobSearchSettings,
   type JobSearchStatus,
 } from "@nestor/contracts";
-import { createJobSitesStore, type JobStore } from "@nestor/db/job-store";
+import {
+  createJobSitesStore,
+  createSearchSourcesStore,
+  type JobStore,
+} from "@nestor/db/job-store";
 import type { z } from "zod";
 
 /** What the commands need from the search runner. */
 export interface JobSearchControl {
   start(settings: JobSearchSettings): Promise<unknown>;
   stop(): void;
+  retrySource(id: number): Promise<unknown>;
   status(): JobSearchStatus;
   /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
   scoreUnscored(): Promise<number>;
@@ -56,6 +61,8 @@ export function createJobCommandRunner(deps: {
     current()?.status() ?? {
       search: store.searches.latest(),
       sources: [],
+      progress: null,
+      sourceRevision: 0,
     };
   const handlers: Handlers = {
     list_jobs: (input) => store.listJobs(input),
@@ -87,11 +94,17 @@ export function createJobCommandRunner(deps: {
       await runner.start(settings);
       return runner.status();
     },
+    retry_source: async ({ id }) => {
+      const runner = await search();
+      await runner.retrySource(id);
+      return runner.status();
+    },
     stop_search: () => {
       current()?.stop();
       return status();
     },
     search_status: () => status(),
+    list_search_sources: (query) => createSearchSourcesStore(store).list(query),
   };
 
   return async (name, input) => {

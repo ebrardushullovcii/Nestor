@@ -352,10 +352,52 @@ export const JobSearchSourceStateSchema = z.object({
 });
 export type JobSearchSourceState = z.infer<typeof JobSearchSourceStateSchema>;
 
-/** What a screen shows about the running or last search. */
+export const JobSearchSourceRowSchema = JobSearchSourceStateSchema.extend({
+  url: z.string(),
+  lane: z.enum(["http", "browser"]).nullable(),
+  phase: z.enum(["http", "browser", "screening", "reading"]).nullable(),
+  cards: z.number().int().nonnegative(),
+  related: z.number().int().nonnegative(),
+  unrelated: z.number().int().nonnegative(),
+  seen: z.number().int().nonnegative(),
+  failedReads: z.number().int().nonnegative(),
+});
+export type JobSearchSourceRow = z.infer<typeof JobSearchSourceRowSchema>;
+export const JobSearchSourceQuerySchema = z
+  .object({
+    searchId: z.string().nullable().default(null),
+    text: z.string().trim().max(200).default(""),
+    state: JobSearchSourceStateSchema.shape.state.nullable().default(null),
+    after: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(100).default(25),
+  })
+  .strict();
+export type JobSearchSourceQuery = z.input<typeof JobSearchSourceQuerySchema>;
+export const JobSearchSourcePageSchema = z.object({
+  rows: z.array(JobSearchSourceRowSchema),
+  nextCursor: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative(),
+});
+export type JobSearchSourcePage = z.infer<typeof JobSearchSourcePageSchema>;
+export const JobSearchProgressSchema = z.object({
+  httpQueued: z.number(),
+  httpActive: z.number(),
+  browserQueued: z.number(),
+  browserActive: z.number(),
+  processing: z.number(),
+  fitQueued: z.number(),
+  fitActive: z.number(),
+  needsYou: z.number(),
+  failed: z.number(),
+});
+
+export type JobSearchProgress = z.infer<typeof JobSearchProgressSchema>;
+
+/** A bounded active sample; the paged site-results command owns the complete list. */
 export const JobSearchStatusSchema = z.object({
   search: JobSearchRecordSchema.nullable(),
-  /** Per-site progress while running; empty otherwise. */
-  sources: z.array(JobSearchSourceStateSchema),
+  sources: z.array(JobSearchSourceStateSchema).max(3),
+  progress: JobSearchProgressSchema.nullable(),
+  sourceRevision: z.number().int().nonnegative(),
 });
 export type JobSearchStatus = z.infer<typeof JobSearchStatusSchema>;

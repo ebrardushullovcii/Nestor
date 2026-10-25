@@ -1,3 +1,4 @@
+import { listingClosedReason } from "./listing-status";
 import { z } from "zod";
 import { DiscoveryPageReadError, JOB_FIT_BANDS } from "@nestor/contracts";
 import type {
@@ -22,6 +23,7 @@ import {
 import {
   extractListingDetailFromHtml,
   findApplyLinkInHtml,
+  listingPageText,
 } from "./listing-detail-extraction";
 import { blockedByCheck } from "./bot-check";
 import { collectPublicFeed, publicBoardFeed } from "./public-board-feed";
@@ -119,12 +121,24 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    2,
+    3,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
     goals.request?.trim() ?? "",
   ]);
+}
+
+/** Wait for actual inventory semantics, including script-rendered plain lists. */
+export function listingInventoryReady(html: string, url: string): boolean {
+  return (
+    blockedByCheck(html) ||
+    /<input\b[^>]*type\s*=\s*["']?password/iu.test(html) ||
+    readInventoryHtml(html, url, { id: "ready", label: "" }).cards.length > 0 ||
+    /\bno (?:current |open |available )?(?:jobs|positions|vacancies)\b/iu.test(
+      listingPageText(html),
+    )
+  );
 }
 
 /** No browser or model for ordinary HTTP lists. An incomplete source explicitly asks for navigation fallback. */
@@ -133,10 +147,12 @@ export async function collectSource(
     source: { id: string; label: string; url: string };
     onPage?: (cards: ListingCard[]) => Promise<void> | void;
     navigateFallback?: () => Promise<SourceInventory>;
+    lane?: "http" | "browser";
   },
 ): Promise<SourceInventory> {
   try {
-    const feed = await collectPublicFeed(input);
+    const feed =
+      input.lane === "browser" ? null : await collectPublicFeed(input);
     if (feed) {
       await input.onPage?.(feed);
       return {
@@ -158,7 +174,8 @@ export async function collectSource(
     cards = new Map<string, ListingCard>(),
     notes: string[] = [];
   let complete = true,
-    recognized = false;
+    recognized = false,
+    needsAccess = false;
   while (queue.length) {
     input.signal?.throwIfAborted();
     const urls = queue.splice(0, 4).filter((url) => !visited.has(url));
@@ -166,11 +183,30 @@ export async function collectSource(
     await mapConcurrent(urls, 2, async (url) => {
       try {
         const page = await input.readPage(url, { signal: input.signal });
+        if (
+          blockedByCheck(page.html) ||
+          /<input\b[^>]*type\s*=\s*["']?password/iu.test(page.html)
+        ) {
+          complete = false;
+          needsAccess = true;
+          notes.push("Sign-in or verification is required.");
+          return;
+        }
         const parsed = readInventoryHtml(
           page.html,
           page.finalUrl,
           input.source,
         );
+        if (
+          !parsed.cards.length &&
+          /\b(?:no (?:current |open |available )?(?:jobs|positions|vacancies)|(?:0|zero) (?:open )?(?:jobs|positions|vacancies))\b/iu.test(
+            page.html,
+          )
+        ) {
+          recognized = true;
+          notes.push("The site explicitly reports no open positions.");
+          return;
+        }
         if (!parsed.cards.length) {
           complete = false;
           notes.push(`No readable listing cards at ${page.finalUrl}.`);
@@ -190,12 +226,26 @@ export async function collectSource(
       } catch (error) {
         input.signal?.throwIfAborted();
         complete = false;
+        if (
+          error instanceof DiscoveryPageReadError &&
+          [401, 403].includes(error.status)
+        )
+          needsAccess = true;
         notes.push(
           `Could not read ${url}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     });
   }
+  if (needsAccess && input.lane === "browser")
+    return {
+      cards: [...cards.values()],
+      lane: "browser",
+      pagesRead: visited.size,
+      complete: false,
+      needsYou: true,
+      notes,
+    };
   if ((!recognized || !complete) && input.navigateFallback) {
     const fallback = await input.navigateFallback();
     for (const card of fallback.cards) cards.set(card.url, card);
@@ -213,7 +263,8 @@ export async function collectSource(
   );
   return {
     cards: [...cards.values()],
-    lane: "http",
+    lane: input.lane ?? "http",
+    requiresBrowser: !recognized || !complete,
     pagesRead: visited.size,
     complete,
     notes,
@@ -225,6 +276,7 @@ export async function screenCards(
   input: ListingEngineModel & {
     cards: readonly ListingCard[];
     goals: RoleScreenGoals;
+    decisions?: Map<string, boolean>;
     lookupSeenCards?: (
       cards: readonly ListingCard[],
       roleGoalsKey: string,
@@ -258,15 +310,25 @@ export async function screenCards(
         "",
       )
       .trim();
-  const titles = [...new Set(fresh.map((card) => titleKey(card.title)))];
-  const unrelated = new Set<string>();
+  const allTitles = [...new Set(fresh.map((card) => titleKey(card.title)))];
+  const decisions = input.decisions ?? new Map<string, boolean>();
+  const titles = allTitles.filter((title) => !decisions.has(title));
+  const unrelated = new Set(
+    allTitles.filter((title) => decisions.get(title) === false),
+  );
   await mapConcurrent(batches(titles, 250), 3, async (titles) => {
     const answer = await ask(
       input,
-      'Screen professions against the requested kinds of work. Titles in this list have had common seniority prefixes removed; understand titles in their own language. Reject ONLY clearly unrelated professions. Keep adjacent or ambiguous roles and transferable specialisms. Never reject for place, work mode, level, pay, hours, employment type or a low expected fit. Strategy target_roles covers the target professions and synonyms; related_roles also covers the requested related roles and adjacent specialisms; wide_net includes transferable neighboring work. Return {"unrelated":[integer title indices]}. Omitted indices are kept.',
+      'Screen professions against the requested kinds of work. Titles in this list have had common seniority prefixes removed; understand titles in their own language. Reject ONLY clearly unrelated professions. Keep adjacent or genuinely ambiguous professions and transferable specialisms. Transferability requires overlap in the actual professional work: shared generic tools, spreadsheets, working with data, or general problem-solving alone do not make a distinct profession related. Use the representative card evidence to disambiguate broad titles. Reject a clearly different profession even when some general skills transfer. Never reject for place, work mode, level, pay, hours, employment type or a low expected fit. Strategy target_roles covers the target professions and synonyms; related_roles also covers the requested related roles and adjacent specialisms; wide_net includes transferable neighboring work. Return {"unrelated":[integer title indices]}. Omitted indices are kept.',
       {
         goals: input.goals,
-        titles: titles.map((title, index) => [index, title]),
+        titles: titles.map((title, index) => [
+          index,
+          title,
+          fresh
+            .find((card) => titleKey(card.title) === title)
+            ?.text.slice(0, 700) ?? "",
+        ]),
       },
       z.object({ unrelated: z.array(z.number().int().nonnegative()) }),
       2000,
@@ -277,6 +339,7 @@ export async function screenCards(
         throw new Error("Role screen returned an unknown title.");
       unrelated.add(titles[index]);
     }
+    for (const title of titles) decisions.set(title, !unrelated.has(title));
   });
   const seen = fresh
     .filter((card) => unrelated.has(titleKey(card.title)))
@@ -303,12 +366,16 @@ const fieldsSchema = z.object({
   employmentType: z.string().nullable(),
   seniority: z.string().nullable(),
   salaryText: z.string().nullable(),
+  closed: z.boolean().default(false),
 });
 
 /** Full text is extracted mechanically once, then metadata for many bodies is read in one model call. No fit judgment here. */
 export async function readListings(
   input: ListingEngineModel &
-    ListingSearchReader & { cards: readonly ListingCard[] },
+    ListingSearchReader & {
+      cards: readonly ListingCard[];
+      lane?: "http" | "browser";
+    },
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
   const sameCards = new Map<string, ListingCard[]>();
@@ -342,10 +409,13 @@ export async function readListings(
       for (const candidate of group) {
         try {
           const alternative =
-            candidate.listingPage ??
+            (input.lane === "browser" ? undefined : candidate.listingPage) ??
             (candidate.listingText
               ? { html: "", finalUrl: candidate.url }
-              : await input.readPage(candidate.url, { signal: input.signal }));
+              : await input.readPage(candidate.url, {
+                  signal: input.signal,
+                  rendered: input.lane === "browser",
+                }));
           if (!page || !blockedByCheck(alternative.html)) {
             card = candidate;
             page = alternative;
@@ -361,7 +431,7 @@ export async function readListings(
             authenticatedCard = candidate;
         }
       }
-      if (!page && authenticatedCard) {
+      if (!page && authenticatedCard && input.lane === "browser") {
         needsYou = true;
         card = authenticatedCard;
         page = await input.readPage(card.url, {
@@ -374,13 +444,16 @@ export async function readListings(
         throw lastError instanceof Error
           ? lastError
           : new Error("The listing could not be read.");
-      if (blockedByCheck(page.html))
+      if (blockedByCheck(page.html) && input.lane === "browser")
         page = await input.readPage(card.url, {
           signal: input.signal,
           rendered: true,
           ready: (html) => !blockedByCheck(html),
         });
-      if (blockedByCheck(page.html)) {
+      if (
+        blockedByCheck(page.html) ||
+        /<input\b[^>]*type\s*=\s*["']?password/iu.test(page.html)
+      ) {
         needsYou = true;
         throw new Error("The listing is behind a browser check.");
       }
@@ -392,7 +465,9 @@ export async function readListings(
             renderSuggested: false,
           }
         : readListingHtml(page.html, card.title);
-      if (body.renderSuggested) {
+      if (body.renderSuggested && input.lane !== "browser")
+        throw new Error("This listing needs a browser read.");
+      if (body.renderSuggested && input.lane === "browser" && !body.text) {
         page = await input.readPage(card.url, {
           signal: input.signal,
           rendered: true,
@@ -432,7 +507,9 @@ export async function readListings(
         failures.push({
           url: card.url,
           reason: error instanceof Error ? error.message : String(error),
-          ...(needsYou ? { needsYou: true } : {}),
+          ...(input.lane === "browser"
+            ? { needsYou: true }
+            : { requiresBrowser: true }),
         });
       return null;
     }
@@ -442,9 +519,19 @@ export async function readListings(
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
   const append = (read: Read, fields: Omit<Fields, "id">): void => {
+    const { closed, ...facts } = fields;
+    const hiddenReason =
+      listingClosedReason(
+        listingPageText(read.page.html) + "\n" + read.body.text,
+        read.structured?.validThrough,
+      ) ??
+      (closed
+        ? "Closed: this vacancy is no longer accepting applications."
+        : null);
     for (const sighting of [read.card, ...read.aliases])
       jobs.push({
-        ...fields,
+        ...facts,
+        ...(hiddenReason ? { hiddenReason } : {}),
         sourceJobId:
           sighting === read.card
             ? (fields.sourceJobId ?? sighting.sourceJobId ?? null)
@@ -522,6 +609,7 @@ export async function readListings(
           /\b(?:full[ -]time|part[ -]time|contract|temporary|internship)\b/iu,
         )?.[0] ||
         null,
+      closed: false,
       seniority: read.structured?.seniority ?? null,
       salaryText: read.structured?.salaryText ?? null,
     });
@@ -532,7 +620,7 @@ export async function readListings(
     async (batch) => {
       const answer = await ask(
         input,
-        'Read listing metadata faithfully. A sign-in page, talent pool or results list is not one vacancy: return empty title and company for those. A closed vacancy is still a listing. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null}]}. Use one result for every id. Unknown fields are null or empty strings/arrays. Listing card and full page are evidence; preserve employer and reference/requisition numbers exactly. Do not assess fit and do not summarize the body.',
+        'Read listing metadata faithfully. A sign-in page, talent pool or results list is not one vacancy: return empty title and company for those. A closed vacancy is still a listing: set closed=true only for explicit evidence that applications have ended, in any language. Do not confuse an old posting date with closure. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean}]}. Use one result for every id. Unknown fields are null or empty strings/arrays. Listing card and full page are evidence; preserve employer and reference/requisition numbers exactly. Do not assess fit and do not summarize the body.',
         {
           listings: batch.map((read, id) => ({
             id,
@@ -576,6 +664,7 @@ export async function readListings(
           employmentType: fields.employmentType,
           seniority: fields.seniority,
           salaryText: fields.salaryText,
+          closed: fields.closed,
         });
       }
     },

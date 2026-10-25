@@ -33,6 +33,8 @@ import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
 export { createJobSitesStore, type JobSitesStore } from "./job-sites";
+export { createSourceAccessStore } from "./source-access";
+export { createSearchSourcesStore } from "./search-sources";
 export { createTrackerStore, type TrackerStore } from "./tracker";
 export { createHomeStore, type HomeStore } from "./home";
 export {
@@ -64,6 +66,8 @@ export interface JobStore {
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
   findKnownUrls(urls: readonly string[]): string[];
+  /** Listing-card closure evidence can retire an existing Found job without another detail read. */
+  closeFoundUrls(urls: readonly string[]): number;
   lookupSeenCards(
     cards: readonly Pick<SeenListingCard, "url" | "cardFingerprint">[],
     roleGoalsKey: string,
@@ -236,6 +240,30 @@ export function openJobStore(filePath: string): JobStore {
       });
     },
 
+    closeFoundUrls(urls) {
+      if (!urls.length) return 0;
+      return transaction(() => {
+        const rows =
+          sql(`SELECT DISTINCT j.id FROM jobs j JOIN job_sightings s ON s.job_id = j.id
+          WHERE j.stage = 'found' AND s.url IN (SELECT value FROM json_each(?))`).all(
+            JSON.stringify(urls),
+          ) as { id: number }[];
+        if (!rows.length) return 0;
+        const ids = rows.map((row) => row.id);
+        sql(`UPDATE jobs SET stage = 'hidden', stage_at = ?, stage_note = 'Closed: this vacancy is no longer accepting applications.'
+          WHERE id IN (SELECT value FROM json_each(?)) AND stage = 'found'`).run(
+          Date.now(),
+          JSON.stringify(ids),
+        );
+        notify({
+          cause: "stage",
+          stages: ["found", "hidden"],
+          ids,
+          searchId: null,
+        });
+        return ids.length;
+      });
+    },
     setFit(updates) {
       if (updates.length === 0) return;
       transaction(() => {

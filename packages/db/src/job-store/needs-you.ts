@@ -29,6 +29,9 @@ type Task = {
   opened_at: number;
   resolved_at: number | null;
   answer: string | null;
+  source_id?: number | null;
+  source_label?: string | null;
+  source_url?: string | null;
 };
 
 function sameFormat(
@@ -55,6 +58,15 @@ function toTask(row: Task): NeedsYouTask {
     input: row.input,
     options,
     openedAt: toIso(row.opened_at),
+    ...(row.source_id != null
+      ? {
+          source: {
+            id: row.source_id,
+            label: row.source_label,
+            url: row.source_url,
+          },
+        }
+      : {}),
   });
 }
 
@@ -232,7 +244,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     list(input: NeedsYouListQuery = {}): NeedsYouPage {
       const { after, limit } = NeedsYouListQuerySchema.parse(input);
       const records = sql(
-        "SELECT * FROM needs_you WHERE resolved_at IS NULL AND id > ? ORDER BY id LIMIT ?",
+        `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url FROM needs_you t
+         LEFT JOIN source_needs_you n ON n.task_id = t.id
+         LEFT JOIN job_sites s ON s.id = n.source_id
+         WHERE t.resolved_at IS NULL AND t.id > ? ORDER BY t.id LIMIT ?`,
       ).all(after, limit + 1) as Task[];
       const rows = records.slice(0, limit).map(toTask);
       return {

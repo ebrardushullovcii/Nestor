@@ -1,7 +1,6 @@
 import {
   JobSearchSettingsSchema,
   type JobSearchSettings,
-  type JobSearchSourceState,
   type JobSearchStatus,
 } from "@nestor/contracts";
 import { Search, Square } from "lucide-react";
@@ -17,6 +16,7 @@ import {
 
 import { describeAge, plural } from "@renderer/features/job-lists";
 import { SitePicker } from "./site-picker";
+import { SiteResults } from "./site-results";
 
 const DEPTH: readonly SegmentedControlOption<JobSearchSettings["depth"]>[] = [
   { value: "quick", label: "Quick", title: "A short look at each site" },
@@ -57,7 +57,8 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
       ? (search.sourcesDone / search.sourcesTotal) * 100
       : null;
   const working = props.status.sources.filter((s) => s.state === "searching");
-  const needsYou = props.status.sources.filter((s) => s.state === "needs_you");
+  const progress = props.status.progress;
+  const needsYou = progress?.needsYou ?? 0;
   return (
     <div className="grid gap-2" data-search-running>
       <div className="flex min-w-0 items-center gap-3">
@@ -83,68 +84,33 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
           Stop
         </Button>
       </div>
+      {progress ? (
+        <p className="text-xs text-foreground-muted">
+          HTTP: {progress.httpActive} active, {progress.httpQueued} waiting ·
+          Browser: {progress.browserActive} active, {progress.browserQueued}{" "}
+          waiting
+          {progress.processing > 0
+            ? ` · ${progress.processing} sites being read or screened`
+            : ""}
+          {progress.failed > 0 ? ` · ${progress.failed} could not be read` : ""}
+        </p>
+      ) : null}
       <ProgressBar
         ariaLabel="Search progress"
         indeterminate={percent === null}
         percent={percent}
       />
-      {working.length > 0 || needsYou.length > 0 ? (
+      {working.length > 0 || needsYou > 0 ? (
         <p className="truncate text-(length:--text-small) text-foreground-muted">
           {working.length > 0
             ? `Now: ${working.map((s) => (s.message ? `${s.label}: ${s.message}` : s.label)).join(" · ")}`
             : ""}
-          {needsYou.length > 0
-            ? `${working.length > 0 ? " · " : ""}Needs you: ${needsYou
-                .map((s) => s.label)
-                .join(", ")}`
+          {needsYou > 0
+            ? `${working.length > 0 ? " · " : ""}${needsYou} sites need you`
             : ""}
         </p>
       ) : null}
     </div>
-  );
-}
-
-const SITE_STATE: Record<JobSearchSourceState["state"], string> = {
-  waiting: "Not reached",
-  searching: "Searching",
-  done: "Done",
-  failed: "Could not search",
-  needs_you: "Needs you",
-  stopped: "Stopped",
-};
-
-/** What each site found in the last search, and why one found nothing. */
-function SiteResults(props: { sources: readonly JobSearchSourceState[] }) {
-  return (
-    <details className="text-(length:--text-small) text-foreground-soft">
-      <summary className="cursor-pointer text-foreground-muted">
-        What each site found
-      </summary>
-      <ul className="mt-2 grid list-none gap-1 p-0">
-        {props.sources.map((source) => (
-          <li className="flex min-w-0 gap-2" key={source.sourceId}>
-            <span className="w-48 shrink-0 truncate font-medium text-foreground">
-              {source.label}
-            </span>
-            <span className="shrink-0">
-              {source.state === "done"
-                ? `${plural(source.found, "listing")}, ${source.added} new${
-                    source.hidden > 0 ? `, ${source.hidden} hidden` : ""
-                  }`
-                : SITE_STATE[source.state]}
-            </span>
-            {source.message ? (
-              <span
-                className="min-w-0 truncate text-foreground-muted"
-                title={source.message}
-              >
-                · {source.message}
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </details>
   );
 }
 
@@ -282,8 +248,11 @@ export function SearchPanel(props: {
               Some jobs still need a fit score. The next search will retry them.
             </p>
           ) : null}
-          {props.status.sources.length > 0 ? (
-            <SiteResults sources={props.status.sources} />
+          {props.status.search !== null ? (
+            <SiteResults
+              searchId={props.status.search.id}
+              revision={props.status.sourceRevision}
+            />
           ) : null}
         </div>
       ) : null}

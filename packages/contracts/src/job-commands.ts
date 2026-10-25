@@ -1,3 +1,4 @@
+import { RetrySourceInputSchema } from "./source-access";
 import { z } from "zod";
 import type { AppCommandDefinition } from "./app-commands";
 
@@ -5,6 +6,8 @@ import {
   JobIdSchema,
   JobListQuerySchema,
   JobSearchSettingsSchema,
+  JobSearchSourceQuerySchema,
+  type JobSearchSourcePage,
   MoveJobsInputSchema,
   UndoMoveInputSchema,
   type JobChange,
@@ -105,10 +108,22 @@ export const JOB_COMMANDS = {
       "Starts a background search of the person's job sites. depth: quick look or thorough; picky: open, balanced or strict; postedWithin: week, month or any; note: anything specific. Jobs appear in found as they are found. Returns at once.",
     input: JobSearchSettingsSchema,
   },
+  retry_source: {
+    effect: "external",
+    description:
+      "Retries just one job site after you open it and finish sign-in or verification. Leaves its Needs you item open until the site can actually be read; other sites keep running.",
+    input: RetrySourceInputSchema,
+  },
   stop_search: {
     effect: "local_write",
     description: "Stops the running search. Jobs already found stay.",
     input: NoInputSchema,
+  },
+  list_search_sources: {
+    effect: "read",
+    description:
+      "One page of a search's per-site results and coverage, with a text or status filter. Does not load all sites into the screen.",
+    input: JobSearchSourceQuerySchema,
   },
   search_status: {
     effect: "read",
@@ -137,8 +152,10 @@ export interface JobCommandOutputs {
   remove_site: { removed: boolean };
   set_sites_enabled: { changed: number };
   start_search: JobSearchStatus;
+  retry_source: JobSearchStatus;
   stop_search: JobSearchStatus;
   search_status: JobSearchStatus;
+  list_search_sources: JobSearchSourcePage;
 }
 
 export type JobCommandOutput<K extends JobCommandName> = JobCommandOutputs[K];

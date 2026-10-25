@@ -64,3 +64,5 @@ export * from "./saved-job-sightings";
 export * from "./assistant-job-view";
 export * from "./app-commands";
 export * from "./job-sites";
+
+export * from "./source-access";

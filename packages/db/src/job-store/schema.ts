@@ -1,3 +1,5 @@
+import { SEARCH_SOURCES_SCHEMA } from "./search-sources";
+import { SOURCE_ACCESS_SCHEMA } from "./source-access";
 /**
  * The Job Finder store: one SQLite file, one row per job.
  *
@@ -179,4 +181,6 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   SEEN_CARDS_SCHEMA,
   TRACKER_SCHEMA,
   JOB_SITES_SCHEMA,
+  SOURCE_ACCESS_SCHEMA,
+  SEARCH_SOURCES_SCHEMA,
 ];

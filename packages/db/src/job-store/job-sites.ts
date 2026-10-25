@@ -268,7 +268,11 @@ export function createJobSitesStore(store: JobStore) {
         `SELECT count(*) AS "all", coalesce(sum(enabled), 0) AS enabled, coalesce(sum(NOT enabled), 0) AS disabled, coalesce(sum(attention), 0) AS needs_attention FROM job_sites`,
       ).get() as JobSitePage["counts"];
     },
-    record(id: number, input: JobSiteRuntimeUpdate): JobSite | null {
+    record(
+      id: number,
+      input: JobSiteRuntimeUpdate,
+      notify = true,
+    ): JobSite | null {
       const patch = JobSiteRuntimeUpdateSchema.parse(input);
       return store.transaction(() => {
         const before = get(id);
@@ -299,7 +303,7 @@ export function createJobSitesStore(store: JobStore) {
             ...values,
             id,
           );
-          changed();
+          if (notify) changed();
         }
         return get(id);
       });

@@ -14,7 +14,8 @@ export function createFitQueue(
   const pending: number[] = [];
   const seen = new Set<number>();
   const active = new Set<Promise<void>>();
-  let scored = 0;
+  let scored = 0,
+    judging = 0;
   let drainers = 0;
   let flushCount = 0;
   let partialTimer: ReturnType<typeof setTimeout> | null = null;
@@ -27,24 +28,33 @@ export function createFitQueue(
   const judge = async (ids: number[]) => {
     const jobs = ids.flatMap((id) => {
       const job = deps.store.getJob(id);
-      return job && job.fitScore === null ? [job] : [];
+      return job &&
+        job.fitScore === null &&
+        !job.stageNote?.startsWith("Closed:")
+        ? [job]
+        : [];
     });
     if (jobs.length === 0) return;
-    const updates = await abortable(
-      deps.engine.fitJobs({
-        jobs,
-        context,
+    judging += jobs.length;
+    try {
+      const updates = await abortable(
+        deps.engine.fitJobs({
+          jobs,
+          context,
+          signal,
+          ...(settings?.note ? { request: settings.note } : {}),
+        }),
         signal,
-        ...(settings?.note ? { request: settings.note } : {}),
-      }),
-      signal,
-    );
-    if (signal.aborted) return;
-    deps.store.setFit(updates);
-    scored += updates.length;
-    onScored(updates.length);
-    if (updates.length < jobs.length)
-      onError(new Error("Some jobs are still waiting for a fit score."));
+      );
+      if (signal.aborted) return;
+      deps.store.setFit(updates);
+      scored += updates.length;
+      onScored(updates.length);
+      if (updates.length < jobs.length)
+        onError(new Error("Some jobs are still waiting for a fit score."));
+    } finally {
+      judging -= jobs.length;
+    }
   };
 
   const pump = () => {
@@ -84,6 +94,12 @@ export function createFitQueue(
   };
 
   return {
+    get pendingCount() {
+      return pending.length;
+    },
+    get activeCount() {
+      return judging;
+    },
     get scored() {
       return scored;
     },

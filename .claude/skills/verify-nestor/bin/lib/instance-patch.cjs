@@ -134,7 +134,12 @@ shell.showItemInFolder = (target) =>
   log("opened.jsonl", { kind: "showItemInFolder", target });
 
 // --- 3. Send guard --------------------------------------------------------
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const LOOPBACK = new Set([
+  "localhost",
+  "[::1]",
+  "::1",
+  ...Array.from({ length: 12 }, (_, index) => `127.0.0.${index + 1}`),
+]);
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 const guarded = new WeakSet();
 function guard(ses) {

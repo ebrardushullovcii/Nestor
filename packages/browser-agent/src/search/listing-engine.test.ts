@@ -11,6 +11,7 @@ import {
   readListings,
   screenCards,
 } from "./listing-engine";
+import { listingClosedReason } from "./listing-status";
 import { publicBoardFeed } from "./public-board-feed";
 import type { LLMClient } from "../agent/contracts";
 
@@ -245,7 +246,7 @@ test("identical cross-site cards share one full read, preserving each site's ide
   expect(readPage).toHaveBeenCalledTimes(2);
 });
 
-test("an authenticated listing uses the browser session after HTTP refuses it", async () => {
+test("an authenticated listing is deferred to the browser lane after HTTP refuses it", async () => {
   const listing = {
     ...card("Backend Engineer"),
     companyHint: "Real Employer",
@@ -264,7 +265,20 @@ test("an authenticated listing uses the browser session after HTTP refuses it", 
       Promise.reject(new Error("No model transcription needed")),
     ),
   };
-  const full = await readListings({ cards: [listing], readPage, client });
+  const http = await readListings({
+    cards: [listing],
+    readPage,
+    client,
+    lane: "http",
+  });
+  expect(http.jobs).toEqual([]);
+  expect(http.failures[0]).toMatchObject({ requiresBrowser: true });
+  const full = await readListings({
+    cards: [listing],
+    readPage,
+    client,
+    lane: "browser",
+  });
   expect(full.failures).toEqual([]);
   expect(full.jobs[0]?.description).toContain(
     "Own APIs and SQL production services.",
@@ -403,4 +417,37 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
   expect(requests).toEqual([[1, 2], [2]]);
   expect(repaired.map((fit) => fit.id)).toEqual([1, 2]);
+});
+
+test("closed text outside the job body remains hidden without an AI fit", async () => {
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(new Error("Metadata already published")),
+    ),
+  };
+  const listing = {
+    ...card("Senior Visual Designer"),
+    companyHint: "Real Employer",
+    locationHint: "Manchester, United Kingdom",
+  };
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: `<main><article><h1>Senior Visual Designer</h1><p>Real Employer</p><p>Manchester, United Kingdom</p><p>Design thoughtful visual systems and collaborate with researchers.</p></article><p role="status">This job is no longer accepting applications.</p></main>`,
+    }),
+  );
+  const result = await readListings({ cards: [listing], readPage, client });
+  expect(result.jobs[0]?.hiddenReason).toMatch(/^Closed:/);
+  expect(result.jobs[0]?.description).toContain("visual systems");
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+});
+
+test("an expired published closing date closes a listing; posting age and future deadlines do not", () => {
+  const yesterday = new Date(Date.now() - 2 * 86400000).toISOString();
+  const tomorrow = new Date(Date.now() + 2 * 86400000).toISOString();
+  expect(listingClosedReason("Apply now", yesterday)).toMatch(/^Closed:/);
+  expect(
+    listingClosedReason("Applications close on a future date", tomorrow),
+  ).toBeNull();
+  expect(listingClosedReason("Posted three months ago. Apply now.")).toBeNull();
 });
