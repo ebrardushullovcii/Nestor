@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { FoundJob } from "@nestor/contracts";
+import type { ApplicationDetails, FoundJob } from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   createTrackerStore,
@@ -25,6 +25,7 @@ import { ApplicationsScreen } from "./applications-screen";
 
 let store: JobStore;
 let ids: number[];
+let openApplication: ReturnType<typeof vi.fn>;
 
 function job(n: number): FoundJob {
   return {
@@ -73,13 +74,54 @@ beforeEach(() => {
     "state = 'submitted', submitted_at = updated_at, updated_at = updated_at + 1",
   );
   const run = createTrackerCommandRunner(store);
+  const applications = createApplicationStore(store);
+  const onChange = (listener: Parameters<JobStore["onChange"]>[0]) =>
+    store.onChange(listener);
+  openApplication = vi.fn(() => Promise.resolve(true));
   Object.assign(window, {
     nestor: {
-      jobs: {
-        onChange: (listener: Parameters<JobStore["onChange"]>[0]) =>
-          store.onChange(listener),
-      },
+      jobs: { onChange },
       tracker: { run, exportCsv: vi.fn() },
+      // Apply's bridge over the same store; the review card is what a run recorded.
+      jobFinder: {
+        applicationsForJobs: ({ jobIds }: { jobIds: number[] }) =>
+          Promise.resolve(applications.forJobs(jobIds)),
+        getApplicationDetails: ({ id }: { id: number }) => {
+          const application = applications.getApplication(id);
+          return Promise.resolve(
+            application
+              ? ({
+                  application,
+                  summary: null,
+                  detail: null,
+                  resumeFileName: "Resume - Northfield.pdf",
+                  reviewCard: {
+                    siteLabel: "Northfield careers",
+                    pageUrl: null,
+                    answers: [
+                      {
+                        question: "Why Northfield?",
+                        answer: "I build design systems for clinics.",
+                        source: "Written for this job",
+                        written: true,
+                        groundedIn: [],
+                      },
+                    ],
+                    attachments: [],
+                    letter: null,
+                    waitingOnYou: [],
+                    preparedAt: new Date().toISOString(),
+                  },
+                  receipt: null,
+                } satisfies ApplicationDetails)
+              : null,
+          );
+        },
+        openApplication,
+        stopApplication: ({ id }: { id: number }) =>
+          Promise.resolve(applications.stop(id)),
+        onApplicationsChange: onChange,
+      },
     },
   });
   Element.prototype.scrollIntoView = () => undefined;
@@ -193,9 +235,7 @@ describe("Applications", () => {
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 1",
     });
-    fireEvent.click(
-      within(detail).getByRole("button", { name: "Note" }),
-    );
+    fireEvent.click(within(detail).getByRole("button", { name: "Note" }));
     fireEvent.change(
       within(detail).getByRole("textbox", { name: "Note title" }),
       { target: { value: "Recruiter wants samples" } },
@@ -216,5 +256,38 @@ describe("Applications", () => {
       ).toEqual([]),
     );
     expect(createTrackerStore(store).getRow(ids[0]!)?.status).toBe("applied");
+  });
+
+  it("opens or stops an application Apply has filled in, and shows what it wrote", async () => {
+    applyWrites(ids[1]!, "state = 'ready'");
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+
+    expect(
+      await within(detail).findByText("What Apply filled in"),
+    ).toBeTruthy();
+    expect(
+      within(detail).getByText("I build design systems for clinics."),
+    ).toBeTruthy();
+    expect(within(detail).getByText("Resume - Northfield.pdf")).toBeTruthy();
+
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Open application" }),
+    );
+    await waitFor(() => expect(openApplication).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(detail).getByRole("button", { name: "Stop" }));
+    await screen.findByText("Stopped. Apply won't send it.");
+    await waitFor(() =>
+      expect(within(detail).queryByRole("button", { name: "Stop" })).toBeNull(),
+    );
+    expect(
+      within(detail).queryByRole("button", { name: "Open application" }),
+    ).toBeNull();
   });
 });
