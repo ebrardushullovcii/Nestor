@@ -56,6 +56,7 @@ export interface JobSearchEngine {
     related: ListingCard[];
     seen: SeenListingCard[];
     skipped: number;
+    failed?: { url: string; reason: string }[];
   }>;
   readListings(input: {
     lane?: "http" | "browser";
@@ -131,7 +132,7 @@ export function createListingSearchEngine(deps: {
         },
         ...(input.lane === "browser"
           ? {
-              navigateFallback: async () => {
+              navigateFallback: async (portalUrl) => {
                 if (!deps.browserRuntime.runAgentDiscovery)
                   return {
                     cards: [],
@@ -155,9 +156,10 @@ export function createListingSearchEngine(deps: {
                       ),
                       lookupKnownUrls: (urls) =>
                         Promise.resolve(input.knownUrls(urls)),
-                      startingUrls: [target.startingUrl],
+                      startingUrls: [portalUrl ?? target.startingUrl],
                       navigationHostnames: [
                         new URL(target.startingUrl).hostname,
+                        ...(portalUrl ? [new URL(portalUrl).hostname] : []),
                       ],
                       siteLabel: target.label,
                       siteInstructions: guidance,
@@ -168,7 +170,7 @@ export function createListingSearchEngine(deps: {
                         sourceIds: [target.id],
                       },
                       targetJobCount: Number.MAX_SAFE_INTEGER,
-                      maxSteps: settings.depth === "quick" ? 16 : 48,
+                      maxSteps: settings.depth === "quick" ? 8 : 16,
                       signal,
                       onProgress: (progress) => {
                         if (progress.message) input.message(progress.message);

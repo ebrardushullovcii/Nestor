@@ -195,6 +195,7 @@ export function createJobSitesStore(store: JobStore) {
         const change = undo.begin();
         let added = 0,
           duplicates = parsed.duplicates;
+        const duplicateUrls = new Set(parsed.duplicateUrls);
         let firstAddedId: number | null = null;
         const insert = sql(
           "INSERT INTO job_sites (label, url) VALUES (?, ?) ON CONFLICT(url) DO NOTHING RETURNING id",
@@ -202,6 +203,7 @@ export function createJobSitesStore(store: JobStore) {
         for (const url of parsed.urls) {
           if (sql("SELECT 1 FROM job_sites WHERE url = ?").get(url)) {
             duplicates++;
+            duplicateUrls.add(url);
             continue;
           }
           const label = jobSiteLabel(url);
@@ -210,11 +212,20 @@ export function createJobSitesStore(store: JobStore) {
             change.capture({ table: "job_sites", id: inserted.id }, null);
             added++;
             firstAddedId ??= inserted.id;
-          } else duplicates++;
+          } else {
+            duplicates++;
+            duplicateUrls.add(url);
+          }
         }
         lastChange = change.finish();
         if (added) changed();
-        return { added, duplicates, invalid: parsed.invalid, firstAddedId };
+        return {
+          added,
+          duplicates,
+          duplicateUrls: [...duplicateUrls],
+          invalid: parsed.invalid,
+          firstAddedId,
+        };
       });
     },
     update(input: UpdateJobSiteInput): JobSite | null {

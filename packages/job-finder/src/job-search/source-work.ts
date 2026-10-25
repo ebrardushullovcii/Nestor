@@ -6,6 +6,7 @@ export interface SourceWork {
   urls: Set<string>;
   processed: number;
   collected: boolean;
+  accessBlocked: boolean;
   counted: boolean;
   notes: string[];
 }
@@ -15,6 +16,7 @@ export function sourceWork(target: JobDiscoveryTarget): SourceWork {
     urls: new Set(),
     processed: 0,
     collected: false,
+    accessBlocked: false,
     counted: false,
     notes: [],
     row: {

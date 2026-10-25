@@ -11,11 +11,13 @@ test("bulk add explains duplicates and invalid entries; editing a site touches o
     expect(added).toMatchObject({
       added: 2,
       duplicates: 1,
+      duplicateUrls: ["https://jobs.example.test/one"],
       invalid: ["not a site"],
     });
     expect(sites.add({ text: "https://jobs.example.test/one" })).toMatchObject({
       added: 0,
       duplicates: 1,
+      duplicateUrls: ["https://jobs.example.test/one"],
     });
     const before = sites.list();
     const first = before.rows.find((site) => site.url.endsWith("/one"))!;

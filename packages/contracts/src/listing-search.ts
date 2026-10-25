@@ -24,6 +24,17 @@ export interface ListingCard {
   sourceJobId?: string;
   postedAt?: string;
   closed?: boolean;
+  /** Authoritative provider fields, mechanically read with its complete body. */
+  providerFacts?: Pick<
+    FoundJob,
+    | "company"
+    | "location"
+    | "workModes"
+    | "employmentType"
+    | "salaryText"
+    | "applyUrl"
+    | "postedAt"
+  >;
 }
 
 export interface SeenListingCard {
@@ -48,6 +59,8 @@ export interface SourceInventory {
   complete: boolean;
   notes: string[];
   needsYou?: boolean;
+  /** An observed HTTP 401/403 or explicit sign-in wall; browser reading may still resolve it. */
+  accessBlocked?: boolean;
   /** The HTTP lane defers interaction to the separate browser queue. */
   requiresBrowser?: boolean;
 }

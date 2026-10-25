@@ -778,7 +778,7 @@ export function htmlToPlainText(html: string): string {
   }
   // A description that is already plain text (no tags) still needs entities
   // decoded and whitespace settled; the same pipeline handles both.
-  const withBreaks = html
+  const withBreaks = decodeHtmlEntities(html)
     .replace(/<script\b[\s\S]*?<\/script\s*>/giu, " ")
     .replace(/<style\b[\s\S]*?<\/style\s*>/giu, " ")
     .replace(/<!--[\s\S]*?-->/gu, " ")

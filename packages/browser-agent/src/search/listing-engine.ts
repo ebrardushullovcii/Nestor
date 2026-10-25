@@ -17,6 +17,7 @@ import type {
 import type { BrowserAgentReasoningTask, LLMClient } from "../agent/contracts";
 import {
   fingerprint,
+  listingSignInRequired,
   readInventoryHtml,
   readListingHtml,
 } from "./listing-html";
@@ -121,7 +122,7 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    3,
+    4,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
@@ -131,10 +132,15 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
 
 /** Wait for actual inventory semantics, including script-rendered plain lists. */
 export function listingInventoryReady(html: string, url: string): boolean {
+  const inventory = readInventoryHtml(html, url, { id: "ready", label: "" });
   return (
     blockedByCheck(html) ||
-    /<input\b[^>]*type\s*=\s*["']?password/iu.test(html) ||
-    readInventoryHtml(html, url, { id: "ready", label: "" }).cards.length > 0 ||
+    listingSignInRequired(html) ||
+    inventory.cards.length > 0 ||
+    inventory.portals.length > 0 ||
+    /<input\b[^>]*(?:type\s*=\s*["']search["']|(?:placeholder|aria-label)\s*=\s*["'][^"']*(?:jobs|keywords|roles))/iu.test(
+      html,
+    ) ||
     /\bno (?:current |open |available )?(?:jobs|positions|vacancies)\b/iu.test(
       listingPageText(html),
     )
@@ -146,7 +152,7 @@ export async function collectSource(
   input: ListingSearchReader & {
     source: { id: string; label: string; url: string };
     onPage?: (cards: ListingCard[]) => Promise<void> | void;
-    navigateFallback?: () => Promise<SourceInventory>;
+    navigateFallback?: (url?: string) => Promise<SourceInventory>;
     lane?: "http" | "browser";
   },
 ): Promise<SourceInventory> {
@@ -182,11 +188,20 @@ export async function collectSource(
     urls.forEach((url) => visited.add(url));
     await mapConcurrent(urls, 2, async (url) => {
       try {
+        if (url !== input.source.url && input.lane !== "browser") {
+          const feed = await collectPublicFeed({
+            ...input,
+            source: { ...input.source, url },
+          });
+          if (feed) {
+            recognized = true;
+            for (const card of feed) cards.set(card.url, card);
+            await input.onPage?.(feed);
+            return;
+          }
+        }
         const page = await input.readPage(url, { signal: input.signal });
-        if (
-          blockedByCheck(page.html) ||
-          /<input\b[^>]*type\s*=\s*["']?password/iu.test(page.html)
-        ) {
+        if (blockedByCheck(page.html) || listingSignInRequired(page.html)) {
           complete = false;
           needsAccess = true;
           notes.push("Sign-in or verification is required.");
@@ -197,6 +212,14 @@ export async function collectSource(
           page.finalUrl,
           input.source,
         );
+        for (const next of [...parsed.next, ...parsed.portals])
+          if (!visited.has(next) && !queue.includes(next)) queue.push(next);
+        if (!parsed.cards.length && parsed.portals.length) {
+          notes.push(
+            `Following the site's open-jobs portal from ${page.finalUrl}.`,
+          );
+          return;
+        }
         if (
           !parsed.cards.length &&
           /\b(?:no (?:current |open |available )?(?:jobs|positions|vacancies)|(?:0|zero) (?:open )?(?:jobs|positions|vacancies))\b/iu.test(
@@ -260,7 +283,7 @@ export async function collectSource(
       notes,
     };
   if ((!recognized || !complete) && input.navigateFallback) {
-    const fallback = await input.navigateFallback();
+    const fallback = await input.navigateFallback([...visited].at(-1));
     for (const card of fallback.cards) cards.set(card.url, card);
     return {
       cards: [...cards.values()],
@@ -272,14 +295,15 @@ export async function collectSource(
     };
   }
   notes.push(
-    `${cards.size} listings collected from ${visited.size} HTTP pages; ${complete ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected from ${visited.size} HTTP pages; ${complete && recognized ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],
     lane: input.lane ?? "http",
     requiresBrowser: !recognized || !complete,
+    ...(needsAccess ? { accessBlocked: true } : {}),
     pagesRead: visited.size,
-    complete,
+    complete: complete && recognized,
     notes,
   };
 }
@@ -300,6 +324,7 @@ export async function screenCards(
   related: ListingCard[];
   seen: SeenListingCard[];
   skipped: number;
+  failed: { url: string; reason: string }[];
 }> {
   const key = roleGoalsKey(input.goals);
   const known = (await input.lookupSeenCards?.(input.cards, key)) ?? [];
@@ -314,45 +339,47 @@ export async function screenCards(
       !saved.has(card.url) &&
       !seenKeys.has(`${card.url}\n${card.cardFingerprint}`),
   );
-  // Rank variants share a profession decision. The full, unchanged title still goes to fit.
+  // Keep the whole title: stripping rank also erased the distinction between
+  // hands-on analytics and a different management or infrastructure profession.
   const titleKey = (title: string) =>
-    title
-      .toLowerCase()
-      .replace(
-        /^(?:(?:senior|junior|staff|principal|lead|director|intern|mid-level|sr\.?|jr\.?)\s+)+/iu,
-        "",
-      )
-      .trim();
+    title.toLowerCase().replace(/\s+/gu, " ").trim();
   const allTitles = [...new Set(fresh.map((card) => titleKey(card.title)))];
   const decisions = input.decisions ?? new Map<string, boolean>();
   const titles = allTitles.filter((title) => !decisions.has(title));
   const unrelated = new Set(
     allTitles.filter((title) => decisions.get(title) === false),
   );
+  const failedTitles = new Map<string, string>();
   await mapConcurrent(batches(titles, 250), 3, async (titles) => {
-    const answer = await ask(
-      input,
-      'Screen professions against the requested kinds of work. Titles in this list have had common seniority prefixes removed; understand titles in their own language. Reject ONLY clearly unrelated professions. Keep adjacent or genuinely ambiguous professions and transferable specialisms. Transferability requires overlap in the actual professional work: shared generic tools, spreadsheets, working with data, or general problem-solving alone do not make a distinct profession related. Use the representative card evidence to disambiguate broad titles. Reject a clearly different profession even when some general skills transfer. Never reject for place, work mode, level, pay, hours, employment type or a low expected fit. Strategy target_roles covers the target professions and synonyms; related_roles also covers the requested related roles and adjacent specialisms; wide_net includes transferable neighboring work. Return {"unrelated":[integer title indices]}. Omitted indices are kept.',
-      {
-        goals: input.goals,
-        titles: titles.map((title, index) => [
-          index,
-          title,
-          fresh
-            .find((card) => titleKey(card.title) === title)
-            ?.text.slice(0, 700) ?? "",
-        ]),
-      },
-      z.object({ unrelated: z.array(z.number().int().nonnegative()) }),
-      2000,
-      "listing_screen",
-    );
-    for (const index of answer.unrelated) {
-      if (!titles[index])
-        throw new Error("Role screen returned an unknown title.");
-      unrelated.add(titles[index]);
+    try {
+      const answer = await ask(
+        input,
+        'Screen actual professions against the requested kinds of work; reject only clear mismatches. Return {"unrelated":[integer title indices]} for ONLY clearly different professions. Every omitted title remains a plausible match for full-text fit. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the requested related work and genuinely overlapping functions (Fullstack includes Backend duties; Business Intelligence includes Data Analysis), wide_net also adds genuinely transferable neighboring professions. Apply profession examples ONLY when that profession is requested. If the goals include Backend or Platform Engineering, generic Software Engineer and Engineering Lead titles are ambiguous matches to keep for reading, and distributed systems, storage, cloud infrastructure, SRE and DevOps overlap. If the goals are Data Analyst or Business Intelligence, generic Software Engineer, infrastructure engineering and software-management roles are different professions and must be rejected unless the card explicitly describes analytical/reporting duties. A broad word such as data, analytics or research does not by itself establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
+        {
+          goals: input.goals,
+          titles: titles.map((title, index) => [
+            index,
+            title,
+            fresh
+              .find((card) => titleKey(card.title) === title)
+              ?.text.slice(0, 700) ?? "",
+          ]),
+        },
+        z.object({ unrelated: z.array(z.number().int().nonnegative()) }),
+        2000,
+        "listing_screen",
+      );
+      for (const index of answer.unrelated) {
+        const title = titles[index];
+        if (!title) throw new Error("Role screen returned an unknown title.");
+        unrelated.add(title);
+      }
+      for (const title of titles) decisions.set(title, !unrelated.has(title));
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      const reason = error instanceof Error ? error.message : String(error);
+      for (const title of titles) failedTitles.set(title, reason);
     }
-    for (const title of titles) decisions.set(title, !unrelated.has(title));
   });
   const seen = fresh
     .filter((card) => unrelated.has(titleKey(card.title)))
@@ -363,7 +390,17 @@ export async function screenCards(
       verdict: "unrelated" as const,
     }));
   return {
-    related: fresh.filter((card) => !unrelated.has(titleKey(card.title))),
+    related: fresh.filter(
+      (card) =>
+        !unrelated.has(titleKey(card.title)) &&
+        !failedTitles.has(titleKey(card.title)),
+    ),
+    failed: fresh
+      .filter((card) => failedTitles.has(titleKey(card.title)))
+      .map((card) => ({
+        url: card.url,
+        reason: failedTitles.get(titleKey(card.title))!,
+      })),
     seen,
     skipped: input.cards.length - fresh.length,
   };
@@ -463,10 +500,7 @@ export async function readListings(
           rendered: true,
           ready: (html) => !blockedByCheck(html),
         });
-      if (
-        blockedByCheck(page.html) ||
-        /<input\b[^>]*type\s*=\s*["']?password/iu.test(page.html)
-      ) {
+      if (blockedByCheck(page.html) || listingSignInRequired(page.html)) {
         needsYou = true;
         throw new Error("The listing is behind a browser check.");
       }
@@ -510,9 +544,7 @@ export async function readListings(
         structured,
         publishedOnly,
         needsYou:
-          needsYou ||
-          (!body.detailHeading &&
-            /<input\b[^>]*\btype\s*=\s*["']password["']/iu.test(page.html)),
+          needsYou || (!body.detailHeading && listingSignInRequired(page.html)),
       };
     } catch (error) {
       input.signal?.throwIfAborted();
@@ -554,11 +586,16 @@ export async function readListings(
         url: sighting.url,
         applyUrl:
           sighting === read.card
-            ? findApplyLinkInHtml(read.page.html, read.page.finalUrl)
+            ? (read.card.providerFacts?.applyUrl ??
+              findApplyLinkInHtml(read.page.html, read.page.finalUrl))
             : null,
         sourceId: sighting.sourceId,
         sourceLabel: sighting.sourceLabel,
-        postedAt: read.structured?.postedAt ?? read.card.postedAt ?? null,
+        postedAt:
+          read.card.providerFacts?.postedAt ??
+          read.structured?.postedAt ??
+          read.card.postedAt ??
+          null,
         description: read.body.text,
         summary: null,
         salaryMin: null,
@@ -568,6 +605,17 @@ export async function readListings(
   };
   const uncertain: Read[] = [];
   for (const read of good) {
+    if (read.card.providerFacts) {
+      append(read, {
+        title: read.card.title,
+        ...read.card.providerFacts,
+        workModes: [...read.card.providerFacts.workModes],
+        sourceJobId: read.card.sourceJobId ?? null,
+        seniority: null,
+        closed: read.card.closed ?? false,
+      });
+      continue;
+    }
     const company = read.structured?.company || read.card.companyHint;
     const location =
       read.card.locationHint?.split("·")[0]?.trim() ||
@@ -752,37 +800,58 @@ export async function fitJobs(
     education: profile.education,
     projects: profile.projects,
     spokenLanguages: profile.spokenLanguages,
-    resume: profile.baseResume.textContent,
+    // Parsed facts already contain the resume evidence and take precedence over
+    // the original file. Only an unparsed profile needs that fallback body.
+    resume:
+      profile.experiences.length || profile.skills.length
+        ? undefined
+        : profile.baseResume.textContent,
   };
   const output: JobFitUpdate[] = [];
   await mapConcurrent(
     batches(
       input.jobs.filter((job) => job.fit === null),
-      24,
+      32,
       (job) => job.description.length,
-      50000,
+      180000,
     ),
     6,
     async (batch) => {
       const judge = async (batch: JobDetail[]) => {
+        // Lossless dictionary: repeated company/legal paragraphs and identical
+        // descriptions across locations are sent once, never cut from the job.
+        const passages: string[] = [],
+          indices = new Map<string, number>();
+        const fullText = (text: string) =>
+          text.split(/\n\s*\n/u).map((paragraph) => {
+            let id = indices.get(paragraph);
+            if (id === undefined) {
+              id = passages.length;
+              passages.push(paragraph);
+              indices.set(paragraph, id);
+            }
+            return id;
+          });
+        const listings = batch.map((job) => ({
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          workModes: job.workModes,
+          employmentType: job.employmentType,
+          salaryText: job.salaryText,
+          seniority: job.seniority,
+          passages: fullText(job.description),
+        }));
         const answer = await ask(
           input,
-          `Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON with one key per job id: {"fits":{"123":{"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}}}. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
+          `Judge each job once from the full listing and candidate evidence. Each listing references the shared passages array by index, in order; together they are its complete unabridged text. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON with one key per job id: {"fits":{"123":{"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}}}. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
           {
             person,
             goals: input.goals,
             request: input.request,
-            listings: batch.map((job) => ({
-              id: job.id,
-              title: job.title,
-              company: job.company,
-              location: job.location,
-              workModes: job.workModes,
-              employmentType: job.employmentType,
-              salaryText: job.salaryText,
-              seniority: job.seniority,
-              fullText: job.description,
-            })),
+            passages,
+            listings,
           },
           z.object({ fits: z.record(fitSchema) }),
           Math.max(8000, batch.length * 350),

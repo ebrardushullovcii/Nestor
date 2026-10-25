@@ -23,6 +23,7 @@ export function createSearchPipeline(input: {
   settled(source: SourceWork): void;
   count(increments: { found?: number; added?: number; merged?: number }): void;
   needsAccess(source: SourceWork, reason: string): void;
+  failed(source: SourceWork, reason: string): void;
   browser(
     source: SourceWork,
     work: (signal: AbortSignal) => Promise<void>,
@@ -101,6 +102,11 @@ export function createSearchPipeline(input: {
         const failure = failures.get(card.url);
         if (failure) {
           source.row.failedReads++;
+          if (!failure.needsYou)
+            input.failed(
+              source,
+              `Some listings could not be read: ${failure.reason}`,
+            );
           if (failure.needsYou)
             input.needsAccess(
               source,
@@ -136,15 +142,27 @@ export function createSearchPipeline(input: {
       screened.related.map((card) => `${card.sourceId}\n${card.url}`),
     );
     const rejected = new Set(screened.seen.map((card) => card.url));
+    const failed = new Map(
+      screened.failed?.map((row) => [row.url, row.reason]),
+    );
+    const failedSources = new Map<string, string>();
     for (const card of cards) {
       const source = sources.get(card.sourceId)!;
       if (related.has(`${card.sourceId}\n${card.url}`)) source.row.related++;
       else {
         source.processed++;
-        if (rejected.has(card.url)) source.row.unrelated++;
+        if (failed.has(card.url)) {
+          source.row.failedReads++;
+          failedSources.set(card.sourceId, failed.get(card.url)!);
+        } else if (rejected.has(card.url)) source.row.unrelated++;
         else source.row.seen++;
       }
     }
+    for (const [id, reason] of failedSources)
+      input.failed(
+        sources.get(id)!,
+        `Some listings could not be screened: ${reason}`,
+      );
     for (const id of touched) {
       const source = sources.get(id)!;
       if (source.row.state !== "needs_you" && source.row.state !== "failed")
@@ -152,11 +170,20 @@ export function createSearchPipeline(input: {
       input.write(source);
       input.settled(source);
     }
-    const result = await deps.engine.readListings({
-      cards: screened.related,
-      signal,
-      lane: "http",
-    });
+    const result = await deps.engine
+      .readListings({
+        cards: screened.related,
+        signal,
+        lane: "http",
+      })
+      .catch((error: unknown): ReadListingResult => {
+        signal.throwIfAborted();
+        const reason = error instanceof Error ? error.message : String(error);
+        return {
+          jobs: [],
+          failures: screened.related.map((card) => ({ url: card.url, reason })),
+        };
+      });
     signal.throwIfAborted();
     const deferredUrls = new Set(
       result.failures

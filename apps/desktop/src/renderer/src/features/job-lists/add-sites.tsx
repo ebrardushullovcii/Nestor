@@ -10,6 +10,7 @@ export function AddSites(props: {
 }) {
   const [open, setOpen] = useState(props.alwaysOpen ?? false);
   const [text, setText] = useState("");
+  const [duplicateUrls, setDuplicateUrls] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const add = async () => {
@@ -18,6 +19,7 @@ export function AddSites(props: {
     let hasInvalid = false;
     try {
       const result = await window.nestor.jobs.run("add_sites", { text });
+      setDuplicateUrls(result.duplicateUrls);
       setMessage(
         `Added and turned on ${result.added} source${result.added === 1 ? "" : "s"}.` +
           (result.duplicates
@@ -75,6 +77,7 @@ export function AddSites(props: {
             onChange={(event) => {
               setText(event.target.value);
               setMessage(null);
+              setDuplicateUrls([]);
             }}
           />
           <Button
@@ -89,6 +92,19 @@ export function AddSites(props: {
           >
             Add and turn on
           </Button>
+        </div>
+      ) : null}
+      {duplicateUrls.length ? (
+        <div className="grid gap-1">
+          <label htmlFor="duplicate-site-urls" className="text-sm font-medium">
+            Skipped duplicate URLs
+          </label>
+          <ProfileTextarea
+            id="duplicate-site-urls"
+            readOnly
+            rows={Math.min(6, duplicateUrls.length)}
+            value={duplicateUrls.join("\n")}
+          />
         </div>
       ) : null}
       {message ? (

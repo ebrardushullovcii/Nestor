@@ -442,3 +442,57 @@ test.each(["incomplete", "browser error", "listing error"])(
     expect(sites.get(1)?.signInState).not.toBe("required");
   },
 );
+
+test("a site's screening failure stays visible without stopping successful sites or marking failed cards seen", async () => {
+  const { runner, engine, store } = setup();
+  engine.screenCards.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      related: cards.filter(
+        (row) => row.sourceId === "one" && row.title !== "Nurse",
+      ),
+      seen: [],
+      skipped: 0,
+      failed: cards
+        .filter((row) => row.sourceId === "two")
+        .map((row) => ({ url: row.url, reason: "Incomplete screen response" })),
+    }),
+  );
+  await runner.start({ postedWithin: "any" });
+  const status = await finished(runner);
+  expect(status.search?.state).toBe("done");
+  expect(store.listJobs({ stage: "found" }).total).toBe(1);
+  const failed = createSearchSourcesStore(store)
+    .list({})
+    .rows.find((row) => row.sourceId === "two");
+  expect(failed?.state).toBe("failed");
+  expect(failed?.seen).toBe(0);
+  expect(failed?.failedReads).toBe(2);
+});
+
+test("a proven access block becomes one source ticket if browser reading also fails", async () => {
+  const { runner, engine, store, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://blocked.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  engine.collectSource.mockImplementation(({ lane }) =>
+    lane === "http"
+      ? Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: false,
+          requiresBrowser: true,
+          accessBlocked: true,
+          notes: ["HTTP 403"],
+        })
+      : Promise.reject(Error("Browser access blocked")),
+  );
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(createSourceAccessStore(store).pending(1)).toBe(true);
+  expect(
+    (store.sql("SELECT count(*) AS n FROM needs_you").get() as { n: number }).n,
+  ).toBe(1);
+  expect(createSearchSourcesStore(store).list({}).rows[0]?.state).toBe(
+    "needs_you",
+  );
+});
