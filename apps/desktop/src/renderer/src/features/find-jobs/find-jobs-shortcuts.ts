@@ -11,7 +11,6 @@ export function findJobsShortcutHelp(modifier: string) {
     ["find-jobs-all", "Select every job in the list", [[modifier, "A"]]],
     ["find-jobs-clear", "Clear the selection", [["Esc"]]],
     ["find-jobs-open", "Open the listing", [["O"], ["Enter"]]],
-    ["find-jobs-filter", "Filter the list", [["/"]]],
   ].map(([id, label, combos]) => ({
     id: id as `find-jobs-${string}`,
     rowId: id as string,

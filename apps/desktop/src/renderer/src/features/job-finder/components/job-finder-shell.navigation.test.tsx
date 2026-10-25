@@ -25,7 +25,6 @@ import {
 } from "../lib/job-finder-shell-gutters";
 import { JobFinderShell } from "./job-finder-shell";
 
-
 const windowControlsState = {
   isClosable: true,
   isFullScreen: false,
@@ -53,7 +52,6 @@ function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
     userActionRequests: [],
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
-
 
 /**
  * The module switch is the wordmark's subtitle inside the header brand
@@ -516,7 +514,8 @@ describe("JobFinderShell compact nav responsive contract", () => {
     const keycaps = [...dialog.querySelectorAll("kbd")].map(
       (cap) => cap.textContent,
     );
-    expect(keycaps).toEqual([
+    // The app-wide keys come first; the Find jobs keys follow, scoped to it.
+    expect(keycaps.slice(0, 18)).toEqual([
       "⌘",
       "K",
       "/",
@@ -536,6 +535,9 @@ describe("JobFinderShell compact nav responsive contract", () => {
       "⌘",
       "0",
     ]);
+    for (const action of ["Shortlist", "Hide", "Undo the last move"]) {
+      expect(within(dialog).getByText(action)).toBeTruthy();
+    }
     expect(within(dialog).getAllByText("/")).toHaveLength(1);
     expect(shortcutText).not.toContain(
       "Anywhere in Job Finder; Outside text fields",

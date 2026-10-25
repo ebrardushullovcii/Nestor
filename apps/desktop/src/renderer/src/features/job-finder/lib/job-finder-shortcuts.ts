@@ -232,7 +232,6 @@ export function buildJobFinderShortcutHelp(
   const modifier = platform === "darwin" ? "⌘" : "Ctrl";
   return [
     ...entries.values(),
-    ...findJobsShortcutHelp(modifier),
     {
       id: "history-back",
       rowId: "history-back",
@@ -268,5 +267,6 @@ export function buildJobFinderShortcutHelp(
       scope: "Anywhere in the app",
       combos: [[modifier, "0"]],
     },
+    ...findJobsShortcutHelp(modifier),
   ];
 }
