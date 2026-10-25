@@ -20,6 +20,86 @@ test.each([
 });
 
 describe("application preparation ownership", () => {
+  test("a site's requested wait releases capacity for other sites and resumes at its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const scheduler = createApplicationPreparationScheduler(1);
+      const limited = await scheduler.acquire("https://one.example/apply");
+      scheduler.recordResponse("https://one.example/apply", 429, "2");
+      let resumed = false;
+      const waiting = limited.moveTo("https://one.example/apply").then(() => {
+        resumed = true;
+      });
+      const other = await scheduler.acquire("https://two.test/apply");
+      other.release();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(resumed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await waiting;
+      limited.release();
+      expect(resumed).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("success returns a site to normal speed; missing Retry-After backs off repeated limits", async () => {
+    vi.useFakeTimers();
+    try {
+      const scheduler = createApplicationPreparationScheduler();
+      const now = Date.now();
+      expect(scheduler.recordResponse("https://one.example/a", 429, null)).toBe(
+        now + 1_000,
+      );
+      expect(scheduler.recordResponse("https://one.example/a", 429, null)).toBe(
+        now + 2_000,
+      );
+      await vi.advanceTimersByTimeAsync(2_000);
+      scheduler.recordResponse("https://one.example/a", 200, null);
+      const lease = await scheduler.acquire("https://one.example/a");
+      lease.release();
+      expect(scheduler.recordResponse("https://one.example/a", 429, null)).toBe(
+        Date.now() + 1_000,
+      );
+      expect(
+        scheduler.recordResponse("https://two.test/a", 403, null),
+      ).toBeNull();
+      expect(
+        scheduler.recordResponse("https://two.test/a", 503, null),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("an HTTP date or a long Retry-After is honored and stopping clears the waiter", async () => {
+    vi.useFakeTimers();
+    try {
+      const scheduler = createApplicationPreparationScheduler();
+      const date = new Date(Math.ceil(Date.now() / 1_000) * 1_000 + 5_000);
+      expect(
+        scheduler.recordResponse(
+          "https://one.example/a",
+          503,
+          date.toUTCString(),
+        ),
+      ).toBe(date.getTime());
+      expect(scheduler.recordResponse("https://two.test/a", 429, "86400")).toBe(
+        Date.now() + 86_400_000,
+      );
+      const controller = new AbortController();
+      const waiting = scheduler.acquire(
+        "https://two.test/a",
+        controller.signal,
+      );
+      controller.abort();
+      await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   test("concurrent hands both wait for a busy redirect destination", async () => {
     const scheduler = createApplicationPreparationScheduler(2);
     const moving = await scheduler.acquire("https://first.example/apply");

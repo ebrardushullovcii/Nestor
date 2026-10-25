@@ -12,6 +12,7 @@
 - `apply-documents`: "Draft a cover letter" / short response document for an attachment question.
 - `applications-tracking`: filters (All, Waiting on you, In progress), "Hiring stage", "Open tracker", "Prepare interview" (links to Live Assistant).
 - `apply-recovery`: "Could not apply" and recovery actions.
+- `apply-pacing`: a site's HTTP 429 or 503 with Retry-After waits automatically, without a Needs-you question. Rejected main-page GETs reload after the wait; writes and sends are never replayed. Other sites can use the released worker slot. Sites that respond normally have no added delay.
 
 ## How to get to it (user POV)
 
