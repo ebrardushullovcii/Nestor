@@ -189,9 +189,18 @@ describe("registered user actions", () => {
   it("stops an explicitly selected application without another confirmation", async () => {
     const executeAction = vi.fn().mockResolvedValue(true);
     const createProposal = vi.fn();
-    const context = { service: {}, ports: { executeAction, publishWorkspaceUpdate: vi.fn() }, session: { assertCurrent: vi.fn(), createProposal } } as unknown as AssistantToolContext;
-    await executeRegisteredAssistantAction({ actionId: "stop-application", input: { id: 1 } }, context);
-    expect(executeAction).toHaveBeenCalledExactlyOnceWith("stop-application", { id: 1 });
+    const context = {
+      service: {},
+      ports: { executeAction, publishWorkspaceUpdate: vi.fn() },
+      session: { assertCurrent: vi.fn(), createProposal },
+    } as unknown as AssistantToolContext;
+    await executeRegisteredAssistantAction(
+      { actionId: "stop-application", input: { id: 1 } },
+      context,
+    );
+    expect(executeAction).toHaveBeenCalledExactlyOnceWith("stop-application", {
+      id: 1,
+    });
     expect(createProposal).not.toHaveBeenCalled();
   });
 

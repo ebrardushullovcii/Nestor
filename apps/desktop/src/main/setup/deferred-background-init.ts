@@ -25,7 +25,6 @@ export interface DeferredBackgroundInitOptions {
   loadInterviewSessionControlsModule: () => Promise<
     typeof InterviewSessionControlsApi
   >;
-  resumeApplyQueueAfterRestart: () => void;
   initializeInterviewSurfaces: (
     overlay: typeof InterviewOverlayApi,
     sessionControls: typeof InterviewSessionControlsApi,
@@ -100,10 +99,6 @@ export function createDeferredBackgroundInitController(
           return;
         }
         await getJobFinderWorkspaceService();
-        if (quitHasBegun()) {
-          return;
-        }
-        options.resumeApplyQueueAfterRestart();
       })
       .catch((error) => {
         options.onError(

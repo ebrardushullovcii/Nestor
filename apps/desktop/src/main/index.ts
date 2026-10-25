@@ -124,7 +124,6 @@ const deferredBackgroundInit = createDeferredBackgroundInitController({
   loadLiveAssistantModule,
   loadInterviewOverlayModule,
   loadInterviewSessionControlsModule,
-  resumeApplyQueueAfterRestart,
   initializeInterviewSurfaces: (overlay, sessionControls) => {
     closeInterviewOverlayWindows = overlay.closeInterviewOverlayWindows;
     disposeInterviewSessionControls =
@@ -308,8 +307,6 @@ void app
 
 let jobFinderShutdownInFlight = false;
 let quitApprovedByCloseGuard = false;
-
-
 
 async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
   if (!jobFinderServicesPromise) {

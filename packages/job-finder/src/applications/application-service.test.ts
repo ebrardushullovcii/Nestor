@@ -71,7 +71,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function setup(count: number, concurrency = 2) {
+async function setup(count: number, concurrency?: number) {
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
   const imported = path.join(directory, "imported.txt");
   await writeFile(imported, "Synthetic imported resume");
@@ -197,8 +197,18 @@ async function setup(count: number, concurrency = 2) {
   };
 }
 
+it("defaults to four preparations and leaves additional applications queued", async () => {
+  const f = await setup(5);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
+  expect(
+    f.applications.listApplications({ state: "queued" }).rows,
+  ).toHaveLength(1);
+});
+
 it("starts approved jobs immediately, caps preparation, and leaves Original forms for the person's click", async () => {
-  const f = await setup(4);
+  const f = await setup(4, 2);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));

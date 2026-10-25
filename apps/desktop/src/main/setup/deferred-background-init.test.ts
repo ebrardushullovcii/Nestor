@@ -20,7 +20,6 @@ const flushMicrotasks = () => vi.advanceTimersByTimeAsync(0);
 
 function createOptions() {
   const calls: string[] = [];
-  const queueResumptions: boolean[] = [];
   const surfaceInitializations: boolean[] = [];
   const errors: Array<{ message: string; error: unknown }> = [];
   const counts = {
@@ -74,9 +73,6 @@ function createOptions() {
       counts.interviewSessionControls += 1;
       return Promise.resolve(sessionControlsStub);
     },
-    resumeApplyQueueAfterRestart: () => {
-      queueResumptions.push(true);
-    },
     initializeInterviewSurfaces: (overlay, sessionControls) => {
       surfaceInitializations.push(Boolean(overlay) && Boolean(sessionControls));
     },
@@ -92,7 +88,6 @@ function createOptions() {
     options,
     calls,
     counts,
-    queueResumptions,
     surfaceInitializations,
     errors,
   };
@@ -105,14 +100,8 @@ describe("deferred background initialization", () => {
 
   test("runs the background loads only after the schedule delay elapses", async () => {
     vi.useFakeTimers();
-    const {
-      options,
-      calls,
-      counts,
-      queueResumptions,
-      surfaceInitializations,
-      errors,
-    } = createOptions();
+    const { options, calls, counts, surfaceInitializations, errors } =
+      createOptions();
     const controller = createDeferredBackgroundInitController(options);
 
     controller.schedule();
@@ -126,7 +115,6 @@ describe("deferred background initialization", () => {
     expect(calls).toContain("workspace");
     expect(calls).toContain("asset-lifecycle");
     expect(calls).toContain("live-assistant");
-    expect(queueResumptions).toHaveLength(1);
     expect(surfaceInitializations).toEqual([true]);
     expect(errors).toEqual([]);
   });
@@ -261,7 +249,7 @@ describe("deferred background initialization", () => {
   describe("aborted quit latch release", () => {
     test("an early-startup cancel releases the latch and runs initialization exactly once", async () => {
       vi.useFakeTimers();
-      const { options, counts, queueResumptions, errors } = createOptions();
+      const { options, counts, errors } = createOptions();
       const controller = createDeferredBackgroundInitController(options);
 
       // Quit begins during the startup window, before the timer ever fires.
@@ -278,13 +266,12 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(queueResumptions).toHaveLength(1);
       expect(errors).toEqual([]);
     });
 
     test("a repeated cancel cycle never duplicates the initialization", async () => {
       vi.useFakeTimers();
-      const { options, counts, queueResumptions } = createOptions();
+      const { options, counts } = createOptions();
       const controller = createDeferredBackgroundInitController(options);
 
       controller.schedule();
@@ -295,7 +282,6 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(queueResumptions).toHaveLength(1);
 
       // A later quit/abort cycle after completion re-arms nothing.
       controller.beginQuitTeardown();
@@ -304,7 +290,6 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(queueResumptions).toHaveLength(1);
     });
 
     test("release is ignored once actual teardown has committed", async () => {

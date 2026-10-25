@@ -391,8 +391,20 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "apply.work",
     screen: "Shortlisted / Applications",
     action: "Apply to approved jobs and read or stop the queued work",
-    channels: ["job-finder:apply-jobs", "job-finder:list-applications", "job-finder:get-application-details", "job-finder:stop-application", "job-finder:open-application"],
-    coverage: tools("apply_to_jobs", "action_list_applications", "action_get_application_details", "action_stop_application", "action_open_application"),
+    channels: [
+      "job-finder:apply-jobs",
+      "job-finder:list-applications",
+      "job-finder:get-application-details",
+      "job-finder:stop-application",
+      "job-finder:open-application",
+    ],
+    coverage: tools(
+      "apply_to_jobs",
+      "action_list_applications",
+      "action_get_application_details",
+      "action_stop_application",
+      "action_open_application",
+    ),
   },
   {
     id: "apply.move_back",

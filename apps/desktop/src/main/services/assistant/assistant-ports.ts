@@ -320,21 +320,42 @@ export function createAssistantHostPorts(input: {
     },
     async startApplications({ jobIds, mode, conversationId }) {
       await getJobFinderWorkspaceService();
-      if (!conversationId) throw new Error("Record the person's sidebar instruction before applying.");
+      if (!conversationId)
+        throw new Error(
+          "Record the person's sidebar instruction before applying.",
+        );
       const store = getApplicationStore();
       const queuedJobIds: string[] = [];
       const heldBack: { jobId: string; title: string; reason: string }[] = [];
       for (let offset = 0; offset < jobIds.length; offset += 200) {
         const batch = jobIds.slice(offset, offset + 200);
-        const ids = batch.map(id => Number(id));
-        if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error("Use job ids from Find jobs or Shortlisted.");
-        const before = new Map(store.forJobs(ids).map(row => [row.jobId, row]));
-        store.applyJobs({ selection: { ids } }, mode === "autonomous_submit" ? mode : "confirm_before_submit", { conversationId, mode });
+        const ids = batch.map((id) => Number(id));
+        if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0))
+          throw new Error("Use job ids from Find jobs or Shortlisted.");
+        const before = new Map(
+          store.forJobs(ids).map((row) => [row.jobId, row]),
+        );
+        store.applyJobs(
+          { selection: { ids } },
+          mode === "autonomous_submit" ? mode : "confirm_before_submit",
+          { conversationId, mode },
+        );
         for (const id of ids) {
           const job = getJobStore().getJob(id);
           const previous = before.get(id);
-          if (job?.stage !== "resume") heldBack.push({ jobId: String(id), title: job?.title ?? String(id), reason: "Approve this job's resume on Shortlisted before applying." });
-          else if (previous && !["stopped", "failed"].includes(previous.state)) heldBack.push({ jobId: String(id), title: job.title, reason: "This application is already queued, prepared, or sent." });
+          if (job?.stage !== "resume")
+            heldBack.push({
+              jobId: String(id),
+              title: job?.title ?? String(id),
+              reason:
+                "Approve this job's resume on Shortlisted before applying.",
+            });
+          else if (previous && !["stopped", "failed"].includes(previous.state))
+            heldBack.push({
+              jobId: String(id),
+              title: job.title,
+              reason: "This application is already queued, prepared, or sent.",
+            });
           else queuedJobIds.push(String(id));
         }
       }
@@ -347,12 +368,28 @@ export function createAssistantHostPorts(input: {
       const sentJobIds: string[] = [];
       const failed: { jobId: string; reason: string }[] = [];
       for (const jobId of jobIds) {
-        const [row] = Number.isSafeInteger(Number(jobId)) ? store.forJobs([Number(jobId)]) : [];
+        const [row] = Number.isSafeInteger(Number(jobId))
+          ? store.forJobs([Number(jobId)])
+          : [];
         try {
-          if (row && await runner.sendPrepared(row.id)) sentJobIds.push(jobId);
-          else failed.push({ jobId, reason: row ? store.getApplication(row.id)?.error ?? "This application is not ready to send." : "No application for this job." });
+          if (row && (await runner.sendPrepared(row.id)))
+            sentJobIds.push(jobId);
+          else
+            failed.push({
+              jobId,
+              reason: row
+                ? (store.getApplication(row.id)?.error ??
+                  "This application is not ready to send.")
+                : "No application for this job.",
+            });
         } catch (error) {
-          failed.push({ jobId, reason: error instanceof Error ? error.message.slice(0, 300) : "It could not be sent." });
+          failed.push({
+            jobId,
+            reason:
+              error instanceof Error
+                ? error.message.slice(0, 300)
+                : "It could not be sent.",
+          });
         }
       }
       return { sentJobIds, failed };

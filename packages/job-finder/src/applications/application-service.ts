@@ -106,7 +106,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const accessWallSeen = new Set<number>();
   const accessContinued = new Set<number>();
   const capacity = applicationPreparationConcurrency(
-    String(deps.concurrency ?? 16),
+    String(deps.concurrency ?? 4),
   );
   const onError =
     deps.onError ?? ((error: unknown) => console.error("[Apply]", error));

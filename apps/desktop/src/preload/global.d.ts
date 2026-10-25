@@ -280,14 +280,24 @@ declare global {
       };
       jobFinder: {
         applyJobs: (input: ApplyJobsInput) => Promise<ApplyJobsResult>;
-        listApplications: (input?: ApplicationListQuery) => Promise<ApplicationListPage>;
-        applicationsForJobs: (input: ApplicationsForJobsInput) => Promise<ApplicationRow[]>;
-        getApplicationDetails: (input: ApplicationTarget) => Promise<ApplicationDetails | null>;
+        listApplications: (
+          input?: ApplicationListQuery,
+        ) => Promise<ApplicationListPage>;
+        applicationsForJobs: (
+          input: ApplicationsForJobsInput,
+        ) => Promise<ApplicationRow[]>;
+        getApplicationDetails: (
+          input: ApplicationTarget,
+        ) => Promise<ApplicationDetails | null>;
         openApplication: (input: ApplicationTarget) => Promise<boolean>;
         stopApplication: (input: ApplicationTarget) => Promise<boolean>;
         listNeedsYou: (input?: NeedsYouListQuery) => Promise<NeedsYouPage>;
-        answerNeedsYou: (input: AnswerNeedsYouInput) => Promise<AnswerNeedsYouResult>;
-        onApplicationsChange: (listener: (change: JobChange) => void) => () => void;
+        answerNeedsYou: (
+          input: AnswerNeedsYouInput,
+        ) => Promise<AnswerNeedsYouResult>;
+        onApplicationsChange: (
+          listener: (change: JobChange) => void,
+        ) => () => void;
         queries: WorkspaceQueryApi;
         getApplicationAuthorityReadiness: (
           input?: GetApplicationAuthorityReadinessInput,
