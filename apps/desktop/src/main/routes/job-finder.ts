@@ -125,14 +125,7 @@ import type {
   JobFinderWorkspaceSyncResult,
   JobFinderResumePdfExportReply,
 } from "@nestor/contracts";
-import {
-  JobFinderApplyQueueControlInputSchema,
-  JobFinderRemoveFromApplyQueueInputSchema,
-  JobFinderApproveResumesInputSchema,
-  JobFinderStartApplyQueueInputSchema,
-  type ApplicationAutomationMode,
-  type ApplyQueueSkippedJob,
-} from "@nestor/contracts";
+
 import {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
@@ -156,10 +149,8 @@ import {
   withJobFinderWorkspaceUpdates,
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
-import type { ApplyQueue } from "@nestor/contracts";
 import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
 import {
-  applyQueueFinishedNotice,
   searchFinishedNotice,
 } from "../setup/finished-work-notices";
 import {

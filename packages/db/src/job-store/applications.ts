@@ -134,10 +134,17 @@ export function createApplicationStore(store: JobStore) {
              AND applications.submitted_at IS NULL RETURNING id`,
         ).all(mode, now, now, ...params) as { id: number }[];
         for (const { id } of result) {
-          if (instruction) sql(`INSERT INTO application_instructions (application_id, conversation_id, mode)
-            VALUES (?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET conversation_id = excluded.conversation_id, mode = excluded.mode`)
-            .run(id, instruction.conversationId, instruction.mode);
-          else sql("DELETE FROM application_instructions WHERE application_id = ?").run(id);
+          if (instruction)
+            sql(`INSERT INTO application_instructions (application_id, conversation_id, mode)
+            VALUES (?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET conversation_id = excluded.conversation_id, mode = excluded.mode`).run(
+              id,
+              instruction.conversationId,
+              instruction.mode,
+            );
+          else
+            sql(
+              "DELETE FROM application_instructions WHERE application_id = ?",
+            ).run(id);
         }
         const queued = result.length;
         if (queued > 0)
@@ -152,85 +159,164 @@ export function createApplicationStore(store: JobStore) {
 
     getApplication,
 
-    instructionFor(id: number): { conversationId: string; mode: ApplicationAutomationMode } | null {
-      const row = sql("SELECT conversation_id, mode FROM application_instructions WHERE application_id = ?").get(id) as { conversation_id: string; mode: ApplicationAutomationMode } | undefined;
-      return row ? { conversationId: row.conversation_id, mode: row.mode } : null;
+    instructionFor(
+      id: number,
+    ): { conversationId: string; mode: ApplicationAutomationMode } | null {
+      const row = sql(
+        "SELECT conversation_id, mode FROM application_instructions WHERE application_id = ?",
+      ).get(id) as
+        | { conversation_id: string; mode: ApplicationAutomationMode }
+        | undefined;
+      return row
+        ? { conversationId: row.conversation_id, mode: row.mode }
+        : null;
     },
 
     forJobs(jobIds: readonly number[]): ApplicationRow[] {
-      if (jobIds.length > 200) throw new Error("Read applications for one page of jobs at a time.");
-      return (sql(`SELECT ${COLUMNS} FROM applications a JOIN jobs j ON j.id = a.job_id
-        WHERE a.job_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(jobIds)) as Row[]).map(toRow);
+      if (jobIds.length > 200)
+        throw new Error("Read applications for one page of jobs at a time.");
+      return (
+        sql(`SELECT ${COLUMNS} FROM applications a JOIN jobs j ON j.id = a.job_id
+        WHERE a.job_id IN (SELECT value FROM json_each(?))`).all(
+          JSON.stringify(jobIds),
+        ) as Row[]
+      ).map(toRow);
     },
 
     getSubmissionReceipt(id: number): SubmissionOutcomeRecord | null {
-      const row = sql("SELECT submission_outcome_json FROM applications WHERE id = ?").get(id) as { submission_outcome_json: string | null } | undefined;
-      return row?.submission_outcome_json ? SubmissionOutcomeRecordSchema.parse(JSON.parse(row.submission_outcome_json)) : null;
+      const row = sql(
+        "SELECT submission_outcome_json FROM applications WHERE id = ?",
+      ).get(id) as { submission_outcome_json: string | null } | undefined;
+      return row?.submission_outcome_json
+        ? SubmissionOutcomeRecordSchema.parse(
+            JSON.parse(row.submission_outcome_json),
+          )
+        : null;
     },
 
     recordOrigin(id: number, origin: string): void {
       origin = new URL(origin).origin;
-      if (!/^https?:/u.test(origin)) throw new Error("An application site must use HTTP or HTTPS.");
-      sql("INSERT OR IGNORE INTO application_origins (application_id, origin) VALUES (?, ?)").run(id, origin);
+      if (!/^https?:/u.test(origin))
+        throw new Error("An application site must use HTTP or HTTPS.");
+      sql(
+        "INSERT OR IGNORE INTO application_origins (application_id, origin) VALUES (?, ?)",
+      ).run(id, origin);
     },
 
     originsForApplications(ids: readonly number[]): string[] {
-      return (sql("SELECT DISTINCT origin FROM application_origins WHERE application_id IN (SELECT value FROM json_each(?))").all(JSON.stringify(ids)) as Array<{ origin: string }>).map(row => row.origin);
+      return (
+        sql(
+          "SELECT DISTINCT origin FROM application_origins WHERE application_id IN (SELECT value FROM json_each(?))",
+        ).all(JSON.stringify(ids)) as Array<{ origin: string }>
+      ).map((row) => row.origin);
     },
 
     /** Details for one application, never part of a list or workspace snapshot. */
     getWork(id: number): ApplicationWork | null {
-      const row = sql("SELECT * FROM application_details WHERE application_id = ?").get(id) as {
-        attempt: number; resume_artifact_json: string; execution_json: string | null;
-        review_json: string | null; authority_envelope_id: string | null; access_recheck: number; profile_digest: string;
-      } | undefined;
-      return row?.execution_json ? {
-        attempt: row.attempt,
-        resumeArtifact: ApplicationResumeArtifactSchema.parse(JSON.parse(row.resume_artifact_json)),
-        execution: ApplyExecutionResultSchema.parse(JSON.parse(row.execution_json)),
-        reviewCard: row.review_json ? ApplicationReviewCardSchema.parse(JSON.parse(row.review_json)) : null,
-        authorityEnvelopeId: row.authority_envelope_id,
-        accessRecheck: row.access_recheck === 1,
-        profileDigest: row.profile_digest,
-      } : null;
+      const row = sql(
+        "SELECT * FROM application_details WHERE application_id = ?",
+      ).get(id) as
+        | {
+            attempt: number;
+            resume_artifact_json: string;
+            execution_json: string | null;
+            review_json: string | null;
+            authority_envelope_id: string | null;
+            access_recheck: number;
+            profile_digest: string;
+          }
+        | undefined;
+      return row?.execution_json
+        ? {
+            attempt: row.attempt,
+            resumeArtifact: ApplicationResumeArtifactSchema.parse(
+              JSON.parse(row.resume_artifact_json),
+            ),
+            execution: ApplyExecutionResultSchema.parse(
+              JSON.parse(row.execution_json),
+            ),
+            reviewCard: row.review_json
+              ? ApplicationReviewCardSchema.parse(JSON.parse(row.review_json))
+              : null,
+            authorityEnvelopeId: row.authority_envelope_id,
+            accessRecheck: row.access_recheck === 1,
+            profileDigest: row.profile_digest,
+          }
+        : null;
     },
 
     getResumeArtifact(id: number): ApplicationResumeArtifact | null {
-      const row = sql("SELECT resume_artifact_json FROM application_details WHERE application_id = ?").get(id) as { resume_artifact_json: string } | undefined;
-      return row ? ApplicationResumeArtifactSchema.parse(JSON.parse(row.resume_artifact_json)) : null;
+      const row = sql(
+        "SELECT resume_artifact_json FROM application_details WHERE application_id = ?",
+      ).get(id) as { resume_artifact_json: string } | undefined;
+      return row
+        ? ApplicationResumeArtifactSchema.parse(
+            JSON.parse(row.resume_artifact_json),
+          )
+        : null;
     },
 
-    setResumeArtifact(id: number, attempt: number, artifact: ApplicationResumeArtifact, profileDigest: string): boolean {
+    setResumeArtifact(
+      id: number,
+      attempt: number,
+      artifact: ApplicationResumeArtifact,
+      profileDigest: string,
+    ): boolean {
       artifact = ApplicationResumeArtifactSchema.parse(artifact);
       return store.transaction(() => {
         const row = getApplication(id);
-        if (!row || row.attempt !== attempt || row.state !== "running") return false;
-        if (artifact.jobId !== String(row.jobId)) throw new Error("The application resume belongs to another job.");
+        if (!row || row.attempt !== attempt || row.state !== "running")
+          return false;
+        if (artifact.jobId !== String(row.jobId))
+          throw new Error("The application resume belongs to another job.");
         sql(`INSERT INTO application_details (application_id, attempt, resume_artifact_json, profile_digest)
           VALUES (?, ?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET attempt = excluded.attempt,
           resume_artifact_json = excluded.resume_artifact_json, execution_json = NULL,
-          review_json = NULL, authority_envelope_id = NULL, profile_digest = excluded.profile_digest`).run(id, attempt, JSON.stringify(artifact), profileDigest);
+          review_json = NULL, authority_envelope_id = NULL, profile_digest = excluded.profile_digest`).run(
+          id,
+          attempt,
+          JSON.stringify(artifact),
+          profileDigest,
+        );
         return true;
       });
     },
 
-    saveWork(id: number, work: Omit<ApplicationWork, "accessRecheck">): boolean {
-      const resumeArtifact = ApplicationResumeArtifactSchema.parse(work.resumeArtifact);
+    saveWork(
+      id: number,
+      work: Omit<ApplicationWork, "accessRecheck">,
+    ): boolean {
+      const resumeArtifact = ApplicationResumeArtifactSchema.parse(
+        work.resumeArtifact,
+      );
       const execution = ApplyExecutionResultSchema.parse(work.execution);
-      const review = ApplicationReviewCardSchema.nullable().parse(work.reviewCard);
+      const review = ApplicationReviewCardSchema.nullable().parse(
+        work.reviewCard,
+      );
       return store.transaction(() => {
         const current = getApplication(id);
-        if (!current || current.attempt !== work.attempt || current.state !== "running") return false;
-        if (resumeArtifact.jobId !== String(current.jobId)) throw new Error("The application resume belongs to another job.");
+        if (
+          !current ||
+          current.attempt !== work.attempt ||
+          current.state !== "running"
+        )
+          return false;
+        if (resumeArtifact.jobId !== String(current.jobId))
+          throw new Error("The application resume belongs to another job.");
         sql(`INSERT INTO application_details
           (application_id, attempt, resume_artifact_json, execution_json, review_json, authority_envelope_id, profile_digest)
           VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET
           attempt = excluded.attempt, resume_artifact_json = excluded.resume_artifact_json,
           execution_json = excluded.execution_json, review_json = excluded.review_json,
           authority_envelope_id = excluded.authority_envelope_id, profile_digest = excluded.profile_digest, access_recheck = 0`).run(
-            id, work.attempt, JSON.stringify(resumeArtifact), JSON.stringify(execution),
-            review ? JSON.stringify(review) : null, work.authorityEnvelopeId, work.profileDigest,
-          );
+          id,
+          work.attempt,
+          JSON.stringify(resumeArtifact),
+          JSON.stringify(execution),
+          review ? JSON.stringify(review) : null,
+          work.authorityEnvelopeId,
+          work.profileDigest,
+        );
         changed([current.jobId]);
         return true;
       });
@@ -239,8 +325,14 @@ export function createApplicationStore(store: JobStore) {
     /** A question answered from memory needs another preparation, without a task. */
     continuePreparation(id: number, attempt: number): boolean {
       return store.transaction(() => {
-        const row = sql(`UPDATE applications SET state = 'queued', queued_at = ?, updated_at = ?
-          WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id`).get(Date.now(), Date.now(), id, attempt) as { job_id: number } | undefined;
+        const row =
+          sql(`UPDATE applications SET state = 'queued', queued_at = ?, updated_at = ?
+          WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id`).get(
+            Date.now(),
+            Date.now(),
+            id,
+            attempt,
+          ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
@@ -249,8 +341,13 @@ export function createApplicationStore(store: JobStore) {
     /** The state is written before the existing guarded send can be armed. */
     beginSubmission(id: number, attempt: number): boolean {
       return store.transaction(() => {
-        const row = sql(`UPDATE applications SET state = 'submitting', updated_at = ?
-          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready') RETURNING job_id`).get(Date.now(), id, attempt) as { job_id: number } | undefined;
+        const row =
+          sql(`UPDATE applications SET state = 'submitting', updated_at = ?
+          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready') RETURNING job_id`).get(
+            Date.now(),
+            id,
+            attempt,
+          ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
@@ -259,36 +356,73 @@ export function createApplicationStore(store: JobStore) {
     /** A refusal before a send was issued can return the filled form for review. */
     submissionRefused(id: number, attempt: number, reason: string): void {
       store.transaction(() => {
-        const row = sql(`UPDATE applications SET state = 'ready', error = ?, updated_at = ?
-          WHERE id = ? AND attempt = ? AND state = 'submitting' RETURNING job_id`).get(reason.slice(0, 2000), Date.now(), id, attempt) as { job_id: number } | undefined;
+        const row =
+          sql(`UPDATE applications SET state = 'ready', error = ?, updated_at = ?
+          WHERE id = ? AND attempt = ? AND state = 'submitting' RETURNING job_id`).get(
+            reason.slice(0, 2000),
+            Date.now(),
+            id,
+            attempt,
+          ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
       });
     },
 
     submissionUnknown(id: number, attempt: number): void {
       store.transaction(() => {
-        const row = sql(`UPDATE applications SET state = 'uncertain', error = ?, updated_at = ?
+        const row =
+          sql(`UPDATE applications SET state = 'uncertain', error = ?, updated_at = ?
           WHERE id = ? AND attempt = ? AND state = 'submitting' RETURNING job_id`).get(
             "The app closed while this application was being sent. Check the site before taking another submission action.",
-            Date.now(), id, attempt,
+            Date.now(),
+            id,
+            attempt,
           ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
       });
     },
 
     /** Only a validated employer receipt can move a job out of Approved. */
-    recordSubmission(id: number, attempt: number, receipt: SubmissionOutcomeRecord): boolean {
+    recordSubmission(
+      id: number,
+      attempt: number,
+      receipt: SubmissionOutcomeRecord,
+    ): boolean {
       receipt = SubmissionOutcomeRecordSchema.parse(receipt);
       return store.transaction(() => {
         const current = getApplication(id);
-        if (!current || current.attempt !== attempt || !["ready", "submitting"].includes(current.state)) return false;
-        if (receipt.jobId !== String(current.jobId) || receipt.applicationRecordId !== `application_${id}` || receipt.runId !== `application_run_${id}` || receipt.resultId !== `application_${id}_attempt_${attempt}`) throw new Error("The submission receipt belongs to another application attempt.");
-        const state = receipt.outcome === "submitted" ? "submitted" : receipt.outcome === "outcome_uncertain" ? "uncertain" : "ready";
+        if (
+          !current ||
+          current.attempt !== attempt ||
+          !["ready", "needs_you", "submitting"].includes(current.state)
+        )
+          return false;
+        if (
+          receipt.jobId !== String(current.jobId) ||
+          receipt.applicationRecordId !== `application_${id}` ||
+          receipt.runId !== `application_run_${id}` ||
+          receipt.resultId !== `application_${id}_attempt_${attempt}`
+        )
+          throw new Error(
+            "The submission receipt belongs to another application attempt.",
+          );
+        const state =
+          receipt.outcome === "submitted"
+            ? "submitted"
+            : receipt.outcome === "outcome_uncertain"
+              ? "uncertain"
+              : "ready";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
           submission_outcome_id = ?, submission_outcome_json = ?, error = NULL WHERE id = ?`).run(
-            state, receipt.outcome === "submitted" ? Date.parse(receipt.verifiedAt!) : null,
-            Date.now(), receipt.id, JSON.stringify(receipt), id,
-          );
+          state,
+          receipt.outcome === "submitted"
+            ? Date.parse(receipt.verifiedAt!)
+            : null,
+          Date.now(),
+          receipt.id,
+          JSON.stringify(receipt),
+          id,
+        );
         if (state === "submitted") store.setStage([current.jobId], "applied");
         changed([current.jobId]);
         return true;
@@ -298,14 +432,24 @@ export function createApplicationStore(store: JobStore) {
     /** A crash in preparation is retryable; an interrupted send requires proof. */
     recoverPreparation(): void {
       store.transaction(() => {
-        const result = sql("UPDATE applications SET state = 'queued', updated_at = ? WHERE state = 'running'").run(Date.now());
+        const result = sql(
+          "UPDATE applications SET state = 'queued', updated_at = ? WHERE state = 'running'",
+        ).run(Date.now());
         if (result.changes) changed();
       });
     },
 
-    listWorkInState(state: ApplicationRow["state"], limit = 16): ApplicationRow[] {
-      return (sql(`SELECT ${COLUMNS} FROM applications a JOIN jobs j ON j.id = a.job_id
-        WHERE a.state = ? ORDER BY a.updated_at, a.id LIMIT ?`).all(state, limit) as Row[]).map(toRow);
+    listWorkInState(
+      state: ApplicationRow["state"],
+      limit = 16,
+    ): ApplicationRow[] {
+      return (
+        sql(`SELECT ${COLUMNS} FROM applications a JOIN jobs j ON j.id = a.job_id
+        WHERE a.state = ? ORDER BY a.updated_at, a.id LIMIT ?`).all(
+          state,
+          limit,
+        ) as Row[]
+      ).map(toRow);
     },
 
     listApplications(input: ApplicationListQuery = {}): ApplicationListPage {

@@ -1,6 +1,8 @@
 # ADR 0058: One Apply press queues the whole choice
 
-Status: accepted (2026-10-23).
+Status: superseded by the owner’s Job Finder rewrite (2026-10-25).
+
+Apply now admits approved jobs into indexed `applications` rows through `applyJobs`, using ids or a filter selection. The runner claims bounded concurrent work directly from those rows; there is no singleton queue or ten-job batch path. An interrupted preparation may resume, while an interrupted send requires a confirmed receipt or remains uncertain. The mode captured at Apply and the current permission bound every send. Approval is read from `resumes` beside `jobs`, with no legacy approval fold. The historical decision below does not describe the current runner.
 
 ## Context
 

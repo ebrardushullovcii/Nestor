@@ -105,12 +105,21 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
   return {
     /** Answers for the questions currently on a page, scoped before any AI call. */
-    answersForQuestions(applicationId: number, keys: readonly string[], siteOrigin: string): Array<{
-      id: string; key: string; prompt: string; answer: string; local: boolean;
+    answersForQuestions(
+      applicationId: number,
+      keys: readonly string[],
+      siteOrigin: string,
+    ): Array<{
+      id: string;
+      key: string;
+      prompt: string;
+      answer: string;
+      local: boolean;
     }> {
       if (keys.length === 0) return [];
       const scope = FormAnswerScopeSchema.parse({ siteOrigin });
-      const records = sql(`SELECT 'saved:' || answer_key AS id, answer_key AS key, prompt, answer, 0 AS local
+      const records =
+        sql(`SELECT 'saved:' || answer_key AS id, answer_key AS key, prompt, answer, 0 AS local
         FROM form_answers WHERE answer_key IN (SELECT value FROM json_each(?))
           AND country = '' AND site_origin IN ('', ?)
         UNION ALL
@@ -118,8 +127,17 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
         WHERE n.application_id = ? AND t.kind = 'question' AND t.answer IS NOT NULL
           AND t.answer_key IN (SELECT value FROM json_each(?))`).all(
-          JSON.stringify(keys), scope.siteOrigin, applicationId, JSON.stringify(keys),
-        ) as Array<{ id: string; key: string; prompt: string; answer: string; local: number }>;
+          JSON.stringify(keys),
+          scope.siteOrigin,
+          applicationId,
+          JSON.stringify(keys),
+        ) as Array<{
+          id: string;
+          key: string;
+          prompt: string;
+          answer: string;
+          local: number;
+        }>;
       return records.map((row) => ({ ...row, local: row.local === 1 }));
     },
     findAnswer: (key: string, scope: Partial<FormAnswerScope> = {}) =>
@@ -262,10 +280,12 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     },
 
     accessForApplication(applicationId: number): NeedsYouTask[] {
-      return (sql(`SELECT t.* FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+      return (
+        sql(`SELECT t.* FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
         JOIN applications a ON a.id = n.application_id
         WHERE n.application_id = ? AND n.attempt = a.attempt AND t.kind <> 'question'
-          AND t.resolved_at IS NULL`).all(applicationId) as Task[]).map(toTask);
+          AND t.resolved_at IS NULL`).all(applicationId) as Task[]
+      ).map(toTask);
     },
 
     /** The browser watcher verifies one exact bound page before completing its task. */
@@ -274,13 +294,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const task = get(id);
         if (!task || task.kind === "question" || task.resolved_at !== null)
           return false;
-        const linked = sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
-          WHERE n.task_id = ? AND n.application_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'`).get(id, verifiedApplicationId);
+        const linked =
+          sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
+          WHERE n.task_id = ? AND n.application_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'`).get(
+            id,
+            verifiedApplicationId,
+          );
         if (!linked) return false;
         // A shared sign-in changes the session for other pages. Those pages
         // need a GET at their checkpoint; the page the person finished keeps
         // its current form and answers.
-        if (task.kind === "sign_in") sql(`UPDATE application_details SET access_recheck = 1
+        if (task.kind === "sign_in")
+          sql(`UPDATE application_details SET access_recheck = 1
           WHERE application_id <> ? AND application_id IN (
             SELECT n.application_id FROM application_needs_you n JOIN applications a ON a.id = n.application_id
             WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'
