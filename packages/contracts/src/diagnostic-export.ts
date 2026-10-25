@@ -26,13 +26,6 @@ export const JobFinderDiagnosticExportSchema = z
     state: z
       .object({
         profileSetupStatus: z.enum(["not_started", "in_progress", "completed"]),
-        discoveryRunState: z.enum([
-          "idle",
-          "running",
-          "completed",
-          "failed",
-          "cancelled",
-        ]),
         browserStatus: z.enum([
           "unknown",
           "ready",
@@ -43,7 +36,6 @@ export const JobFinderDiagnosticExportSchema = z
           .object({
             configuredSources: CountSchema,
             visibleJobs: CountSchema,
-            hiddenJobs: CountSchema,
             shortlistedJobs: CountSchema,
             applications: CountSchema,
             unresolvedActions: CountSchema,
@@ -150,7 +142,6 @@ export const JobFinderDiagnosticExportSchema = z
       .strict(),
     evidence: z
       .object({
-        discoveryRuns: CountSchema,
         sourceDebugRuns: CountSchema,
         resumeImports: CountSchema,
         applicationAttempts: CountSchema,

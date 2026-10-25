@@ -9,7 +9,6 @@ import {
   BrowserSessionStatusSchema,
   DocumentFontPresetSchema,
   DocumentFormatSchema,
-  DiscoveryRunStateSchema,
   IsoDateTimeSchema,
   JobSourceSchema,
   NonEmptyStringSchema,
@@ -50,11 +49,9 @@ import { ApprovedApplicationAnswerSnapshotSchema } from "./application-answer-sn
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
-  DiscoveryLedgerEntrySchema,
   DiscoveryJobViewSchema,
   JobListRowSchema,
   DiscoveryAdapterSessionStateSchema,
-  DiscoveryRunRecordSchema,
   JobSearchPreferencesSchema,
   ReviewQueueItemSchema,
   SavedJobSchema,
@@ -905,32 +902,19 @@ export function collapsesSideMenuWithAssistant(
   return settings.collapseSideMenuWithAssistant !== false;
 }
 
-const PersistedDiscoveryRunRecordSchema: z.ZodType<
-  z.output<typeof DiscoveryRunRecordSchema>,
-  z.ZodTypeDef,
-  z.input<typeof DiscoveryRunRecordSchema>
-> = DiscoveryRunRecordSchema;
-
 export const JobFinderDiscoveryStateSchema = z.object({
   sessions: z.array(DiscoveryAdapterSessionStateSchema).default([]),
-  runState: DiscoveryRunStateSchema.default("idle"),
-  activeRun: PersistedDiscoveryRunRecordSchema.nullable().default(null),
-  recentRuns: z.array(PersistedDiscoveryRunRecordSchema).default([]),
   activeSourceDebugRun: SourceDebugRunRecordSchema.nullable().default(null),
   recentSourceDebugRuns: z.array(SourceDebugRunRecordSchema).default([]),
-  discoveryLedger: z.array(DiscoveryLedgerEntrySchema).default([]),
-  pendingDiscoveryJobs: z.array(SavedJobSchema).default([]),
 });
 export type JobFinderDiscoveryState = z.infer<
   typeof JobFinderDiscoveryStateSchema
 >;
 
-/** Shell fields only; history, pending jobs and ledger are deferred. */
+/** Shell fields only; source-debug history is deferred. */
 export const DiscoveryBootstrapStateSchema = JobFinderDiscoveryStateSchema.pick(
   {
     sessions: true,
-    runState: true,
-    activeRun: true,
     activeSourceDebugRun: true,
   },
 );
@@ -1385,13 +1369,9 @@ const WorkspaceSnapshotCoreSchema = z.object({
   browserSession: BrowserSessionStateSchema,
   sourceAccessPrompts: z.array(SourceAccessPromptSchema).default([]),
   discoverySessions: z.array(DiscoveryAdapterSessionStateSchema).default([]),
-  discoveryRunState: DiscoveryRunStateSchema.default("idle"),
-  activeDiscoveryRun: DiscoveryRunRecordSchema.nullable().default(null),
-  recentDiscoveryRuns: z.array(DiscoveryRunRecordSchema).default([]),
   activeSourceDebugRun: SourceDebugRunRecordSchema.nullable().default(null),
   recentSourceDebugRuns: z.array(SourceDebugRunRecordSchema).default([]),
   discoveryJobs: z.array(DiscoveryJobViewSchema).default([]),
-  dismissedDiscoveryJobs: z.array(DiscoveryJobViewSchema).default([]),
   companyJobs: z.array(DiscoveryJobViewSchema).default([]),
   selectedDiscoveryJobId: NonEmptyStringSchema.nullable(),
   reviewQueue: z.array(ReviewQueueItemSchema).default([]),
@@ -1436,15 +1416,7 @@ const WorkspaceSnapshotBaseSchema: z.ZodObject<
 > = WorkspaceSnapshotCoreSchema.extend({
   intelligence: SnapshotIntelligenceSchema,
 });
-const OptionalFitJudgmentProgressSchema =
-  FitJudgmentProgressSchema.nullable().optional();
-export const JobFinderWorkspaceSnapshotSchema: z.ZodObject<
-  typeof WorkspaceSnapshotBaseSchema.shape & {
-    fitJudgmentProgress: typeof OptionalFitJudgmentProgressSchema;
-  }
-> = WorkspaceSnapshotBaseSchema.extend({
-  fitJudgmentProgress: OptionalFitJudgmentProgressSchema,
-});
+export const JobFinderWorkspaceSnapshotSchema = WorkspaceSnapshotBaseSchema;
 
 export type JobFinderWorkspaceSnapshot = z.infer<
   typeof JobFinderWorkspaceSnapshotSchema
@@ -1457,7 +1429,6 @@ export const JobFinderRendererWorkspaceSnapshotSchema =
     applyJobResults: z.array(ApplyJobResultListRowSchema).default([]),
     applicationAttempts: z.array(ApplicationAttemptListRowSchema).default([]),
     discoveryJobs: z.array(JobListRowSchema).default([]),
-    dismissedDiscoveryJobs: z.array(JobListRowSchema).default([]),
     companyJobs: z.array(JobListRowSchema).default([]),
   });
 export type JobFinderRendererWorkspaceSnapshot = z.infer<
@@ -1594,20 +1565,6 @@ export const JobFinderWorkspaceDeltaSchema = z
     baseRevision: WorkspaceRevisionSchema,
     currentRevision: WorkspaceRevisionSchema,
     generatedAt: IsoDateTimeSchema,
-    discoveryRunState: DiscoveryRunStateSchema,
-    fitJudgmentProgress: FitJudgmentProgressSchema.nullable().optional(),
-    activeDiscoveryRun: DiscoveryRunRecordSchema.nullable(),
-    /**
-     * When set, `activeDiscoveryRun.activity` holds only the events after the
-     * first this-many, which the receiver already has for the same run. A
-     * long search's history only grows, so each delta carries what is new.
-     */
-    activeDiscoveryRunActivityFrom: z
-      .number()
-      .int()
-      .nonnegative()
-      .nullable()
-      .default(null),
     // The fields below are sent only when they changed; an absent field
     // keeps what the receiver holds. Plan state alone is hundreds of KB with
     // a large search, and resending it on every refresh dominated the delta.
@@ -1636,12 +1593,6 @@ export const JobFinderWorkspaceDeltaSchema = z
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),
-    dismissedDiscoveryJobs: z
-      .object({
-        upserts: z.array(JobListRowSchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
     companyJobs: z
       .object({
         upserts: z.array(JobListRowSchema).default([]),
@@ -1649,12 +1600,6 @@ export const JobFinderWorkspaceDeltaSchema = z
       })
       .strict()
       .default({}),
-    recentDiscoveryRuns: z
-      .object({
-        upserts: z.array(DiscoveryRunRecordSchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
     reviewQueue: z
       .object({
         upserts: z.array(ReviewQueueItemSchema).default([]),

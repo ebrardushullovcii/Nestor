@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import {
   ApplicationRecordSchema,
   CampaignNotificationSchema,
-  DiscoveryRunRecordSchema,
   getDefaultCampaignConfiguration,
   GroupedManualAnswerDecisionSchema,
   JobFinderIntelligenceStateSchema,
@@ -126,11 +125,6 @@ function createStateSliceFixtures(phase: ResetConformancePhase) {
       id: jobId,
       sourceJobId: `target_${jobId}`,
       title: `${phase} role`,
-    }),
-    discoveryPendingJob: createSavedJob({
-      id: `pending_${jobId}`,
-      sourceJobId: `target_pending_${jobId}`,
-      title: `Pending ${phase} role`,
     }),
     tailoredAsset: {
       id: `asset_${phase}`,
@@ -603,11 +597,6 @@ async function applyDirtyMutations(
     humanReviewRequired: false,
     appearanceTheme: "dark",
   });
-  await repository.commitDiscoveryStateUpdate(() => ({
-    ...base.discovery,
-    runState: "running",
-    pendingDiscoveryJobs: [fixtures.discoveryPendingJob],
-  }));
 
   const dirtyCampaign = createCampaign(
     "campaign_dirty",
@@ -718,11 +707,6 @@ async function expectDirtyProbes(
       }),
     },
     {
-      label: "dirty discovery run state persisted",
-      read: async () => (await repository.getDiscoveryState()).runState,
-      expected: "running",
-    },
-    {
       label: "dirty activity control persisted",
       read: () => repository.getActivityControl(),
       expected: { paused: true, pausedAt: DIRTY_AT, reason: "Dirty pause" },
@@ -771,19 +755,7 @@ function createResetSeed(): JobFinderRepositorySeed {
       allowAutoSubmitOverride: true,
       keepSessionAlive: false,
     },
-    discovery: {
-      ...base.discovery,
-      recentRuns: [
-        DiscoveryRunRecordSchema.parse({
-          id: "discovery_run_reset",
-          state: "completed",
-          startedAt: BASE_AT,
-          completedAt: RESET_AT,
-          summary: { validJobsFound: 2, jobsPersisted: 2 },
-        }),
-      ],
-      pendingDiscoveryJobs: [fixtures.discoveryPendingJob],
-    },
+    discovery: base.discovery,
     campaigns: [campaign],
     activeCampaignId: campaign.id,
     campaignNotifications: [
@@ -1114,7 +1086,6 @@ describe("job finder repository reset conformance", () => {
           (await repository.getSearchPreferences()).minimumSalaryUsd,
           (await repository.getProfileSetupState()).currentStep,
           (await repository.getSettings()).allowAutoSubmitOverride,
-          (await repository.getDiscoveryState()).recentRuns.length,
           (await repository.getCampaignState())?.activeCampaignId ?? null,
           (await repository.getIntelligenceState()).updatedAt,
           (await repository.getActivityControl()).reason,

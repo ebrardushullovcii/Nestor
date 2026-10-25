@@ -389,11 +389,6 @@ describe("singleton_state revision migration", () => {
     await current.close();
     const database = new DatabaseSync(filePath);
     try {
-      expect(
-        database
-          .prepare("SELECT COUNT(*) AS count FROM discovery_ledger")
-          .get()?.count,
-      ).toBe(0);
       database.exec(`
         BEGIN;
         CREATE TABLE singleton_state_v10 (
@@ -404,10 +399,6 @@ describe("singleton_state revision migration", () => {
           SELECT key, value FROM singleton_state WHERE key = 'profile';
         DROP TABLE singleton_state;
         ALTER TABLE singleton_state_v10 RENAME TO singleton_state;
-        -- The fixture predates migration 30, including its schema artifacts.
-        DROP TRIGGER discovery_ledger_split_insert;
-        DROP TRIGGER discovery_ledger_split_update;
-        DROP TABLE discovery_ledger_observations;
         DELETE FROM schema_migrations WHERE version > 10;
         COMMIT;
       `);

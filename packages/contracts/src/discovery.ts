@@ -1452,9 +1452,6 @@ export const discoveryFeedbackReasonValues = [
 export const DiscoveryFeedbackReasonSchema = z.enum(
   discoveryFeedbackReasonValues,
 );
-export type DiscoveryFeedbackReason = z.infer<
-  typeof DiscoveryFeedbackReasonSchema
->;
 
 export const EmployerExclusionReferenceSchema = z
   .object({
@@ -2747,15 +2744,6 @@ export const DiscoveryRunRecordSchema = z.object({
 });
 export type DiscoveryRunRecord = z.infer<typeof DiscoveryRunRecordSchema>;
 
-/** Recovery checks phases before loading the canonical run and its evidence. */
-export const DiscoveryRunStateProjectionSchema = DiscoveryRunRecordSchema.pick({
-  state: true,
-  runPhase: true,
-}).extend({ isActive: z.boolean() });
-export type DiscoveryRunStateProjection = z.infer<
-  typeof DiscoveryRunStateProjectionSchema
->;
-
 /**
  * The run's phase, deriving an honest value for records written before the
  * field existed: a run still marked running is in progress, and any terminal
@@ -2806,14 +2794,6 @@ export const ACTIVITY_PAUSED_MESSAGE =
 
 export const DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE =
   "A search is already running for this plan.";
-
-/** Cancels the service-owned discovery run with this durable run identity. */
-export const JobFinderDiscoveryCancellationInputSchema = z
-  .object({ runId: NonEmptyStringSchema })
-  .strict();
-export type JobFinderDiscoveryCancellationInput = z.infer<
-  typeof JobFinderDiscoveryCancellationInputSchema
->;
 
 export const ApplicationRecordSchema = z.object({
   id: NonEmptyStringSchema,

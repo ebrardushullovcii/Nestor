@@ -48,7 +48,6 @@ import {
   TailoredAssetSchema,
   type CandidateProfile,
   type SavedJob,
-  type JobFinderDiscoveryState,
   type JobFinderRepositoryState,
   readPreparedDiscoveryFingerprints,
 } from "@nestor/contracts";
@@ -143,13 +142,12 @@ import {
   freezeSavedJobForWrite,
   sameSavedJobWrite,
 } from "./internal/saved-job-write-reader";
-import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
+import { toDiscoveryDisplayProjection } from "./internal/discovery-display-projection";
 import {
   createDiscoveryStorage,
   replaceDiscoveryStorage,
   readDiscoveryBootstrapStorage,
   readDiscoveryHomeStorage,
-  readDiscoveryRunStates,
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
 import { createWorkspaceListActivityReader } from "./internal/workspace-list-activity";
@@ -400,9 +398,6 @@ export async function createFileJobFinderRepository(
   let readSingletonProjection: ReturnType<
     typeof createSingletonProjectionReader
   >;
-  let readDiscoveryDisplayProjection: ReturnType<
-    typeof createDiscoveryDisplayProjectionReader
-  >;
   try {
     if (!hasPersistedState(database)) {
       const legacySeed = await readLegacySeed(options.filePath, normalizedSeed);
@@ -461,33 +456,6 @@ export async function createFileJobFinderRepository(
     // Every canonical and display read already composes pending approval
     // metadata. Fold its bodies in the background; close still flushes them.
     approvalFolder.schedule();
-    const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
-      database,
-      normalizedSeed.discovery,
-    );
-    let sharedDiscovery: Awaited<
-      ReturnType<typeof readDiscoveryDisplay>
-    > | null = null;
-    let sharedFrom: Awaited<ReturnType<typeof readDiscoveryDisplay>> | null =
-      null;
-    readDiscoveryDisplayProjection = async () => {
-      const display = await readDiscoveryDisplay();
-      const canonical = discoveryStorage.peek();
-      if (!canonical) return display;
-      if (
-        sharedFrom === display &&
-        sharedDiscovery?.discoveryLedger === canonical.discoveryLedger &&
-        sharedDiscovery.pendingDiscoveryJobs === canonical.pendingDiscoveryJobs
-      )
-        return sharedDiscovery;
-      sharedFrom = display;
-      sharedDiscovery = Object.freeze({
-        ...display,
-        discoveryLedger: canonical.discoveryLedger,
-        pendingDiscoveryJobs: canonical.pendingDiscoveryJobs,
-      });
-      return sharedDiscovery;
-    };
   } catch (error) {
     await stopWalCheckpoints();
     closeDatabaseQuietly(database);
@@ -980,10 +948,7 @@ export async function createFileJobFinderRepository(
           database.exec(
             "DELETE FROM resume_sources; DELETE FROM resume_source_texts",
           );
-        if (
-          !nextState.savedJobs.length &&
-          !nextState.discovery.pendingDiscoveryJobs.length
-        )
+        if (!nextState.savedJobs.length)
           database.exec(
             "DELETE FROM job_provenance; DELETE FROM job_plan_assessments; DELETE FROM job_listing_texts; DELETE FROM job_fit_assessments",
           );
@@ -1429,7 +1394,6 @@ export async function createFileJobFinderRepository(
       const startedAt = performance.now();
       try {
         const suppliedUpserts = [...upserts];
-        let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
           const currentDiscoveryState =
@@ -1601,13 +1565,9 @@ export async function createFileJobFinderRepository(
           writeSavedJobSightings(database, sightings);
           writeSavedJobPlanAssessments(database, planAssessments);
           if (updateDiscoveryState && currentDiscoveryState) {
-            committedDiscovery = discoveryStorage.update(
-              updateDiscoveryState(currentDiscoveryState),
-              currentDiscoveryState,
-            );
+            discoveryStorage.update(updateDiscoveryState(currentDiscoveryState));
           }
         });
-        if (committedDiscovery) discoveryStorage.publish(committedDiscovery);
       } catch (error) {
         return Promise.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -2422,7 +2382,11 @@ export async function createFileJobFinderRepository(
         );
       }
     },
-    readDiscoveryDisplayProjection,
+    readDiscoveryDisplayProjection() {
+      return Promise.resolve(
+        toDiscoveryDisplayProjection(discoveryStorage.read()),
+      );
+    },
     readDiscoveryBootstrapProjection() {
       return Promise.resolve(
         readDiscoveryBootstrapStorage(database, normalizedSeed.discovery),
@@ -2453,9 +2417,6 @@ export async function createFileJobFinderRepository(
         );
       }
     },
-    readDiscoveryRunStates() {
-      return Promise.resolve(readDiscoveryRunStates(database));
-    },
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },
@@ -2477,7 +2438,6 @@ export async function createFileJobFinderRepository(
         const sessions = runImmediateTransaction(database, () =>
           discoveryStorage.updateSessions(update),
         );
-        discoveryStorage.publishSessions();
         return secureDatabaseFile(options.filePath).then(() => [...sessions]);
       } catch (error) {
         return Promise.reject(
@@ -2488,10 +2448,8 @@ export async function createFileJobFinderRepository(
     commitDiscoveryStateUpdate(update) {
       try {
         const nextDiscoveryState = runImmediateTransaction(database, () => {
-          const current = discoveryStorage.read();
-          return discoveryStorage.update(update(current), current);
+          return discoveryStorage.update(update(discoveryStorage.read()));
         });
-        discoveryStorage.publish(nextDiscoveryState);
 
         return secureDatabaseFile(options.filePath).then(() => ({
           ...nextDiscoveryState,

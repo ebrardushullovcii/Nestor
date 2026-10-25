@@ -200,13 +200,8 @@ export function createSeed(): JobFinderRepositorySeed {
     },
     discovery: {
       sessions: [],
-      runState: "idle" as const,
-      activeRun: null,
-      recentRuns: [],
       activeSourceDebugRun: null,
       recentSourceDebugRuns: [],
-      discoveryLedger: [],
-      pendingDiscoveryJobs: [],
     },
     campaigns: [],
     activeCampaignId: null,

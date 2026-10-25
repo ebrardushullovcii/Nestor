@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   workModeValues,
-  isLikelyUtilityShortlistJob,
   type JobDiscoveryTarget,
 } from "@nestor/contracts";
 import {
@@ -29,39 +28,6 @@ export function createWorkspaceListFilters(db: DatabaseSync) {
   let targets: Array<Pick<JobDiscoveryTarget, "id" | "label">> = [];
   let targetKey = "";
   const labels = new Map<string, string>();
-  const pendingVisibility = new Map<string, number>();
-  const readPendingBody = db.prepare(
-    "SELECT json_extract(value,'$.description') AS description FROM discovery_pending_jobs WHERE id=?",
-  );
-  db.function(
-    "workspace_pending_visible",
-    (id, title, company, canonicalUrl, status) => {
-      if (status !== "discovered") return 1;
-      const key = String(id);
-      const cached = pendingVisibility.get(key);
-      if (cached !== undefined) return cached;
-      const facts = {
-        title: String(title),
-        company: String(company),
-        canonicalUrl: String(canonicalUrl),
-      };
-      let read = false,
-        description: string | undefined;
-      Object.defineProperty(facts, "description", {
-        get() {
-          if (!read) {
-            const value = readPendingBody.get(key)?.description;
-            description = typeof value === "string" ? value : undefined;
-            read = true;
-          }
-          return description;
-        },
-      });
-      const visible = isLikelyUtilityShortlistJob(facts) ? 0 : 1;
-      pendingVisibility.set(key, visible);
-      return visible;
-    },
-  );
   db.function("workspace_sources", (value) => {
     const text = typeof value === "string" ? value : "[]";
     let found = labels.get(text);
@@ -138,7 +104,6 @@ export function createWorkspaceListFilters(db: DatabaseSync) {
       labels.clear();
       targetKey = nextKey;
     }
-    pendingVisibility.clear();
     generation = version;
   };
 }

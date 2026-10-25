@@ -17,15 +17,11 @@ function queued<T>(jobId: string): T {
 function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: "2026-07-31T10:00:00.000Z",
-    discoveryRunState: { status: "idle" },
-    activeDiscoveryRun: null,
     discoverySessions: [],
     sourceAccessPrompts: [],
     latestResumeImportRun: null,
     discoveryJobs: [identified("job-old"), identified("job-keep")],
-    dismissedDiscoveryJobs: [identified("dismissed-old")],
     companyJobs: [identified("company-job-old")],
-    recentDiscoveryRuns: [identified("run-old")],
     reviewQueue: [queued("queue-old")],
     applyRuns: [identified("apply-old")],
     applyJobResults: [identified("result-old")],
@@ -50,8 +46,6 @@ function createDelta(
     baseRevision: 7,
     currentRevision: 8,
     generatedAt: "2026-07-31T10:01:00.000Z",
-    discoveryRunState: { status: "running" },
-    activeDiscoveryRun: null,
     discoverySessions: [],
     sourceAccessPrompts: [],
     latestResumeImportRun: null,
@@ -64,17 +58,9 @@ function createDelta(
       upserts: [identified("job-new")],
       removedIds: ["job-old"],
     },
-    dismissedDiscoveryJobs: {
-      upserts: [],
-      removedIds: ["dismissed-old"],
-    },
     companyJobs: {
       upserts: [identified("company-job-new")],
       removedIds: ["company-job-old"],
-    },
-    recentDiscoveryRuns: {
-      upserts: [identified("run-new")],
-      removedIds: ["run-old"],
     },
     reviewQueue: {
       upserts: [queued("queue-new")],
@@ -108,21 +94,16 @@ function createDelta(
   } as unknown as JobFinderWorkspaceDelta;
 }
 
-const ENTITY_SLICE_KEYS = [
-  "discoveryJobs",
-  "dismissedDiscoveryJobs",
-  "companyJobs",
-  "recentDiscoveryRuns",
-  "reviewQueue",
-  "applyRuns",
-  "applyJobResults",
-  "applicationRecords",
-  "applicationAttempts",
-  "userActionRequests",
-  "userActionEvents",
-] as const;
-
-type EntitySliceKey = (typeof ENTITY_SLICE_KEYS)[number];
+type EntitySliceKey =
+  | "discoveryJobs"
+  | "companyJobs"
+  | "reviewQueue"
+  | "applyRuns"
+  | "applyJobResults"
+  | "applicationRecords"
+  | "applicationAttempts"
+  | "userActionRequests"
+  | "userActionEvents";
 
 type EntitySliceChanges = {
   upserts: unknown[];
@@ -132,9 +113,7 @@ type EntitySliceChanges = {
 function emptyEntitySlices(): Record<EntitySliceKey, EntitySliceChanges> {
   return {
     discoveryJobs: { upserts: [], removedIds: [] },
-    dismissedDiscoveryJobs: { upserts: [], removedIds: [] },
     companyJobs: { upserts: [], removedIds: [] },
-    recentDiscoveryRuns: { upserts: [], removedIds: [] },
     reviewQueue: { upserts: [], removedIds: [] },
     applyRuns: { upserts: [], removedIds: [] },
     applyJobResults: { upserts: [], removedIds: [] },
@@ -184,51 +163,6 @@ describe("applyJobFinderWorkspaceDelta", () => {
     ).toEqual({ status: "stale" });
   });
 
-  it("applies entity slices and moves selection to valid current entities", () => {
-    const result = applyJobFinderWorkspaceDelta({
-      revision: 7,
-      workspace: createWorkspace(),
-      delta: createDelta(),
-    });
-
-    expect(result.status).toBe("applied");
-    if (result.status !== "applied") {
-      throw new Error("Expected the delta to apply.");
-    }
-
-    expect(result.revision).toBe(8);
-    expect(result.workspace.generatedAt).toBe("2026-07-31T10:01:00.000Z");
-    expect(result.workspace.discoveryJobs.map(({ id }) => id)).toEqual([
-      "job-keep",
-      "job-new",
-    ]);
-    expect(result.workspace.companyJobs.map(({ id }) => id)).toEqual([
-      "company-job-new",
-    ]);
-    expect(result.workspace.recentDiscoveryRuns.map(({ id }) => id)).toEqual([
-      "run-new",
-    ]);
-    expect(result.workspace.reviewQueue.map(({ jobId }) => jobId)).toEqual([
-      "queue-new",
-    ]);
-    expect(result.workspace.applyRuns.map(({ id }) => id)).toEqual([
-      "apply-new",
-    ]);
-    expect(result.workspace.applicationRecords.map(({ id }) => id)).toEqual([
-      "record-new",
-    ]);
-    expect(result.workspace.userActionRequests.map(({ id }) => id)).toEqual([
-      "request-new",
-    ]);
-    expect(result.workspace.userActionEvents.map(({ id }) => id)).toEqual([
-      "event-new",
-    ]);
-    expect(result.workspace.selectedDiscoveryJobId).toBe("job-new");
-    expect(result.workspace.selectedReviewJobId).toBe("queue-new");
-    expect(result.workspace.selectedApplyRunId).toBe("apply-new");
-    expect(result.workspace.selectedApplicationRecordId).toBe("record-new");
-  });
-
   it("rejects a stale delta without replacing the current workspace", () => {
     const workspace = createWorkspace();
 
@@ -243,55 +177,6 @@ describe("applyJobFinderWorkspaceDelta", () => {
       "job-old",
       "job-keep",
     ]);
-  });
-
-  it("appends a running search's new activity to what this window holds", () => {
-    const run = (activity: readonly string[]) =>
-      ({
-        id: "run-1",
-        state: "running",
-        activity: activity.map((id) => ({ id })),
-      }) as unknown as JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
-    const workspace = {
-      ...createWorkspace(),
-      activeDiscoveryRun: run(["a", "b"]),
-    };
-    const delta = {
-      ...createDelta(),
-      activeDiscoveryRun: run(["c"]),
-      activeDiscoveryRunActivityFrom: 2,
-    };
-
-    const result = applyJobFinderWorkspaceDelta({
-      revision: 7,
-      workspace,
-      delta,
-    });
-    expect(result.status).toBe("applied");
-    if (result.status === "applied") {
-      expect(
-        result.workspace.activeDiscoveryRun?.activity.map((event) => event.id),
-      ).toEqual(["a", "b", "c"]);
-    }
-
-    // Without the earlier events the window asks for the whole workspace.
-    expect(
-      applyJobFinderWorkspaceDelta({
-        revision: 7,
-        workspace: { ...workspace, activeDiscoveryRun: run(["a"]) },
-        delta,
-      }).status,
-    ).toBe("gap");
-    expect(
-      applyJobFinderWorkspaceDelta({
-        revision: 7,
-        workspace: {
-          ...workspace,
-          activeDiscoveryRun: { ...run(["a", "b"])!, id: "another-run" },
-        },
-        delta: { ...delta, currentRevision: 10 },
-      }).status,
-    ).toBe("gap");
   });
 
   it("keeps fields the delta leaves out and applies replaced fields", () => {
@@ -331,24 +216,6 @@ describe("applyJobFinderWorkspaceDelta", () => {
     expect(result).toEqual({ status: "gap" });
   });
 
-  it("preserves every entity slice reference when the delta changes no slices", () => {
-    const workspace = createWorkspace();
-
-    const result = expectApplied(
-      applyJobFinderWorkspaceDelta({
-        revision: 7,
-        workspace,
-        delta: createSliceDelta(),
-      }),
-    );
-
-    expect(result.revision).toBe(8);
-    expect(result.workspace).not.toBe(workspace);
-    for (const key of ENTITY_SLICE_KEYS) {
-      expect(result.workspace[key]).toBe(workspace[key]);
-    }
-  });
-
   it("keeps the previous slice reference when removals match nothing", () => {
     const workspace = createWorkspace();
 
@@ -365,34 +232,6 @@ describe("applyJobFinderWorkspaceDelta", () => {
 
     expect(result.workspace.discoveryJobs).toBe(workspace.discoveryJobs);
     expect(result.workspace.reviewQueue).toBe(workspace.reviewQueue);
-  });
-
-  it("changes only the slice receiving upserts", () => {
-    const workspace = createWorkspace();
-    const untouchedKeys = ENTITY_SLICE_KEYS.filter(
-      (key) => key !== "discoveryJobs",
-    );
-
-    const result = expectApplied(
-      applyJobFinderWorkspaceDelta({
-        revision: 7,
-        workspace,
-        delta: createSliceDelta({
-          discoveryJobs: { upserts: [identified("job-new")], removedIds: [] },
-        }),
-      }),
-    );
-
-    expect(result.workspace).not.toBe(workspace);
-    expect(result.workspace.discoveryJobs).not.toBe(workspace.discoveryJobs);
-    expect(result.workspace.discoveryJobs.map(({ id }) => id)).toEqual([
-      "job-old",
-      "job-keep",
-      "job-new",
-    ]);
-    for (const key of untouchedKeys) {
-      expect(result.workspace[key]).toBe(workspace[key]);
-    }
   });
 
   it("replaces matching entities in place and appends new ones in upsert order", () => {

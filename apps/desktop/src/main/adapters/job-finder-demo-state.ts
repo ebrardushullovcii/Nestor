@@ -551,12 +551,8 @@ export function createResumeWorkspaceDemoState(): JobFinderRepositoryState {
     },
     discovery: {
       sessions: [],
-      runState: "idle",
-      activeRun: null,
-      recentRuns: [],
       activeSourceDebugRun: null,
       recentSourceDebugRuns: [],
-      pendingDiscoveryJobs: [],
     },
   });
 }

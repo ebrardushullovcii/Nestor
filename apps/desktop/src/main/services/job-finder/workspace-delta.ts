@@ -14,9 +14,6 @@ type EntitySlice<T> = {
 const DELTA_OR_IGNORED_KEYS = new Set<keyof JobFinderRendererWorkspaceSnapshot>(
   [
     "generatedAt",
-    "discoveryRunState",
-    "fitJudgmentProgress",
-    "activeDiscoveryRun",
     "discoverySessions",
     "sourceAccessPrompts",
     "latestResumeImportRun",
@@ -27,9 +24,7 @@ const DELTA_OR_IGNORED_KEYS = new Set<keyof JobFinderRendererWorkspaceSnapshot>(
     "activityControl",
     "intelligence",
     "discoveryJobs",
-    "dismissedDiscoveryJobs",
     "companyJobs",
-    "recentDiscoveryRuns",
     "reviewQueue",
     "applyRuns",
     "applyJobResults",
@@ -218,35 +213,6 @@ function ifChanged<K extends keyof JobFinderRendererWorkspaceSnapshot>(
     : ({ [key]: current[key] } as Pick<JobFinderRendererWorkspaceSnapshot, K>);
 }
 
-/**
- * A running search's activity only grows. When the receiver holds the same
- * run, only the events after the ones it has are sent; a long search would
- * otherwise resend its whole history on every refresh.
- */
-function activeRunForDelta(
-  previous: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"],
-  current: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"],
-): {
-  run: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
-  activityFrom: number | null;
-} {
-  if (!previous || !current || previous.id !== current.id) {
-    return { run: current, activityFrom: null };
-  }
-  const from = previous.activity.length;
-  if (
-    current.activity.length < from ||
-    (from > 0 &&
-      current.activity[from - 1]?.id !== previous.activity[from - 1]?.id)
-  ) {
-    return { run: current, activityFrom: null };
-  }
-  return {
-    run: { ...current, activity: current.activity.slice(from) },
-    activityFrom: from,
-  };
-}
-
 export function buildJobFinderWorkspaceDelta(input: {
   baseRevision: WorkspaceRevision;
   currentRevision: WorkspaceRevision;
@@ -259,19 +225,11 @@ export function buildJobFinderWorkspaceDelta(input: {
     ? sameRowAcrossProcesses
     : sameValue;
   const replaced = changedUntrackedValues(input.previous, input.current);
-  const activeRun = activeRunForDelta(
-    input.previous.activeDiscoveryRun,
-    input.current.activeDiscoveryRun,
-  );
 
   return {
     baseRevision: input.baseRevision,
     currentRevision: input.currentRevision,
     generatedAt: input.current.generatedAt,
-    discoveryRunState: input.current.discoveryRunState,
-    fitJudgmentProgress: input.current.fitJudgmentProgress ?? null,
-    activeDiscoveryRun: activeRun.run,
-    activeDiscoveryRunActivityFrom: activeRun.activityFrom,
     ...ifChanged(input.previous, input.current, "discoverySessions"),
     ...ifChanged(input.previous, input.current, "sourceAccessPrompts"),
     ...ifChanged(input.previous, input.current, "latestResumeImportRun"),
@@ -294,22 +252,11 @@ export function buildJobFinderWorkspaceDelta(input: {
       (value) => value.id,
       sameJob,
     ),
-    dismissedDiscoveryJobs: buildEntitySlice(
-      input.previous.dismissedDiscoveryJobs,
-      input.current.dismissedDiscoveryJobs,
-      (value) => value.id,
-      sameJob,
-    ),
     companyJobs: buildEntitySlice(
       input.previous.companyJobs,
       input.current.companyJobs,
       (value) => value.id,
       sameJob,
-    ),
-    recentDiscoveryRuns: buildEntitySlice(
-      input.previous.recentDiscoveryRuns,
-      input.current.recentDiscoveryRuns,
-      (value) => value.id,
     ),
     reviewQueue: buildEntitySlice(
       input.previous.reviewQueue,

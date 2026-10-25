@@ -2,8 +2,8 @@ import { ensureSavedJobFingerprintStorage } from "./saved-job-fingerprints";
 import type { DatabaseSync } from "node:sqlite";
 import { registerWorkspaceStartupListFacts } from "./workspace-startup-list-facts";
 
-const VERSION = "12";
-const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
+const VERSION = "13";
+const jobTables = ["saved_jobs"] as const;
 const jobFields =
   "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group provider_updated_at discovery_method apply_path recommendation_rationale first_gap role_state seniority rescored source_provenance last_verified_active_at listing_closed_evidence identity_value tie_requirements first_reason last_seen_at".split(
     " ",
@@ -279,7 +279,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
     database.exec(
       "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
     );
-    if (version !== VERSION || indexedTriggers !== 6) {
+    if (version !== VERSION || indexedTriggers !== jobTables.length * 3) {
       // Rebuilds replace identical facts in bulk. Per-row activity/sort bumps
       // would rewrite the same metadata thousands of times inside this commit.
       for (const { name } of database
@@ -346,8 +346,6 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       DROP INDEX IF EXISTS workspace_job_company_idx;
       CREATE INDEX IF NOT EXISTS workspace_job_identity_idx ON workspace_job_index(id, plan_id);
       CREATE INDEX IF NOT EXISTS workspace_job_collation_idx ON workspace_job_index(plan_id,title,company,id);
-      CREATE INDEX IF NOT EXISTS workspace_ledger_activity_idx ON discovery_ledger(
-        json_extract(value,'$.latestStatus'));
     `);
     if (
       !database
@@ -477,24 +475,6 @@ function ensureActivityRevision(database: DatabaseSync): void {
     BEGIN ${bump} END`);
   for (const event of ["insert", "update", "delete"]) {
     const ref = event === "delete" ? "OLD" : "NEW";
-    if (
-      database
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'",
-        )
-        .get()
-    )
-      database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_ledger_observations_${event}
-      AFTER ${event.toUpperCase()} ON discovery_ledger_observations
-      WHEN EXISTS (SELECT 1 FROM discovery_ledger WHERE id=${ref}.id
-        AND json_extract(value,'$.latestStatus')='inactive') BEGIN ${bump} END`);
-    const inactive =
-      event === "update"
-        ? "(json_extract(OLD.value,'$.latestStatus')='inactive' OR json_extract(NEW.value,'$.latestStatus')='inactive') AND OLD.value IS NOT NEW.value"
-        : `json_extract(${ref}.value,'$.latestStatus')='inactive'`;
-    database.exec(
-      `CREATE TRIGGER IF NOT EXISTS workspace_activity_ledger_${event} AFTER ${event.toUpperCase()} ON discovery_ledger WHEN ${inactive} BEGIN ${bump} END`,
-    );
     database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_signals_${event} AFTER ${event.toUpperCase()} ON singleton_state
       WHEN ${ref}.key='intelligence_state' ${event === "update" ? "AND json_extract(OLD.value,'$.safeguards.listingSignals') IS NOT json_extract(NEW.value,'$.safeguards.listingSignals')" : ""}
       BEGIN ${bump} END`);

@@ -2004,19 +2004,7 @@ describe("createFileJobFinderRepository", () => {
             survivorResult.state,
             JSON.stringify(survivorResult),
           );
-        // Replay the old migration chain from its old schema, not a current
-        // observation table whose migration record has been removed.
-        expect(
-          database
-            .prepare("SELECT COUNT(*) AS count FROM discovery_ledger")
-            .get()?.count,
-        ).toBe(0);
-        database.exec(`
-          DROP TRIGGER discovery_ledger_split_insert;
-          DROP TRIGGER discovery_ledger_split_update;
-          DROP TABLE discovery_ledger_observations;
-          DELETE FROM schema_migrations WHERE version >= 4;
-        `);
+        database.exec("DELETE FROM schema_migrations WHERE version >= 4");
       } finally {
         database.close();
       }

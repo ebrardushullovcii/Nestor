@@ -8,8 +8,6 @@ const generatedAt = "2026-08-09T10:00:00.000Z";
 describe("collectJobFinderPerformanceSnapshot", () => {
   it("measures the existing workspace read and leaves unobserved runtime areas unavailable", async () => {
     const workspace = {
-      activeDiscoveryRun: null,
-      recentDiscoveryRuns: [],
       latestResumeImportRun: null,
       applicationAttempts: [],
       activeSourceDebugRun: null,
@@ -74,8 +72,6 @@ it("includes native waiting-form measurements in the timing snapshot", async () 
     ],
   };
   const workspace = {
-    activeDiscoveryRun: null,
-    recentDiscoveryRuns: [],
     latestResumeImportRun: null,
     applicationAttempts: [],
     activeSourceDebugRun: null,

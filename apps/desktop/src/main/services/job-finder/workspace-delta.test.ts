@@ -16,15 +16,11 @@ function createWorkspace(input: {
   return {
     generatedAt: input.generatedAt,
     profile: { summary: input.profileSummary ?? "Original summary" },
-    discoveryRunState: "idle",
-    activeDiscoveryRun: null,
     discoverySessions: [],
     sourceAccessPrompts: [],
     latestResumeImportRun: null,
     discoveryJobs: input.discoveryJobs ?? input.jobIds.map((id) => ({ id })),
-    dismissedDiscoveryJobs: [],
     companyJobs: input.companyJobs ?? [],
-    recentDiscoveryRuns: [],
     reviewQueue: [],
     applyRuns: [],
     applyJobResults: [],
@@ -388,48 +384,6 @@ describe("Job Finder workspace delta tracker", () => {
       kind: "delta",
       delta: {
         discoveryJobs: { upserts: [currentJob], removedIds: [] },
-      },
-    });
-  });
-
-  it("sends only the running search's new activity", () => {
-    const tracker = createJobFinderWorkspaceDeltaTracker();
-    const withRun = (runId: string, eventIds: readonly string[]) =>
-      ({
-        ...createWorkspace({
-          generatedAt: "2026-08-09T10:00:00.000Z",
-          jobIds: [],
-          selectedJobId: null,
-        }),
-        activeDiscoveryRun: {
-          id: runId,
-          activity: eventIds.map((id) => ({ id })),
-        },
-      }) as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    tracker.synchronize(null, withRun("run-1", ["a", "b"]));
-    expect(
-      tracker.synchronize(1, withRun("run-1", ["a", "b", "c"])),
-    ).toMatchObject({
-      kind: "delta",
-      delta: {
-        activeDiscoveryRunActivityFrom: 2,
-        activeDiscoveryRun: { id: "run-1", activity: [{ id: "c" }] },
-      },
-    });
-    // Another run, or a history that does not continue the held one, goes whole.
-    expect(tracker.synchronize(2, withRun("run-2", ["x"]))).toMatchObject({
-      kind: "delta",
-      delta: {
-        activeDiscoveryRunActivityFrom: null,
-        activeDiscoveryRun: { id: "run-2", activity: [{ id: "x" }] },
-      },
-    });
-    expect(tracker.synchronize(3, withRun("run-2", ["y", "z"]))).toMatchObject({
-      kind: "delta",
-      delta: {
-        activeDiscoveryRunActivityFrom: null,
-        activeDiscoveryRun: { activity: [{ id: "y" }, { id: "z" }] },
       },
     });
   });
