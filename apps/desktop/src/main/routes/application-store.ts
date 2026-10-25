@@ -7,6 +7,7 @@ import {
   ApplicationStoreDemoResultSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
 } from "@nestor/contracts";
+import { seedTrackerDemo } from "@nestor/db/job-store";
 import type { IpcMain } from "electron";
 
 import { getApplicationStore } from "../services/job-finder/application-store";
@@ -42,7 +43,7 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
     (_event, input: unknown) => {
       if (!isDesktopTestApiEnabled())
         throw new Error("Desktop test API is disabled.");
-      const { sourceUrl } = ApplicationStoreDemoInputSchema.parse(input);
+      const { sourceUrl, trackApplications } = ApplicationStoreDemoInputSchema.parse(input);
       const origin = new URL(sourceUrl).origin;
       if (
         !["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname)
@@ -78,6 +79,7 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
           throw new Error("Load the applications demo in an empty instance.");
         const approvedIds = added.slice(0, 2);
         store.setStage(approvedIds, "resume");
+        if (trackApplications) seedTrackerDemo(store, approvedIds);
         return ApplicationStoreDemoResultSchema.parse({
           approvedIds,
           unapprovedId: added[2],

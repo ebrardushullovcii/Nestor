@@ -40,9 +40,9 @@ describe("assistant context capture", () => {
     expect(
       focusFromLocation(
         "/job-finder/applications",
-        "?applicationRecordId=app_1",
+        "?jobId=7",
       ),
-    ).toMatchObject({ kind: "application", id: "app_1" });
+    ).toMatchObject({ kind: "application", id: "7" });
     expect(
       focusFromLocation("/job-finder/review-queue/job_2/resume", ""),
     ).toMatchObject({

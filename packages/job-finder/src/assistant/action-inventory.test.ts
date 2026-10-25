@@ -1,3 +1,4 @@
+import { TRACKER_COMMANDS } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { ACTION_INVENTORY } from "./action-inventory";
@@ -25,7 +26,7 @@ describe("assistant action inventory", () => {
       expect(bytes(catalog), screen).toBeLessThan(full / 2);
       expect(catalog.some((tool) => tool.name === "load_tools")).toBe(true);
       // Background handoffs and off-screen questions use the same small core.
-      expect(catalog.map(tool => tool.name)).toEqual(expect.arrayContaining(["ask_person", "list_needs_you", "get_application", "answer_application_question", "read_result"]));
+      expect(catalog.map(tool => tool.name)).toEqual(expect.arrayContaining(["ask_person", "list_needs_you", "get_application_run", "answer_application_question", "read_result"]));
     }
   });
 
@@ -47,7 +48,7 @@ describe("assistant action inventory", () => {
     ).toContain("finish_profile_setup");
   });
   it("names only tools that exist", () => {
-    const known = new Set(listAllAssistantToolNames());
+    const known = new Set([...listAllAssistantToolNames(), ...Object.keys(TRACKER_COMMANDS)]);
     const missing = ACTION_INVENTORY.flatMap((entry) =>
       entry.coverage.kind === "tools"
         ? entry.coverage.tools

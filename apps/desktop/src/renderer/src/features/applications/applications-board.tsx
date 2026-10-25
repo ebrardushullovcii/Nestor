@@ -110,7 +110,8 @@ function BoardColumn(props: {
       onDrop={(event) => {
         setOver(false);
         const id = Number(event.dataTransfer.getData(DRAG_TYPE));
-        if (target && Number.isInteger(id)) void setStatus([id], target);
+        if (target && Number.isInteger(id))
+          void setStatus({ ids: [id] }, target);
       }}
     >
       <header className="flex items-baseline justify-between px-3 py-2">

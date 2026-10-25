@@ -49,11 +49,8 @@ export function focusFromLocation(
     return { kind: "job", id: decodeURIComponent(resume[1]), label: null };
   }
   const params = new URLSearchParams(search);
-  const applicationRecordId = params.get("applicationRecordId");
-  if (applicationRecordId)
-    return { kind: "application", id: applicationRecordId, label: null };
   const jobId = params.get(pathname === "/job-finder/discovery" ? "job" : "jobId");
-  if (jobId) return { kind: "job", id: jobId, label: null };
+  if (jobId) return { kind: pathname === "/job-finder/applications" ? "application" : "job", id: jobId, label: null };
   return null;
 }
 
@@ -120,7 +117,7 @@ export function composeContextReference(input: {
     screen: input.browser?.visible
       ? "browser"
       : screenForPathname(input.pathname),
-    route: `${input.pathname}${input.search}`.slice(0, 400),
+    route: `${input.pathname}${input.search}`.slice(0, 4000),
     sectionLabel: null,
     focus: focusFromLocation(input.pathname, input.search),
     list: null,

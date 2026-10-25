@@ -11,7 +11,7 @@ import {
   type AssistantHostPorts,
   type JobFinderWorkspaceService,
 } from "@nestor/job-finder";
-import { app, BrowserWindow } from "electron";
+import { BrowserWindow } from "electron";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -37,7 +37,6 @@ import {
 } from "../job-finder/workspace-updates";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
-import { writeExportFile } from "./tracker-export-file";
 import { assistantAppCommands } from "./app-commands";
 import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
 
@@ -495,24 +494,6 @@ export function createAssistantHostPorts(input: {
       } finally {
         publishJobFinderWorkspaceUpdate();
       }
-    },
-    async exportTracker(format) {
-      const service = await getJobFinderWorkspaceService();
-      const result = await service.exportApplicationCrm({
-        format,
-        applicationRecordIds: [],
-      });
-      // From chat no save dialog can be answered, so the export goes to
-      // Downloads (a folder inside the app's data in test runs, so tests
-      // never write into the person's own folders) and the path is reported.
-      const directory = isDesktopTestApiEnabled()
-        ? path.join(getJobFinderUserDataDirectory(), "exports")
-        : app.getPath("downloads");
-      return writeExportFile({
-        directory,
-        fileName: result.fileName,
-        content: result.content,
-      });
     },
     publishWorkspaceUpdate: () => publishJobFinderWorkspaceUpdate(),
   };

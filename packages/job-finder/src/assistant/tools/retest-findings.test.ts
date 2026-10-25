@@ -12,8 +12,7 @@ import {
 import type { AssistantTurnSession } from "../tool-kit";
 import {
   applyToJobsTool,
-  exportTrackerTool,
-  getApplicationTool,
+  getApplicationRunTool,
 } from "./application-tools";
 import { listDocumentsTool } from "./profile-tools";
 import { searchForJobsTool } from "./jobs-tools";
@@ -121,29 +120,6 @@ describe("a template change on an approved resume (R3)", () => {
   });
 });
 
-describe("exporting the tracker from chat (R6)", () => {
-  it("reports where the file was saved", async () => {
-    const outcome = await exportTrackerTool.execute(
-      { format: "csv" },
-      {
-        service: {} as never,
-        session,
-        ports: {
-          exportTracker: () =>
-            Promise.resolve("/Users/test/Downloads/application-tracker.csv"),
-        } as unknown as AssistantHostPorts,
-      },
-    );
-    expect(outcome.summary).toContain(
-      "Exported the tracker to /Users/test/Downloads/application-tracker.csv.",
-    );
-    expect(outcome.summary).toContain("exact path");
-    expect(exportTrackerTool.description).not.toMatch(
-      /chooses|dialog|Downloads/u,
-    );
-  });
-});
-
 describe("answers the person gives through Needs you (R7)", () => {
   it("keeps a lasting answer for later applications when asked to", async () => {
     const performUserAction = vi.fn().mockResolvedValue(undefined);
@@ -213,7 +189,7 @@ describe("answers the person gives through Needs you (R7)", () => {
         },
       ],
     } as unknown as JobFinderWorkspaceSnapshot;
-    const outcome = await getApplicationTool.execute(
+    const outcome = await getApplicationRunTool.execute(
       { jobId: "job_1" },
       {
         service: {

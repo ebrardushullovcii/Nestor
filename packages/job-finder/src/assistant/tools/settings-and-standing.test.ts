@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
-import { getApplicationTool, sendApplicationsTool } from "./application-tools";
+import { getApplicationRunTool, sendApplicationsTool } from "./application-tools";
 import { describeApplicationStanding } from "./format";
 import { dismissJobsTool } from "./jobs-tools";
 import {
@@ -95,7 +95,7 @@ describe("settings and application standing the assistant reports", () => {
       ],
       applicationRecords: [],
     };
-    const result = await getApplicationTool.execute(
+    const result = await getApplicationRunTool.execute(
       { jobId: "job_1" },
       {
         service: {

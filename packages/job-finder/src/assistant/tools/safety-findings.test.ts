@@ -24,8 +24,6 @@ import type { AssistantTurnSession } from "../tool-kit";
 import {
   continueApplicationTool,
   recordInstructionTool,
-  listApplicationsTool,
-  getApplicationTool,
 } from "./application-tools";
 import {
   browserOpenTool,
@@ -48,7 +46,6 @@ import {
   listNeedsYouTool,
   openInAppTool,
 } from "./workspace-tools";
-import { interviewForModel } from "./format";
 
 function world() {
   const { workspaceService: service } = createWorkspaceServiceHarness();
@@ -609,20 +606,9 @@ describe("R3 assistant safety findings", () => {
         ctx,
       ),
     ).rejects.toThrow("Choose one destination");
-    await openInAppTool.execute(
-      { screen: "tracker", applicationRecordId: "record" },
-      ctx,
-    );
-    expect(ctx.openInApp).toHaveBeenLastCalledWith(
-      "/job-finder/applications?view=tracker&applicationRecordId=record",
-    );
-    await openInAppTool.execute(
-      { screen: "applications", applicationRecordId: "record" },
-      ctx,
-    );
-    expect(ctx.openInApp).toHaveBeenLastCalledWith(
-      "/job-finder/applications?applicationRecordId=record",
-    );
+    await openInAppTool.execute({ screen: "applications" }, ctx);
+    expect(ctx.openInApp).toHaveBeenLastCalledWith("/job-finder/applications");
+
   });
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {
@@ -667,97 +653,6 @@ describe("R3 assistant safety findings", () => {
     );
   });
 
-  it("R3-045 finds only unanswered applications older than 21 days from their sent dates", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const base = application();
-    snapshot.applicationRecords = [
-      {
-        ...base,
-        id: "old",
-        crm: {
-          ...base.crm!,
-          stage: "applied",
-          appliedAt: "2026-09-01T12:00:00.000Z",
-          lastEmployerActivityAt: null,
-        },
-      },
-      {
-        ...base,
-        id: "recent",
-        crm: {
-          ...base.crm!,
-          stage: "applied",
-          appliedAt: "2026-10-01T12:00:00.000Z",
-          lastEmployerActivityAt: null,
-        },
-      },
-      {
-        ...base,
-        id: "responded",
-        crm: {
-          ...base.crm!,
-          stage: "interview",
-          appliedAt: "2026-09-01T12:00:00.000Z",
-          lastEmployerActivityAt: "2026-09-20T12:00:00.000Z",
-        },
-      },
-      {
-        ...base,
-        id: "unknown",
-        crm: { ...base.crm!, stage: "applied", appliedAt: null },
-      },
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const result = await listApplicationsTool.execute(
-      listApplicationsTool.input.parse({
-        olderThanDays: 21,
-        unansweredOnly: true,
-        show: false,
-      }),
-      ctx,
-    );
-    expect(result.data).toMatchObject({
-      applications: [{ id: "old", appliedAt: "2026-09-01T12:00:00.000Z" }],
-      missingAppliedDateCount: 1,
-    });
-  });
-
-  it("R3-046 returns 9am EDT for 13:00Z in New York, including completed interviews", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const record = application();
-    snapshot.applicationRecords = [record];
-    record.crm!.interviews = [
-      {
-        id: "debrief",
-        title: "Recruiter debrief",
-        startsAt: "2026-10-03T13:00:00.000Z",
-        timeZone: "America/New_York",
-        status: "completed",
-      } as NonNullable<typeof record.crm>["interviews"][number],
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const result = await getApplicationTool.execute(
-      { jobId: record.jobId },
-      ctx,
-    );
-    expect(result.data).toMatchObject({
-      tracking: {
-        interviews: [
-          expect.objectContaining({
-            localTime: "Oct 3, 2026, 9:00 AM EDT",
-            startsAt: "2026-10-03T13:00:00.000Z",
-          }),
-        ],
-      },
-    });
-    expect(
-      interviewForModel({ ...record.crm!.interviews[0]!, timeZone: "invalid" })
-        .localTime,
-    ).toContain("UTC");
-  });
-
   it("R3-048 lists unapproved resumes and final sends even without a browser question", async () => {
     const ctx = world();
     const snapshot = await ctx.service.getWorkspaceSnapshot();
@@ -800,7 +695,7 @@ describe("R3 assistant safety findings", () => {
       "Settings > Delete everything > Reset everything",
     );
     expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-      "Applications > tracker offers CSV/JSON export",
+      "Applications offers CSV export for its current filter",
     );
     expect(ASSISTANT_SYSTEM_PROMPT).toContain(
       "AI features send relevant resume/profile text",

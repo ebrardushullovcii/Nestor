@@ -309,3 +309,5 @@ export function openJobStore(filePath: string): JobStore {
   };
 }
 export type { JobSearches } from "./searches";
+
+export { seedTrackerDemo } from "./test-seeds";

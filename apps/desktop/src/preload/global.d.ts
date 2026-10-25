@@ -684,6 +684,7 @@ declare global {
         test?: {
           loadApplicationsStoreDemo: (input: {
             sourceUrl: string;
+            trackApplications?: boolean;
           }) => Promise<ApplicationStoreDemoResult>;
           getSystemThemeOverride: () => "dark" | "light" | null;
           setSystemThemeOverride: (

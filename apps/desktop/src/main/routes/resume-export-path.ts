@@ -46,7 +46,7 @@ export function buildResumeExportDefaultPath(
  * data folder so the export still writes a real file.
  */
 export async function chooseSavePath(
-  sender: WebContents,
+  sender: WebContents | null,
   defaultPath: string,
   kind: { name: string; extension: string; title: string },
 ): Promise<string | null> {
@@ -61,7 +61,7 @@ export async function chooseSavePath(
     properties: ["createDirectory", "showOverwriteConfirmation"],
     title: kind.title,
   };
-  const browserWindow = BrowserWindow.fromWebContents(sender);
+  const browserWindow = sender ? BrowserWindow.fromWebContents(sender) : null;
   const result = browserWindow
     ? await dialog.showSaveDialog(browserWindow, options)
     : await dialog.showSaveDialog(options);

@@ -2,11 +2,8 @@ import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import {
   isApplicationTrackedAsSentByPerson,
   ApplicationAnswerValueSchema,
-  ApplicationCrmMutationSchema,
-  ApplicationCrmStageSchema,
   AssistantGrantActionSchema,
   NonEmptyStringSchema,
-  applicationCrmStageValues,
   type ApplicationAutomationMode,
   type AssistantInstructionGrant,
   type JobFinderWorkspaceSnapshot,
@@ -19,7 +16,6 @@ import { AssistantToolError, defineTool, json } from "../tool-kit";
 import {
   applicationRowsPart,
   compactApplication,
-  interviewForModel,
   createJobCaveats,
   findJob,
   pausedByPersonMessage,
@@ -451,111 +447,6 @@ export const sendApplicationsTool = defineTool({
   },
 });
 
-export const listApplicationsTool = defineTool({
-  name: "list_applications",
-  group: "applications",
-  description:
-    "Lists applications with their state, next step, blocker and tracking stage, filtered by words, status or stage.",
-  parameters: json.object({
-    text: json.string(),
-    status: json.string(
-      "Such as ready_for_review, submitted, interview, rejected.",
-    ),
-    stage: json.enumOf(applicationCrmStageValues),
-    needsAttention: json.boolean("Only ones blocked or waiting on the person."),
-    olderThanDays: json.number(
-      "Sent more than this many days ago, using crm.appliedAt; unknown sent dates do not match.",
-    ),
-    unansweredOnly: json.boolean(
-      "Applied or no_response with no recorded employer response since sending.",
-    ),
-    limit: json.number(),
-    show: json.boolean(
-      "False when you are only checking facts for your answer; the rows then are not shown as cards.",
-    ),
-  }),
-  input: z.object({
-    text: z.string().trim().max(200).optional(),
-    status: z.string().trim().max(60).optional(),
-    stage: ApplicationCrmStageSchema.optional(),
-    needsAttention: z.boolean().default(false),
-    olderThanDays: z.number().int().min(0).max(3650).optional(),
-    unansweredOnly: z.boolean().optional(),
-    limit: z.number().int().min(1).max(25).default(10),
-    show: z.boolean().default(true),
-  }),
-  label: () => "Reading your applications",
-  effect: "read",
-  async execute(input, { service, session }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const now = Date.parse(session.now());
-    const words = (input.text ?? "")
-      .toLowerCase()
-      .split(/\s+/u)
-      .filter(Boolean);
-    const records = snapshot.applicationRecords
-      .filter((record) => !input.status || record.status === input.status)
-      .filter((record) => !input.stage || record.crm?.stage === input.stage)
-      .filter(
-        (record) =>
-          input.olderThanDays === undefined ||
-          (record.crm?.appliedAt &&
-            now - Date.parse(record.crm.appliedAt) >
-              input.olderThanDays * 86_400_000),
-      )
-      .filter(
-        (record) =>
-          !input.unansweredOnly ||
-          (record.crm &&
-            ["applied", "no_response"].includes(record.crm.stage) &&
-            (!record.crm.lastEmployerActivityAt ||
-              (record.crm.appliedAt &&
-                Date.parse(record.crm.lastEmployerActivityAt) <=
-                  Date.parse(record.crm.appliedAt)))),
-      )
-      .filter(
-        (record) =>
-          !input.needsAttention ||
-          record.latestBlocker !== null ||
-          record.lastAttemptState === "paused",
-      )
-      .filter((record) => {
-        const haystack = `${record.title} ${record.company}`.toLowerCase();
-        return words.every((word) => haystack.includes(word));
-      })
-      .sort((left, right) =>
-        right.lastUpdatedAt.localeCompare(left.lastUpdatedAt),
-      );
-    const resultSet = await session.createResultSet({
-      kind: "applications",
-      label: "Applications",
-      itemIds: records.map((record) => record.id),
-      source: "tool_query",
-    });
-    const shown = records.slice(0, input.limit);
-    return {
-      summary: `${plural(records.length, "application")} (result set ${resultSet.id}).`,
-      data: {
-        resultSetId: resultSet.id,
-        applications: shown.map(compactApplication),
-        missingAppliedDateCount: snapshot.applicationRecords.filter(
-          (record) => !record.crm?.appliedAt,
-        ).length,
-      },
-      parts:
-        input.show && shown.length
-          ? [
-              applicationRowsPart({
-                records: shown,
-                title: null,
-                resultSetId: resultSet.id,
-              }),
-            ]
-          : [],
-    };
-  },
-});
-
 /** Needs you steps that are still open for an application. */
 const OPEN_STEP_STATES = new Set([
   "pending",
@@ -619,11 +510,11 @@ async function latestRunFor(service: JobFinderWorkspaceService, jobId: string) {
   return { snapshot, result: result ?? null, record };
 }
 
-export const getApplicationTool = defineTool({
-  name: "get_application",
+export const getApplicationRunTool = defineTool({
+  name: "get_application_run",
   group: "applications",
   description:
-    "Reads one application by job id: its state, the questions the form asked and the answers given, what blocks it, and tracking.",
+    "Reads one application by job id: its state, the questions the form asked and the answers given, what blocks it, and its attached files. Use get_application for Applications tracking.",
   parameters: json.object({ jobId: json.string() }, ["jobId"]),
   input: z.object({ jobId: Id }),
   label: () => "Reading the application",
@@ -723,17 +614,7 @@ export const getApplicationTool = defineTool({
             .map((artifact) => ({ fileName: artifact.label, field: null })),
         ].slice(0, 20),
         blocker: record?.latestBlocker ?? null,
-        tracking: record?.crm
-          ? {
-              stage: record.crm.stage,
-              revision: record.crm.revision,
-              reminders: record.crm.reminders.slice(0, 5),
-              appliedAt: record.crm.appliedAt,
-              lastEmployerActivityAt: record.crm.lastEmployerActivityAt,
-              interviews: record.crm.interviews.map(interviewForModel),
-              notes: record.crm.notes.slice(-5),
-            }
-          : null,
+
       },
     };
   },
@@ -896,154 +777,14 @@ export const cancelApplicationsTool = defineTool({
   },
 });
 
-export const updateTrackingTool = defineTool({
-  name: "update_tracking",
-  group: "tracking",
-  description:
-    "Changes one application's tracking: set_stage, add_note, upsert_reminder (with a dueAt date), set_tags, upsert_interview, set_compensation, set_archived (archived:true to hide finished records, false to restore) and their removals. The revision comes from get_application. A tracking stage never counts as sending anything.",
-  parameters: json.object(
-    {
-      applicationRecordId: json.string(),
-      revision: json.number(),
-      mutation: json.looseObject(
-        "{type:'set_stage',stage,note?} | {type:'add_note',note:{id,body,createdAt,updatedAt}} | {type:'upsert_reminder',reminder:{id,dueAt,note,...}} | ...",
-      ),
-    },
-    ["applicationRecordId", "revision", "mutation"],
-  ),
-  input: z.object({
-    applicationRecordId: Id,
-    revision: z.number().int().nonnegative(),
-    mutation: ApplicationCrmMutationSchema,
-  }),
-  label: () => "Updating application tracking",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    const saved = await service.mutateApplicationCrm({
-      applicationRecordId: input.applicationRecordId,
-      expectedRevision: input.revision,
-      mutation: input.mutation,
-      actor: "assistant",
-    });
-    ports.publishWorkspaceUpdate();
-    return {
-      summary: `Tracking updated (${input.mutation.type.replaceAll("_", " ")}).`,
-      data: (() => {
-        const record = saved.applicationRecords.find(
-          (entry) => entry.id === input.applicationRecordId,
-        );
-        return {
-          tracking: record?.crm
-            ? {
-                ...record.crm,
-                interviews: record.crm.interviews.map(interviewForModel),
-              }
-            : null,
-        };
-      })(),
-    };
-  },
-});
-
-export const setStageForManyTool = defineTool({
-  name: "set_stage_for_applications",
-  group: "tracking",
-  description:
-    "Updates a selected group of applications: any stage, adds tags without removing existing tags, archives without changing outcomes or dates, or restores. Read the exact saved dates before selecting old applications; never guess dates.",
-  parameters: json.object(
-    {
-      applicationRecordIds: json.ids(),
-      stage: json.enumOf(applicationCrmStageValues),
-      action: json.enumOf(["stage", "tags", "archive", "restore"]),
-      tags: json.ids(),
-      note: json.string(),
-    },
-    ["applicationRecordIds", "stage"],
-  ),
-  input: z.object({
-    applicationRecordIds: z.array(Id).min(1).max(500),
-    stage: ApplicationCrmStageSchema,
-    action: z.enum(["stage", "tags", "archive", "restore"]).optional(),
-    tags: z.array(Id).max(50).optional(),
-    note: z.string().trim().min(1).max(1_000).optional(),
-  }),
-  label: () => "Updating application stages",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const items = input.applicationRecordIds.map((id) => {
-      const record = snapshot.applicationRecords.find(
-        (entry) => entry.id === id,
-      );
-      if (!record)
-        throw new AssistantToolError("not_found", `No application ${id}.`);
-      return {
-        applicationRecordId: id,
-        expectedRevision: record.crm?.revision ?? 0,
-      };
-    });
-    session.assertCurrent();
-    await service.mutateApplicationCrmBulkStage({
-      items,
-      stage: input.stage,
-      ...(input.action ? { action: input.action } : {}),
-      ...(input.tags ? { tags: input.tags } : {}),
-      customStageId: null,
-      note: input.note ?? null,
-      actor: "assistant",
-    });
-    ports.publishWorkspaceUpdate();
-    return {
-      summary:
-        input.action && input.action !== "stage"
-          ? `Updated ${plural(items.length, "application")}: ${input.action}.`
-          : `Moved ${plural(items.length, "application")} to ${input.stage}.`,
-    };
-  },
-});
-
-export const exportTrackerTool = defineTool({
-  name: "export_tracker",
-  group: "tracking",
-  description:
-    "Exports every application in the tracker as CSV or JSON to a file and returns the file's exact path. Nothing else is needed from the person. Tell them the path the result gives; never guess the folder.",
-  parameters: json.object({ format: json.enumOf(["csv", "json"]) }),
-  input: z.object({ format: z.enum(["csv", "json"]).default("csv") }),
-  label: () => "Exporting the tracker",
-  effect: "local_write",
-  async execute(input, { ports }) {
-    if (!ports.exportTracker) {
-      throw new AssistantToolError(
-        "refused",
-        "Exporting is not available here.",
-      );
-    }
-    const path = await ports.exportTracker(input.format);
-    return {
-      summary: path
-        ? `Exported the tracker to ${path}. Give the person this exact path; do not name a folder in other words.`
-        : "Nothing was exported.",
-      data: { saved: Boolean(path), path },
-    };
-  },
-});
-
 export const applicationTools = [
   recordInstructionTool,
   updateInstructionTool,
   listInstructionsTool,
   applyToJobsTool,
   sendApplicationsTool,
-  listApplicationsTool,
-  getApplicationTool,
+  getApplicationRunTool,
   answerApplicationQuestionTool,
   continueApplicationTool,
   cancelApplicationsTool,
-];
-
-export const trackingTools = [
-  updateTrackingTool,
-  setStageForManyTool,
-  exportTrackerTool,
 ];

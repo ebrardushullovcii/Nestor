@@ -5,6 +5,7 @@ import type {
 import {
   AssistantTaskPlanStepSchema,
   AssistantJobViewSchema,
+  AssistantTrackerViewSchema,
   JobIdSchema,
   JobDetailSchema,
   JobStageCountsSchema,
@@ -18,7 +19,7 @@ import {
   getAssistantSavedSearch,
   getAssistantSearchReadiness,
 } from "../prompt";
-import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
+import { AssistantToolError, defineTool, json } from "../tool-kit";
 import { readAssistantWorkState, runningSearchState } from "../work-state";
 import {
   allJobs,
@@ -26,7 +27,6 @@ import {
   compactJob,
   outstandingReviews,
   plural,
-  trackerAgenda,
 } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
@@ -42,7 +42,7 @@ export const getWorkspaceSummaryTool = defineTool({
   name: "get_workspace_summary",
   group: "workspace",
   description:
-    "Where the job search stands: enabled job-source IDs and URLs, whether a search can start and its missing requirements, profile readiness, jobs found and shortlisted, applications and their states, running work, Needs you count, the selected search plan, the plan and sources of the running search, and the saved apply mode. A resume is not required for searching.",
+    "Where the job search stands: enabled job-source IDs and URLs, whether a search can start and its missing requirements, profile readiness, jobs found and shortlisted, applications and their states, running work, Needs you count, the sources of the running search and the saved apply mode. A resume is not required for searching.",
   parameters: json.object({}),
   input: z.object({}).passthrough(),
   label: () => "Reading your workspace",
@@ -52,15 +52,17 @@ export const getWorkspaceSummaryTool = defineTool({
     const snapshot = await service.getWorkspaceSnapshot();
     const countsCommand = ports.commands?.find((command) => command.name === "stage_counts");
     const searchCommand = ports.commands?.find((command) => command.name === "search_status");
+    const trackerCommand = ports.commands?.find((command) => command.name === "list_applications");
     if (countsCommand && searchCommand) {
-      const [countsResult, searchResult] = await Promise.all([
+      const [countsResult, searchResult, trackerResult] = await Promise.all([
         countsCommand.execute({}, context), searchCommand.execute({}, context),
+        trackerCommand?.execute({ limit: 1 }, context),
       ]);
       const counts = JobStageCountsSchema.parse(countsResult.data);
       const search = JobSearchStatusSchema.parse(searchResult.data);
       return {
         summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
-        data: { jobs: counts, search, profile: { setup: snapshot.profileSetupState.status, name: snapshot.profile.fullName }, applyMode: snapshot.settings.applicationAutomationMode, needsYou: projectWorkspaceAttention(snapshot).count },
+        data: { jobs: counts, search, applications: trackerResult ? z.object({ counts: z.record(z.number()) }).parse(trackerResult.data).counts : null, profile: { setup: snapshot.profileSetupState.status, name: snapshot.profile.fullName }, applyMode: snapshot.settings.applicationAutomationMode, needsYou: projectWorkspaceAttention(snapshot).count },
       };
     }
     const work = readAssistantWorkState(ports, snapshot);
@@ -75,9 +77,6 @@ export const getWorkspaceSummaryTool = defineTool({
       ),
     );
     const attention = projectWorkspaceAttention(snapshot);
-    const campaign = snapshot.campaigns.find(
-      (entry) => entry.id === snapshot.activeCampaignId,
-    );
     const searchReadiness = getAssistantSearchReadiness(snapshot);
     return {
       summary: `${plural(snapshot.discoveryJobs.length, "job")} found, ${snapshot.reviewQueue.length} shortlisted, ${plural(applications.length, "application")}, ${attention.count} Needs you items, ${attention.readyToSend.length} ready to send, ${attention.resumeReviews.length} resume reviews. ${
@@ -117,48 +116,10 @@ export const getWorkspaceSummaryTool = defineTool({
         needsYou: attention.count,
         readyToSend: attention.readyToSend.length,
         resumeReviews: attention.resumeReviews.length,
-        tracker: (() => {
-          const agenda = trackerAgenda(snapshot, Date.now());
-          return {
-            overdueReminders: agenda.filter((item) => item.overdue).length,
-            dueSoon: agenda.filter((item) => !item.overdue).length,
-          };
-        })(),
-        selectedSearchPlan: campaign
-          ? { id: campaign.id, name: campaign.name }
-          : null,
         applyMode:
           snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
         activityPaused: snapshot.activityControl.paused ?? false,
       },
-    };
-  },
-});
-
-export const listTrackerAgendaTool = defineTool({
-  name: "list_tracker_agenda",
-  group: "workspace",
-  description:
-    "What the application tracker says is due: overdue and upcoming reminders and scheduled interviews in the next days, with dates, time zones and the application each belongs to. Use it for 'what do I need to do today', 'what's coming up' and 'any interviews'. It is separate from Needs you, which lists browser steps.",
-  parameters: json.object({
-    days: json.number("How far ahead to look, 1 to 60. Default 14."),
-  }),
-  input: z.object({ days: z.number().int().min(1).max(60).default(14) }),
-  label: () => "Checking your tracker",
-  effect: "read",
-  async execute(input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const agenda = trackerAgenda(snapshot, Date.now(), input.days);
-    const overdue = agenda.filter((item) => item.overdue).length;
-    const interviews = agenda.filter(
-      (item) => item.kind === "interview",
-    ).length;
-    return {
-      summary:
-        agenda.length === 0
-          ? `Nothing is due in the tracker in the next ${plural(input.days, "day")}.`
-          : `${plural(overdue, "overdue reminder")}, ${plural(interviews, "upcoming interview")}, ${plural(agenda.length - overdue - interviews, "other reminder")} due soon.`,
-      data: agenda.slice(0, 40),
     };
   },
 });
@@ -416,53 +377,6 @@ export function describeApplicationProgress(
     latest.state === "planned" && run?.state === "running";
   return `${latest.state.replaceAll("_", " ")} in run ${latest.runId} (${(run?.state ?? "unknown").replaceAll("_", " ")})${waitingSameSite ? ", not started yet" : ""}`;
 }
-
-export const searchWorkspaceTool = defineTool({
-  name: "search_workspace",
-  group: "workspace",
-  description:
-    "Finds jobs, applications and job sources whose names match the words given. Use it to resolve 'the Acme job' or 'my Stripe application' to ids.",
-  parameters: json.object({ query: json.string() }, ["query"]),
-  input: z.object({ query: z.string().trim().min(1).max(200) }),
-  label: (input) => `Searching your workspace for "${argText(input.query)}"`,
-  effect: "read",
-  async execute(input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const words = input.query
-      .toLowerCase()
-      .split(/\s+/u)
-      .filter((word) => word.length > 1);
-    const matches = (text: string) => {
-      const haystack = text.toLowerCase();
-      return words.every((word) => haystack.includes(word));
-    };
-    const jobs = allJobs(snapshot)
-      .filter((job) => matches(`${job.title} ${job.company} ${job.location}`))
-      .slice(0, 15)
-      .map(compactJob);
-    const applications = snapshot.applicationRecords
-      .filter((record) => matches(`${record.title} ${record.company}`))
-      .slice(0, 15)
-      .map(compactApplication);
-    const sources = snapshot.searchPreferences.discovery.targets
-      .filter((target) => matches(`${target.label} ${target.startingUrl}`))
-      .slice(0, 10)
-      .map((target) => ({
-        id: target.id,
-        label: target.label,
-        url: target.startingUrl,
-        enabled: target.enabled,
-      }));
-    const total = jobs.length + applications.length + sources.length;
-    return {
-      summary:
-        total === 0
-          ? `Nothing in the workspace matches "${input.query}".`
-          : `Found ${plural(jobs.length, "job")}, ${plural(applications.length, "application")} and ${plural(sources.length, "source")}.`,
-      data: { jobs, applications, sources },
-    };
-  },
-});
 
 export const readResultTool = defineTool({
   name: "read_result",
@@ -731,7 +645,6 @@ const APP_ROUTES = {
   find_jobs: "/job-finder/discovery",
   shortlisted: "/job-finder/review-queue",
   applications: "/job-finder/applications",
-  tracker: "/job-finder/applications?view=tracker",
   needs_you: "/job-finder/actions",
   settings: "/job-finder/settings",
 } as const;
@@ -740,11 +653,11 @@ export const openInAppTool = defineTool({
   name: "open_in_app",
   group: "workspace",
   description:
-    "Opens a screen or a record in the app for the person. Use screen tracker for saved interviews, reminders and stages, optionally with applicationRecordId. Open screens only when asked to see them.",
+    "Opens a screen or a record in the app for the person. Use screen applications for the tracker (statuses, notes, interviews and reminders), optionally with its numeric jobId. Open screens only when asked to see them.",
   parameters: json.object({
     screen: json.enumOf(Object.keys(APP_ROUTES)),
     jobId: json.number("Opens that stored job (its resume when resume is true)."),
-    applicationRecordId: json.string(),
+    applicationView: json.looseObject("Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true)."),
     resume: json.boolean(),
     view: json.looseObject("Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions."),
     section: json.enumOf(
@@ -757,7 +670,7 @@ export const openInAppTool = defineTool({
       .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
       .optional(),
     jobId: JobIdSchema.optional(),
-    applicationRecordId: Id.optional(),
+    applicationView: AssistantTrackerViewSchema.optional(),
     resume: z.boolean().optional(),
     view: AssistantJobViewSchema.optional(),
     section: z
@@ -775,34 +688,38 @@ export const openInAppTool = defineTool({
   effect: "read",
   async execute(input, context) {
     const { session, ports } = context;
-    let opensResume = Boolean(input.resume || input.screen === "shortlisted");
+    if (input.resume && input.screen && input.screen !== "shortlisted") throw new AssistantToolError("invalid_input", "Choose one destination per call: a resume opens in Shortlisted.");
+    let screen = input.screen ?? (input.resume ? "shortlisted" : undefined);
     let jobView: z.infer<typeof AssistantJobViewSchema> | undefined;
+    let applicationView = input.applicationView;
     const getJob = ports.commands?.find((command) => command.name === "get_job");
-    if (input.jobId && getJob) {
-      const result = await getJob.execute({ id: input.jobId }, context);
-      if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
-      const job = JobDetailSchema.parse(result.data);
-      if (!input.screen && !input.resume && ["shortlisted", "resume"].includes(job.stage)) opensResume = true;
-      const stages = opensResume ? ["shortlisted", "resume"] : ["found", "hidden", "shortlisted"];
-      if (!stages.includes(job.stage)) throw new AssistantToolError("invalid_input", "That job belongs to a different screen. Choose its current stage.");
-      jobView = { stage: job.stage, text: "", ...(opensResume ? {} : { minFit: null }) };
+    if (input.jobId) {
+      if (!screen && getJob) {
+        const result = await getJob.execute({ id: input.jobId }, context);
+        if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
+        const job = JobDetailSchema.parse(result.data);
+        screen = job.stage === "applied" ? "applications" : ["shortlisted", "resume"].includes(job.stage) ? "shortlisted" : "find_jobs";
+      }
+      screen ??= "find_jobs";
+      if (screen === "applications") {
+        const getApplication = ports.commands?.find((command) => command.name === "get_application");
+        if (!getApplication || (await getApplication.execute({ jobId: input.jobId }, context)).data === null)
+          throw new AssistantToolError("not_found", "That job is not in Applications.");
+        applicationView ??= { statuses: [], text: "", tag: null, due: false, quietForDays: null };
+      } else {
+        if (screen !== "find_jobs" && screen !== "shortlisted") throw new AssistantToolError("invalid_input", "Choose the job's list screen.");
+        if (getJob) {
+          const result = await getJob.execute({ id: input.jobId }, context);
+          if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
+          const job = JobDetailSchema.parse(result.data);
+          const stages = screen === "shortlisted" ? ["shortlisted", "resume"] : ["found", "hidden", "shortlisted"];
+          if (!stages.includes(job.stage)) throw new AssistantToolError("invalid_input", "That job belongs to a different screen. Choose its current stage.");
+          jobView = { stage: job.stage, text: "", ...(screen === "shortlisted" ? {} : { minFit: null }) };
+        }
+      }
     }
-    if (
-      input.screen &&
-      (input.jobId || input.applicationRecordId) &&
-      !(input.applicationRecordId && input.screen === "tracker") &&
-      input.screen !==
-        (input.applicationRecordId
-          ? "applications"
-          : opensResume
-            ? "shortlisted"
-            : "find_jobs")
-    ) {
-      throw new AssistantToolError(
-        "invalid_input",
-        "Choose one destination per call. To show a tracker after writing a resume, open tracker last.",
-      );
-    }
+    if (input.resume && screen !== "shortlisted") throw new AssistantToolError("invalid_input", "A resume opens in Shortlisted.");
+    if (input.applicationView && input.screen !== "applications") throw new AssistantToolError("invalid_input", "Application filters require screen applications.");
     if (input.section && input.screen !== "profile")
       throw new AssistantToolError(
         "invalid_input",
@@ -817,15 +734,20 @@ export const openInAppTool = defineTool({
       throw new AssistantToolError("invalid_input", "Shortlisted supports its shortlisted/resume stage, text filter and selection.");
     if (input.view?.stage && input.screen === "find_jobs" && !["found", "hidden", "shortlisted"].includes(input.view.stage))
       throw new AssistantToolError("invalid_input", "Find jobs shows found, hidden or shortlisted jobs.");
-    let route = input.applicationRecordId
-      ? `/job-finder/applications?${input.screen === "tracker" ? "view=tracker&" : ""}applicationRecordId=${encodeURIComponent(input.applicationRecordId)}`
-      : input.jobId
-        ? opensResume
-          ? `/job-finder/review-queue?jobId=${encodeURIComponent(input.jobId)}`
-          : `/job-finder/discovery?job=${encodeURIComponent(input.jobId)}`
-        : input.screen === "profile" && input.section
-          ? `${APP_ROUTES.profile}?section=${input.section}`
-          : APP_ROUTES[input.screen ?? "home"];
+    let route = input.jobId
+      ? screen === "applications"
+        ? `/job-finder/applications?jobId=${input.jobId}`
+        : screen === "shortlisted"
+          ? `/job-finder/review-queue?jobId=${input.jobId}`
+          : `/job-finder/discovery?job=${input.jobId}`
+      : input.screen === "profile" && input.section
+        ? `${APP_ROUTES.profile}?section=${input.section}`
+        : APP_ROUTES[input.screen ?? "home"];
+    if (applicationView) {
+      const destination = new URL(route, "https://nestor.local");
+      destination.searchParams.set("applications", JSON.stringify(applicationView));
+      route = `${destination.pathname}${destination.search}`;
+    }
     const view = input.view ?? jobView;
     if (view) {
       const destination = new URL(route, "https://nestor.local");
@@ -845,10 +767,8 @@ export const openInAppTool = defineTool({
 
 export const workspaceTools = [
   getWorkspaceSummaryTool,
-  listTrackerAgendaTool,
   listNeedsYouTool,
   resolveNeedsYouTool,
-  searchWorkspaceTool,
   readResultTool,
   searchConversationTool,
   updatePlanTool,

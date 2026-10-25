@@ -2,6 +2,8 @@ import {
   CLOSED_TRACKER_STATUSES,
   TRACKER_STATUS_LABEL,
   type TrackerEvent,
+  type TrackerChange,
+  type TrackerSelectionInput,
   type TrackerStatus,
 } from "@nestor/contracts";
 import { ExternalLink, Trash2, X } from "lucide-react";
@@ -44,32 +46,61 @@ const TITLE_HINT: Record<AddKind, string> = {
   note: "Anything worth remembering",
 };
 
+/** Every local tracker change offers the same guarded store Undo. */
+export function useTrackerChangeToast() {
+  const { showToast } = useToast();
+  return (title: string, change: TrackerChange) => {
+    const undoId = change.undoId;
+    showToast({
+      ...(undoId === null ? {} : { id: `tracker-change-${undoId}` }),
+      title,
+      ...(undoId === null
+        ? {}
+        : {
+            action: {
+              label: "Undo",
+              onClick: () => {
+                void window.nestor.tracker
+                  .run("undo_tracker_change", { undoId })
+                  .then((result) =>
+                    showToast({
+                      title: result.changed
+                        ? "Tracker change undone"
+                        : "Nothing changed",
+                      ...(result.skipped
+                        ? { description: "Later edits were kept." }
+                        : {}),
+                    }),
+                  )
+                  .catch((error: unknown) =>
+                    showToast({ title: describeError(error), tone: "warning" }),
+                  );
+              },
+            },
+          }),
+    });
+  };
+}
+
 /** Moves applications to a status, says so, and offers Undo. */
 export function useSetStatus() {
   const { showToast } = useToast();
-  return async (ids: number[], status: Exclude<TrackerStatus, "applying">) => {
+  const showChange = useTrackerChangeToast();
+  return async (
+    selection: TrackerSelectionInput,
+    status: Exclude<TrackerStatus, "applying">,
+  ) => {
     try {
       const result = await window.nestor.tracker.run("set_status", {
-        ids,
+        selection,
         status,
       });
-      const undoId = result.undoId;
-      showToast({
-        id: "applications-status",
-        title:
-          result.changed === 0
-            ? "Nothing changed"
-            : `${result.changed === 1 ? "Moved" : `Moved ${result.changed} applications`} to ${TRACKER_STATUS_LABEL[status]}`,
-        ...(undoId !== null
-          ? {
-              action: {
-                label: "Undo",
-                onClick: () =>
-                  void window.nestor.tracker.run("undo_status", { undoId }),
-              },
-            }
-          : {}),
-      });
+      showChange(
+        result.changed === 0
+          ? "Nothing changed"
+          : `${result.changed === 1 ? "Moved" : `Moved ${result.changed} applications`} to ${TRACKER_STATUS_LABEL[status]}`,
+        result,
+      );
     } catch (error) {
       showToast({ title: describeError(error), tone: "warning" });
     }
@@ -81,6 +112,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
   const { application } = useApplication(props.jobId);
   const { showToast } = useToast();
   const setStatus = useSetStatus();
+  const showChange = useTrackerChangeToast();
   const [kind, setKind] = useState<AddKind>("reply");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -106,10 +138,10 @@ export function ApplicationDetail(props: { jobId: number | null }) {
   const status = describeStatus(row);
   const dated = kind === "interview" || kind === "reminder";
 
-  const run = async (work: () => Promise<unknown>, done: string) => {
+  const run = async (work: () => Promise<TrackerChange>, done: string) => {
     try {
-      await work();
-      showToast({ id: "applications-detail", title: done });
+      const result = await work();
+      showChange(done, result);
       return true;
     } catch (error) {
       showToast({ title: describeError(error), tone: "warning" });
@@ -146,7 +178,10 @@ export function ApplicationDetail(props: { jobId: number | null }) {
     if (!value) return;
     const ok = await run(
       () =>
-        window.nestor.tracker.run("set_tags", { ids: [job.id], add: [value] }),
+        window.nestor.tracker.run("set_tags", {
+          selection: { ids: [job.id] },
+          add: [value],
+        }),
       `Tagged ${value}`,
     );
     if (ok) setTag("");
@@ -155,6 +190,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
   return (
     <section
       aria-label={`Application to ${job.company}`}
+      data-job-detail-id={job.id}
       className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto pr-1"
       data-locked-pane-scroll-region
       id={LIST_DETAIL_REGION_ID}
@@ -197,7 +233,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
             label="Where this application stands"
             onValueChange={(next) =>
               void setStatus(
-                [job.id],
+                { ids: [job.id] },
                 next as Exclude<TrackerStatus, "applying">,
               )
             }
@@ -216,7 +252,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
                   key={value}
                   onClick={() =>
                     void setStatus(
-                      [job.id],
+                      { ids: [job.id] },
                       value as Exclude<TrackerStatus, "applying">,
                     )
                   }
@@ -311,7 +347,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
                 void run(
                   () =>
                     window.nestor.tracker.run("set_tags", {
-                      ids: [job.id],
+                      selection: { ids: [job.id] },
                       remove: [value],
                     }),
                   `Removed ${value}`,
@@ -345,10 +381,15 @@ export function ApplicationDetail(props: { jobId: number | null }) {
 
 function TimelineItem({ event }: { event: TrackerEvent }) {
   const { showToast } = useToast();
+  const showChange = useTrackerChangeToast();
   const dated = event.kind === "interview" || event.kind === "reminder";
   const toggle = async (done: boolean) => {
     try {
-      await window.nestor.tracker.run("update_event", { id: event.id, done });
+      const result = await window.nestor.tracker.run("update_event", {
+        id: event.id,
+        done,
+      });
+      showChange(done ? "Marked done" : "Reopened", result);
     } catch (error) {
       showToast({ title: describeError(error), tone: "warning" });
     }
@@ -401,6 +442,7 @@ function TimelineItem({ event }: { event: TrackerEvent }) {
           onClick={() =>
             void window.nestor.tracker
               .run("delete_event", { id: event.id })
+              .then((result) => showChange("Deleted tracker entry", result))
               .catch((error: unknown) =>
                 showToast({ title: describeError(error), tone: "warning" }),
               )

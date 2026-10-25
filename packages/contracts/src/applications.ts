@@ -167,6 +167,7 @@ export type AnswerNeedsYouResult = z.infer<typeof AnswerNeedsYouResultSchema>;
 export const ApplicationStoreDemoInputSchema = z
   .object({
     sourceUrl: z.string().url(),
+    trackApplications: z.boolean().optional(),
   })
   .strict();
 export const ApplicationStoreDemoResultSchema = z.object({

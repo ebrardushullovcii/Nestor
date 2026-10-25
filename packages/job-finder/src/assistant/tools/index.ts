@@ -6,7 +6,7 @@ import type {
   AssistantToolGroup,
 } from "../tool-kit";
 import { assistantToolGroupValues, defineTool, json } from "../tool-kit";
-import { applicationTools, trackingTools } from "./application-tools";
+import { applicationTools } from "./application-tools";
 import { browserTools } from "./browser-tools";
 import { jobsTools } from "./jobs-tools";
 import { fileTools, profileTools } from "./profile-tools";
@@ -34,7 +34,7 @@ export const ASSISTANT_TOOL_GROUPS: Record<
   resume: resumeTools,
   jobs: jobsTools,
   applications: applicationTools,
-  tracking: trackingTools,
+  tracking: [],
   settings: settingsTools,
   browser: browserTools,
 };
@@ -50,7 +50,7 @@ export type AssistantCatalogMode = "flat" | "grouped";
 
 const COMMON_TOOLS = [
   "open_in_app", "read_result", "ask_person", "list_needs_you", "undo_change",
-  "get_application", "answer_application_question", "read_profile", "get_job",
+  "get_application", "get_application_run", "answer_application_question", "read_profile", "get_job",
   "list_jobs", "set_default_resume_level",
 ];
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
@@ -72,17 +72,7 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "set_resume_template",
     "restore_resume_version",
   ],
-  applications: [
-    "list_applications",
-    "get_application",
-    "record_instruction",
-    "apply_to_jobs",
-    "send_applications",
-    "continue_application",
-    "answer_application_question",
-    "cancel_applications",
-    "action_return_application_to_shortlist",
-    "action_control_apply_queue",
+  applications: ["list_applications", "get_application", "set_status", "add_event", "undo_tracker_change", "get_application_run", "record_instruction", "apply_to_jobs", "send_applications", "continue_application", "answer_application_question", "cancel_applications", "action_return_application_to_shortlist", "action_control_apply_queue",
   ],
   actions: ["list_needs_you", "resolve_needs_you"],
   settings: [
@@ -100,7 +90,7 @@ export const loadToolsTool = defineTool({
   name: "load_tools",
   group: "workspace",
   description:
-    "Load tools for any task, regardless of the current screen: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (stages, notes, reminders, interviews, companies, outcomes), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded groups stay available this turn.",
+    "Load tools for any task, regardless of the current screen: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded groups stay available this turn.",
   parameters: json.object({
     groups: json.array(json.enumOf(assistantToolGroupValues)),
     names: json.ids(

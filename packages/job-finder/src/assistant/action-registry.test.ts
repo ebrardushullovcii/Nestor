@@ -90,12 +90,7 @@ describe("registered user actions", () => {
       "restoreResumeDraftRevision",
       ["j", "v"],
     ],
-    [
-      "run-application-no-response-automation",
-      {},
-      "runApplicationNoResponseAutomation",
-      [],
-    ],
+
     [
       "snooze-grouped-decision",
       { decisionId: "d", expectedRevision: 1, until: at },

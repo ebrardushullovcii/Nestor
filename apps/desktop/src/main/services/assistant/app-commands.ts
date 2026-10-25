@@ -1,17 +1,123 @@
 import {
   JOB_COMMANDS,
   RESUME_COMMANDS,
+  TRACKER_COMMANDS,
+  TRACKER_STATUS_LABEL,
   type JobCommandOutputs,
   type ResumeCommandOutputs,
+  type TrackerCommandOutputs,
+  type TrackerChange,
 } from "@nestor/contracts";
-import { assistantCommandTools } from "@nestor/job-finder";
+import {
+  assistantCommandTools,
+  type AssistantToolContext,
+} from "@nestor/job-finder";
 
 import { runJobCommand } from "../job-commands";
 import { runResumeCommand } from "../../routes/resumes";
+import { runTrackerCommand } from "../../routes/tracker";
+
+async function trackerChange<T extends TrackerChange>(
+  value: T,
+  summary: string,
+  { session }: AssistantToolContext,
+) {
+  if (!value.undoId) return { summary, data: value };
+  const { part } = await session.recordChange({
+    target: "app_command",
+    targetId: String(value.undoId),
+    summary,
+    undoCommand: {
+      name: "undo_tracker_change",
+      input: { undoId: value.undoId },
+      expectedCount: value.undoCount,
+    },
+    entries: [
+      {
+        path: ["tracker"],
+        kind: "set",
+        before: "Previous value",
+        after: summary,
+        index: null,
+        label: "Application tracking",
+      },
+    ],
+  });
+  return { summary, data: value, parts: [part] };
+}
 
 /** Add each screen's command catalog here as its store lands. */
 export function assistantAppCommands() {
   return [
+    ...assistantCommandTools<typeof TRACKER_COMMANDS, TrackerCommandOutputs>(
+      TRACKER_COMMANDS,
+      runTrackerCommand,
+      {
+        group: "tracking",
+        results: {
+          list_applications: (page) => ({
+            summary: `${page.rows.length} applications on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
+            data: page,
+          }),
+          get_application: (value) => ({
+            summary: value
+              ? `${value.job.title} at ${value.job.company}: ${TRACKER_STATUS_LABEL[value.row.status]}.`
+              : "That application was not found.",
+            data: value,
+          }),
+          set_status: (value, input, context) =>
+            trackerChange(
+              value,
+              `Moved ${value.changed} ${value.changed === 1 ? "application" : "applications"} to ${TRACKER_STATUS_LABEL[input.status]}.`,
+              context,
+            ),
+          add_event: (value, input, context) =>
+            trackerChange(
+              value,
+              `Added ${input.kind}: ${value.title}.`,
+              context,
+            ),
+          update_event: (value, _input, context) =>
+            trackerChange(
+              value,
+              `Updated ${value.kind}: ${value.title}.`,
+              context,
+            ),
+          delete_event: (value, _input, context) =>
+            trackerChange(
+              value,
+              value.deleted
+                ? "Deleted the tracker entry."
+                : "That tracker entry was not deleted.",
+              context,
+            ),
+          set_tags: (value, _input, context) =>
+            trackerChange(
+              value,
+              `Changed ${value.changed} application tags.`,
+              context,
+            ),
+          save_view: (value, _input, context) =>
+            trackerChange(
+              value,
+              `Saved the Applications view ${value.name}.`,
+              context,
+            ),
+          delete_view: (value, _input, context) =>
+            trackerChange(
+              value,
+              value.deleted
+                ? "Deleted the saved Applications view."
+                : "That view was not deleted.",
+              context,
+            ),
+          undo_tracker_change: (value) => ({
+            summary: `${value.changed ? "Undid the tracker change." : "Nothing changed."}${value.skipped ? " Later edits were kept." : ""}`,
+            data: value,
+          }),
+        },
+      },
+    ),
     ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
       JOB_COMMANDS,
       runJobCommand,

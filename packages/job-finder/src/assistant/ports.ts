@@ -77,7 +77,6 @@ export interface AssistantHostPorts {
     options?: { signal?: AbortSignal },
   ): Promise<void>;
   /** Writes the tracker export where the person chooses; returns the path or null. */
-  exportTracker?(format: "csv" | "json"): Promise<string | null>;
   /** The browser, when the host has one. */
   browser?: AssistantBrowserPort;
   /** Makes app navigation visible while preserving every browser tab. */
