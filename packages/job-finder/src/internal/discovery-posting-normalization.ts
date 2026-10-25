@@ -9,7 +9,7 @@ import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
   normalizeListingText,
   stripPictographGlyphs,
-} from "./listing-detail-extraction";
+} from "@nestor/browser-agent/listing-detail-extraction";
 import {
   collapseRepeatedLocationTokens,
   isTruncatedLocationFragment,
@@ -85,7 +85,10 @@ export function toProviderAwarePosting(input: {
 }): JobPosting {
   const provider = input.intelligence.provider;
   const normalizedDescription = normalizeListingText(input.posting.description);
-  const detailQuality = assessJobPostingDetailQuality(input.posting);
+  const detailQuality =
+    input.posting.listingDetailFetch?.outcome === "enriched"
+      ? "detail_enriched"
+      : assessJobPostingDetailQuality(input.posting);
 
   return prepareDiscoveryPosting({
     ...input.posting,

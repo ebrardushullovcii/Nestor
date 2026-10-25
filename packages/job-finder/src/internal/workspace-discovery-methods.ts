@@ -195,7 +195,7 @@ import {
   isSiteFurnitureSalaryText,
   reconcileSalaryTextWithPreparedBody,
 } from "./matching-compensation";
-import { normalizeListingText } from "./listing-detail-extraction";
+import { normalizeListingText } from "@nestor/browser-agent/listing-detail-extraction";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import {
   takePreparedDiscoveryPosting,

@@ -1,3 +1,8 @@
+import type {
+  ExtractedListingDetail,
+  ExtractListingDetailInput,
+} from "@nestor/contracts";
+
 /**
  * Reads the body of a job listing out of its own page HTML, without a browser.
  *
@@ -80,63 +85,10 @@ function looksLikeApplyEntryText(text: string): boolean {
 }
 
 const MAX_HTML_LENGTH = 1_500_000;
-const MAX_DESCRIPTION_LENGTH = 24_000;
 const MAX_PAGE_TEXT_LENGTH = 64_000;
 export const LISTING_PAGE_OMISSION_MARKER =
   "[Page text excerpt: middle omitted]";
 const MAX_JSON_LD_NODES = 200;
-
-export type ListingDetailExtractionMethod = "json_ld" | "page_text";
-
-/**
- * What one listing page said. `json_ld` is the page's own structured record;
- * `page_text` is the model's reading of the page's text (ADR 0041).
- */
-export interface ExtractedListingDetail {
-  method: ListingDetailExtractionMethod;
-  title: string | null;
-  company: string | null;
-  location: string | null;
-  /** Plain text with paragraphs separated by blank lines and "• " bullets. */
-  description: string;
-  /** Length before this reader's safety cap was applied. */
-  descriptionSourceLength?: number;
-  /** The captured text ended at a cap or in a likely word fragment. */
-  descriptionLikelyTruncated?: boolean;
-  salaryText: string | null;
-  employmentType: string | null;
-  /** ISO timestamp when the record carried a parseable posting date. */
-  postedAt: string | null;
-  validThrough: string | null;
-  workModeHints: string[];
-  directApplyUrl: string | null;
-  /** The model's reading of the listing's skills and requirements. */
-  keySkills?: string[];
-  responsibilities?: string[];
-  minimumQualifications?: string[];
-  preferredQualifications?: string[];
-  seniority?: string | null;
-}
-
-const LIKELY_MID_WORD_ENDING_PATTERN =
-  /\b(?:th|thi|wit|fro|ac|acr|bec|req|qual|responsibilit|experienc|developm|engineer)\s*$/iu;
-
-function isLikelyTruncatedDescription(
-  description: string,
-  sourceLength: number,
-): boolean {
-  return (
-    description.length < sourceLength ||
-    LIKELY_MID_WORD_ENDING_PATTERN.test(description.trimEnd())
-  );
-}
-
-export interface ExtractListingDetailInput {
-  html: string;
-  url: string;
-  /** The title the card carried; used to pick among several records. */
-  expectedTitle?: string | null;
-}
 
 /**
  * Reads the page's own JobPosting record. Returns null when the page publishes
@@ -530,7 +482,7 @@ function extractJobPostingFromJsonLd(
   const descriptionHtml =
     typeof node.description === "string" ? node.description : "";
   const fullDescription = htmlToPlainText(descriptionHtml);
-  const description = truncateText(fullDescription, MAX_DESCRIPTION_LENGTH);
+  const description = fullDescription;
   if (!description) {
     return null;
   }
@@ -544,10 +496,7 @@ function extractJobPostingFromJsonLd(
     location,
     description,
     descriptionSourceLength: fullDescription.length,
-    descriptionLikelyTruncated: isLikelyTruncatedDescription(
-      description,
-      fullDescription.length,
-    ),
+    descriptionLikelyTruncated: false,
     salaryText: readSalary(node),
     employmentType: readEmploymentType(node.employmentType),
     postedAt: readIsoDate(node.datePosted),
@@ -859,15 +808,6 @@ export function htmlToPlainText(html: string): string {
 
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
-}
-
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  const cut = value.slice(0, maxLength);
-  const lastBreak = Math.max(cut.lastIndexOf("\n"), cut.lastIndexOf(". "));
-  return `${cut.slice(0, lastBreak > maxLength * 0.6 ? lastBreak : maxLength).trimEnd()}…`;
 }
 
 /** Link labels and destinations are page data; the model selects the route. */

@@ -114,6 +114,7 @@ const workspaceAliases = {
     "../../packages/job-list-policy/src/index.ts",
   ),
   "@nestor/ai-providers": aiProvidersPath,
+  "@nestor/browser-agent/listing-detail-extraction": path.resolve(currentDir, "../../packages/browser-agent/src/search/listing-detail-extraction.ts"),
   "@nestor/browser-agent": browserAgentPath,
   "@nestor/browser-runtime": browserRuntimePath,
   "@nestor/contracts": contractsPath,

@@ -42,6 +42,7 @@ import {
 import {
   createApplyPageHands,
   createSearchResultCache,
+  readCachedSearchResult,
   runJobSearchAgent,
   type AgentConfig,
   type AgentResult,
@@ -3479,6 +3480,12 @@ export function createBrowserAgentRuntime(
         });
       };
       agentOptions.signal?.throwIfAborted();
+      const reused = await readCachedSearchResult(searchResultCache, agentConfig);
+      if (reused) {
+        const reason = "This source has not changed; reused the previous search results.";
+        agentOptions.onProgress?.({currentUrl:agentConfig.startingUrls[0] ?? "about:blank", jobsFound:reused.jobs.length,stepCount:0,currentAction:"finish",message:reason,targetId:null,adapterKind:source});
+        return toDiscoveryResult({...reused,steps:0,phaseCompletionReason:reason});
+      }
       let page: Page | null = null;
       // Set when the agent stopped on a page only the person can continue
       // (a sign-in, a check). That page is the parked tab: it stays open.
@@ -3572,6 +3579,19 @@ export function createBrowserAgentRuntime(
 
         const result = await runJobSearchAgent({
           resultCache: searchResultCache,
+          readPostingPage: async (url, readOptions) => {
+            readOptions.signal?.throwIfAborted();
+            if (readOptions.rendered)
+              return readRenderedPageHtml(await getContext(), url, readOptions);
+            const response = await page!.request.get(url, {timeout:15_000});
+            try {
+              if (!response.ok()) throw new Error(`Listing read returned HTTP ${response.status()}.`);
+              readOptions.signal?.throwIfAborted();
+              return {html:await response.text(),finalUrl:response.url()};
+            } finally {
+              await response.dispose();
+            }
+          },
           hands: createApplyPageHands(createPlaywrightApplyPageMechanics(page)),
           page,
           config: agentConfig,
@@ -3604,6 +3624,7 @@ export function createBrowserAgentRuntime(
               );
 
               return jobs.map((job) => ({
+                needsRenderedPage: job.needsRenderedPage,
                 sourceJobId: job.sourceJobId,
                 canonicalUrl: job.canonicalUrl,
                 applicationUrl: job.applicationUrl,

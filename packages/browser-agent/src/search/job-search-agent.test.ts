@@ -274,6 +274,26 @@ const extractor: JobExtractor = {
   ),
 };
 
+test("search checkpoints and the final result carry the same full listing body", async () => {
+  const description = "Build APIs, operate services, mentor engineers. Requirements: SQL and production experience. Benefits: flexible hours.";
+  const card = posting("Platform Engineer", "Northwind", "j1");
+  const readPostingPage = vi.fn(() => Promise.resolve({
+    finalUrl: card.canonicalUrl,
+    html: `<script type="application/ld+json">${JSON.stringify({"@type":"JobPosting",title:card.title,hiringOrganization:{name:card.company},description})}</script>`,
+  }));
+  const savedBodies: string[] = [];
+  const result = await runJobSearchAgent({
+    hands:hands({current:rawPage()}),
+    config:config({onCheckpoint: checkpoint => { savedBodies.push(...checkpoint.collectedJobs.map(job=>job.description)); }}),
+    readPostingPage,
+    llmClient:scripted([{name:"extract_jobs",args:{pageType:"search_results"}},{name:"finish",args:{reason:"All results read."}}]),
+    jobExtractor:{extractJobsFromPage:()=>Promise.resolve([card])},
+  });
+  expect(savedBodies).toEqual([description]);
+  expect(result.jobs[0]?.description).toBe(description);
+  expect(readPostingPage).toHaveBeenCalledTimes(1);
+});
+
 test.each(["same", "text", "link", "unlinked"])(
   "results section reuse across filter routes checks all page evidence (%s)",
   async (change) => {
