@@ -33,6 +33,7 @@ import type {
   JobFinderSearchRequest,
   JobFinderAgentDiscoveryReply,
   JobFinderAgentDiscoveryResult,
+  JobFinderJobDetail,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
@@ -79,9 +80,16 @@ import { whenLaunchReadsSettled } from "../lib/launch-reads";
 import {
   createSearchChangeFeedFollower,
   isSearchRunning,
+  publishLiveFindJobsCounts,
   publishSearchLiveCounts,
   type SearchChangeFeedFollower,
 } from "../lib/search-change-feed";
+import {
+  markFindJobsListsBehind,
+  patchFindJobsLists,
+  PATCHED_JOBS_LIMIT,
+  registerFullWorkspaceRead,
+} from "../lib/workspace-view-refresh";
 import {
   isJobFinderStartupDatabaseRecoveryFact,
   type JobFinderStartupDatabaseRecoveryBlockedFact,
@@ -274,6 +282,24 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     [],
   );
 
+  /**
+   * Shows a workspace that is not a revision main sent (a view refresh). The
+   * revision and its baseline stay, so main's next delta still applies to
+   * what it was computed from.
+   */
+  const commitWorkspaceView = useCallback(
+    (workspace: JobFinderRendererWorkspaceSnapshot) => {
+      workspaceCommitVersionRef.current += 1;
+      workspaceRef.current = workspace;
+      setWorkspaceState((currentState) =>
+        currentState.status === "ready"
+          ? { ...currentState, workspace }
+          : currentState,
+      );
+    },
+    [],
+  );
+
   const applyWorkspaceDelta = useCallback((delta: JobFinderWorkspaceDelta) => {
     if (delta.currentRevision <= workspaceRevisionRef.current) {
       return { status: "stale" } as const;
@@ -327,6 +353,16 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   // its snapshot observes every settled commit — restores freshness without
   // weakening the latest-request fence: nothing stale is ever committed.
   const scheduleConvergenceFetch = useCallback(() => {
+    // A loaded window converges through the view refresh, never the full
+    // sync (it walked every job in main).
+    if (
+      workspaceRef.current?.hydration?.phase === "complete" &&
+      typeof window.nestor.jobFinder.getWorkspaceHome === "function" &&
+      requestBackgroundSyncRef.current
+    ) {
+      requestBackgroundSyncRef.current();
+      return;
+    }
     void recoverFullWorkspaceOnce().catch(() => undefined);
   }, [recoverFullWorkspaceOnce]);
 
@@ -495,6 +531,94 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspace;
   }, [applyWorkspaceDelta, commitWorkspace]);
 
+  // Jobs the change feed named since the last view refresh.
+  const changedJobIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const queries = window.nestor.jobFinder.queries;
+    if (typeof queries?.onChanges !== "function") return undefined;
+    return queries.onChanges((batch) => {
+      for (const change of batch.changes)
+        if (
+          change.table === "saved_jobs" ||
+          change.table === "discovery_pending_jobs"
+        )
+          changedJobIdsRef.current.add(change.id);
+    });
+  }, []);
+
+  // A loaded window takes a workspace update without the full sync: it reads
+  // Home's first view again (everything but the Find jobs lists) and patches
+  // those lists for the jobs the feed named. Revisions and baselines stay as
+  // they are, so the next mutation's delta still applies.
+  const refreshWorkspaceView = useCallback(async () => {
+    const current = workspaceRef.current;
+    const readHome = window.nestor.jobFinder.getWorkspaceHome;
+    const queries = window.nestor.jobFinder.queries;
+    if (
+      !current ||
+      current.hydration?.phase !== "complete" ||
+      typeof readHome !== "function" ||
+      typeof queries?.getJobDetail !== "function"
+    )
+      return syncWorkspaceFromUpdate();
+    const commitVersion = workspaceCommitVersionRef.current;
+    const jobIds = [...changedJobIdsRef.current];
+    changedJobIdsRef.current.clear();
+    const readOneByOne = jobIds.length <= PATCHED_JOBS_LIMIT;
+    const planId = current.activeCampaignId;
+    let view: JobFinderRendererWorkspaceSnapshot | null;
+    let details: (JobFinderJobDetail | null | undefined)[] = [];
+    try {
+      [view, details] = await Promise.all([
+        readHome(),
+        readOneByOne
+          ? Promise.all(
+              jobIds.map((jobId) =>
+                queries.getJobDetail(jobId, planId).catch(() => undefined),
+              ),
+            )
+          : Promise.resolve([]),
+      ]);
+    } catch {
+      view = null;
+    }
+    if (!view) {
+      for (const jobId of jobIds) changedJobIdsRef.current.add(jobId);
+      return syncWorkspaceFromUpdate();
+    }
+    if (workspaceCommitVersionRef.current !== commitVersion) {
+      // A newer answer landed meanwhile; these jobs are read next time.
+      for (const jobId of jobIds) changedJobIdsRef.current.add(jobId);
+      return workspaceRef.current;
+    }
+    const latest = workspaceRef.current ?? current;
+    const lists = readOneByOne
+      ? patchFindJobsLists({
+          current: latest,
+          curated: view.discoveryJobs,
+          jobIds,
+          details,
+        })
+      : { ...latest, complete: false };
+    if (!lists.complete) markFindJobsListsBehind(true);
+    const next: JobFinderRendererWorkspaceSnapshot = {
+      ...view,
+      discoveryJobs: lists.discoveryJobs,
+      dismissedDiscoveryJobs: lists.dismissedDiscoveryJobs,
+      companyJobs: lists.companyJobs,
+      selectedDiscoveryJobId: latest.selectedDiscoveryJobId,
+      hydration: latest.hydration,
+    };
+    commitWorkspaceView(next);
+    void publishLiveFindJobsCounts(next);
+    return next;
+  }, [commitWorkspaceView, syncWorkspaceFromUpdate]);
+
+  useEffect(() => {
+    registerFullWorkspaceRead(() => recoverFullWorkspaceOnce());
+    return () => registerFullWorkspaceRead(null);
+  }, [recoverFullWorkspaceOnce]);
+
   useEffect(() => {
     let disposed = false;
     let syncing = false;
@@ -504,7 +628,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     const startSync = () => {
       syncing = true;
       const startedAt = Date.now();
-      void syncWorkspaceFromUpdate().finally(() => {
+      void refreshWorkspaceView().finally(() => {
         syncing = false;
         // A search sends updates several times a second, and each sync makes
         // main rebuild the whole workspace, which takes seconds once it holds
@@ -560,7 +684,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       if (waitTimer !== undefined) window.clearTimeout(waitTimer);
       unsubscribe?.();
     };
-  }, [syncWorkspaceFromUpdate]);
+  }, [refreshWorkspaceView]);
 
   // During a search main announces only its start; the change feed says what
   // the search wrote, and only screens that show the search sync for it.

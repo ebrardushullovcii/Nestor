@@ -17,6 +17,11 @@ import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pa
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { readInspectedSelectionId } from "./use-job-finder-page-controller-helpers";
+import { useLiveFindJobsCounts } from "@renderer/features/job-finder/lib/search-change-feed";
+import {
+  readFullWorkspaceIfBehind,
+  useFindJobsListsCurrent,
+} from "@renderer/features/job-finder/lib/workspace-view-refresh";
 import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import {
   describeResumeReviewProgress,
@@ -612,6 +617,8 @@ export { JobFinderRouteErrorBoundary };
 
 export function JobFinderCompaniesRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
 
   return (
     <JobFinderHydrationGate
@@ -656,6 +663,8 @@ export function JobFinderCompaniesRoute() {
 
 export function JobFinderCompanyDetailRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const { companyId } = useParams<{ companyId: string }>();
   const [searchParams] = useSearchParams();
   const navigationContext = readJobFinderNavigationContext(searchParams);
@@ -782,7 +791,9 @@ export function JobFinderHomeRoute() {
   // runs or jobs yet) it told a person with thousands of jobs to "Run your
   // first search" for several seconds after launch. Its first view (ADR
   // 0077) has all of them but the Find jobs lists, whose two numbers Home
-  // takes from the database until the lists land.
+  // takes from the database until the lists land. After a view refresh the
+  // lists are only patched, so the numbers come from the same queries.
+  const liveFindJobsCounts = useLiveFindJobsCounts(context.workspace);
   const findJobsCounts =
     launchReads.findJobs &&
     isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])
@@ -794,7 +805,7 @@ export function JobFinderHomeRoute() {
               launchReads.findJobs.focused.total,
           ),
         }
-      : null;
+      : liveFindJobsCounts;
   return (
     <JobFinderHydrationGate
       collections={
@@ -1372,9 +1383,16 @@ export function JobFinderDiscoveryRoute() {
     !navigationContext.jobId &&
     launchReads.counts !== null &&
     jobRowsFor(context.workspace).length === 0;
+  // A link to one job checks it against every job, so it waits for a full
+  // read when the lists fell behind (a view refresh only patches them).
+  const listsCurrent = useFindJobsListsCurrent();
+  useEffect(() => {
+    if (navigationContext.jobId) readFullWorkspaceIfBehind();
+  }, [navigationContext.jobId]);
   const isHydrating =
-    !opensOnFirstView &&
-    isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"]);
+    (!opensOnFirstView &&
+      isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])) ||
+    (Boolean(navigationContext.jobId) && !listsCurrent);
   // On the first view the workspace holds only the jobs past Find jobs, so
   // the open job is the person's pick, else the one remembered from last
   // time; the full list keeps both, so nothing moves when it lands.
@@ -1679,6 +1697,8 @@ export function JobFinderDiscoveryRoute() {
 
 export function JobFinderRapidReviewRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const { campaign, jobs, log } = useMemo(
     () => selectRapidReviewScope(context.workspace),
     [context.workspace],
@@ -3033,6 +3053,8 @@ export function selectJobFinderActionsScope(context: JobFinderPageContext) {
 
 export function JobFinderActionsRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const [searchParams] = useSearchParams();
   const scope = useMemo(
     () => selectJobFinderActionsScope(context),
@@ -3186,6 +3208,8 @@ export function JobFinderSettingsRoute() {
 
 export function JobFinderSafeguardsRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
 
   return (
     <JobFinderHydrationGate

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 import { Button } from "@renderer/components/ui/button";
@@ -10,6 +10,7 @@ import {
 } from "../../lib/recent-changes";
 import { collectPreparedApplicationJobIds } from "../../screens/review-queue/review-queue-status";
 import { formatRelativeTimestamp } from "../../screens/review-queue/resume-workspace-time";
+import { readFullWorkspaceIfBehind } from "../../lib/workspace-view-refresh";
 
 /**
  * The person's last moves of jobs between lists, each with Undo while it can
@@ -20,6 +21,8 @@ export function RecentChangesSection(props: {
   onUndo: (change: RecentChange) => Promise<boolean>;
 }) {
   const changes = useRecentChanges();
+  // Undo checks where each job is now among every job.
+  useEffect(readFullWorkspaceIfBehind, []);
   const [undoingId, setUndoingId] = useState<string | null>(null);
   const { workspace } = props;
   const state = useMemo(
