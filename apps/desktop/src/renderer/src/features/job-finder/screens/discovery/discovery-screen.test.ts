@@ -306,3 +306,4 @@ describe("getDiscoverySearchReadiness", () => {
     expect(noSources.blocker).toBe("no_enabled_sources");
   });
 });
+

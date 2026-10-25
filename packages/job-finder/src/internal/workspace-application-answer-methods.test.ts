@@ -284,9 +284,7 @@ describe("workspace application answer methods", () => {
     });
 
     expect(
-      await repository.listApplicationAnswerRecords({
-        questionId: question.id,
-      }),
+      await repository.listApplicationAnswerRecords({ questionId: question.id }),
     ).toHaveLength(1);
     expect(
       await repository.listApplicationAnswerRecords({

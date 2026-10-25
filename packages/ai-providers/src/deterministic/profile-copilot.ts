@@ -1,7 +1,4 @@
-import {
-  ProfileCopilotReplySchema,
-  type ProfileCopilotReply,
-} from "@nestor/contracts";
+import { ProfileCopilotReplySchema, type ProfileCopilotReply } from "@nestor/contracts";
 
 import type { ReviseCandidateProfileInput } from "../shared";
 import {
@@ -18,12 +15,8 @@ function describeChanges(
   patchGroups: ProfileCopilotReply["patchGroups"],
   input: ReviseCandidateProfileInput,
 ): string {
-  const appliedPatchGroups = patchGroups.filter(
-    (patchGroup) => patchGroup.applyMode === "applied",
-  );
-  const reviewPatchGroups = patchGroups.filter(
-    (patchGroup) => patchGroup.applyMode !== "applied",
-  );
+  const appliedPatchGroups = patchGroups.filter((patchGroup) => patchGroup.applyMode === "applied");
+  const reviewPatchGroups = patchGroups.filter((patchGroup) => patchGroup.applyMode !== "applied");
   const summaryList = formatPatchGroupSummaryList(patchGroups);
   const contextLabel =
     input.context.surface === "setup"
@@ -74,9 +67,7 @@ export function buildDeterministicProfileCopilotReply(
     return buildNoChangeReply(input);
   }
 
-  const normalizedPatchGroups = Array.isArray(patchReply)
-    ? patchReply
-    : [patchReply];
+  const normalizedPatchGroups = Array.isArray(patchReply) ? patchReply : [patchReply];
   const content = describeChanges(normalizedPatchGroups, input);
 
   return ProfileCopilotReplySchema.parse({

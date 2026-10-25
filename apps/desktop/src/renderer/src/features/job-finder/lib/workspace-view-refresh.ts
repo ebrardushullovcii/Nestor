@@ -83,8 +83,7 @@ export function patchFindJobsLists(input: {
   for (const [jobId, job] of changed) {
     if (!job || listed.has(jobId) || hidden.has(jobId)) continue;
     const known = knownRows.get(jobId) ?? curated.get(jobId);
-    const isHidden =
-      job.status === "archived" && Boolean(job.discoveryFeedback);
+    const isHidden = job.status === "archived" && Boolean(job.discoveryFeedback);
     if (job.status === "archived" && !isHidden) continue;
     if (!known) {
       // A job new to these lists (one a search found): its row needs the

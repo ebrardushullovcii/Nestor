@@ -38,12 +38,11 @@ vi.mock("./discovery-filters-panel", () => ({
   DiscoveryFiltersPanel: () => <section aria-label="Current search" />,
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } =
-    await import("./find-jobs-list-report.test-support");
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
   return {
-    DiscoveryResultsPanel: (
-      props: Parameters<typeof useFixtureListReport>[0],
-    ) => {
+    DiscoveryResultsPanel: (props: Parameters<typeof useFixtureListReport>[0]) => {
       useFixtureListReport(props);
       return <section aria-label="Job results" />;
     },
@@ -53,7 +52,9 @@ vi.mock("./discovery-results-panel", async () => {
 import type { DiscoveryScreen } from "./discovery-screen";
 import { COMMAND_PENDING_RELEASE_MS } from "@renderer/features/job-finder/lib/discovery-stop-state";
 import { DISCOVERY_STOP_UNACKNOWLEDGED_LABEL } from "@renderer/features/job-finder/lib/status-copy";
-import { DiscoveryScreenWithJobs } from "./find-jobs-query-fixture.test-support";
+import {
+  DiscoveryScreenWithJobs,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",

@@ -6,7 +6,10 @@ import type {
   ResumeStrategySkillsPolicy,
   ResumeTemplateId,
 } from "@nestor/contracts";
-import type { ResumeApplicationMode, TailoringMode } from "@nestor/contracts";
+import type {
+  ResumeApplicationMode,
+  TailoringMode,
+} from "@nestor/contracts";
 
 // The same names the resume picker shows (job-finder-resume-catalog); a
 // second vocabulary here made one template look like two.

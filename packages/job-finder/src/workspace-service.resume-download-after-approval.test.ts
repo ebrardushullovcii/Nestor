@@ -16,8 +16,7 @@ function createPathHonoringDocumentManager() {
       // path; an approval export writes a fresh file in app storage.
       return {
         ...rendered,
-        storagePath:
-          input.targetPath ?? `/tmp/app-storage/render-${renders}.pdf`,
+        storagePath: input.targetPath ?? `/tmp/app-storage/render-${renders}.pdf`,
       };
     },
   };
@@ -58,8 +57,7 @@ describe("Download PDF after approval", () => {
 
     // A download with no chosen folder renders a new copy in app storage;
     // the job still points at the approved file.
-    const afterStorageCopy =
-      await workspaceService.exportResumePdf("job_ready");
+    const afterStorageCopy = await workspaceService.exportResumePdf("job_ready");
     const storageAsset = afterStorageCopy.tailoredAssets.find(
       (candidate) => candidate.jobId === "job_ready",
     )!;

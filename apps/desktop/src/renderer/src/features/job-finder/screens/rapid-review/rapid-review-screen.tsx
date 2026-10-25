@@ -391,7 +391,9 @@ export function RapidReviewScreen(props: {
           </p>
           <div className="flex justify-center pt-2">
             <Button asChild type="button">
-              <Link to={JOB_FINDER_ROUTE_PATHS.discovery}>Open Find jobs</Link>
+              <Link to={JOB_FINDER_ROUTE_PATHS.discovery}>
+                Open Find jobs
+              </Link>
             </Button>
           </div>
         </div>

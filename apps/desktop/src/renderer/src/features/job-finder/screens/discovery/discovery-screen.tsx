@@ -206,14 +206,17 @@ const resolvePlanSearchPreferences = createIdentityMemo(
       ...workspaceSearchPreferences,
       discovery: {
         ...workspaceSearchPreferences.discovery,
-        targets: workspaceSearchPreferences.discovery.targets.map((target) => ({
-          ...target,
-          enabled: effectiveSourceIds.has(target.id),
-        })),
+        targets: workspaceSearchPreferences.discovery.targets.map(
+          (target) => ({
+            ...target,
+            enabled: effectiveSourceIds.has(target.id),
+          }),
+        ),
       },
     };
   },
 );
+
 
 /**
  * The person's own Show/Hide weaker matches choice per plan and opening rule,
@@ -275,7 +278,10 @@ export function DiscoveryScreen(props: {
     jobId: string;
     normalizedCompanyName: string;
   }) => void;
-  onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => void;
+  onRestoreDismissedJob: (
+    jobId: string,
+    options?: { quiet?: boolean },
+  ) => void;
   onOpenBrowserSession: () => void;
   onOpenBrowserSessionForTarget: (targetId: string) => void;
   onOpenCompany?: (companyId: string) => void;
@@ -755,7 +761,8 @@ export function DiscoveryScreen(props: {
   const heldDecidedJobId =
     selectedJob &&
     selectedJobDecided &&
-    (preserveSelectedJob || openedUndecidedJobIdRef.current === selectedJob.id)
+    (preserveSelectedJob ||
+      openedUndecidedJobIdRef.current === selectedJob.id)
       ? selectedJob.id
       : null;
   // The page the results panel shows and the list's order, read from the
@@ -769,10 +776,7 @@ export function DiscoveryScreen(props: {
       : undefined;
   // Rows shown on earlier pages, so the open job can stay open. Bounded by
   // what the person paged through.
-  const seenRows = useMemo(
-    () => new Map<string, (typeof listRows)[number]>(),
-    [],
-  );
+  const seenRows = useMemo(() => new Map<string, (typeof listRows)[number]>(), []);
   for (const row of listRows) seenRows.set(row.id, row);
   const inspectedJob = useMemo<DiscoveryInspectedJob | null>(() => {
     const fromRow = (row: {
@@ -803,9 +807,7 @@ export function DiscoveryScreen(props: {
         : null;
     };
     if (displayedJobId === undefined)
-      return (
-        find(selectedJob?.id) ?? (listRows[0] ? fromRow(listRows[0]) : null)
-      );
+      return find(selectedJob?.id) ?? (listRows[0] ? fromRow(listRows[0]) : null);
     if (displayedJobId === null) return null;
     return find(displayedJobId);
   }, [
@@ -853,11 +855,7 @@ export function DiscoveryScreen(props: {
       const fresh =
         current?.runId !== runningRunId || current.planId !== activeCampaignId;
       const record = fresh
-        ? {
-            runId: runningRunId,
-            planId: activeCampaignId,
-            ids: new Set<string>(),
-          }
+        ? { runId: runningRunId, planId: activeCampaignId, ids: new Set<string>() }
         : current;
       searchVisibleJobs.current = record;
       void queries
@@ -935,7 +933,8 @@ export function DiscoveryScreen(props: {
   } | null>(null);
   const assessJobWithFeedback = onAssessJobListing
     ? async (id: string) => {
-        const job = inspectedDetail.job?.id === id ? inspectedDetail.job : null;
+        const job =
+          inspectedDetail.job?.id === id ? inspectedDetail.job : null;
         assessedRequest.current = {
           id,
           previousJudgedAt: job?.matchAssessment.judgment?.judgedAt ?? null,
@@ -1302,18 +1301,18 @@ export function DiscoveryScreen(props: {
     // never reads as "Enable sources" while a source is already on.
     const readinessAction: PageStatusAction | null =
       searchReadiness.blocker === "no_search_roles"
-        ? {
-            kind: "link",
-            label: "Add target roles",
-            to: JOB_FINDER_ROUTE_PATHS.profileTargetRoles,
-          }
-        : searchReadiness.blocker === "no_enabled_sources"
           ? {
               kind: "link",
-              label: savedSourceCount > 0 ? "Enable sources" : "Add sources",
-              to: JOB_FINDER_ROUTE_PATHS.profileSources,
+              label: "Add target roles",
+              to: JOB_FINDER_ROUTE_PATHS.profileTargetRoles,
             }
-          : null;
+          : searchReadiness.blocker === "no_enabled_sources"
+            ? {
+                kind: "link",
+                label: savedSourceCount > 0 ? "Enable sources" : "Add sources",
+                to: JOB_FINDER_ROUTE_PATHS.profileSources,
+              }
+            : null;
     discoveryStatusItems.push({
       id: "search-readiness",
       tone: "warning",
@@ -1583,9 +1582,7 @@ export function DiscoveryScreen(props: {
             <section className="surface-panel-shell p-6" aria-live="polite">
               <h2>{inspectedJob?.title}</h2>
               {/* "Loading" shows only if the read takes longer than a blink. */}
-              <p
-                className={inspectedDetail.error ? undefined : "delayed-appear"}
-              >
+              <p className={inspectedDetail.error ? undefined : "delayed-appear"}>
                 {inspectedDetail.error ?? "Loading job details…"}
               </p>
               {inspectedDetail.error ? (

@@ -36,9 +36,7 @@ const REVIEW_QUEUE_ITEM = {
     approvedFilePath: "/tmp/ready-resume.pdf",
   },
   updatedAt: "2026-03-20T10:04:00.000Z",
-} satisfies NonNullable<
-  JobFinderRendererWorkspaceSnapshot["reviewQueue"][number]
->;
+} satisfies NonNullable<JobFinderRendererWorkspaceSnapshot["reviewQueue"][number]>;
 
 function createWorkspace(
   overrides: Partial<

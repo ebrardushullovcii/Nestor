@@ -1,5 +1,5 @@
-import { AppProviders } from "./providers";
+import { AppProviders } from './providers'
 
 export function App() {
-  return <AppProviders />;
+  return <AppProviders />
 }

@@ -23,68 +23,55 @@ export function createTestBundle(input: {
     createdAt: "2026-04-10T00:00:00.000Z",
     warnings: [],
     languageHints: [],
-    pages: input.pages ?? [
-      {
-        pageNumber: 1,
-        text: input.fullText,
-        charCount: input.fullText.length,
-        parserKinds: input.parserKinds ?? [
-          input.primaryParserKind ?? "pdfjs_text",
-        ],
-        usedOcr: false,
-        routeKind: input.routeKind ?? "native_first",
-        quality: {
-          score: input.qualityScore ?? 0.92,
-          textDensity: 0.9,
-          tokenCount: input.fullText.split(/\s+/).filter(Boolean).length,
-          lineCount: input.fullText.split(/\r?\n/).filter(Boolean).length,
-          blockCount:
-            input.blocks?.length ??
-            input.fullText.split(/\r?\n/).filter(Boolean).length,
-          columnLikelihood: 0.08,
-          readingOrderConfidence: 0.95,
-          nativeTextCoverage: 1,
-          ocrConfidence: null,
-          imageCoverageRatio: 0.04,
-          invalidUnicodeRatio: 0,
+    pages:
+      input.pages ??
+      [
+        {
+          pageNumber: 1,
+          text: input.fullText,
+          charCount: input.fullText.length,
+          parserKinds: input.parserKinds ?? [input.primaryParserKind ?? "pdfjs_text"],
+          usedOcr: false,
+          routeKind: input.routeKind ?? "native_first",
+          quality: {
+            score: input.qualityScore ?? 0.92,
+            textDensity: 0.9,
+            tokenCount: input.fullText.split(/\s+/).filter(Boolean).length,
+            lineCount: input.fullText.split(/\r?\n/).filter(Boolean).length,
+            blockCount: input.blocks?.length ?? input.fullText.split(/\r?\n/).filter(Boolean).length,
+            columnLikelihood: 0.08,
+            readingOrderConfidence: 0.95,
+            nativeTextCoverage: 1,
+            ocrConfidence: null,
+            imageCoverageRatio: 0.04,
+            invalidUnicodeRatio: 0,
+          },
+          qualityWarnings: [],
         },
-        qualityWarnings: [],
-      },
-    ],
+      ],
     blocks:
       input.blocks ??
-      input.fullText
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((text, index) => ({
-          id: `page_1_block_${index + 1}`,
-          pageNumber: 1,
-          readingOrder: index,
-          text,
-          kind: index === 0 ? "heading" : "paragraph",
-          sectionHint: index === 0 ? "identity" : "other",
-          bbox: null,
-          sourceParserKinds: input.parserKinds ?? [
-            input.primaryParserKind ?? "pdfjs_text",
-          ],
-          sourceConfidence: 0.9,
-          parserLineage: input.parserKinds ?? [
-            input.primaryParserKind ?? "pdfjs_text",
-          ],
-          readingOrderConfidence: 0.94,
-          lineIds: [`line_${index + 1}`],
-          textSpan: null,
-        })),
+      input.fullText.split(/\r?\n/).filter(Boolean).map((text, index) => ({
+        id: `page_1_block_${index + 1}`,
+        pageNumber: 1,
+        readingOrder: index,
+        text,
+        kind: index === 0 ? "heading" : "paragraph",
+        sectionHint: index === 0 ? "identity" : "other",
+        bbox: null,
+        sourceParserKinds: input.parserKinds ?? [input.primaryParserKind ?? "pdfjs_text"],
+        sourceConfidence: 0.9,
+        parserLineage: input.parserKinds ?? [input.primaryParserKind ?? "pdfjs_text"],
+        readingOrderConfidence: 0.94,
+        lineIds: [`line_${index + 1}`],
+        textSpan: null,
+      })),
     fullText: input.fullText,
     route: {
       routeKind: input.routeKind ?? "native_first",
       triageReasons: ["test_fixture"],
-      preferredExecutors: input.parserKinds ?? [
-        input.primaryParserKind ?? "pdfjs_text",
-      ],
-      usedExecutors: input.parserKinds ?? [
-        input.primaryParserKind ?? "pdfjs_text",
-      ],
+      preferredExecutors: input.parserKinds ?? [input.primaryParserKind ?? "pdfjs_text"],
+      usedExecutors: input.parserKinds ?? [input.primaryParserKind ?? "pdfjs_text"],
     },
     parserManifest: {
       workerKind: "embedded_node",
@@ -101,9 +88,7 @@ export function createTestBundle(input: {
       textDensity: 0.9,
       tokenCount: input.fullText.split(/\s+/).filter(Boolean).length,
       lineCount: input.fullText.split(/\r?\n/).filter(Boolean).length,
-      blockCount:
-        input.blocks?.length ??
-        input.fullText.split(/\r?\n/).filter(Boolean).length,
+      blockCount: input.blocks?.length ?? input.fullText.split(/\r?\n/).filter(Boolean).length,
       columnLikelihood: 0.08,
       readingOrderConfidence: 0.95,
       nativeTextCoverage: 1,
@@ -121,14 +106,9 @@ export function createStageCandidate(input: {
   value: ResumeImportFieldCandidate["value"];
   sourceBlockIds?: string[];
   confidence?: number;
-  recommendation?: NonNullable<
-    ResumeImportFieldCandidate["confidenceBreakdown"]
-  >["recommendation"];
+  recommendation?: NonNullable<ResumeImportFieldCandidate["confidenceBreakdown"]>["recommendation"];
   overall?: number;
-}): Omit<
-  ResumeImportFieldCandidate,
-  "id" | "runId" | "sourceKind" | "resolution" | "createdAt" | "resolvedAt"
-> {
+}): Omit<ResumeImportFieldCandidate, "id" | "runId" | "sourceKind" | "resolution" | "createdAt" | "resolvedAt"> {
   const fieldSensitivity =
     input.target.section === "experience"
       ? "high"
@@ -141,14 +121,8 @@ export function createStageCandidate(input: {
     label: input.label,
     value: input.value,
     normalizedValue: null,
-    valuePreview:
-      typeof input.value === "string"
-        ? input.value
-        : JSON.stringify(input.value),
-    evidenceText:
-      typeof input.value === "string"
-        ? input.value
-        : JSON.stringify(input.value),
+    valuePreview: typeof input.value === "string" ? input.value : JSON.stringify(input.value),
+    evidenceText: typeof input.value === "string" ? input.value : JSON.stringify(input.value),
     sourceBlockIds: input.sourceBlockIds ?? [],
     confidence: input.confidence ?? 0.82,
     confidenceBreakdown: {

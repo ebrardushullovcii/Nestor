@@ -383,9 +383,7 @@ export function useProfileScreenForms(input: {
   // and searchPreferences with a new object identity even when nothing in
   // them changed; content fingerprints, not identity, decide when a form may
   // be reseeded so unrelated commits cannot erase dirty drafts.
-  const loadedProfileContentFingerprintRef = useRef(
-    initialFingerprints.profile,
-  );
+  const loadedProfileContentFingerprintRef = useRef(initialFingerprints.profile);
   const loadedReviewCandidatesContentFingerprintRef = useRef(
     initialFingerprints.reviewCandidates,
   );
@@ -863,10 +861,7 @@ export function useProfileScreenForms(input: {
     const draftPreferencesValues = preferencesForm.getValues();
     const isSavedPreferencesDraftEcho =
       preferencesForm.formState.isDirty &&
-      [
-        latestSearchPreferencesRef.current,
-        pendingCanonicalSearchPreferencesRef.current,
-      ]
+      [latestSearchPreferencesRef.current, pendingCanonicalSearchPreferencesRef.current]
         .map(
           (preferences) =>
             buildSearchPreferencesPayload(preferences, draftPreferencesValues)

@@ -1,20 +1,13 @@
-<!doctype html>
+<!DOCTYPE html>
 
-<html class="dark" lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>NESTOR | SESSION_BLOCKED</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
-      rel="stylesheet"
-    />
-    <script id="tailwind-config">
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NESTOR | SESSION_BLOCKED</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
         theme: {
@@ -31,11 +24,11 @@
               "tertiary-dim": "#c2def0",
               "surface-tint": "#c6c6c7",
               "secondary-container": "#3a3c3c",
-              outline: "#767575",
+              "outline": "#767575",
               "on-tertiary-fixed-variant": "#486372",
-              surface: "#0e0e0e",
+              "surface": "#0e0e0e",
               "outline-variant": "#484848",
-              secondary: "#9e9e9e",
+              "secondary": "#9e9e9e",
               "on-error": "#490106",
               "surface-bright": "#2b2c2c",
               "tertiary-fixed-dim": "#c2def0",
@@ -44,13 +37,13 @@
               "surface-container-lowest": "#000000",
               "inverse-primary": "#5e5f60",
               "surface-container": "#191a1a",
-              tertiary: "#eff8ff",
+              "tertiary": "#eff8ff",
               "on-surface": "#e7e5e5",
               "inverse-on-surface": "#565555",
               "surface-dim": "#0e0e0e",
-              background: "#0e0e0e",
+              "background": "#0e0e0e",
               "tertiary-container": "#d0ecff",
-              primary: "#c6c6c7",
+              "primary": "#c6c6c7",
               "inverse-surface": "#fcf9f8",
               "secondary-fixed-dim": "#d5d4d4",
               "on-error-container": "#ff9993",
@@ -67,329 +60,173 @@
               "on-primary-fixed-variant": "#5a5c5c",
               "secondary-dim": "#9e9e9e",
               "primary-fixed-dim": "#d4d4d4",
-              error: "#ee7d77",
+              "error": "#ee7d77",
               "on-secondary-fixed": "#3e3f40",
               "surface-container-highest": "#252626",
-              "on-primary": "#3f4041",
+              "on-primary": "#3f4041"
             },
             fontFamily: {
-              headline: ["Space Grotesk"],
-              body: ["Inter"],
-              label: ["Inter"],
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Inter"]
             },
-            borderRadius: {
-              DEFAULT: "0.25rem",
-              lg: "0.5rem",
-              xl: "0.75rem",
-              full: "9999px",
-            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
           },
         },
-      };
+      }
     </script>
-    <style>
+<style>
       .material-symbols-outlined {
-        font-variation-settings:
-          "FILL" 0,
-          "wght" 400,
-          "GRAD" 0,
-          "opsz" 24;
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
       }
-      ::-webkit-scrollbar {
-        width: 4px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #0e0e0e;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #484848;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #c6c6c7;
-      }
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: #0e0e0e; }
+      ::-webkit-scrollbar-thumb { background: #484848; }
+      ::-webkit-scrollbar-thumb:hover { background: #c6c6c7; }
       .terminal-glow {
-        text-shadow: 0 0 8px rgba(238, 125, 119, 0.4);
+          text-shadow: 0 0 8px rgba(238, 125, 119, 0.4);
       }
       .scanline {
-        background: linear-gradient(
-          to bottom,
-          transparent 50%,
-          rgba(255, 255, 255, 0.02) 50%
-        );
-        background-size: 100% 4px;
+          background: linear-gradient(to bottom, transparent 50%, rgba(255,255,255,0.02) 50%);
+          background-size: 100% 4px;
       }
     </style>
-  </head>
-  <body
-    class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary overflow-hidden"
-  >
-    <!-- Top Navigation Bar -->
-    <nav
-      class="fixed top-0 z-50 w-full h-14 bg-[#0e0e0e] flex justify-between items-center px-6 border-b border-[#484848]/20"
-    >
-      <div class="flex items-center gap-8">
-        <span
-          class="text-xl font-black text-[#c6c6c7] tracking-tighter font-headline"
-          >NESTOR</span
-        >
-        <div class="hidden md:flex gap-6">
-          <span
-            class="text-[#c6c6c7] border-b border-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold cursor-default"
-            >SESSION_ACTIVE</span
-          >
-          <span
-            class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1"
-            >PROXY_LHR_01</span
-          >
-          <span
-            class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1"
-            >BROWSER_SYNCED</span
-          >
-        </div>
-      </div>
-      <div class="flex items-center gap-4">
-        <span
-          class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1"
-          >notifications</span
-        >
-        <span
-          class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1"
-          >terminal</span
-        >
-        <div
-          class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 flex items-center justify-center"
-        >
-          <img
-            alt="OPERATOR_AVATAR"
-            class="w-full h-full object-cover"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ39vfrySZWB_iqXxYbinuBv0h0ImiBZaMqHmaIHgE-pC2tpWJQCifd9FxRrciwagppdf8Vg5eiU3FVB0mbR9IqFSvfgM0-e78KnaRks8s_d80dYbxZm58AzUQgpQl3ZBwV7xX1MKGpGvlwhAJBmicQ7wriJ3kJu9ID-R1l7yAub7iNiLVDkPltnGmliJs8Dx1z6ORGROq9yMHnSd8hbih1y8fF5b4o-paqmzQq3hYIGznVJpKjiNn3DVgbS_Aj0x930GNYWK5xq0-"
-          />
-        </div>
-      </div>
-    </nav>
-    <!-- Side Navigation Bar -->
-    <aside
-      class="fixed left-0 top-0 h-screen w-64 bg-[#131313] flex flex-col border-r border-[#484848]/20 z-40 pt-14"
-    >
-      <div class="p-6 border-b border-[#484848]/20">
-        <div class="flex items-center gap-3 mb-2">
-          <div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
-          <span
-            class="font-headline font-medium text-[11px] tracking-widest text-primary"
-            >NESTOR_OPS</span
-          >
-        </div>
-        <span class="font-mono text-[9px] text-outline tracking-tight"
-          >STATUS: COMMAND_READY</span
-        >
-      </div>
-      <nav class="flex-1 py-4 overflow-y-auto">
-        <a
-          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">grid_view</span>
-          DASHBOARD
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary overflow-hidden">
+<!-- Top Navigation Bar -->
+<nav class="fixed top-0 z-50 w-full h-14 bg-[#0e0e0e] flex justify-between items-center px-6 border-b border-[#484848]/20">
+<div class="flex items-center gap-8">
+<span class="text-xl font-black text-[#c6c6c7] tracking-tighter font-headline">NESTOR</span>
+<div class="hidden md:flex gap-6">
+<span class="text-[#c6c6c7] border-b border-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold cursor-default">SESSION_ACTIVE</span>
+<span class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1">PROXY_LHR_01</span>
+<span class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1">BROWSER_SYNCED</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1">notifications</span>
+<span class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1">terminal</span>
+<div class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 flex items-center justify-center">
+<img alt="OPERATOR_AVATAR" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ39vfrySZWB_iqXxYbinuBv0h0ImiBZaMqHmaIHgE-pC2tpWJQCifd9FxRrciwagppdf8Vg5eiU3FVB0mbR9IqFSvfgM0-e78KnaRks8s_d80dYbxZm58AzUQgpQl3ZBwV7xX1MKGpGvlwhAJBmicQ7wriJ3kJu9ID-R1l7yAub7iNiLVDkPltnGmliJs8Dx1z6ORGROq9yMHnSd8hbih1y8fF5b4o-paqmzQq3hYIGznVJpKjiNn3DVgbS_Aj0x930GNYWK5xq0-"/>
+</div>
+</div>
+</nav>
+<!-- Side Navigation Bar -->
+<aside class="fixed left-0 top-0 h-screen w-64 bg-[#131313] flex flex-col border-r border-[#484848]/20 z-40 pt-14">
+<div class="p-6 border-b border-[#484848]/20">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
+<span class="font-headline font-medium text-[11px] tracking-widest text-primary">NESTOR_OPS</span>
+</div>
+<span class="font-mono text-[9px] text-outline tracking-tight">STATUS: COMMAND_READY</span>
+</div>
+<nav class="flex-1 py-4 overflow-y-auto">
+<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">grid_view</span> DASHBOARD
         </a>
-        <a
-          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">account_circle</span>
-          PROFILE
+<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">account_circle</span> PROFILE
         </a>
-        <a
-          class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">explore</span>
-          DISCOVERY
+<a class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">explore</span> DISCOVERY
         </a>
-        <a
-          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">fact_check</span>
-          REVIEW_QUEUE
+<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">fact_check</span> REVIEW_QUEUE
         </a>
-        <a
-          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">description</span>
-          APPLICATIONS
+<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">description</span> APPLICATIONS
         </a>
-        <a
-          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-sm">settings</span>
-          SETTINGS
+<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-sm">settings</span> SETTINGS
         </a>
-      </nav>
-      <div class="p-4 border-t border-[#484848]/20">
-        <button
-          class="w-full bg-primary text-on-primary py-3 font-headline font-bold text-[11px] tracking-widest uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
-        >
-          <span class="material-symbols-outlined text-sm">add</span> NEW_SEARCH
+</nav>
+<div class="p-4 border-t border-[#484848]/20">
+<button class="w-full bg-primary text-on-primary py-3 font-headline font-bold text-[11px] tracking-widest uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-sm">add</span> NEW_SEARCH
         </button>
-      </div>
-    </aside>
-    <!-- Main Workspace Area -->
-    <main
-      class="ml-64 pt-14 pb-8 min-h-screen relative bg-surface overflow-hidden"
-    >
-      <!-- Blurred Background Content Mock -->
-      <div
-        class="absolute inset-0 p-8 opacity-20 pointer-events-none filter blur-sm flex gap-6"
-      >
-        <div
-          class="w-72 bg-surface-container-low border border-outline-variant/10 h-full"
-        ></div>
-        <div class="flex-1 flex flex-col gap-4">
-          <div
-            class="h-14 bg-surface-container border border-outline-variant/10"
-          ></div>
-          <div
-            class="flex-1 bg-surface-container border border-outline-variant/10"
-          ></div>
-        </div>
-        <div
-          class="w-[450px] bg-surface-container border border-outline-variant/10 h-full"
-        ></div>
-      </div>
-      <!-- Blocking Overlay (Embedded State) -->
-      <div
-        class="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-[2px] z-30 scanline"
-      >
-        <div class="max-w-xl w-full mx-4">
-          <!-- Tactical Gate Panel -->
-          <div
-            class="bg-surface-container-low border border-outline-variant relative shadow-2xl shadow-black/50"
-          >
-            <!-- Corner Accents -->
-            <div
-              class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-error"
-            ></div>
-            <div
-              class="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-error"
-            ></div>
-            <div
-              class="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-error"
-            ></div>
-            <div
-              class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-error"
-            ></div>
-            <!-- Header -->
-            <div
-              class="p-6 border-b border-outline-variant/30 flex items-center justify-between"
-            >
-              <div class="flex items-center gap-4">
-                <span
-                  class="material-symbols-outlined text-error text-4xl terminal-glow"
-                  style="font-variation-settings: &quot;FILL&quot; 1"
-                  >lock_person</span
-                >
-                <div>
-                  <h1
-                    class="font-headline text-2xl font-bold tracking-tighter text-on-background uppercase"
-                  >
-                    SESSION_BLOCKED
-                  </h1>
-                  <p
-                    class="font-headline text-[10px] tracking-[0.2em] text-error font-semibold"
-                  >
-                    AUTH_REQUIRED // LINKEDIN_CORE
-                  </p>
-                </div>
-              </div>
-              <div class="text-right">
-                <span
-                  class="text-[10px] font-headline text-outline tracking-widest"
-                  >ERR_CODE: 0x401_UNAUTHORIZED</span
-                >
-              </div>
-            </div>
-            <!-- Content -->
-            <div class="p-8 space-y-6">
-              <div
-                class="bg-surface-container-lowest p-4 border-l-2 border-error/50"
-              >
-                <p
-                  class="text-on-surface text-sm font-medium leading-relaxed font-body"
-                >
-                  The active job discovery session has been suspended because a
-                  valid browser cookie could not be detected. Re-authentication
-                  is required to resume automated extraction.
-                </p>
-              </div>
-              <div class="grid grid-cols-1 gap-4">
-                <div
-                  class="flex items-center gap-3 text-outline text-[10px] font-headline tracking-widest bg-surface-container-high p-3"
-                >
-                  <span class="material-symbols-outlined text-sm">info</span>
-                  LAST_SUCCESSFUL_HANDSHAKE: 14:02:44 UTC
-                </div>
-                <div
-                  class="flex items-center gap-3 text-outline text-[10px] font-headline tracking-widest bg-surface-container-high p-3"
-                >
-                  <span class="material-symbols-outlined text-sm">history</span>
-                  RECOVERY_ATTEMPTS_EXHAUSTED: 3/3
-                </div>
-              </div>
-              <!-- Actions -->
-              <div class="flex flex-col gap-3 pt-4">
-                <button
-                  class="w-full bg-primary text-on-primary py-4 font-headline font-bold uppercase tracking-widest text-sm hover:brightness-110 active:scale-[0.98] transition-all"
-                >
-                  [RE-AUTHENTICATE_NOW]
-                </button>
-                <button
-                  class="w-full border border-outline text-on-background py-3 font-headline font-medium uppercase tracking-widest text-xs hover:bg-surface-container-high transition-all"
-                >
-                  [CONTINUE_TO_PROFILE_ONLY]
-                </button>
-              </div>
-            </div>
-            <!-- Footer Decal -->
-            <div
-              class="bg-surface-container-highest px-6 py-2 border-t border-outline-variant/30 flex justify-between items-center"
-            >
-              <span
-                class="text-[8px] font-headline text-outline-variant tracking-tighter"
-                >SEC_PROTOCOL_V4.9</span
-              >
-              <div class="flex gap-2">
-                <div class="w-1 h-1 bg-error rounded-full animate-pulse"></div>
-                <div class="w-1 h-1 bg-outline-variant rounded-full"></div>
-                <div class="w-1 h-1 bg-outline-variant rounded-full"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
-    <!-- Global Footer -->
-    <footer
-      class="fixed bottom-0 left-0 w-full h-8 bg-[#000000] flex justify-between items-center px-4 border-t border-[#484848]/30 z-50"
-    >
-      <span class="text-[#eff8ff] font-mono text-[9px] tracking-widest"
-        >v1.0.4_STABLE</span
-      >
-      <div class="flex gap-6">
-        <span
-          class="text-[#eff8ff] animate-pulse font-mono text-[9px] tracking-widest cursor-default"
-          >LOG_STREAM</span
-        >
-        <span
-          class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default"
-          >LATENCY:14ms</span
-        >
-        <span
-          class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default"
-          >MEM:42%</span
-        >
-      </div>
-    </footer>
-  </body>
-</html>
+</div>
+</aside>
+<!-- Main Workspace Area -->
+<main class="ml-64 pt-14 pb-8 min-h-screen relative bg-surface overflow-hidden">
+<!-- Blurred Background Content Mock -->
+<div class="absolute inset-0 p-8 opacity-20 pointer-events-none filter blur-sm flex gap-6">
+<div class="w-72 bg-surface-container-low border border-outline-variant/10 h-full"></div>
+<div class="flex-1 flex flex-col gap-4">
+<div class="h-14 bg-surface-container border border-outline-variant/10"></div>
+<div class="flex-1 bg-surface-container border border-outline-variant/10"></div>
+</div>
+<div class="w-[450px] bg-surface-container border border-outline-variant/10 h-full"></div>
+</div>
+<!-- Blocking Overlay (Embedded State) -->
+<div class="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-[2px] z-30 scanline">
+<div class="max-w-xl w-full mx-4">
+<!-- Tactical Gate Panel -->
+<div class="bg-surface-container-low border border-outline-variant relative shadow-2xl shadow-black/50">
+<!-- Corner Accents -->
+<div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-error"></div>
+<div class="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-error"></div>
+<div class="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-error"></div>
+<div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-error"></div>
+<!-- Header -->
+<div class="p-6 border-b border-outline-variant/30 flex items-center justify-between">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-error text-4xl terminal-glow" style="font-variation-settings: 'FILL' 1;">lock_person</span>
+<div>
+<h1 class="font-headline text-2xl font-bold tracking-tighter text-on-background uppercase">SESSION_BLOCKED</h1>
+<p class="font-headline text-[10px] tracking-[0.2em] text-error font-semibold">AUTH_REQUIRED // LINKEDIN_CORE</p>
+</div>
+</div>
+<div class="text-right">
+<span class="text-[10px] font-headline text-outline tracking-widest">ERR_CODE: 0x401_UNAUTHORIZED</span>
+</div>
+</div>
+<!-- Content -->
+<div class="p-8 space-y-6">
+<div class="bg-surface-container-lowest p-4 border-l-2 border-error/50">
+<p class="text-on-surface text-sm font-medium leading-relaxed font-body">
+                            The active job discovery session has been suspended because a valid browser cookie could not be detected. Re-authentication is required to resume automated extraction.
+                        </p>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<div class="flex items-center gap-3 text-outline text-[10px] font-headline tracking-widest bg-surface-container-high p-3">
+<span class="material-symbols-outlined text-sm">info</span>
+                            LAST_SUCCESSFUL_HANDSHAKE: 14:02:44 UTC
+                        </div>
+<div class="flex items-center gap-3 text-outline text-[10px] font-headline tracking-widest bg-surface-container-high p-3">
+<span class="material-symbols-outlined text-sm">history</span>
+                            RECOVERY_ATTEMPTS_EXHAUSTED: 3/3
+                        </div>
+</div>
+<!-- Actions -->
+<div class="flex flex-col gap-3 pt-4">
+<button class="w-full bg-primary text-on-primary py-4 font-headline font-bold uppercase tracking-widest text-sm hover:brightness-110 active:scale-[0.98] transition-all">
+                            [RE-AUTHENTICATE_NOW]
+                        </button>
+<button class="w-full border border-outline text-on-background py-3 font-headline font-medium uppercase tracking-widest text-xs hover:bg-surface-container-high transition-all">
+                            [CONTINUE_TO_PROFILE_ONLY]
+                        </button>
+</div>
+</div>
+<!-- Footer Decal -->
+<div class="bg-surface-container-highest px-6 py-2 border-t border-outline-variant/30 flex justify-between items-center">
+<span class="text-[8px] font-headline text-outline-variant tracking-tighter">SEC_PROTOCOL_V4.9</span>
+<div class="flex gap-2">
+<div class="w-1 h-1 bg-error rounded-full animate-pulse"></div>
+<div class="w-1 h-1 bg-outline-variant rounded-full"></div>
+<div class="w-1 h-1 bg-outline-variant rounded-full"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Global Footer -->
+<footer class="fixed bottom-0 left-0 w-full h-8 bg-[#000000] flex justify-between items-center px-4 border-t border-[#484848]/30 z-50">
+<span class="text-[#eff8ff] font-mono text-[9px] tracking-widest">v1.0.4_STABLE</span>
+<div class="flex gap-6">
+<span class="text-[#eff8ff] animate-pulse font-mono text-[9px] tracking-widest cursor-default">LOG_STREAM</span>
+<span class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default">LATENCY:14ms</span>
+<span class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default">MEM:42%</span>
+</div>
+</footer>
+</body></html>

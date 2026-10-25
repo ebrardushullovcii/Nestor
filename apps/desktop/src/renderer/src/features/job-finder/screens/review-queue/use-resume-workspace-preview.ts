@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { JobFinderResumePreview, ResumeDraft } from "@nestor/contracts";
+import type {
+  JobFinderResumePreview,
+  ResumeDraft,
+} from "@nestor/contracts";
 import { cloneDraft } from "./resume-workspace-utils";
 import { getPreviewErrorMessage } from "./resume-workspace-screen-helpers";
 

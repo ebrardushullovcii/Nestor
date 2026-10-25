@@ -222,8 +222,7 @@ describe("AI provider rate limits", () => {
 });
 
 test("a request the service never finished answering counts as busy, not failed", async () => {
-  const { ModelRequestTimeoutError } =
-    await import("./model-request-transport");
+  const { ModelRequestTimeoutError } = await import("./model-request-transport");
   const { isAiServiceBusy } = await import("./ai-provider-access-failure");
   const wrapped = new Error("The AI could not write this resume in time.", {
     cause: new ModelRequestTimeoutError("total", 300_000),

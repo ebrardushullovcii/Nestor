@@ -8,11 +8,7 @@ import {
   DiscoveryRunRecordSchema,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
-import {
-  cleanupTempDirectoryWithRetry,
-  createSavedJob,
-  createTempRepository,
-} from "./file-repository.test-support";
+import { cleanupTempDirectoryWithRetry, createSavedJob, createTempRepository } from "./file-repository.test-support";
 import { createDiscoveryStorage } from "./internal/discovery-storage";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import { createSeed } from "./test-fixtures";
@@ -37,12 +33,7 @@ function checkpoint(revision: number) {
     currentUrl: "https://example.test/jobs/1",
     lastStableUrl: "https://example.test/jobs/1",
     stepCount: revision,
-    collectedJobs: [
-      createSavedJob({
-        id: "checkpoint_private",
-        description: "synthetic checkpoint body ".repeat(400),
-      }),
-    ],
+    collectedJobs: [createSavedJob({ id: "checkpoint_private", description: "synthetic checkpoint body ".repeat(400) })],
     visitedUrls: ["https://example.test/jobs/1"],
     phaseEvidence: {},
   });
@@ -55,14 +46,7 @@ function run(id: string, revision: number) {
     scope: "run_all",
     startedAt: "2026-10-13T10:00:00.000Z",
     targetIds: ["synthetic_target"],
-    targetExecutions: [
-      {
-        targetId: "synthetic_target",
-        adapterKind: "auto",
-        state: "running",
-        agentCheckpoint: checkpoint(revision),
-      },
-    ],
+    targetExecutions: [{ targetId: "synthetic_target", adapterKind: "auto", state: "running", agentCheckpoint: checkpoint(revision) }],
     activity: [],
     summary: { targetsPlanned: 1, outcome: "running" },
   });
@@ -207,12 +191,7 @@ describe("normalized discovery storage", () => {
     const temp = await createTempRepository("nestor-ledger-batch-");
     try {
       const repo = await temp.createRepository();
-      await repo.commitDiscoveryStateUpdate((current) => ({
-        ...current,
-        discoveryLedger: Array.from({ length: 3000 }, (_, index) =>
-          ledger(`batch_${index}`),
-        ),
-      }));
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, discoveryLedger: Array.from({ length: 3000 }, (_, index) => ledger(`batch_${index}`)) }));
       await repo.close();
       const raw = new DatabaseSync(temp.filePath);
       try {
@@ -222,39 +201,19 @@ describe("normalized discovery storage", () => {
         const prepare = raw.prepare.bind(raw);
         const spy = vi.spyOn(raw, "prepare").mockImplementation((sql) => {
           const stmt = prepare(sql);
-          if (
-            sql.startsWith("SELECT id, position FROM discovery_ledger WHERE")
-          ) {
+          if (sql.startsWith("SELECT id, position FROM discovery_ledger WHERE")) {
             const all = stmt.all.bind(stmt);
-            vi.spyOn(stmt, "all").mockImplementation((...args) => {
-              calls.rankReads++;
-              return all(...args);
-            });
+            vi.spyOn(stmt, "all").mockImplementation((...args) => { calls.rankReads++; return all(...args); });
           }
           if (sql.startsWith("INSERT INTO discovery_ledger_observations")) {
             const run = stmt.run.bind(stmt);
-            vi.spyOn(stmt, "run").mockImplementation((...args) => {
-              calls.rowWrites++;
-              return run(...args);
-            });
+            vi.spyOn(stmt, "run").mockImplementation((...args) => { calls.rowWrites++; return run(...args); });
           }
           return stmt;
         });
-        const next = patchDiscoveryLedger(
-          before.discoveryLedger,
-          Array.from({ length: 500 }, (_, index) => ({
-            id: `batch_${index}`,
-            update: (row) => ({
-              ...row!,
-              lastSeenAt: "2026-10-24T00:00:00.000Z",
-            }),
-          })),
-        );
+        const next = patchDiscoveryLedger(before.discoveryLedger, Array.from({ length: 500 }, (_, index) => ({ id: `batch_${index}`, update: (row) => ({ ...row!, lastSeenAt: "2026-10-24T00:00:00.000Z" }) })));
         raw.exec("BEGIN IMMEDIATE");
-        const stored = storage.update(
-          { ...before, discoveryLedger: next },
-          before,
-        );
+        const stored = storage.update({ ...before, discoveryLedger: next }, before);
         raw.exec("COMMIT");
         storage.publish(stored);
         expect(calls.rankReads).toBe(1);
@@ -263,20 +222,10 @@ describe("normalized discovery storage", () => {
         expect(storage.read().discoveryLedger).toEqual(next);
         spy.mockRestore();
         const reopened = new DatabaseSync(temp.filePath);
-        try {
-          expect(
-            createDiscoveryStorage(reopened, createSeed().discovery).read()
-              .discoveryLedger,
-          ).toEqual(next);
-        } finally {
-          reopened.close();
-        }
-      } finally {
-        raw.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+        try { expect(createDiscoveryStorage(reopened, createSeed().discovery).read().discoveryLedger).toEqual(next); }
+        finally { reopened.close(); }
+      } finally { raw.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("migration 29 backs up and preserves complete legacy run metadata once", async () => {
@@ -285,74 +234,32 @@ describe("normalized discovery storage", () => {
       const repo = await temp.createRepository();
       const legacy = {
         ...run("legacy_progress", 3),
-        summary: {
-          ...run("legacy_progress", 3).summary,
-          jobsPersisted: 7,
-          sourceHealth: [
-            {
-              targetId: "synthetic_target",
-              health: "warning" as const,
-              durationMs: 27,
-              warnings: ["Synthetic warning"],
-            },
-          ],
-        },
+        summary: { ...run("legacy_progress", 3).summary, jobsPersisted: 7, sourceHealth: [{ targetId: "synthetic_target", health: "warning" as const, durationMs: 27, warnings: ["Synthetic warning"] }] },
         activity: [activity("legacy_progress", 1)],
       };
-      await repo.commitDiscoveryStateUpdate((current) => ({
-        ...current,
-        activeRun: legacy,
-        runState: "running",
-      }));
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, activeRun: legacy, runState: "running" }));
       await repo.close();
       const backupPath = `${temp.filePath}.before-discovery-progress.sqlite`;
       await rm(backupPath, { force: true });
       const raw = new DatabaseSync(temp.filePath);
       try {
-        const metadata = Object.fromEntries(
-          Object.entries(legacy).filter(
-            ([key]) => key !== "activity" && key !== "targetExecutions",
-          ),
-        );
-        raw
-          .prepare(
-            "UPDATE discovery_runs SET value = ?, progress = '{}' WHERE id = ?",
-          )
-          .run(JSON.stringify(metadata), legacy.id);
-        raw.exec(
-          "DELETE FROM discovery_run_source_health; DELETE FROM schema_migrations WHERE version = 29",
-        );
-      } finally {
-        raw.close();
-      }
+        const metadata = Object.fromEntries(Object.entries(legacy).filter(([key]) => key !== "activity" && key !== "targetExecutions"));
+        raw.prepare("UPDATE discovery_runs SET value = ?, progress = '{}' WHERE id = ?").run(JSON.stringify(metadata), legacy.id);
+        raw.exec("DELETE FROM discovery_run_source_health; DELETE FROM schema_migrations WHERE version = 29");
+      } finally { raw.close(); }
       const migrated = await temp.createRepository();
       try {
         expect((await migrated.getDiscoveryState()).activeRun).toEqual(legacy);
         const backup = new DatabaseSync(backupPath, { readOnly: true });
         try {
-          expect(
-            backup
-              .prepare("SELECT progress FROM discovery_runs WHERE id = ?")
-              .get(legacy.id)?.progress,
-          ).toBe("{}");
-          expect(
-            backup.prepare("PRAGMA integrity_check").get()?.integrity_check,
-          ).toBe("ok");
-        } finally {
-          backup.close();
-        }
-      } finally {
-        await migrated.close();
-      }
+          expect(backup.prepare("SELECT progress FROM discovery_runs WHERE id = ?").get(legacy.id)?.progress).toBe("{}");
+          expect(backup.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+        } finally { backup.close(); }
+      } finally { await migrated.close(); }
       const again = await temp.createRepository();
-      try {
-        expect((await again.getDiscoveryState()).activeRun).toEqual(legacy);
-      } finally {
-        await again.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+      try { expect((await again.getDiscoveryState()).activeRun).toEqual(legacy); }
+      finally { await again.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("progress updates leave the large run header unchanged and retain recovery and source history", async () => {
@@ -361,30 +268,16 @@ describe("normalized discovery storage", () => {
       const repo = await temp.createRepository();
       const initial = {
         ...run("progress", 1),
-        targetIds: Array.from(
-          { length: 742 },
-          (_, index) => `synthetic_source_${index}`,
-        ),
+        targetIds: Array.from({ length: 742 }, (_, index) => `synthetic_source_${index}`),
         summary: {
           ...run("progress", 1).summary,
-          sourceHealth: Array.from({ length: 742 }, (_, index) => ({
-            targetId: `synthetic_source_${index}`,
-            health: "pending" as const,
-            durationMs: 0,
-            warnings: [],
-          })),
+          sourceHealth: Array.from({ length: 742 }, (_, index) => ({ targetId: `synthetic_source_${index}`, health: "pending" as const, durationMs: 0, warnings: [] })),
         },
       };
-      await repo.commitDiscoveryStateUpdate((current) => ({
-        ...current,
-        activeRun: initial,
-        runState: "running",
-      }));
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, activeRun: initial, runState: "running" }));
       const raw = new DatabaseSync(temp.filePath);
       try {
-        const header = raw
-          .prepare("SELECT value FROM discovery_runs WHERE id = 'progress'")
-          .get()?.value;
+        const header = raw.prepare("SELECT value FROM discovery_runs WHERE id = 'progress'").get()?.value;
         raw.exec(`CREATE TABLE synthetic_run_writes (kind TEXT, bytes INTEGER);
           CREATE TRIGGER synthetic_header AFTER UPDATE OF value ON discovery_runs BEGIN INSERT INTO synthetic_run_writes VALUES ('header', length(NEW.value)); END;
           CREATE TRIGGER synthetic_progress AFTER UPDATE OF progress ON discovery_runs BEGIN INSERT INTO synthetic_run_writes VALUES ('progress', length(NEW.progress)); END;
@@ -394,81 +287,36 @@ describe("normalized discovery storage", () => {
           ...current,
           activeRun: {
             ...current.activeRun!,
-            targetExecutions: [
-              {
-                ...current.activeRun!.targetExecutions[0]!,
-                agentCheckpoint: checkpoint(2),
-              },
-            ],
+            targetExecutions: [{ ...current.activeRun!.targetExecutions[0]!, agentCheckpoint: checkpoint(2) }],
             activity: [activity("progress", 1)],
             summary: {
               ...current.activeRun!.summary,
               jobsPersisted: 1,
-              sourceHealth: current.activeRun!.summary.sourceHealth.map(
-                (value, index) =>
-                  index === 0 ? { ...value, health: "healthy" } : value,
-              ),
+              sourceHealth: current.activeRun!.summary.sourceHealth.map((value, index) => index === 0 ? { ...value, health: "healthy" } : value),
             },
           },
         }));
-        expect(
-          raw
-            .prepare("SELECT value FROM discovery_runs WHERE id = 'progress'")
-            .get()?.value,
-        ).toBe(header);
-        expect(
-          raw
-            .prepare(
-              "SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'header'",
-            )
-            .get()?.n,
-        ).toBe(0);
-        expect(
-          raw
-            .prepare(
-              "SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'health'",
-            )
-            .get()?.n,
-        ).toBe(1);
-        expect(
-          Number(
-            raw
-              .prepare("SELECT SUM(bytes) AS n FROM synthetic_run_writes")
-              .get()?.n,
-          ),
-        ).toBeLessThan(2000);
+        expect(raw.prepare("SELECT value FROM discovery_runs WHERE id = 'progress'").get()?.value).toBe(header);
+        expect(raw.prepare("SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'header'").get()?.n).toBe(0);
+        expect(raw.prepare("SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'health'").get()?.n).toBe(1);
+        expect(Number(raw.prepare("SELECT SUM(bytes) AS n FROM synthetic_run_writes").get()?.n)).toBeLessThan(2000);
         const display = await repo.readDiscoveryDisplayProjection();
         expect(display.activeRun?.summary.jobsPersisted).toBe(1);
-        expect(display.activeRun?.summary.sourceHealth[0]?.health).toBe(
-          "healthy",
-        );
-        expect(display.activeRun?.summary.sourceHealth[1]).toBe(
-          displayBefore.activeRun?.summary.sourceHealth[1],
-        );
+        expect(display.activeRun?.summary.sourceHealth[0]?.health).toBe("healthy");
+        expect(display.activeRun?.summary.sourceHealth[1]).toBe(displayBefore.activeRun?.summary.sourceHealth[1]);
         expect(display.activeRun?.activity).toHaveLength(1);
-      } finally {
-        raw.close();
-        await repo.close();
-      }
+      } finally { raw.close(); await repo.close(); }
       const reopened = await temp.createRepository();
       try {
         const state = await reopened.getDiscoveryState();
         expect(state.activeRun?.targetIds).toEqual(initial.targetIds);
-        expect(
-          state.activeRun?.targetExecutions[0]?.agentCheckpoint?.revision,
-        ).toBe(2);
+        expect(state.activeRun?.targetExecutions[0]?.agentCheckpoint?.revision).toBe(2);
         expect(state.activeRun?.summary.jobsPersisted).toBe(1);
         expect(state.activeRun?.summary.sourceHealth).toHaveLength(742);
-        expect(state.activeRun?.summary.sourceHealth[0]?.health).toBe(
-          "healthy",
-        );
+        expect(state.activeRun?.summary.sourceHealth[0]?.health).toBe("healthy");
         expect(state.activeRun?.activity).toHaveLength(1);
-      } finally {
-        await reopened.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+      } finally { await reopened.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("prunes complete run rows atomically without reporting every retired child as a display edit", async () => {
@@ -476,23 +324,12 @@ describe("normalized discovery storage", () => {
     try {
       const repo = await temp.createRepository();
       try {
-        const old = {
-          ...run("retired", 1),
-          activity: Array.from({ length: 300 }, (_, index) =>
-            activity("retired", index),
-          ),
-        };
-        await repo.commitDiscoveryStateUpdate((current) => ({
-          ...current,
-          recentRuns: [old],
-        }));
+        const old = { ...run("retired", 1), activity: Array.from({ length: 300 }, (_, index) => activity("retired", index)) };
+        await repo.commitDiscoveryStateUpdate((current) => ({ ...current, recentRuns: [old] }));
         const rows = new DatabaseSync(temp.filePath);
         try {
           const storage = createDiscoveryStorage(rows, createSeed().discovery);
-          const readDisplay = createDiscoveryDisplayProjectionReader(
-            rows,
-            createSeed().discovery,
-          );
+          const readDisplay = createDiscoveryDisplayProjectionReader(rows, createSeed().discovery);
           const before = storage.read();
           await readDisplay();
           rows.exec("BEGIN IMMEDIATE");
@@ -504,34 +341,14 @@ describe("normalized discovery storage", () => {
           const after = storage.update({ ...before, recentRuns: [] }, before);
           rows.exec("COMMIT");
           storage.publish(after);
-          expect(
-            rows
-              .prepare(
-                "SELECT COUNT(*) AS n FROM discovery_display_changes WHERE run_id = ?",
-              )
-              .get("retired")?.n,
-          ).toBe(0);
+          expect(rows.prepare("SELECT COUNT(*) AS n FROM discovery_display_changes WHERE run_id = ?").get("retired")?.n).toBe(0);
           expect((await readDisplay()).recentRuns).toEqual([]);
-          for (const table of [
-            "discovery_run_targets",
-            "discovery_run_checkpoints",
-            "discovery_run_activity",
-          ])
-            expect(
-              rows
-                .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE run_id = ?`)
-                .get("retired")?.n,
-            ).toBe(0);
-        } finally {
-          rows.close();
-        }
+          for (const table of ["discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity"])
+            expect(rows.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE run_id = ?`).get("retired")?.n).toBe(0);
+        } finally { rows.close(); }
         expect((await repo.getDiscoveryState()).recentRuns).toEqual([]);
-      } finally {
-        await repo.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+      } finally { await repo.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("pairs saved job, ledger, counters and checkpoint writes and rolls all of them back on failure", async () => {
@@ -544,20 +361,12 @@ describe("normalized discovery storage", () => {
           updateDiscoveryState: (current) => ({
             ...current,
             runState: "running",
-            activeRun: {
-              ...run("paired_run", 1),
-              summary: { ...run("paired_run", 1).summary, jobsPersisted: 1 },
-            },
-            discoveryLedger: [
-              ...current.discoveryLedger,
-              ledger("paired_ledger"),
-            ],
+            activeRun: { ...run("paired_run", 1), summary: { ...run("paired_run", 1).summary, jobsPersisted: 1 } },
+            discoveryLedger: [...current.discoveryLedger, ledger("paired_ledger")],
           }),
         });
         const committed = await repo.getDiscoveryState();
-        expect(
-          committed.activeRun?.targetExecutions[0]?.agentCheckpoint?.revision,
-        ).toBe(1);
+        expect(committed.activeRun?.targetExecutions[0]?.agentCheckpoint?.revision).toBe(1);
         expect(committed.activeRun?.summary.jobsPersisted).toBe(1);
         expect(await repo.listSavedJobsByIds(["paired_job"])).toHaveLength(1);
 
@@ -566,50 +375,24 @@ describe("normalized discovery storage", () => {
           WHEN json_extract(NEW.value, '$.revision') = 2
           BEGIN SELECT RAISE(ABORT, 'synthetic checkpoint failure'); END`);
         failing.close();
-        await expect(
-          repo.commitSavedJobDelta({
-            upserts: [createSavedJob({ id: "rolled_back_job" })],
-            updateDiscoveryState: (current) => ({
-              ...current,
-              activeRun: {
-                ...current.activeRun!,
-                targetExecutions: [
-                  {
-                    ...current.activeRun!.targetExecutions[0]!,
-                    agentCheckpoint: checkpoint(2),
-                  },
-                ],
-              },
-              discoveryLedger: [
-                ...current.discoveryLedger,
-                ledger("rolled_back_ledger"),
-              ],
-              pendingDiscoveryJobs: [],
-            }),
+        await expect(repo.commitSavedJobDelta({
+          upserts: [createSavedJob({ id: "rolled_back_job" })],
+          updateDiscoveryState: (current) => ({
+            ...current,
+            activeRun: { ...current.activeRun!, targetExecutions: [{ ...current.activeRun!.targetExecutions[0]!, agentCheckpoint: checkpoint(2) }] },
+            discoveryLedger: [...current.discoveryLedger, ledger("rolled_back_ledger")],
+            pendingDiscoveryJobs: [],
           }),
-        ).rejects.toThrow();
+        })).rejects.toThrow();
         expect(await repo.getDiscoveryState()).toEqual(committed);
         expect(await repo.listSavedJobsByIds(["rolled_back_job"])).toEqual([]);
-      } finally {
-        await repo.close();
-      }
+      } finally { await repo.close(); }
       const reopened = await temp.createRepository();
       try {
-        expect(
-          (await reopened.getDiscoveryState()).activeRun?.targetExecutions[0]
-            ?.agentCheckpoint?.revision,
-        ).toBe(1);
-        expect(
-          (await reopened.getDiscoveryState()).discoveryLedger.map(
-            (entry) => entry.id,
-          ),
-        ).toContain("paired_ledger");
-      } finally {
-        await reopened.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+        expect((await reopened.getDiscoveryState()).activeRun?.targetExecutions[0]?.agentCheckpoint?.revision).toBe(1);
+        expect((await reopened.getDiscoveryState()).discoveryLedger.map((entry) => entry.id)).toContain("paired_ledger");
+      } finally { await reopened.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("migrates a complete legacy singleton once, retaining history, ledger, pending jobs and checkpoints", async () => {
@@ -627,326 +410,134 @@ describe("normalized discovery storage", () => {
             state: "completed" as const,
             targetExecutions: [
               run("historical_legacy", 2).targetExecutions[0]!,
-              {
-                ...run("historical_legacy", 1).targetExecutions[0]!,
-                agentCheckpoint: checkpoint(4),
-              },
-              {
-                ...run("historical_legacy", 1).targetExecutions[0]!,
-                targetId: "synthetic_target#duplicate_1",
-              },
+              { ...run("historical_legacy", 1).targetExecutions[0]!, agentCheckpoint: checkpoint(4) },
+              { ...run("historical_legacy", 1).targetExecutions[0]!, targetId: "synthetic_target#duplicate_1" },
             ],
           },
           { ...run("historical_legacy", 1), state: "failed" as const },
         ],
-        discoveryLedger: [
-          ledger("legacy_one"),
-          ledger("legacy_two"),
-          { ...ledger("legacy_two"), title: "Duplicate historical sighting" },
-          ledger("legacy_two#duplicate_1"),
-        ],
+        discoveryLedger: [ledger("legacy_one"), ledger("legacy_two"), { ...ledger("legacy_two"), title: "Duplicate historical sighting" }, ledger("legacy_two#duplicate_1")],
         pendingDiscoveryJobs: [createSavedJob({ id: "pending_legacy" })],
       };
       const database = new DatabaseSync(temp.filePath);
       try {
         database.exec("BEGIN IMMEDIATE");
-        database
-          .prepare("DELETE FROM schema_migrations WHERE version = 20")
-          .run();
-        for (const table of [
-          "discovery_run_checkpoints",
-          "discovery_run_activity",
-          "discovery_run_targets",
-          "discovery_runs",
-          "discovery_ledger",
-          "discovery_pending_jobs",
-        ])
-          database.exec(`DELETE FROM ${table}`);
-        database
-          .prepare(
-            "UPDATE singleton_state SET value = ?, revision = revision + 1 WHERE key = 'discovery_state'",
-          )
-          .run(JSON.stringify(legacy));
+        database.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+        for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets", "discovery_runs", "discovery_ledger", "discovery_pending_jobs"]) database.exec(`DELETE FROM ${table}`);
+        database.prepare("UPDATE singleton_state SET value = ?, revision = revision + 1 WHERE key = 'discovery_state'").run(JSON.stringify(legacy));
         database.exec("COMMIT");
-      } finally {
-        database.close();
-      }
+      } finally { database.close(); }
       const migrated = await temp.createRepository();
       try {
         expect(await migrated.getDiscoveryState()).toEqual(legacy);
-        await migrated.commitDiscoveryStateUpdate((current) => ({
-          ...current,
-          runState: "completed",
-        }));
-        expect(
-          (
-            await migrated.getDiscoveryState()
-          ).recentRuns[0]?.targetExecutions.map(
-            (target) => target.agentCheckpoint?.revision,
-          ),
-        ).toEqual([2, 4, 1]);
-        expect(
-          (await migrated.readDiscoveryDisplayProjection()).activeRun
-            ?.targetExecutions[0]?.agentCheckpoint,
-        ).toBeNull();
+        await migrated.commitDiscoveryStateUpdate((current) => ({ ...current, runState: "completed" }));
+        expect((await migrated.getDiscoveryState()).recentRuns[0]?.targetExecutions.map((target) => target.agentCheckpoint?.revision)).toEqual([2, 4, 1]);
+        expect((await migrated.readDiscoveryDisplayProjection()).activeRun?.targetExecutions[0]?.agentCheckpoint).toBeNull();
         const beforeExternal = await migrated.readDiscoveryDisplayProjection();
         const external = new DatabaseSync(temp.filePath);
         try {
-          external
-            .prepare(
-              "UPDATE discovery_ledger SET value = ? WHERE id = 'legacy_two'",
-            )
-            .run(
-              JSON.stringify({
-                ...legacy.discoveryLedger[1],
-                title: "Externally updated synthetic role",
-              }),
-            );
-        } finally {
-          external.close();
-        }
-        expect(
-          (await migrated.readDiscoveryDisplayProjection()).discoveryLedger[1]
-            ?.title,
-        ).toBe("Externally updated synthetic role");
-        expect(
-          (await migrated.readDiscoveryDisplayProjection()).discoveryLedger[0],
-        ).not.toBe(beforeExternal.discoveryLedger[0]);
-        expect(
-          (await migrated.getDiscoveryState()).discoveryLedger[1]?.title,
-        ).toBe("Externally updated synthetic role");
-      } finally {
-        await migrated.close();
-      }
+          external.prepare("UPDATE discovery_ledger SET value = ? WHERE id = 'legacy_two'")
+            .run(JSON.stringify({ ...legacy.discoveryLedger[1], title: "Externally updated synthetic role" }));
+        } finally { external.close(); }
+        expect((await migrated.readDiscoveryDisplayProjection()).discoveryLedger[1]?.title).toBe("Externally updated synthetic role");
+        expect((await migrated.readDiscoveryDisplayProjection()).discoveryLedger[0]).not.toBe(beforeExternal.discoveryLedger[0]);
+        expect((await migrated.getDiscoveryState()).discoveryLedger[1]?.title).toBe("Externally updated synthetic role");
+      } finally { await migrated.close(); }
       const reopened = await temp.createRepository();
-      try {
-        expect(
-          (await reopened.getDiscoveryState()).discoveryLedger[1]?.title,
-        ).toBe("Externally updated synthetic role");
-      } finally {
-        await reopened.close();
-      }
+      try { expect((await reopened.getDiscoveryState()).discoveryLedger[1]?.title).toBe("Externally updated synthetic role"); }
+      finally { await reopened.close(); }
       const rows = new DatabaseSync(temp.filePath);
       try {
-        expect(
-          Number(
-            rows
-              .prepare(
-                "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 20",
-              )
-              .get()?.count,
-          ),
-        ).toBe(1);
-        expect(
-          Number(
-            rows.prepare("SELECT COUNT(*) AS count FROM discovery_ledger").get()
-              ?.count,
-          ),
-        ).toBe(4);
-        expect(
-          String(
-            rows
-              .prepare(
-                "SELECT value FROM singleton_state WHERE key = 'discovery_state'",
-              )
-              .get()?.value,
-          ),
-        ).not.toContain("synthetic checkpoint body");
-      } finally {
-        rows.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+        expect(Number(rows.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 20").get()?.count)).toBe(1);
+        expect(Number(rows.prepare("SELECT COUNT(*) AS count FROM discovery_ledger").get()?.count)).toBe(4);
+        expect(String(rows.prepare("SELECT value FROM singleton_state WHERE key = 'discovery_state'").get()?.value)).not.toContain("synthetic checkpoint body");
+      } finally { rows.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
   test("canonical cache observes local row edits but never retains rolled-back transaction reads", async () => {
     const temp = await createTempRepository("nestor-discovery-cache-tx-");
     try {
       const repo = await temp.createRepository();
-      await repo.commitDiscoveryStateUpdate((current) => ({
-        ...current,
-        discoveryLedger: [ledger("cache_row")],
-      }));
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, discoveryLedger: [ledger("cache_row")] }));
       await repo.close();
       const database = new DatabaseSync(temp.filePath);
       try {
-        const storage = createDiscoveryStorage(
-          database,
-          createSeed().discovery,
-        );
+        const storage = createDiscoveryStorage(database, createSeed().discovery);
         const original = storage.read();
         expect(storage.read()).toBe(original);
-        const writeTitle = (title: string) =>
-          database
-            .prepare(
-              "UPDATE discovery_ledger SET value = ? WHERE id = 'cache_row'",
-            )
-            .run(JSON.stringify({ ...ledger("cache_row"), title }));
+        const writeTitle = (title: string) => database.prepare("UPDATE discovery_ledger SET value = ? WHERE id = 'cache_row'")
+          .run(JSON.stringify({ ...ledger("cache_row"), title }));
 
         database.exec("BEGIN IMMEDIATE");
         writeTitle("Uncommitted synthetic role");
         const uncommitted = storage.read();
-        expect(uncommitted.discoveryLedger[0]?.title).toBe(
-          "Uncommitted synthetic role",
-        );
-        expect(() => storage.publish(uncommitted)).toThrow(
-          "only be published after commit",
-        );
+        expect(uncommitted.discoveryLedger[0]?.title).toBe("Uncommitted synthetic role");
+        expect(() => storage.publish(uncommitted)).toThrow("only be published after commit");
         database.exec("ROLLBACK");
         expect(storage.read()).toBe(original);
 
         database.exec("BEGIN IMMEDIATE");
         writeTitle("Committed synthetic role");
-        expect(storage.read().discoveryLedger[0]?.title).toBe(
-          "Committed synthetic role",
-        );
+        expect(storage.read().discoveryLedger[0]?.title).toBe("Committed synthetic role");
         database.exec("COMMIT");
-        expect(storage.read().discoveryLedger[0]?.title).toBe(
-          "Committed synthetic role",
-        );
+        expect(storage.read().discoveryLedger[0]?.title).toBe("Committed synthetic role");
 
         writeTitle("Local synthetic role");
-        expect(storage.read().discoveryLedger[0]?.title).toBe(
-          "Local synthetic role",
-        );
-        database
-          .prepare(
-            "UPDATE singleton_state SET value = json_set(value, '$.runState', 'running') WHERE key = 'discovery_state'",
-          )
-          .run();
+        expect(storage.read().discoveryLedger[0]?.title).toBe("Local synthetic role");
+        database.prepare("UPDATE singleton_state SET value = json_set(value, '$.runState', 'running') WHERE key = 'discovery_state'").run();
         expect(storage.read().runState).toBe("running");
-      } finally {
-        database.close();
-      }
-    } finally {
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
+      } finally { database.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
   });
 
-  test.each([3000, 10000])(
-    "a checkpoint with %i ledger rows writes only changed records",
-    async (size) => {
-      const temp = await createTempRepository(
-        `nestor-discovery-scale-${size}-`,
-      );
+  test.each([3000, 10000])("a checkpoint with %i ledger rows writes only changed records", async (size) => {
+    const temp = await createTempRepository(`nestor-discovery-scale-${size}-`);
+    try {
+      const repo = await temp.createRepository();
       try {
-        const repo = await temp.createRepository();
+        const entries = Array.from({ length: size }, (_, index) => ledger(`ledger_${index}`));
+        await repo.commitDiscoveryStateUpdate((current) => ({
+          ...current,
+          runState: "running",
+          activeRun: run("active_scale", 1),
+          recentRuns: [{ ...run("historical_scale", 1), state: "completed", activity: Array.from({ length: 1000 }, (_, index) => activity("historical_scale", index)) }],
+          discoveryLedger: entries,
+        }));
+        const displayBefore = await repo.readDiscoveryDisplayProjection();
+        const raw = new DatabaseSync(temp.filePath);
         try {
-          const entries = Array.from({ length: size }, (_, index) =>
-            ledger(`ledger_${index}`),
-          );
+          const oldLedgerRowid = Number(raw.prepare("SELECT rowid FROM discovery_ledger WHERE id = ?").get(`ledger_${size - 1}`)?.rowid);
+          const oldHistoryRowid = Number(raw.prepare("SELECT rowid FROM discovery_run_checkpoints WHERE run_id = 'historical_scale'").get()?.rowid);
+          const stringify = vi.spyOn(JSON, "stringify");
+          const started = performance.now();
           await repo.commitDiscoveryStateUpdate((current) => ({
             ...current,
-            runState: "running",
-            activeRun: run("active_scale", 1),
-            recentRuns: [
-              {
-                ...run("historical_scale", 1),
-                state: "completed",
-                activity: Array.from({ length: 1000 }, (_, index) =>
-                  activity("historical_scale", index),
-                ),
-              },
-            ],
-            discoveryLedger: entries,
+            activeRun: {
+              ...current.activeRun!,
+              targetExecutions: [{ ...current.activeRun!.targetExecutions[0]!, agentCheckpoint: checkpoint(2) }],
+            },
           }));
-          const displayBefore = await repo.readDiscoveryDisplayProjection();
-          const raw = new DatabaseSync(temp.filePath);
-          try {
-            const oldLedgerRowid = Number(
-              raw
-                .prepare("SELECT rowid FROM discovery_ledger WHERE id = ?")
-                .get(`ledger_${size - 1}`)?.rowid,
-            );
-            const oldHistoryRowid = Number(
-              raw
-                .prepare(
-                  "SELECT rowid FROM discovery_run_checkpoints WHERE run_id = 'historical_scale'",
-                )
-                .get()?.rowid,
-            );
-            const stringify = vi.spyOn(JSON, "stringify");
-            const started = performance.now();
-            await repo.commitDiscoveryStateUpdate((current) => ({
-              ...current,
-              activeRun: {
-                ...current.activeRun!,
-                targetExecutions: [
-                  {
-                    ...current.activeRun!.targetExecutions[0]!,
-                    agentCheckpoint: checkpoint(2),
-                  },
-                ],
-              },
-            }));
-            const elapsedMs =
-              Math.round((performance.now() - started) * 10) / 10;
-            expect(
-              stringify.mock.calls.some(
-                ([value]) => Array.isArray(value) && value.length >= size,
-              ),
-            ).toBe(false);
-            expect(
-              stringify.mock.calls.some(
-                ([value]) =>
-                  value &&
-                  typeof value === "object" &&
-                  "discoveryLedger" in value,
-              ),
-            ).toBe(false);
-            expect(
-              stringify.mock.calls.some(([value]) => {
-                const candidate: unknown = value;
-                return (
-                  candidate !== null &&
-                  typeof candidate === "object" &&
-                  "id" in candidate &&
-                  candidate.id === "historical_scale"
-                );
-              }),
-            ).toBe(false);
-            stringify.mockRestore();
-            const parse = vi.spyOn(JSON, "parse");
-            const displayAfter = await repo.readDiscoveryDisplayProjection();
-            expect(displayAfter).toBe(displayBefore);
-            expect(parse.mock.calls.length).toBeLessThan(20);
-            expect(displayAfter.discoveryLedger[0]).toBe(
-              displayBefore.discoveryLedger[0],
-            );
-            parse.mockRestore();
-            expect(
-              Number(
-                raw
-                  .prepare("SELECT rowid FROM discovery_ledger WHERE id = ?")
-                  .get(`ledger_${size - 1}`)?.rowid,
-              ),
-            ).toBe(oldLedgerRowid);
-            expect(
-              Number(
-                raw
-                  .prepare(
-                    "SELECT rowid FROM discovery_run_checkpoints WHERE run_id = 'historical_scale'",
-                  )
-                  .get()?.rowid,
-              ),
-            ).toBe(oldHistoryRowid);
-            expect(
-              (await repo.getDiscoveryState()).activeRun?.targetExecutions[0]
-                ?.agentCheckpoint?.revision,
-            ).toBe(2);
-            console.info(
-              `normalized discovery checkpoint ${size} ledger rows: ${elapsedMs} ms`,
-            );
-          } finally {
-            raw.close();
-          }
-        } finally {
-          await repo.close();
-        }
-      } finally {
-        await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-      }
-    },
-  );
+          const elapsedMs = Math.round((performance.now() - started) * 10) / 10;
+          expect(stringify.mock.calls.some(([value]) => Array.isArray(value) && value.length >= size)).toBe(false);
+          expect(stringify.mock.calls.some(([value]) => value && typeof value === "object" && "discoveryLedger" in value)).toBe(false);
+          expect(stringify.mock.calls.some(([value]) => {
+            const candidate: unknown = value;
+            return candidate !== null && typeof candidate === "object" && "id" in candidate && candidate.id === "historical_scale";
+          })).toBe(false);
+          stringify.mockRestore();
+          const parse = vi.spyOn(JSON, "parse");
+          const displayAfter = await repo.readDiscoveryDisplayProjection();
+          expect(displayAfter).toBe(displayBefore);
+          expect(parse.mock.calls.length).toBeLessThan(20);
+          expect(displayAfter.discoveryLedger[0]).toBe(displayBefore.discoveryLedger[0]);
+          parse.mockRestore();
+          expect(Number(raw.prepare("SELECT rowid FROM discovery_ledger WHERE id = ?").get(`ledger_${size - 1}`)?.rowid)).toBe(oldLedgerRowid);
+          expect(Number(raw.prepare("SELECT rowid FROM discovery_run_checkpoints WHERE run_id = 'historical_scale'").get()?.rowid)).toBe(oldHistoryRowid);
+          expect((await repo.getDiscoveryState()).activeRun?.targetExecutions[0]?.agentCheckpoint?.revision).toBe(2);
+          console.info(`normalized discovery checkpoint ${size} ledger rows: ${elapsedMs} ms`);
+        } finally { raw.close(); }
+      } finally { await repo.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
+  });
 });

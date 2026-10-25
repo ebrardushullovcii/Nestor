@@ -3,7 +3,6 @@
 User explicitly requested removal of all Pi references and economical Pi-first delegation.
 
 Instructions for memory consolidation:
-
 - DELETE from C:\Users\ebrar\.codex\memories\MEMORY.md and memory_summary.md:
   - Line 'For economical delegation, let Codex choose worker count, model, and least-privilege read/write access; prefer Pi for bounded checkable work...'
   - Line 'Prefer delegate-to-pi for bounded, separable, checkable work; require agent_end and stopReason: stop, redact credentials, and use independent Windows shell calls rather than nested Start-Job. Keep opencode2 beside v1 as fallback...'

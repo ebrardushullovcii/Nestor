@@ -5,8 +5,7 @@ import {
   resolveResumeWorkspaceRouteState,
 } from "./resume-workspace-route-state";
 
-type ReviewQueueItem =
-  JobFinderRendererWorkspaceSnapshot["reviewQueue"][number];
+type ReviewQueueItem = JobFinderRendererWorkspaceSnapshot["reviewQueue"][number];
 
 function hydrate(
   phase: "bootstrap" | "complete",

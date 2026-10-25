@@ -44,9 +44,7 @@ describe("MatchEvidenceMatrix required-gap summary", () => {
     const view = render(<MatchEvidenceMatrix assessment={assessment} />);
 
     expect(view.getByText("Scored from partial listing text.")).toBeTruthy();
-    expect(
-      view.queryByText("The full listing detail was available."),
-    ).toBeNull();
+    expect(view.queryByText("The full listing detail was available.")).toBeNull();
   });
 
   it("reads as a grammatical sentence for one and for several gaps", () => {
@@ -384,9 +382,7 @@ describe("MatchEvidenceMatrix requirement rows", () => {
       },
     ]);
 
-    const { container } = render(
-      <MatchEvidenceMatrix assessment={assessment} />,
-    );
+    const { container } = render(<MatchEvidenceMatrix assessment={assessment} />);
     fireEvent.click(
       within(container).getByRole("button", {
         name: "Review requirement evidence — 1 of 3 supported",

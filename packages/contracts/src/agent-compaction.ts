@@ -27,9 +27,9 @@ export type SharedAgentCompactionTriggerKind = z.infer<
   typeof SharedAgentCompactionTriggerKindSchema
 >;
 
-export const SharedAgentCompactionPolicyOverrideSchema = z
-  .object(sharedAgentCompactionPolicyOverrideShape)
-  .superRefine(validateCompactionPolicyIssues);
+export const SharedAgentCompactionPolicyOverrideSchema = z.object(
+  sharedAgentCompactionPolicyOverrideShape,
+).superRefine(validateCompactionPolicyIssues);
 
 type CompactionPolicyValidationInput = {
   warningTokenBudget?: number | undefined;
@@ -71,8 +71,8 @@ export type SharedAgentCompactionPolicyOverride = z.infer<
   typeof SharedAgentCompactionPolicyOverrideSchema
 >;
 
-export const SharedAgentCompactionPolicySchema = z
-  .object({
+export const SharedAgentCompactionPolicySchema =
+  z.object({
     ...sharedAgentCompactionPolicyOverrideShape,
     enabled: z.boolean().default(true),
     warningTokenBudget: PositiveIntSchema.default(176_000),
@@ -85,8 +85,7 @@ export const SharedAgentCompactionPolicySchema = z
     workflowOverrides: z
       .record(NonEmptyStringSchema, SharedAgentCompactionPolicyOverrideSchema)
       .default({}),
-  })
-  .superRefine(validateCompactionPolicyIssues);
+  }).superRefine(validateCompactionPolicyIssues);
 export type SharedAgentCompactionPolicy = z.infer<
   typeof SharedAgentCompactionPolicySchema
 >;
@@ -94,9 +93,8 @@ export type SharedAgentCompactionPolicy = z.infer<
 export const SharedAgentCompactionSnapshotSchema = z.object({
   compactedAt: IsoDateTimeSchema,
   compactionCount: NonNegativeIntSchema.default(0),
-  triggerKind: SharedAgentCompactionTriggerKindSchema.default(
-    "message_count_fallback",
-  ),
+  triggerKind:
+    SharedAgentCompactionTriggerKindSchema.default("message_count_fallback"),
   estimatedTokensBefore: NonNegativeIntSchema.nullable().default(null),
   estimatedTokensAfter: NonNegativeIntSchema.nullable().default(null),
   summary: NonEmptyStringSchema,

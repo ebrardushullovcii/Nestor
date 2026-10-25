@@ -61,11 +61,7 @@ export function createMoveReviewer(input: {
   /** Hostnames that count as home. */
   homeHosts: readonly string[];
   signal?: AbortSignal;
-}): (move: {
-  url: string;
-  reason: string;
-  fromUrl: string | null;
-}) => Promise<MoveReview> {
+}): (move: { url: string; reason: string; fromUrl: string | null }) => Promise<MoveReview> {
   const { goal } = input;
 
   return async (move) => {
@@ -107,8 +103,7 @@ export function createMoveReviewer(input: {
       }
       return {
         allowed: false,
-        verdict:
-          "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
+        verdict: "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
       };
     }
     const call = (response.toolCalls ?? []).find(
@@ -117,8 +112,7 @@ export function createMoveReviewer(input: {
     if (!call) {
       return {
         allowed: false,
-        verdict:
-          "The review gave no decision, so the move stays refused for now.",
+        verdict: "The review gave no decision, so the move stays refused for now.",
       };
     }
     const args = parseToolArguments(call.function.arguments);

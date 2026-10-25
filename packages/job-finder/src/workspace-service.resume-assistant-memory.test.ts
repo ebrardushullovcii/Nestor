@@ -112,11 +112,7 @@ describe("Resume Studio Assistant memory and approval check", () => {
     ).toBe(true);
 
     const clean = await second.checkProposal!([]);
-    expect(clean).toEqual({
-      applyError: null,
-      findings: [],
-      droppedOnSave: [],
-    });
+    expect(clean).toEqual({ applyError: null, findings: [], droppedOnSave: [] });
 
     // The agent can measure the pages its changes would produce.
     const measured = await second.measurePages!([]);

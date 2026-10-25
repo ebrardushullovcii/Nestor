@@ -44,17 +44,12 @@ async function drafted(
 async function waitingIds(
   repository: ReturnType<typeof createWorkspaceServiceHarness>["repository"],
 ) {
-  return (
-    (await repository.getIntelligenceState()).resumeOnShortlistJobIds ?? []
-  );
+  return (await repository.getIntelligenceState()).resumeOnShortlistJobIds ?? [];
 }
 
 test("shortlisting writes each job's resume through the batch path", async () => {
   const seed = seedWith(3);
-  seed.savedJobs[2] = {
-    ...seed.savedJobs[2]!,
-    resumeApplicationMode: "original_resume",
-  };
+  seed.savedJobs[2] = { ...seed.savedJobs[2]!, resumeApplicationMode: "original_resume" };
   const { repository, workspaceService } = createWorkspaceServiceHarness({
     seed,
     aiClient: configuredAi(),
@@ -67,9 +62,7 @@ test("shortlisting writes each job's resume through the batch path", async () =>
     },
     { timeout: 10_000 },
   );
-  await vi.waitFor(async () =>
-    expect(await waitingIds(repository)).toEqual([]),
-  );
+  await vi.waitFor(async () => expect(await waitingIds(repository)).toEqual([]));
   // Original keeps the person's own file: nothing is written for it.
   expect(await drafted(repository, "short_2")).toBeNull();
   const [job] = await repository.listSavedJobsByIds(["short_0"]);
@@ -160,7 +153,5 @@ test("a queue saved before a restart carries on", async () => {
     async () => expect(await drafted(repository, "short_0")).not.toBeNull(),
     { timeout: 10_000 },
   );
-  await vi.waitFor(async () =>
-    expect(await waitingIds(repository)).toEqual([]),
-  );
+  await vi.waitFor(async () => expect(await waitingIds(repository)).toEqual([]));
 });

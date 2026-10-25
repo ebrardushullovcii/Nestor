@@ -1039,9 +1039,7 @@ export function DiscoveryDetailPanel({
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <strong
-                      aria-label={
-                        assessmentPresentation?.headlineScoreAriaLabel
-                      }
+                      aria-label={assessmentPresentation?.headlineScoreAriaLabel}
                       className={
                         assessmentPresentation?.isScoreWithheld
                           ? "text-(length:--text-body) text-foreground-soft"
@@ -1136,9 +1134,7 @@ export function DiscoveryDetailPanel({
                       </Button>
                       <Button
                         aria-keyshortcuts="X"
-                        disabled={
-                          isSelectedJobPending || !triage.onNotInterested
-                        }
+                        disabled={isSelectedJobPending || !triage.onNotInterested}
                         onClick={() => triage.onNotInterested?.()}
                         title="Hide this job and open the next one (X)"
                         type="button"
@@ -1198,44 +1194,44 @@ export function DiscoveryDetailPanel({
                 ) : null}
               </>
             ) : existingNeedsYouApplication ? (
-              <Button
-                className="h-11 w-full"
-                onClick={() =>
-                  onOpenApplication(existingNeedsYouApplication.id)
-                }
-                type="button"
-                variant="primary"
-              >
-                Needs you · Open application
-              </Button>
-            ) : isAlreadyShortlisted ? (
-              <Button asChild className="h-11 w-full" variant="primary">
-                <Link
-                  aria-describedby={DISCOVERY_DETAIL_HEADING_ID}
-                  data-testid="discovery-detail-open-shortlisted"
-                  to={buildJobFinderContextRoute("/job-finder/review-queue", {
-                    jobId: selectedJob.id,
-                  })}
+                <Button
+                  className="h-11 w-full"
+                  onClick={() =>
+                    onOpenApplication(existingNeedsYouApplication.id)
+                  }
+                  type="button"
+                  variant="primary"
                 >
-                  Open in Shortlisted
-                </Link>
-              </Button>
-            ) : (
-              <Button
-                aria-describedby={DISCOVERY_DETAIL_HEADING_ID}
-                className="h-11 w-full"
-                disabled={isSelectedJobPending || isReportedClosed}
-                onClick={() => onQueueJob(selectedJob.id)}
-                type="button"
-                variant="primary"
-              >
-                {isReportedClosed
-                  ? "Reported closed"
-                  : needsSourceVerification
-                    ? "Shortlist anyway"
-                    : "Shortlist job"}
-              </Button>
-            )}
+                  Needs you · Open application
+                </Button>
+              ) : isAlreadyShortlisted ? (
+                <Button asChild className="h-11 w-full" variant="primary">
+                  <Link
+                    aria-describedby={DISCOVERY_DETAIL_HEADING_ID}
+                    data-testid="discovery-detail-open-shortlisted"
+                    to={buildJobFinderContextRoute("/job-finder/review-queue", {
+                      jobId: selectedJob.id,
+                    })}
+                  >
+                    Open in Shortlisted
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  aria-describedby={DISCOVERY_DETAIL_HEADING_ID}
+                  className="h-11 w-full"
+                  disabled={isSelectedJobPending || isReportedClosed}
+                  onClick={() => onQueueJob(selectedJob.id)}
+                  type="button"
+                  variant="primary"
+                >
+                  {isReportedClosed
+                    ? "Reported closed"
+                    : needsSourceVerification
+                      ? "Shortlist anyway"
+                      : "Shortlist job"}
+                </Button>
+              )}
             {!isAlreadyShortlisted && needsSourceVerification ? (
               <p
                 className="break-words text-(length:--text-tiny) leading-5 text-foreground-muted"
@@ -1327,78 +1323,78 @@ export function DiscoveryDetailPanel({
                     already there; the cards below would only repeat them. */}
                 {triage ? null : (
                   <>
-                    <div
-                      className="grid min-w-0 gap-3 sm:grid-cols-2"
-                      data-job-fact-grid
-                    >
-                      <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-                        <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
-                          Salary
-                        </span>
-                        <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
-                          {selectedJob.salaryText ?? "Not stated"}
-                        </strong>
-                        {selectedJob.salaryText && normalizedCompensation ? (
-                          <p className="mt-2 text-(length:--text-small) text-foreground-soft">
-                            About {normalizedCompensation}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-                        <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
-                          Location and work mode
-                        </span>
-                        <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
-                          {locationAndWorkModeLine}
-                        </strong>
-                        {listingLocationCount > 1 ? (
-                          <p
-                            className="mt-2 text-(length:--text-small) text-foreground-soft"
-                            data-testid="discovery-detail-location-count"
-                          >
-                            This job is open in {listingLocationCount} places.
-                          </p>
-                        ) : null}
-                      </div>
+                  <div
+                    className="grid min-w-0 gap-3 sm:grid-cols-2"
+                    data-job-fact-grid
+                  >
+                    <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
+                        Salary
+                      </span>
+                      <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
+                        {selectedJob.salaryText ?? "Not stated"}
+                      </strong>
+                      {selectedJob.salaryText && normalizedCompensation ? (
+                        <p className="mt-2 text-(length:--text-small) text-foreground-soft">
+                          About {normalizedCompensation}
+                        </p>
+                      ) : null}
                     </div>
-
-                    <div
-                      className="grid min-w-0 gap-2"
-                      data-testid="discovery-detail-why-it-fits"
-                    >
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <strong
-                          aria-label={
-                            assessmentPresentation?.headlineScoreAriaLabel
-                          }
-                          className={
-                            assessmentPresentation?.isScoreWithheld
-                              ? "text-(length:--text-body) text-foreground-soft"
-                              : "text-(length:--text-body) text-(--text-headline)"
-                          }
-                          data-testid="discovery-detail-fit-score"
+                    <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
+                        Location and work mode
+                      </span>
+                      <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
+                        {locationAndWorkModeLine}
+                      </strong>
+                      {listingLocationCount > 1 ? (
+                        <p
+                          className="mt-2 text-(length:--text-small) text-foreground-soft"
+                          data-testid="discovery-detail-location-count"
                         >
-                          {/* A percentage is only printed when the evidence behind
+                          This job is open in {listingLocationCount} places.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div
+                    className="grid min-w-0 gap-2"
+                    data-testid="discovery-detail-why-it-fits"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <strong
+                        aria-label={
+                          assessmentPresentation?.headlineScoreAriaLabel
+                        }
+                        className={
+                          assessmentPresentation?.isScoreWithheld
+                            ? "text-(length:--text-body) text-foreground-soft"
+                            : "text-(length:--text-body) text-(--text-headline)"
+                        }
+                        data-testid="discovery-detail-fit-score"
+                      >
+                        {/* A percentage is only printed when the evidence behind
                           it was actually checkable. Otherwise the number stays
                           inside "How this was scored" beside its evidence. */}
-                          {assessmentPresentation?.headlineScoreLabel}
-                        </strong>
-                        {recommendation ? (
-                          <StatusBadge
-                            tone={
-                              assessmentPresentation?.isProvisional
-                                ? "neutral"
-                                : recommendation.tone
-                            }
-                          >
-                            {recommendation.label}
-                          </StatusBadge>
-                        ) : null}
-                      </div>
-                      <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-                        {whyItFitsLine}
-                      </p>
+                        {assessmentPresentation?.headlineScoreLabel}
+                      </strong>
+                      {recommendation ? (
+                        <StatusBadge
+                          tone={
+                            assessmentPresentation?.isProvisional
+                              ? "neutral"
+                              : recommendation.tone
+                          }
+                        >
+                          {recommendation.label}
+                        </StatusBadge>
+                      ) : null}
                     </div>
+                    <p className="text-(length:--text-small) leading-5 text-foreground-soft">
+                      {whyItFitsLine}
+                    </p>
+                  </div>
                   </>
                 )}
 

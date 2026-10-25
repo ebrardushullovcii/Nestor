@@ -334,19 +334,11 @@ export const applyToJobsTool = defineTool({
     const runIds: string[] = [];
     for (const [mode, jobIds] of byMode) {
       session.assertCurrent();
-      const result = await ports.startApplications({
-        jobIds,
-        mode,
-        conversationId: session.conversationId,
-        onQueued: async (queueId) => {
-          session.assertCurrent();
-          await session.watchRun(
-            { kind: "apply_queue", id: queueId, jobIds },
-            "Applying to the chosen jobs",
-          );
-          session.assertCurrent();
-        },
-      });
+      const result = await ports.startApplications({ jobIds, mode, conversationId: session.conversationId, onQueued: async (queueId) => {
+        session.assertCurrent();
+        await session.watchRun({ kind: "apply_queue", id: queueId, jobIds }, "Applying to the chosen jobs");
+        session.assertCurrent();
+      } });
       queued.push(...(result.queuedJobIds ?? []));
       started.push(...result.startedJobIds);
       heldBack.push(

@@ -53,10 +53,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
         verification: null,
         intelligence: learnedRoutesIntelligence([
-          [
-            "https://www.linkedin.com/jobs/collections/recommended/",
-            "collection",
-          ],
+          ["https://www.linkedin.com/jobs/collections/recommended/", "collection"],
           ["https://www.linkedin.com/jobs/:jobId", "listing"],
           [
             "https://www.linkedin.com/jobs/search/?keywords=:keyword&location=:location",
@@ -76,8 +73,7 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_template_routes",
           discoveryMethod: "catalog_seed",
-          canonicalUrl:
-            "https://www.linkedin.com/jobs/view/linkedin_template_routes",
+          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_template_routes",
           title: "Senior Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -99,13 +95,10 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(
-          options.taskPacket?.strategyLabel ?? options.siteLabel,
-          {
-            startingUrls: [...options.startingUrls],
-            maxSteps: options.maxSteps,
-          },
-        );
+        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
+          startingUrls: [...options.startingUrls],
+          maxSteps: options.maxSteps,
+        });
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
@@ -189,8 +182,7 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_unstable_job_route",
           discoveryMethod: "catalog_seed",
-          canonicalUrl:
-            "https://www.linkedin.com/jobs/view/linkedin_unstable_job_route",
+          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_unstable_job_route",
           title: "Senior Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -212,13 +204,10 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(
-          options.taskPacket?.strategyLabel ?? options.siteLabel,
-          {
-            startingUrls: [...options.startingUrls],
-            maxSteps: options.maxSteps,
-          },
-        );
+        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
+          startingUrls: [...options.startingUrls],
+          maxSteps: options.maxSteps,
+        });
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
@@ -273,8 +262,7 @@ describe("createJobFinderWorkspaceService", () => {
         acceptedAt: null,
         basedOnRunId: "debug_run_example_query_detail",
         basedOnAttemptIds: ["debug_attempt_example_query_detail"],
-        notes:
-          "Detail route includes query params but should not become the search starting point.",
+        notes: "Detail route includes query params but should not become the search starting point.",
         navigationGuidance: [
           "Start at https://example.com/careers/open-roles/.",
         ],
@@ -336,13 +324,10 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(
-          options.taskPacket?.strategyLabel ?? options.siteLabel,
-          {
-            startingUrls: [...options.startingUrls],
-            maxSteps: options.maxSteps,
-          },
-        );
+        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
+          startingUrls: [...options.startingUrls],
+          maxSteps: options.maxSteps,
+        });
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
@@ -407,14 +392,13 @@ describe("createJobFinderWorkspaceService", () => {
     const { workspaceService } = createWorkspaceServiceHarness({ seed });
     const originalArtifact = seed.sourceInstructionArtifacts[0]!;
 
-    const updatedSnapshot =
-      await workspaceService.saveSourceInstructionArtifact(
-        "target_linkedin_default",
-        {
-          ...toEditableSourceInstructionArtifactInput(originalArtifact),
-          searchGuidance: ["Use the edited search guidance instead."],
-        },
-      );
+    const updatedSnapshot = await workspaceService.saveSourceInstructionArtifact(
+      "target_linkedin_default",
+      {
+        ...toEditableSourceInstructionArtifactInput(originalArtifact),
+        searchGuidance: ["Use the edited search guidance instead."],
+      },
+    );
     const updatedArtifact = updatedSnapshot.sourceInstructionArtifacts.find(
       (artifact) => artifact.id === originalArtifact.id,
     );
@@ -426,13 +410,10 @@ describe("createJobFinderWorkspaceService", () => {
     expect(updatedArtifact?.basedOnRunId).toBe("debug_run_editable");
 
     await expect(
-      workspaceService.saveSourceInstructionArtifact(
-        "target_linkedin_default",
-        {
-          ...toEditableSourceInstructionArtifactInput(originalArtifact),
-          id: "instruction_not_bound_to_target",
-        },
-      ),
+      workspaceService.saveSourceInstructionArtifact("target_linkedin_default", {
+        ...toEditableSourceInstructionArtifactInput(originalArtifact),
+        id: "instruction_not_bound_to_target",
+      }),
     ).rejects.toThrow(/unknown source instruction/i);
   });
 
@@ -449,15 +430,15 @@ describe("createJobFinderWorkspaceService", () => {
       {
         ...seed.savedJobs[0]!,
         provenance: [
-          createSavedJobDiscoveryProvenance({
-            targetId: "target_linkedin_default",
-            adapterKind: "auto",
-            resolvedAdapterKind: "target_site",
-            startingUrl: "https://www.linkedin.com/jobs/search/",
-            discoveredAt: "2026-03-20T10:04:00.000Z",
-          }),
-        ],
-      },
+            createSavedJobDiscoveryProvenance({
+              targetId: "target_linkedin_default",
+              adapterKind: "auto",
+              resolvedAdapterKind: "target_site",
+              startingUrl: "https://www.linkedin.com/jobs/search/",
+              discoveredAt: "2026-03-20T10:04:00.000Z",
+            }),
+          ],
+        },
       ...seed.savedJobs.slice(1),
     ];
     seed.sourceInstructionArtifacts = [
@@ -515,17 +496,22 @@ describe("createJobFinderWorkspaceService", () => {
         ...fallbackRuntime,
         async executeEasyApply(source, input) {
           capturedInstructions = input.instructions ?? [];
-          return fallbackRuntime.executeEasyApply(source, input);
+          return fallbackRuntime.executeEasyApply(
+            source,
+            input,
+          );
         },
         async executeApplicationFlow(source, input) {
           capturedInstructions = input.instructions ?? [];
-          return fallbackRuntime.executeApplicationFlow(source, input);
+          return fallbackRuntime.executeApplicationFlow(
+            source,
+            input,
+          );
         },
       },
     });
 
-    const exportedSnapshot =
-      await workspaceService.exportResumePdf("job_ready");
+    const exportedSnapshot = await workspaceService.exportResumePdf("job_ready");
     const approvedExport = exportedSnapshot.resumeExportArtifacts.find(
       (artifact) => artifact.jobId === "job_ready",
     );
@@ -559,15 +545,15 @@ describe("createJobFinderWorkspaceService", () => {
       {
         ...seed.savedJobs[0]!,
         provenance: [
-          createSavedJobDiscoveryProvenance({
-            targetId: "target_linkedin_default",
-            adapterKind: "auto",
-            resolvedAdapterKind: "target_site",
-            startingUrl: "https://www.linkedin.com/jobs/",
-            discoveredAt: "2026-03-20T10:04:00.000Z",
-          }),
-        ],
-      },
+            createSavedJobDiscoveryProvenance({
+              targetId: "target_linkedin_default",
+              adapterKind: "auto",
+              resolvedAdapterKind: "target_site",
+              startingUrl: "https://www.linkedin.com/jobs/",
+              discoveredAt: "2026-03-20T10:04:00.000Z",
+            }),
+          ],
+        },
       ...seed.savedJobs.slice(1),
     ];
     seed.sourceInstructionArtifacts = [
@@ -610,17 +596,22 @@ describe("createJobFinderWorkspaceService", () => {
         ...fallbackRuntime,
         async executeEasyApply(source, input) {
           capturedInstructions = input.instructions ?? [];
-          return fallbackRuntime.executeEasyApply(source, input);
+          return fallbackRuntime.executeEasyApply(
+            source,
+            input,
+          );
         },
         async executeApplicationFlow(source, input) {
           capturedInstructions = input.instructions ?? [];
-          return fallbackRuntime.executeApplicationFlow(source, input);
+          return fallbackRuntime.executeApplicationFlow(
+            source,
+            input,
+          );
         },
       },
     });
 
-    const exportedSnapshot =
-      await workspaceService.exportResumePdf("job_ready");
+    const exportedSnapshot = await workspaceService.exportResumePdf("job_ready");
     const approvedExport = exportedSnapshot.resumeExportArtifacts.find(
       (artifact) => artifact.jobId === "job_ready",
     );

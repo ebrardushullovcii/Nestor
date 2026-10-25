@@ -35,8 +35,7 @@ describe("resume timeline repair contracts", () => {
       status: "accepted",
       certainty: "deterministic_normalization",
       title: "Review reversed dates for Engineer at Acme",
-      explanation:
-        "The extracted start date is later than the extracted end date.",
+      explanation: "The extracted start date is later than the extracted end date.",
       affectedExperienceIds: ["experience_1"],
       beforeExperiences: [experience],
       proposedExperiences: [

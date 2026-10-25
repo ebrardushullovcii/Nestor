@@ -27,12 +27,11 @@ describe("deterministic resume guided edits", () => {
       updatedAt: "2026-08-10T12:00:00.000Z",
     });
 
-    const reply =
-      await createDeterministicJobFinderAiClient().reviseResumeDraft({
-        draft,
-        job: createJobPosting(),
-        request: "Shorten the summary while keeping it professional.",
-      });
+    const reply = await createDeterministicJobFinderAiClient().reviseResumeDraft({
+      draft,
+      job: createJobPosting(),
+      request: "Shorten the summary while keeping it professional.",
+    });
 
     expect(reply.patches).toHaveLength(1);
     expect(reply.patches[0]?.newText).toBe(

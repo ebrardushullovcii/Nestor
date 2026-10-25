@@ -33,7 +33,11 @@ export const fitRecommendationCopy: Record<
  * counts and this screen apply one rule. Re-exported because the renderer
  * already imports both from here.
  */
-export { FIT_NOT_JUDGED_REASON, getFitEvidenceDepth, type FitEvidenceDepth };
+export {
+  FIT_NOT_JUDGED_REASON,
+  getFitEvidenceDepth,
+  type FitEvidenceDepth,
+};
 
 export interface MatchAssessmentPresentation {
   /**
@@ -251,8 +255,9 @@ export function describeMatchTieBreakReason(
     return `Your resume backs ${backed} of the ${skills.length} skills this listing asks for.`;
   }
 
-  const locationReason =
-    LOCATION_REACH_TIE_BREAK_REASON[assessment.locationReach];
+  const locationReason = LOCATION_REACH_TIE_BREAK_REASON[
+    assessment.locationReach
+  ];
   if (locationReason) {
     return locationReason;
   }

@@ -9,9 +9,9 @@ import {
 
 describe("desktop window close guard contracts", () => {
   it("parses the renderer-owned protection mirror as a strict boolean flag", () => {
-    expect(DesktopWindowCloseGuardStateSchema.parse({ blocked: true })).toEqual(
-      { blocked: true },
-    );
+    expect(
+      DesktopWindowCloseGuardStateSchema.parse({ blocked: true }),
+    ).toEqual({ blocked: true });
     expect(() =>
       DesktopWindowCloseGuardStateSchema.parse({ blocked: "yes" }),
     ).toThrow();
@@ -37,10 +37,9 @@ describe("desktop window close guard contracts", () => {
       }),
     ).toEqual({ requestId: "window_close_1", decision: "cancel" });
 
-    expect(DesktopWindowCloseDecisionSchema.options).toEqual([
-      "proceed",
-      "cancel",
-    ]);
+    expect(
+      DesktopWindowCloseDecisionSchema.options,
+    ).toEqual(["proceed", "cancel"]);
 
     expect(() =>
       DesktopWindowCloseResolutionSchema.parse({

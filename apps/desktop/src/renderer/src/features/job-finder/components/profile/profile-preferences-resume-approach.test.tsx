@@ -23,9 +23,7 @@ function Harness() {
     defaultValues: createSearchPreferencesEditorValues(preferences),
   });
 
-  return (
-    <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />
-  );
+  return <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />;
 }
 
 beforeEach(() => {
@@ -41,9 +39,7 @@ describe("Preferences resume approach", () => {
   it("no longer offers the resume approach or strict collection here; both live under Settings, AI behavior", () => {
     render(<Harness />);
 
-    expect(
-      screen.queryByLabelText("Default resume tailoring style"),
-    ).toBeNull();
+    expect(screen.queryByLabelText("Default resume tailoring style")).toBeNull();
     expect(
       screen.queryByText(/How broadly should Job Finder collect/),
     ).toBeNull();

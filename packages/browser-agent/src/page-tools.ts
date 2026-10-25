@@ -99,9 +99,7 @@ export function createPageTools(
   const authorize = async (
     url: string,
     reason: string | null,
-  ): Promise<
-    { allowed: true; note: string | null } | { allowed: false; refusal: string }
-  > => {
+  ): Promise<{ allowed: true; note: string | null } | { allowed: false; refusal: string }> => {
     const refusal = policy.allowUrl?.(url) ?? null;
     if (!refusal) return { allowed: true, note: null };
     const origin = originOf(url);
@@ -141,9 +139,7 @@ export function createPageTools(
     };
   };
 
-  const remember = (
-    observation: ApplyFormObservation,
-  ): ApplyFormObservation => {
+  const remember = (observation: ApplyFormObservation): ApplyFormObservation => {
     state.observation = observation;
     if (observation.url && !state.visitedUrls.includes(observation.url)) {
       state.visitedUrls.push(observation.url);
@@ -178,12 +174,8 @@ export function createPageTools(
       if (!verdict.allowed) {
         const back = await hands.goBack();
         observation = await observe();
-        notes.push(
-          `${verdict.refusal}${back.ok ? " Job Finder went back." : ""}`,
-        );
-        return ok(
-          `${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`,
-        );
+        notes.push(`${verdict.refusal}${back.ok ? " Job Finder went back." : ""}`);
+        return ok(`${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`);
       }
       if (verdict.note) notes.push(verdict.note);
     }
@@ -230,8 +222,7 @@ export function createPageTools(
             properties: {
               ref: {
                 type: "string",
-                description:
-                  "Optional handle of one element. Omit for the whole page.",
+                description: "Optional handle of one element. Omit for the whole page.",
               },
             },
           },
@@ -298,10 +289,7 @@ export function createPageTools(
           parameters: {
             type: "object",
             properties: {
-              ref: {
-                type: "string",
-                description: "The link handle, such as l4.",
-              },
+              ref: { type: "string", description: "The link handle, such as l4." },
               reason: {
                 type: "string",
                 description:
@@ -317,9 +305,7 @@ export function createPageTools(
         const ref = asString(args.ref);
         if (!ref) return ok("follow_link needs the link handle in ref.");
         const reason = asString(args.reason);
-        const link = state.observation?.links.find(
-          (entry) => entry.ref === ref,
-        );
+        const link = state.observation?.links.find((entry) => entry.ref === ref);
         let allowedNote: string | null = null;
         if (link) {
           const verdict = await authorize(link.href, reason);
@@ -499,8 +485,7 @@ export function createPageTools(
         type: "function",
         function: {
           name: "select",
-          description:
-            "Choose an option in a list or dropdown by its exact label.",
+          description: "Choose an option in a list or dropdown by its exact label.",
           parameters: {
             type: "object",
             properties: {
@@ -568,10 +553,7 @@ export function createPageTools(
           parameters: {
             type: "object",
             properties: {
-              direction: {
-                type: "string",
-                enum: ["down", "up", "top", "bottom"],
-              },
+              direction: { type: "string", enum: ["down", "up", "top", "bottom"] },
             },
             required: ["direction"],
           },
@@ -592,16 +574,11 @@ export function createPageTools(
         type: "function",
         function: {
           name: "wait",
-          description:
-            "Wait for a page that is still settling, then look again.",
+          description: "Wait for a page that is still settling, then look again.",
           parameters: {
             type: "object",
             properties: {
-              milliseconds: {
-                type: "number",
-                description:
-                  "Up to 30000. A page checking the browser by itself can take a minute or two: wait 20000 to 30000 at a time.",
-              },
+              milliseconds: { type: "number", description: "Up to 30000. A page checking the browser by itself can take a minute or two: wait 20000 to 30000 at a time." },
             },
           },
         },
@@ -609,9 +586,7 @@ export function createPageTools(
       execute: async (raw) => {
         const requested = parseToolArguments(raw).milliseconds;
         const milliseconds =
-          typeof requested === "number"
-            ? Math.max(0, Math.min(30_000, requested))
-            : 1_000;
+          typeof requested === "number" ? Math.max(0, Math.min(30_000, requested)) : 1_000;
         await hands.wait(milliseconds);
         return ok(
           `Waited ${Math.round(milliseconds)}ms. The page now:\n\n${describe(await observe())}`,

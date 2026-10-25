@@ -30,7 +30,9 @@ describe("countDistinguishingListingTerms", () => {
       keySkills: ["TypeScript", "Postgres", "Kafka"],
     });
 
-    expect(count).toBeGreaterThanOrEqual(MINIMUM_DISTINGUISHING_LISTING_TERMS);
+    expect(count).toBeGreaterThanOrEqual(
+      MINIMUM_DISTINGUISHING_LISTING_TERMS,
+    );
   });
 
   test("treats an empty posting as having nothing at all", () => {

@@ -226,10 +226,11 @@ export function DiscoverySearchBar(props: {
     setIsSourcePickerOpen(false);
     if (restoreFocus) sourcePickerTriggerRef.current?.focus();
   }, []);
-  const { isTopmost: isSourcePickerTopmost } = useJobFinderOverlayOwnership({
-    active: isSourcePickerOpen,
-    close: () => closeSourcePicker(true),
-  });
+  const { isTopmost: isSourcePickerTopmost } =
+    useJobFinderOverlayOwnership({
+      active: isSourcePickerOpen,
+      close: () => closeSourcePicker(true),
+    });
   const sourcePickerPlacement = useBoundedFloatingSurface({
     alignment: "start",
     desiredHeight: SOURCE_PICKER_DESIRED_HEIGHT_PX,
@@ -270,7 +271,9 @@ export function DiscoverySearchBar(props: {
       } else {
         selected.add(sourceId);
       }
-      return selected.size === availableSources.length ? "all" : [...selected];
+      return selected.size === availableSources.length
+        ? "all"
+        : [...selected];
     });
   };
   const runSearch = () => {
@@ -346,7 +349,9 @@ export function DiscoverySearchBar(props: {
         )}
         disabled={isSearchRunning}
         onClick={() =>
-          setFreshness((current) => (current === "recent" ? "any" : "recent"))
+          setFreshness((current) =>
+            current === "recent" ? "any" : "recent",
+          )
         }
         title="Prioritize recent listings. Older or undated roles may still appear when they fit."
         type="button"
@@ -362,101 +367,98 @@ export function DiscoverySearchBar(props: {
       {/* With one enabled source there is nothing to choose; the picker
           returns as soon as a second source is on. */}
       {availableSources.length > 1 ? (
-        <div
-          className="relative shrink-0"
-          data-testid="discovery-source-picker"
+      <div className="relative shrink-0" data-testid="discovery-source-picker">
+        <button
+          aria-expanded={isSourcePickerOpen}
+          aria-haspopup="dialog"
+          className="inline-flex min-h-8 items-center rounded-(--radius-small) border border-(--control-border) px-2.5 text-(length:--text-small) font-medium text-foreground-soft outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30"
+          disabled={isSearchRunning}
+          onClick={() => setIsSourcePickerOpen((open) => !open)}
+          ref={sourcePickerTriggerRef}
+          type="button"
         >
-          <button
-            aria-expanded={isSourcePickerOpen}
-            aria-haspopup="dialog"
-            className="inline-flex min-h-8 items-center rounded-(--radius-small) border border-(--control-border) px-2.5 text-(length:--text-small) font-medium text-foreground-soft outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30"
-            disabled={isSearchRunning}
-            onClick={() => setIsSourcePickerOpen((open) => !open)}
-            ref={sourcePickerTriggerRef}
-            type="button"
+          {sourceSelectionLabel}
+        </button>
+        {sourcePickerPlacement ? (
+          <Popover
+            className="p-2"
+            label="Search sources"
+            open={isSourcePickerOpen}
+            placement={{
+              left: sourcePickerPlacement.left,
+              maxHeight: sourcePickerPlacement.maxHeight,
+              top: sourcePickerPlacement.top,
+              width: sourcePickerPlacement.width,
+            }}
+            ref={sourcePickerSurfaceRef}
+            role="dialog"
           >
-            {sourceSelectionLabel}
-          </button>
-          {sourcePickerPlacement ? (
-            <Popover
-              className="p-2"
-              label="Search sources"
-              open={isSourcePickerOpen}
-              placement={{
-                left: sourcePickerPlacement.left,
-                maxHeight: sourcePickerPlacement.maxHeight,
-                top: sourcePickerPlacement.top,
-                width: sourcePickerPlacement.width,
-              }}
-              ref={sourcePickerSurfaceRef}
-              role="dialog"
-            >
-              {/* Hundreds of sources: a name filter and All / None, so searching
+          {/* Hundreds of sources: a name filter and All / None, so searching
               one source is not hundreds of unticks. */}
-              {availableSources.length > 8 ? (
-                <input
-                  aria-label="Find a source"
-                  className="mb-1 h-8 w-full rounded-(--radius-small) border border-(--control-border) bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
-                  onChange={(event) => setSourceFilter(event.target.value)}
-                  placeholder="Find a source"
-                  type="search"
-                  value={sourceFilter}
-                />
-              ) : null}
-              <div className="mb-1 flex items-center justify-between gap-2 px-2 py-1 text-sm">
-                <span className="text-foreground-soft">
-                  {selectedSourceCount} of {availableSources.length} selected
-                </span>
-                <span className="flex gap-1">
-                  <button
-                    aria-label="All sources in this plan"
-                    className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
-                    disabled={isSearchRunning}
-                    onClick={() => setSelectedSourceIds("all")}
-                    type="button"
-                  >
-                    All
-                  </button>
-                  <button
-                    aria-label="No sources"
-                    className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
-                    disabled={isSearchRunning}
-                    onClick={() => setSelectedSourceIds([])}
-                    type="button"
-                  >
-                    None
-                  </button>
-                </span>
-              </div>
-              {visibleSources.map((source) => {
-                const checked =
-                  selectedSourceIds === "all" ||
-                  selectedSourceIds.includes(source.id);
-                return (
-                  <label
-                    className="flex cursor-pointer items-center gap-2 rounded-(--radius-small) px-2 py-1.5 text-sm hover:bg-secondary"
-                    key={source.id}
-                  >
-                    <input
-                      checked={checked}
-                      disabled={isSearchRunning}
-                      onChange={() => toggleSource(source.id)}
-                      type="checkbox"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate">{source.label}</span>
-                      {props.profileSourceEnabled?.[source.id] === false ? (
-                        <span className="block text-xs text-foreground-muted">
-                          Off in Profile; this plan still searches it
-                        </span>
-                      ) : null}
-                    </span>
-                  </label>
-                );
-              })}
-            </Popover>
+          {availableSources.length > 8 ? (
+            <input
+              aria-label="Find a source"
+              className="mb-1 h-8 w-full rounded-(--radius-small) border border-(--control-border) bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+              onChange={(event) => setSourceFilter(event.target.value)}
+              placeholder="Find a source"
+              type="search"
+              value={sourceFilter}
+            />
           ) : null}
-        </div>
+          <div className="mb-1 flex items-center justify-between gap-2 px-2 py-1 text-sm">
+            <span className="text-foreground-soft">
+              {selectedSourceCount} of {availableSources.length} selected
+            </span>
+            <span className="flex gap-1">
+              <button
+                aria-label="All sources in this plan"
+                className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
+                disabled={isSearchRunning}
+                onClick={() => setSelectedSourceIds("all")}
+                type="button"
+              >
+                All
+              </button>
+              <button
+                aria-label="No sources"
+                className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
+                disabled={isSearchRunning}
+                onClick={() => setSelectedSourceIds([])}
+                type="button"
+              >
+                None
+              </button>
+            </span>
+          </div>
+          {visibleSources.map((source) => {
+            const checked =
+              selectedSourceIds === "all" ||
+              selectedSourceIds.includes(source.id);
+            return (
+              <label
+                className="flex cursor-pointer items-center gap-2 rounded-(--radius-small) px-2 py-1.5 text-sm hover:bg-secondary"
+                key={source.id}
+              >
+                <input
+                  checked={checked}
+                  disabled={isSearchRunning}
+                  onChange={() => toggleSource(source.id)}
+                  type="checkbox"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate">{source.label}</span>
+                  {props.profileSourceEnabled?.[source.id] === false ? (
+                    <span className="block text-xs text-foreground-muted">
+                      Off in Profile; this plan still searches it
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            );
+          })}
+          </Popover>
+        ) : null}
+      </div>
       ) : null}
       <button
         aria-controls={DISCOVERY_SEARCH_SETUP_PANEL_ID}

@@ -1711,7 +1711,8 @@ async function openAndLoad(app: ElectronSeedProcess): Promise<{
     { timeout: 30_000 },
   );
   return page.evaluate(async () => {
-    const api = (globalThis as unknown as SeedWindowGlobal).nestor?.jobFinder;
+    const api = (globalThis as unknown as SeedWindowGlobal).nestor
+      ?.jobFinder;
     if (!api?.getWorkspace)
       throw new Error("Normal workspace API is unavailable.");
     return {
@@ -1818,8 +1819,8 @@ async function seedPersona(
       await page.waitForFunction(
         () =>
           Boolean(
-            (globalThis as unknown as SeedWindowGlobal).nestor?.jobFinder?.test
-              ?.resetWorkspaceState,
+            (globalThis as unknown as SeedWindowGlobal).nestor?.jobFinder
+              ?.test?.resetWorkspaceState,
           ),
         undefined,
         { timeout: 30_000 },

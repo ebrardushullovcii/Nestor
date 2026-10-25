@@ -62,7 +62,9 @@ describe("WorkspaceStateScreen", () => {
     expect(outer?.className).toContain("place-items-center");
     expect(outer?.className).toContain("text-center");
     expect(outer?.className).toContain("min-h-[calc(100dvh-7.25rem)]");
-    expect(outer?.className).toContain("xl:min-h-[calc(100dvh-3.5rem)]");
+    expect(outer?.className).toContain(
+      "xl:min-h-[calc(100dvh-3.5rem)]",
+    );
     expect(outer?.dataset.workspaceStateViewportFill).toBe("true");
     expect(status.className).toContain("w-full");
     expect(status.className).toContain("justify-items-center");

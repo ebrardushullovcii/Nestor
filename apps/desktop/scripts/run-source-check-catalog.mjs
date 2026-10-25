@@ -342,7 +342,8 @@ async function cancelActiveRun() {
   if (!page || !runId) return;
   await page
     .evaluate(
-      (activeRunId) => window.nestor.jobFinder.cancelSourceDebug(activeRunId),
+      (activeRunId) =>
+        window.nestor.jobFinder.cancelSourceDebug(activeRunId),
       runId,
     )
     .catch(() => undefined);

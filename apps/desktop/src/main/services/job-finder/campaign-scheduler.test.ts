@@ -102,12 +102,13 @@ describe("campaign scheduler", () => {
 
   it("publishes a schedule change and live discovery activity", async () => {
     const factory = createFakeTimerFactory();
-    const processDueScheduledCampaigns = vi.fn(
-      (_now: string | undefined, onActivity: () => void) => {
-        onActivity();
-        return Promise.resolve(true);
-      },
-    );
+    const processDueScheduledCampaigns = vi.fn((
+      _now: string | undefined,
+      onActivity: () => void,
+    ) => {
+      onActivity();
+      return Promise.resolve(true);
+    });
     vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
       processDueScheduledCampaigns,
     } as unknown as Awaited<ReturnType<typeof getJobFinderWorkspaceService>>);

@@ -151,9 +151,7 @@ describe("InterviewVisibleChat capture controls", () => {
     if (!baseWorkspace.activeSession) {
       throw new Error("Expected an active interview session.");
     }
-    const endedSession: NonNullable<
-      InterviewWorkspaceSnapshot["activeSession"]
-    > = {
+    const endedSession: NonNullable<InterviewWorkspaceSnapshot["activeSession"]> = {
       ...baseWorkspace.activeSession,
       status: "ended",
       listening: false,

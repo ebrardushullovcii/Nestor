@@ -760,11 +760,7 @@ describe("applyCompensationPreferenceChange", () => {
   test("clearing the currency puts it back to awaiting clarification", () => {
     expect(
       applyCompensationPreferenceChange(
-        {
-          ...awaitingClarification,
-          currency: "EUR",
-          currencyStatus: "explicit",
-        },
+        { ...awaitingClarification, currency: "EUR", currencyStatus: "explicit" },
         { currency: null },
       ).currencyStatus,
     ).toBe("needs_clarification");
@@ -781,11 +777,7 @@ describe("applyCompensationPreferenceChange", () => {
   test("an inherited currency survives a change that keeps it", () => {
     expect(
       applyCompensationPreferenceChange(
-        {
-          ...awaitingClarification,
-          currency: "USD",
-          currencyStatus: "inherited",
-        },
+        { ...awaitingClarification, currency: "USD", currencyStatus: "inherited" },
         { maximum: 90_000 },
       ).currencyStatus,
     ).toBe("inherited");

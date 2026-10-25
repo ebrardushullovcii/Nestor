@@ -53,12 +53,8 @@ function normalizeSetupProfileValues(
   // States" into City "Remote - United States" with the other two emptied.
   const storesOwnLocation =
     persistedLocation.length > 0 &&
-    !hasProfileSetupPlaceholderValue(
-      "currentLocation",
-      profile.currentLocation,
-    );
-  const locationChanged =
-    !storesOwnLocation && setupLocation !== persistedLocation;
+    !hasProfileSetupPlaceholderValue("currentLocation", profile.currentLocation);
+  const locationChanged = !storesOwnLocation && setupLocation !== persistedLocation;
   const locationParts = setupLocation
     .split(",")
     .map((part) => part.trim())

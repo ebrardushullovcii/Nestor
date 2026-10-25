@@ -53,9 +53,8 @@ describe("shared agent handoff compaction", () => {
     const result = compactSourceInstructionReviewPhaseContexts({
       phaseContexts: [
         createPhaseContext({
-          reviewTranscript: Array.from(
-            { length: 120 },
-            (_, index) => `assistant: transcript line ${index}`,
+          reviewTranscript: Array.from({ length: 120 }, (_, index) =>
+            `assistant: transcript line ${index}`,
           ),
         }),
       ],
@@ -75,9 +74,7 @@ describe("shared agent handoff compaction", () => {
     expect(result.handoffCompaction.droppedTranscriptLineCount).toBe(120);
     expect(result.phaseContexts[0]?.reviewTranscript).toEqual([]);
     expect(result.handoffCompaction.compaction).toBeDefined();
-    expect(result.handoffCompaction.compaction?.summary.length).toBeGreaterThan(
-      0,
-    );
+    expect(result.handoffCompaction.compaction?.summary.length).toBeGreaterThan(0);
   });
 
   test("keeps transcripts intact when compaction is disabled", () => {

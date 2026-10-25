@@ -122,8 +122,9 @@ describe("running a plan whose sources are gone", () => {
 
     const campaignState = await repository.getCampaignState();
     expect(
-      campaignState?.campaigns.find((candidate) => candidate.id === campaign.id)
-        ?.schedule.runFacts.lastRunOutcome,
+      campaignState?.campaigns.find(
+        (candidate) => candidate.id === campaign.id,
+      )?.schedule.runFacts.lastRunOutcome,
     ).toBe("failed");
   });
 });

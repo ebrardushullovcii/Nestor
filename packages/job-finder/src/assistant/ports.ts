@@ -15,10 +15,7 @@ import type {
  * IPC routes call, so the assistant and the buttons take one path.
  */
 export interface AssistantHostPorts {
-  readJobDetail?(
-    jobId: string,
-    planId: string | null,
-  ): Promise<JobFinderJobDetail>;
+  readJobDetail?(jobId: string, planId: string | null): Promise<JobFinderJobDetail>;
   /** Only registered desktop actions; never raw IPC or arbitrary file access. */
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
   /** Includes reading the file before the domain import run is stored. */
@@ -56,10 +53,7 @@ export interface AssistantHostPorts {
     failed: { jobId: string; reason: string }[];
   }>;
   /** Runs a source check (the same as Check this source). */
-  checkSource(
-    targetId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void>;
+  checkSource(targetId: string, options?: { signal?: AbortSignal }): Promise<void>;
   listDocuments(): Promise<readonly CandidateAsset[]>;
   /** Plain text of one document, bounded; null when it has none. */
   readDocumentText(documentId: string): Promise<string | null>;

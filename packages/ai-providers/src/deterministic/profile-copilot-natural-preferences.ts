@@ -92,11 +92,7 @@ export function buildNaturalSearchPreferenceReply(
     return null;
   }
 
-  if (
-    !/\b(?:jobs?|roles?|look(?:ing)?|search|pay|salary|compensation)\b/i.test(
-      input.request,
-    )
-  ) {
+  if (!/\b(?:jobs?|roles?|look(?:ing)?|search|pay|salary|compensation)\b/i.test(input.request)) {
     return null;
   }
 
@@ -108,8 +104,7 @@ export function buildNaturalSearchPreferenceReply(
   const location = detectPreferredLocation(input.request);
   const needsCurrencyClarification =
     compensation.currencyStatus === "needs_clarification";
-  const operations: ProfileCopilotReply["patchGroups"][number]["operations"] =
-    [];
+  const operations: ProfileCopilotReply["patchGroups"][number]["operations"] = [];
 
   if (location && !input.searchPreferences.locations.includes(location)) {
     operations.push({

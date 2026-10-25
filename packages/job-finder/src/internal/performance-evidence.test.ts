@@ -218,7 +218,9 @@ describe("buildJobFinderPerformanceSnapshot", () => {
           area: "ipc",
           durationMs: 14,
           recordedAt: completedAt,
-          stageDurations: [{ id: "ipc.workspace_round_trip", durationMs: 14 }],
+          stageDurations: [
+            { id: "ipc.workspace_round_trip", durationMs: 14 },
+          ],
         },
         {
           area: "renderer_commit",

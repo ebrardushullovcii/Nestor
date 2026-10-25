@@ -1,10 +1,7 @@
 import type { ApplyQueue } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
-import {
-  describeApplyQueue,
-  listApplyQueueWaitingJobIds,
-} from "./apply-queue-view";
+import { describeApplyQueue, listApplyQueueWaitingJobIds } from "./apply-queue-view";
 
 const base: ApplyQueue = {
   id: "queue_1",
@@ -27,25 +24,11 @@ describe("describeApplyQueue", () => {
     const results = [
       { jobId: "a", state: "submitted", startedAt: at(1), updatedAt: at(2) },
       { jobId: "c", state: "failed", startedAt: at(1), updatedAt: at(3) },
-      {
-        jobId: "d",
-        state: "awaiting_review",
-        startedAt: at(1),
-        updatedAt: at(4),
-      },
+      { jobId: "d", state: "awaiting_review", startedAt: at(1), updatedAt: at(4) },
       // An earlier press's success does not count for this queue.
-      {
-        jobId: "c",
-        state: "submitted",
-        startedAt: at(0),
-        updatedAt: "2026-10-22T09:00:00.000Z",
-      },
+      { jobId: "c", state: "submitted", startedAt: at(0), updatedAt: "2026-10-22T09:00:00.000Z" },
     ] as const;
-    const done = {
-      ...base,
-      state: "done" as const,
-      startedJobIds: ["a", "c", "d"],
-    };
+    const done = { ...base, state: "done" as const, startedJobIds: ["a", "c", "d"] };
     expect(describeApplyQueue(done, { results })).toMatchObject({
       title: "Applied to 1 of 4 jobs",
       detail: "1 sent · 1 ready for you to send · 1 failed · 1 not started",
@@ -55,10 +38,7 @@ describe("describeApplyQueue", () => {
     ).toBe("Filled in applications for 2 of 4 jobs");
     expect(
       describeApplyQueue(done, {
-        results: results.map((result) => ({
-          ...result,
-          state: "failed" as const,
-        })),
+        results: results.map((result) => ({ ...result, state: "failed" as const })),
       })?.title,
     ).toBe("Apply queue finished · none sent");
   });
@@ -89,18 +69,13 @@ describe("describeApplyQueue", () => {
       }),
     ).toMatchObject({
       title: "Applying to 4 jobs · paused",
-      detail:
-        "Too many application attempts failed, so this plan paused. · 1 not applied",
+      detail: "Too many application attempts failed, so this plan paused. · 1 not applied",
       primary: { label: "Continue", action: "continue" },
     });
   });
 
   it("offers Dismiss once finished and no longer holds its jobs", () => {
-    const done = {
-      ...base,
-      state: "done" as const,
-      startedJobIds: ["a", "c", "d"],
-    };
+    const done = { ...base, state: "done" as const, startedJobIds: ["a", "c", "d"] };
     expect(describeApplyQueue(done)).toMatchObject({
       title: "Applied to 3 jobs",
       secondary: { action: "dismiss" },

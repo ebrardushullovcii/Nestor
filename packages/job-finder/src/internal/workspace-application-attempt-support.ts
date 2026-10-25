@@ -131,9 +131,7 @@ export function mergeAttemptReplay(input: {
 }) {
   return {
     sourceInstructionArtifactId:
-      input.replay.sourceInstructionArtifactId ??
-      input.activeInstruction?.id ??
-      null,
+      input.replay.sourceInstructionArtifactId ?? input.activeInstruction?.id ?? null,
     sourceDebugEvidenceRefIds: uniqueStrings([
       ...input.sourceDebugEvidenceRefIds,
       ...input.replay.sourceDebugEvidenceRefIds,

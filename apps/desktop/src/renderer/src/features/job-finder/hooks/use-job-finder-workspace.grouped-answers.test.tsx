@@ -6,9 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 
-function createWorkspace(
-  generatedAt: string,
-): JobFinderRendererWorkspaceSnapshot {
+function createWorkspace(generatedAt: string): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt,
     intelligence: { groupedDecisions: [] },
@@ -24,8 +22,7 @@ describe("useJobFinderWorkspace grouped manual-answer actions", () => {
     vi.fn<(input: unknown) => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const syncWorkspace =
     vi.fn<(baseRevision: number | null) => Promise<unknown>>();
-  const getWorkspace =
-    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 
   beforeEach(() => {
     vi.clearAllMocks();

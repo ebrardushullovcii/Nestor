@@ -68,20 +68,14 @@ test("saved identity round trips without opening a stored body and invalidates c
   const saved = readPreparedSavedJobIdentity(job)!;
   expect(saved).not.toBeNull();
   const lazy = { ...job };
-  writeDiscoveryPreparation(lazy, {
-    savedIdentity: { owner: lazy, value: saved },
-  });
+  writeDiscoveryPreparation(lazy, { savedIdentity: { owner: lazy, value: saved } });
   Object.defineProperty(lazy, "description", {
     enumerable: true,
-    get() {
-      throw new Error("Stored identity opened the body");
-    },
+    get() { throw new Error("Stored identity opened the body"); },
   });
   Object.freeze(lazy);
   const actual = toSightingIdentityInput(lazy);
-  expect(buildJobIdentityAliases(actual)).toEqual(
-    buildJobIdentityAliases(expected),
-  );
+  expect(buildJobIdentityAliases(actual)).toEqual(buildJobIdentityAliases(expected));
   expect(hasEquivalentListingContentIdentity(actual, expected)).toBe(true);
   expect(actual.description).toBeUndefined();
   for (const change of [
@@ -89,25 +83,12 @@ test("saved identity round trips without opening a stored body and invalidates c
     { company: "Different company" },
     { canonicalUrl: "https://example.test/changed" },
     { description: "Different body" },
-    {
-      provenance: [
-        ...job.provenance,
-        { ...job.provenance[0]!, listingUrl: "https://example.test/alternate" },
-      ],
-    },
+    { provenance: [...job.provenance, { ...job.provenance[0]!, listingUrl: "https://example.test/alternate" }] },
   ]) {
     const changed = { ...job, ...change };
     expect(readPreparedSavedJobIdentity(changed)).toBeNull();
     expect(buildJobIdentityAliases(toSightingIdentityInput(changed))).toEqual(
-      buildJobIdentityAliases({
-        ...changed,
-        alternateListingUrls: changed.provenance.flatMap((entry) =>
-          entry.listingUrl && entry.listingUrl !== changed.canonicalUrl
-            ? [entry.listingUrl]
-            : [],
-        ),
-        matchAcrossSources: true,
-      }),
+      buildJobIdentityAliases({ ...changed, alternateListingUrls: changed.provenance.flatMap((entry) => entry.listingUrl && entry.listingUrl !== changed.canonicalUrl ? [entry.listingUrl] : []), matchAcrossSources: true }),
     );
   }
 });

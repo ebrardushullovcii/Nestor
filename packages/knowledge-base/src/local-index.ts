@@ -117,7 +117,9 @@ export function createLocalKnowledgeIndex(
         stale = false;
       }
 
-      const tagFilter = searchOptions.tags ? new Set(searchOptions.tags) : null;
+      const tagFilter = searchOptions.tags
+        ? new Set(searchOptions.tags)
+        : null;
       const results = miniSearch.search(normalizedQuery, {
         prefix: searchOptions.prefix ?? true,
         fuzzy: searchOptions.fuzzy ?? 0,
@@ -140,19 +142,14 @@ export function createLocalKnowledgeIndex(
             score: result.score,
           };
         })
-        .filter(
-          (result): result is IndexedChunk & { score: number } =>
-            result !== null,
-        )
+        .filter((result): result is IndexedChunk & { score: number } => result !== null)
         .filter((result) => {
-          if (!tagFilter) {
-            return true;
-          }
+        if (!tagFilter) {
+          return true;
+        }
 
-          const metadataTags = result.metadata.tags ?? [];
-          return metadataTags.some((tag: KnowledgeDocumentTag) =>
-            tagFilter.has(tag),
-          );
+        const metadataTags = result.metadata.tags ?? [];
+        return metadataTags.some((tag: KnowledgeDocumentTag) => tagFilter.has(tag));
         });
 
       return filteredResults

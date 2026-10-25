@@ -170,27 +170,19 @@ export const ProductActionSuccessSchema = z.discriminatedUnion("tool", [
   }).strict(),
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("shortlist_job"),
-    data: z
-      .object({ jobId: NonEmptyStringSchema, status: z.literal("shortlisted") })
-      .strict(),
+    data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("shortlisted") }).strict(),
   }).strict(),
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("dismiss_job"),
-    data: z
-      .object({ jobId: NonEmptyStringSchema, status: z.literal("dismissed") })
-      .strict(),
+    data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("dismissed") }).strict(),
   }).strict(),
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("restore_job"),
-    data: z
-      .object({ jobId: NonEmptyStringSchema, status: z.literal("restored") })
-      .strict(),
+    data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("restored") }).strict(),
   }).strict(),
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("open_user_action"),
-    data: z
-      .object({ requestId: NonEmptyStringSchema, state: NonEmptyStringSchema })
-      .strict(),
+    data: z.object({ requestId: NonEmptyStringSchema, state: NonEmptyStringSchema }).strict(),
   }).strict(),
 ]);
 export type ProductActionSuccess = z.infer<typeof ProductActionSuccessSchema>;

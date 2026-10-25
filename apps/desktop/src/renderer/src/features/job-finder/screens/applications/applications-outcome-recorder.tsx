@@ -1,5 +1,8 @@
 import { useState } from "react";
-import type { ApplicationOutcome, RecordOutcomeInput } from "@nestor/contracts";
+import type {
+  ApplicationOutcome,
+  RecordOutcomeInput,
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 export const outcomeRecordingOptions: ReadonlyArray<{

@@ -1322,7 +1322,8 @@ export function createLiveAssistantProvidersFromEnvironment(
       ) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(
-        env.NESTOR_INTERVIEW_REASONING_EFFORT ?? env.NESTOR_AI_REASONING_EFFORT,
+        env.NESTOR_INTERVIEW_REASONING_EFFORT ??
+          env.NESTOR_AI_REASONING_EFFORT,
       ) ?? DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     requestTimeoutMs,
   };

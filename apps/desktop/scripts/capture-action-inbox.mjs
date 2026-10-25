@@ -126,21 +126,21 @@ async function captureGroup(page, capture, groupName, fileName) {
         : []),
     ];
     const shellDestinations = shellControls.map((control) => {
-      const bounds = control.getBoundingClientRect();
-      return {
-        label: control.textContent?.replace(/\s+/g, " ").trim() ?? "",
-        visible: Boolean(
-          control instanceof HTMLElement &&
-          control.offsetWidth > 0 &&
-          control.offsetHeight > 0 &&
-          getComputedStyle(control).visibility !== "hidden" &&
-          bounds.left >= 0 &&
-          bounds.right <= window.innerWidth &&
-          bounds.top >= 0 &&
-          bounds.bottom <= window.innerHeight,
-        ),
-      };
-    });
+          const bounds = control.getBoundingClientRect();
+          return {
+            label: control.textContent?.replace(/\s+/g, " ").trim() ?? "",
+            visible: Boolean(
+              control instanceof HTMLElement &&
+                control.offsetWidth > 0 &&
+                control.offsetHeight > 0 &&
+                getComputedStyle(control).visibility !== "hidden" &&
+                bounds.left >= 0 &&
+                bounds.right <= window.innerWidth &&
+                bounds.top >= 0 &&
+                bounds.bottom <= window.innerHeight
+            ),
+          };
+        });
 
     return {
       headingVisible: Boolean(groupHeading),
@@ -148,10 +148,7 @@ async function captureGroup(page, capture, groupName, fileName) {
       shellDestinations,
       shellNavigationHorizontalOverflow:
         shellNavigation instanceof HTMLElement
-          ? Math.max(
-              0,
-              shellNavigation.scrollWidth - shellNavigation.clientWidth,
-            )
+          ? Math.max(0, shellNavigation.scrollWidth - shellNavigation.clientWidth)
           : null,
       mainHorizontalOverflow:
         main instanceof HTMLElement
@@ -254,7 +251,9 @@ async function runCapture() {
           throw new Error("Desktop test API is unavailable in the renderer.");
         }
         await window.nestor.jobFinder.test.setSystemThemeOverride(theme);
-        await window.nestor.jobFinder.test.resetWorkspaceState(workspaceState);
+        await window.nestor.jobFinder.test.resetWorkspaceState(
+          workspaceState,
+        );
       },
       {
         theme: process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",

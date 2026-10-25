@@ -23,18 +23,11 @@ function pickArrayValue<TValue>(
       : [...primaryValue];
   }
 
-  return primaryValue.length > 0
-    ? [...primaryValue]
-    : [...(fallbackValue ?? [])];
+  return primaryValue.length > 0 ? [...primaryValue] : [...(fallbackValue ?? [])];
 }
 
 function normalizeComparableText(value: string | null): string {
-  return (
-    value
-      ?.toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim() ?? ""
-  );
+  return value?.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() ?? "";
 }
 
 function textsOverlap(left: string | null, right: string | null): boolean {
@@ -64,9 +57,7 @@ function findExperienceMatchIndex(
   const exactMatchIndex = fallback.findIndex((fb, idx) => {
     if (matchedFallbackIndices.has(idx)) return false;
     const titleMatch =
-      (entry.title &&
-        fb.title &&
-        entry.title.toLowerCase() === fb.title.toLowerCase()) ||
+      (entry.title && fb.title && entry.title.toLowerCase() === fb.title.toLowerCase()) ||
       (!entry.title && !fb.title);
     const startMatch =
       (entry.startDate && fb.startDate && entry.startDate === fb.startDate) ||
@@ -101,10 +92,7 @@ function findEducationMatchIndex(
 
   const exactMatchIndex = fallback.findIndex((fb, idx) => {
     if (matchedFallbackIndices.has(idx)) return false;
-    return (
-      normalize(entry.schoolName) === normalize(fb.schoolName) &&
-      normalize(entry.location) === normalize(fb.location)
-    );
+    return normalize(entry.schoolName) === normalize(fb.schoolName) && normalize(entry.location) === normalize(fb.location);
   });
 
   if (exactMatchIndex !== -1) {
@@ -115,9 +103,7 @@ function findEducationMatchIndex(
     if (matchedFallbackIndices.has(idx)) return false;
 
     const schoolMatch = textsOverlap(entry.schoolName, fb.schoolName);
-    const locationMatch =
-      datesCompatible(entry.location, fb.location) ||
-      textsOverlap(entry.location, fb.location);
+    const locationMatch = datesCompatible(entry.location, fb.location) || textsOverlap(entry.location, fb.location);
 
     return schoolMatch && locationMatch;
   });
@@ -134,11 +120,7 @@ function mergeExperienceExtractionEntries(
 
   const matchedFallbackIndices = new Set<number>();
   const merged = primary.map((entry) => {
-    const matchIndex = findExperienceMatchIndex(
-      entry,
-      fallback,
-      matchedFallbackIndices,
-    );
+    const matchIndex = findExperienceMatchIndex(entry, fallback, matchedFallbackIndices);
 
     if (matchIndex !== -1) {
       matchedFallbackIndices.add(matchIndex);
@@ -149,70 +131,24 @@ function mergeExperienceExtractionEntries(
     return {
       ...entry,
       title: entry.title ?? match?.title ?? null,
-      companyName: pickNullableValue(
-        entry.companyName,
-        match?.companyName,
-        preferFallbackValues,
-      ),
-      companyUrl: pickNullableValue(
-        entry.companyUrl,
-        match?.companyUrl,
-        preferFallbackValues,
-      ),
-      location: pickNullableValue(
-        entry.location,
-        match?.location,
-        preferFallbackValues,
-      ),
-      workMode: pickArrayValue(
-        entry.workMode,
-        match?.workMode,
-        preferFallbackValues,
-      ),
-      employmentType: pickNullableValue(
-        entry.employmentType,
-        match?.employmentType,
-        preferFallbackValues,
-      ),
+      companyName: pickNullableValue(entry.companyName, match?.companyName, preferFallbackValues),
+      companyUrl: pickNullableValue(entry.companyUrl, match?.companyUrl, preferFallbackValues),
+      location: pickNullableValue(entry.location, match?.location, preferFallbackValues),
+      workMode: pickArrayValue(entry.workMode, match?.workMode, preferFallbackValues),
+      employmentType: pickNullableValue(entry.employmentType, match?.employmentType, preferFallbackValues),
       startDate: entry.startDate ?? match?.startDate ?? null,
-      endDate: pickNullableValue(
-        entry.endDate,
-        match?.endDate,
-        preferFallbackValues,
-      ),
+      endDate: pickNullableValue(entry.endDate, match?.endDate, preferFallbackValues),
       isCurrent: (entry.isCurrent || match?.isCurrent) ?? false,
-      summary: pickNullableValue(
-        entry.summary,
-        match?.summary,
-        preferFallbackValues,
-      ),
-      achievements: pickArrayValue(
-        entry.achievements,
-        match?.achievements,
-        preferFallbackValues,
-      ),
+      summary: pickNullableValue(entry.summary, match?.summary, preferFallbackValues),
+      achievements: pickArrayValue(entry.achievements, match?.achievements, preferFallbackValues),
       skills: pickArrayValue(entry.skills, match?.skills, preferFallbackValues),
-      domainTags: pickArrayValue(
-        entry.domainTags,
-        match?.domainTags,
-        preferFallbackValues,
-      ),
-      peopleManagementScope: pickNullableValue(
-        entry.peopleManagementScope,
-        match?.peopleManagementScope,
-        preferFallbackValues,
-      ),
-      ownershipScope: pickNullableValue(
-        entry.ownershipScope,
-        match?.ownershipScope,
-        preferFallbackValues,
-      ),
+      domainTags: pickArrayValue(entry.domainTags, match?.domainTags, preferFallbackValues),
+      peopleManagementScope: pickNullableValue(entry.peopleManagementScope, match?.peopleManagementScope, preferFallbackValues),
+      ownershipScope: pickNullableValue(entry.ownershipScope, match?.ownershipScope, preferFallbackValues),
     };
   });
 
-  const unmatchedFallback = fallback.filter(
-    (_, idx) => !matchedFallbackIndices.has(idx),
-  );
+  const unmatchedFallback = fallback.filter((_, idx) => !matchedFallbackIndices.has(idx));
   return [...merged, ...unmatchedFallback];
 }
 
@@ -227,11 +163,7 @@ function mergeEducationExtractionEntries(
 
   const matchedFallbackIndices = new Set<number>();
   const merged = primary.map((entry) => {
-    const matchIndex = findEducationMatchIndex(
-      entry,
-      fallback,
-      matchedFallbackIndices,
-    );
+    const matchIndex = findEducationMatchIndex(entry, fallback, matchedFallbackIndices);
 
     if (matchIndex !== -1) {
       matchedFallbackIndices.add(matchIndex);
@@ -241,47 +173,17 @@ function mergeEducationExtractionEntries(
 
     return {
       ...entry,
-      schoolName: pickNullableValue(
-        entry.schoolName,
-        match?.schoolName,
-        preferFallbackValues,
-      ),
-      location: pickNullableValue(
-        entry.location,
-        match?.location,
-        preferFallbackValues,
-      ),
-      summary: pickNullableValue(
-        entry.summary,
-        match?.summary,
-        preferFallbackValues,
-      ),
-      degree: pickNullableValue(
-        entry.degree,
-        match?.degree,
-        preferFallbackValues,
-      ),
-      fieldOfStudy: pickNullableValue(
-        entry.fieldOfStudy,
-        match?.fieldOfStudy,
-        preferFallbackValues,
-      ),
-      startDate: pickNullableValue(
-        entry.startDate,
-        match?.startDate,
-        preferFallbackValues,
-      ),
-      endDate: pickNullableValue(
-        entry.endDate,
-        match?.endDate,
-        preferFallbackValues,
-      ),
+      schoolName: pickNullableValue(entry.schoolName, match?.schoolName, preferFallbackValues),
+      location: pickNullableValue(entry.location, match?.location, preferFallbackValues),
+      summary: pickNullableValue(entry.summary, match?.summary, preferFallbackValues),
+      degree: pickNullableValue(entry.degree, match?.degree, preferFallbackValues),
+      fieldOfStudy: pickNullableValue(entry.fieldOfStudy, match?.fieldOfStudy, preferFallbackValues),
+      startDate: pickNullableValue(entry.startDate, match?.startDate, preferFallbackValues),
+      endDate: pickNullableValue(entry.endDate, match?.endDate, preferFallbackValues),
     };
   });
 
-  const unmatchedFallback = fallback.filter(
-    (_, idx) => !matchedFallbackIndices.has(idx),
-  );
+  const unmatchedFallback = fallback.filter((_, idx) => !matchedFallbackIndices.has(idx));
   return [...merged, ...unmatchedFallback];
 }
 
@@ -295,19 +197,11 @@ function mergeLinkExtractionEntries(
 
   const matchedFallbackIndices = new Set<number>();
   const merged = primary.map((entry, index) => {
-    const matchIndex =
-      entry.url == null
-        ? !matchedFallbackIndices.has(index) &&
-          index < fallback.length &&
-          fallback[index]?.url == null
-          ? index
-          : -1
-        : fallback.findIndex((candidate, fallbackIndex) => {
-            return (
-              candidate.url === entry.url &&
-              !matchedFallbackIndices.has(fallbackIndex)
-            );
-          });
+    const matchIndex = entry.url == null
+      ? (!matchedFallbackIndices.has(index) && index < fallback.length && fallback[index]?.url == null ? index : -1)
+      : fallback.findIndex((candidate, fallbackIndex) => {
+        return candidate.url === entry.url && !matchedFallbackIndices.has(fallbackIndex);
+      });
 
     if (matchIndex !== -1) {
       matchedFallbackIndices.add(matchIndex);
@@ -323,15 +217,11 @@ function mergeLinkExtractionEntries(
     };
   });
 
-  const unmatchedFallback = fallback.filter(
-    (_, index) => !matchedFallbackIndices.has(index),
-  );
+  const unmatchedFallback = fallback.filter((_, index) => !matchedFallbackIndices.has(index));
   return [...merged, ...unmatchedFallback];
 }
 
-function scoreExperienceEntries(
-  entries: readonly ResumeProfileExtraction["experiences"][number][],
-): number {
+function scoreExperienceEntries(entries: readonly ResumeProfileExtraction["experiences"][number][]): number {
   if (entries.length === 0) {
     return 0;
   }
@@ -351,29 +241,19 @@ function scoreExperienceEntries(
   return total / entries.length;
 }
 
-function scoreEducationEntries(
-  entries: readonly ResumeProfileExtraction["education"][number][],
-): number {
+function scoreEducationEntries(entries: readonly ResumeProfileExtraction["education"][number][]): number {
   if (entries.length === 0) {
     return 0;
   }
 
   const total = entries.reduce((score, entry) => {
-    return (
-      score +
-      (entry.schoolName ? 2 : 0) +
-      (entry.degree ? 1 : 0) +
-      (entry.fieldOfStudy ? 1 : 0)
-    );
+    return score + (entry.schoolName ? 2 : 0) + (entry.degree ? 1 : 0) + (entry.fieldOfStudy ? 1 : 0);
   }, 0);
 
   return total / entries.length;
 }
 
-function choosePreferredHeadline(
-  primary: string | null,
-  fallback: string | null,
-): string | null {
+function choosePreferredHeadline(primary: string | null, fallback: string | null): string | null {
   if (!primary) {
     return fallback;
   }
@@ -389,12 +269,8 @@ export function completeResumeExtraction(
   primary: ResumeProfileExtraction,
   fallback: ResumeProfileExtraction,
 ): ResumeProfileExtraction {
-  const preferFallbackExperiences =
-    scoreExperienceEntries(primary.experiences) <
-    scoreExperienceEntries(fallback.experiences);
-  const preferFallbackEducation =
-    scoreEducationEntries(primary.education) <
-    scoreEducationEntries(fallback.education);
+  const preferFallbackExperiences = scoreExperienceEntries(primary.experiences) < scoreExperienceEntries(fallback.experiences);
+  const preferFallbackEducation = scoreEducationEntries(primary.education) < scoreEducationEntries(fallback.education);
   const mergedExperiences = mergeExperienceExtractionEntries(
     primary.experiences,
     fallback.experiences,
@@ -423,25 +299,19 @@ export function completeResumeExtraction(
     portfolioUrl: primary.portfolioUrl ?? fallback.portfolioUrl,
     linkedinUrl: primary.linkedinUrl ?? fallback.linkedinUrl,
     githubUrl: primary.githubUrl ?? fallback.githubUrl,
-    personalWebsiteUrl:
-      primary.personalWebsiteUrl ?? fallback.personalWebsiteUrl,
+    personalWebsiteUrl: primary.personalWebsiteUrl ?? fallback.personalWebsiteUrl,
     professionalSummary: {
       shortValueProposition:
-        primary.professionalSummary.shortValueProposition ??
-        fallback.professionalSummary.shortValueProposition,
-      fullSummary:
-        primary.professionalSummary.fullSummary ??
-        fallback.professionalSummary.fullSummary,
+        primary.professionalSummary.shortValueProposition ?? fallback.professionalSummary.shortValueProposition,
+      fullSummary: primary.professionalSummary.fullSummary ?? fallback.professionalSummary.fullSummary,
       careerThemes:
         primary.professionalSummary.careerThemes.length > 0
           ? primary.professionalSummary.careerThemes
           : fallback.professionalSummary.careerThemes,
       leadershipSummary:
-        primary.professionalSummary.leadershipSummary ??
-        fallback.professionalSummary.leadershipSummary,
+        primary.professionalSummary.leadershipSummary ?? fallback.professionalSummary.leadershipSummary,
       domainFocusSummary:
-        primary.professionalSummary.domainFocusSummary ??
-        fallback.professionalSummary.domainFocusSummary,
+        primary.professionalSummary.domainFocusSummary ?? fallback.professionalSummary.domainFocusSummary,
       strengths:
         primary.professionalSummary.strengths.length > 0
           ? primary.professionalSummary.strengths
@@ -449,48 +319,31 @@ export function completeResumeExtraction(
     },
     skillGroups: {
       coreSkills:
-        primary.skillGroups.coreSkills.length > 0
-          ? primary.skillGroups.coreSkills
-          : fallback.skillGroups.coreSkills,
-      tools:
-        primary.skillGroups.tools.length > 0
-          ? primary.skillGroups.tools
-          : fallback.skillGroups.tools,
+        primary.skillGroups.coreSkills.length > 0 ? primary.skillGroups.coreSkills : fallback.skillGroups.coreSkills,
+      tools: primary.skillGroups.tools.length > 0 ? primary.skillGroups.tools : fallback.skillGroups.tools,
       languagesAndFrameworks:
         primary.skillGroups.languagesAndFrameworks.length > 0
           ? primary.skillGroups.languagesAndFrameworks
           : fallback.skillGroups.languagesAndFrameworks,
       softSkills:
-        primary.skillGroups.softSkills.length > 0
-          ? primary.skillGroups.softSkills
-          : fallback.skillGroups.softSkills,
+        primary.skillGroups.softSkills.length > 0 ? primary.skillGroups.softSkills : fallback.skillGroups.softSkills,
       highlightedSkills:
         primary.skillGroups.highlightedSkills.length > 0
           ? primary.skillGroups.highlightedSkills
           : fallback.skillGroups.highlightedSkills,
     },
     skills: uniqueStrings([...primary.skills, ...fallback.skills]),
-    targetRoles:
-      primary.targetRoles.length > 0
-        ? primary.targetRoles
-        : fallback.targetRoles,
+    targetRoles: primary.targetRoles.length > 0 ? primary.targetRoles : fallback.targetRoles,
     preferredLocations:
-      primary.preferredLocations.length > 0
-        ? primary.preferredLocations
-        : fallback.preferredLocations,
+      primary.preferredLocations.length > 0 ? primary.preferredLocations : fallback.preferredLocations,
     experiences: mergedExperiences,
     education: mergedEducation,
     certifications:
-      primary.certifications.length > 0
-        ? primary.certifications
-        : fallback.certifications,
+      primary.certifications.length > 0 ? primary.certifications : fallback.certifications,
     links: mergeLinkExtractionEntries(primary.links, fallback.links),
-    projects:
-      primary.projects.length > 0 ? primary.projects : fallback.projects,
+    projects: primary.projects.length > 0 ? primary.projects : fallback.projects,
     spokenLanguages:
-      primary.spokenLanguages.length > 0
-        ? primary.spokenLanguages
-        : fallback.spokenLanguages,
+      primary.spokenLanguages.length > 0 ? primary.spokenLanguages : fallback.spokenLanguages,
     notes: uniqueStrings([...primary.notes, ...fallback.notes]),
   });
 }

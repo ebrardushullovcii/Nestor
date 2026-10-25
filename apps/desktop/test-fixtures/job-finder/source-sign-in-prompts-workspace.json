@@ -68,14 +68,32 @@
       "strengths": []
     },
     "skillGroups": {
-      "coreSkills": ["React", "TypeScript"],
-      "tools": ["Figma"],
-      "languagesAndFrameworks": ["TypeScript", "React"],
-      "softSkills": ["Cross-functional communication"],
-      "highlightedSkills": ["Workflow design"]
+      "coreSkills": [
+        "React",
+        "TypeScript"
+      ],
+      "tools": [
+        "Figma"
+      ],
+      "languagesAndFrameworks": [
+        "TypeScript",
+        "React"
+      ],
+      "softSkills": [
+        "Cross-functional communication"
+      ],
+      "highlightedSkills": [
+        "Workflow design"
+      ]
     },
-    "targetRoles": ["Senior Product Engineer", "Staff Frontend Engineer"],
-    "locations": ["Remote", "New York, NY"],
+    "targetRoles": [
+      "Senior Product Engineer",
+      "Staff Frontend Engineer"
+    ],
+    "locations": [
+      "Remote",
+      "New York, NY"
+    ],
     "skills": [
       "React",
       "TypeScript",
@@ -92,7 +110,9 @@
         "title": "Senior product engineer",
         "employmentType": null,
         "location": "New York, NY",
-        "workMode": ["hybrid"],
+        "workMode": [
+          "hybrid"
+        ],
         "startDate": "2021-03",
         "endDate": null,
         "isCurrent": true,
@@ -120,15 +140,36 @@
     "spokenLanguages": []
   },
   "searchPreferences": {
-    "targetRoles": ["Senior Product Engineer", "Staff Frontend Engineer"],
-    "jobFamilies": ["Product engineering", "Frontend platform"],
-    "locations": ["Remote", "New York, NY"],
+    "targetRoles": [
+      "Senior Product Engineer",
+      "Staff Frontend Engineer"
+    ],
+    "jobFamilies": [
+      "Product engineering",
+      "Frontend platform"
+    ],
+    "locations": [
+      "Remote",
+      "New York, NY"
+    ],
     "excludedLocations": [],
-    "workModes": ["remote", "hybrid"],
-    "seniorityLevels": ["senior", "staff"],
-    "targetIndustries": ["Developer tools"],
-    "targetCompanyStages": ["growth"],
-    "employmentTypes": ["Full-time"],
+    "workModes": [
+      "remote",
+      "hybrid"
+    ],
+    "seniorityLevels": [
+      "senior",
+      "staff"
+    ],
+    "targetIndustries": [
+      "Developer tools"
+    ],
+    "targetCompanyStages": [
+      "growth"
+    ],
+    "employmentTypes": [
+      "Full-time"
+    ],
     "minimumSalaryUsd": 180000,
     "targetSalaryUsd": 210000,
     "salaryCurrency": "USD",
@@ -196,7 +237,9 @@
       "targetHostname": "www.linkedin.com",
       "manualPrerequisiteSummary": "Please sign in first.",
       "finalSummary": "Manual login is required before discovery can continue.",
-      "attemptIds": ["attempt_linkedin_required"],
+      "attemptIds": [
+        "attempt_linkedin_required"
+      ],
       "phaseSummaries": [],
       "instructionArtifactId": null,
       "timing": null
@@ -219,7 +262,9 @@
       "targetHostname": "wellfound.com",
       "manualPrerequisiteSummary": null,
       "finalSummary": "Guest access works, but sign in is recommended for broader results.",
-      "attemptIds": ["attempt_wellfound_recommended"],
+      "attemptIds": [
+        "attempt_wellfound_recommended"
+      ],
       "phaseSummaries": [],
       "instructionArtifactId": "instruction_wellfound_signin",
       "timing": null
@@ -262,7 +307,9 @@
       "completionReason": "Auth-limited guest access was proven.",
       "strategyLabel": "Access auth probe",
       "strategyFingerprint": "access_auth_probe:target_site:wellfound_signin",
-      "confirmedFacts": ["Guest access is limited until you sign in."],
+      "confirmedFacts": [
+        "Guest access is limited until you sign in."
+      ],
       "attemptedActions": [],
       "blockerSummary": null,
       "resultSummary": "Sign in is recommended for broader results.",
@@ -275,7 +322,9 @@
         "successfulInteractions": [],
         "routeSignals": [],
         "attemptedControls": [],
-        "warnings": ["Sign in is recommended for broader results."]
+        "warnings": [
+          "Sign in is recommended for broader results."
+        ]
       },
       "compactionState": null,
       "timing": null
@@ -290,15 +339,21 @@
       "updatedAt": "2026-04-26T09:22:00.000Z",
       "acceptedAt": null,
       "basedOnRunId": "source_debug_run_wellfound_recommended",
-      "basedOnAttemptIds": ["attempt_wellfound_recommended"],
+      "basedOnAttemptIds": [
+        "attempt_wellfound_recommended"
+      ],
       "notes": null,
       "navigationGuidance": [
         "Use the jobs landing page first when the guest feed looks sparse."
       ],
-      "searchGuidance": ["Sign in is recommended for broader results."],
+      "searchGuidance": [
+        "Sign in is recommended for broader results."
+      ],
       "detailGuidance": [],
       "applyGuidance": [],
-      "warnings": ["Guest access is limited until you sign in."],
+      "warnings": [
+        "Guest access is limited until you sign in."
+      ],
       "versionInfo": {
         "promptProfileVersion": "v1",
         "toolsetVersion": "v1",
@@ -310,7 +365,10 @@
         "provider": null,
         "collection": {
           "preferredMethod": "listing_route",
-          "rankedMethods": ["listing_route", "fallback_search"],
+          "rankedMethods": [
+            "listing_route",
+            "fallback_search"
+          ],
           "startingRoutes": [
             {
               "url": "https://wellfound.com/jobs",
@@ -332,7 +390,9 @@
         },
         "apply": {
           "applyPath": "unknown",
-          "authMarkers": ["Guest access is limited until you sign in."],
+          "authMarkers": [
+            "Guest access is limited until you sign in."
+          ],
           "consentMarkers": [],
           "questionSurfaceHints": [],
           "resumeUploadHints": []
@@ -394,7 +454,9 @@
       "targetHostname": "www.linkedin.com",
       "manualPrerequisiteSummary": "Please sign in first.",
       "finalSummary": "Manual login is required before discovery can continue.",
-      "attemptIds": ["attempt_linkedin_required"],
+      "attemptIds": [
+        "attempt_linkedin_required"
+      ],
       "phaseSummaries": [],
       "instructionArtifactId": null,
       "timing": null
@@ -418,7 +480,9 @@
         "targetHostname": "www.linkedin.com",
         "manualPrerequisiteSummary": "Please sign in first.",
         "finalSummary": "Manual login is required before discovery can continue.",
-        "attemptIds": ["attempt_linkedin_required"],
+        "attemptIds": [
+          "attempt_linkedin_required"
+        ],
         "phaseSummaries": [],
         "instructionArtifactId": null,
         "timing": null
@@ -441,7 +505,9 @@
         "targetHostname": "wellfound.com",
         "manualPrerequisiteSummary": null,
         "finalSummary": "Guest access works, but sign in is recommended for broader results.",
-        "attemptIds": ["attempt_wellfound_recommended"],
+        "attemptIds": [
+          "attempt_wellfound_recommended"
+        ],
         "phaseSummaries": [],
         "instructionArtifactId": "instruction_wellfound_signin",
         "timing": null

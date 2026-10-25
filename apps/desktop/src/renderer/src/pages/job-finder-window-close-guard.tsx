@@ -116,7 +116,10 @@ type HeldCloseRequest =
 
 type CloseDecision = "proceed" | "cancel";
 
-function sendCloseResolution(requestId: string, decision: CloseDecision): void {
+function sendCloseResolution(
+  requestId: string,
+  decision: CloseDecision,
+): void {
   try {
     void window.nestor.window
       .resolveCloseRequest({ requestId, decision })
@@ -165,7 +168,10 @@ export function JobFinderWindowCloseGuard() {
             ? {
                 title: "Close Nestor?",
                 description: "Your unsaved changes will be lost.",
-                reasons: [...(mirrored?.reasons ?? []), LATEST_EDITS_NOT_SAVED],
+                reasons: [
+                  ...(mirrored?.reasons ?? []),
+                  LATEST_EDITS_NOT_SAVED,
+                ],
               }
             : mirrored;
 

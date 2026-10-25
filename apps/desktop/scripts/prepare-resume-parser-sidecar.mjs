@@ -34,7 +34,8 @@ function readCliOption(flag) {
 
 function shouldFailHard() {
   const cliMode = readCliOption("--mode") ?? null;
-  const envMode = process.env.NESTOR_RESUME_PARSER_PREPARE_MODE?.trim() ?? null;
+  const envMode =
+    process.env.NESTOR_RESUME_PARSER_PREPARE_MODE?.trim() ?? null;
   const mode = cliMode ?? envMode ?? "best-effort";
 
   return mode === "required";

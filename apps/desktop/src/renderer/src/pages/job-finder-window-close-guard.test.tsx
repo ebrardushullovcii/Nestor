@@ -547,9 +547,9 @@ describe("JobFinderPage answers close requests in every render state", () => {
         "[data-desktop-header-window-control-inset]",
       ),
     ).not.toBeNull();
-    expect(screen.getAllByRole("group", { name: "Nestor modules" })).toContain(
-      moduleNavigation,
-    );
+    expect(
+      screen.getAllByRole("group", { name: "Nestor modules" }),
+    ).toContain(moduleNavigation);
     expect(
       screen.getByRole("navigation", { name: "Job Finder sections" }),
     ).not.toBe(moduleNavigation);

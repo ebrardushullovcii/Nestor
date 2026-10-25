@@ -1401,12 +1401,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       for (const listener of feedListeners)
         listener({
           changes: [
-            {
-              revision: 2,
-              table: "saved_jobs",
-              id: listed.id,
-              operation: "upsert",
-            },
+            { revision: 2, table: "saved_jobs", id: listed.id, operation: "upsert" },
           ],
           revision: 2,
           hasMore: false,
@@ -1422,10 +1417,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
     );
     const workspace = requireReadyWorkspace(result.current).workspace;
     expect(syncWorkspace).toHaveBeenCalledTimes(1);
-    expect(getJobDetail).toHaveBeenCalledWith(
-      listed.id,
-      loaded.activeCampaignId,
-    );
+    expect(getJobDetail).toHaveBeenCalledWith(listed.id, loaded.activeCampaignId);
     // Everything else from the first view; the Find jobs list kept, patched.
     expect(workspace.hydration.phase).toBe("complete");
     expect(workspace.discoveryJobs.map((job) => job.id)).toEqual([listed.id]);

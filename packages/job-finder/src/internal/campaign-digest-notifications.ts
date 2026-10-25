@@ -64,7 +64,8 @@ export function describeJobSourceWorkTitle(
   targets: readonly { id: string; label: string }[],
 ): string {
   const id = sourceTargetId.trim();
-  const label = targets.find((target) => target.id === id)?.label.trim() ?? "";
+  const label =
+    targets.find((target) => target.id === id)?.label.trim() ?? "";
   return label.length > 0 ? `Job source ${label}` : UNNAMED_JOB_SOURCE_TITLE;
 }
 

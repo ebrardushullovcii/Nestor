@@ -145,7 +145,8 @@ export default async function browserHarness(qa) {
       "function",
   );
   await qa.page.evaluate(
-    (input) => window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+    (input) =>
+      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: site("/greenhouse/"),
       applicationUrl: site("/greenhouse/apply/3"),

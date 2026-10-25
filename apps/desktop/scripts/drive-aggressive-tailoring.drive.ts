@@ -3,17 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  _electron as electron,
-  type ElectronApplication,
-  type Page,
-} from "playwright";
+import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { test } from "vitest";
 
-const desktopDir = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 const resumePath = path.join(
   repoRoot,
@@ -103,8 +96,7 @@ function createProbeJob(now: string) {
     discoveryMethod: "catalog_seed",
     collectionMethod: "fallback_search",
     canonicalUrl: "https://jobs.harborledger.example.com/senior-full-stack",
-    applicationUrl:
-      "https://jobs.harborledger.example.com/senior-full-stack/apply",
+    applicationUrl: "https://jobs.harborledger.example.com/senior-full-stack/apply",
     title: JOB_TITLE,
     company: "Harbor Ledger",
     location: "Remote",
@@ -138,14 +130,7 @@ function createProbeJob(now: string) {
       "The team already runs Docker and Amazon Web Services; Kubernetes is the next isolation layer.",
       "This role asks for 8 years of professional software experience and someone who can sit with kitchen staff on 10-inch tablets.",
     ].join(" "),
-    keySkills: [
-      "TypeScript",
-      "React",
-      "Next.js",
-      "Node.js",
-      "Postgres",
-      "Terraform",
-    ],
+    keySkills: ["TypeScript", "React", "Next.js", "Node.js", "Postgres", "Terraform"],
     responsibilities: [
       "Own React and Next.js storefronts used by kitchen and floor staff.",
       "Keep TypeScript and Node.js order services under a one-second ticket path.",
@@ -230,9 +215,7 @@ function summarizeWorkspace(workspace: {
 }) {
   const skillBullets =
     workspace.draft?.sections
-      ?.filter(
-        (section) => section.kind === "skills" || section.kind === "keywords",
-      )
+      ?.filter((section) => section.kind === "skills" || section.kind === "keywords")
       .flatMap((section) =>
         (section.bullets ?? []).map((bullet) => ({
           text: bullet.text ?? "",
@@ -265,8 +248,7 @@ function summarizeWorkspace(workspace: {
       ["confirm_needed", "unsupported", "exact", "paraphrase", "review"].map(
         (status) => [
           status,
-          assessments.filter((assessment) => assessment.status === status)
-            .length,
+          assessments.filter((assessment) => assessment.status === status).length,
         ],
       ),
     ),
@@ -307,10 +289,7 @@ async function captureStudio(window: Page, name: string): Promise<void> {
 async function main(): Promise<void> {
   loadRepoLocalEnv();
   const builtMain = path.join(desktopDir, "out", "main", "index.cjs");
-  assert(
-    existsSync(builtMain),
-    "Desktop build is missing. Run pnpm --filter @nestor/desktop build first.",
-  );
+  assert(existsSync(builtMain), "Desktop build is missing. Run pnpm --filter @nestor/desktop build first.");
   assert(existsSync(resumePath), `Resume is missing at ${resumePath}`);
   assert(
     Boolean(process.env.NESTOR_AI_API_KEY),
@@ -353,12 +332,10 @@ async function main(): Promise<void> {
     );
 
     const imported = await window.evaluate(async (sourcePath) => {
-      const snapshot = await window.nestor.jobFinder.test!.importResumeFromPath(
-        {
-          sourcePath,
-          useVision: false,
-        },
-      );
+      const snapshot = await window.nestor.jobFinder.test!.importResumeFromPath({
+        sourcePath,
+        useVision: false,
+      });
       return {
         fullName: snapshot.profile.fullName,
         headline: snapshot.profile.headline,
@@ -456,9 +433,7 @@ async function main(): Promise<void> {
     await captureStudio(window, "02-generated-studio.png");
 
     const confirmPanel = window.locator("[data-resume-claim-confirmations]");
-    const tools = window.locator(
-      "[data-resume-workspace-scroll-region]:visible",
-    );
+    const tools = window.locator("[data-resume-workspace-scroll-region]:visible");
     if (await tools.count()) {
       await tools.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
@@ -519,10 +494,7 @@ async function main(): Promise<void> {
       const firstSkill = window.getByRole("button", {
         name: /Confirm this skill/i,
       });
-      assert(
-        await firstSkill.count(),
-        "Expected at least one skill confirmation control.",
-      );
+      assert(await firstSkill.count(), "Expected at least one skill confirmation control.");
       await firstSkill.first().click();
     }
 
@@ -646,6 +618,10 @@ async function expectExportBlocked(window: Page): Promise<void> {
   );
 }
 
-test("imports the real resume and drives aggressive generation in an isolated desktop app", async () => {
-  await main();
-}, 600_000);
+test(
+  "imports the real resume and drives aggressive generation in an isolated desktop app",
+  async () => {
+    await main();
+  },
+  600_000,
+);

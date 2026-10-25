@@ -585,10 +585,7 @@ describe("campaign workspace core", () => {
       notifications: [],
       activeCampaignId: template.id,
       campaigns: [
-        {
-          ...template,
-          limits: { ...template.limits, retainedJobTarget: 1000 },
-        },
+        { ...template, limits: { ...template.limits, retainedJobTarget: 1000 } },
       ],
     });
     const commits: { ids: number; run: boolean }[] = [];

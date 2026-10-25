@@ -75,7 +75,9 @@ import {
 } from "@renderer/features/job-finder/lib/collection-keyboard-navigation";
 import { Link } from "react-router-dom";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
-import { formatJobEmployerLocationLine } from "@renderer/features/job-finder/lib/job-employer-location-display";
+import {
+  formatJobEmployerLocationLine,
+} from "@renderer/features/job-finder/lib/job-employer-location-display";
 import { cn } from "@renderer/lib/cn";
 import {
   formatTimestamp,
@@ -93,10 +95,7 @@ import {
   focusDiscoveryDetailAfterKeyboardSelection,
   revealDiscoveryDetailAfterPointerSelection,
 } from "./discovery-accessibility";
-import {
-  buildRunHeadedGroups,
-  buildRunHeadings,
-} from "./discovery-result-groups";
+import { buildRunHeadedGroups, buildRunHeadings } from "./discovery-result-groups";
 import {
   getDiscoveryRowView,
   isDiscoveryRowInPipeline,
@@ -482,6 +481,7 @@ function pruneFilterSelection(
   return kept.length === current.size ? current : new Set(kept);
 }
 
+
 function toggleFilterValue(
   values: ReadonlySet<string>,
   value: string,
@@ -494,6 +494,7 @@ function toggleFilterValue(
   }
   return next;
 }
+
 
 /**
  * Truthful streaming-progress count: reports what is actually visible after
@@ -540,8 +541,7 @@ export function getDiscoveryListingDateBadge(input: {
   };
 }
 
-const DISMISSED_SESSION_NOTICES_KEY =
-  "nestor.discovery.dismissed-session-notices";
+const DISMISSED_SESSION_NOTICES_KEY = "nestor.discovery.dismissed-session-notices";
 
 function readDismissedSessionNotices(): string[] {
   try {
@@ -756,13 +756,16 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
     : undefined;
   const sourceLabels = job.sourceLabels;
   const sourceText =
-    sourceLabels.length > 0 ? sourceLabels.join(", ") : "Source unavailable";
+    sourceLabels.length > 0
+      ? sourceLabels.join(", ")
+      : "Source unavailable";
   // A careers-site source repeats the employer's own name; the
   // meta line then read "Canonical • Remote · Canonical".
   const sourceRepeatsEmployer =
     sourceLabels.length === 1 &&
     Boolean(job.company) &&
-    sourceLabels[0]?.trim().toLowerCase() === job.company?.trim().toLowerCase();
+    sourceLabels[0]?.trim().toLowerCase() ===
+      job.company?.trim().toLowerCase();
   const listingActivity = job.listingActivity;
   const activity = presentListingActivity(listingActivity);
   const activityDescription =
@@ -801,7 +804,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
         className={props.buttonClassName}
         aria-keyshortcuts="ArrowUp ArrowDown Home End"
         data-collection-item-id={job.id}
-        onContextMenu={(event) => props.actions.current.openRowMenu(event, job)}
+        onContextMenu={(event) =>
+          props.actions.current.openRowMenu(event, job)
+        }
         onClick={(event) => {
           if (
             props.showSelection &&
@@ -822,9 +827,7 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
             revealDiscoveryDetailAfterPointerSelection();
           }
         }}
-        onKeyDown={(event) =>
-          props.actions.current.handleListKeyDown(event, job.id)
-        }
+        onKeyDown={(event) => props.actions.current.handleListKeyDown(event, job.id)}
         selected={isSelected}
       >
         {/* One shared line rhythm for all three lists: title line (with
@@ -863,7 +866,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                       : "text-(--text-headline)",
                   )}
                   data-testid={`discovery-result-fit-${job.id}`}
-                  {...(tieBreakReason ? { title: tieBreakReason } : {})}
+                  {...(tieBreakReason
+                    ? { title: tieBreakReason }
+                    : {})}
                 >
                   {assessment.headlineScoreLabel}
                 </span>
@@ -876,7 +881,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
               job.recommendation !== "review_before_applying" ? (
                 <StatusBadge
                   tone={
-                    assessment.isProvisional ? "neutral" : recommendation.tone
+                    assessment.isProvisional
+                      ? "neutral"
+                      : recommendation.tone
                   }
                 >
                   {recommendation.label}
@@ -885,12 +892,13 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
             </div>
           </div>
           {(() => {
-            const employerLocationLine = formatJobEmployerLocationLine({
-              company: job.company,
-              location: job.location,
-              canonicalUrl: job.canonicalUrl,
-              separator: " • ",
-            });
+            const employerLocationLine =
+              formatJobEmployerLocationLine({
+                company: job.company,
+                location: job.location,
+                canonicalUrl: job.canonicalUrl,
+                separator: " • ",
+              });
             const pipelineLabel = [
               "drafting",
               "ready_for_review",
@@ -925,12 +933,15 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                 <span
                   className={cn(
                     "min-w-0 truncate",
-                    employerLocationLine ? "font-medium" : "shrink-0",
+                    employerLocationLine
+                      ? "font-medium"
+                      : "shrink-0",
                   )}
                   data-testid={`discovery-result-employer-${job.id}`}
                   title={employerLocationLine || undefined}
                 >
-                  {employerLocationLine || "Employer not listed"}
+                  {employerLocationLine ||
+                    "Employer not listed"}
                   {job.indistinguishable
                     ? ` · Reference ${job.sourceJobId}`
                     : ""}
@@ -939,7 +950,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                   aria-hidden="true"
                   className={cn(
                     "shrink-0",
-                    sourceRepeatsEmployer && employerLocationLine && "sr-only",
+                    sourceRepeatsEmployer &&
+                      employerLocationLine &&
+                      "sr-only",
                   )}
                 >
                   {" · "}
@@ -947,7 +960,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                 <span
                   className={cn(
                     "flex min-w-0 max-w-[45%] shrink-0",
-                    sourceRepeatsEmployer && employerLocationLine && "sr-only",
+                    sourceRepeatsEmployer &&
+                      employerLocationLine &&
+                      "sr-only",
                   )}
                   {...(employerLocationLine
                     ? {
@@ -957,7 +972,9 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                     : {})}
                 >
                   <span className="sr-only">Found on </span>
-                  <span className="min-w-0 truncate">{sourceText}</span>
+                  <span className="min-w-0 truncate">
+                    {sourceText}
+                  </span>
                 </span>
                 {listingDateBadge.shown ? (
                   <span className="shrink-0 whitespace-nowrap text-foreground-muted">
@@ -1075,7 +1092,10 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
           data-details-cue={isSelected ? "visible" : "hidden"}
           data-testid={`discovery-result-details-below-${job.id}`}
         >
-          <ChevronDown aria-hidden="true" className="size-3.5" />
+          <ChevronDown
+            aria-hidden="true"
+            className="size-3.5"
+          />
           Job details below
         </span>
       </SelectableRow>
@@ -1259,9 +1279,7 @@ export function DiscoveryResultsPanel({
     0,
   );
   const poolBands = list.pool;
-  const alsoFoundCount = poolBands
-    ? poolBands.weaker + poolBands.mismatches
-    : 0;
+  const alsoFoundCount = poolBands ? poolBands.weaker + poolBands.mismatches : 0;
   const hiddenAlsoFoundCount = areAlsoFoundShown ? 0 : alsoFoundCount;
   // A facet with one value cannot narrow anything, so it is not offered.
   const filterGroups = {
@@ -2529,7 +2547,9 @@ export function DiscoveryResultsPanel({
             </Button>
           </div>
         ) : null}
-        {poolCount > 0 && jobCount === 0 && activeFilterCount > 0 ? (
+        {poolCount > 0 &&
+        jobCount === 0 &&
+        activeFilterCount > 0 ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-48"}
@@ -2608,9 +2628,7 @@ export function DiscoveryResultsPanel({
                       isNew={isNewSinceVisit(job, previousVisitEnd)}
                       job={job}
                       key={job.id}
-                      rescoreAcknowledged={acknowledgedRescoreJobIds.has(
-                        job.id,
-                      )}
+                      rescoreAcknowledged={acknowledgedRescoreJobIds.has(job.id)}
                       selectable={selectablePageJobIds.includes(job.id)}
                       selected={displayedSelectedJobId === job.id}
                       showSelection={Boolean(onShortlistJobs)}

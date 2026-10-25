@@ -13,10 +13,7 @@ import {
 type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
 
 const workspace = {
-  searchPreferences: {
-    tailoringMode: "aggressive",
-    discovery: { targets: [] },
-  },
+  searchPreferences: { tailoringMode: "aggressive", discovery: { targets: [] } },
   reviewQueue: [
     {
       jobId: "job_comet",

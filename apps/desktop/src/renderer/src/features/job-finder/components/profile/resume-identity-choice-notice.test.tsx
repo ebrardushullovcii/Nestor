@@ -46,7 +46,9 @@ describe("ResumeIdentityChoiceNotice", () => {
       "email is “morgan.lee@example.test” and your profile uses “morgan@lee-mail.test”",
     );
     expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Got it" }),
+    );
     expect(onUseProfileName).toHaveBeenCalledOnce();
   });
 

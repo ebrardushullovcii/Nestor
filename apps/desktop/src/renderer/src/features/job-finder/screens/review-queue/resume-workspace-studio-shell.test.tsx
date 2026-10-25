@@ -1424,12 +1424,10 @@ describe("ResumeWorkspaceStudioShell review pass", () => {
     cleanup();
   });
 
-  function renderReviewShell(
-    overrides: {
-      canApproveResume?: boolean;
-      nextTitle?: string | null;
-    } = {},
-  ) {
+  function renderReviewShell(overrides: {
+    canApproveResume?: boolean;
+    nextTitle?: string | null;
+  } = {}) {
     const onApproveAndNext = vi.fn();
     const onSkip = vi.fn();
     const onApproveCurrentPdf = vi.fn();
@@ -1498,9 +1496,7 @@ describe("ResumeWorkspaceStudioShell review pass", () => {
 
   it("says Approve resume on the last one and offers no Skip", () => {
     renderReviewShell({ nextTitle: null });
-    expect(
-      screen.getByRole("button", { name: /^Approve resume/ }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Approve resume/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
   });
 });

@@ -12,11 +12,7 @@ const ids = (page: PageStability) => page.rows.map((entry) => entry.id);
 function step(
   previous: PageStability | null,
   rows: WorkspaceJobListRow[],
-  options: {
-    runId?: string | null;
-    heldJobId?: string | null;
-    list?: string[];
-  } = {},
+  options: { runId?: string | null; heldJobId?: string | null; list?: string[] } = {},
 ) {
   return stabilizeFindJobsPage({
     previous,

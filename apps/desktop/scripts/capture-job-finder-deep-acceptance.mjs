@@ -1311,7 +1311,8 @@ async function run() {
       window.nestor.jobFinder.test.loadResumeWorkspaceDemo(),
     );
     await page.evaluate(
-      async (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
+      async (state) =>
+        window.nestor.jobFinder.test.resetWorkspaceState(state),
       createLongProfileState(resumeDemo),
     );
     await completeProfileSetup(page);
@@ -1571,7 +1572,8 @@ async function run() {
     );
     const longDiscoveryState = createLongDiscoveryState(discoveryDemo);
     await page.evaluate(
-      async (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
+      async (state) =>
+        window.nestor.jobFinder.test.resetWorkspaceState(state),
       longDiscoveryState,
     );
     await completeProfileSetup(page);
@@ -1735,7 +1737,8 @@ async function run() {
       await readFile(baselineWorkspacePath, "utf8"),
     );
     await page.evaluate(
-      async (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
+      async (state) =>
+        window.nestor.jobFinder.test.resetWorkspaceState(state),
       {
         ...actionBaseline,
         userActionRequests: createUserActionRequests(),

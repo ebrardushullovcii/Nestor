@@ -3,7 +3,6 @@
 # Nestor
 
 Agent-first desktop monorepo for:
-
 - `Job Finder`
 - `Live Assistant`
 

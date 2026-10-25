@@ -203,8 +203,7 @@ describe("live assistant contracts", () => {
           verificationMethod:
             "electron-desktopCapturer-screen-thumbnail-vs-overlay-window-pixels",
           displayLabel: "Screen 1",
-          detail:
-            "Overlay pixels were not detected in ordinary Electron screen capture.",
+          detail: "Overlay pixels were not detected in ordinary Electron screen capture.",
           lastVerifiedAt: now,
         },
       ],

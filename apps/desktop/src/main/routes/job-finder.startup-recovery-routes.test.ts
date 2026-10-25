@@ -116,12 +116,9 @@ describe("job-finder startup recovery route boundary", () => {
     mockGetJobFinderStartupDatabaseRecoveryFact.mockResolvedValue(fact);
 
     await expect(
-      registerAndFindHandler("job-finder:get-startup-database-recovery")(
-        {
-          sender: {},
-        },
-        undefined,
-      ),
+      registerAndFindHandler("job-finder:get-startup-database-recovery")({
+        sender: {},
+      }, undefined),
     ).resolves.toEqual(fact);
   });
 
@@ -130,17 +127,16 @@ describe("job-finder startup recovery route boundary", () => {
       status: "blocked",
       incidentId: "incident-2",
       outcome: "salvage-required",
-      candidates: [{ kind: "backup", status: "invalid", failedStage: null }],
+      candidates: [
+        { kind: "backup", status: "invalid", failedStage: null },
+      ],
       quarantineBasenames: [],
     });
 
     await expect(
-      registerAndFindHandler("job-finder:get-startup-database-recovery")(
-        {
-          sender: {},
-        },
-        undefined,
-      ),
+      registerAndFindHandler("job-finder:get-startup-database-recovery")({
+        sender: {},
+      }, undefined),
     ).rejects.toThrow();
   });
 

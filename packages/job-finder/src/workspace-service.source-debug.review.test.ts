@@ -129,12 +129,8 @@ describe("createJobFinderWorkspaceService", () => {
       "Keep the source in draft if a future replay loses the collection route.",
     );
     expect(latestArtifact?.intelligence?.collection).toBeDefined();
-    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe(
-      "listing_route",
-    );
-    expect(
-      latestArtifact?.intelligence?.collection?.startingRoutes.length,
-    ).toBeGreaterThan(0);
+    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe("listing_route");
+    expect(latestArtifact?.intelligence?.collection?.startingRoutes.length).toBeGreaterThan(0);
   });
 
   test("skips the AI final reviewer when summary-first handoff still cannot fit the context budget", async () => {
@@ -200,15 +196,11 @@ describe("createJobFinderWorkspaceService", () => {
       {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
         reviewTranscriptByPhase: {
-          search_filter_probe: Array.from(
-            { length: 200 },
-            (_, index) =>
-              `assistant: oversized transcript line ${index} with repeated evidence payload`,
+          search_filter_probe: Array.from({ length: 200 }, (_, index) =>
+            `assistant: oversized transcript line ${index} with repeated evidence payload`,
           ),
-          replay_verification: Array.from(
-            { length: 200 },
-            (_, index) =>
-              `assistant: oversized replay line ${index} with repeated verification payload`,
+          replay_verification: Array.from({ length: 200 }, (_, index) =>
+            `assistant: oversized replay line ${index} with repeated verification payload`,
           ),
         },
       },
@@ -330,9 +322,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(learnedLines).toContain("visible location filter");
     expect(learnedLines).toContain("same-host detail pages");
     expect(latestArtifact?.intelligence?.collection).toBeDefined();
-    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe(
-      "listing_route",
-    );
+    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe("listing_route");
   });
 
   test("keeps timed-out partial evidence in draft and exposes completion metadata in run details", async () => {
@@ -559,9 +549,7 @@ describe("createJobFinderWorkspaceService", () => {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
         reviewTranscriptByPhase: {
           search_filter_probe: Array.from({ length: 3500 }, (_, index) =>
-            `assistant: transcript line ${index} showing repeated route evidence with stable listing routes, visible filters, canonical detail confirmations, reusable collection routes, and durable replay notes for the final reviewer. `.repeat(
-              4,
-            ),
+            (`assistant: transcript line ${index} showing repeated route evidence with stable listing routes, visible filters, canonical detail confirmations, reusable collection routes, and durable replay notes for the final reviewer. `).repeat(4),
           ),
         },
       },
@@ -578,9 +566,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(reviewPrompts).toHaveLength(1);
     expect(reviewPrompts[0]).toContain('"mode": "summary_first"');
     expect(reviewPrompts[0]).not.toContain("transcript line 3499");
-    expect(reviewPrompts[0]).toContain(
-      "do not ask for the missing raw transcript lines",
-    );
+    expect(reviewPrompts[0]).toContain("do not ask for the missing raw transcript lines");
   });
 
   test("clears prior learned instructions for the target before a fresh source-debug run", async () => {
@@ -712,4 +698,6 @@ describe("createJobFinderWorkspaceService", () => {
       ),
     ).toBe(true);
   });
+
+
 });

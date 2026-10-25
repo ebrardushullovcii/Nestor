@@ -64,21 +64,15 @@ async function acceptAssistantEdit(
 
 describe("undo one AI edit", () => {
   test("manual, AI, manual: Undo removes only the AI edit and keeps the later manual edit", async () => {
-    const { repository, workspaceService } = createHarnessWithSummaryRewrite(
-      "Refined for clarity.",
-    );
+    const { repository, workspaceService } =
+      createHarnessWithSummaryRewrite("Refined for clarity.");
     await workspaceService.generateResume("job_ready");
     const original = await workspaceService.getResumeWorkspace("job_ready");
-    const summary = original.draft.sections.find((entry) =>
-      entry.text?.trim(),
-    )!;
+    const summary = original.draft.sections.find((entry) => entry.text?.trim())!;
 
     await workspaceService.saveResumeDraft({
       ...original.draft,
-      identity: {
-        ...original.draft.identity!,
-        headline: "First manual headline",
-      },
+      identity: { ...original.draft.identity!, headline: "First manual headline" },
     });
     await acceptAssistantEdit(workspaceService);
     const afterAi = await workspaceService.getResumeWorkspace("job_ready");
@@ -87,10 +81,7 @@ describe("undo one AI edit", () => {
     ).toContain("Refined for clarity.");
     await workspaceService.saveResumeDraft({
       ...afterAi.draft,
-      identity: {
-        ...afterAi.draft.identity!,
-        headline: "Second manual headline",
-      },
+      identity: { ...afterAi.draft.identity!, headline: "Second manual headline" },
     });
 
     const aiRevision = (
@@ -114,14 +105,11 @@ describe("undo one AI edit", () => {
   });
 
   test("a later manual rewrite of the same text wins over Undo", async () => {
-    const { repository, workspaceService } = createHarnessWithSummaryRewrite(
-      "Refined for clarity.",
-    );
+    const { repository, workspaceService } =
+      createHarnessWithSummaryRewrite("Refined for clarity.");
     await workspaceService.generateResume("job_ready");
     const original = await workspaceService.getResumeWorkspace("job_ready");
-    const summary = original.draft.sections.find((entry) =>
-      entry.text?.trim(),
-    )!;
+    const summary = original.draft.sections.find((entry) => entry.text?.trim())!;
     await acceptAssistantEdit(workspaceService);
     const afterAi = await workspaceService.getResumeWorkspace("job_ready");
     // Grounded wording from the fixture profile, so the save keeps it.

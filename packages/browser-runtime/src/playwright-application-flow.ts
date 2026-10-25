@@ -2041,9 +2041,7 @@ export function createApplicationRunServiceWorkerSentinel(input: {
       const onServiceWorker = (worker: { url(): string }): void => {
         const workerUrl = worker.url();
         const workerOrigin = parseHttpOriginOrNull(workerUrl);
-        const applicationOrigin = parseHttpOriginOrNull(
-          currentApplicationUrl(),
-        );
+        const applicationOrigin = parseHttpOriginOrNull(currentApplicationUrl());
         if (!workerOrigin || workerOrigin === applicationOrigin)
           pendingWorkerEvents.push(workerUrl);
       };

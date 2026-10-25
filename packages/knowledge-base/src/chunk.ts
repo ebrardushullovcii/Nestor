@@ -17,10 +17,7 @@ const DEFAULT_OVERLAP_CHARS = 60;
 const DEFAULT_MIN_CHUNK_CHARS = 120;
 
 export function normalizeTextForChunking(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/[\t ]+/g, " ")
-    .trim();
+  return text.replace(/\r\n?/g, "\n").replace(/[\t ]+/g, " ").trim();
 }
 
 export function chunkText(
@@ -55,11 +52,7 @@ export function chunkText(
     let endOffset = Math.min(normalizedText.length, startOffset + maxChars);
 
     if (endOffset < normalizedText.length) {
-      const preferredBreak = findPreferredBreak(
-        normalizedText,
-        startOffset,
-        endOffset,
-      );
+      const preferredBreak = findPreferredBreak(normalizedText, startOffset, endOffset);
       // Avoid tiny leading chunks by only honoring softer breakpoints after the
       // configured leading threshold has been crossed.
       if (preferredBreak > startOffset + minLeadingChunkChars) {
@@ -88,7 +81,11 @@ export function chunkText(
 
   const lastChunk = chunks.at(-1);
   const previousChunk = chunks.at(-2);
-  if (lastChunk && previousChunk && lastChunk.text.length < minChunkChars) {
+  if (
+    lastChunk &&
+    previousChunk &&
+    lastChunk.text.length < minChunkChars
+  ) {
     previousChunk.text = normalizedText
       .slice(previousChunk.startOffset, lastChunk.endOffset)
       .trim();
@@ -99,11 +96,7 @@ export function chunkText(
   return chunks;
 }
 
-function findPreferredBreak(
-  text: string,
-  startOffset: number,
-  endOffset: number,
-): number {
+function findPreferredBreak(text: string, startOffset: number, endOffset: number): number {
   const window = text.slice(startOffset, endOffset);
   const breakPatterns = ["\n\n", ". ", "! ", "? ", "; ", ", ", " "];
 

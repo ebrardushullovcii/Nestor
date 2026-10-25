@@ -97,16 +97,12 @@ it("acts on S, X, J and U outside text fields only", async () => {
   );
   const input = document.createElement("input");
   document.body.append(input);
-  input.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "x", bubbles: true }),
-  );
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }));
   expect(onDismissJob).not.toHaveBeenCalled();
   input.remove();
   // A held key does not decide job after job.
   act(() => {
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "x", repeat: true }),
-    );
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "x", repeat: true }));
   });
   expect(onSelectJob).not.toHaveBeenCalled();
 
@@ -119,9 +115,7 @@ it("acts on S, X, J and U outside text fields only", async () => {
   expect(onSelectJob).toHaveBeenLastCalledWith("b");
   // A modifier makes it someone else's shortcut.
   act(() => {
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "j", ctrlKey: true }),
-    );
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", ctrlKey: true }));
   });
   expect(onSelectJob).toHaveBeenCalledTimes(1);
 });
@@ -148,24 +142,12 @@ it("counts progress within the open job's group, so weaker matches do not bury i
       }),
     { initialProps: { inspected: jobs[0]! } },
   );
-  expect(result.current).toMatchObject({
-    goneThrough: 0,
-    total: 2,
-    weaker: false,
-  });
+  expect(result.current).toMatchObject({ goneThrough: 0, total: 2, weaker: false });
   act(() => result.current!.onNotInterested!());
   rerender({ inspected: jobs[1]! });
-  expect(result.current).toMatchObject({
-    goneThrough: 1,
-    total: 2,
-    weaker: false,
-  });
+  expect(result.current).toMatchObject({ goneThrough: 1, total: 2, weaker: false });
   rerender({ inspected: jobs[2]! });
-  expect(result.current).toMatchObject({
-    goneThrough: 0,
-    total: 3,
-    weaker: true,
-  });
+  expect(result.current).toMatchObject({ goneThrough: 0, total: 3, weaker: true });
 });
 
 it("recounts open jobs when the list or the shortlist changes", () => {

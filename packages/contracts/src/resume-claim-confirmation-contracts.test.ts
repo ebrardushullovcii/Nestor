@@ -260,7 +260,8 @@ describe("contracts resume claim confirmation schemas", () => {
     expect(() =>
       ResumeClaimConfirmationSchema.parse(
         buildValidConfirmationInput({
-          ownershipStatement: "I confirm this content is accurate and my own!",
+          ownershipStatement:
+            "I confirm this content is accurate and my own!",
         }),
       ),
     ).toThrow();
@@ -268,7 +269,8 @@ describe("contracts resume claim confirmation schemas", () => {
     expect(() =>
       ResumeClaimConfirmationSchema.parse(
         buildValidConfirmationInput({
-          ownershipStatement: "i confirm this content is accurate and my own.",
+          ownershipStatement:
+            "i confirm this content is accurate and my own.",
         }),
       ),
     ).toThrow();

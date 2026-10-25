@@ -26,9 +26,7 @@ export function canonicalSkillPhrase(value: string): string {
 export function skillsAreEquivalent(left: string, right: string): boolean {
   const canonicalLeft = canonicalSkillPhrase(left);
   const canonicalRight = canonicalSkillPhrase(right);
-  return Boolean(
-    canonicalLeft && canonicalRight && canonicalLeft === canonicalRight,
-  );
+  return Boolean(canonicalLeft && canonicalRight && canonicalLeft === canonicalRight);
 }
 
 const SPOKEN_LANGUAGE_CHROME_PATTERN =
@@ -39,9 +37,7 @@ const SPOKEN_LANGUAGE_PROFICIENCY_LINE_PATTERN =
 
 export function isSpokenLanguageResumeChrome(value: string): boolean {
   const normalized = value.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
-  return (
-    normalized.length > 0 && SPOKEN_LANGUAGE_CHROME_PATTERN.test(normalized)
-  );
+  return normalized.length > 0 && SPOKEN_LANGUAGE_CHROME_PATTERN.test(normalized);
 }
 
 export function looksLikeSpokenLanguageSkillEntry(value: string): boolean {

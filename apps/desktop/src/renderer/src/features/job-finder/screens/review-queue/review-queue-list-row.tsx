@@ -86,8 +86,8 @@ function ReviewQueueRowComponent({
   statusTone,
   title,
 }: ReviewQueueRowProps) {
-  const metaParts = [employerLocationLine].filter((part): part is string =>
-    Boolean(part),
+  const metaParts = [employerLocationLine].filter(
+    (part): part is string => Boolean(part),
   );
   // The third line Find jobs and Applications rows have too, so the three
   // lists share one rhythm: what the badge cannot say, else the level.

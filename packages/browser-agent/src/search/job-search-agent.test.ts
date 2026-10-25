@@ -148,26 +148,17 @@ test("unmatched pages can progress past the no-saves window", async () => {
   const pages = { current: rawPage() };
   const liveHands = hands(pages);
   liveHands.navigate = (url) => {
-    pages.current = rawPage({
-      url,
-      bodyText: `A different page of unrelated vacancies: ${url}`,
-    });
+    pages.current = rawPage({ url, bodyText: `A different page of unrelated vacancies: ${url}` });
     return Promise.resolve({ ok: true, url });
   };
   const turns = Array.from({ length: 10 }, (_, index) => [
-    {
-      name: "navigate",
-      args: { url: `https://jobs.example.test/search?page=${index}` },
-    },
+    { name: "navigate", args: { url: `https://jobs.example.test/search?page=${index}` } },
     { name: "extract_jobs", args: { pageType: "search_results" } },
   ]).flat();
   const result = await runJobSearchAgent({
     hands: liveHands,
     config: config({ runControl: { noProgressStepLimit: 3 } }),
-    llmClient: scripted([
-      ...turns,
-      { name: "finish", args: { reason: "Results exhausted." } },
-    ]),
+    llmClient: scripted([...turns, { name: "finish", args: { reason: "Results exhausted." } }]),
     jobExtractor: { extractJobsFromPage: () => Promise.resolve([]) },
   });
   expect(result.steps).toBe(21);
@@ -175,18 +166,10 @@ test("unmatched pages can progress past the no-saves window", async () => {
 });
 
 test("lists links after the view's limit and advances via the selected page control", async () => {
-  const pages = {
-    current: rawPage({
-      links: Array.from({ length: 205 }, (_, index) => ({
-        index,
-        label: `Page link ${index}`,
-        href: `https://jobs.example.test/link/${index}`,
-        visible: true,
-        target: "",
-        topOffset: index,
-      })),
-    }),
-  };
+  const pages = { current: rawPage({ links: Array.from({ length: 205 }, (_, index) => ({
+    index, label: `Page link ${index}`, href: `https://jobs.example.test/link/${index}`,
+    visible: true, target: "", topOffset: index,
+  })) }) };
   const liveHands = hands(pages);
   const click = vi.spyOn(liveHands, "clickElement");
   let answer = "";
@@ -196,97 +179,44 @@ test("lists links after the view's limit and advances via the selected page cont
     { name: "finish", args: { reason: "Last page." } },
   ]);
   const result = await runJobSearchAgent({
-    hands: liveHands,
-    config: config(),
-    jobExtractor: extractor,
-    llmClient: {
-      chatWithTools: (messages, tools, options) => {
-        const last = messages.at(-1);
-        if (last?.role === "tool" && last.content.includes('"nextOffset"'))
-          answer = last.content;
-        return model.chatWithTools(messages, tools, options);
-      },
-    },
+    hands: liveHands, config: config(), jobExtractor: extractor,
+    llmClient: { chatWithTools: (messages, tools, options) => {
+      const last = messages.at(-1);
+      if (last?.role === "tool" && last.content.includes('"nextOffset"')) answer = last.content;
+      return model.chatWithTools(messages, tools, options);
+    } },
   });
-  expect(JSON.parse(answer)).toMatchObject({
-    total: 205,
-    nextOffset: null,
-    links: [
-      { ref: "l200" },
-      { ref: "l201" },
-      { ref: "l202" },
-      { ref: "l203" },
-      { ref: "l204" },
-    ],
-  });
+  expect(JSON.parse(answer)).toMatchObject({ total: 205, nextOffset: null, links: [
+    { ref: "l200" }, { ref: "l201" }, { ref: "l202" }, { ref: "l203" }, { ref: "l204" },
+  ] });
   expect(click).toHaveBeenCalledWith("a0");
   expect(result.incomplete).toBe(false);
 });
 
-test.each(["job_detail", "explicit"])(
-  "a later model decision can correct a duplicate's earlier rejection (%s)",
-  async (kind) => {
-    let reads = 0;
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config(),
-      llmClient: scripted([
-        { name: "extract_jobs", args: { pageType: "search_results" } },
-        {
-          name: "navigate",
-          args: { url: "https://jobs.example.test/jobs/j1" },
-        },
-        {
-          name: "extract_jobs",
-          args:
-            kind === "job_detail"
-              ? { pageType: "job_detail" }
-              : {
-                  pageType: "search_results",
-                  rejected: [
-                    {
-                      url: "https://jobs.example.test/jobs/j1",
-                      category: "place",
-                      reason:
-                        "The model now confirms a different work location.",
-                    },
-                  ],
-                },
-        },
-        {
-          name: "finish",
-          args: { reason: "Corrected the decision after reading more." },
-        },
-      ]),
-      jobExtractor: {
-        extractJobsFromPage: () => {
-          reads += 1;
-          return Promise.resolve([
-            {
-              ...posting("Platform Engineer", "Northwind", "j1"),
-              searchRejection:
-                reads === 1
-                  ? {
-                      category: "closed" as const,
-                      reason: "Provisional card reading.",
-                    }
-                  : null,
-            },
-          ]);
-        },
-      },
-    });
-    expect(result.jobs).toHaveLength(1);
-    expect(result.jobs[0]?.searchRejection).toEqual(
-      kind === "job_detail"
-        ? null
-        : {
-            category: "place",
-            reason: "The model now confirms a different work location.",
-          },
-    );
-  },
-);
+test.each(["job_detail", "explicit"])("a later model decision can correct a duplicate's earlier rejection (%s)", async (kind) => {
+  let reads = 0;
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }), config: config(),
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "navigate", args: { url: "https://jobs.example.test/jobs/j1" } },
+      { name: "extract_jobs", args: kind === "job_detail"
+        ? { pageType: "job_detail" }
+        : { pageType: "search_results", rejected: [{ url: "https://jobs.example.test/jobs/j1", category: "place", reason: "The model now confirms a different work location." }] } },
+      { name: "finish", args: { reason: "Corrected the decision after reading more." } },
+    ]),
+    jobExtractor: { extractJobsFromPage: () => {
+      reads += 1;
+      return Promise.resolve([{ ...posting("Platform Engineer", "Northwind", "j1"),
+        searchRejection: reads === 1 ? { category: "closed" as const, reason: "Provisional card reading." } : null,
+      }]);
+    } },
+  });
+  expect(result.jobs).toHaveLength(1);
+  expect(result.jobs[0]?.searchRejection).toEqual(kind === "job_detail" ? null : {
+    category: "place", reason: "The model now confirms a different work location.",
+  });
+});
 
 function posting(title: string, company: string, id: string) {
   return {
@@ -1431,9 +1361,7 @@ describe("what the person sees while it runs", () => {
     });
     expect(result.jobs).toHaveLength(2);
     expect(result.steps).toBe(8);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("counts only repeated catalog pages in the stall warning window", async () => {
@@ -1461,9 +1389,7 @@ describe("what the person sees while it runs", () => {
     });
     expect(result.steps).toBe(12);
     expect(result.jobs).toEqual([]);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("unread catalog details keep progressing, but repeated details stall", async () => {
@@ -1490,9 +1416,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(12);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("identical observations still stall", async () => {
@@ -1503,9 +1427,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(6);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("turn notes are rewritten without tool names or handles", async () => {
@@ -1605,9 +1527,7 @@ describe("what the person sees while it runs", () => {
     // The first read is new content; the next six repeated reads still stall.
     expect(result.steps).toBe(7);
     expect(result.jobs).toEqual([]);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("stops scrolling without saved jobs and reports the step window", async () => {
@@ -1618,9 +1538,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(6);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("the wall-clock safety ceiling still stops a productive search", async () => {
@@ -2428,16 +2346,12 @@ describe("reading pages for less", () => {
   function linkReader() {
     return vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
       const ids = [
-        ...input.pageText.matchAll(
-          /→ https:\/\/jobs\.example\.test\/jobs\/(\d+)/gu,
-        ),
+        ...input.pageText.matchAll(/→ https:\/\/jobs\.example\.test\/jobs\/(\d+)/gu),
       ].map((match) => match[1] ?? "");
       return Promise.resolve(
         ids
           .slice(0, Math.min(12, input.maxJobs))
-          .map((id) =>
-            posting(`Platform Engineer ${id}`, `Employer ${id}`, id),
-          ),
+          .map((id) => posting(`Platform Engineer ${id}`, `Employer ${id}`, id)),
       );
     });
   }
@@ -2470,11 +2384,7 @@ describe("reading pages for less", () => {
       let slowText = "";
       let attempts = 0;
       const wrapped = vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
-        if (
-          !slowText &&
-          input.pageText.includes("→ https://jobs.example.test/jobs/0\n")
-        )
-          slowText = input.pageText;
+        if (!slowText && input.pageText.includes("→ https://jobs.example.test/jobs/0\n")) slowText = input.pageText;
         if (input.pageText === slowText) {
           attempts += 1;
           if (attempts === 1) {
@@ -2491,36 +2401,25 @@ describe("reading pages for less", () => {
         { name: "finish", args: { reason: "All parts read." } },
       ]);
       const running = runJobSearchAgent({
-        hands: hands({ current: longBoard(45) }),
-        config: config({ retainAllFound: true }),
+        hands: hands({ current: longBoard(45) }), config: config({ retainAllFound: true }),
         jobExtractor: { extractJobsFromPage: wrapped },
-        llmClient: {
-          chatWithTools: (messages, tools, options) => {
-            const last = messages.at(-1);
-            if (last?.role === "tool") answers.push(last.content);
-            return model.chatWithTools(messages, tools, options);
-          },
-        },
+        llmClient: { chatWithTools: (messages, tools, options) => {
+          const last = messages.at(-1);
+          if (last?.role === "tool") answers.push(last.content);
+          return model.chatWithTools(messages, tools, options);
+        } },
       });
       await vi.advanceTimersByTimeAsync(45_001);
       const result = await running;
       expect(slowSignal?.aborted).toBe(true);
       expect(result.jobs).toHaveLength(45);
       expect(attempts).toBe(2);
-      expect(
-        answers.some((answer) =>
-          answer.includes("could not be read this time"),
-        ),
-      ).toBe(true);
+      expect(answers.some((answer) => answer.includes("could not be read this time"))).toBe(true);
       const counts = new Map<string, number>();
-      for (const [call] of wrapped.mock.calls)
-        counts.set(call.pageText, (counts.get(call.pageText) ?? 0) + 1);
-      for (const [text, count] of counts)
-        expect(count).toBe(text === slowText ? 2 : 1);
+      for (const [call] of wrapped.mock.calls) counts.set(call.pageText, (counts.get(call.pageText) ?? 0) + 1);
+      for (const [text, count] of counts) expect(count).toBe(text === slowText ? 2 : 1);
       expect(result.incomplete).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+    } finally { vi.useRealTimers(); }
   });
 
   test("reading an unchanged page again costs no page read and says so", async () => {
@@ -2546,10 +2445,7 @@ describe("reading pages for less", () => {
               {
                 id: `call_${turn}`,
                 type: "function" as const,
-                function: {
-                  name: next.name,
-                  arguments: JSON.stringify(next.args),
-                },
+                function: { name: next.name, arguments: JSON.stringify(next.args) },
               },
             ],
           });
@@ -2576,21 +2472,9 @@ describe("reading pages for less", () => {
           args: {
             pageType: "search_results",
             rejected: [
-              {
-                url: "https://jobs.example.test/jobs/0",
-                category: "place",
-                reason: "On-site elsewhere.",
-              },
-              {
-                url: "https://jobs.example.test/jobs/0",
-                category: "place",
-                reason: "On-site elsewhere.",
-              },
-              {
-                url: "https://jobs.example.test/jobs/1",
-                category: "nonsense",
-                reason: "?",
-              },
+              { url: "https://jobs.example.test/jobs/0", category: "place", reason: "On-site elsewhere." },
+              { url: "https://jobs.example.test/jobs/0", category: "place", reason: "On-site elsewhere." },
+              { url: "https://jobs.example.test/jobs/1", category: "nonsense", reason: "?" },
             ],
           },
         },
@@ -2600,13 +2484,8 @@ describe("reading pages for less", () => {
     });
     expect(reader).toHaveBeenCalled();
     expect(result.jobs).toHaveLength(3);
-    expect(
-      result.jobs.find((job) => job.sourceJobId === "0")?.searchRejection
-        ?.category,
-    ).toBe("place");
-    expect(
-      result.jobs.find((job) => job.sourceJobId === "1")?.searchRejection,
-    ).toBeFalsy();
+    expect(result.jobs.find((job) => job.sourceJobId === "0")?.searchRejection?.category).toBe("place");
+    expect(result.jobs.find((job) => job.sourceJobId === "1")?.searchRejection).toBeFalsy();
   });
 
   test("the page reader gets the goals and its rejections are kept unless the model decided", async () => {
@@ -2635,11 +2514,7 @@ describe("reading pages for less", () => {
           args: {
             pageType: "search_results",
             rejected: [
-              {
-                url: "https://jobs.example.test/jobs/1",
-                category: "place",
-                reason: "Office in Leeds.",
-              },
+              { url: "https://jobs.example.test/jobs/1", category: "place", reason: "Office in Leeds." },
             ],
           },
         },
@@ -2648,14 +2523,8 @@ describe("reading pages for less", () => {
       jobExtractor: { extractJobsFromPage: reader },
     });
     const byId = new Map(result.jobs.map((job) => [job.sourceJobId, job]));
-    expect(byId.get("0")?.searchRejection).toEqual({
-      category: "place",
-      reason: "US only.",
-    });
-    expect(byId.get("1")?.searchRejection).toEqual({
-      category: "place",
-      reason: "Office in Leeds.",
-    });
+    expect(byId.get("0")?.searchRejection).toEqual({ category: "place", reason: "US only." });
+    expect(byId.get("1")?.searchRejection).toEqual({ category: "place", reason: "Office in Leeds." });
     expect(byId.get("2")?.searchRejection).toBeFalsy();
   });
 
@@ -2680,10 +2549,7 @@ describe("reading pages for less", () => {
               {
                 id: "call_finish",
                 type: "function" as const,
-                function: {
-                  name: "finish",
-                  arguments: JSON.stringify({ reason: "Done." }),
-                },
+                function: { name: "finish", arguments: JSON.stringify({ reason: "Done." }) },
               },
             ],
           });
@@ -2692,12 +2558,8 @@ describe("reading pages for less", () => {
       jobExtractor: extractor,
     });
     expect(waits).toBe(2);
-    expect(opening).toContain(
-      "Platform Engineer 1 → https://jobs.example.test/jobs/1",
-    );
-    expect(opening).toContain(
-      "The page you landed on is shown below; work from it.",
-    );
+    expect(opening).toContain("Platform Engineer 1 → https://jobs.example.test/jobs/1");
+    expect(opening).toContain("The page you landed on is shown below; work from it.");
     expect(opening).not.toContain("Begin by looking at the page.");
   });
 
@@ -2720,11 +2582,7 @@ describe("reading pages for less", () => {
                 type: "function" as const,
                 function: {
                   name,
-                  arguments: JSON.stringify(
-                    name === "scroll"
-                      ? { direction: "down" }
-                      : { reason: "Done." },
-                  ),
+                  arguments: JSON.stringify(name === "scroll" ? { direction: "down" } : { reason: "Done." }),
                 },
               },
             ],

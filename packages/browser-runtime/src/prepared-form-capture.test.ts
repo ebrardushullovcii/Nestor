@@ -80,31 +80,19 @@ test("saved files resolve to exactly one resume or asset record by name and byte
         value: "",
         checked: false,
         selected: [],
-        files: [
-          { name: "resume.pdf", type: "application/pdf", size: 3, sha256: sha },
-        ],
+        files: [{ name: "resume.pdf", type: "application/pdf", size: 3, sha256: sha }],
         disabled: false,
         readOnly: false,
       },
     ],
   } as PreparedFormSnapshot;
-  const resume = {
-    kind: "resume_export" as const,
-    id: "export",
-    name: "resume.pdf",
-    sha256: sha,
-  };
+  const resume = { kind: "resume_export" as const, id: "export", name: "resume.pdf", sha256: sha };
   expect(describePreparedFormAttachments(snapshot, [resume])).toEqual([resume]);
   expect(describePreparedFormAttachments(snapshot, [])).toBeNull();
   expect(
-    describePreparedFormAttachments(snapshot, [
-      { ...resume, sha256: "c".repeat(64) },
-    ]),
+    describePreparedFormAttachments(snapshot, [{ ...resume, sha256: "c".repeat(64) }]),
   ).toBeNull();
   expect(
-    describePreparedFormAttachments(snapshot, [
-      resume,
-      { ...resume, kind: "candidate_asset", id: "asset" },
-    ]),
+    describePreparedFormAttachments(snapshot, [resume, { ...resume, kind: "candidate_asset", id: "asset" }]),
   ).toBeNull();
 });

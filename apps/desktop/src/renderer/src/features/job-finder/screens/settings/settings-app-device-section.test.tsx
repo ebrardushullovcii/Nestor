@@ -70,9 +70,7 @@ describe("App & device: side menu with the assistant", () => {
       collapseSideMenuWithAssistant: false,
     });
     // Nothing is left waiting for a save.
-    expect(
-      screen.queryByRole("button", { name: "Save appearance" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save appearance" })).toBeNull();
     expect(onUpdateAppearanceTheme).not.toHaveBeenCalled();
   });
 

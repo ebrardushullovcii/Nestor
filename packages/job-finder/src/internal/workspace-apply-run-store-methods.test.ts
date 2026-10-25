@@ -495,11 +495,7 @@ describe("workspace application packet", () => {
     } as WorkspaceServiceContext);
 
     await expect(
-      methods.getApplyRunDetails(
-        "run-legacy-ambiguous",
-        job.id,
-        "application-a",
-      ),
+      methods.getApplyRunDetails("run-legacy-ambiguous", job.id, "application-a"),
     ).rejects.toThrow(/mismatched application record lineage/iu);
   });
 

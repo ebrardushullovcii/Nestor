@@ -26,11 +26,7 @@ function createAppData() {
   return appData;
 }
 
-function fakeApp(
-  appData: string,
-  name: string,
-  userData = path.join(appData, name),
-) {
+function fakeApp(appData: string, name: string, userData = path.join(appData, name)) {
   return {
     getName: () => name,
     getPath: (key: string) => (key === "appData" ? appData : userData),
@@ -50,30 +46,21 @@ describe("migrateLegacyDesktopUserData", () => {
     const appData = createAppData();
     seedLegacyWorkspace(path.join(appData, "@unemployed", "desktop"));
 
-    const result = migrateLegacyDesktopUserData(
-      fakeApp(appData, "@nestor/desktop"),
-      {
-        configuredDirectory: null,
-      },
-    );
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "@nestor/desktop"), {
+      configuredDirectory: null,
+    });
 
     const target = path.join(appData, "@nestor", "desktop");
     expect(result.movedDirectory).toEqual({
       from: path.join(appData, "@unemployed", "desktop"),
       to: target,
     });
-    expect(
-      readFileSync(path.join(target, "job-finder-workspace.sqlite"), "utf8"),
-    ).toBe("jobs");
-    expect(existsSync(path.join(target, "live-assistant-workspace.json"))).toBe(
-      true,
+    expect(readFileSync(path.join(target, "job-finder-workspace.sqlite"), "utf8")).toBe(
+      "jobs",
     );
-    expect(existsSync(path.join(target, "live-assistant-screenshots"))).toBe(
-      true,
-    );
-    expect(
-      existsSync(path.join(target, "interview-helper-workspace.json")),
-    ).toBe(false);
+    expect(existsSync(path.join(target, "live-assistant-workspace.json"))).toBe(true);
+    expect(existsSync(path.join(target, "live-assistant-screenshots"))).toBe(true);
+    expect(existsSync(path.join(target, "interview-helper-workspace.json"))).toBe(false);
     expect(existsSync(path.join(appData, "@unemployed"))).toBe(false);
   });
 
@@ -87,9 +74,9 @@ describe("migrateLegacyDesktopUserData", () => {
     });
 
     expect(result.movedDirectory?.to).toBe(path.join(appData, "Nestor"));
-    expect(
-      existsSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite")),
-    ).toBe(true);
+    expect(existsSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"))).toBe(
+      true,
+    );
     expect(existsSync(path.join(appData, "UnEmployed"))).toBe(false);
   });
 
@@ -97,30 +84,19 @@ describe("migrateLegacyDesktopUserData", () => {
     const appData = createAppData();
     seedLegacyWorkspace(path.join(appData, "UnEmployed"));
     mkdirSync(path.join(appData, "Nestor"));
-    writeFileSync(
-      path.join(appData, "Nestor", "job-finder-workspace.sqlite"),
-      "new",
-    );
+    writeFileSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"), "new");
 
     const result = migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
       configuredDirectory: null,
     });
 
-    expect(result).toMatchObject({
-      movedDirectory: null,
-      skippedReason: "target-has-data",
-    });
-    expect(
-      readFileSync(
-        path.join(appData, "Nestor", "job-finder-workspace.sqlite"),
-        "utf8",
-      ),
-    ).toBe("new");
-    expect(
-      existsSync(
-        path.join(appData, "UnEmployed", "job-finder-workspace.sqlite"),
-      ),
-    ).toBe(true);
+    expect(result).toMatchObject({ movedDirectory: null, skippedReason: "target-has-data" });
+    expect(readFileSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"), "utf8")).toBe(
+      "new",
+    );
+    expect(existsSync(path.join(appData, "UnEmployed", "job-finder-workspace.sqlite"))).toBe(
+      true,
+    );
   });
 
   test("an isolated session directory never adopts the real workspace", () => {
@@ -136,9 +112,7 @@ describe("migrateLegacyDesktopUserData", () => {
 
     expect(result.movedDirectory).toBeNull();
     expect(existsSync(path.join(appData, "@unemployed", "desktop"))).toBe(true);
-    expect(existsSync(path.join(isolated, "job-finder-workspace.sqlite"))).toBe(
-      false,
-    );
+    expect(existsSync(path.join(isolated, "job-finder-workspace.sqlite"))).toBe(false);
   });
 
   test("a --user-data-dir switch never adopts the real workspace", () => {
@@ -154,9 +128,7 @@ describe("migrateLegacyDesktopUserData", () => {
 
     expect(result.movedDirectory).toBeNull();
     expect(existsSync(path.join(appData, "@unemployed", "desktop"))).toBe(true);
-    expect(existsSync(path.join(switched, "job-finder-workspace.sqlite"))).toBe(
-      false,
-    );
+    expect(existsSync(path.join(switched, "job-finder-workspace.sqlite"))).toBe(false);
   });
 
   test("renames old module files inside an isolated session directory", () => {
@@ -178,30 +150,21 @@ describe("migrateLegacyDesktopUserData", () => {
   test("moves the Nordri workspace before an older UnEmployed one", () => {
     const appData = createAppData();
     const nordri = path.join(appData, "@nordri", "desktop");
-    mkdirSync(path.join(nordri, "Partitions", "unemployed-browser"), {
-      recursive: true,
-    });
+    mkdirSync(path.join(nordri, "Partitions", "unemployed-browser"), { recursive: true });
     writeFileSync(path.join(nordri, "job-finder-workspace.sqlite"), "nordri");
     seedLegacyWorkspace(path.join(appData, "@unemployed", "desktop"));
 
-    const result = migrateLegacyDesktopUserData(
-      fakeApp(appData, "@nestor/desktop"),
-      {
-        configuredDirectory: null,
-      },
-    );
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "@nestor/desktop"), {
+      configuredDirectory: null,
+    });
 
     const target = path.join(appData, "@nestor", "desktop");
     expect(result.movedDirectory).toEqual({ from: nordri, to: target });
-    expect(
-      readFileSync(path.join(target, "job-finder-workspace.sqlite"), "utf8"),
-    ).toBe("nordri");
-    expect(result.renamedEntries).toEqual([
-      path.join("Partitions", "nestor-browser"),
-    ]);
-    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(
-      true,
+    expect(readFileSync(path.join(target, "job-finder-workspace.sqlite"), "utf8")).toBe(
+      "nordri",
     );
+    expect(result.renamedEntries).toEqual([path.join("Partitions", "nestor-browser")]);
+    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(true);
     expect(existsSync(path.join(appData, "@nordri"))).toBe(false);
     expect(existsSync(path.join(appData, "@unemployed", "desktop"))).toBe(true);
   });
@@ -209,24 +172,14 @@ describe("migrateLegacyDesktopUserData", () => {
   test("keeps the newer browser partition when both old ones exist", () => {
     const appData = createAppData();
     const target = path.join(appData, "Nestor");
-    mkdirSync(path.join(target, "Partitions", "nordri-browser"), {
-      recursive: true,
-    });
+    mkdirSync(path.join(target, "Partitions", "nordri-browser"), { recursive: true });
     mkdirSync(path.join(target, "Partitions", "unemployed-browser"));
 
-    migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
-      configuredDirectory: null,
-    });
+    migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), { configuredDirectory: null });
 
-    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(
-      true,
-    );
-    expect(existsSync(path.join(target, "Partitions", "nordri-browser"))).toBe(
-      false,
-    );
-    expect(
-      existsSync(path.join(target, "Partitions", "unemployed-browser")),
-    ).toBe(true);
+    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(true);
+    expect(existsSync(path.join(target, "Partitions", "nordri-browser"))).toBe(false);
+    expect(existsSync(path.join(target, "Partitions", "unemployed-browser"))).toBe(true);
   });
 
   test("does nothing on a fresh install", () => {
@@ -236,11 +189,7 @@ describe("migrateLegacyDesktopUserData", () => {
       migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
         configuredDirectory: null,
       }),
-    ).toEqual({
-      movedDirectory: null,
-      renamedEntries: [],
-      skippedReason: null,
-    });
+    ).toEqual({ movedDirectory: null, renamedEntries: [], skippedReason: null });
     expect(existsSync(path.join(appData, "Nestor"))).toBe(false);
   });
 });

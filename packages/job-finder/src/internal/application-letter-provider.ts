@@ -1,4 +1,7 @@
-import type { ApplyDocument, ApplyLetterProvider } from "@nestor/browser-agent";
+import type {
+  ApplyDocument,
+  ApplyLetterProvider,
+} from "@nestor/browser-agent";
 import type { CoverLetterPreference } from "@nestor/contracts";
 
 /**

@@ -190,9 +190,7 @@ function hasRequirementEvidence(
   // An "unknown" status means nothing was decided, and with no resume
   // evidence beside it there is no comparison left for the row to print —
   // only a label, a badge and a line saying nothing was found.
-  return (
-    requirement.status !== "unknown" || requirement.resumeEvidence.length > 0
-  );
+  return requirement.status !== "unknown" || requirement.resumeEvidence.length > 0;
 }
 
 function describeUnevidencedRequirements(
@@ -355,13 +353,9 @@ export function MatchEvidenceMatrix({
       : scoreLabel;
   const hasDetailedFitEvidence =
     assessment.scorerVersion >= 3 || requirements.length > 0;
-  const legacyReasons = scrubJobAbsencePlaceholdersList([
-    ...new Set(
-      assessment.reasons
-        .map((reason) => joinUniqueSentences([reason]))
-        .filter(Boolean),
-    ),
-  ]);
+  const legacyReasons = scrubJobAbsencePlaceholdersList(
+    [...new Set(assessment.reasons.map((reason) => joinUniqueSentences([reason])).filter(Boolean))],
+  );
   const legacyGaps = scrubJobAbsencePlaceholdersList(
     assessment.gaps.filter((gap) => gap.trim().length > 0),
   );

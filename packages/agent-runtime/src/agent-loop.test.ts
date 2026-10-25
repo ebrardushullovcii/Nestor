@@ -575,46 +575,43 @@ describe("runAgentLoop", () => {
     }
   });
 
-  test.each([4, 1])(
-    "a host can keep fewer recent tool answers whole (batch=%s)",
-    async (batchSize) => {
-      let looks = 0;
-      const look = tool("look", () => {
-        looks += 1;
-        return Promise.resolve({
-          kind: "ok",
-          content: `Page ${looks}\n${"x".repeat(3_000)}`,
-          progress: true,
-        });
+  test.each([4, 1])("a host can keep fewer recent tool answers whole (batch=%s)", async (batchSize) => {
+    let looks = 0;
+    const look = tool("look", () => {
+      looks += 1;
+      return Promise.resolve({
+        kind: "ok",
+        content: `Page ${looks}\n${"x".repeat(3_000)}`,
+        progress: true,
       });
-      const turns: AgentLoopToolCall[][] = Array.from({ length: 8 }, () => [
-        call("look"),
-      ]);
-      turns.push([call("finish", { reason: "Done" })]);
-      const result = await runAgentLoop({
-        messages: opening,
-        model: scripted(turns),
-        tools: [look, finishTool],
-        subjectLabel: "the site",
-        staleToolResultKeepRecent: 2,
-        staleToolResultBatchSize: batchSize,
-      });
-      const answers = result.messages.filter(
-        (message) =>
-          message.role === "tool" && message.content.startsWith("Page"),
-      );
-      // A batch of four leaves two old answers whole until the next batch;
-      // shortening immediately leaves exactly the two recent answers whole.
-      expect(
-        answers.filter((answer) =>
-          answer.content.includes("Older answer shortened"),
-        ),
-      ).toHaveLength(batchSize === 4 ? 4 : 6);
-      for (const recent of answers.slice(-2)) {
-        expect(recent.content.length).toBeGreaterThan(3_000);
-      }
-    },
-  );
+    });
+    const turns: AgentLoopToolCall[][] = Array.from({ length: 8 }, () => [
+      call("look"),
+    ]);
+    turns.push([call("finish", { reason: "Done" })]);
+    const result = await runAgentLoop({
+      messages: opening,
+      model: scripted(turns),
+      tools: [look, finishTool],
+      subjectLabel: "the site",
+      staleToolResultKeepRecent: 2,
+      staleToolResultBatchSize: batchSize,
+    });
+    const answers = result.messages.filter(
+      (message) =>
+        message.role === "tool" && message.content.startsWith("Page"),
+    );
+    // A batch of four leaves two old answers whole until the next batch;
+    // shortening immediately leaves exactly the two recent answers whole.
+    expect(
+      answers.filter((answer) =>
+        answer.content.includes("Older answer shortened"),
+      ),
+    ).toHaveLength(batchSize === 4 ? 4 : 6);
+    for (const recent of answers.slice(-2)) {
+      expect(recent.content.length).toBeGreaterThan(3_000);
+    }
+  });
 
   test("a tool that hangs is given up after its deadline and the run carries on", async () => {
     let calls = 0;

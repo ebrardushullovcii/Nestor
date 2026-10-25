@@ -20,16 +20,12 @@ function createCandidateId(
   index: number,
   draft: ResumeImportFieldCandidateDraft,
 ): string {
-  return buildExtractionId(
-    `resume_import_${runId}_${sourceKind}_${index}`,
-    index,
-    [
-      draft.target.section,
-      draft.target.key,
-      draft.target.recordId,
-      draft.label,
-    ],
-  );
+  return buildExtractionId(`resume_import_${runId}_${sourceKind}_${index}`, index, [
+    draft.target.section,
+    draft.target.key,
+    draft.target.recordId,
+    draft.label,
+  ]);
 }
 
 export function toCandidate(
@@ -47,8 +43,7 @@ export function toCandidate(
       bundle: documentBundle,
     });
   const resolvedConfidenceBreakdown =
-    sourceKind === "parser_literal" &&
-    confidenceBreakdown.recommendation !== "abstain"
+    sourceKind === "parser_literal" && confidenceBreakdown.recommendation !== "abstain"
       ? { ...confidenceBreakdown, recommendation: "auto_apply" as const }
       : confidenceBreakdown;
 
@@ -81,18 +76,10 @@ export function toCandidate(
 function toCandidateCounts(candidates: readonly ResumeImportFieldCandidate[]) {
   return {
     total: candidates.length,
-    autoApplied: candidates.filter(
-      (candidate) => candidate.resolution === "auto_applied",
-    ).length,
-    needsReview: candidates.filter(
-      (candidate) => candidate.resolution === "needs_review",
-    ).length,
-    rejected: candidates.filter(
-      (candidate) => candidate.resolution === "rejected",
-    ).length,
-    abstained: candidates.filter(
-      (candidate) => candidate.resolution === "abstained",
-    ).length,
+    autoApplied: candidates.filter((candidate) => candidate.resolution === "auto_applied").length,
+    needsReview: candidates.filter((candidate) => candidate.resolution === "needs_review").length,
+    rejected: candidates.filter((candidate) => candidate.resolution === "rejected").length,
+    abstained: candidates.filter((candidate) => candidate.resolution === "abstained").length,
   };
 }
 
@@ -102,13 +89,8 @@ export function countResumeImportCandidates(
   return toCandidateCounts(candidates);
 }
 
-function isBlockingReviewCandidate(
-  candidate: ResumeImportFieldCandidate,
-): boolean {
-  if (
-    candidate.resolution !== "needs_review" &&
-    candidate.resolution !== "abstained"
-  ) {
+function isBlockingReviewCandidate(candidate: ResumeImportFieldCandidate): boolean {
+  if (candidate.resolution !== "needs_review" && candidate.resolution !== "abstained") {
     return false;
   }
 
@@ -126,12 +108,9 @@ function isBlockingReviewCandidate(
   );
 }
 
-function isOptionalProofCandidate(
-  candidate: ResumeImportFieldCandidate,
-): boolean {
+function isOptionalProofCandidate(candidate: ResumeImportFieldCandidate): boolean {
   return (
-    (candidate.resolution === "needs_review" ||
-      candidate.resolution === "abstained") &&
+    (candidate.resolution === "needs_review" || candidate.resolution === "abstained") &&
     candidate.target.section === "proof_point"
   );
 }
@@ -171,10 +150,7 @@ export function summarizeCandidateWarnings(
     }
   }
 
-  if (
-    blockingReviewCandidates.length === 0 &&
-    optionalProofCandidates.length === 0
-  ) {
+  if (blockingReviewCandidates.length === 0 && optionalProofCandidates.length === 0) {
     return [];
   }
 

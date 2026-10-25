@@ -1937,9 +1937,15 @@ describe("blind persona accepted-build preparation", () => {
         zoomFactorMatchesRequest: true,
       },
     });
-    expect(probed.environments[0]?.NESTOR_TESTER_SESSION_GEOMETRY).toBe("1");
-    expect(probed.environments[0]?.NESTOR_STARTUP_WINDOW_WIDTH).toBe("1280");
-    expect(probed.environments[0]?.NESTOR_STARTUP_WINDOW_HEIGHT).toBe("800");
+    expect(probed.environments[0]?.NESTOR_TESTER_SESSION_GEOMETRY).toBe(
+      "1",
+    );
+    expect(probed.environments[0]?.NESTOR_STARTUP_WINDOW_WIDTH).toBe(
+      "1280",
+    );
+    expect(probed.environments[0]?.NESTOR_STARTUP_WINDOW_HEIGHT).toBe(
+      "800",
+    );
     expect(probed.environments[0]?.NESTOR_STARTUP_ZOOM_FACTOR).toBe("2");
     // Hardening stays intact around the explicitly injected keys.
     expect(record.environment.NESTOR_ENABLE_TEST_API).toBeUndefined();
@@ -2173,12 +2179,16 @@ describe("blind persona accepted-build preparation", () => {
     ]);
     expect(record.startupGeometry.applied.outerBoundsMatchRequest).toBe(true);
     expect(record.startupGeometry.applied.zoomFactorMatchesRequest).toBe(true);
-    expect(probed.environments[0]?.NESTOR_STARTUP_WINDOW_WIDTH).toBeUndefined();
+    expect(
+      probed.environments[0]?.NESTOR_STARTUP_WINDOW_WIDTH,
+    ).toBeUndefined();
     expect(
       probed.environments[0]?.NESTOR_STARTUP_WINDOW_HEIGHT,
     ).toBeUndefined();
     expect(probed.environments[0]?.NESTOR_STARTUP_ZOOM_FACTOR).toBe("2");
-    expect(probed.environments[0]?.NESTOR_TESTER_SESSION_GEOMETRY).toBe("1");
+    expect(probed.environments[0]?.NESTOR_TESTER_SESSION_GEOMETRY).toBe(
+      "1",
+    );
     await session.close();
   });
 

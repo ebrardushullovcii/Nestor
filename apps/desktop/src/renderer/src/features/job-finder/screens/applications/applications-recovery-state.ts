@@ -36,9 +36,7 @@ import {
 } from "./applications-detail-panel-helpers";
 import type { ApplicationQueueHold } from "./application-queue-hold";
 
-type ApplyResult =
-  | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
-  | null;
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
 
 /**
  * One state, one sentence, one action.
@@ -188,9 +186,7 @@ export type PlannedApplyStanding =
 
 export function buildApplyRunContextReader(workspace: {
   applyRuns?: JobFinderRendererWorkspaceSnapshot["applyRuns"] | null;
-  applyJobResults?:
-    | JobFinderRendererWorkspaceSnapshot["applyJobResults"]
-    | null;
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"] | null;
   activityControl?: Pick<
     JobFinderRendererWorkspaceSnapshot["activityControl"],
     "paused" | "pauseBehavior"

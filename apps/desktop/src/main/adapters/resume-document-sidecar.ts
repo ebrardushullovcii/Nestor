@@ -140,7 +140,8 @@ export function _resetSidecarAvailabilityLogged(): void {
 }
 
 function getBundledSidecarBinaryPath(): string | null {
-  const override = process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
+  const override =
+    process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
   const candidates = uniquePaths([
     override ?? "",
     ...getGeneratedSidecarRootCandidates().map((root) =>

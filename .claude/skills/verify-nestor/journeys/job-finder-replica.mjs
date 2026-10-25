@@ -83,9 +83,7 @@ const STAGES = {
       );
     const submissionsBefore = sites.submissions().length;
     if (
-      await (
-        await page
-      )
+      await (await page)
         .getByRole("button", {
           name: "Finish setup and find jobs",
           exact: true,

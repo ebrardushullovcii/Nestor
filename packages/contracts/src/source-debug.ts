@@ -64,14 +64,12 @@ const SourceDebugEvidenceRefBaseSchema = z.object({
   capturedAt: IsoDateTimeSchema,
 });
 
-const SourceDebugUrlEvidenceRefSchema = SourceDebugEvidenceRefBaseSchema.extend(
-  {
-    kind: z.literal("url"),
-    url: UrlStringSchema,
-    storagePath: z.null().default(null),
-    excerpt: NonEmptyStringSchema.nullable().default(null),
-  },
-);
+const SourceDebugUrlEvidenceRefSchema = SourceDebugEvidenceRefBaseSchema.extend({
+  kind: z.literal("url"),
+  url: UrlStringSchema,
+  storagePath: z.null().default(null),
+  excerpt: NonEmptyStringSchema.nullable().default(null),
+});
 
 const SourceDebugScreenshotEvidenceRefSchema =
   SourceDebugEvidenceRefBaseSchema.extend({
@@ -82,19 +80,18 @@ const SourceDebugScreenshotEvidenceRefSchema =
     visualSnapshotId: NonEmptyStringSchema.nullable().default(null),
     visualObservationSetId: NonEmptyStringSchema.nullable().default(null),
     visualMode: BrowserVisualSnapshotModeSchema.nullable().default(null),
-    visualRetention:
-      BrowserVisualRetentionPolicySchema.nullable().default(null),
-    visualObservations:
-      BrowserVisualObservationSetSchema.nullable().default(null),
+    visualRetention: BrowserVisualRetentionPolicySchema.nullable().default(null),
+    visualObservations: BrowserVisualObservationSetSchema.nullable().default(null),
   });
 
-const SourceDebugNoteEvidenceRefSchema =
-  SourceDebugEvidenceRefBaseSchema.extend({
+const SourceDebugNoteEvidenceRefSchema = SourceDebugEvidenceRefBaseSchema.extend(
+  {
     kind: z.literal("note"),
     url: UrlStringSchema.nullable().default(null),
     storagePath: z.null().default(null),
     excerpt: NonEmptyStringSchema,
-  });
+  },
+);
 
 export const SourceDebugEvidenceRefSchema = z.discriminatedUnion("kind", [
   SourceDebugUrlEvidenceRefSchema,
@@ -124,12 +121,13 @@ export type SourceDebugTimingSummary = z.infer<
   typeof SourceDebugTimingSummarySchema
 >;
 
-export const SourceDebugRunTimingSummarySchema =
-  SourceDebugTimingSummarySchema.extend({
+export const SourceDebugRunTimingSummarySchema = SourceDebugTimingSummarySchema.extend(
+  {
     browserSetupMs: z.number().int().nonnegative().nullable().default(null),
     finalReviewMs: z.number().int().nonnegative().nullable().default(null),
     finalizationMs: z.number().int().nonnegative().nullable().default(null),
-  });
+  },
+);
 export type SourceDebugRunTimingSummary = z.infer<
   typeof SourceDebugRunTimingSummarySchema
 >;
@@ -317,9 +315,7 @@ export const SourceIntelligenceCollectionStrategySchema = z.object({
   rankedMethods: z.array(JobDiscoveryCollectionMethodSchema).default([]),
   startingRoutes: z.array(SourceIntelligenceRouteSchema).default([]),
   searchRouteTemplates: z.array(SourceIntelligenceRouteSchema).default([]),
-  detailRoutePatterns: z
-    .array(SourceIntelligenceRoutePatternSchema)
-    .default([]),
+  detailRoutePatterns: z.array(SourceIntelligenceRoutePatternSchema).default([]),
   listingMarkers: z.array(NonEmptyStringSchema).default([]),
 });
 export type SourceIntelligenceCollectionStrategy = z.infer<
@@ -396,8 +392,7 @@ export const SourceInstructionArtifactSchema = z
     if (value.acceptedAt === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Validated source instructions must record when they were accepted.",
+        message: "Validated source instructions must record when they were accepted.",
         path: ["acceptedAt"],
       });
     }
@@ -480,8 +475,7 @@ export const SourceDebugRunRecordSchema = z
       if (value.completedAt !== null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message:
-            "Running source-debug runs cannot have a completion timestamp.",
+          message: "Running source-debug runs cannot have a completion timestamp.",
           path: ["completedAt"],
         });
       }
@@ -489,8 +483,7 @@ export const SourceDebugRunRecordSchema = z
       if (value.activePhase === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message:
-            "Running source-debug runs must keep track of the active phase.",
+          message: "Running source-debug runs must keep track of the active phase.",
           path: ["activePhase"],
         });
       }
@@ -523,8 +516,7 @@ export const SourceDebugRunRecordSchema = z
     if (isTerminalState && value.completedAt === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Finished source-debug runs must record a completion timestamp.",
+        message: "Finished source-debug runs must record a completion timestamp.",
         path: ["completedAt"],
       });
     }

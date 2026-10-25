@@ -4255,9 +4255,9 @@ describe("createJobFinderWorkspaceService", () => {
     const validation = (
       await repository.listResumeValidationResults(workspace.draft.id)
     )[0];
-    expect(validation?.issues.some((issue) => issue.severity === "error")).toBe(
-      false,
-    );
+    expect(
+      validation?.issues.some((issue) => issue.severity === "error"),
+    ).toBe(false);
   });
 
   test("rejects approval when the persisted claim assessment hash is stale", async () => {

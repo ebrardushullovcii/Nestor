@@ -45,7 +45,9 @@ const postingCandidate = {
 
 describe("compact discovery observation contracts", () => {
   test("defaults a minimal supported observation to empty bounded content", () => {
-    const observation = DiscoveryCompactObservationSchema.parse(supportedInput);
+    const observation = DiscoveryCompactObservationSchema.parse(
+      supportedInput,
+    );
 
     expect(observation.kind).toBe("supported");
     expect(observation).toMatchObject({

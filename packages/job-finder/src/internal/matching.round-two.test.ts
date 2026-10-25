@@ -332,9 +332,7 @@ describe("completed full reads (R3-019, R3-106)", () => {
     await expect(workspaceService.assessJobListing(job.id)).rejects.toThrow(
       "previous assessment was kept",
     );
-    expect((await repository.listSavedJobs())[0]?.matchAssessment.score).toBe(
-      45,
-    );
+    expect((await repository.listSavedJobs())[0]?.matchAssessment.score).toBe(45);
   });
 
   test("a completed read explains its score change in the visible rationale", async () => {
@@ -503,6 +501,7 @@ test.each([
   },
 );
 
+
 describe("fix-up response and route regressions", () => {
   test.each([null, "https://jobs.example.test/apply/correct"])(
     "persists a refreshed destination (%s) in the sighting and honours it after rediscovery",
@@ -535,8 +534,7 @@ describe("fix-up response and route regressions", () => {
         seed: { ...seed, savedJobs: [job] },
         aiClient: {
           ...createAiClient(),
-          extractJobsFromPage: () =>
-            Promise.resolve([{ ...job, applicationUrl }]),
+          extractJobsFromPage: () => Promise.resolve([{ ...job, applicationUrl }]),
           assessJobFit: () =>
             Promise.resolve({
               score: 50,

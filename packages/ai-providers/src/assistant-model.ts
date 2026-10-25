@@ -172,7 +172,8 @@ export function resolveAssistantModelRouteFromEnvironment(
   env: StringMap = process.env,
 ): AssistantModelRouteResolution {
   const apiKey =
-    env.NESTOR_AI_ASSISTANT_API_KEY?.trim() || env.NESTOR_AI_API_KEY?.trim();
+    env.NESTOR_AI_ASSISTANT_API_KEY?.trim() ||
+    env.NESTOR_AI_API_KEY?.trim();
   if (!apiKey) {
     return { available: false, detail: ASSISTANT_MODEL_OUTAGE_DETAIL };
   }

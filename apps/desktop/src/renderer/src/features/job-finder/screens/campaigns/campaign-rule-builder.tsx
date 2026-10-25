@@ -406,15 +406,15 @@ export function CampaignRuleBuilder(props: {
         ) : !hasEnabledRule ? (
           <p className="text-sm text-foreground-soft">
             No rules are on, so all {funnel.sampleSize} saved{" "}
-            {funnel.sampleSize === 1 ? "job is" : "jobs are"} kept without being
-            screened.
+            {funnel.sampleSize === 1 ? "job is" : "jobs are"} kept without
+            being screened.
           </p>
         ) : (
           <p className="text-sm text-foreground-soft">
-            Of {funnel.sampleSize} saved{" "}
-            {funnel.sampleSize === 1 ? "job" : "jobs"}, these rules kept{" "}
-            {funnel.retainedCount}, removed {funnel.hardRemovedCount}, and
-            ranked {funnel.preferDowngradedCount} lower. {funnel.uncertainCount}{" "}
+            Of {funnel.sampleSize} saved {funnel.sampleSize === 1 ? "job" : "jobs"},
+            these rules kept {funnel.retainedCount}, removed{" "}
+            {funnel.hardRemovedCount}, and ranked {funnel.preferDowngradedCount}{" "}
+            lower. {funnel.uncertainCount}{" "}
             {funnel.uncertainCount === 1 ? "job was" : "jobs were"} kept because
             the listing did not say enough to judge, and{" "}
             {funnel.confirmedRetainedCount} matched on evidence the listing
@@ -527,8 +527,8 @@ export function CampaignRuleBuilder(props: {
                     ? "Compares the advertised pay band."
                     : "Compares the advertised minimum."}{" "}
                 Hourly pay uses 2,080 hours per year; weekly and monthly pay use
-                52 weeks and 12 months. Missing pay or a different currency
-                stays unknown.
+                52 weeks and 12 months. Missing pay or a different currency stays
+                unknown.
               </>
             ) : (
               "Compensation and travel rules need a numeric value; compensation also needs a currency code."

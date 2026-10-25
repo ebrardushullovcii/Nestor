@@ -1,4 +1,7 @@
-import type { SavedJob, SavedJobDiscoveryProvenance } from "@nestor/contracts";
+import type {
+  SavedJob,
+  SavedJobDiscoveryProvenance,
+} from "@nestor/contracts";
 
 /**
  * One job, seen on several sources (ADR 0030).

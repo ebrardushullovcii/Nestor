@@ -382,133 +382,130 @@ export function SafeguardsScreen(props: {
           </p>
         ) : null}
 
-        {isEmpty &&
-        !isPaused &&
-        blockedCount === 0 &&
-        !dailyCapacityExhausted ? null : (
-          <details
-            className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-4"
-            data-safeguard-events
-            onToggle={(event) =>
-              setEventsOpenOverride(event.currentTarget.open ? true : false)
-            }
-            open={eventsOpen}
-          >
-            <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-(length:--text-body) font-semibold text-(--text-headline)">
-              Safety events and automatic pauses
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1 text-(length:--text-tiny) tabular-nums font-normal text-foreground">
-                {model.counts.total}
-              </span>
-              {blockedCount > 0 ? (
+        {isEmpty && !isPaused && blockedCount === 0 && !dailyCapacityExhausted ? null : (
+        <details
+          className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-4"
+          data-safeguard-events
+          onToggle={(event) =>
+            setEventsOpenOverride(event.currentTarget.open ? true : false)
+          }
+          open={eventsOpen}
+        >
+          <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-(length:--text-body) font-semibold text-(--text-headline)">
+            Safety events and automatic pauses
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1 text-(length:--text-tiny) tabular-nums font-normal text-foreground">
+              {model.counts.total}
+            </span>
+            {blockedCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-1.5 text-(length:--text-small) font-normal text-foreground"
+                data-safeguard-held-count
+              >
                 <span
-                  className="inline-flex items-center gap-1.5 text-(length:--text-small) font-normal text-foreground"
-                  data-safeguard-held-count
-                >
-                  <span
+                  aria-hidden="true"
+                  className="size-2 rounded-full bg-destructive"
+                />
+                {blockedCount} holding work back
+              </span>
+            ) : null}
+          </summary>
+
+          <div className="grid min-w-0 gap-3 pt-3">
+            {!isEmpty ? (
+              <div
+                className="grid min-w-0 gap-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(0,3fr)] lg:items-start"
+                data-safeguard-toolbar
+              >
+                <div className="relative min-w-0">
+                  <Search
                     aria-hidden="true"
-                    className="size-2 rounded-full bg-destructive"
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                   />
-                  {blockedCount} holding work back
-                </span>
-              ) : null}
-            </summary>
-
-            <div className="grid min-w-0 gap-3 pt-3">
-              {!isEmpty ? (
+                  <Input
+                    aria-label="Search safeguards"
+                    className="pl-9"
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search safeguards"
+                    type="search"
+                    value={query}
+                  />
+                </div>
                 <div
-                  className="grid min-w-0 gap-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(0,3fr)] lg:items-start"
-                  data-safeguard-toolbar
+                  aria-label="Safeguard categories"
+                  className="flex min-w-0 w-full flex-wrap items-center gap-1 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) p-1"
+                  data-safeguard-categories
+                  role="group"
                 >
-                  <div className="relative min-w-0">
-                    <Search
-                      aria-hidden="true"
-                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                    />
-                    <Input
-                      aria-label="Search safeguards"
-                      className="pl-9"
-                      onChange={(event) => {
-                        setQuery(event.target.value);
-                        setPage(1);
-                      }}
-                      placeholder="Search safeguards"
-                      type="search"
-                      value={query}
-                    />
-                  </div>
-                  <div
-                    aria-label="Safeguard categories"
-                    className="flex min-w-0 w-full flex-wrap items-center gap-1 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) p-1"
-                    data-safeguard-categories
-                    role="group"
-                  >
-                    {visibleTabs.map((entry) => {
-                      const count = countForTab(model.counts, entry.id);
-                      return (
-                        <button
-                          aria-pressed={activeTab === entry.id}
-                          className={cn(
-                            "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-full px-3 text-(length:--text-small) font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                            activeTab === entry.id
-                              ? "bg-secondary text-foreground"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                          key={entry.id}
-                          onClick={() => {
-                            setTab(entry.id);
-                            setPage(1);
-                          }}
-                          type="button"
-                        >
-                          {entry.label}
-                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1 text-(length:--text-tiny) tabular-nums text-foreground">
-                            {count}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {visibleTabs.map((entry) => {
+                    const count = countForTab(model.counts, entry.id);
+                    return (
+                      <button
+                        aria-pressed={activeTab === entry.id}
+                        className={cn(
+                          "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-full px-3 text-(length:--text-small) font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                          activeTab === entry.id
+                            ? "bg-secondary text-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        key={entry.id}
+                        onClick={() => {
+                          setTab(entry.id);
+                          setPage(1);
+                        }}
+                        type="button"
+                      >
+                        {entry.label}
+                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1 text-(length:--text-tiny) tabular-nums text-foreground">
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : null}
+              </div>
+            ) : null}
 
-              {isEmpty ? (
-                <div data-safeguard-empty>
-                  <EmptyState
-                    className="min-h-40 px-5 py-6"
-                    description="Job Finder records an event here only when one of its limits is actually reached — a per-company application limit, a listing that looks closed or suspicious, an unusual run of failures, or a batch waiting for your spot check. Nothing has been recorded yet."
-                    title="No safety events yet"
-                  />
-                </div>
-              ) : isNoMatch ? (
+            {isEmpty ? (
+              <div data-safeguard-empty>
                 <EmptyState
                   className="min-h-40 px-5 py-6"
-                  description="Nothing in this category matches your search. Try a different term or clear the search box."
-                  title="No matching safeguards"
+                  description="Job Finder records an event here only when one of its limits is actually reached — a per-company application limit, a listing that looks closed or suspicious, an unusual run of failures, or a batch waiting for your spot check. Nothing has been recorded yet."
+                  title="No safety events yet"
                 />
-              ) : (
-                <div className="grid min-w-0 gap-3">
-                  {pagedRows.map((row) => (
-                    <SafeguardRowCard
-                      isPending={isPending}
-                      key={row.key}
-                      onMutate={(mutation) => {
-                        setEventsOpenOverride(true);
-                        return onMutateSafeguards(mutation);
-                      }}
-                      row={row}
-                    />
-                  ))}
-                  <CollectionPagination
-                    itemLabel="safeguards"
-                    onPageChange={setPage}
-                    page={currentPage}
-                    pageSize={COLLECTION_PAGE_SIZE}
-                    totalCount={visibleRows.length}
+              </div>
+            ) : isNoMatch ? (
+              <EmptyState
+                className="min-h-40 px-5 py-6"
+                description="Nothing in this category matches your search. Try a different term or clear the search box."
+                title="No matching safeguards"
+              />
+            ) : (
+              <div className="grid min-w-0 gap-3">
+                {pagedRows.map((row) => (
+                  <SafeguardRowCard
+                    isPending={isPending}
+                    key={row.key}
+                    onMutate={(mutation) => {
+                      setEventsOpenOverride(true);
+                      return onMutateSafeguards(mutation);
+                    }}
+                    row={row}
                   />
-                </div>
-              )}
-            </div>
-          </details>
+                ))}
+                <CollectionPagination
+                  itemLabel="safeguards"
+                  onPageChange={setPage}
+                  page={currentPage}
+                  pageSize={COLLECTION_PAGE_SIZE}
+                  totalCount={visibleRows.length}
+                />
+              </div>
+            )}
+          </div>
+        </details>
         )}
         <SafeguardsApplicationBoundary>
           <div className="grid justify-items-start gap-2">

@@ -623,9 +623,7 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     expect(input.checkValidity()).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Add and turn on" }));
     expect(screen.getByText("12 sources")).toBeTruthy();
-    expect(
-      screen.getByText(/Added 12 sources and turned them on/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Added 12 sources and turned them on/)).toBeTruthy();
     const cards = Array.from(
       document.querySelectorAll("[data-profile-setup-source-card]"),
     );
@@ -720,7 +718,10 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
             preferencesForm={preferencesForm}
             profileForm={profileForm}
             renderFooter={(options) => (
-              <button onClick={() => options?.onPrimary?.()} type="button">
+              <button
+                onClick={() => options?.onPrimary?.()}
+                type="button"
+              >
                 {options?.nextLabel}
               </button>
             )}
@@ -806,8 +807,7 @@ it("splits pasted roles using the same semicolon separator as places", () => {
   const input = screen.getByPlaceholderText("Add a target role");
   fireEvent.change(input, {
     target: {
-      value:
-        "Junior Data Analyst; Junior Data Scientist; Working Student Data Analytics",
+      value: "Junior Data Analyst; Junior Data Scientist; Working Student Data Analytics",
     },
   });
   fireEvent.keyDown(input, { key: "Enter" });

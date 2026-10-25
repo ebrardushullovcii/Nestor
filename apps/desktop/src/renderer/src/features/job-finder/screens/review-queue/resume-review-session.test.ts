@@ -89,12 +89,8 @@ it("counts what was reviewed, names the next one and wraps to the top", () => {
   expect(atC.next?.jobId).toBe("e");
   // From the last one the next is the first still waiting.
   expect(
-    describeResumeReviewProgress({
-      currentJobId: "e",
-      toReview,
-      queue,
-      session,
-    }).next?.jobId,
+    describeResumeReviewProgress({ currentJobId: "e", toReview, queue, session })
+      .next?.jobId,
   ).toBe("c");
 });
 

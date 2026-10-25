@@ -115,7 +115,9 @@ export function ResumeWorkspaceLanguagePicker(props: {
         </>
       ) : null}
       <span
-        className={props.inline ? "sr-only" : "text-xs text-foreground-muted"}
+        className={
+          props.inline ? "sr-only" : "text-xs text-foreground-muted"
+        }
       >
         Choosing a language translates this draft.
       </span>

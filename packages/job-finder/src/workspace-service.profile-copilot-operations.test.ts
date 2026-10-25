@@ -11,7 +11,10 @@ import type {
   ProfileSetupState,
 } from "@nestor/contracts";
 import { ProfileCopilotPatchGroupSchema } from "@nestor/contracts";
-import type { JobFinderRepository, JobFinderRepositorySeed } from "@nestor/db";
+import type {
+  JobFinderRepository,
+  JobFinderRepositorySeed,
+} from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import {

@@ -199,9 +199,9 @@ describe("createJobFinderWorkspaceService", () => {
     expect(
       snapshot.latestResumeImportRun?.candidateCounts.autoApplied,
     ).toBeGreaterThan(0);
-    expect(
-      snapshot.latestResumeImportRun?.candidateCounts.total,
-    ).toBeGreaterThan(0);
+    expect(snapshot.latestResumeImportRun?.candidateCounts.total).toBeGreaterThan(
+      0,
+    );
   });
 
   test("fresh-start sample imports auto-apply placeholder summary and avoid duplicate derived name review", async () => {

@@ -305,15 +305,9 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
-  getApplicationPageState?(
-    source: JobSource,
-    key: string,
-  ): Promise<ApplicationPageState>;
-  reopenApplicationPage?(
-    source: JobSource,
-    key: string,
-    onProgress?: (progress: ApplicationPageReopenProgress) => void,
-  ): Promise<ApplicationPageState>;
+  getApplicationPageState?(source: JobSource, key: string): Promise<ApplicationPageState>;
+  reopenApplicationPage?(source: JobSource, key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<ApplicationPageState>;
   /** Discard a ready form only after an exact guarded refill has been verified. */
   hibernateApplicationPageBinding?(
     source: JobSource,

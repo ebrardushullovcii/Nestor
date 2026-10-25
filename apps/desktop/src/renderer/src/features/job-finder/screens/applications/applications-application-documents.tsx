@@ -14,7 +14,8 @@ import { formatStatusLabel } from "@renderer/features/job-finder/lib/job-finder-
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
 import { StatusBadge } from "../../components/status-badge";
 
-export const CANDIDATE_ASSETS_CHANGED_EVENT = "nestor:candidate-assets-changed";
+export const CANDIDATE_ASSETS_CHANGED_EVENT =
+  "nestor:candidate-assets-changed";
 
 export function ApplicationsApplicationDocuments(props: {
   applicationRecord: ApplicationRecord;
@@ -74,10 +75,12 @@ export function ApplicationsApplicationDocuments(props: {
   async function refresh() {
     setStatus("loading");
     try {
-      const result = await window.nestor.jobFinder.listApplicationDocuments({
-        jobId: applicationRecord.jobId,
-        applicationRecordId: applicationRecord.id,
-      });
+      const result = await window.nestor.jobFinder.listApplicationDocuments(
+        {
+          jobId: applicationRecord.jobId,
+          applicationRecordId: applicationRecord.id,
+        },
+      );
       // One entry per document, at its newest revision; the approved one
       // opens first so a person never mistakes it for an unapproved draft.
       const latest = [
@@ -143,8 +146,8 @@ export function ApplicationsApplicationDocuments(props: {
       (entry) => entry.id === questionId,
     );
     try {
-      const document = await window.nestor.jobFinder.proposeApplicationDocument(
-        {
+      const document =
+        await window.nestor.jobFinder.proposeApplicationDocument({
           kind,
           jobId: applicationRecord.jobId,
           applicationRecordId: applicationRecord.id,
@@ -157,8 +160,7 @@ export function ApplicationsApplicationDocuments(props: {
                 expectedRevision: selectedDocument.revision,
               }
             : {}),
-        },
-      );
+        });
       await refresh();
       setSelectedDocumentId(document.id);
       setMessage(
@@ -198,12 +200,11 @@ export function ApplicationsApplicationDocuments(props: {
             content,
           })
         : selectedDocument;
-      const approved = await window.nestor.jobFinder.approveApplicationDocument(
-        {
+      const approved =
+        await window.nestor.jobFinder.approveApplicationDocument({
           documentId: revisionToApprove.id,
           expectedRevision: revisionToApprove.revision,
-        },
-      );
+        });
       setDraftContent(approved.content);
       await refresh();
       setSelectedDocumentId(approved.id);
@@ -265,10 +266,11 @@ export function ApplicationsApplicationDocuments(props: {
     setStatus("working");
     setMessage(null);
     try {
-      const result = await window.nestor.jobFinder.exportApplicationDocument({
-        documentId: selectedDocument.id,
-        expectedRevision: selectedDocument.revision,
-      });
+      const result =
+        await window.nestor.jobFinder.exportApplicationDocument({
+          documentId: selectedDocument.id,
+          expectedRevision: selectedDocument.revision,
+        });
       if (result.status === "cancelled") {
         setStatus("ready");
         setMessage("Export cancelled. The approved document was not changed.");
@@ -290,9 +292,7 @@ export function ApplicationsApplicationDocuments(props: {
   // Optional work is one quiet disclosure line, like "Run details and
   // history", not a card whose heading and sentence look like a step.
   const header = demoteAsSecondary ? (
-    <ApplicationsDisclosureSummary>
-      Cover letter (optional)
-    </ApplicationsDisclosureSummary>
+    <ApplicationsDisclosureSummary>Cover letter (optional)</ApplicationsDisclosureSummary>
   ) : (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>

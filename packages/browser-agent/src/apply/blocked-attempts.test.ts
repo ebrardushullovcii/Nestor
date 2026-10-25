@@ -11,9 +11,7 @@ import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
  * carrying an answer is a possible save and ends the run.
  */
 
-function attempt(
-  overrides: Partial<ApplyBlockedAttempt> = {},
-): ApplyBlockedAttempt {
+function attempt(overrides: Partial<ApplyBlockedAttempt> = {}): ApplyBlockedAttempt {
   return {
     kind: "fetch",
     method: "POST",
@@ -102,11 +100,7 @@ describe("blocked attempts", () => {
   });
 
   test("the page trying to send the form always stops the run", () => {
-    for (const kind of [
-      "dom_submit",
-      "form_submit",
-      "form_request_submit",
-    ] as const) {
+    for (const kind of ["dom_submit", "form_submit", "form_request_submit"] as const) {
       const judgement = judgeBlockedAttempt({
         attempt: attempt({ kind }),
         acknowledged: new Set(),

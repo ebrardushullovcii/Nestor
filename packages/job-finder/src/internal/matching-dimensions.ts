@@ -316,10 +316,7 @@ export function buildBookkeepingDimensions(input: {
   posting: MatchAssessmentPostingInput;
   searchPreferences: JobSearchPreferences;
   requirements: readonly JobRequirementAssessment[];
-}): Pick<
-  MatchDimensionsAssessment,
-  "applicationEffort" | "evidenceConfidence"
-> {
+}): Pick<MatchDimensionsAssessment, "applicationEffort" | "evidenceConfidence"> {
   const neutral: BuildMatchDimensionsAssessmentInput = {
     ...input,
     matchesRole: false,

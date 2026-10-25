@@ -1,9 +1,9 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { Switch as SwitchPrimitive } from "radix-ui";
+import * as React from "react"
+import { Switch as SwitchPrimitive } from "radix-ui"
 
-import { cn } from "@renderer/lib/utils";
+import { cn } from "@renderer/lib/utils"
 
 function Switch({
   className,
@@ -11,31 +11,31 @@ function Switch({
   style,
   ...props
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & {
-  size?: "sm" | "default";
+  size?: "sm" | "default"
 }) {
   // Calculate dimensions based on size
   const dimensions = React.useMemo(() => {
-    const trackWidth = size === "sm" ? 32 : 40; // w-8 or w-10
-    const trackHeight = size === "sm" ? 16 : 20; // h-4 or h-5
-    const thumbSize = size === "sm" ? 10 : 12; // size-2.5 or size-3
-    const padding = 2; // px-[2px]
-    const thumbTravel = trackWidth - thumbSize - padding;
-
+    const trackWidth = size === "sm" ? 32 : 40 // w-8 or w-10
+    const trackHeight = size === "sm" ? 16 : 20 // h-4 or h-5
+    const thumbSize = size === "sm" ? 10 : 12 // size-2.5 or size-3
+    const padding = 2 // px-[2px]
+    const thumbTravel = trackWidth - thumbSize - padding
+    
     return {
-      "--switch-track-width": `${trackWidth}px`,
-      "--switch-track-height": `${trackHeight}px`,
-      "--switch-thumb-size": `${thumbSize}px`,
-      "--switch-thumb-travel": `${thumbTravel}px`,
-    } as React.CSSProperties;
-  }, [size]);
+      '--switch-track-width': `${trackWidth}px`,
+      '--switch-track-height': `${trackHeight}px`,
+      '--switch-thumb-size': `${thumbSize}px`,
+      '--switch-thumb-travel': `${thumbTravel}px`,
+    } as React.CSSProperties
+  }, [size])
 
   const switchStyle = React.useMemo(
     () => ({
       ...style,
       ...dimensions,
     }),
-    [dimensions, style],
-  );
+    [dimensions, style]
+  )
 
   return (
     <SwitchPrimitive.Root
@@ -58,7 +58,7 @@ function Switch({
         "h-(--switch-track-height) w-(--switch-track-width)",
         "data-[state=checked]:bg-primary-fill data-[state=unchecked]:bg-input",
         "disabled:data-[state=checked]:bg-(--disabled-surface) disabled:data-[state=unchecked]:bg-(--disabled-surface)",
-        className,
+        className
       )}
       {...props}
     >
@@ -79,11 +79,11 @@ function Switch({
           "size-(--switch-thumb-size)",
           "data-[state=checked]:translate-x-(--switch-thumb-travel)",
           "data-[state=unchecked]:translate-x-[2px]",
-          "my-auto",
+          "my-auto"
         )}
       />
     </SwitchPrimitive.Root>
-  );
+  )
 }
 
-export { Switch };
+export { Switch }

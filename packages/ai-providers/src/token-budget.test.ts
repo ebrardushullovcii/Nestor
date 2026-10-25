@@ -1,8 +1,5 @@
 import { readFileSync } from "node:fs";
-import {
-  CandidateProfileSchema,
-  type CandidateProfile,
-} from "@nestor/contracts";
+import { CandidateProfileSchema, type CandidateProfile } from "@nestor/contracts";
 import { expect, test } from "vitest";
 
 import { runResumeGenerationAgentTask } from "./agent-capabilities";
@@ -97,10 +94,7 @@ function largeSyntheticProfile(): CandidateProfile {
     })),
     targetRoles: ["Data Analyst", "Junior Data Scientist"],
     locations: ["Berlin, Germany"],
-    skills: Array.from(
-      { length: 40 },
-      (_, index) => `Analytics skill ${index}`,
-    ),
+    skills: Array.from({ length: 40 }, (_, index) => `Analytics skill ${index}`),
     experiences,
     education: [
       {
@@ -214,10 +208,7 @@ test("the writer gets the evidence once and a record outline, and a refused prop
     ...firstPayload,
     candidateProfile: {
       ...profile,
-      baseResume: {
-        ...resumeMetadata,
-        textContentEvidenceRef: "baseResume:text",
-      },
+      baseResume: { ...resumeMetadata, textContentEvidenceRef: "baseResume:text" },
     },
     languageFields: request.languageFields,
   });
@@ -269,9 +260,7 @@ test("a full listing read gets the trimmed profile, not contact details or saved
   expect(after).toContain("Built report 0 for team 0");
   expect(after).toContain("Additional experience");
   const payload = buildJobFitAssessmentPayload(input);
-  expect(
-    JSON.stringify(payload.profile).split("lina.haddad@example.com"),
-  ).toHaveLength(
+  expect(JSON.stringify(payload.profile).split("lina.haddad@example.com")).toHaveLength(
     // Only inside the imported resume text.
     2,
   );

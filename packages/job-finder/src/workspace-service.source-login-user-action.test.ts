@@ -295,9 +295,7 @@ describe("discovery source login UserActionRequest adoption", () => {
         ),
     );
     expect(open).toHaveLength(1);
-    expect(open[0]?.scope).toMatchObject({
-      parkedTab: { tabId: "tab_wall_2" },
-    });
+    expect(open[0]?.scope).toMatchObject({ parkedTab: { tabId: "tab_wall_2" } });
     expect(closeParkedTab).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ tabId: "tab_wall_1" }),
@@ -358,9 +356,9 @@ describe("discovery source login UserActionRequest adoption", () => {
       parkedTab: { tabId: "tab_parked" },
     });
     expect(closeSession).not.toHaveBeenCalled();
-    expect(stopped.recentDiscoveryRuns[0]?.summary.browserCloseout?.mode).toBe(
-      "kept_alive",
-    );
+    expect(
+      stopped.recentDiscoveryRuns[0]?.summary.browserCloseout?.mode,
+    ).toBe("kept_alive");
 
     await harness.workspaceService.performUserAction({
       action: "cancel",
@@ -723,11 +721,7 @@ describe("continuing a search after the person clears a wall", () => {
     const baseRuntime = createBrowserRuntime();
     const expectedOrigin = new URL(target.startingUrl).origin;
     const runAgentDiscovery = vi.fn(
-      (
-        source: Parameters<
-          NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
-        >[0],
-      ) =>
+      (source: Parameters<NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>>[0]) =>
         Promise.resolve(
           DiscoveryRunResultSchema.parse({
             source,
@@ -824,11 +818,7 @@ describe("continuing a search after the person clears a wall", () => {
     });
     let calls = 0;
     const runAgentDiscovery = vi.fn(
-      async (
-        source: Parameters<
-          NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
-        >[0],
-      ) => {
+      async (source: Parameters<NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>>[0]) => {
         calls += 1;
         // The first search is still running when the person signs in.
         if (calls === 1) await running;
@@ -928,6 +918,8 @@ describe("continuing a search after the person clears a wall", () => {
     const resolved = await harness.repository.getUserActionRequest(request.id);
     expect(resolved?.state).toBe("resolved");
   });
+
+
 
   test("continues a blocked run with its non-active plan preferences and retention", async () => {
     const seed = createSeed();
@@ -1040,11 +1032,8 @@ describe("continuing a search after the person clears a wall", () => {
     if (!target) throw new Error("Expected a saved source.");
     const baseRuntime = createBrowserRuntime();
     const runAgentDiscovery = vi.fn(
-      (
-        ...args: Parameters<
-          NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
-        >
-      ) => baseRuntime.runAgentDiscovery!(...args),
+      (...args: Parameters<NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>>) =>
+        baseRuntime.runAgentDiscovery!(...args),
     );
     const harness = createWorkspaceServiceHarness({
       seed,
@@ -1106,9 +1095,7 @@ describe("continuing a search after the person clears a wall", () => {
       accountCreationAuthorized: false,
     });
 
-    const stillVisible = await harness.repository.getUserActionRequest(
-      request.id,
-    );
+    const stillVisible = await harness.repository.getUserActionRequest(request.id);
     expect(stillVisible).toMatchObject({
       state: "still_blocked",
       summary: "This search plan was removed; run the plan again",

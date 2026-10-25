@@ -37,7 +37,9 @@ function visibleCredentialControls(
 }
 
 /** The only native form action that may be opened for an existing-account handoff. */
-export function selectObservedSignInAction(observation: ApplyFormObservation): {
+export function selectObservedSignInAction(
+  observation: ApplyFormObservation,
+): {
   ref: string;
   label: string;
   formAction: string;

@@ -1,6 +1,10 @@
-import type { SourceDebugWorkerAttempt } from "@nestor/contracts";
+import type {
+  SourceDebugWorkerAttempt,
+} from "@nestor/contracts";
 import { normalizeText, uniqueStrings } from "./shared";
-import { lineMentionsAnyKeyword } from "./source-instruction-filtering";
+import {
+  lineMentionsAnyKeyword,
+} from "./source-instruction-filtering";
 
 export function warningSuggestsAuthRestriction(
   value: string | null | undefined,
@@ -91,3 +95,4 @@ export function isExplicitSearchProbeDisproof(value: string): boolean {
     lineMentionsAnyKeyword(normalized, sourceDebugSearchControlKeywords)
   );
 }
+

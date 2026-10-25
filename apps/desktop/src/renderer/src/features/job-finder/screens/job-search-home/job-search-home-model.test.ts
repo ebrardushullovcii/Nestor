@@ -959,10 +959,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     expect(model.next).toMatchObject({
       id: "create_resumes",
       title: "Create 4 resumes",
-      primary: {
-        label: "Create 4 resumes",
-        action: { kind: "create_resumes" },
-      },
+      primary: { label: "Create 4 resumes", action: { kind: "create_resumes" } },
     });
     expect(model.next.secondary[0]).toMatchObject({
       label: "Apply to 1 ready job",
@@ -983,10 +980,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       queueItem("job_2"),
     ]);
     const model = build(ws);
-    expect(model.next).toMatchObject({
-      id: "apply",
-      title: "Apply to 2 ready jobs",
-    });
+    expect(model.next).toMatchObject({ id: "apply", title: "Apply to 2 ready jobs" });
     expect(model.next.secondary[0]).toMatchObject({
       label: "Create the missing resume",
       action: { kind: "create_resumes" },
@@ -1085,9 +1079,9 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
     expect(model.stages?.[1]?.detail).toBe("1 in Applications");
     // Searching again stays one press for a returning person.
-    expect(
-      model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Search again"]);
+    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
+      "Search again",
+    ]);
   });
 
   it("under Send for me, sends forms filled in earlier with one press", () => {
@@ -1747,13 +1741,12 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     failedApplications(ws, ["job_1", "job_2"]);
     const model = build(ws);
     expect(model.next.id).toBe("send");
-    expect(
-      model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Try again for all 2", "Search again"]);
+    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
+      "Try again for all 2",
+      "Search again",
+    ]);
     // In Send for me those runs send, so the same press says Apply.
-    const sending = build(ws, {
-      applicationAutomationMode: "autonomous_submit",
-    });
+    const sending = build(ws, { applicationAutomationMode: "autonomous_submit" });
     expect(sending.next.secondary[0]?.label).toBe("Apply again for all 2");
     expect(model.next.secondary[0]?.action).toEqual({
       kind: "apply_all",
@@ -1782,9 +1775,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     expect(model.next.id).toBe("needs_you");
     expect(model.next.detail).toContain("A job source wants you to sign in");
     expect(model.next.detail).not.toContain("An application is waiting");
-    expect(
-      model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Apply to all 2"]);
+    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
+      "Apply to all 2",
+    ]);
   });
 
   it("sends a search whose only source leads to a missing page to Job sources", () => {
@@ -2386,10 +2379,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
 
   it("never offers to retry an application the person cancelled", () => {
     const model = build(
-      withResult(
-        { state: "cancelled", summary: "Cancelled by you" },
-        "cancelled",
-      ),
+      withResult({ state: "cancelled", summary: "Cancelled by you" }, "cancelled"),
     );
     expect(model.next.id).not.toBe("retry");
     expect(model.stages?.[2]?.detail).toBe("1 cancelled");
@@ -2411,6 +2401,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
     });
     expect(model.next.detail).toContain("Prepare again");
     expect(model.stages?.[2]?.detail).toBe("1 form closed");
+
   });
 
   it("leads with the resumes to review and keeps a closed form as a quiet line", () => {
@@ -2426,17 +2417,13 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
         assetStatus: "ready",
         resumeAssetId: "asset-1",
         resumeTailoringMode: "aggressive",
-        resumeReview: {
-          status: "needs_review",
-        } as ReviewQueueItem["resumeReview"],
+        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
       }),
       queueItem("job_2", {
         assetStatus: "ready",
         resumeAssetId: "asset-2",
         resumeTailoringMode: "aggressive",
-        resumeReview: {
-          status: "needs_review",
-        } as ReviewQueueItem["resumeReview"],
+        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
       }),
     ];
     for (const campaign of ws.campaigns) {

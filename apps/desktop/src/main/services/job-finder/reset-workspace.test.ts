@@ -519,12 +519,9 @@ describe("resetJobFinderWorkspace", () => {
       .map((event) => event.split("->")[1]);
     expect(renameTargets).toEqual([
       intentMarkerPath,
-      ...allResetSourceRelativePaths.map((sourcePath) =>
-        workspacePath(
-          "trash",
-          `job-finder-reset-${markerPayload.token}`,
-          sourcePath,
-        ),
+      ...allResetSourceRelativePaths.map(
+        (sourcePath) =>
+          workspacePath("trash", `job-finder-reset-${markerPayload.token}`, sourcePath),
       ),
     ]);
 
@@ -705,16 +702,15 @@ describe("resetJobFinderWorkspace", () => {
 
     expect(mockRm).toHaveBeenCalledWith(intentMarkerPath, { force: true });
     expect(
-      fileSystemEventLog.filter(
-        (event) =>
-          event.startsWith("rename:") &&
-          event.slice(0, event.indexOf("->")).includes(trashPathSegment) &&
-          (event
+      fileSystemEventLog.filter((event) =>
+        event.startsWith("rename:") &&
+        event.slice(0, event.indexOf("->")).includes(trashPathSegment) &&
+        (event
+          .slice(event.indexOf("->"))
+          .includes(`${path.sep}documents${path.sep}`) ||
+          event
             .slice(event.indexOf("->"))
-            .includes(`${path.sep}documents${path.sep}`) ||
-            event
-              .slice(event.indexOf("->"))
-              .includes(`${path.sep}browser-agent${path.sep}`)),
+            .includes(`${path.sep}browser-agent${path.sep}`)),
       ),
     ).toHaveLength(1);
   });
@@ -835,12 +831,9 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       .filter((event) => event.startsWith("rename:"))
       .map((event) => event.split("->")[1]);
     expect(renameDestinations).toEqual(
-      allResetSourceRelativePaths.map((sourcePath) =>
-        workspacePath(
-          "trash",
-          `job-finder-reset-${defaultResetToken}`,
-          sourcePath,
-        ),
+      allResetSourceRelativePaths.map(
+        (sourcePath) =>
+          workspacePath("trash", `job-finder-reset-${defaultResetToken}`, sourcePath),
       ),
     );
     expect(repository.reset).toHaveBeenCalledTimes(1);
@@ -1382,10 +1375,13 @@ describe("sweepStaleJobFinderResetArtifacts", () => {
 
     await sweepStaleJobFinderResetArtifacts();
 
-    expect(mockRm).toHaveBeenCalledWith(workspacePath(abandonedTempName), {
-      recursive: true,
-      force: true,
-    });
+    expect(mockRm).toHaveBeenCalledWith(
+      workspacePath(abandonedTempName),
+      {
+        recursive: true,
+        force: true,
+      },
+    );
   });
 
   test("times out a browser clear that never finishes before deleting anything", async () => {

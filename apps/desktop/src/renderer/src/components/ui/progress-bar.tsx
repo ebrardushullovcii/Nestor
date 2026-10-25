@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, type CSSProperties } from 'react'
 
 /**
  * The empty meter has to read as a meter.
@@ -13,42 +13,39 @@ import { useMemo, type CSSProperties } from "react";
  * (3.99 / 3.88). Pinned by styles/globals.test.ts.
  */
 const PROGRESS_TRACK_CLASS_NAME =
-  "h-2 w-full rounded-full bg-(--surface-progress-track) shadow-[inset_0_0_0_1px_var(--control-border)]";
+  'h-2 w-full rounded-full bg-(--surface-progress-track) shadow-[inset_0_0_0_1px_var(--control-border)]'
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) {
-    return 0;
+    return 0
   }
 
-  return Math.max(0, Math.min(100, value));
+  return Math.max(0, Math.min(100, value))
 }
 
 interface ProgressBarProps {
-  ariaLabel?: string;
-  className?: string;
+  ariaLabel?: string
+  className?: string
   /**
    * Omit a percentage the operation cannot substantiate. An indeterminate bar
    * reports "still working" without asserting a completion fraction, and drops
    * `aria-valuenow` so assistive tech is told the same thing the eye is.
    */
-  indeterminate?: boolean;
-  percent?: number | null | undefined;
+  indeterminate?: boolean
+  percent?: number | null | undefined
 }
 
 export function ProgressBar({
-  ariaLabel = "Progress",
+  ariaLabel = 'Progress',
   className,
   indeterminate = false,
   percent,
 }: ProgressBarProps) {
-  const clampedPercent = clampPercent(percent ?? 0);
+  const clampedPercent = clampPercent(percent ?? 0)
   const style = useMemo(
-    () =>
-      ({
-        ["--progress-width" as const]: `${clampedPercent}%`,
-      }) as CSSProperties,
+    () => ({ ['--progress-width' as const]: `${clampedPercent}%` }) as CSSProperties,
     [clampedPercent],
-  );
+  )
 
   if (indeterminate) {
     return (
@@ -62,7 +59,7 @@ export function ProgressBar({
       >
         <div className="h-full w-2/5 rounded-full bg-primary/70 motion-safe:animate-pulse-brief" />
       </div>
-    );
+    )
   }
 
   return (
@@ -74,10 +71,7 @@ export function ProgressBar({
       className={className ?? PROGRESS_TRACK_CLASS_NAME}
       role="progressbar"
     >
-      <div
-        className="progress-fill h-full bg-primary-fill shadow-(--progress-active-glow)"
-        style={style}
-      />
+      <div className="progress-fill h-full bg-primary-fill shadow-(--progress-active-glow)" style={style} />
     </div>
-  );
+  )
 }

@@ -332,9 +332,7 @@ function TaskLocalCredentialsForm(props: {
           type="submit"
           variant="secondary"
         >
-          {props.runSends
-            ? "Sign in once and apply"
-            : "Sign in once and continue"}
+          {props.runSends ? "Sign in once and apply" : "Sign in once and continue"}
         </Button>
       </form>
     </details>
@@ -865,8 +863,8 @@ function ActionCard(props: {
         <p className="text-xs leading-5 text-muted-foreground" role="status">
           Job Finder checked {request.maxAttempts} times and still saw the same
           page. Finish the step in {JOB_FINDER_BROWSER_NAME}, then open the
-          application and start it again, or cancel this step to stop working on
-          this job.
+          application and start it again, or cancel this step to stop working
+          on this job.
         </p>
       ) : null}
     </article>

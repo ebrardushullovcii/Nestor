@@ -33,9 +33,15 @@
         "claim": "Led a design-system rollout across core workflow surfaces used by design and operations teams.",
         "heroMetric": "Adoption reached 80% of core product surfaces within two quarters.",
         "supportingContext": "Worked across product, engineering, and operations to standardize interaction and content patterns.",
-        "roleFamilies": ["product design", "design systems", "platform"],
+        "roleFamilies": [
+          "product design",
+          "design systems",
+          "platform"
+        ],
         "projectIds": [],
-        "linkIds": ["link_1"]
+        "linkIds": [
+          "link_1"
+        ]
       }
     ],
     "answerBank": {
@@ -53,7 +59,9 @@
     "applicationIdentity": {
       "preferredEmail": "alex@example.com",
       "preferredPhone": "+44 7700 900123",
-      "preferredLinkIds": ["link_1"]
+      "preferredLinkIds": [
+        "link_1"
+      ]
     },
     "baseResume": {
       "id": "resume_1",
@@ -66,9 +74,17 @@
       "lastAnalyzedAt": "2026-03-20T10:01:00.000Z",
       "analysisWarnings": []
     },
-    "targetRoles": ["Principal Designer"],
-    "locations": ["Remote"],
-    "skills": ["Figma", "React", "Design Systems"],
+    "targetRoles": [
+      "Principal Designer"
+    ],
+    "locations": [
+      "Remote"
+    ],
+    "skills": [
+      "Figma",
+      "React",
+      "Design Systems"
+    ],
     "experiences": [
       {
         "id": "experience_1",
@@ -76,7 +92,9 @@
         "title": "Senior systems designer",
         "employmentType": "Full-time",
         "location": "London, UK",
-        "workMode": ["hybrid"],
+        "workMode": [
+          "hybrid"
+        ],
         "startDate": "2020-01",
         "endDate": null,
         "isCurrent": true,
@@ -85,7 +103,10 @@
         "achievements": [
           "Led design-system rollout across core workflow surfaces."
         ],
-        "skills": ["Figma", "Design Systems"],
+        "skills": [
+          "Figma",
+          "Design Systems"
+        ],
         "domainTags": [],
         "peopleManagementScope": null,
         "ownershipScope": null
@@ -122,12 +143,22 @@
       "Senior Product Designer",
       "Principal UX Engineer"
     ],
-    "locations": ["Remote", "London"],
-    "workModes": ["remote", "hybrid"],
-    "seniorityLevels": ["senior"],
+    "locations": [
+      "Remote",
+      "London"
+    ],
+    "workModes": [
+      "remote",
+      "hybrid"
+    ],
+    "seniorityLevels": [
+      "senior"
+    ],
     "minimumSalaryUsd": 170000,
     "salaryCurrency": "USD",
-    "companyWhitelist": ["Signal Systems"],
+    "companyWhitelist": [
+      "Signal Systems"
+    ],
     "approvalMode": "review_before_submit",
     "tailoringMode": "balanced",
     "discovery": {

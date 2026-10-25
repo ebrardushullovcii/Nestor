@@ -220,9 +220,7 @@ export const saveSearchPlanTool = defineTool({
       schedule,
     });
     session.assertCurrent();
-    const after = (await executeJobFinderAction("save-campaign", request, {
-      service,
-    })) as JobFinderWorkspaceSnapshot;
+    const after = await executeJobFinderAction("save-campaign", request, { service }) as JobFinderWorkspaceSnapshot;
     const created = after.campaigns.filter(
       (plan) =>
         plan.name === input.name &&

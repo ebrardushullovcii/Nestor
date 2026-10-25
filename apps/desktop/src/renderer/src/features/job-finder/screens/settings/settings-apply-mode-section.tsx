@@ -167,13 +167,7 @@ export function SettingsApplyModeSection(props: {
   };
 
   const saveDailyCap = () => {
-    if (
-      !capIsOutstanding ||
-      !capIsValid ||
-      isSaving ||
-      capSaving ||
-      modeSaving
-    ) {
+    if (!capIsOutstanding || !capIsValid || isSaving || capSaving || modeSaving) {
       return;
     }
     // The mode the person last picked, so a limit saved moments after a

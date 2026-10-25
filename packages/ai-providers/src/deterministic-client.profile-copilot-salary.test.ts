@@ -56,7 +56,9 @@ function compensationOperation(reply: {
 }): { operation: string; value: Record<string, unknown> } | undefined {
   for (const group of reply.patchGroups) {
     for (const operation of group.operations) {
-      if (operation.operation === "replace_compensation_preferences_fields") {
+      if (
+        operation.operation === "replace_compensation_preferences_fields"
+      ) {
         return {
           operation: operation.operation,
           value: operation.value as Record<string, unknown>,
@@ -89,9 +91,7 @@ describe("deterministic ai client profile copilot salary commands", () => {
       operation: "replace_compensation_preferences_fields",
       value: { maximum: 180000 },
     });
-    expect(
-      ProfileCopilotPatchGroupSchema.parse(reply.patchGroups[0]),
-    ).toBeTruthy();
+    expect(ProfileCopilotPatchGroupSchema.parse(reply.patchGroups[0])).toBeTruthy();
   });
 
   test("A2 keeps an explicitly stated currency symbol on a single value", async () => {
@@ -330,8 +330,7 @@ describe("deterministic ai client profile copilot salary commands", () => {
       searchPreferences: createPreferences(),
       context: { surface: "profile", section: "preferences" },
       relevantReviewItems: [],
-      request:
-        "make my experience 7 years and make my expected salary to be 2k",
+      request: "make my experience 7 years and make my expected salary to be 2k",
     });
 
     expect(reply.patchGroups).toHaveLength(1);
@@ -359,10 +358,7 @@ describe("deterministic ai client profile copilot salary commands", () => {
     const parsedGroup = ProfileCopilotPatchGroupSchema.parse(group);
     const operation = parsedGroup.operations[0];
 
-    if (
-      !operation ||
-      operation.operation !== "replace_compensation_preferences_fields"
-    ) {
+    if (!operation || operation.operation !== "replace_compensation_preferences_fields") {
       throw new Error("Expected a compensation operation");
     }
 

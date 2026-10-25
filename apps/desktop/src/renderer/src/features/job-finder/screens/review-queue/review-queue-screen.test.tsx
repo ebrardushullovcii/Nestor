@@ -648,7 +648,9 @@ describe("ReviewQueueScreen locked pane scroll regions", () => {
     });
 
     const column = screen.getByTestId("review-queue-workspace-column");
-    expect(column.querySelector("[data-resume-preview-card]")).toBeTruthy();
+    expect(
+      column.querySelector("[data-resume-preview-card]"),
+    ).toBeTruthy();
     expect(
       column.querySelectorAll("[data-locked-pane-scroll-region]"),
     ).toHaveLength(0);

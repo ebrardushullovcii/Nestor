@@ -40,11 +40,7 @@ describe("compensation normalization and fit truth", () => {
       reconcileSalaryTextWithPreparedBody(null, "EUR 96,000 per year", read),
     ).toBe("EUR 96,000 per year");
     expect(
-      reconcileSalaryTextWithPreparedBody(
-        "EUR 96,000 per year",
-        "EUR 96,000 per year",
-        read,
-      ),
+      reconcileSalaryTextWithPreparedBody("EUR 96,000 per year", "EUR 96,000 per year", read),
     ).toBe("EUR 96,000 per year");
   });
   test.each(["EUR 96,000 per year", "USD 99,000 per year"])(
@@ -254,13 +250,9 @@ describe("findSiteFurnitureSalaryTexts", () => {
   }
 
   it("does not open bodies whose band cannot meet the existing threshold", async () => {
-    const readBody = () => {
-      throw new Error("An ineligible band opened its body");
-    };
+    const readBody = () => { throw new Error("An ineligible band opened its body"); };
     const postings = Array.from({ length: 10 }, (_, index) => ({
-      get description(): string {
-        return readBody();
-      },
+      get description(): string { return readBody(); },
       salaryText: `$${80000 + index * 1000} per year`,
     }));
     expect(await findSiteFurnitureSalaryTexts(postings)).toEqual(new Set());

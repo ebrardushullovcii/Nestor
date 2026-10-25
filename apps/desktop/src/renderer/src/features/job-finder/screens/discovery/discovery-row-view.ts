@@ -35,7 +35,8 @@ export const getDiscoveryRowView = createPerObjectCache(
             joinUniqueSentences([row.recommendationRationale ?? ""]),
           ) || null
         : null) ??
-      (row.roleSuitabilityState !== null && row.roleSuitabilityState !== "exact"
+      (row.roleSuitabilityState !== null &&
+      row.roleSuitabilityState !== "exact"
         ? row.firstGap
         : null) ??
       fit.withheldReason ??

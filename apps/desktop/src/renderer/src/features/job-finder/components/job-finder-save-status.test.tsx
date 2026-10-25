@@ -439,9 +439,7 @@ describe("JobFinderSaveStatus", () => {
     act(() => {
       vi.advanceTimersByTime(SAVE_SUCCESS_VISIBLE_MS * 2);
     });
-    expect(
-      screen.getByRole("button", { name: "Undo AI behavior change" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo AI behavior change" })).toBeTruthy();
   });
 
   it("dismisses a saved confirmation after its readable interval without hiding failures", () => {

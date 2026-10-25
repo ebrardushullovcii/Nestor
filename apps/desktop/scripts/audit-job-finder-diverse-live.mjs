@@ -290,7 +290,9 @@ async function auditProfile(profile) {
 
     let resumeAudit = null;
     if (topJob) {
-      const firstResult = page.locator(`[data-job-result-id="${topJob.id}"]`);
+      const firstResult = page.locator(
+        `[data-job-result-id="${topJob.id}"]`,
+      );
       await firstResult.waitFor({ state: "visible", timeout: 10_000 });
       await firstResult.click();
       const evidenceLedger = page.getByRole("region", {
@@ -359,9 +361,7 @@ async function auditProfile(profile) {
         .getByRole("heading", { name: "Shortlisted jobs", level: 1 })
         .waitFor({ state: "visible", timeout: 15_000 });
       await page
-        .getByRole("button", {
-          name: /Edit resume|Open the resume|Review the resume/i,
-        })
+        .getByRole("button", { name: /Edit resume|Open the resume|Review the resume/i })
         .first()
         .click();
       await page
@@ -406,7 +406,8 @@ async function auditProfile(profile) {
         locations: configured.searchPreferences.locations,
         workModes: configured.searchPreferences.workModes,
         collectOnlyHardCriteriaMatches:
-          configured.searchPreferences.discovery.collectOnlyHardCriteriaMatches,
+          configured.searchPreferences.discovery
+            .collectOnlyHardCriteriaMatches,
       },
       sourceRuns:
         latestWorkspace.recentDiscoveryRuns[0]?.targetExecutions ?? [],

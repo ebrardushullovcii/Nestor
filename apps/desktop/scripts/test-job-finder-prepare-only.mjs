@@ -1794,13 +1794,18 @@ async function runPrepareOnlySmoke() {
         withTimeout(
           page.evaluate(
             (targetId) =>
-              window.nestor.jobFinder.runAgentDiscovery(undefined, targetId),
+              window.nestor.jobFinder.runAgentDiscovery(
+                undefined,
+                targetId,
+              ),
             target.id,
           ),
           discoveryTimeoutMs,
           `${target.label} fast discovery`,
           () =>
-            page.evaluate(() => window.nestor.jobFinder.cancelAgentDiscovery()),
+            page.evaluate(() =>
+              window.nestor.jobFinder.cancelAgentDiscovery(),
+            ),
         ),
     );
     // The route answers with what changed; read the whole workspace.

@@ -1,626 +1,324 @@
-<!doctype html>
+<!DOCTYPE html>
 
-<html class="dark" lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>NESTOR // RESUME_GEN</title>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
-      rel="stylesheet"
-    />
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script id="tailwind-config">
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-              "error-container": "#7f2927",
-              background: "#0e0e0e",
-              tertiary: "#eff8ff",
-              "primary-fixed": "#e2e2e2",
-              "on-surface-variant": "#acabaa",
-              "on-error": "#490106",
-              "surface-container-lowest": "#000000",
-              "tertiary-container": "#d0ecff",
-              "on-primary-fixed-variant": "#5a5c5c",
-              "on-background": "#e7e5e5",
-              "on-primary-container": "#d0d0d0",
-              "on-primary": "#3f4041",
-              surface: "#0e0e0e",
-              "surface-container-low": "#131313",
-              "surface-bright": "#2b2c2c",
-              "on-secondary-fixed-variant": "#5b5c5c",
-              "outline-variant": "#484848",
-              "secondary-fixed": "#e3e2e2",
-              "secondary-container": "#3a3c3c",
-              error: "#ee7d77",
-              "surface-container-highest": "#252626",
-              "surface-variant": "#252626",
-              "on-secondary-fixed": "#3e3f40",
-              "surface-tint": "#c6c6c7",
-              "on-primary-fixed": "#3e4040",
-              "tertiary-dim": "#c2def0",
-              "on-tertiary-container": "#3e5968",
-              "on-secondary": "#1f2021",
-              "on-error-container": "#ff9993",
-              "on-tertiary": "#466170",
-              "secondary-dim": "#9e9e9e",
-              "on-surface": "#e7e5e5",
-              "on-tertiary-fixed": "#2b4655",
-              "tertiary-fixed-dim": "#c2def0",
-              "primary-fixed-dim": "#d4d4d4",
-              "primary-container": "#454747",
-              secondary: "#9e9e9e",
-              "inverse-on-surface": "#565555",
-              "primary-dim": "#b8b9b9",
-              "surface-container": "#191a1a",
-              primary: "#c6c6c7",
-              "surface-container-high": "#1f2020",
-              outline: "#767575",
-              "on-tertiary-fixed-variant": "#486372",
-              "secondary-fixed-dim": "#d5d4d4",
-              "surface-dim": "#0e0e0e",
-              "on-secondary-container": "#bfbfbf",
-              "inverse-surface": "#fcf9f8",
-              "error-dim": "#bb5551",
-              "tertiary-fixed": "#d0ecff",
-              "inverse-primary": "#5e5f60",
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NESTOR // RESUME_GEN</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "error-container": "#7f2927",
+                        "background": "#0e0e0e",
+                        "tertiary": "#eff8ff",
+                        "primary-fixed": "#e2e2e2",
+                        "on-surface-variant": "#acabaa",
+                        "on-error": "#490106",
+                        "surface-container-lowest": "#000000",
+                        "tertiary-container": "#d0ecff",
+                        "on-primary-fixed-variant": "#5a5c5c",
+                        "on-background": "#e7e5e5",
+                        "on-primary-container": "#d0d0d0",
+                        "on-primary": "#3f4041",
+                        "surface": "#0e0e0e",
+                        "surface-container-low": "#131313",
+                        "surface-bright": "#2b2c2c",
+                        "on-secondary-fixed-variant": "#5b5c5c",
+                        "outline-variant": "#484848",
+                        "secondary-fixed": "#e3e2e2",
+                        "secondary-container": "#3a3c3c",
+                        "error": "#ee7d77",
+                        "surface-container-highest": "#252626",
+                        "surface-variant": "#252626",
+                        "on-secondary-fixed": "#3e3f40",
+                        "surface-tint": "#c6c6c7",
+                        "on-primary-fixed": "#3e4040",
+                        "tertiary-dim": "#c2def0",
+                        "on-tertiary-container": "#3e5968",
+                        "on-secondary": "#1f2021",
+                        "on-error-container": "#ff9993",
+                        "on-tertiary": "#466170",
+                        "secondary-dim": "#9e9e9e",
+                        "on-surface": "#e7e5e5",
+                        "on-tertiary-fixed": "#2b4655",
+                        "tertiary-fixed-dim": "#c2def0",
+                        "primary-fixed-dim": "#d4d4d4",
+                        "primary-container": "#454747",
+                        "secondary": "#9e9e9e",
+                        "inverse-on-surface": "#565555",
+                        "primary-dim": "#b8b9b9",
+                        "surface-container": "#191a1a",
+                        "primary": "#c6c6c7",
+                        "surface-container-high": "#1f2020",
+                        "outline": "#767575",
+                        "on-tertiary-fixed-variant": "#486372",
+                        "secondary-fixed-dim": "#d5d4d4",
+                        "surface-dim": "#0e0e0e",
+                        "on-secondary-container": "#bfbfbf",
+                        "inverse-surface": "#fcf9f8",
+                        "error-dim": "#bb5551",
+                        "tertiary-fixed": "#d0ecff",
+                        "inverse-primary": "#5e5f60"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: { "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px" },
+                },
             },
-            fontFamily: {
-              headline: ["Space Grotesk"],
-              body: ["Inter"],
-              label: ["Inter"],
-            },
-            borderRadius: {
-              DEFAULT: "0px",
-              lg: "0px",
-              xl: "0px",
-              full: "9999px",
-            },
-          },
-        },
-      };
+        }
     </script>
-    <style>
-      .material-symbols-outlined {
-        font-variation-settings:
-          "FILL" 0,
-          "wght" 400,
-          "GRAD" 0,
-          "opsz" 24;
-      }
-      .scan-line {
-        background: linear-gradient(
-          to bottom,
-          transparent,
-          #c6c6c7,
-          transparent
-        );
-        height: 100px;
-        width: 100%;
-        position: absolute;
-        top: -100px;
-        left: 0;
-        opacity: 0.1;
-        animation: scan 4s linear infinite;
-      }
-      @keyframes scan {
-        0% {
-          top: -100px;
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
-        100% {
-          top: 100%;
+        .scan-line {
+            background: linear-gradient(to bottom, transparent, #c6c6c7, transparent);
+            height: 100px;
+            width: 100%;
+            position: absolute;
+            top: -100px;
+            left: 0;
+            opacity: 0.1;
+            animation: scan 4s linear infinite;
         }
-      }
-      .no-scrollbar::-webkit-scrollbar {
-        display: none;
-      }
-      .command-voice {
-        font-family: "Space Grotesk", sans-serif;
-      }
+        @keyframes scan {
+            0% { top: -100px; }
+            100% { top: 100%; }
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .command-voice { font-family: 'Space Grotesk', sans-serif; }
     </style>
-  </head>
-  <body
-    class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary overflow-hidden"
-  >
-    <!-- TOP NAV BAR (Shell Structure from SCREEN_6) -->
-    <header
-      class="bg-[#0e0e0e] text-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold border-b border-[#484848]/20 flex justify-between items-center w-full px-6 h-14 fixed top-0 z-50"
-    >
-      <div class="flex items-center gap-8">
-        <span class="text-xl font-black text-[#c6c6c7] tracking-tighter"
-          >NESTOR</span
-        >
-        <nav class="hidden md:flex items-center gap-6 h-full">
-          <a
-            class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2"
-            href="#"
-            >SESSION_ACTIVE</a
-          >
-          <a
-            class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2"
-            href="#"
-            >PROXY_LHR_01</a
-          >
-          <a
-            class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2"
-            href="#"
-            >BROWSER_SYNCED</a
-          >
-        </nav>
-      </div>
-      <div class="flex items-center gap-4">
-        <button
-          class="material-symbols-outlined p-2 hover:bg-[#1f2020] transition-colors"
-          data-icon="notifications"
-        >
-          notifications
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary overflow-hidden">
+<!-- TOP NAV BAR (Shell Structure from SCREEN_6) -->
+<header class="bg-[#0e0e0e] text-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold border-b border-[#484848]/20 flex justify-between items-center w-full px-6 h-14 fixed top-0 z-50">
+<div class="flex items-center gap-8">
+<span class="text-xl font-black text-[#c6c6c7] tracking-tighter">NESTOR</span>
+<nav class="hidden md:flex items-center gap-6 h-full">
+<a class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2" href="#">SESSION_ACTIVE</a>
+<a class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2" href="#">PROXY_LHR_01</a>
+<a class="text-[#767575] hover:bg-[#1f2020] transition-colors h-14 flex items-center px-2" href="#">BROWSER_SYNCED</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined p-2 hover:bg-[#1f2020] transition-colors" data-icon="notifications">notifications</button>
+<button class="material-symbols-outlined p-2 hover:bg-[#1f2020] transition-colors" data-icon="terminal">terminal</button>
+<div class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 overflow-hidden">
+<img alt="Operator Avatar" class="w-full h-full object-cover opacity-80" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXZm29uEc2RUdNFzCjbpraXa2isIlyQ-DlQC9ofwYkPHqARUdBs5-Dt2OMYe7r7U2DJKbN0Bso0IAFVjr04YoDY0y7dhdr_V1SLZo69LsWfSRhwlx7qiIHUSqPlFVZiRcq2mAzcIRjXpCM5gTsery4rBefk9naUBfg6igHQhszDEG_NmaSG88hrjhvdISRkaVYVRj-fG8DOhwYfbP1Fx92SILNFMXlIiUK5wqrZmKqGX9_KvcRCWUcnXCpSIk0ew-1kmTkuXGKG6sy"/>
+</div>
+</div>
+</header>
+<!-- SIDE NAV BAR (Shell Structure from SCREEN_6) -->
+<aside class="bg-[#131313] text-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium border-r border-[#484848]/20 fixed left-0 top-0 h-screen w-64 flex flex-col pt-14 z-40 hidden md:flex">
+<div class="p-6 border-b border-outline-variant/10">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-xl" data-icon="robot_2">robot_2</span>
+</div>
+<div>
+<div class="font-bold tracking-widest">NESTOR_OPS</div>
+<div class="text-[9px] text-tertiary opacity-70 uppercase">STATUS: ACTIVE_SCAN</div>
+</div>
+</div>
+</div>
+<nav class="flex-1 py-4 overflow-y-auto no-scrollbar">
+<a class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="grid_view">grid_view</span> DASHBOARD
+        </a>
+<a class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="account_circle">account_circle</span> PROFILE
+        </a>
+<a class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="explore">explore</span> DISCOVERY
+        </a>
+<a class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-6 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="description">description</span> RESUME_GEN
+        </a>
+<a class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="auto_mode">auto_mode</span> AUTO_APPLY
+        </a>
+<a class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="analytics">analytics</span> SYSTEM_HEALTH
+        </a>
+</nav>
+<div class="p-6 mt-auto border-t border-[#484848]/10 space-y-4">
+<button class="w-full py-2 bg-error/10 text-error border border-error/20 font-['Space_Grotesk'] uppercase text-[10px] tracking-widest font-bold hover:bg-error/20 transition-all">
+            EMERGENCY_STOP
         </button>
-        <button
-          class="material-symbols-outlined p-2 hover:bg-[#1f2020] transition-colors"
-          data-icon="terminal"
-        >
-          terminal
-        </button>
-        <div
-          class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 overflow-hidden"
-        >
-          <img
-            alt="Operator Avatar"
-            class="w-full h-full object-cover opacity-80"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXZm29uEc2RUdNFzCjbpraXa2isIlyQ-DlQC9ofwYkPHqARUdBs5-Dt2OMYe7r7U2DJKbN0Bso0IAFVjr04YoDY0y7dhdr_V1SLZo69LsWfSRhwlx7qiIHUSqPlFVZiRcq2mAzcIRjXpCM5gTsery4rBefk9naUBfg6igHQhszDEG_NmaSG88hrjhvdISRkaVYVRj-fG8DOhwYfbP1Fx92SILNFMXlIiUK5wqrZmKqGX9_KvcRCWUcnXCpSIk0ew-1kmTkuXGKG6sy"
-          />
-        </div>
-      </div>
-    </header>
-    <!-- SIDE NAV BAR (Shell Structure from SCREEN_6) -->
-    <aside
-      class="bg-[#131313] text-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium border-r border-[#484848]/20 fixed left-0 top-0 h-screen w-64 flex flex-col pt-14 z-40 hidden md:flex"
-    >
-      <div class="p-6 border-b border-outline-variant/10">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-primary flex items-center justify-center">
-            <span
-              class="material-symbols-outlined text-on-primary text-xl"
-              data-icon="robot_2"
-              >robot_2</span
-            >
-          </div>
-          <div>
-            <div class="font-bold tracking-widest">NESTOR_OPS</div>
-            <div class="text-[9px] text-tertiary opacity-70 uppercase">
-              STATUS: ACTIVE_SCAN
-            </div>
-          </div>
-        </div>
-      </div>
-      <nav class="flex-1 py-4 overflow-y-auto no-scrollbar">
-        <a
-          class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-lg" data-icon="grid_view"
-            >grid_view</span
-          >
-          DASHBOARD
-        </a>
-        <a
-          class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span
-            class="material-symbols-outlined text-lg"
-            data-icon="account_circle"
-            >account_circle</span
-          >
-          PROFILE
-        </a>
-        <a
-          class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-lg" data-icon="explore"
-            >explore</span
-          >
-          DISCOVERY
-        </a>
-        <a
-          class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-6 py-3 flex items-center gap-3 transition-all duration-150"
-          href="#"
-        >
-          <span
-            class="material-symbols-outlined text-lg"
-            data-icon="description"
-            >description</span
-          >
-          RESUME_GEN
-        </a>
-        <a
-          class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-lg" data-icon="auto_mode"
-            >auto_mode</span
-          >
-          AUTO_APPLY
-        </a>
-        <a
-          class="text-[#767575] px-6 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
-          href="#"
-        >
-          <span class="material-symbols-outlined text-lg" data-icon="analytics"
-            >analytics</span
-          >
-          SYSTEM_HEALTH
-        </a>
-      </nav>
-      <div class="p-6 mt-auto border-t border-[#484848]/10 space-y-4">
-        <button
-          class="w-full py-2 bg-error/10 text-error border border-error/20 font-['Space_Grotesk'] uppercase text-[10px] tracking-widest font-bold hover:bg-error/20 transition-all"
-        >
-          EMERGENCY_STOP
-        </button>
-        <div class="flex gap-4">
-          <button class="text-[#767575] hover:text-[#c6c6c7] transition-all">
-            <span class="material-symbols-outlined text-sm" data-icon="help"
-              >help</span
-            >
-          </button>
-          <button class="text-[#767575] hover:text-[#c6c6c7] transition-all">
-            <span
-              class="material-symbols-outlined text-sm"
-              data-icon="menu_book"
-              >menu_book</span
-            >
-          </button>
-        </div>
-      </div>
-    </aside>
-    <!-- MAIN CONTENT (Three-panel Layout from SCREEN_6) -->
-    <main
-      class="md:ml-64 mt-14 h-[calc(100vh-3.5rem-2rem)] flex overflow-hidden bg-background"
-    >
-      <!-- LEFT PANEL: ACTIVE QUEUE -->
-      <section
-        class="w-80 bg-surface-container-low border-r border-outline-variant/20 flex flex-col"
-      >
-        <div
-          class="p-4 border-b border-outline-variant/20 flex justify-between items-center bg-surface"
-        >
-          <span
-            class="command-voice text-[11px] font-bold tracking-widest text-on-surface-variant uppercase"
-            >ACTIVE_QUEUE // 08</span
-          >
-          <span
-            class="material-symbols-outlined text-on-surface-variant text-sm"
-            data-icon="filter_list"
-            >filter_list</span
-          >
-        </div>
-        <div
-          class="flex-1 overflow-y-auto no-scrollbar space-y-[1px] bg-outline-variant/5"
-        >
-          <!-- Active Item -->
-          <div
-            class="p-4 bg-surface-container-high border-l-2 border-primary cursor-pointer group"
-          >
-            <div class="flex justify-between items-start mb-2">
-              <span
-                class="text-[10px] font-mono text-primary bg-primary/10 px-1"
-                >ID: 8829-SYS</span
-              >
-              <span class="text-[9px] font-mono text-tertiary">64% GEN</span>
-            </div>
-            <h3
-              class="font-headline text-sm font-bold text-on-surface uppercase tracking-tight"
-            >
-              Senior Systems Architect
-            </h3>
-            <p
-              class="text-[10px] text-on-surface-variant uppercase tracking-wider mb-2"
-            >
-              NEURAL_DYNAMICS_INC
-            </p>
-            <div class="h-1 w-full bg-surface-container-lowest">
-              <div class="h-full bg-primary w-[64%]"></div>
-            </div>
-          </div>
-          <!-- Other Items -->
-          <div
-            class="p-4 bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors border-l-2 border-transparent"
-          >
-            <div class="flex justify-between items-start mb-1">
-              <span class="text-[10px] font-mono text-on-surface-variant"
-                >ID: 7102-OPS</span
-              >
-              <span
-                class="text-[10px] font-mono text-on-surface-variant uppercase"
-                >QUEUED</span
-              >
-            </div>
-            <h3
-              class="font-headline text-sm font-bold text-on-surface-variant uppercase tracking-tight"
-            >
-              Cloud Infrastructure Lead
-            </h3>
-            <p
-              class="text-[10px] text-on-surface-variant/60 uppercase tracking-wider"
-            >
-              AETHER_SOLUTIONS
-            </p>
-          </div>
-          <div
-            class="p-4 bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors border-l-2 border-transparent"
-          >
-            <div class="flex justify-between items-start mb-1">
-              <span class="text-[10px] font-mono text-on-surface-variant"
-                >ID: 9941-DEV</span
-              >
-              <span
-                class="text-[10px] font-mono text-on-surface-variant uppercase"
-                >QUEUED</span
-              >
-            </div>
-            <h3
-              class="font-headline text-sm font-bold text-on-surface-variant uppercase tracking-tight"
-            >
-              Principal Fullstack Op
-            </h3>
-            <p
-              class="text-[10px] text-on-surface-variant/60 uppercase tracking-wider"
-            >
-              CYBER_DYNE_SYSTEMS
-            </p>
-          </div>
-        </div>
-      </section>
-      <!-- CENTER PANEL: ASSET PREVIEW (Generation Progress) -->
-      <section class="flex-1 bg-surface overflow-hidden flex flex-col relative">
-        <div
-          class="p-4 border-b border-outline-variant/20 flex justify-between items-center z-10 bg-surface/80 backdrop-blur-md"
-        >
-          <div class="flex items-center gap-4">
-            <span
-              class="command-voice text-[11px] font-bold tracking-widest uppercase"
-              >ASSET_PREVIEW</span
-            >
-            <span class="text-[9px] font-mono text-on-surface-variant uppercase"
-              >RESUME_V4.2_TAILORING...</span
-            >
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              class="material-symbols-outlined text-sm p-1.5 bg-surface-container-high border border-outline-variant/20"
-              data-icon="zoom_in"
-            >
-              zoom_in
-            </button>
-            <button
-              class="material-symbols-outlined text-sm p-1.5 bg-surface-container-high border border-outline-variant/20"
-              data-icon="zoom_out"
-            >
-              zoom_out
-            </button>
-          </div>
-        </div>
-        <div
-          class="flex-1 relative overflow-hidden bg-surface-container-lowest flex flex-col items-center justify-center p-6"
-        >
-          <div class="scan-line"></div>
-          <div class="relative z-10 flex flex-col items-center">
-            <!-- Centered Generation Progress -->
-            <div class="mb-12 relative">
-              <svg class="w-56 h-56 transform -rotate-90">
-                <circle
-                  class="text-surface-container-high"
-                  cx="112"
-                  cy="112"
-                  fill="transparent"
-                  r="104"
-                  stroke="currentColor"
-                  stroke-width="2"
-                ></circle>
-                <circle
-                  class="text-primary"
-                  cx="112"
-                  cy="112"
-                  fill="transparent"
-                  r="104"
-                  stroke="currentColor"
-                  stroke-dasharray="653"
-                  stroke-dashoffset="235"
-                  stroke-width="2"
-                ></circle>
-              </svg>
-              <div
-                class="absolute inset-0 flex flex-col items-center justify-center"
-              >
-                <span class="font-headline text-5xl font-bold text-primary"
-                  >64%</span
-                >
-                <span
-                  class="font-mono text-[10px] text-primary tracking-widest uppercase"
-                  >SYMBOLS_SYNC</span
-                >
-              </div>
-            </div>
-            <h2
-              class="font-headline text-xl font-bold tracking-[0.2em] text-on-surface uppercase mb-2"
-            >
-              NEURAL_TAILORING_IN_PROGRESS
-            </h2>
-            <div class="flex items-center gap-3 text-tertiary mb-12">
-              <span
-                class="material-symbols-outlined text-sm animate-spin"
-                data-icon="sync"
-                >sync</span
-              >
-              <span class="font-mono text-xs tracking-widest uppercase"
-                >INJECTING_KEYWORDS... // SEMANTIC_ALIGNMENT_ACTIVE</span
-              >
-            </div>
-            <!-- Skeleton Resume Preview (Faded) -->
-            <div
-              class="w-full max-w-xl bg-surface-container-low/30 p-10 border border-outline-variant/10 opacity-30 relative overflow-hidden"
-            >
-              <div class="flex justify-between mb-8">
-                <div class="space-y-2">
-                  <div class="h-6 w-48 bg-outline-variant/20"></div>
-                  <div class="h-3 w-32 bg-outline-variant/10"></div>
+<div class="flex gap-4">
+<button class="text-[#767575] hover:text-[#c6c6c7] transition-all"><span class="material-symbols-outlined text-sm" data-icon="help">help</span></button>
+<button class="text-[#767575] hover:text-[#c6c6c7] transition-all"><span class="material-symbols-outlined text-sm" data-icon="menu_book">menu_book</span></button>
+</div>
+</div>
+</aside>
+<!-- MAIN CONTENT (Three-panel Layout from SCREEN_6) -->
+<main class="md:ml-64 mt-14 h-[calc(100vh-3.5rem-2rem)] flex overflow-hidden bg-background">
+<!-- LEFT PANEL: ACTIVE QUEUE -->
+<section class="w-80 bg-surface-container-low border-r border-outline-variant/20 flex flex-col">
+<div class="p-4 border-b border-outline-variant/20 flex justify-between items-center bg-surface">
+<span class="command-voice text-[11px] font-bold tracking-widest text-on-surface-variant uppercase">ACTIVE_QUEUE // 08</span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm" data-icon="filter_list">filter_list</span>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar space-y-[1px] bg-outline-variant/5">
+<!-- Active Item -->
+<div class="p-4 bg-surface-container-high border-l-2 border-primary cursor-pointer group">
+<div class="flex justify-between items-start mb-2">
+<span class="text-[10px] font-mono text-primary bg-primary/10 px-1">ID: 8829-SYS</span>
+<span class="text-[9px] font-mono text-tertiary">64% GEN</span>
+</div>
+<h3 class="font-headline text-sm font-bold text-on-surface uppercase tracking-tight">Senior Systems Architect</h3>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-wider mb-2">NEURAL_DYNAMICS_INC</p>
+<div class="h-1 w-full bg-surface-container-lowest">
+<div class="h-full bg-primary w-[64%]"></div>
+</div>
+</div>
+<!-- Other Items -->
+<div class="p-4 bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors border-l-2 border-transparent">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-mono text-on-surface-variant">ID: 7102-OPS</span>
+<span class="text-[10px] font-mono text-on-surface-variant uppercase">QUEUED</span>
+</div>
+<h3 class="font-headline text-sm font-bold text-on-surface-variant uppercase tracking-tight">Cloud Infrastructure Lead</h3>
+<p class="text-[10px] text-on-surface-variant/60 uppercase tracking-wider">AETHER_SOLUTIONS</p>
+</div>
+<div class="p-4 bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors border-l-2 border-transparent">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-mono text-on-surface-variant">ID: 9941-DEV</span>
+<span class="text-[10px] font-mono text-on-surface-variant uppercase">QUEUED</span>
+</div>
+<h3 class="font-headline text-sm font-bold text-on-surface-variant uppercase tracking-tight">Principal Fullstack Op</h3>
+<p class="text-[10px] text-on-surface-variant/60 uppercase tracking-wider">CYBER_DYNE_SYSTEMS</p>
+</div>
+</div>
+</section>
+<!-- CENTER PANEL: ASSET PREVIEW (Generation Progress) -->
+<section class="flex-1 bg-surface overflow-hidden flex flex-col relative">
+<div class="p-4 border-b border-outline-variant/20 flex justify-between items-center z-10 bg-surface/80 backdrop-blur-md">
+<div class="flex items-center gap-4">
+<span class="command-voice text-[11px] font-bold tracking-widest uppercase">ASSET_PREVIEW</span>
+<span class="text-[9px] font-mono text-on-surface-variant uppercase">RESUME_V4.2_TAILORING...</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="material-symbols-outlined text-sm p-1.5 bg-surface-container-high border border-outline-variant/20" data-icon="zoom_in">zoom_in</button>
+<button class="material-symbols-outlined text-sm p-1.5 bg-surface-container-high border border-outline-variant/20" data-icon="zoom_out">zoom_out</button>
+</div>
+</div>
+<div class="flex-1 relative overflow-hidden bg-surface-container-lowest flex flex-col items-center justify-center p-6">
+<div class="scan-line"></div>
+<div class="relative z-10 flex flex-col items-center">
+<!-- Centered Generation Progress -->
+<div class="mb-12 relative">
+<svg class="w-56 h-56 transform -rotate-90">
+<circle class="text-surface-container-high" cx="112" cy="112" fill="transparent" r="104" stroke="currentColor" stroke-width="2"></circle>
+<circle class="text-primary" cx="112" cy="112" fill="transparent" r="104" stroke="currentColor" stroke-dasharray="653" stroke-dashoffset="235" stroke-width="2"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="font-headline text-5xl font-bold text-primary">64%</span>
+<span class="font-mono text-[10px] text-primary tracking-widest uppercase">SYMBOLS_SYNC</span>
+</div>
+</div>
+<h2 class="font-headline text-xl font-bold tracking-[0.2em] text-on-surface uppercase mb-2">NEURAL_TAILORING_IN_PROGRESS</h2>
+<div class="flex items-center gap-3 text-tertiary mb-12">
+<span class="material-symbols-outlined text-sm animate-spin" data-icon="sync">sync</span>
+<span class="font-mono text-xs tracking-widest uppercase">INJECTING_KEYWORDS... // SEMANTIC_ALIGNMENT_ACTIVE</span>
+</div>
+<!-- Skeleton Resume Preview (Faded) -->
+<div class="w-full max-w-xl bg-surface-container-low/30 p-10 border border-outline-variant/10 opacity-30 relative overflow-hidden">
+<div class="flex justify-between mb-8">
+<div class="space-y-2">
+<div class="h-6 w-48 bg-outline-variant/20"></div>
+<div class="h-3 w-32 bg-outline-variant/10"></div>
+</div>
+<div class="h-10 w-10 bg-outline-variant/20"></div>
+</div>
+<div class="space-y-6">
+<div class="h-2 w-1/4 bg-primary/20"></div>
+<div class="h-4 w-full bg-outline-variant/10"></div>
+<div class="h-4 w-5/6 bg-outline-variant/10"></div>
+<div class="h-2 w-1/4 bg-primary/20"></div>
+<div class="h-20 w-full bg-outline-variant/5"></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- RIGHT PANEL: MISSION DETAILS (Shell Structure from SCREEN_6) -->
+<section class="w-96 bg-surface-container border-l border-outline-variant/20 flex flex-col">
+<div class="p-6 bg-surface-container-high/50 border-b border-outline-variant/20">
+<div class="flex justify-between items-center mb-6">
+<span class="command-voice text-[11px] font-bold tracking-widest text-primary uppercase">MISSION_PARAMETERS</span>
+<span class="material-symbols-outlined text-outline" data-icon="info">info</span>
+</div>
+<div class="p-3 bg-surface border border-outline-variant/20 mb-6">
+<div class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono">OPERATIONAL_STATUS</div>
+<div class="text-sm font-bold text-error uppercase font-headline">ASSET_PENDING</div>
+</div>
+<div class="space-y-4">
+<div>
+<div class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono">COMPENSATION_BRACKET</div>
+<div class="text-xs text-on-surface font-mono">$180K - $240K // PER_ANNUM</div>
+</div>
+<div>
+<div class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono">LOCATION_PROTOCOL</div>
+<div class="text-xs text-on-surface font-mono">HYBRID // ZURICH_CLUSTER</div>
+</div>
+<div>
+<div class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono">REQUISITE_SKILLS</div>
+<div class="flex flex-wrap gap-1 mt-2">
+<span class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20">RUST</span>
+<span class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20">K8S</span>
+<span class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20">GRPC</span>
+<span class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20">VECTOR_DB</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex-1 p-6 space-y-6 overflow-y-auto no-scrollbar">
+<div>
+<label class="text-[10px] font-bold tracking-widest text-outline uppercase mb-4 block">AUTO_MATCH_REPORT</label>
+<div class="bg-surface-container-lowest p-4 font-mono text-[10px] leading-relaxed text-on-surface-variant">
+                    &gt; PROFILE_OVERLAP: 94.2%<br/>
+                    &gt; KEYWORD_DENSITY: OPTIMAL<br/>
+                    &gt; EXP_VERIFICATION: VERIFIED
                 </div>
-                <div class="h-10 w-10 bg-outline-variant/20"></div>
-              </div>
-              <div class="space-y-6">
-                <div class="h-2 w-1/4 bg-primary/20"></div>
-                <div class="h-4 w-full bg-outline-variant/10"></div>
-                <div class="h-4 w-5/6 bg-outline-variant/10"></div>
-                <div class="h-2 w-1/4 bg-primary/20"></div>
-                <div class="h-20 w-full bg-outline-variant/5"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <!-- RIGHT PANEL: MISSION DETAILS (Shell Structure from SCREEN_6) -->
-      <section
-        class="w-96 bg-surface-container border-l border-outline-variant/20 flex flex-col"
-      >
-        <div
-          class="p-6 bg-surface-container-high/50 border-b border-outline-variant/20"
-        >
-          <div class="flex justify-between items-center mb-6">
-            <span
-              class="command-voice text-[11px] font-bold tracking-widest text-primary uppercase"
-              >MISSION_PARAMETERS</span
-            >
-            <span
-              class="material-symbols-outlined text-outline"
-              data-icon="info"
-              >info</span
-            >
-          </div>
-          <div class="p-3 bg-surface border border-outline-variant/20 mb-6">
-            <div
-              class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono"
-            >
-              OPERATIONAL_STATUS
-            </div>
-            <div class="text-sm font-bold text-error uppercase font-headline">
-              ASSET_PENDING
-            </div>
-          </div>
-          <div class="space-y-4">
-            <div>
-              <div
-                class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono"
-              >
-                COMPENSATION_BRACKET
-              </div>
-              <div class="text-xs text-on-surface font-mono">
-                $180K - $240K // PER_ANNUM
-              </div>
-            </div>
-            <div>
-              <div
-                class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono"
-              >
-                LOCATION_PROTOCOL
-              </div>
-              <div class="text-xs text-on-surface font-mono">
-                HYBRID // ZURICH_CLUSTER
-              </div>
-            </div>
-            <div>
-              <div
-                class="text-[9px] uppercase tracking-widest text-on-surface-variant mb-1 font-mono"
-              >
-                REQUISITE_SKILLS
-              </div>
-              <div class="flex flex-wrap gap-1 mt-2">
-                <span
-                  class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20"
-                  >RUST</span
-                >
-                <span
-                  class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20"
-                  >K8S</span
-                >
-                <span
-                  class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20"
-                  >GRPC</span
-                >
-                <span
-                  class="text-[8px] bg-surface-container-highest px-1.5 py-0.5 text-on-surface font-mono border border-outline-variant/20"
-                  >VECTOR_DB</span
-                >
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="flex-1 p-6 space-y-6 overflow-y-auto no-scrollbar">
-          <div>
-            <label
-              class="text-[10px] font-bold tracking-widest text-outline uppercase mb-4 block"
-              >AUTO_MATCH_REPORT</label
-            >
-            <div
-              class="bg-surface-container-lowest p-4 font-mono text-[10px] leading-relaxed text-on-surface-variant"
-            >
-              &gt; PROFILE_OVERLAP: 94.2%<br />
-              &gt; KEYWORD_DENSITY: OPTIMAL<br />
-              &gt; EXP_VERIFICATION: VERIFIED
-            </div>
-          </div>
-        </div>
-        <div
-          class="p-6 bg-surface-container-highest/20 mt-auto border-t border-outline-variant/20 flex flex-col gap-3"
-        >
-          <button
-            class="w-full bg-primary/20 text-on-primary/40 cursor-not-allowed py-4 text-xs font-black tracking-[0.2em] flex items-center justify-center gap-3 border border-outline-variant/20"
-            disabled=""
-          >
-            <span class="material-symbols-outlined text-sm" data-icon="lock"
-              >lock</span
-            >
-            APPROVE_APPLY
-          </button>
-          <button
-            class="w-full text-on-surface border border-outline-variant py-3 text-[10px] font-bold tracking-widest hover:bg-surface-bright transition-all duration-150 uppercase"
-          >
-            DISCARD_JOB
-          </button>
-        </div>
-      </section>
-    </main>
-    <!-- FOOTER (Shell Structure from SCREEN_6) -->
-    <footer
-      class="bg-[#000000] text-[#eff8ff] font-['Inter'] text-[9px] font-mono tracking-widest h-8 border-t border-[#484848]/30 fixed bottom-0 left-0 w-full flex justify-between items-center px-4 z-50"
-    >
-      <div class="flex items-center gap-6">
-        <span class="text-[#eff8ff] animate-pulse flex items-center gap-2">
-          <span class="w-1.5 h-1.5 bg-primary rounded-full"></span>
-          CONNECTION: SECURE
+</div>
+</div>
+<div class="p-6 bg-surface-container-highest/20 mt-auto border-t border-outline-variant/20 flex flex-col gap-3">
+<button class="w-full bg-primary/20 text-on-primary/40 cursor-not-allowed py-4 text-xs font-black tracking-[0.2em] flex items-center justify-center gap-3 border border-outline-variant/20" disabled="">
+<span class="material-symbols-outlined text-sm" data-icon="lock">lock</span>
+                APPROVE_APPLY
+            </button>
+<button class="w-full text-on-surface border border-outline-variant py-3 text-[10px] font-bold tracking-widest hover:bg-surface-bright transition-all duration-150 uppercase">
+                DISCARD_JOB
+            </button>
+</div>
+</section>
+</main>
+<!-- FOOTER (Shell Structure from SCREEN_6) -->
+<footer class="bg-[#000000] text-[#eff8ff] font-['Inter'] text-[9px] font-mono tracking-widest h-8 border-t border-[#484848]/30 fixed bottom-0 left-0 w-full flex justify-between items-center px-4 z-50">
+<div class="flex items-center gap-6">
+<span class="text-[#eff8ff] animate-pulse flex items-center gap-2">
+<span class="w-1.5 h-1.5 bg-primary rounded-full"></span>
+            CONNECTION: SECURE
         </span>
-        <span class="text-[#484848]">LATENCY: 14MS</span>
-        <span class="text-[#484848]">LOAD_FACTOR: CRITICAL_SUCCESS</span>
-      </div>
-      <div class="flex items-center gap-4">
-        <span
-          class="text-[#484848] hover:text-[#c6c6c7] cursor-default transition-colors uppercase"
-          >v1.0.4_STABLE</span
-        >
-        <div class="flex gap-2">
-          <div class="w-1 h-3 bg-primary/20"></div>
-          <div class="w-1 h-3 bg-primary/40"></div>
-          <div class="w-1 h-3 bg-primary/60"></div>
-        </div>
-      </div>
-    </footer>
-  </body>
-</html>
+<span class="text-[#484848]">LATENCY: 14MS</span>
+<span class="text-[#484848]">LOAD_FACTOR: CRITICAL_SUCCESS</span>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-[#484848] hover:text-[#c6c6c7] cursor-default transition-colors uppercase">v1.0.4_STABLE</span>
+<div class="flex gap-2">
+<div class="w-1 h-3 bg-primary/20"></div>
+<div class="w-1 h-3 bg-primary/40"></div>
+<div class="w-1 h-3 bg-primary/60"></div>
+</div>
+</div>
+</footer>
+</body></html>

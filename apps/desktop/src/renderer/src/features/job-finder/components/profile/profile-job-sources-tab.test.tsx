@@ -171,7 +171,10 @@ describe("ProfileJobSourcesTab", () => {
         "jobs.example.com, https://company.example/careers\nnot a url\njobs.example.com",
       ),
     ).toEqual({
-      urls: ["https://jobs.example.com/", "https://company.example/careers"],
+      urls: [
+        "https://jobs.example.com/",
+        "https://company.example/careers",
+      ],
       invalid: ["not a url"],
     });
   });
@@ -240,9 +243,7 @@ describe("ProfileJobSourcesTab", () => {
         )}
       />,
     );
-    expect(
-      screen.getAllByRole("heading", { name: "Company careers" }),
-    ).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "Company careers" })).toHaveLength(2);
     for (const url of urls) expect(screen.getByText(url)).toBeTruthy();
   });
 
@@ -791,9 +792,7 @@ describe("ProfileJobSourcesTab", () => {
       target: { value: "https://gamma.example/careers" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add 1 source" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit gamma.example/careers" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit gamma.example/careers" }));
 
     const includeToggle = screen.getByRole("checkbox", {
       name: "Include this source in searches",

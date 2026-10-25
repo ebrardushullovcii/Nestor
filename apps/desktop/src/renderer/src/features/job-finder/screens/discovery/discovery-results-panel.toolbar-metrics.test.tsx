@@ -4,7 +4,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS } from "./discovery-results-panel";
+import {
+  DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS,
+} from "./discovery-results-panel";
 import {
   DiscoveryResultsPanelWithJobs,
   flushFindJobsQueries,

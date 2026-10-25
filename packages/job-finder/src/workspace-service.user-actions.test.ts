@@ -138,9 +138,7 @@ describe("workspace user action inbox operations", () => {
     seed.userActionRequests = [createRequest()];
     const harness = createWorkspaceServiceHarness({
       seed,
-      browserRuntime: createRuntime(
-        vi.fn(() => Promise.resolve(blockedResult)),
-      ),
+      browserRuntime: createRuntime(vi.fn(() => Promise.resolve(blockedResult))),
     });
     const openSession = vi
       .spyOn(harness.browserRuntime, "openSession")

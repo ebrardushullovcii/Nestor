@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { JobFinderTaskCenter } from "./job-finder-task-center";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 
+
 // The fixtures' runs end on 31 July; Activity shows a finished run for a day.
 beforeEach(() => {
   vi.useFakeTimers({
@@ -27,6 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
+
 
 function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   const discoveryRun = {

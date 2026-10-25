@@ -1,5 +1,8 @@
 import { ShieldAlert, ShieldCheck } from "lucide-react";
-import type { BrowserSessionState, JobFinderSettings } from "@nestor/contracts";
+import type {
+  BrowserSessionState,
+  JobFinderSettings,
+} from "@nestor/contracts";
 import { StatusBadge } from "../../components/status-badge";
 import { formatStatusLabel, getSessionTone } from "../../lib/job-finder-utils";
 

@@ -36,19 +36,22 @@ function blockedFact(): Record<string, unknown> {
 
 describe("startup database recovery fact contract", () => {
   it("parses idle, restored, and blocked facts without changing known fields", () => {
-    expect(
-      JobFinderStartupDatabaseRecoveryFactSchema.parse({ status: "idle" }),
-    ).toEqual({ status: "idle" });
-    expect(
-      JobFinderStartupDatabaseRecoveryFactSchema.parse(restoredFact()),
-    ).toEqual(restoredFact());
-    expect(
-      JobFinderStartupDatabaseRecoveryFactSchema.parse(blockedFact()),
-    ).toEqual(blockedFact());
+    expect(JobFinderStartupDatabaseRecoveryFactSchema.parse({ status: "idle" }))
+      .toEqual({ status: "idle" });
+    expect(JobFinderStartupDatabaseRecoveryFactSchema.parse(restoredFact()))
+      .toEqual(restoredFact());
+    expect(JobFinderStartupDatabaseRecoveryFactSchema.parse(blockedFact()))
+      .toEqual(blockedFact());
   });
 
   it("rejects non-objects and unknown statuses", () => {
-    const malformed = [null, "restored", 42, { status: "surprise" }, {}];
+    const malformed = [
+      null,
+      "restored",
+      42,
+      { status: "surprise" },
+      {},
+    ];
 
     for (const fact of malformed) {
       expect(
@@ -173,9 +176,8 @@ describe("startup database recovery fact contract", () => {
 
 describe("startup reset recovery fact contract", () => {
   it("parses idle, completed, and degraded facts", () => {
-    expect(
-      JobFinderStartupResetRecoveryFactSchema.parse({ status: "idle" }),
-    ).toEqual({ status: "idle" });
+    expect(JobFinderStartupResetRecoveryFactSchema.parse({ status: "idle" }))
+      .toEqual({ status: "idle" });
     expect(
       JobFinderStartupResetRecoveryFactSchema.parse({
         status: "completed",

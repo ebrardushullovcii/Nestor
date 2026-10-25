@@ -34,7 +34,9 @@ export function withBrowserSignInRetry(
   return async (url, options) => {
     const first = await plain(url, options);
     if (!readWithBrowserSignIn || !looksLikeSignInPage(first)) return first;
-    const second = await readWithBrowserSignIn(url, options).catch(() => null);
+    const second = await readWithBrowserSignIn(url, options).catch(
+      () => null,
+    );
     return second && second.status < 400 && !looksLikeSignInPage(second)
       ? second
       : first;

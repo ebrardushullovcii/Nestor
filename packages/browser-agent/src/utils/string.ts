@@ -1,23 +1,21 @@
-export function uniqueStrings(
-  values: readonly (string | null | undefined)[],
-): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
+export function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
 
   for (const value of values) {
-    const normalized = value?.replace(/\s+/g, " ").trim();
+    const normalized = value?.replace(/\s+/g, ' ').trim()
     if (!normalized) {
-      continue;
+      continue
     }
 
-    const key = normalized.toLowerCase();
+    const key = normalized.toLowerCase()
     if (seen.has(key)) {
-      continue;
+      continue
     }
 
-    seen.add(key);
-    result.push(normalized);
+    seen.add(key)
+    result.push(normalized)
   }
 
-  return result;
+  return result
 }

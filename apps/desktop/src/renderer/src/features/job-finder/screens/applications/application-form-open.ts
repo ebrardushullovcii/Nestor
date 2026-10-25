@@ -148,10 +148,7 @@ export function resetApplicationFormOpenStates(): void {
 }
 
 function isOutcomePromise(
-  outcome:
-    | FinishInBrowserOutcome
-    | void
-    | Promise<FinishInBrowserOutcome | void>,
+  outcome: FinishInBrowserOutcome | void | Promise<FinishInBrowserOutcome | void>,
 ): outcome is Promise<FinishInBrowserOutcome | void> {
   // Structural, so a thenable from another realm (a test double, the preload
   // bridge) is awaited rather than written into the status as an outcome.

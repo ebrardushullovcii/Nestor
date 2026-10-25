@@ -112,10 +112,7 @@ function workspace(): JobFinderRendererWorkspaceSnapshot {
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function withReadyShortlist(
-  ws: JobFinderRendererWorkspaceSnapshot,
-  ids: string[],
-) {
+function withReadyShortlist(ws: JobFinderRendererWorkspaceSnapshot, ids: string[]) {
   return {
     ...ws,
     campaigns: ws.campaigns.map((campaign) => ({ ...campaign, jobIds: ids })),

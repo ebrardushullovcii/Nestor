@@ -165,14 +165,12 @@ export type JobFinderStartupDatabaseRecoveryBlockedFact = z.infer<
   typeof JobFinderStartupDatabaseRecoveryBlockedFactSchema
 >;
 
-export const JobFinderStartupDatabaseRecoveryFactSchema = z.discriminatedUnion(
-  "status",
-  [
+export const JobFinderStartupDatabaseRecoveryFactSchema =
+  z.discriminatedUnion("status", [
     JobFinderStartupDatabaseRecoveryIdleFactSchema,
     JobFinderStartupDatabaseRecoveryRestoredFactSchema,
     JobFinderStartupDatabaseRecoveryBlockedFactSchema,
-  ],
-);
+  ]);
 export type JobFinderStartupDatabaseRecoveryFact = z.infer<
   typeof JobFinderStartupDatabaseRecoveryFactSchema
 >;
@@ -216,14 +214,12 @@ export type JobFinderStartupResetRecoveryDegradedFact = z.infer<
   typeof JobFinderStartupResetRecoveryDegradedFactSchema
 >;
 
-export const JobFinderStartupResetRecoveryFactSchema = z.discriminatedUnion(
-  "status",
-  [
+export const JobFinderStartupResetRecoveryFactSchema =
+  z.discriminatedUnion("status", [
     JobFinderStartupResetRecoveryIdleFactSchema,
     JobFinderStartupResetRecoveryCompletedFactSchema,
     JobFinderStartupResetRecoveryDegradedFactSchema,
-  ],
-);
+  ]);
 export type JobFinderStartupResetRecoveryFact = z.infer<
   typeof JobFinderStartupResetRecoveryFactSchema
 >;

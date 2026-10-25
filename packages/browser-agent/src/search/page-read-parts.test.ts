@@ -37,23 +37,10 @@ function board(count: number) {
 
 describe("reading a long results page in parts", () => {
   test("keeps each semantic page item with its own text and inline URL without repeating a separate link list", () => {
-    const items = Array.from(
-      { length: 40 },
-      (_, index) =>
-        `[Page item ${index}]\nEmployer ${index}\nEngineer → https://jobs.example.test/jobs/${index}\n${"Visible card facts ".repeat(20)}\n[End page item ${index}]`,
-    );
-    const parts = pagePartsForReading({
-      pageText: items.join("\n"),
-      pageUrl,
-      links: [],
-      inlineLinks: true,
-      size: 1000,
-    });
-    for (const item of items)
-      expect(parts.some((part) => part.window.includes(item))).toBe(true);
-    expect(
-      parts.every((part) => !part.text.includes("Page links in this part")),
-    ).toBe(true);
+    const items = Array.from({ length: 40 }, (_, index) => `[Page item ${index}]\nEmployer ${index}\nEngineer → https://jobs.example.test/jobs/${index}\n${"Visible card facts ".repeat(20)}\n[End page item ${index}]`);
+    const parts = pagePartsForReading({ pageText: items.join("\n"), pageUrl, links: [], inlineLinks: true, size: 1000 });
+    for (const item of items) expect(parts.some(part => part.window.includes(item))).toBe(true);
+    expect(parts.every(part => !part.text.includes("Page links in this part"))).toBe(true);
   });
   test("every listing reaches some part with its own address", () => {
     const { text, links } = board(60);
@@ -83,10 +70,7 @@ describe("reading a long results page in parts", () => {
     expect(windows.length).toBeGreaterThan(4);
     for (let index = 1; index < windows.length; index += 1) {
       const previousEnd = windows[index - 1].split("\n").at(-1)!;
-      expect(
-        windows[index].startsWith(previousEnd) ||
-          windows[index].includes(previousEnd),
-      ).toBe(true);
+      expect(windows[index].startsWith(previousEnd) || windows[index].includes(previousEnd)).toBe(true);
     }
     expect(windows.join("\n")).toContain("About us");
   });
@@ -94,9 +78,7 @@ describe("reading a long results page in parts", () => {
   test("a very long single line is still cut", () => {
     const windows = splitPageText("x".repeat(7_000), 3_000);
     expect(windows.length).toBe(3);
-    expect(
-      Math.max(...windows.map((window) => window.length)),
-    ).toBeLessThanOrEqual(3_300);
+    expect(Math.max(...windows.map((window) => window.length))).toBeLessThanOrEqual(3_300);
   });
 
   test("keeps unlinked text alongside links and beyond the former 24-part limit", () => {
@@ -107,11 +89,7 @@ describe("reading a long results page in parts", () => {
       pageUrl,
     });
     expect(parts[0]?.window).toContain("Menu line");
-    expect(
-      parts.some((part) =>
-        part.text.includes("→ https://jobs.example.test/jobs/"),
-      ),
-    ).toBe(true);
+    expect(parts.some((part) => part.text.includes("→ https://jobs.example.test/jobs/"))).toBe(true);
 
     const bare = pagePartsForReading({
       pageText: "Engineer at Northwind. Analyst at Contoso.",
@@ -122,8 +100,7 @@ describe("reading a long results page in parts", () => {
     expect(bare[0]?.text).toContain("Engineer at Northwind.");
     const unlinked = pagePartsForReading({
       pageText: `${"Vacancy card without an anchor\n".repeat(3000)}Last vacancy`,
-      links: [],
-      pageUrl,
+      links: [], pageUrl,
     });
     expect(unlinked.length).toBeGreaterThan(24);
     expect(unlinked.at(-1)?.window).toContain("Last vacancy");
@@ -133,10 +110,7 @@ describe("reading a long results page in parts", () => {
     const found = linksInText(
       "Senior Data Engineer\nNorthwind\nSenior Data Engineer",
       [
-        {
-          label: "Senior Data Engineer\nNorthwind\nRemote",
-          href: "https://x.test/jobs/1",
-        },
+        { label: "Senior Data Engineer\nNorthwind\nRemote", href: "https://x.test/jobs/1" },
         { label: "Senior Data Engineer", href: "https://x.test/jobs/1" },
         { label: "Go", href: "https://x.test/go" },
         { label: "Unrelated", href: "https://x.test/u" },

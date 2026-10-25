@@ -35,26 +35,12 @@ function link(index: number, label: string, href: string) {
 }
 
 function boardPage() {
-  const links = [
-    link(0, "Skip to content", "https://jobs.example.test/jobs#content"),
-  ];
+  const links = [link(0, "Skip to content", "https://jobs.example.test/jobs#content")];
   for (let job = 0; job < 30; job += 1) {
     links.push(
-      link(
-        links.length,
-        `Engineer ${job}\nNorthwind\nRemote`,
-        `https://jobs.example.test/jobs/${job}`,
-      ),
-      link(
-        links.length + 1,
-        "Back end",
-        "https://jobs.example.test/jobs/type/back-end",
-      ),
-      link(
-        links.length + 2,
-        "Remote, Worldwide",
-        "https://jobs.example.test/jobs/location/remote",
-      ),
+      link(links.length, `Engineer ${job}\nNorthwind\nRemote`, `https://jobs.example.test/jobs/${job}`),
+      link(links.length + 1, "Back end", "https://jobs.example.test/jobs/type/back-end"),
+      link(links.length + 2, "Remote, Worldwide", "https://jobs.example.test/jobs/location/remote"),
     );
   }
   return page({
@@ -64,22 +50,8 @@ function boardPage() {
       text: `Engineer ${job}\nNorthwind\nRemote, Worldwide`,
     })),
     clickables: [
-      {
-        index: 0,
-        label: "Engineer 0\nNorthwind\nRemote",
-        role: "",
-        tagName: "div",
-        visible: true,
-        topOffset: 0,
-      },
-      {
-        index: 1,
-        label: "Engineer 0\nNorthwind",
-        role: "",
-        tagName: "div",
-        visible: true,
-        topOffset: 0,
-      },
+      { index: 0, label: "Engineer 0\nNorthwind\nRemote", role: "", tagName: "div", visible: true, topOffset: 0 },
+      { index: 1, label: "Engineer 0\nNorthwind", role: "", tagName: "div", visible: true, topOffset: 0 },
     ],
   });
 }
@@ -94,9 +66,7 @@ describe("the search agent's page view", () => {
     // The default view stops at 80 links and never reaches the last postings.
     expect(full).not.toContain("https://jobs.example.test/jobs/29");
     for (let job = 0; job < 30; job += 1)
-      expect(lean).toContain(
-        `: Engineer ${job} → https://jobs.example.test/jobs/${job}`,
-      );
+      expect(lean).toContain(`: Engineer ${job} → https://jobs.example.test/jobs/${job}`);
     expect(lean.match(/type\/back-end/gu)).toHaveLength(1);
     expect(lean).not.toContain("#content");
     expect(lean).toContain("- Engineer 0\n- Engineer 1");
@@ -119,9 +89,7 @@ describe("the search agent's page view", () => {
     expect(views.describe(observation)).toBe(first);
     answers += 1;
     expect(views.describe(observation)).toBe(UNCHANGED_VIEW_NOTE);
-    expect(views.describe(page())).toContain(
-      "Page: https://jobs.example.test/jobs",
-    );
+    expect(views.describe(page())).toContain("Page: https://jobs.example.test/jobs");
   });
 
   test("the opening view is never shortened, so it is never repeated", () => {

@@ -8,9 +8,7 @@ describe("source instruction filtering", () => {
       normalizeInstructionLine(
         "Direct path guesses like https://example.com/404 are broken and should be ignored.",
       ),
-    ).toBe(
-      "Direct path guesses like that route are broken and should be ignored.",
-    );
+    ).toBe("Direct path guesses like that route are broken and should be ignored.");
     expect(
       normalizeInstructionLine(
         "Broken templated routes like /jobs/{slug} should not be reused.",

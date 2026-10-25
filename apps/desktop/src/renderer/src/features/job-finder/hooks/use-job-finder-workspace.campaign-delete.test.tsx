@@ -86,8 +86,7 @@ describe("useJobFinderWorkspace campaign deletion", () => {
     >();
   const deleteJobSearchCampaign =
     vi.fn<(campaignId: string) => Promise<boolean>>();
-  const getWorkspace =
-    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
     vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 

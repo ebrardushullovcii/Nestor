@@ -44,9 +44,7 @@ function createFinishedRun(
   } as unknown as DiscoveryRunRecord;
 }
 
-function createWorkspace(
-  run: DiscoveryRunRecord,
-): JobFinderRendererWorkspaceSnapshot {
+function createWorkspace(run: DiscoveryRunRecord): JobFinderRendererWorkspaceSnapshot {
   return {
     activeDiscoveryRun: null,
     applicationRecords: [],

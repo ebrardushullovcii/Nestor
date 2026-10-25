@@ -348,9 +348,7 @@ describe("collectPublicProviderJobs", () => {
     }
   });
   test("an unreadable feed from a live reader is not fetched again", async () => {
-    setDiscoveryFeedExecutor(() =>
-      Promise.reject(new Error("Unreadable feed")),
-    );
+    setDiscoveryFeedExecutor(() => Promise.reject(new Error("Unreadable feed")));
     try {
       const result = await collectGreenhouseJobs(null);
       expect(globalThis.fetch).toHaveBeenCalledOnce();

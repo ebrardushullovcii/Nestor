@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { ResumeDraftEntry, ResumeDraftSection } from "@nestor/contracts";
+import type {
+  ResumeDraftEntry,
+  ResumeDraftSection,
+} from "@nestor/contracts";
 import {
   buildResumeEntryDateQualityIssues,
   moveSectionEntry,

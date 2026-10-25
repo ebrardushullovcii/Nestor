@@ -42,9 +42,9 @@ test("treats Postgres and PostgreSQL as the same grounded skill", () => {
     },
   };
 
-  expect(
-    filterGroundedVisibleSkills(profile, ["Postgres", "Terraform"], 8),
-  ).toEqual(["Postgres"]);
+  expect(filterGroundedVisibleSkills(profile, ["Postgres", "Terraform"], 8)).toEqual([
+    "Postgres",
+  ]);
 });
 
 test("treats Postgres and PostgreSQL as equivalent skill names", () => {
@@ -55,9 +55,7 @@ test("treats Postgres and PostgreSQL as equivalent skill names", () => {
 });
 
 test("recognizes Europass language chrome that must not become a skill", () => {
-  expect(isSpokenLanguageResumeChrome("Mother Tongue(S) — ALBANIAN")).toBe(
-    true,
-  );
+  expect(isSpokenLanguageResumeChrome("Mother Tongue(S) — ALBANIAN")).toBe(true);
   expect(
     isSpokenLanguageResumeChrome(
       "Levels — A1 and A2: Basic user; B1 and B2: Independent user; C1 and C2: Proficient user",

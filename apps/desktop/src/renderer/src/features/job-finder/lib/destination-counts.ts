@@ -187,9 +187,7 @@ export function countSafeguardBlockers(
   return countWorkspaceSafeguardBlockers(workspace);
 }
 
-export function countNeedsYou(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
+export function countNeedsYou(workspace: JobFinderRendererWorkspaceSnapshot): number {
   return countWorkspaceNeedsYouItems(workspace);
 }
 

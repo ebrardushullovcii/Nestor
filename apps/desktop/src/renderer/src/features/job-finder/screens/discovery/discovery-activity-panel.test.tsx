@@ -1,13 +1,7 @@
 import { round3SearchRun } from "../../lib/discovery-round3.test-fixture";
 // @vitest-environment jsdom
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import {
   DiscoveryActivityEventSchema,
   DiscoveryRunRecordSchema,
@@ -100,58 +94,26 @@ const liveEvent = DiscoveryActivityEventSchema.parse({
 
 describe("DiscoveryHistoryModal", () => {
   it("shows the terminal source explanation instead of guessing why no jobs were collected", () => {
-    const reason =
-      "The careers page returned service unavailable. No vacancies could be read.";
+    const reason = "The careers page returned service unavailable. No vacancies could be read.";
     const run = DiscoveryRunRecordSchema.parse({
       ...failedRun,
       targetExecutions: failedRun.targetExecutions.map((execution) => ({
-        ...execution,
-        state: "completed",
-        warning: null,
+        ...execution, state: "completed", warning: null,
       })),
       activity: [
-        {
-          ...liveEvent,
-          id: "finished",
-          runId: failedRun.id,
-          terminalState: "completed",
-          message: reason,
-        },
-        {
-          ...liveEvent,
-          id: "later-note",
-          runId: failedRun.id,
-          message: "Reading another page.",
-        },
+        { ...liveEvent, id: "finished", runId: failedRun.id, terminalState: "completed", message: reason },
+        { ...liveEvent, id: "later-note", runId: failedRun.id, message: "Reading another page." },
       ],
       summary: {
         ...failedRun.summary,
-        sourceHealth: [
-          {
-            targetId: "greenhouse-source",
-            health: "warning",
-            durationMs: 4000,
-            warnings: [],
-          },
-        ],
+        sourceHealth: [{ targetId: "greenhouse-source", health: "warning", durationMs: 4000, warnings: [] }],
         warnings: [],
       },
     });
-    render(
-      <DiscoveryHistoryModal
-        activeRun={null}
-        isDiscoveryPending={false}
-        isTargetPending={() => false}
-        liveEvents={[]}
-        onClose={vi.fn()}
-        open
-        recentRuns={[run]}
-        targets={targets}
-      />,
-    );
-    const sourceCard = screen
-      .getByText(/^No jobs collected/u)
-      .closest("article");
+    render(<DiscoveryHistoryModal activeRun={null} isDiscoveryPending={false}
+      isTargetPending={() => false} liveEvents={[]} onClose={vi.fn()} open
+      recentRuns={[run]} targets={targets} />);
+    const sourceCard = screen.getByText(/^No jobs collected/u).closest("article");
     expect(sourceCard).not.toBeNull();
     expect(sourceCard!.parentElement!.className).not.toContain("max-h-60");
     expect(within(sourceCard!).getByText(reason)).toBeTruthy();
@@ -171,29 +133,18 @@ describe("DiscoveryHistoryModal", () => {
       })),
       summary: {
         ...failedRun.summary,
-        sourceHealth: [
-          {
-            targetId: "greenhouse-source",
-            health: "healthy",
-            durationMs: 4000,
-            warnings: ["Could not read this source"],
-          },
-        ],
+        sourceHealth: [{
+          targetId: "greenhouse-source",
+          health: "healthy",
+          durationMs: 4000,
+          warnings: ["Could not read this source"],
+        }],
         warnings: [],
       },
     });
-    render(
-      <DiscoveryHistoryModal
-        activeRun={null}
-        isDiscoveryPending={false}
-        isTargetPending={() => false}
-        liveEvents={[]}
-        onClose={vi.fn()}
-        open
-        recentRuns={[run]}
-        targets={targets}
-      />,
-    );
+    render(<DiscoveryHistoryModal activeRun={null} isDiscoveryPending={false}
+      isTargetPending={() => false} liveEvents={[]} onClose={vi.fn()} open
+      recentRuns={[run]} targets={targets} />);
     expect(
       screen.getByText(
         "inspected not recorded · 3 saved · rejected not recorded · deferred not recorded · pages covered not recorded.",
@@ -342,7 +293,9 @@ describe("DiscoveryHistoryModal", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText(/^Finished( · .*)?$/u)).toBeTruthy();
-    expect(screen.queryByText(/By source:/)).toBeNull();
+    expect(
+      screen.queryByText(/By source:/),
+    ).toBeNull();
     expect(
       screen.getByText(
         "No jobs matched this plan in either of its last two runs. Broaden the plan or try another source.",

@@ -257,22 +257,25 @@ describe("the safety net on a preparation result", () => {
       "autonomous_submit",
     ] as const) {
       expect(() =>
-        enforceResolvedApplyAuthorityResult({ mode }, {
-          state: "submitted",
-          summary: "Sent",
-          detail: "Sent",
-          submittedAt: NOW,
-          outcome: "submitted",
-          questions: [],
-          blocker: null,
-          consentDecisions: [],
-          replay: {},
-          visualEvidence: [],
-          visualObservationSets: [],
-          visualCheckpoints: [],
-          nextActionLabel: null,
-          checkpoints: [],
-        } as never),
+        enforceResolvedApplyAuthorityResult(
+          { mode },
+          {
+            state: "submitted",
+            summary: "Sent",
+            detail: "Sent",
+            submittedAt: NOW,
+            outcome: "submitted",
+            questions: [],
+            blocker: null,
+            consentDecisions: [],
+            replay: {},
+            visualEvidence: [],
+            visualObservationSets: [],
+            visualCheckpoints: [],
+            nextActionLabel: null,
+            checkpoints: [],
+          } as never,
+        ),
       ).toThrow(/Preparation never sends anything/iu);
     }
   });

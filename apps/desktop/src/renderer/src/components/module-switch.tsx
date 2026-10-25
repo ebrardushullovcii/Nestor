@@ -103,10 +103,7 @@ export interface ModuleSwitchProps {
 
 function placementFor(trigger: HTMLElement): PopoverPlacement {
   const rect = trigger.getBoundingClientRect();
-  const minWidth = Math.max(
-    MODULE_SWITCH_MENU_MIN_WIDTH,
-    Math.round(rect.width),
-  );
+  const minWidth = Math.max(MODULE_SWITCH_MENU_MIN_WIDTH, Math.round(rect.width));
   const viewportWidth =
     typeof window === "undefined" ? minWidth : window.innerWidth;
   const left = Math.max(8, Math.min(rect.left, viewportWidth - minWidth - 8));
@@ -249,11 +246,7 @@ export function ModuleSwitch({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={getModuleSwitchTriggerName(activeModule)}
-        className={
-          isRail
-            ? MODULE_SWITCH_RAIL_TRIGGER_CLASS
-            : MODULE_SWITCH_TRIGGER_CLASS
-        }
+        className={isRail ? MODULE_SWITCH_RAIL_TRIGGER_CLASS : MODULE_SWITCH_TRIGGER_CLASS}
         data-module-switch-trigger
         data-state={open ? "open" : "closed"}
         onClick={() => (open ? close(false) : openMenu())}
@@ -269,10 +262,7 @@ export function ModuleSwitch({
             {MODULE_SWITCH_LABELS[activeModule]}
           </span>
         )}
-        <ChevronDown
-          aria-hidden="true"
-          className={MODULE_SWITCH_CHEVRON_CLASS}
-        />
+        <ChevronDown aria-hidden="true" className={MODULE_SWITCH_CHEVRON_CLASS} />
       </button>
       {placement ? (
         <Popover
@@ -306,13 +296,8 @@ export function ModuleSwitch({
                 role="menuitemradio"
                 type="button"
               >
-                <Icon
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
-                <span className="min-w-0 flex-1">
-                  {MODULE_SWITCH_LABELS[moduleName]}
-                </span>
+                <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">{MODULE_SWITCH_LABELS[moduleName]}</span>
                 {selected ? (
                   <Check aria-hidden="true" className="size-4 shrink-0" />
                 ) : null}

@@ -104,11 +104,13 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     await flushFindJobsQueries();
 
     const resultsPanel = screen.getByRole("region", { name: "Results" });
-    expect(within(resultsPanel).getByText("1 job")).toBeTruthy();
+    expect(
+      within(resultsPanel).getByText(
+        "1 job",
+      ),
+    ).toBeTruthy();
     fireEvent.click(
-      within(resultsPanel).getByRole("button", {
-        name: /Show weaker matches/u,
-      }),
+      within(resultsPanel).getByRole("button", { name: /Show weaker matches/u }),
     );
     await flushFindJobsQueries();
     expect(onToggleAlsoFound).toHaveBeenCalledOnce();

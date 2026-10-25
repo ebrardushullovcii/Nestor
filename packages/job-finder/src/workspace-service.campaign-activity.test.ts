@@ -83,9 +83,9 @@ describe("workspace campaign and activity controls", () => {
     await service.runSourceDebug("target_linkedin_default").catch((error) => {
       expect(String(error)).not.toContain("activity is paused");
     });
-    expect((await service.getWorkspaceSnapshot()).activityControl.paused).toBe(
-      false,
-    );
+    expect(
+      (await service.getWorkspaceSnapshot()).activityControl.paused,
+    ).toBe(false);
 
     await service.setActivityControl({ paused: true, reason: "Again." });
     const resumed = await service.setActivityControl({ paused: false });

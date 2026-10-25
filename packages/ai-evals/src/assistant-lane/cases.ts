@@ -479,14 +479,11 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
 const INVENTORY_REQUESTS: Record<string, string> = {
   "home.notifications": "Turn off finished-work notifications.",
   "profile.files_delete": "Delete my old cover letter file.",
-  "discovery.judge_unjudged":
-    "Judge fit for the jobs that have not been judged.",
+  "discovery.judge_unjudged": "Judge fit for the jobs that have not been judged.",
   "campaigns.rules": "Which rules are saved for my current search plan?",
   "apply.queue": "Pause my Apply queue.",
-  "apply.move_back":
-    "Move my unsent Northwind application back to Shortlisted.",
-  "apply.reopen":
-    "Is the Northwind application page still open? Reopen it if it is closed.",
+  "apply.move_back": "Move my unsent Northwind application back to Shortlisted.",
+  "apply.reopen": "Is the Northwind application page still open? Reopen it if it is closed.",
   "profile.legacy_copilot":
     "Earlier I asked the old profile chat to fix my headline. Is my headline right now?",
   "resume.legacy_chat":

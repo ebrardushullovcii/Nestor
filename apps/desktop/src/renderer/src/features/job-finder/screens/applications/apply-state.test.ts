@@ -13,8 +13,7 @@ import {
   resolveApplyStatePresentation,
 } from "./apply-state";
 
-type ApplyResult =
-  JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {

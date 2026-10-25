@@ -25,15 +25,7 @@ describe("assistant action inventory", () => {
       expect(bytes(catalog), screen).toBeLessThan(full / 2);
       expect(catalog.some((tool) => tool.name === "load_tools")).toBe(true);
       // Background handoffs and off-screen questions use the same small core.
-      expect(catalog.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining([
-          "ask_person",
-          "list_needs_you",
-          "get_application",
-          "answer_application_question",
-          "read_result",
-        ]),
-      );
+      expect(catalog.map(tool => tool.name)).toEqual(expect.arrayContaining(["ask_person", "list_needs_you", "get_application", "answer_application_question", "read_result"]));
     }
   });
 

@@ -6,9 +6,7 @@ import {
 } from "@nestor/contracts";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
-export function createWorkspaceSourceDebugStoreMethods(
-  ctx: WorkspaceServiceContext,
-) {
+export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceContext) {
   return {
     async getSourceDebugRun(runId: string) {
       const run = (await ctx.repository.listSourceDebugRuns()).find(
@@ -82,9 +80,7 @@ export function createWorkspaceSourceDebugStoreMethods(
 
       const existingArtifact = (
         await ctx.repository.listSourceInstructionArtifacts()
-      ).find(
-        (entry) => entry.id === artifact.id && entry.targetId === targetId,
-      );
+      ).find((entry) => entry.id === artifact.id && entry.targetId === targetId);
 
       if (!existingArtifact) {
         throw new Error(`Unknown source instruction '${artifact.id}'.`);
@@ -110,13 +106,8 @@ export function createWorkspaceSourceDebugStoreMethods(
       await ctx.repository.upsertSourceInstructionArtifact(normalizedArtifact);
       return ctx.getWorkspaceSnapshot();
     },
-    async acceptSourceInstructionDraft(
-      targetId: string,
-      instructionId: string,
-    ) {
-      const artifact = (
-        await ctx.repository.listSourceInstructionArtifacts()
-      ).find(
+    async acceptSourceInstructionDraft(targetId: string, instructionId: string) {
+      const artifact = (await ctx.repository.listSourceInstructionArtifacts()).find(
         (entry) => entry.id === instructionId && entry.targetId === targetId,
       );
 

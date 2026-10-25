@@ -233,83 +233,42 @@ describe("merging the same job from two sources", () => {
   }
 
   test("a second source's route read keeps complete listing text through a lazy-row merge", async () => {
-    const firstBody =
-      "Build accessible interfaces and reliable TypeScript services. Partner with product and engineering, test changes and document their behavior. "
-        .repeat(5)
-        .trim();
-    const secondBody =
-      firstBody +
-      " The employer's own page also describes mentoring and release ownership.";
-    const board = {
-      ...posting("board", "2026-09-23T10:00:00.000Z"),
-      description: firstBody,
-      detailQuality: "detail_enriched" as const,
+    const firstBody = "Build accessible interfaces and reliable TypeScript services. Partner with product and engineering, test changes and document their behavior. ".repeat(5).trim();
+    const secondBody = firstBody + " The employer's own page also describes mentoring and release ownership.";
+    const board = { ...posting("board", "2026-09-23T10:00:00.000Z"),
+      description: firstBody, detailQuality: "detail_enriched" as const,
       applicationUrl: `${HOST}/employer-a/apply/9`,
     };
     const provenanceFor = (item: JobPosting) => ({
       targetId: `target_${item.canonicalUrl.split("/")[3]}`,
-      adapterKind: "auto" as const,
-      resolvedAdapterKind: "target_site" as const,
+      adapterKind: "auto" as const, resolvedAdapterKind: "target_site" as const,
       startingUrl: `${HOST}/${item.canonicalUrl.split("/")[3]}/`,
-      discoveredAt: item.discoveredAt,
-      collectionMethod: item.collectionMethod,
-      providerKey: null,
-      providerBoardToken: null,
+      discoveredAt: item.discoveredAt, collectionMethod: item.collectionMethod,
+      providerKey: null, providerBoardToken: null,
       titleTriageOutcome: "pass" as const,
     });
-    const first = mergeDiscoveredPostings(
-      seed.profile,
-      seed.searchPreferences,
-      [],
-      [board],
-      provenanceFor,
-    ).mergedJobs[0]!;
-    first.provenance = first.provenance.map((entry) => ({
-      ...entry,
-      routeReadAt: "2026-09-23T10:01:00.000Z",
-      pageApplyUrl: board.applicationUrl,
+    const first = mergeDiscoveredPostings(seed.profile, seed.searchPreferences, [], [board], provenanceFor).mergedJobs[0]!;
+    first.provenance = first.provenance.map((entry) => ({ ...entry,
+      routeReadAt: "2026-09-23T10:01:00.000Z", pageApplyUrl: board.applicationUrl,
     }));
-    const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nestor-cross-source-body-"),
-    );
+    const directory = await mkdtemp(path.join(os.tmpdir(), "nestor-cross-source-body-"));
     const repository = await createFileJobFinderRepository({
-      filePath: path.join(directory, "workspace.sqlite"),
-      seed: { ...seed, savedJobs: [first] },
+      filePath: path.join(directory, "workspace.sqlite"), seed: { ...seed, savedJobs: [first] },
     });
     try {
       const [lazy] = await repository.readSavedJobsProjection();
-      expect(
-        typeof Object.getOwnPropertyDescriptor(lazy!, "description")?.get,
-      ).toBe("function");
-      const card = {
-        ...posting("forms", "2026-09-23T11:00:00.000Z"),
-        applicationUrl: null,
-        description: first.title,
-      };
-      const merge = mergeDiscoveredPostings(
-        seed.profile,
-        seed.searchPreferences,
-        [lazy!],
-        [card],
-        provenanceFor,
-      );
+      expect(typeof Object.getOwnPropertyDescriptor(lazy!, "description")?.get).toBe("function");
+      const card = { ...posting("forms", "2026-09-23T11:00:00.000Z"), applicationUrl: null, description: first.title };
+      const merge = mergeDiscoveredPostings(seed.profile, seed.searchPreferences, [lazy!], [card], provenanceFor);
       expect(merge.duplicatesMerged).toBe(1);
       const merged = merge.mergedJobs[0]!;
       expect(merged.description).toBe(firstBody);
       const read = await readSightingApplyRoutes({
         jobs: [merged],
-        fetchHtml: (url) =>
-          Promise.resolve({
-            status: 200,
-            finalUrl: url,
-            html: `<h1>${first.title}</h1><p>${secondBody}</p><a href="/forms/apply/9">Apply now</a>`,
-          }),
-        readPage: () =>
-          Promise.resolve({
-            ...card,
-            description: secondBody,
-            applicationUrl: `${HOST}/forms/apply/9`,
-          }),
+        fetchHtml: (url) => Promise.resolve({ status: 200, finalUrl: url,
+          html: `<h1>${first.title}</h1><p>${secondBody}</p><a href="/forms/apply/9">Apply now</a>`,
+        }),
+        readPage: () => Promise.resolve({ ...card, description: secondBody, applicationUrl: `${HOST}/forms/apply/9` }),
       });
       expect(read.summary.read).toBe(1);
       const winner = selectCanonicalSighting(read.jobs[0]!.provenance)!;
@@ -317,13 +276,10 @@ describe("merging the same job from two sources", () => {
       const routed = applySightingRoute(read.jobs[0]!, winner);
       expect(routed.description).toBe(secondBody);
       await repository.commitSavedJobDelta({
-        borrowCurrentJobs: true,
-        updateJobIds: [first.id],
+        borrowCurrentJobs: true, updateJobIds: [first.id],
         update: (current) => applySavedJobDelta(current, lazy!, routed),
       });
-      expect(
-        (await repository.listSavedJobsByIds([first.id]))[0]?.description,
-      ).toBe(secondBody);
+      expect((await repository.listSavedJobsByIds([first.id]))[0]?.description).toBe(secondBody);
     } finally {
       await repository.close();
       await rm(directory, { recursive: true, force: true });

@@ -463,7 +463,9 @@ describe("describeEnabledSourceHealth", () => {
     expect(
       describeEnabledSourceHealth(source(), deriveSourceHealthSignals({}))
         .reason,
-    ).toBe("Not checked yet. Searches can still use it.");
+    ).toBe(
+      "Not checked yet. Searches can still use it.",
+    );
   });
   test("a source proven by a completed run is healthy with a reason", () => {
     const target = source({ id: "target_run" });
@@ -680,9 +682,7 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
       ],
     });
     const runs = [
-      failed(
-        "Public provider API collection failed: Greenhouse API request timed out.",
-      ),
+      failed("Public provider API collection failed: Greenhouse API request timed out."),
       failed("Public provider API collection failed: fetch failed"),
       failed("Public provider API collection failed: fetch failed"),
       failed(
@@ -717,9 +717,9 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
         },
       ],
     };
-    expect([...deriveRepeatedlyFailingTargetIds([missing, missing])]).toEqual([
-      "api",
-    ]);
+    expect([...deriveRepeatedlyFailingTargetIds([missing, missing])]).toEqual(
+      ["api"],
+    );
   });
 
   test("two failed runs in a row mark that source, and that source only", () => {

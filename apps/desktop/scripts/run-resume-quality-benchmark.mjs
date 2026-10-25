@@ -64,20 +64,9 @@ const templateIds = process.argv
   .map((entry) => entry.trim())
   .filter(Boolean);
 const benchmarkVersion =
-  readCliOption("--benchmark-version") ??
-  process.env.UI_RESUME_QUALITY_BENCHMARK_VERSION ??
-  "023-local-benchmark-v1";
-const runLabel =
-  readCliOption("--label") ??
-  process.env.UI_CAPTURE_LABEL ??
-  "resume-quality-benchmark";
-const outputDir = path.join(
-  desktopDir,
-  "test-artifacts",
-  "ui",
-  runLabel,
-  benchmarkVersion,
-);
+  readCliOption("--benchmark-version") ?? process.env.UI_RESUME_QUALITY_BENCHMARK_VERSION ?? "023-local-benchmark-v1";
+const runLabel = readCliOption("--label") ?? process.env.UI_CAPTURE_LABEL ?? "resume-quality-benchmark";
+const outputDir = path.join(desktopDir, "test-artifacts", "ui", runLabel, benchmarkVersion);
 
 async function main() {
   await rm(outputDir, { recursive: true, force: true });
@@ -86,9 +75,7 @@ async function main() {
   let app = null;
 
   try {
-    userDataDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nestor-resume-quality-"),
-    );
+    userDataDirectory = await mkdtemp(path.join(os.tmpdir(), "nestor-resume-quality-"));
     app = await electron.launch({
       args: ["."],
       cwd: desktopDir,
@@ -102,25 +89,12 @@ async function main() {
 
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
-    await window.waitForFunction(
-      () => Boolean(window.nestor?.jobFinder.test),
-      undefined,
-      { timeout: 15000 },
-    );
+    await window.waitForFunction(() => Boolean(window.nestor?.jobFinder.test), undefined, { timeout: 15000 });
 
     const report = await window.evaluate(
-      async ({
-        benchmarkVersion,
-        canaryOnly,
-        caseIds,
-        templateIds,
-        outputDir,
-        useConfiguredAi,
-      }) => {
+      async ({ benchmarkVersion, canaryOnly, caseIds, templateIds, outputDir, useConfiguredAi }) => {
         if (!window.nestor.jobFinder.test) {
-          throw new Error(
-            "Desktop test API is not available in the renderer context.",
-          );
+          throw new Error("Desktop test API is not available in the renderer context.");
         }
 
         return window.nestor.jobFinder.test.runResumeQualityBenchmark({
@@ -132,25 +106,13 @@ async function main() {
           persistArtifactsDirectory: outputDir,
         });
       },
-      {
-        benchmarkVersion,
-        canaryOnly,
-        caseIds,
-        templateIds,
-        outputDir,
-        useConfiguredAi,
-      },
+      { benchmarkVersion, canaryOnly, caseIds, templateIds, outputDir, useConfiguredAi },
     );
 
-    const reportPath = path.join(
-      outputDir,
-      "resume-quality-benchmark-report.json",
-    );
+    const reportPath = path.join(outputDir, "resume-quality-benchmark-report.json");
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 
-    process.stdout.write(
-      `Saved resume quality benchmark report to ${reportPath}\n`,
-    );
+    process.stdout.write(`Saved resume quality benchmark report to ${reportPath}\n`);
     process.stdout.write(
       `Aggregate grounded visible skill rate: ${report.aggregate.groundedVisibleSkillRate.toFixed(3)} | ATS render pass rate: ${report.aggregate.atsRenderPassRate.toFixed(3)}\n`,
     );
@@ -188,10 +150,8 @@ async function main() {
         .slice(0, 12)
         .map((entry) => `${entry.caseId}/${entry.templateId}`)
         .join(", ");
-      const omittedCount =
-        failedCases.length - Math.min(failedCases.length, 12);
-      const omittedSuffix =
-        omittedCount > 0 ? `, and ${omittedCount} more` : "";
+      const omittedCount = failedCases.length - Math.min(failedCases.length, 12);
+      const omittedSuffix = omittedCount > 0 ? `, and ${omittedCount} more` : "";
 
       throw new Error(
         `Resume quality benchmark failed ${failedCases.length} required case/template result(s): ${failedLabels}${omittedSuffix}.`,
@@ -213,8 +173,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  const message =
-    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   process.stderr.write(`${message}\n`);
   process.exit(1);
 });

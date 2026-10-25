@@ -947,10 +947,10 @@ export function SettingsApplicationAuthoritySection({
               className="text-xs leading-4 text-foreground-soft"
               id={`${resumeDigestsId}-hint`}
             >
-              The fingerprint identifies the exact resume file you approved, so
-              a different file cannot be sent by mistake. Letting the site save
-              your answers as you go needs exactly one, and it is checked again
-              when Job Finder fills the form.
+              The fingerprint identifies the exact resume file you approved,
+              so a different file cannot be sent by mistake. Letting the site
+              save your answers as you go needs exactly one, and it is checked
+              again when Job Finder fills the form.
             </p>
           </Field>
           <Field>

@@ -3355,8 +3355,9 @@ async function run() {
   await ensureFreshOutputDir(outputDir);
   await verifyAcceptanceArtifacts(acceptance);
   await mkdir(screenshotDir, { recursive: true });
-  const userDataDirectory =
-    await makeIsolatedUserDataDirectory("nestor-scale-500-");
+  const userDataDirectory = await makeIsolatedUserDataDirectory(
+    "nestor-scale-500-",
+  );
   report.safety.isolatedUserDataDir = userDataDirectory;
   report.safety.syntheticTestDataDigest = digestSeed({
     seed: acceptance.seedDigest,

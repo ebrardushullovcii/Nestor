@@ -159,8 +159,7 @@ it("puts a rewrite in progress ahead of the last attempt's failure", () => {
     id: "resume_failed",
     jobId: "failed",
     status: "failed",
-    failureMessage:
-      "The AI could not write this resume, so nothing was changed.",
+    failureMessage: "The AI could not write this resume, so nothing was changed.",
     failedAt: "2026-10-20T10:00:00.000Z",
   } as unknown as TailoredAsset;
 

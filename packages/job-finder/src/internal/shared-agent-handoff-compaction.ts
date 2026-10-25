@@ -9,8 +9,7 @@ import {
 import { uniqueStrings } from "./shared";
 import type { SourceInstructionFinalReviewPhaseContext } from "./source-instruction-types";
 
-const NORMALIZED_CONTEXT_EXHAUSTED_REASON =
-  "Context budget exhausted after compaction.";
+const NORMALIZED_CONTEXT_EXHAUSTED_REASON = "Context budget exhausted after compaction.";
 const MAX_PHASE_CONFIRMED_FACTS = 12;
 const MAX_PHASE_ATTEMPTED_ACTIONS = 10;
 const MAX_AGGREGATED_CONFIRMED_FACTS = 16;
@@ -23,9 +22,7 @@ function estimateTokens(value: string): number {
   return Math.ceil(value.length / 4);
 }
 
-function estimatePhaseContextTokens(
-  context: SourceInstructionFinalReviewPhaseContext,
-): number {
+function estimatePhaseContextTokens(context: SourceInstructionFinalReviewPhaseContext): number {
   return estimateTokens(JSON.stringify(context));
 }
 
@@ -36,11 +33,7 @@ function getEffectiveBudgets(input: {
   const effectiveTarget = input.modelContextWindowTokens
     ? Math.min(
         input.policy.targetTokenBudget,
-        Math.max(
-          1,
-          input.modelContextWindowTokens -
-            input.policy.minimumResponseHeadroomTokens,
-        ),
+        Math.max(1, input.modelContextWindowTokens - input.policy.minimumResponseHeadroomTokens),
       )
     : input.policy.targetTokenBudget;
 
@@ -60,17 +53,9 @@ function summarizePhaseContext(
   return {
     ...context,
     reviewTranscript: [],
-    compactionState: parsedCompactionState?.success
-      ? parsedCompactionState.data
-      : null,
-    confirmedFacts: uniqueStrings(context.confirmedFacts).slice(
-      0,
-      MAX_PHASE_CONFIRMED_FACTS,
-    ),
-    attemptedActions: uniqueStrings(context.attemptedActions).slice(
-      0,
-      MAX_PHASE_ATTEMPTED_ACTIONS,
-    ),
+    compactionState: parsedCompactionState?.success ? parsedCompactionState.data : null,
+    confirmedFacts: uniqueStrings(context.confirmedFacts).slice(0, MAX_PHASE_CONFIRMED_FACTS),
+    attemptedActions: uniqueStrings(context.attemptedActions).slice(0, MAX_PHASE_ATTEMPTED_ACTIONS),
   };
 }
 
@@ -85,9 +70,7 @@ export function compactSourceInstructionReviewPhaseContexts(input: {
   phaseContexts: SourceInstructionFinalReviewPhaseContext[];
   handoffCompaction: SharedAgentHandoffCompaction;
 } {
-  const policy = SharedAgentCompactionPolicySchema.parse(
-    input.compactionPolicy,
-  );
+  const policy = SharedAgentCompactionPolicySchema.parse(input.compactionPolicy);
 
   if (!policy.enabled) {
     return {
@@ -114,20 +97,13 @@ export function compactSourceInstructionReviewPhaseContexts(input: {
     modelContextWindowTokens: input.modelContextWindowTokens,
   });
   const basePromptTokens = estimateTokens(
-    [
-      input.heuristicInstructionText,
-      input.instructionUnderReviewText,
-      input.verificationText,
-    ]
+    [input.heuristicInstructionText, input.instructionUnderReviewText, input.verificationText]
       .filter(Boolean)
       .join("\n"),
   );
   const totalBefore =
     basePromptTokens +
-    input.phaseContexts.reduce(
-      (sum, context) => sum + estimatePhaseContextTokens(context),
-      0,
-    );
+    input.phaseContexts.reduce((sum, context) => sum + estimatePhaseContextTokens(context), 0);
 
   if (totalBefore < budgets.warning) {
     return {
@@ -149,9 +125,7 @@ export function compactSourceInstructionReviewPhaseContexts(input: {
     };
   }
 
-  const summarizedPhaseContexts = input.phaseContexts.map(
-    summarizePhaseContext,
-  );
+  const summarizedPhaseContexts = input.phaseContexts.map(summarizePhaseContext);
   const totalAfter =
     basePromptTokens +
     summarizedPhaseContexts.reduce(
@@ -189,8 +163,7 @@ export function compactSourceInstructionReviewPhaseContexts(input: {
         ).slice(0, MAX_BLOCKER_NOTES),
         avoidStrategyFingerprints: uniqueStrings(
           summarizedPhaseContexts.flatMap(
-            (context) =>
-              context.compactionState?.avoidStrategyFingerprints ?? [],
+            (context) => context.compactionState?.avoidStrategyFingerprints ?? [],
           ),
         ).slice(0, MAX_AVOID_STRATEGY_FINGERPRINTS),
         preservedContext: uniqueStrings(
@@ -201,16 +174,12 @@ export function compactSourceInstructionReviewPhaseContexts(input: {
         stickyWorkflowState: uniqueStrings(
           summarizedPhaseContexts.flatMap((context) => [
             `Phase goal: ${context.phaseGoal}`,
-            ...context.successCriteria.map(
-              (criterion) => `Success criterion: ${criterion}`,
-            ),
+            ...context.successCriteria.map((criterion) => `Success criterion: ${criterion}`),
           ]),
         ).slice(0, MAX_STICKY_WORKFLOW_STATE_LINES),
       }),
       normalizedFailureReason:
-        totalAfter > budgets.target
-          ? NORMALIZED_CONTEXT_EXHAUSTED_REASON
-          : null,
+        totalAfter > budgets.target ? NORMALIZED_CONTEXT_EXHAUSTED_REASON : null,
     }),
   };
 }

@@ -1,4 +1,7 @@
-import { MatchAssessmentSchema, type MatchAssessment } from "@nestor/contracts";
+import {
+  MatchAssessmentSchema,
+  type MatchAssessment,
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
 

@@ -65,9 +65,7 @@ export function compactJob(job: SavedJob | DiscoveryJobView) {
     location: job.location,
     workMode: job.workMode,
     status: assistantJobStatus(job.status),
-    inShortlist: ["drafting", "ready_for_review", "approved"].includes(
-      job.status,
-    ),
+    inShortlist: ["drafting", "ready_for_review", "approved"].includes(job.status),
     fit: fitLabel(job),
     recommendation: job.matchAssessment.recommendation,
     postedAt: job.postedAt,

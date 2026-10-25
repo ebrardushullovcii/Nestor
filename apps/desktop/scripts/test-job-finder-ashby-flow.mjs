@@ -11,8 +11,9 @@ const preferredTitle =
 // skipped by the gate below so unbound developer diagnostics keep their
 // existing behavior.
 process.env.JOB_FINDER_PREPARE_ONLY_SKIP_SMOKE_RUN = "1";
-const smokePreflight =
-  await import("./test-job-finder-prepare-only.mjs?preflight");
+const smokePreflight = await import(
+  "./test-job-finder-prepare-only.mjs?preflight"
+);
 delete process.env.JOB_FINDER_PREPARE_ONLY_SKIP_SMOKE_RUN;
 
 // Local binding gate: a strictly bound run must prove the whole sealed
@@ -56,7 +57,8 @@ if (!selectedJob) {
 const authorizedWriteDiagnostic =
   process.env.JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC === "1";
 const baseLabel =
-  process.env.JOB_FINDER_PREPARE_ONLY_LABEL ?? "complete-flow-current-ashby";
+  process.env.JOB_FINDER_PREPARE_ONLY_LABEL ??
+  "complete-flow-current-ashby";
 
 if (authorizedWriteDiagnostic) {
   process.env.JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES = "1";

@@ -1,11 +1,4 @@
-import {
-  ResumeDraftSchema,
-  type ResumeDraft,
-  type ResumeDraftBullet,
-  type ResumeDraftOrigin,
-  type ResumeDraftPatch,
-  type ResumeDraftSection,
-} from "@nestor/contracts";
+import { ResumeDraftSchema, type ResumeDraft, type ResumeDraftBullet, type ResumeDraftOrigin, type ResumeDraftPatch, type ResumeDraftSection } from "@nestor/contracts";
 import {
   moveSectionEntry,
   resetSectionEntryOrderToChronology,
@@ -22,8 +15,7 @@ function requireTargetEntry(
     return null;
   }
 
-  const targetEntry =
-    section.entries.find((entry) => entry.id === entryId) ?? null;
+  const targetEntry = section.entries.find((entry) => entry.id === entryId) ?? null;
 
   if (!targetEntry) {
     throw new Error(`Unable to find entry '${entryId}'.`);
@@ -42,17 +34,14 @@ function assertAssistantMayEdit(
   }
 
   if (section.locked || bullet?.locked) {
-    throw new Error(
-      "Assistant patches cannot overwrite locked resume content.",
-    );
+    throw new Error("Assistant patches cannot overwrite locked resume content.");
   }
 }
 
 function assertAssistantMayUseOperation(patch: ResumeDraftPatch): void {
   if (
     patch.origin === "assistant" &&
-    (patch.operation === "move_entry" ||
-      patch.operation === "reset_entry_order")
+    (patch.operation === "move_entry" || patch.operation === "reset_entry_order")
   ) {
     throw new Error("Assistant patches cannot reorder resume entries.");
   }
@@ -101,9 +90,7 @@ function requireTargetBullet(
   }
 
   const targetBullet = entryId
-    ? (requireTargetEntry(section, entryId)?.bullets.find(
-        (bullet) => bullet.id === bulletId,
-      ) ?? null)
+    ? (requireTargetEntry(section, entryId)?.bullets.find((bullet) => bullet.id === bulletId) ?? null)
     : (section.bullets.find((bullet) => bullet.id === bulletId) ?? null);
 
   if (!targetBullet) {
@@ -130,7 +117,7 @@ function createInsertedBulletId(
 }
 
 function assertNeverResumePatchOperation(operation: never): never {
-  throw new Error(`Unsupported resume patch operation: ${String(operation)}`);
+  throw new Error(`Unsupported resume patch operation: ${String(operation)}`)
 }
 
 export function applyPatchToResumeDraft(input: {
@@ -145,9 +132,7 @@ export function applyPatchToResumeDraft(input: {
   );
 
   if (!targetSection) {
-    throw new Error(
-      `Unable to find resume section '${patch.targetSectionId}'.`,
-    );
+    throw new Error(`Unable to find resume section '${patch.targetSectionId}'.`);
   }
 
   const nextSections = draft.sections.map((section) => {
@@ -156,26 +141,17 @@ export function applyPatchToResumeDraft(input: {
     }
 
     const requiresExistingBullet = patch.operation !== "insert_bullet";
-    const targetEntry = patch.targetEntryId
-      ? requireTargetEntry(section, patch.targetEntryId)
-      : null;
-    const bulletCollection = targetEntry
-      ? targetEntry.bullets
-      : section.bullets;
+    const targetEntry = patch.targetEntryId ? requireTargetEntry(section, patch.targetEntryId) : null;
+    const bulletCollection = targetEntry ? targetEntry.bullets : section.bullets;
     const entryCollection = section.entries;
-    const targetBullet =
-      requiresExistingBullet && patch.targetBulletId
-        ? (bulletCollection.find(
-            (bullet) => bullet.id === patch.targetBulletId,
-          ) ?? null)
-        : null;
+    const targetBullet = requiresExistingBullet && patch.targetBulletId
+      ? bulletCollection.find((bullet) => bullet.id === patch.targetBulletId) ?? null
+      : null;
 
     assertAssistantMayEdit(patch, section, targetBullet);
     assertAssistantMayUseOperation(patch);
     if (patch.origin === "assistant" && targetEntry?.locked) {
-      throw new Error(
-        "Assistant patches cannot overwrite locked resume content.",
-      );
+      throw new Error("Assistant patches cannot overwrite locked resume content.");
     }
     switch (patch.operation) {
       case "replace_section_text":
@@ -186,7 +162,9 @@ export function applyPatchToResumeDraft(input: {
         // Normalization-equivalent section text rewrites keep the section's
         // generated origin; substantive rewrites flip it via updateSectionMeta
         // semantics below.
-        if (isNormalizationEquivalentTextUpdate(section.text, patch.newText)) {
+        if (
+          isNormalizationEquivalentTextUpdate(section.text, patch.newText)
+        ) {
           return {
             ...section,
             text: patch.newText,
@@ -275,9 +253,7 @@ export function applyPatchToResumeDraft(input: {
       }
       case "insert_bullet": {
         if (!patch.newText) {
-          throw new Error(
-            "A new bullet text value is required for insert_bullet.",
-          );
+          throw new Error("A new bullet text value is required for insert_bullet.");
         }
 
         if (
@@ -290,11 +266,7 @@ export function applyPatchToResumeDraft(input: {
 
         const newBullet = stampGeneratedBulletContentHash(
           createBullet(
-            createInsertedBulletId(
-              section,
-              patch.targetEntryId,
-              patch.targetBulletId,
-            ),
+            createInsertedBulletId(section, patch.targetEntryId, patch.targetBulletId),
             patch.newText,
             updatedAt,
             patch.origin === "assistant" ? "assistant_edited" : "user_edited",
@@ -310,9 +282,7 @@ export function applyPatchToResumeDraft(input: {
           );
 
           if (anchorIndex < 0) {
-            throw new Error(
-              `Unable to find anchor bullet '${patch.anchorBulletId}'.`,
-            );
+            throw new Error(`Unable to find anchor bullet '${patch.anchorBulletId}'.`);
           }
 
           const insertIndex =
@@ -330,10 +300,7 @@ export function applyPatchToResumeDraft(input: {
                   ? {
                       ...entry,
                       bullets,
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -354,16 +321,10 @@ export function applyPatchToResumeDraft(input: {
       }
       case "update_bullet": {
         if (!patch.targetBulletId || !patch.newText) {
-          throw new Error(
-            "update_bullet requires a bullet id and replacement text.",
-          );
+          throw new Error("update_bullet requires a bullet id and replacement text.");
         }
 
-        const currentBullet = requireTargetBullet(
-          section,
-          patch.targetEntryId,
-          patch.targetBulletId,
-        );
+        const currentBullet = requireTargetBullet(section, patch.targetEntryId, patch.targetBulletId);
         if (currentBullet.text === patch.newText) {
           return section;
         }
@@ -374,10 +335,7 @@ export function applyPatchToResumeDraft(input: {
         // rewrites take the patch origin while spreads preserve the
         // historical lastGeneratedContentHash.
         const normalizationEquivalentUpdate =
-          isNormalizationEquivalentTextUpdate(
-            currentBullet.text,
-            patch.newText,
-          );
+          isNormalizationEquivalentTextUpdate(currentBullet.text, patch.newText);
         if (normalizationEquivalentUpdate) {
           if (targetEntry) {
             return {
@@ -480,13 +438,8 @@ export function applyPatchToResumeDraft(input: {
                 entry.id === targetEntry.id
                   ? {
                       ...entry,
-                      bullets: entry.bullets.filter(
-                        (bullet) => bullet.id !== patch.targetBulletId,
-                      ),
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      bullets: entry.bullets.filter((bullet) => bullet.id !== patch.targetBulletId),
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -509,14 +462,8 @@ export function applyPatchToResumeDraft(input: {
       }
       case "move_bullet": {
         const bullets = [...bulletCollection];
-        const movingBullet = requireTargetBullet(
-          section,
-          patch.targetEntryId,
-          patch.targetBulletId,
-        );
-        const currentIndex = bullets.findIndex(
-          (bullet) => bullet.id === movingBullet.id,
-        );
+        const movingBullet = requireTargetBullet(section, patch.targetEntryId, patch.targetBulletId);
+        const currentIndex = bullets.findIndex((bullet) => bullet.id === movingBullet.id);
 
         if (!patch.anchorBulletId && currentIndex === bullets.length - 1) {
           return section;
@@ -535,13 +482,10 @@ export function applyPatchToResumeDraft(input: {
           );
 
           if (anchorIndex < 0) {
-            throw new Error(
-              `Unable to find anchor bullet '${patch.anchorBulletId}'.`,
-            );
+            throw new Error(`Unable to find anchor bullet '${patch.anchorBulletId}'.`);
           }
 
-          const destinationIndex =
-            patch.position === "before" ? anchorIndex : anchorIndex + 1;
+          const destinationIndex = patch.position === "before" ? anchorIndex : anchorIndex + 1;
           if (destinationIndex === currentIndex) {
             return section;
           }
@@ -562,10 +506,7 @@ export function applyPatchToResumeDraft(input: {
                   ? {
                       ...entry,
                       bullets,
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -597,11 +538,8 @@ export function applyPatchToResumeDraft(input: {
           updatedAt,
         });
 
-        if (
-          JSON.stringify(movedSection.entries) ===
-            JSON.stringify(section.entries) &&
-          movedSection.entryOrderMode === section.entryOrderMode
-        ) {
+        if (JSON.stringify(movedSection.entries) === JSON.stringify(section.entries) &&
+          movedSection.entryOrderMode === section.entryOrderMode) {
           return section;
         }
 
@@ -611,8 +549,7 @@ export function applyPatchToResumeDraft(input: {
       case "reset_entry_order": {
         const resetSection = resetSectionEntryOrderToChronology(section);
         if (
-          JSON.stringify(resetSection.entries) ===
-            JSON.stringify(section.entries) &&
+          JSON.stringify(resetSection.entries) === JSON.stringify(section.entries) &&
           resetSection.entryOrderMode === section.entryOrderMode
         ) {
           return section;
@@ -623,11 +560,7 @@ export function applyPatchToResumeDraft(input: {
       }
       case "toggle_include": {
         if (patch.targetBulletId) {
-          const currentBullet = requireTargetBullet(
-            section,
-            patch.targetEntryId,
-            patch.targetBulletId,
-          );
+          const currentBullet = requireTargetBullet(section, patch.targetEntryId, patch.targetBulletId);
           const nextIncluded = patch.newIncluded ?? !currentBullet.included;
           if (nextIncluded === currentBullet.included) {
             return section;
@@ -651,10 +584,7 @@ export function applyPatchToResumeDraft(input: {
                               }
                             : bullet,
                         ),
-                        origin:
-                          patch.origin === "assistant"
-                            ? "assistant_edited"
-                            : "user_edited",
+                        origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                         updatedAt,
                       }
                     : entry,
@@ -667,7 +597,7 @@ export function applyPatchToResumeDraft(input: {
           return updateSectionMeta(
             {
               ...section,
-              bullets: section.bullets.map((bullet) =>
+                bullets: section.bullets.map((bullet) =>
                 bullet.id === patch.targetBulletId
                   ? {
                       ...bullet,
@@ -701,10 +631,7 @@ export function applyPatchToResumeDraft(input: {
                   ? {
                       ...entry,
                       included: nextIncluded,
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -732,11 +659,7 @@ export function applyPatchToResumeDraft(input: {
       }
       case "set_lock": {
         if (patch.targetBulletId) {
-          const currentBullet = requireTargetBullet(
-            section,
-            patch.targetEntryId,
-            patch.targetBulletId,
-          );
+          const currentBullet = requireTargetBullet(section, patch.targetEntryId, patch.targetBulletId);
           const nextLocked = patch.newLocked ?? !currentBullet.locked;
           if (nextLocked === currentBullet.locked) {
             return section;
@@ -760,10 +683,7 @@ export function applyPatchToResumeDraft(input: {
                               }
                             : bullet,
                         ),
-                        origin:
-                          patch.origin === "assistant"
-                            ? "assistant_edited"
-                            : "user_edited",
+                        origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                         updatedAt,
                       }
                     : entry,
@@ -806,10 +726,7 @@ export function applyPatchToResumeDraft(input: {
                   ? {
                       ...entry,
                       locked: nextLocked,
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -843,10 +760,7 @@ export function applyPatchToResumeDraft(input: {
         const replacementBullets = patch.newBullets;
 
         if (patch.targetEntryId) {
-          if (
-            patch.origin === "assistant" &&
-            targetEntry?.bullets.some((bullet) => bullet.locked)
-          ) {
+          if (patch.origin === "assistant" && targetEntry?.bullets.some((bullet) => bullet.locked)) {
             throw new Error(
               "Assistant patches cannot replace entry bullets while any bullet is locked.",
             );
@@ -877,10 +791,7 @@ export function applyPatchToResumeDraft(input: {
                         ...bullet,
                         updatedAt,
                       })),
-                      origin:
-                        patch.origin === "assistant"
-                          ? "assistant_edited"
-                          : "user_edited",
+                      origin: patch.origin === "assistant" ? "assistant_edited" : "user_edited",
                       updatedAt,
                     }
                   : entry,
@@ -914,19 +825,19 @@ export function applyPatchToResumeDraft(input: {
 
         sectionsChanged = true;
         return updateSectionMeta(
-          {
-            ...section,
-            bullets: replacementBullets.map((bullet) => ({
-              ...bullet,
-              updatedAt,
-            })),
-          },
+            {
+              ...section,
+              bullets: replacementBullets.map((bullet) => ({
+                ...bullet,
+                updatedAt,
+              })),
+            },
           patch,
           updatedAt,
         );
       }
       default: {
-        return assertNeverResumePatchOperation(patch.operation);
+        return assertNeverResumePatchOperation(patch.operation)
       }
     }
   });

@@ -31,9 +31,7 @@ describe("createJobFinderWorkspaceService", () => {
         basedOnRunId: "existing_run",
         basedOnAttemptIds: ["existing_attempt"],
         notes: "Existing validated instructions",
-        navigationGuidance: [
-          "Use the existing validated collection route first.",
-        ],
+        navigationGuidance: ["Use the existing validated collection route first."],
         searchGuidance: [
           "Use the existing validated keyword search box to change the result set.",
         ],
@@ -74,8 +72,7 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_verify_case",
           discoveryMethod: "catalog_seed",
-          canonicalUrl:
-            "https://www.linkedin.com/jobs/view/linkedin_verify_case",
+          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_verify_case",
           title: "Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -138,9 +135,7 @@ describe("createJobFinderWorkspaceService", () => {
         artifact.targetId === "target_linkedin_default",
     );
 
-    expect(
-      replayInstructionsByLabel.get("Primary target Replay Verification"),
-    ).toEqual(
+    expect(replayInstructionsByLabel.get("Primary target Replay Verification")).toEqual(
       expect.arrayContaining([
         "[Navigation] Use the existing validated collection route first.",
         "[Search] Use the existing validated keyword search box to change the result set.",
@@ -159,8 +154,8 @@ describe("createJobFinderWorkspaceService", () => {
     ]);
     expect(successorArtifact?.status).toBe("validated");
     expect(successorArtifact?.verification?.outcome).toBe("passed");
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.validatedInstructionId,
-    ).toBe(successorArtifact?.id ?? null);
+    expect(snapshot.searchPreferences.discovery.targets[0]?.validatedInstructionId).toBe(
+      successorArtifact?.id ?? null,
+    );
   });
 });

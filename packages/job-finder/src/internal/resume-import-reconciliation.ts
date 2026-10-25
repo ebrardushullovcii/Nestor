@@ -79,7 +79,10 @@ export function candidateScore(candidate: ResumeImportFieldCandidate): number {
         ? -0.05
         : 0;
   return (
-    candidate.confidence + sourceBonus + evidenceBonus + recommendationBonus
+    candidate.confidence +
+    sourceBonus +
+    evidenceBonus +
+    recommendationBonus
   );
 }
 

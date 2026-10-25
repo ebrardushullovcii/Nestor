@@ -153,9 +153,7 @@ describe("complementary education source evidence", () => {
 describe("toNarrativeStringArray bullet splitting", () => {
   test("splits inline bullet glyphs and long multi-sentence blobs into separate entries", () => {
     expect(
-      toNarrativeStringArray(
-        "Led the migration to Kubernetes. • Cut deploy time by 40%. • Mentored four engineers.",
-      ),
+      toNarrativeStringArray("Led the migration to Kubernetes. • Cut deploy time by 40%. • Mentored four engineers."),
     ).toEqual([
       "Led the migration to Kubernetes.",
       "Cut deploy time by 40%.",
@@ -167,8 +165,6 @@ describe("toNarrativeStringArray bullet splitting", () => {
       "Wrote the on-call runbooks that the whole platform group now follows during incidents. " +
       "Coached two junior engineers through their first production launches.";
     expect(toNarrativeStringArray(blob)).toHaveLength(4);
-    expect(toNarrativeStringArray("Short single bullet.")).toEqual([
-      "Short single bullet.",
-    ]);
+    expect(toNarrativeStringArray("Short single bullet.")).toEqual(["Short single bullet."]);
   });
 });

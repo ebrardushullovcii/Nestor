@@ -64,7 +64,9 @@ describe("release acceptance environment", () => {
       }
       expect(env.NESTOR_ENABLE_TEST_API).toBe("1");
       expect(env.NESTOR_BROWSER_AGENT).toBe("0");
-      expect(env.NESTOR_USER_DATA_DIR).toBe("/isolated/acceptance-user-data");
+      expect(env.NESTOR_USER_DATA_DIR).toBe(
+        "/isolated/acceptance-user-data",
+      );
     } finally {
       for (const [name, value] of saved) {
         if (value === undefined) {
@@ -139,9 +141,9 @@ describe("Live Assistant capture harness provider defaults", () => {
         `deterministic mode must blank ${name}`,
       ).toBe(true);
     }
-    expect(blankList.includes('NESTOR_INTERVIEW_LOCAL_STT_COMMAND: ""')).toBe(
-      true,
-    );
+    expect(
+      blankList.includes('NESTOR_INTERVIEW_LOCAL_STT_COMMAND: ""'),
+    ).toBe(true);
   });
 
   it("enables the narrow live-AI opt-in only for explicitly requested configured mode and announces both modes", async () => {

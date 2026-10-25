@@ -48,8 +48,7 @@ export function buildJobSourcePatchReply(
     const normalizedSourceUrl = normalizeSourceStartingUrl(source.startingUrl);
     const existingTargetIndex = nextTargets.findIndex(
       (target) =>
-        normalizeSourceStartingUrl(target.startingUrl) ===
-          normalizedSourceUrl ||
+        normalizeSourceStartingUrl(target.startingUrl) === normalizedSourceUrl ||
         normalizeSourceLabel(target.label) === normalizedSourceLabel,
     );
 
@@ -84,10 +83,7 @@ export function buildJobSourcePatchReply(
     addedLabels.push(source.label);
   }
 
-  if (
-    nextTargets.length === currentTargets.length &&
-    reEnabledLabels.length === 0
-  ) {
+  if (nextTargets.length === currentTargets.length && reEnabledLabels.length === 0) {
     return buildExistingJobSourcesReply(
       input,
       requestedJobSources.map((source) => source.label),

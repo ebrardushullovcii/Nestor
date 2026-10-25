@@ -1,10 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type {
-  JobFinderDiscoveryState,
-  SavedJob,
-  SavedJobPlanAssessmentPatch,
-  SavedJobSightingPatch,
-} from "@nestor/contracts";
+import type { JobFinderDiscoveryState, SavedJob, SavedJobPlanAssessmentPatch, SavedJobSightingPatch } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import { yieldToEventLoop } from "@nestor/core";
 
@@ -53,10 +48,7 @@ function composeUpdates(
 }
 
 /** Plan verdicts and sightings do not need a transaction-current listing body. */
-function metadataChanges(
-  baseline: SavedJob,
-  intended: SavedJob,
-): {
+function metadataChanges(baseline: SavedJob, intended: SavedJob): {
   sighting: SavedJobSightingPatch;
   planAssessments: SavedJobPlanAssessmentPatch[];
 } | null {
@@ -71,22 +63,12 @@ function metadataChanges(
     if (key === "planAssessments") {
       const previous = baseline.planAssessments;
       const next = intended.planAssessments;
-      if (
-        !next ||
-        (!previous && Object.keys(next).length === 0) ||
-        Object.keys(previous ?? {}).some(
-          (planId) => !Object.hasOwn(next, planId),
-        )
-      )
-        return null;
+      if (!next || (!previous && Object.keys(next).length === 0) ||
+        Object.keys(previous ?? {}).some((planId) => !Object.hasOwn(next, planId))) return null;
       for (const [planId, assessment] of Object.entries(next))
         if (!isDeepStrictEqual(previous?.[planId], assessment))
           planAssessments.push({ jobId: intended.id, planId, assessment });
-    } else if (
-      key === "firstSeenAt" ||
-      key === "lastSeenAt" ||
-      key === "lastVerifiedActiveAt"
-    ) {
+    } else if (key === "firstSeenAt" || key === "lastSeenAt" || key === "lastVerifiedActiveAt") {
       const value = intended[key];
       if (value === undefined) return null;
       sighting[key] = value;
@@ -130,10 +112,7 @@ export function createDiscoverySavedJobWriter(input: {
   ): Promise<void> => {
     const changedIds: string[] = [];
     const intendedRows = new Map<string, SavedJob>();
-    const metadataById = new Map<
-      string,
-      NonNullable<ReturnType<typeof metadataChanges>>
-    >();
+    const metadataById = new Map<string, NonNullable<ReturnType<typeof metadataChanges>>>();
     const settled = (id: string, job: SavedJob) => {
       const intended = intendedRows.get(id);
       if (intended) persisted.set(id, intended);
@@ -152,10 +131,7 @@ export function createDiscoverySavedJobWriter(input: {
       const baseline = persisted.get(id);
       const metadata = baseline ? metadataChanges(baseline, intended) : null;
       if (metadata) {
-        if (
-          Object.keys(metadata.sighting).length > 1 ||
-          metadata.planAssessments.length > 0
-        ) {
+        if (Object.keys(metadata.sighting).length > 1 || metadata.planAssessments.length > 0) {
           metadataById.set(id, metadata);
           changedIds.push(id);
         }
@@ -194,8 +170,7 @@ export function createDiscoverySavedJobWriter(input: {
       for (const id of partIds) {
         const metadata = metadataById.get(id);
         if (metadata) {
-          if (Object.keys(metadata.sighting).length > 1)
-            sightings.push(metadata.sighting);
+          if (Object.keys(metadata.sighting).length > 1) sightings.push(metadata.sighting);
           planAssessments.push(...metadata.planAssessments);
           continue;
         }

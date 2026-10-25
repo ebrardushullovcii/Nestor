@@ -5,7 +5,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getDiscoveryProgressCountLabel } from "./discovery-results-panel";
+import {
+  getDiscoveryProgressCountLabel,
+} from "./discovery-results-panel";
 import {
   DiscoveryResultsPanelWithJobs,
   flushFindJobsQueries,
@@ -191,6 +193,8 @@ it("reads the same report for the live line and source summary regardless of dis
   );
   expect(
     screen.getByTestId("discovery-source-summaries").textContent,
-  ).toContain("52 inspected · 25 saved · 27 duplicates · 7 pages covered");
+  ).toContain(
+    "52 inspected · 25 saved · 27 duplicates · 7 pages covered",
+  );
   expect(screen.queryByText(/28 listings recorded/)).toBeNull();
 });

@@ -4,7 +4,9 @@
     "baseUrl": ".",
     "jsx": "react-jsx",
     "paths": {
-      "@nestor/browser-agent": ["../../packages/browser-agent/src/index.ts"],
+      "@nestor/browser-agent": [
+        "../../packages/browser-agent/src/index.ts"
+      ],
       "@nestor/job-finder/discovery-ordering": [
         "../../packages/job-finder/src/discovery-ordering.ts"
       ],

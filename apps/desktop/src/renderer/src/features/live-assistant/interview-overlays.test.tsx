@@ -133,9 +133,9 @@ describe("interview popup overlay status palette", () => {
     const channels = channelTriplet(hex);
 
     return Math.min(
-      ...channels
-        .filter((_, index) => index !== dominant)
-        .map((value) => channels[dominant] - value),
+      ...channels.filter((_, index) => index !== dominant).map(
+        (value) => channels[dominant] - value,
+      ),
     );
   }
 
@@ -176,15 +176,9 @@ describe("interview popup overlay status palette", () => {
       overlayTokens["--info-text"],
       "overlay --info-text must stay steel blue",
     ).toBe("#a6b9d1");
-    expect(
-      dominanceMargin(overlayToken("--success-text"), 1),
-    ).toBeGreaterThanOrEqual(12);
-    expect(
-      dominanceMargin(overlayToken("--info-text"), 2),
-    ).toBeGreaterThanOrEqual(12);
-    expect(
-      dominanceMargin(overlayToken("--warning-text"), 0),
-    ).toBeGreaterThanOrEqual(12);
+    expect(dominanceMargin(overlayToken("--success-text"), 1)).toBeGreaterThanOrEqual(12);
+    expect(dominanceMargin(overlayToken("--info-text"), 2)).toBeGreaterThanOrEqual(12);
+    expect(dominanceMargin(overlayToken("--warning-text"), 0)).toBeGreaterThanOrEqual(12);
   });
 
   test("never duplicates one family's palette into another inside the scope", () => {

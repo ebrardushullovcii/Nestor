@@ -553,7 +553,9 @@ export type FillFieldsEntry = Extract<
   { tool: "type" | "select" | "set_checkbox" | "upload" | "click" }
 >;
 
-export function parseFillFields(rawArguments: string):
+export function parseFillFields(
+  rawArguments: string,
+):
   | {
       ok: true;
       fields: FillFieldsEntry[];

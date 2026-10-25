@@ -230,7 +230,9 @@ async function launchAppForScenario({ seededInput }) {
             NESTOR_TEST_API_USE_LIVE_AI: "1",
           }
         : {}),
-      ...(userDataDirectory ? { NESTOR_USER_DATA_DIR: userDataDirectory } : {}),
+      ...(userDataDirectory
+        ? { NESTOR_USER_DATA_DIR: userDataDirectory }
+        : {}),
     },
   });
   let cleanedUp = false;
@@ -325,7 +327,9 @@ async function seedWorkspace(window, input) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(async () => window.nestor.jobFinder.getWorkspace());
+  return window.evaluate(async () =>
+    window.nestor.jobFinder.getWorkspace(),
+  );
 }
 
 async function resetDiscoveryState(window) {
@@ -832,17 +836,20 @@ async function executeBenchmarkPairScenarios({
       const discoveryTimed = await withTimedScenario(
         `search_now:${target.id}`,
         () =>
-          scopedWindow.evaluate(async (targetId) => {
-            const reply = await window.nestor.jobFinder.runAgentDiscovery(
-              undefined,
-              targetId,
-            );
-            // The route answers with what changed; read the whole workspace.
-            return {
-              ...reply,
-              snapshot: await window.nestor.jobFinder.getWorkspace(),
-            };
-          }, target.id),
+          scopedWindow.evaluate(
+            async (targetId) => {
+              const reply = await window.nestor.jobFinder.runAgentDiscovery(
+                undefined,
+                targetId,
+              );
+              // The route answers with what changed; read the whole workspace.
+              return {
+                ...reply,
+                snapshot: await window.nestor.jobFinder.getWorkspace(),
+              };
+            },
+            target.id,
+          ),
       );
       const discoverySnapshot =
         discoveryTimed.value?.snapshot ?? discoveryTimed.value ?? null;
@@ -1144,10 +1151,14 @@ async function main() {
         : ["This run used a seeded temporary workspace for isolation."]),
     ],
     useCurrentWorkspace,
-    browserAgentEnabled: process.env.NESTOR_BROWSER_AGENT ?? "(default=true)",
+    browserAgentEnabled:
+      process.env.NESTOR_BROWSER_AGENT ?? "(default=true)",
     browserAgentEnabledEffective: resolveBrowserAgentEnabledEffective(),
-    browserHeadless: process.env.NESTOR_BROWSER_HEADLESS ?? "(default=false)",
-    browserHeadlessEffective: isEnabled(process.env.NESTOR_BROWSER_HEADLESS),
+    browserHeadless:
+      process.env.NESTOR_BROWSER_HEADLESS ?? "(default=false)",
+    browserHeadlessEffective: isEnabled(
+      process.env.NESTOR_BROWSER_HEADLESS,
+    ),
     outputLabel,
     results,
   };

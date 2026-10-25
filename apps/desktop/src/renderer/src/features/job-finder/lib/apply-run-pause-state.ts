@@ -1,11 +1,8 @@
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { resolveApplyStatePresentation } from "../screens/applications/apply-state";
 
-type ApplyRun = NonNullable<
-  JobFinderRendererWorkspaceSnapshot["applyRuns"]
->[number];
-type ApplyJobResult =
-  JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+type ApplyRun = NonNullable<JobFinderRendererWorkspaceSnapshot["applyRuns"]>[number];
+type ApplyJobResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 /**
  * What an application run that reads "paused for review" is actually doing.
@@ -65,9 +62,7 @@ export function classifyPausedApplyRun(
   workspace: Pick<
     JobFinderRendererWorkspaceSnapshot,
     "applyJobResults" | "userActionRequests" | "intelligence"
-  > & {
-    applicationRecords?: JobFinderRendererWorkspaceSnapshot["applicationRecords"];
-  },
+  > & { applicationRecords?: JobFinderRendererWorkspaceSnapshot["applicationRecords"] },
   run: ApplyRun,
 ): ApplyRunPauseState | null {
   if (run.state !== "paused_for_user_review") return null;

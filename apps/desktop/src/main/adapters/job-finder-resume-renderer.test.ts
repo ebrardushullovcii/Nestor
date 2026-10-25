@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { JobFinderSettings, ResumeTemplateId } from "@nestor/contracts";
+import type {
+  JobFinderSettings,
+  ResumeTemplateId,
+} from "@nestor/contracts";
 import type { ResumeRenderDocument } from "@nestor/job-finder";
 
 import {
