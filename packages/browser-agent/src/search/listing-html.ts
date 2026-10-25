@@ -277,8 +277,9 @@ export function readInventoryHtml(
           text(node).trim(),
         ),
     );
-    if (headings.length === 1 && hasJobSections && hasApplyAction) {
-      const title = text(headings[0]),
+    const heading = headings.length === 1 ? headings[0] : undefined;
+    if (heading && hasJobSections && hasApplyAction) {
+      const title = text(heading),
         body = root ? text(root) : "";
       if (
         body.length > title.length + 80 &&
