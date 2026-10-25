@@ -102,6 +102,7 @@ const {
   mockResolveApplyConsentRequest,
   mockShowOpenDialog,
   mockShowSaveDialog,
+  mockGetPath,
   mockSnoozeGroupedDecision,
   mockToggleCampaignRule,
   mockUpdateAppearanceTheme,
@@ -150,6 +151,7 @@ const {
   mockResolveApplyConsentRequest: vi.fn(),
   mockShowOpenDialog: vi.fn(),
   mockShowSaveDialog: vi.fn(),
+  mockGetPath: vi.fn<(name: string) => string>(() => process.cwd()),
   mockSnoozeGroupedDecision: vi.fn(),
   mockToggleCampaignRule: vi.fn(),
   mockUpdateAppearanceTheme: vi.fn(),
@@ -161,7 +163,7 @@ const {
 
 vi.mock("electron", () => ({
   app: {
-    getPath: vi.fn(() => process.cwd()),
+    getPath: mockGetPath,
   },
   BrowserWindow: {
     fromWebContents: mockBrowserWindowFromWebContents,
@@ -2203,6 +2205,34 @@ describe("job-finder application packet export route", () => {
       "job-1",
       `${selectedPath}.pdf`,
     );
+  });
+
+  it("saves a test-API download under the app's data folder instead of opening a dialog", async () => {
+    mockIsDesktopTestApiEnabled.mockReturnValueOnce(true);
+    mockGetPath.mockImplementation((name: string) =>
+      name === "userData" ? temporaryDirectory : process.cwd(),
+    );
+
+    const result = (await resumePdfExportHandler(
+      { sender: {} },
+      { intent: "download", jobId: "job-1" },
+    )) as { outcome: string; outputPath: string | null };
+
+    const expectedPath = path.join(
+      temporaryDirectory,
+      "exports",
+      "Tailored Resume - Staff Engineer - Example.pdf",
+    );
+    expect(mockShowSaveDialog).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      outcome: "saved",
+      outputPath: expectedPath,
+    });
+    expect(mockExportResumePdf).toHaveBeenCalledWith("job-1", expectedPath);
+    await expect(
+      readdir(path.join(temporaryDirectory, "exports")),
+    ).resolves.toEqual([]);
+    mockGetPath.mockImplementation(() => process.cwd());
   });
 
   it("writes the exact schema-validated packet as formatted JSON", async () => {

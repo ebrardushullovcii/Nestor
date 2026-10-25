@@ -35,7 +35,7 @@ import {
   getApplicationDocumentsDirectory,
 } from "../services/job-finder/paths";
 import path from "node:path";
-import { access } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import { createConcurrencyLimiter } from "@nestor/core";
 import { app, BrowserWindow, clipboard, dialog, shell } from "electron";
 import type {
@@ -43,6 +43,7 @@ import type {
   IpcMainInvokeEvent,
   OpenDialogOptions,
   SaveDialogOptions,
+  WebContents,
 } from "electron";
 import {
   type PersonalWorkspaceExport,
@@ -1059,6 +1060,37 @@ function buildResumeExportDefaultPath(
 
   return path.join(app.getPath("documents"), `${fileName}.pdf`);
 }
+/**
+ * Where Download PDF writes. A person picks the file in the save dialog; a
+ * test-API run, which cannot answer a native dialog, saves under the app's own
+ * data folder so the download still writes a real file.
+ */
+async function chooseResumeExportPath(
+  sender: WebContents,
+  defaultPath: string,
+): Promise<{ canceled: boolean; filePath?: string }> {
+  if (isDesktopTestApiEnabled()) {
+    const directory = path.join(app.getPath("userData"), "exports");
+    await mkdir(directory, { recursive: true });
+    return {
+      canceled: false,
+      filePath: path.join(directory, path.basename(defaultPath)),
+    };
+  }
+  const options: SaveDialogOptions = {
+    defaultPath,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+    // Not "tailored": the same dialog opens for a document nothing could be
+    // tailored for.
+    title: "Export resume PDF",
+  };
+  const browserWindow = BrowserWindow.fromWebContents(sender);
+  return browserWindow
+    ? dialog.showSaveDialog(browserWindow, options)
+    : dialog.showSaveDialog(options);
+}
+
 function buildApplicationPacketExportDefaultPath(
   jobTitle: string,
   company: string,
@@ -2598,38 +2630,25 @@ export function registerJobFinderRouteHandlers(
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       let outputPath: string | null = null;
 
-      if (intent === "download" && !isDesktopTestApiEnabled()) {
+      if (intent === "download") {
         const workspace =
           await jobFinderWorkspaceService.getResumeWorkspace(jobId);
-        const browserWindow = BrowserWindow.fromWebContents(event.sender);
-        const saveDialogOptions: SaveDialogOptions = {
-          defaultPath: buildResumeExportDefaultPath(
-            resolveTailoredAssetLabel({
-              existingLabel: workspace.tailoredAsset?.label ?? null,
-              generationMethod:
-                workspace.draft.generationMethod === "ai"
-                  ? "ai_assisted"
-                  : "deterministic",
-              generationReason:
-                workspace.tailoredAsset?.generationReason ?? null,
-            }),
-            workspace.job.title,
-            workspace.job.company,
-          ),
-          filters: [
-            {
-              name: "PDF",
-              extensions: ["pdf"],
-            },
-          ],
-          properties: ["createDirectory", "showOverwriteConfirmation"],
-          // Not "tailored": the same dialog opens for a document nothing
-          // could be tailored for.
-          title: "Export resume PDF",
-        };
-        const saveResult = browserWindow
-          ? await dialog.showSaveDialog(browserWindow, saveDialogOptions)
-          : await dialog.showSaveDialog(saveDialogOptions);
+        const defaultPath = buildResumeExportDefaultPath(
+          resolveTailoredAssetLabel({
+            existingLabel: workspace.tailoredAsset?.label ?? null,
+            generationMethod:
+              workspace.draft.generationMethod === "ai"
+                ? "ai_assisted"
+                : "deterministic",
+            generationReason: workspace.tailoredAsset?.generationReason ?? null,
+          }),
+          workspace.job.title,
+          workspace.job.company,
+        );
+        const saveResult = await chooseResumeExportPath(
+          event.sender,
+          defaultPath,
+        );
 
         if (saveResult.canceled || !saveResult.filePath) {
           const snapshot = await readWorkspaceProjection(
