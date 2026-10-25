@@ -152,6 +152,21 @@ export function createProfileRecords(store: JobStore) {
     );
   return {
     all,
+    experienceRequired() {
+      const result = store
+        .sql(
+          `SELECT count(*) AS count,
+        coalesce(sum((length(trim(coalesce(title,'')))>0)
+          +(length(trim(coalesce(company_name,'')))>0)
+          +(length(trim(coalesce(start_date,'')))>0)),0) AS filled
+        FROM profile_experiences`,
+        )
+        .get() as { count: number; filled: number };
+      return {
+        filled: result.filled,
+        total: result.count ? result.count * 3 : 1,
+      };
+    },
     get(kind: ProfileRecordCollection, id: string): ProfileRecord | null {
       const row = store
         .sql(`SELECT * FROM ${table(kind)} WHERE id=?`)

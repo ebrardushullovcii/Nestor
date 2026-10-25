@@ -218,6 +218,10 @@ export const ProfileOverviewSchema = z.object({
     ProfileRecordCollectionSchema,
     z.number().int().nonnegative(),
   ),
+  experienceRequired: z.object({
+    filled: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  }),
   resume: ProfileResumeMetadataSchema,
   limitedWorkPermissions:
     CandidateWorkEligibilitySchema.shape.limitedWorkPermissions,

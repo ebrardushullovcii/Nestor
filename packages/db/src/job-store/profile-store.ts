@@ -5,6 +5,7 @@ import {
   PatchProfileInputSchema,
   StoredProfileSchema,
   ProfileOverviewSchema,
+  ProfileRecordCollectionSchema,
   ResumeSourceDocumentSchema,
   type PatchProfileInput,
   type StoredProfile,
@@ -179,6 +180,7 @@ export function createProfileStore(store: JobStore) {
       fields: fields(),
       lists: lists(),
       counts: records.counts(),
+      experienceRequired: records.experienceRequired(),
       resume: {
         ...inflate(metadata),
         id: metadata.sourceId,
@@ -192,8 +194,7 @@ export function createProfileStore(store: JobStore) {
     records,
     read(): StoredProfile {
       const data = inflate({ ...fields(), ...lists() });
-      for (const kind of Object.keys(records.counts()) as (keyof typeof empty &
-        Parameters<typeof records.all>[0])[])
+      for (const kind of ProfileRecordCollectionSchema.options)
         data[kind] = records.all(kind).map((row) => row.record);
       const sourceData = source.read(
           sourceFields.filter((field) => field.startsWith("ownership.")),

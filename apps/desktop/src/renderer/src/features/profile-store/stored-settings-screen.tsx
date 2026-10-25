@@ -1,5 +1,7 @@
 import type { ComponentProps } from "react";
 import { Button } from "@renderer/components/ui/button";
+import { useToast } from "@renderer/components/ui/toast";
+import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
 import { SettingsScreen } from "@renderer/features/job-finder/screens/settings/settings-screen";
 import { useStoredSettings } from "./use-stored-settings";
 
@@ -14,10 +16,14 @@ type SettingsPorts = Omit<
 /** Settings owns its small read, independently of Profile and every job list. */
 export function StoredSettingsScreen(props: SettingsPorts) {
   const store = useStoredSettings();
+  const { showToast } = useToast();
   if (!store.settings)
     return (
       <section aria-label="Settings">
-        <h1>Settings</h1>
+        <PageHeaderStack
+          title="Settings"
+          description="Make Job Finder work the way you want."
+        />
         {store.error ? (
           <p role="alert">
             {store.error}{" "}
@@ -35,7 +41,16 @@ export function StoredSettingsScreen(props: SettingsPorts) {
         {...props}
         settings={store.settings}
         onUpdateAppearanceTheme={store.updateAppearanceTheme}
-        onUpdateAiBehavior={store.updateAiBehavior}
+        onUpdateAiBehavior={async (input, options) => {
+          const ok = await store.updateAiBehavior(input);
+          if (ok && options?.undo)
+            showToast({
+              title: "Settings saved",
+              tone: "success",
+              action: { label: "Undo", onClick: options.undo },
+            });
+          return ok;
+        }}
         onUpdateApplicationDefaults={store.updateApplicationDefaults}
         onUpdateWorkspaceBehavior={store.updateWorkspaceBehavior}
       />

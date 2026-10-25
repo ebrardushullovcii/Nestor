@@ -2,6 +2,7 @@ import type {
   JobFinderSettings,
   PatchSettingsInput,
   SettingsFields,
+  ResumeApproach,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
@@ -18,20 +19,27 @@ function leaf(value: unknown, path: string): unknown {
   return value;
 }
 /** Only supplied setting leaves cross IPC; untouched siblings never become a save payload. */
-export function settingPatch(input: unknown): PatchSettingsInput {
+export function settingPatch(
+  input: unknown,
+  previous?: JobFinderSettings | null,
+): PatchSettingsInput {
+  const changed = ([key, value]: [string, unknown]) =>
+    value !== undefined &&
+    (!previous ||
+      JSON.stringify(value) !== JSON.stringify(leaf(previous, key)));
   return {
     fields: SettingsFieldsSchema.parse(
       Object.fromEntries(
         Object.keys(SettingsFieldsSchema.shape)
           .map((key) => [key, leaf(input, key)])
-          .filter(([, value]) => value !== undefined),
+          .filter(changed),
       ),
     ),
     lists: SettingsListsSchema.parse(
       Object.fromEntries(
         Object.keys(SettingsListsSchema.shape)
           .map((key) => [key, leaf(input, key)])
-          .filter(([, value]) => value !== undefined),
+          .filter(changed),
       ),
     ),
   };
@@ -81,8 +89,16 @@ export function useStoredSettings() {
         ),
       );
       try {
-        await window.nestor.jobs.run("patch_settings", { ...input, expected });
-        await refresh();
+        const next = await window.nestor.jobs.run("patch_settings", {
+          ...input,
+          expected,
+        });
+        if (mounted.current) {
+          sequence.current++;
+          current.current = next;
+          setSettings(next);
+          setError(null);
+        }
         return true;
       } catch (reason: unknown) {
         if (mounted.current)
@@ -94,43 +110,57 @@ export function useStoredSettings() {
         return false;
       }
     },
-    [refresh],
+    [],
   );
+  const updateResumeApproach = useCallback(async (approach: ResumeApproach) => {
+    try {
+      const next = await window.nestor.jobs.run("set_resume_approach", {
+        approach,
+      });
+      if (mounted.current) {
+        sequence.current++;
+        current.current = next.settings;
+        setSettings(next.settings);
+        setError(null);
+      }
+      return true;
+    } catch (reason: unknown) {
+      if (mounted.current)
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not save the resume level.",
+        );
+      return false;
+    }
+  }, []);
   const updateAiBehavior = useCallback(
     async (input: UpdateAiBehaviorInput) => {
       if (input.resumeApproach) {
-        try {
-          await window.nestor.jobs.run("set_resume_approach", {
-            approach: input.resumeApproach,
-          });
-        } catch (reason: unknown) {
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Could not save the resume level.",
-          );
-          return false;
-        }
+        if (!(await updateResumeApproach(input.resumeApproach))) return false;
       }
-      return patch(settingPatch(input));
+      return patch(settingPatch(input, current.current));
     },
-    [patch],
+    [patch, updateResumeApproach],
   );
   return {
     settings,
     error,
     refresh,
+    updateResumeApproach,
     updateAppearanceTheme: useCallback(
       (appearanceTheme: JobFinderSettings["appearanceTheme"]) =>
         patch({ fields: { appearanceTheme } }),
       [patch],
     ),
     updateApplicationDefaults: useCallback(
-      (input: UpdateApplicationDefaultsInput) => patch(settingPatch(input)),
+      (input: UpdateApplicationDefaultsInput) =>
+        patch(settingPatch(input, current.current)),
       [patch],
     ),
     updateWorkspaceBehavior: useCallback(
-      (input: UpdateWorkspaceBehaviorInput) => patch(settingPatch(input)),
+      (input: UpdateWorkspaceBehaviorInput) =>
+        patch(settingPatch(input, current.current)),
       [patch],
     ),
     updateAiBehavior,

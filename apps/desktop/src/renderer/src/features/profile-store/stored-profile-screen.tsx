@@ -1,4 +1,10 @@
-import { useMemo, useState, useRef, type ComponentProps } from "react";
+import {
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+  type ComponentProps,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CandidateProfileSchema,
@@ -7,6 +13,9 @@ import {
   type ProfileOverview,
 } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
+import { Input } from "@renderer/components/ui/input";
+import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
+import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
 import { Button } from "@renderer/components/ui/button";
 import { useStoredSettings } from "./use-stored-settings";
 import { useStoredProfile, useProfileRecordPage } from "./use-stored-profile";
@@ -56,6 +65,8 @@ type ProfilePorts = Omit<
   | "onUpdateResumeApproach"
   | "resumeApplicationMode"
   | "recordPaging"
+  | "recordStatus"
+  | "recordSummary"
   | "sourceInfo"
 >;
 /** Reads are local to Profile; Save commits only edited rows and fields. */
@@ -68,6 +79,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
       remove: { collection: ProfileRecordCollection; id: string }[];
     }>({ upsert: [], remove: [] }),
     [epoch, setEpoch] = useState(0),
+    [message, setMessage] = useState<string | null>(null),
     draftRevision = useRef(0),
     [params] = useSearchParams(),
     section = params.get("section") ?? "basics";
@@ -87,6 +99,25 @@ export function StoredProfileScreen(props: ProfilePorts) {
       section === "background",
     ),
     proof = useProfileRecordPage("proofBank", section === "background");
+  const onDirtyChange = useCallback(
+    (value: boolean) => {
+      setDirty(value);
+      props.onProfileSurfaceDirtyChange(value);
+    },
+    [props.onProfileSurfaceDirtyChange],
+  );
+  const onDraftEdited = useCallback(() => {
+    draftRevision.current++;
+    setMessage(null);
+    props.onProfileSurfaceDraftEdited?.();
+  }, [props.onProfileSurfaceDraftEdited]);
+  function changePage(collection: ProfileRecordCollection, change: () => void) {
+    setSaved((previous) => ({
+      upsert: previous.upsert.filter((row) => row.collection !== collection),
+      remove: previous.remove.filter((row) => row.collection !== collection),
+    }));
+    change();
+  }
   const baseRecords = useMemo(
     () => ({
       experiences: experiences.rows,
@@ -127,8 +158,14 @@ export function StoredProfileScreen(props: ProfilePorts) {
   );
   if (!profile || !store.goals || !store.overview)
     return (
-      <section aria-label="Profile">
-        <h1>Profile</h1>
+      <LockedScreenLayout
+        topContent={
+          <PageHeaderStack
+            title="Profile"
+            description="Everything Job Finder knows about you. Edit any field or ask the assistant."
+          />
+        }
+      >
         {store.error ? (
           <p role="alert">
             {store.error}{" "}
@@ -137,7 +174,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
         ) : (
           <p role="status">Loading your profile…</p>
         )}
-      </section>
+      </LockedScreenLayout>
     );
   const pages =
     section === "experience"
@@ -155,32 +192,49 @@ export function StoredProfileScreen(props: ProfilePorts) {
   const paging = (
     <>
       {pages
-        .filter(({ page }) => page.total > 25 || page.index > 0 || page.error)
+        .filter(
+          ({ page }) =>
+            store.overview!.counts[page.collection] > 25 ||
+            page.text ||
+            page.index > 0 ||
+            page.error,
+        )
         .map(({ name, page }) => (
           <nav
             key={name}
             aria-label={`${name} pages`}
-            className="mb-3 flex items-center gap-3 text-sm"
+            className="mb-3 flex flex-wrap items-center gap-3 text-sm"
           >
             <strong>{name}</strong>
+            <Input
+              aria-label={`Filter ${name.toLowerCase()}`}
+              className="max-w-64"
+              value={page.text}
+              disabled={dirty}
+              onChange={(event) =>
+                changePage(page.collection, () =>
+                  page.setText(event.target.value),
+                )
+              }
+            />
             {page.error ? <span role="alert">{page.error}</span> : null}
             <Button
               size="toolbar"
               variant="ghost"
               disabled={dirty || page.loading || page.index === 0}
-              onClick={page.previous}
+              onClick={() => changePage(page.collection, page.previous)}
             >
               Previous
             </Button>
             <span>
-              {page.index * 25 + 1}–{page.index * 25 + page.rows.length} of{" "}
-              {page.total}
+              {page.total ? page.index * 25 + 1 : 0}–
+              {page.index * 25 + page.rows.length} of {page.total}
             </span>
             <Button
               size="toolbar"
               variant="ghost"
               disabled={dirty || page.loading || page.nextCursor === null}
-              onClick={page.next}
+              onClick={() => changePage(page.collection, page.next)}
             >
               Next
             </Button>
@@ -191,31 +245,48 @@ export function StoredProfileScreen(props: ProfilePorts) {
   );
   return (
     <>
-      {store.error ? <p role="alert">{store.error}</p> : null}
+      {store.error || settings.error ? (
+        <p role="alert">{store.error ?? settings.error}</p>
+      ) : null}
       <ProfileScreen
         {...props}
         key={epoch}
-        onProfileSurfaceDraftEdited={() => {
-          draftRevision.current++;
-          props.onProfileSurfaceDraftEdited?.();
-        }}
+        onProfileSurfaceDraftEdited={onDraftEdited}
+        actionState={{ message }}
         profile={profile}
         searchPreferences={store.goals}
         sourceInfo={store.overview}
         recordPaging={paging}
+        recordSummary={store.overview}
+        recordStatus={
+          pages.some(({ page }) => page.loading || page.error) ? (
+            <div role="status">
+              {pages
+                .filter(({ page }) => page.loading || page.error)
+                .map(({ name, page }) => (
+                  <p key={name}>
+                    {page.error ?? `Loading ${name.toLowerCase()}…`}
+                    {page.error ? (
+                      <Button onClick={page.refresh}>Try again</Button>
+                    ) : null}
+                  </p>
+                ))}
+            </div>
+          ) : null
+        }
         pendingActions={{
           ...props.pendingActions,
           profileMutation: store.saving || props.pendingActions.profileMutation,
         }}
-        onProfileSurfaceDirtyChange={(value) => {
-          setDirty(value);
-          props.onProfileSurfaceDirtyChange(value);
-        }}
+        onProfileSurfaceDirtyChange={onDirtyChange}
         resumeApplicationMode={settings.settings?.resumeApplicationMode}
         onUpdateResumeApproach={async (approach) => {
-          await window.nestor.jobs.run("set_resume_approach", { approach });
-          await store.refresh();
-          return true;
+          const ok = await settings.updateResumeApproach(approach);
+          if (ok) {
+            await store.refresh();
+            setMessage("Resume level saved.");
+          }
+          return ok;
         }}
         onSaveAll={(nextProfile, nextGoals) => {
           const revision = draftRevision.current,
@@ -228,10 +299,27 @@ export function StoredProfileScreen(props: ProfilePorts) {
             });
           void store.save(patch).then((ok) => {
             if (!ok) return;
-            setSaved((previous) => ({
-              upsert: [...previous.upsert, ...(patch.upsert ?? [])],
-              remove: [...previous.remove, ...(patch.remove ?? [])],
-            }));
+            setSaved((previous) => {
+              const key = (row: {
+                collection: ProfileRecordCollection;
+                id?: string;
+                record?: { id: string };
+              }) => `${row.collection}:${row.id ?? row.record!.id}`;
+              const changed = new Set(
+                [...patch.upsert, ...patch.remove].map(key),
+              );
+              return {
+                upsert: [
+                  ...previous.upsert.filter((row) => !changed.has(key(row))),
+                  ...patch.upsert,
+                ],
+                remove: [
+                  ...previous.remove.filter((row) => !changed.has(key(row))),
+                  ...patch.remove,
+                ],
+              };
+            });
+            setMessage("Profile saved.");
             if (draftRevision.current === revision)
               setEpoch((value) => value + 1);
           });

@@ -92,7 +92,7 @@ function getImportedIdentityStatus(input: {
 }
 
 interface ProfileResumePanelProps {
-  sourceInfo?: {hasResumeText:boolean;hasSavedResumeFile:boolean};
+  sourceInfo?: { hasResumeText: boolean; hasSavedResumeFile: boolean };
   compact?: boolean;
   importDisabledReason?: string | null;
   isProfileReady?: boolean;
@@ -343,9 +343,9 @@ export function ProfileResumePanel({
   profile,
 }: ProfileResumePanelProps) {
   const resumeAnalysisSummary = formatResumeAnalysisSummary(profile);
-  const resumeTextReadyToAnalyze = sourceInfo?.hasResumeText ?? Boolean(
-    profile.baseResume.textContent?.trim(),
-  );
+  const resumeTextReadyToAnalyze =
+    sourceInfo?.hasResumeText ??
+    Boolean(profile.baseResume.textContent?.trim());
   const rawFileName = profile.baseResume.fileName.trim();
   const hasImportedResume =
     rawFileName.length > 0 &&
@@ -356,7 +356,12 @@ export function ProfileResumePanel({
     : RESUME_PLACEHOLDER_FILE_NAME;
   const originalFileNeedsReimport =
     hasImportedResume &&
-    !(sourceInfo?.hasSavedResumeFile ?? Boolean(profile.baseResume.storagePath?.trim() && profile.baseResume.sha256));
+    !(
+      sourceInfo?.hasSavedResumeFile ??
+      Boolean(
+        profile.baseResume.storagePath?.trim() && profile.baseResume.sha256,
+      )
+    );
   const { headline: panelHeadline, description: panelDescription } =
     getResumePanelCopy({
       extractionStatus: profile.baseResume.extractionStatus,

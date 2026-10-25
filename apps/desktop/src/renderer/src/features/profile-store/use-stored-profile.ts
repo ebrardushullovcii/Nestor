@@ -77,30 +77,31 @@ export function useProfileRecordPage(
   collection: ProfileRecordCollection,
   enabled = true,
 ) {
-  const [text, setText] = useState(""),
-    [cursors, setCursors] = useState([0]),
-    [index, setIndex] = useState(0),
-    [page, setPage] = useState(EMPTY),
-    [loading, setLoading] = useState(false),
-    [error, setError] = useState<string | null>(null),
-    [revision, setRevision] = useState(0);
+  const [query, setQuery] = useState({ text: "", cursors: [0], index: 0 });
+  const { text, cursors, index } = query;
   const after = cursors[index] ?? 0;
-  useEffect(() => {
-    setCursors([0]);
-    setIndex(0);
-  }, [collection, text]);
+  const queryKey = `${collection}:${text}:${after}`;
+  const [result, setResult] = useState({ page: EMPTY, key: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    setLoading(true);
+    setBusy(true);
     void window.nestor.jobs
       .run("list_profile_records", { collection, text, after, limit: 25 })
-      .then((next) => {
-        if (live) {
-          setPage(next);
-          setError(null);
-          setLoading(false);
-        }
+      .then((page) => {
+        if (!live) return;
+        // Removing the final row on a later page returns to the preceding page.
+        if (page.rows.length === 0 && index > 0) {
+          setQuery((previous) => ({
+            ...previous,
+            index: Math.max(0, previous.index - 1),
+          }));
+        } else setResult({ page, key: queryKey });
+        setError(null);
+        setBusy(false);
       })
       .catch((reason: unknown) => {
         if (live) {
@@ -109,13 +110,13 @@ export function useProfileRecordPage(
               ? reason.message
               : "Could not load these records.",
           );
-          setLoading(false);
+          setBusy(false);
         }
       });
     return () => {
       live = false;
     };
-  }, [collection, enabled, text, after, revision]);
+  }, [collection, enabled, text, after, index, revision, queryKey]);
   useEffect(
     () =>
       window.nestor.jobs.onChange((change) => {
@@ -124,18 +125,28 @@ export function useProfileRecordPage(
     [],
   );
   return {
-    ...page,
+    ...result.page,
+    collection,
     text,
-    setText,
     index,
-    loading,
     error,
-    previous: () => setIndex((value) => Math.max(0, value - 1)),
+    loading: enabled && !error && (busy || result.key !== queryKey),
+    refresh: () => setRevision((value) => value + 1),
+    setText: (value: string) =>
+      setQuery({ text: value, cursors: [0], index: 0 }),
+    previous: () =>
+      setQuery((previous) => ({
+        ...previous,
+        index: Math.max(0, previous.index - 1),
+      })),
     next: () => {
-      if (page.nextCursor !== null) {
-        setCursors((old) => [...old.slice(0, index + 1), page.nextCursor!]);
-        setIndex((value) => value + 1);
-      }
+      const cursor = result.page.nextCursor;
+      if (cursor !== null)
+        setQuery((previous) => ({
+          ...previous,
+          cursors: [...previous.cursors.slice(0, previous.index + 1), cursor],
+          index: previous.index + 1,
+        }));
     },
   };
 }

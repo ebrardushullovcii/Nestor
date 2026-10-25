@@ -15,6 +15,7 @@ import type {
   ResumeApplicationMode,
   ResumeApproach,
   ResumeImportRun,
+  ProfileOverview,
   ResumeTimelineRepairAction,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
@@ -111,7 +112,9 @@ type ProfileScreenPendingActions = {
 
 export function ProfileScreen(props: {
   recordPaging?: ReactNode;
-  sourceInfo?: {hasResumeText:boolean;hasSavedResumeFile:boolean};
+  recordStatus?: ReactNode;
+  recordSummary?: Pick<ProfileOverview, "counts" | "experienceRequired">;
+  sourceInfo?: { hasResumeText: boolean; hasSavedResumeFile: boolean };
   actionState: { message: string | null };
   discoveryRunFeedback?: DiscoveryRunFeedback | null;
   importResumeGuardMessage: string | null;
@@ -230,7 +233,7 @@ export function ProfileScreen(props: {
     overviewProfile,
     preferencesForm,
     profileForm,
-    sections,
+    sections: pageSections,
     setValidationMessage,
     validationMessage,
   } = useProfileScreenForms({
@@ -240,6 +243,50 @@ export function ProfileScreen(props: {
       : {}),
     profile,
     searchPreferences,
+  });
+  const sections = pageSections.map((section) => {
+    const summary = props.recordSummary;
+    if (!summary) return section;
+    if (section.id === "experience") {
+      const current = profileForm.getValues().records.experiences;
+      const filled = (
+        rows: readonly {
+          title?: string | null;
+          companyName?: string | null;
+          startDate?: string | null;
+        }[],
+      ) =>
+        rows.reduce(
+          (sum, row) =>
+            sum +
+            [row.title, row.companyName, row.startDate].filter((value) =>
+              value?.trim(),
+            ).length,
+          0,
+        );
+      const required = {
+        filled:
+          summary.experienceRequired.filled +
+          filled(current) -
+          filled(profile.experiences),
+        total: Math.max(
+          1,
+          (summary.counts.experiences +
+            current.length -
+            profile.experiences.length) *
+            3,
+        ),
+      };
+      return { ...section, progress: { ...section.progress, required } };
+    }
+    if (
+      section.id === "background" &&
+      Object.entries(summary.counts).some(
+        ([kind, count]) => kind !== "experiences" && count > 0,
+      )
+    )
+      return { ...section, progress: { filled: 1, total: 1, percent: 100 } };
+    return section;
   });
 
   useEffect(() => {
@@ -735,7 +782,9 @@ export function ProfileScreen(props: {
                     the tabs whose content the resume actually fills. */}
                 {activeSection === "sources" ? null : (
                   <ProfileResumePanel
-                    {...(props.sourceInfo ? {sourceInfo:props.sourceInfo} : {})}
+                    {...(props.sourceInfo
+                      ? { sourceInfo: props.sourceInfo }
+                      : {})}
                     // Keep the resume source/status useful without allowing the
                     // imported-review surface to push the selected profile
                     // editor below the first viewport. The full review surface
@@ -888,49 +937,54 @@ export function ProfileScreen(props: {
                   disabled={resumeAnalysisPending}
                 >
                   {props.recordPaging}
-                  <ProfileActiveSectionContent
-                    activeSection={activeSection}
-                    requestedFileKind={searchParams.get("kind")}
-                    requestedSourceFilter={searchParams.get("show")}
-                    activeDiscoveryRun={activeDiscoveryRun}
-                    onSaveNow={handleSaveAll}
-                    backgroundArrays={backgroundArrays}
-                    discoveryRuns={discoveryRuns}
-                    experienceArray={experienceArray}
-                    isBrowserSessionPending={pendingActions.browserSession}
-                    isProfileMutationPending={
-                      pendingActions.profileMutation || resumeAnalysisPending
-                    }
-                    isSourceDebugPending={pendingActions.sourceDebug}
-                    isSourceInstructionPending={
-                      pendingActions.sourceInstruction
-                    }
-                    isSourceInstructionVerifyPending={
-                      pendingActions.sourceInstructionVerify
-                    }
-                    isTargetDiscoveryPending={pendingActions.targetDiscovery}
-                    onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
-                    onOpenBrowserSessionForTarget={handleSignInForTarget}
-                    {...(onRunDiscoveryForTarget
-                      ? { onRunDiscoveryForTarget: handleRunDiscoveryForTarget }
-                      : {})}
-                    onRunSourceDebug={handleRunSourceDebug}
-                    onSaveSourceInstructionArtifact={
-                      onSaveSourceInstructionArtifact
-                    }
-                    onVerifySourceInstructions={onVerifySourceInstructions}
-                    preferencesForm={preferencesForm}
-                    profileForm={profileForm}
-                    {...(onUpdateResumeApproach
-                      ? {
-                          onResumeApproachChange: onUpdateResumeApproach,
-                          resumeApplicationMode,
-                        }
-                      : {})}
-                    recentSourceDebugRuns={recentSourceDebugRuns}
-                    sourceAccessPrompts={sourceAccessPrompts}
-                    sourceInstructionArtifacts={sourceInstructionArtifacts}
-                  />
+                  {props.recordStatus ?? (
+                    <ProfileActiveSectionContent
+                      activeSection={activeSection}
+                      requestedFileKind={searchParams.get("kind")}
+                      requestedSourceFilter={searchParams.get("show")}
+                      activeDiscoveryRun={activeDiscoveryRun}
+                      onSaveNow={handleSaveAll}
+                      backgroundArrays={backgroundArrays}
+                      discoveryRuns={discoveryRuns}
+                      experienceArray={experienceArray}
+                      isBrowserSessionPending={pendingActions.browserSession}
+                      isProfileMutationPending={
+                        pendingActions.profileMutation || resumeAnalysisPending
+                      }
+                      isSourceDebugPending={pendingActions.sourceDebug}
+                      isSourceInstructionPending={
+                        pendingActions.sourceInstruction
+                      }
+                      isSourceInstructionVerifyPending={
+                        pendingActions.sourceInstructionVerify
+                      }
+                      isTargetDiscoveryPending={pendingActions.targetDiscovery}
+                      onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
+                      onOpenBrowserSessionForTarget={handleSignInForTarget}
+                      {...(onRunDiscoveryForTarget
+                        ? {
+                            onRunDiscoveryForTarget:
+                              handleRunDiscoveryForTarget,
+                          }
+                        : {})}
+                      onRunSourceDebug={handleRunSourceDebug}
+                      onSaveSourceInstructionArtifact={
+                        onSaveSourceInstructionArtifact
+                      }
+                      onVerifySourceInstructions={onVerifySourceInstructions}
+                      preferencesForm={preferencesForm}
+                      profileForm={profileForm}
+                      {...(onUpdateResumeApproach
+                        ? {
+                            onResumeApproachChange: onUpdateResumeApproach,
+                            resumeApplicationMode,
+                          }
+                        : {})}
+                      recentSourceDebugRuns={recentSourceDebugRuns}
+                      sourceAccessPrompts={sourceAccessPrompts}
+                      sourceInstructionArtifacts={sourceInstructionArtifacts}
+                    />
+                  )}
                 </fieldset>
                 {activeSection === "basics" ? (
                   <div
@@ -938,7 +992,9 @@ export function ProfileScreen(props: {
                     data-profile-resume-review
                   >
                     <ProfileResumePanel
-                    {...(props.sourceInfo ? {sourceInfo:props.sourceInfo} : {})}
+                      {...(props.sourceInfo
+                        ? { sourceInfo: props.sourceInfo }
+                        : {})}
                       importDisabledReason={importResumeGuardMessage}
                       isProfileReady={profileSetupState.status === "completed"}
                       isAnalyzeProfilePending={pendingActions.analyzeProfile}

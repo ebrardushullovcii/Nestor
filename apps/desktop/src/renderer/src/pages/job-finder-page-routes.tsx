@@ -32,13 +32,13 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
 }));
 const loadProfileScreen = createSharedRouteLoader(async () => ({
   default: (
-    await import("@renderer/features/job-finder/screens/profile-screen")
-  ).ProfileScreen,
+    await import("@renderer/features/profile-store/stored-profile-screen")
+  ).StoredProfileScreen,
 }));
 const loadSettingsScreen = createSharedRouteLoader(async () => ({
   default: (
-    await import("@renderer/features/job-finder/screens/settings-screen")
-  ).SettingsScreen,
+    await import("@renderer/features/profile-store/stored-settings-screen")
+  ).StoredSettingsScreen,
 }));
 
 preloadWhenIdle([
@@ -47,7 +47,7 @@ preloadWhenIdle([
   loadProfileSetupScreen,
 ]);
 
-const ProfileScreen = lazyScreen(loadProfileScreen);
+const StoredProfileScreen = lazyScreen(loadProfileScreen);
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
 
@@ -363,7 +363,7 @@ export function JobFinderProfileRoute() {
   }
 
   return (
-    <ProfileScreen
+    <StoredProfileScreen
       onApplyProfileSetupReviewAction={context.onApplyProfileSetupReviewAction}
       actionState={context.actionState}
       importResumeGuardMessage={context.importResumeGuardMessage}
@@ -419,7 +419,6 @@ export function JobFinderProfileRoute() {
         ? { onRunDiscoveryForTarget: context.onRunDiscoveryForTarget }
         : {})}
       onRunSourceDebug={context.onRunSourceDebug}
-      onSaveAll={context.onSaveAll}
       onSaveSourceInstructionArtifact={context.onSaveSourceInstructionArtifact}
       onVerifySourceInstructions={context.onVerifySourceInstructions}
       latestResumeImportReviewCandidates={
@@ -427,14 +426,8 @@ export function JobFinderProfileRoute() {
       }
       resumeImportProgress={context.resumeImportProgress}
       latestResumeImportRun={context.workspace.latestResumeImportRun}
-      profile={context.workspace.profile}
       profileSetupState={context.workspace.profileSetupState}
       recentSourceDebugRuns={context.workspace.recentSourceDebugRuns}
-      resumeApplicationMode={context.workspace.settings?.resumeApplicationMode}
-      onUpdateResumeApproach={(resumeApproach) =>
-        context.onUpdateAiBehavior({ resumeApproach })
-      }
-      searchPreferences={context.workspace.searchPreferences}
       sourceAccessPrompts={context.workspace.sourceAccessPrompts}
       sourceInstructionArtifacts={context.workspace.sourceInstructionArtifacts}
     />
@@ -521,15 +514,7 @@ export function JobFinderSettingsRoute() {
       )}
       onResetWorkspace={context.onResetWorkspace}
       onSettingsDraftEdited={context.onSettingsDraftEdited}
-      // Pass-through on purpose: these handlers resolve false when a save
-      // did not commit, and each section needs the real promise so its
-      // pending state lasts for the IPC call and false can surface as a
-      // failure instead of a local saved message.
-      onUpdateAppearanceTheme={context.onUpdateAppearanceTheme}
-      onUpdateApplicationDefaults={context.onUpdateApplicationDefaults}
-      onUpdateWorkspaceBehavior={context.onUpdateWorkspaceBehavior}
-      onUpdateAiBehavior={context.onUpdateAiBehavior}
-      settings={context.workspace.settings}
+
     />
   );
 }
