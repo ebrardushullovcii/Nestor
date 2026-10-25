@@ -31,7 +31,10 @@ test("a wide request and related roles reach browsing, extraction and off-site r
     },
   });
   const prompt = createJobSearchPrompts(run).system;
-  const extraction = JSON.parse(buildExtractionSelectionContext(run, []));
+  const extraction = JSON.parse(buildExtractionSelectionContext(run, [])) as {
+    goals: AgentConfig["searchPreferences"];
+    searchGuidance: { selectivity: string };
+  };
   expect(prompt).toContain("find a broad pool of plausible jobs");
   expect(prompt).toContain("Platform Engineer, API Engineer");
   expect(prompt).toContain('"excludedLocations":["Canada"]');
