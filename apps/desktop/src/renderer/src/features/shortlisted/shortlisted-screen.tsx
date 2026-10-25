@@ -88,9 +88,25 @@ export function ShortlistedScreen() {
     setActiveId(pinnedId.current);
     pinnedId.current = null;
   }, [tab, text]);
+  // When the open job leaves this tab (sent, moved or approved elsewhere),
+  // the one after it opens, or nothing when the tab is empty. A linked job
+  // that isn't among the loaded rows stays open.
+  const shownRows = useRef<readonly ShortlistedRow[]>([]);
   useEffect(() => {
-    if (activeId === null && !list.loading)
+    const before = shownRows.current;
+    shownRows.current = list.rows;
+    if (list.loading) return;
+    if (activeId === null) {
       setActiveId(list.rows[0]?.id ?? null);
+      return;
+    }
+    const at = before.findIndex((row) => row.id === activeId);
+    if (at < 0 || list.rows.some((row) => row.id === activeId)) return;
+    const still = new Set(list.rows.map((row) => row.id));
+    const next =
+      before.slice(at + 1).find((row) => still.has(row.id)) ??
+      list.rows[Math.min(at, list.rows.length - 1)];
+    setActiveId(next?.id ?? null);
   }, [activeId, list.loading, list.rows]);
   useAssistantListView(searchParams.get("jobs"), {
     requestId: navigationKey,
