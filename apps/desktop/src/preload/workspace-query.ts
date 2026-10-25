@@ -83,7 +83,6 @@ export function createWorkspaceQueryBridge(): WorkspaceQueryApi {
     getJobDetail: (jobId, planId = null) =>
       read("getJobDetail", { jobId, planId }),
     getCompanyDetail: (companyId) => read("getCompanyDetail", { companyId }),
-    getHomeSummary: (input = {}) => read("getHomeSummary", input),
     getListCounts: (input = {}) => read("getListCounts", input),
     queryCompanies: (input = {}) => read("queryCompanies", input),
     getChanges: (after, limit = 500) => read("getChanges", { after, limit }),

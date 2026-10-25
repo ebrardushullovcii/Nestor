@@ -22,6 +22,11 @@ function configureWindowNestor(input: {
         onChange: () => () => undefined,
       },
       home: { summary: () => new Promise(() => undefined) },
+      needsYou: { run: () => new Promise(() => undefined) },
+      window: {
+        getControlsState: () => new Promise(() => undefined),
+        onControlsStateChange: () => () => undefined,
+      },
       jobFinder: {
         getWorkspaceBootstrap: vi.fn(() =>
           Promise.reject(input.getWorkspaceBootstrapError),
@@ -37,7 +42,10 @@ function configureWindowNestor(input: {
   });
 }
 
-function renderJobFinderPage() {
+// Settings still reads the old workspace, so a failed load shows there.
+function renderJobFinderPage(path = "/job-finder/settings") {
+  Element.prototype.scrollTo = () => undefined;
+  Element.prototype.scrollIntoView = () => undefined;
   // The page controller mounts a React Router blocker, so the harness must use
   // a data router (declarative routers cannot host blockers).
   const router = createMemoryRouter(
@@ -47,7 +55,7 @@ function renderJobFinderPage() {
         element: <JobFinderPage />,
       },
     ],
-    { initialEntries: ["/job-finder/home"] },
+    { initialEntries: [path] },
   );
 
   return render(<RouterProvider router={router} />);
@@ -57,6 +65,30 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   delete (window as { nestor?: unknown }).nestor;
+});
+
+// First: the other tests open Settings, which asks for the old workspace for
+// the rest of the window's life.
+describe("JobFinderPage launch", () => {
+  it("opens Home and its navigation without loading the old workspace", async () => {
+    configureWindowNestor({
+      getWorkspaceBootstrapError: new Error("not expected"),
+      recoveryFact: { status: "idle" },
+    });
+
+    renderJobFinderPage("/job-finder/home");
+
+    expect(
+      await screen.findByRole("navigation", { name: "Job Finder sections" }),
+    ).toBeTruthy();
+    const bridge = (
+      window as unknown as {
+        nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
+      }
+    ).nestor.jobFinder;
+    expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
+    expect(bridge.getWorkspace).not.toHaveBeenCalled();
+  });
 });
 
 describe("JobFinderPage startup database recovery blocking", () => {

@@ -22,7 +22,6 @@ import {
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJobFinderWorkspaceDeltaTracker } from "../../../../../main/services/job-finder/workspace-delta";
-import { startLaunchReads } from "../lib/launch-reads";
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 
 function requireReadyWorkspace(
@@ -1322,47 +1321,6 @@ describe("useJobFinderWorkspace entity mutations", () => {
         requireReadyWorkspace(result.current).workspace.hydration.phase,
       ).toBe("complete"),
     );
-  });
-
-  it("starts the full load only after the launch queries answered", async () => {
-    enableBootstrapApi();
-    const counts = deferred<unknown>();
-    Object.assign(window.nestor.jobFinder as object, {
-      queries: {
-        getHomeSummary: () => Promise.resolve({ counts: null }),
-        getListCounts: () => counts.promise,
-        getStartupContext: () => Promise.resolve(null),
-        queryJobList: () => Promise.resolve({ rows: [], total: 0 }),
-      },
-    });
-    startLaunchReads();
-    getWorkspaceBootstrap.mockResolvedValueOnce({
-      ...createWorkspace("job-bootstrap"),
-      discoveryJobs: [],
-      hydration: {
-        phase: "bootstrap" as const,
-        deferredCollections: ["discovery_jobs"] as const,
-      },
-    });
-    syncWorkspace.mockResolvedValueOnce({
-      kind: "snapshot",
-      currentRevision: 8,
-      reason: "initial",
-      snapshot: createWorkspace("job-hydrated"),
-    });
-
-    const { result } = renderHook(() => useJobFinderWorkspace());
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(syncWorkspace).not.toHaveBeenCalled();
-
-    await act(async () => {
-      counts.resolve({ discovery: 0 });
-      await counts.promise;
-    });
-    await waitFor(() => expect(syncWorkspace).toHaveBeenCalledWith(null));
   });
 
   it("holds a press made before the full snapshot and runs it when it lands", async () => {

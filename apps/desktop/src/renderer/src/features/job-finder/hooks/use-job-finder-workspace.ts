@@ -50,7 +50,6 @@ import type {
 import { isJobFinderStartupDatabaseRecoveryFact } from "../../../../../shared/job-finder-startup-db-recovery";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 import type { JobFinderShellActions } from "../lib/job-finder-types";
-import { whenLaunchReadsSettled } from "../lib/launch-reads";
 import {
   publishLiveFindJobsCounts,
 } from "../lib/search-change-feed";
@@ -74,7 +73,7 @@ const MIN_UPDATE_SYNC_REST_MS = 400;
 const MAX_UPDATE_SYNC_REST_MS = 8_000;
 const MAX_WORKSPACE_BASELINES = 4;
 
-type JobFinderWorkspaceState =
+export type JobFinderWorkspaceState =
   | { status: "loading" }
   | {
       status: "ready";
@@ -145,7 +144,12 @@ function isWorkspaceSyncResult(
   );
 }
 
-export function useJobFinderWorkspace(): JobFinderWorkspaceState {
+/**
+ * The old whole-workspace load. It starts only once `enabled` turns true (a
+ * screen that still needs it opened), so launch and the store screens never
+ * wait for it.
+ */
+export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
   const [workspaceState, setWorkspaceState] = useState<JobFinderWorkspaceState>(
     { status: "loading" },
   );
@@ -580,11 +584,13 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   }, [commitWorkspaceView, syncWorkspaceFromUpdate]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     registerFullWorkspaceRead(() => recoverFullWorkspaceOnce());
     return () => registerFullWorkspaceRead(null);
-  }, [recoverFullWorkspaceOnce]);
+  }, [enabled, recoverFullWorkspaceOnce]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     let disposed = false;
     let syncing = false;
     let queued = false;
@@ -649,7 +655,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       if (waitTimer !== undefined) window.clearTimeout(waitTimer);
       unsubscribe?.();
     };
-  }, [refreshWorkspaceView]);
+  }, [enabled, refreshWorkspaceView]);
 
   /**
    * Asks for a background refresh on the same paced path as main's update
@@ -1027,6 +1033,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   );
 
   useEffect(() => {
+    if (!enabled) return undefined;
     let cancelled = false;
 
     async function loadWorkspace() {
@@ -1094,11 +1101,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
               markJobFinderTiming("job-finder:workspace:home:ready");
             }
           }
-          // The full load reads every saved job in main. It starts once the
-          // screens drawn from the launch queries are usable, not ahead of
-          // them.
-          await whenLaunchReadsSettled();
-          if (cancelled) return;
           const hydrationSequence = beginWorkspaceRequest();
           markJobFinderTiming(`${performancePrefix}:hydration:start`);
           markJobFinderTiming("job-finder:workspace:hydration:start");
@@ -1219,6 +1221,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     actions,
     beginWorkspaceRequest,
     commitWorkspace,
+    enabled,
     isCurrentWorkspaceRequest,
     loadRequest,
     recoverFullWorkspaceOnce,

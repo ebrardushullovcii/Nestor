@@ -208,15 +208,6 @@ export interface WorkspaceJobListFacets {
   assessed: number;
   newSince: number | null;
 }
-export interface WorkspaceHomeSummary {
-  counts: WorkspaceListCounts;
-  revision: number;
-  resumesToReview: number;
-  resumesApproved: number;
-  activePlanId: string | null;
-  searchRunning: boolean;
-  applicationsByStatus: Record<string, number>;
-}
 export interface WorkspaceCompanySummary {
   id: string;
   canonicalName: string;
@@ -309,12 +300,6 @@ export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
     input: z.object({ companyId: NonEmptyStringSchema }).strict(),
   }),
   z.object({
-    method: z.literal("getHomeSummary"),
-    input: z
-      .object({ planId: NonEmptyStringSchema.nullable().optional() })
-      .strict(),
-  }),
-  z.object({
     method: z.literal("getListCounts"),
     input: z
       .object({ planId: NonEmptyStringSchema.nullable().optional() })
@@ -370,9 +355,6 @@ export interface WorkspaceQueryApi {
     planId?: string | null,
   ): Promise<JobFinderJobDetail | null>;
   getCompanyDetail(companyId: string): Promise<CompanyEntity | null>;
-  getHomeSummary(input?: {
-    planId?: string | null;
-  }): Promise<WorkspaceHomeSummary>;
   getListCounts(input?: {
     planId?: string | null;
   }): Promise<WorkspaceListCounts>;

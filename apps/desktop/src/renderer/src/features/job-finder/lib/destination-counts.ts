@@ -35,25 +35,6 @@ export function selectCampaignJobIds(
   );
 }
 
-/**
- * The rows Find jobs lists by default: the recommended band plus the
- * title-only band. The weaker and clearly mismatched rows stay out, because
- * including them made the badge oversell a search the app had already scored
- * below the user's targets.
- */
-export function countDiscoveryVisibleJobs(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-  campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
-): number {
-  // Exactly the rows Find jobs lists by default: every kept job the person
-  // has not hidden or decided on, minus the weaker matches that sit behind
-  // "Show weaker matches". The badge used to count those too, so Home and the
-  // sidebar said 10 beside a page that said 9.
-  return listFindJobsPool(workspace, campaignJobIds).filter(
-    (job) => !isDiscoveryAlsoFoundResult(job),
-  ).length;
-}
-
 /** Weaker matches Find jobs keeps behind "Show weaker matches". */
 export function countDiscoveryWeakerJobs(
   workspace: JobFinderRendererWorkspaceSnapshot,
@@ -86,15 +67,6 @@ export function countShortlistedJobs(
 ): number {
   return (workspace.reviewQueue ?? []).filter((item) =>
     campaignJobIds.has(item.jobId),
-  ).length;
-}
-
-export function countApplicationRecords(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-  campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
-): number {
-  return (workspace.applicationRecords ?? []).filter((record) =>
-    campaignJobIds.has(record.jobId),
   ).length;
 }
 

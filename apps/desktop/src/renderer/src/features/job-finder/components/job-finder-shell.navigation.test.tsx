@@ -404,6 +404,13 @@ describe("JobFinderShell compact nav responsive contract", () => {
         <JobFinderShell
           needsYouCount={1}
           platform="win32"
+          stageCounts={{
+            found: 2,
+            hidden: 0,
+            shortlisted: 0,
+            resume: 0,
+            applied: 0,
+          }}
           workspace={workspace}
         >
           <div>Current screen</div>

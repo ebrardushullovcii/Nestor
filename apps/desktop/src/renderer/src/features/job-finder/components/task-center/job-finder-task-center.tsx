@@ -10,21 +10,30 @@ import type { RecentChange } from "../../lib/recent-changes";
 import { RecentChangesSection } from "./recent-changes-section";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
+import { requestLegacyWorkspace } from "../../lib/legacy-workspace-demand";
 import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
   type JobFinderTaskCenterItem,
+  type JobFinderTaskCenterModel,
   isStaleFinishedTask,
 } from "./job-finder-task-center-model";
 
 interface JobFinderTaskCenterProps {
-  workspace: JobFinderRendererWorkspaceSnapshot;
+  /** Null until the old workspace loads; opening the panel asks for it. */
+  workspace: JobFinderRendererWorkspaceSnapshot | null;
   isResumeImportPending: boolean;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
   onNavigate?: ((path: string) => void | Promise<void>) | undefined;
   /** Puts back one of the person's recent moves. */
   onUndoRecentChange?: ((change: RecentChange) => Promise<boolean>) | undefined;
 }
+
+const NO_TASKS: JobFinderTaskCenterModel = {
+  activeCount: 0,
+  pausedCount: 0,
+  items: [],
+};
 
 const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v1";
 
@@ -93,11 +102,13 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
   );
   const model = useMemo(
     () =>
-      buildJobFinderTaskCenterModel({
-        workspace: props.workspace,
-        isResumeImportPending: props.isResumeImportPending,
-        resumeImportProgress: props.resumeImportProgress,
-      }),
+      props.workspace
+        ? buildJobFinderTaskCenterModel({
+            workspace: props.workspace,
+            isResumeImportPending: props.isResumeImportPending,
+            resumeImportProgress: props.resumeImportProgress,
+          })
+        : NO_TASKS,
     [
       props.isResumeImportPending,
       props.resumeImportProgress,
@@ -215,7 +226,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
     >
       <summary
         aria-label={
-          props.workspace.activityControl?.paused
+          props.workspace?.activityControl?.paused
             ? "Activity: paused"
             : taskCountsLabel
               ? `Activity: ${taskCountsLabel}`
@@ -226,11 +237,12 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           // The panel state owns openness so overlay ownership and shell
           // shortcut blocking stay truthful; cancel the native summary toggle.
           event.preventDefault();
+          if (!props.workspace) requestLegacyWorkspace();
           setIsPanelOpen((open) => !open);
         }}
         ref={summaryRef}
         title={
-          props.workspace.activityControl?.paused
+          props.workspace?.activityControl?.paused
             ? "Activity: paused"
             : taskCountsLabel
               ? `Activity: ${taskCountsLabel}`
@@ -249,7 +261,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
             screenshot of every round — and the one count that rendered zero
             was the one that means "nothing is happening". The accessible name
             on the summary still states the active count at any value. */}
-        {props.workspace.activityControl?.paused ? (
+        {props.workspace?.activityControl?.paused ? (
           <span className="text-xs text-foreground">Paused</span>
         ) : taskCountsLabel ? (
           <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-(--input) px-1.5 text-(length:--text-tiny) text-foreground tabular-nums">
@@ -303,8 +315,9 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
-            Nothing is running. Resume imports and source checks show here
-            while they work.
+            {props.workspace
+              ? "Nothing is running. Resume imports and source checks show here while they work."
+              : "Loading activity…"}
           </p>
         ) : (
           <div className="grid gap-3">
@@ -393,7 +406,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
             })}
           </div>
         )}
-        {props.onUndoRecentChange ? (
+        {props.onUndoRecentChange && props.workspace ? (
           <RecentChangesSection
             onUndo={props.onUndoRecentChange}
             workspace={props.workspace}

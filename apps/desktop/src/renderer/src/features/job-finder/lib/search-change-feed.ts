@@ -73,11 +73,3 @@ export function useLiveFindJobsCounts(
     ? { visible: current.counts.discovery, weaker: current.weaker }
     : null;
 }
-
-/** The counts to show beside `workspace`, or null when its own are current. */
-export function useSearchLiveCounts(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): WorkspaceListCounts | null {
-  const current = useSyncExternalStore(subscribe, read, read);
-  return current?.workspace === workspace ? current.counts : null;
-}

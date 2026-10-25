@@ -35,8 +35,10 @@ import type { LucideIcon } from "lucide-react";
 import type {
   DesktopWindowControlsState,
   JobFinderRendererWorkspaceSnapshot,
+  JobStageCounts,
   ResumeImportProgressEvent,
   SuiteModule,
+  WorkspaceStartupContext,
 } from "@nestor/contracts";
 import { collapsesSideMenuWithAssistant } from "@nestor/contracts";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -58,13 +60,8 @@ import {
 import { JobFinderTaskCenter } from "./task-center/job-finder-task-center";
 import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
 import {
-  countApplicationRecords,
-  countDiscoveryVisibleJobs,
-  selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
-import { useSearchLiveCounts } from "../lib/search-change-feed";
-import { useLaunchReads } from "../lib/launch-reads";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
@@ -93,6 +90,7 @@ import {
   JobFinderShortcutsDialog,
 } from "./job-finder-shortcuts-dialog";
 import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
+import { requestLegacyWorkspace } from "../lib/legacy-workspace-demand";
 
 interface JobFinderShellProps {
   children: ReactNode;
@@ -104,10 +102,13 @@ interface JobFinderShellProps {
   platform: "darwin" | "linux" | "win32";
   resumeImportProgress?: ResumeImportProgressEvent | null;
   saveState?: JobFinderSaveState;
-  /** Shortlisted jobs whose resume waits to be read, from the job store. */
-  toReviewCount?: number | null;
+  /** Jobs per stage in the job store, for the list badges. */
+  stageCounts?: JobStageCounts | null;
   needsYouCount?: number;
-  workspace: JobFinderRendererWorkspaceSnapshot;
+  /** Settings and setup state read at launch, before any old workspace. */
+  startupContext?: WorkspaceStartupContext | null;
+  /** The old whole workspace, once a screen that needs it has loaded it. */
+  workspace: JobFinderRendererWorkspaceSnapshot | null;
 }
 
 const screenRouteMap: Record<Exclude<JobFinderScreen, "profile">, string> = {
@@ -477,10 +478,14 @@ export function JobFinderShell({
   platform,
   resumeImportProgress = null,
   saveState,
-  toReviewCount = null,
+  stageCounts = null,
   needsYouCount = 0,
+  startupContext = null,
   workspace,
 }: JobFinderShellProps) {
+  const settings = workspace?.settings ?? startupContext?.settings ?? {};
+  const profileSetupState =
+    workspace?.profileSetupState ?? startupContext?.profileSetupState ?? null;
   const isMac = platform === "darwin";
   const isWindows = platform === "win32";
   const location = useLocation();
@@ -519,7 +524,7 @@ export function JobFinderShell({
   const { notePersonToggledSideMenu } = useAssistantSideMenuCollapse({
     assistantOpen: assistant?.open ?? false,
     assistantWidth: assistant?.width ?? 0,
-    enabled: collapsesSideMenuWithAssistant(workspace.settings ?? {}),
+    enabled: collapsesSideMenuWithAssistant(settings),
     isSideMenuCollapsed: isSidebarCollapsed,
     setSideMenuCollapsed: setIsSidebarCollapsed,
   });
@@ -569,6 +574,11 @@ export function JobFinderShell({
   const loadGlobalSearchEntries = useMemo(() => {
     let entries: readonly JobFinderGlobalSearchEntry[] | null = null;
     return () => {
+      if (!workspace) {
+        // The palette still searches the old workspace; opening it loads it.
+        requestLegacyWorkspace();
+        return [];
+      }
       // The palette lists every job: one full read if the lists fell behind.
       readFullWorkspaceIfBehind();
       return (entries ??= buildJobFinderGlobalSearchEntries(workspace));
@@ -598,15 +608,7 @@ export function JobFinderShell({
   // named for its population. No count is derived inline here any more: four
   // of them used to count something other than what their destination page
   // prints, and nothing could hold the two together.
-  const launchCounts = useLaunchReads().counts;
-  const searchCounts = useSearchLiveCounts(workspace);
   const screenDefinitions = useMemo<readonly ShellScreenDefinition[]>(() => {
-    const campaignJobIds = selectCampaignJobIds(workspace);
-    // Until the jobs load, the three list badges come from the database, and
-    // so do they during a search on screens that do not sync for it.
-    const openingCounts =
-      workspace.hydration?.phase === "bootstrap" ? launchCounts : searchCounts;
-
     return [
       {
         id: "home",
@@ -625,27 +627,21 @@ export function JobFinderShell({
       {
         id: "discovery",
         label: "Find jobs",
-        count: toDestinationBadgeCount(
-          openingCounts?.discovery ??
-            countDiscoveryVisibleJobs(workspace, campaignJobIds),
-        ),
+        count: toDestinationBadgeCount(stageCounts?.found ?? 0),
         countKind: "inventory",
         icon: Compass,
       },
       {
         id: "review-queue",
         label: "Shortlisted",
-        count: toDestinationBadgeCount(toReviewCount ?? 0),
+        count: toDestinationBadgeCount(stageCounts?.shortlisted ?? 0),
         countKind: "inventory",
         icon: ClipboardCheck,
       },
       {
         id: "applications",
         label: "Applications",
-        count: toDestinationBadgeCount(
-          openingCounts?.applications ??
-            countApplicationRecords(workspace, campaignJobIds),
-        ),
+        count: toDestinationBadgeCount(stageCounts?.applied ?? 0),
         countKind: "inventory",
         icon: FileText,
       },
@@ -665,7 +661,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [launchCounts, searchCounts, toReviewCount, needsYouCount, workspace]);
+  }, [stageCounts, needsYouCount]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",
@@ -979,7 +975,9 @@ export function JobFinderShell({
   function handleScreenChange(nextScreen: string) {
     const nextPath =
       nextScreen === "profile"
-        ? getDefaultProfileRoute(workspace.profileSetupState)
+        ? profileSetupState
+          ? getDefaultProfileRoute(profileSetupState)
+          : "/job-finder/profile"
         : screenRouteMap[nextScreen as Exclude<JobFinderScreen, "profile">];
 
     const nextPathname = nextPath.split(/[?#]/, 1)[0] ?? nextPath;
