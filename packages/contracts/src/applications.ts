@@ -1,3 +1,4 @@
+import { SourceAccessReferenceSchema } from "./source-access";
 import { z } from "zod";
 
 import { IsoDateTimeSchema } from "./base";
@@ -138,6 +139,7 @@ export const NeedsYouTaskSchema = z.object({
   input: z.enum(["text", "boolean", "choice", "number", "file"]),
   options: z.array(z.string()),
   openedAt: IsoDateTimeSchema,
+  source: SourceAccessReferenceSchema.optional(),
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 
@@ -150,6 +152,7 @@ export type NeedsYouPage = z.infer<typeof NeedsYouPageSchema>;
 export const RequestNeedsYouInputSchema = NeedsYouTaskSchema.omit({
   id: true,
   openedAt: true,
+  source: true,
 })
   .extend({
     applicationId: ApplicationIdSchema,

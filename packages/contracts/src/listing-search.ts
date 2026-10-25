@@ -23,6 +23,7 @@ export interface ListingCard {
   locationHint?: string;
   sourceJobId?: string;
   postedAt?: string;
+  closed?: boolean;
 }
 
 export interface SeenListingCard {
@@ -47,6 +48,8 @@ export interface SourceInventory {
   complete: boolean;
   notes: string[];
   needsYou?: boolean;
+  /** The HTTP lane defers interaction to the separate browser queue. */
+  requiresBrowser?: boolean;
 }
 
 export interface ListingSearchReader {
@@ -57,7 +60,12 @@ export interface ListingSearchReader {
 /** The runner merges these sightings before passing unscored jobs to fit. */
 export interface ReadListingResult {
   jobs: FoundJob[];
-  failures: Array<{ url: string; reason: string; needsYou?: boolean }>;
+  failures: Array<{
+    url: string;
+    reason: string;
+    needsYou?: boolean;
+    requiresBrowser?: boolean;
+  }>;
 }
 
 export interface SearchFitInput {

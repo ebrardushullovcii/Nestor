@@ -68,12 +68,18 @@ describe("job commands", () => {
 
   it("starts a search with the chosen settings and reports it", async () => {
     let started: unknown = null;
-    const status: JobSearchStatus = { search: null, sources: [] };
+    const status: JobSearchStatus = {
+      search: null,
+      sources: [],
+      progress: null,
+      sourceRevision: 0,
+    };
     const search: JobSearchControl = {
       start: (settings) => {
         started = settings;
         return Promise.resolve();
       },
+      retrySource: () => Promise.resolve(undefined),
       stop: () => undefined,
       status: () => status,
       scoreUnscored: () => Promise.resolve(0),

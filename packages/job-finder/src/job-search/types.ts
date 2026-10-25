@@ -22,8 +22,13 @@ export interface JobSearchRunnerDeps {
   store: JobStore;
   engine: JobSearchEngine;
   readContext(): Promise<JobSearchContext>;
-  /** Defaults: four HTTP inventories and six fit batches. Browser reads are capped by the engine. */
-  concurrency?: { sources?: number; fit?: number };
+  /** Separate HTTP/browser queues, with per-host limits; fit batches run alongside collection. */
+  concurrency?: {
+    sources?: number;
+    perHost?: number;
+    browser?: number;
+    fit?: number;
+  };
 }
 
 export interface JobSearchRunner {
@@ -31,6 +36,8 @@ export interface JobSearchRunner {
   start(settings: JobSearchSettingsInput): Promise<JobSearchRecord>;
   /** Also cancels a standalone scoreUnscored call. Saved jobs stay saved. */
   stop(): void;
+  /** Rechecks only this site; joins the running search, or starts a single-site search. */
+  retrySource(id: number): Promise<JobSearchRecord>;
   status(): JobSearchStatus;
   /** Coalesced to at most four notifications per second. */
   onStatus(listener: (status: JobSearchStatus) => void): () => void;

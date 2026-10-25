@@ -11,7 +11,7 @@ import type { Statements } from "./statements";
 
 type SearchCounts = Pick<
   JobSearchRecord,
-  "sourcesDone" | "found" | "added" | "merged" | "scored"
+  "sourcesTotal" | "sourcesDone" | "found" | "added" | "merged" | "scored"
 >;
 
 export interface JobSearches {
@@ -82,10 +82,11 @@ export function createSearches(sql: Statements): JobSearches {
     },
     count(id, increments) {
       sql(
-        `UPDATE searches SET sources_done = sources_done + ?, found = found + ?,
+        `UPDATE searches SET sources_total = sources_total + ?, sources_done = sources_done + ?, found = found + ?,
            added = added + ?, merged = merged + ?, scored = scored + ?
          WHERE id = ?`,
       ).run(
+        increments.sourcesTotal ?? 0,
         increments.sourcesDone ?? 0,
         increments.found ?? 0,
         increments.added ?? 0,

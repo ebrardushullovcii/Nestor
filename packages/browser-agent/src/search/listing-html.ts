@@ -1,3 +1,4 @@
+import { listingClosedReason } from "./listing-status";
 import {
   parse,
   serializeOuter,
@@ -136,6 +137,12 @@ export function readInventoryHtml(
       url: href,
       title: job.title,
       text: body,
+      ...(listingClosedReason(
+        "",
+        typeof job.validThrough === "string" ? job.validThrough : null,
+      )
+        ? { closed: true }
+        : {}),
       cardFingerprint: fingerprint(job.title.trim().toLowerCase()),
       sourceId: source.id,
       sourceLabel: source.label,
@@ -240,6 +247,10 @@ export function readInventoryHtml(
         : {}),
       // Profession screening reads the title, so an age or sponsored badge is not a new decision.
       cardFingerprint: fingerprint(title.trim().toLowerCase()),
+      ...(/(?:^|[·|\n])\s*closed(?:\s|$)/iu.test(body) ||
+      listingClosedReason(body)
+        ? { closed: true }
+        : {}),
     });
   }
   const next = new Set<string>();

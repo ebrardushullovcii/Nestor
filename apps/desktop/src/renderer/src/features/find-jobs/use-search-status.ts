@@ -1,7 +1,12 @@
 import type { JobSearchStatus } from "@nestor/contracts";
 import { useEffect, useState } from "react";
 
-const NONE: JobSearchStatus = { search: null, sources: [] };
+const NONE: JobSearchStatus = {
+  search: null,
+  sources: [],
+  progress: null,
+  sourceRevision: 0,
+};
 
 /**
  * The running or last search, kept current while the screen is open.

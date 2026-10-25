@@ -1,3 +1,4 @@
+import { createScaleRouter } from "./scale/router.mjs";
 import http from "node:http";
 import { appendFileSync, readFileSync } from "node:fs";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -390,6 +391,10 @@ function hasResume(fields) {
   return fields.resume && fields.resume.filename && fields.resume.size > 0;
 }
 
+const scale = createScaleRouter({
+  dispatch: (req, res) => server.emit("request", req, res),
+  port: () => server.address().port,
+});
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   const path = url.pathname;
@@ -410,6 +415,7 @@ const server = http.createServer(async (req, res) => {
     req.headers.cookie || "",
   );
   try {
+    if (await scale.handle(req, res, url)) return;
     if (await handleMoreSites(req, res, url, { send, readPost, logPost }))
       return;
     if (req.method === "POST") {
@@ -699,4 +705,7 @@ server.listen(Number(process.env.PORT || 47950), "127.0.0.1", () => {
   );
 });
 for (const signal of ["SIGTERM", "SIGINT"])
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    scale.close();
+    server.close(() => process.exit(0));
+  });

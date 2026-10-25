@@ -1,12 +1,19 @@
 import {
   CandidateProfileSchema,
+  jobSiteTarget,
   JobDiscoveryTargetSchema,
   JobSearchPreferencesSchema,
   type FoundJob,
   type ListingCard,
   type JobSearchStatus,
 } from "@nestor/contracts";
-import { openJobStore, type JobStore } from "@nestor/db/job-store";
+import {
+  createJobSitesStore,
+  createSearchSourcesStore,
+  createSourceAccessStore,
+  type JobStore,
+  openJobStore,
+} from "@nestor/db/job-store";
 import { afterEach, expect, test, vi } from "vitest";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
@@ -172,9 +179,9 @@ test("a background search merges all sightings before fitting; repeat reads and 
   expect(engine.readListings.mock.calls[1]![0].cards).toEqual([]);
   expect(engine.fitJobs).toHaveBeenCalledTimes(1);
   expect(
-    runner
-      .status()
-      .sources.every((source) => source.message?.includes("already seen")),
+    createSearchSourcesStore(store)
+      .list({})
+      .rows.every((source) => source.seen === 2),
   ).toBe(true);
 });
 
@@ -227,4 +234,154 @@ test("recovery shares the live fit queue rather than judging a job twice", async
   await recovery;
   await finished(runner);
   expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+});
+
+test("HTTP jobs stream while a browser site is waiting; retry rechecks only its site and keeps one access ticket", async () => {
+  const { runner, engine, store, context } = setup();
+  const sites = createJobSitesStore(store),
+    access = createSourceAccessStore(store);
+  sites.add({
+    text: "https://locked.example/jobs\nhttps://readable.example/jobs",
+  });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const held =
+    deferred<Awaited<ReturnType<JobSearchEngine["collectSource"]>>>();
+  let unlocked = false;
+  engine.collectSource.mockImplementation(async ({ target, lane }) => {
+    if (target.id === "1" && !unlocked)
+      return lane === "http"
+        ? {
+            cards: [],
+            pagesRead: 1,
+            complete: false,
+            requiresBrowser: true,
+            notes: [],
+          }
+        : {
+            cards: [],
+            pagesRead: 1,
+            complete: false,
+            needsYou: true,
+            notes: ["Sign in."],
+          };
+    if (target.id === "2" && lane === "browser") return held.promise;
+    if (target.id === "2")
+      return {
+        cards: [card("2")],
+        pagesRead: 1,
+        complete: false,
+        requiresBrowser: true,
+        notes: [],
+      };
+    return {
+      cards: [card(target.id)],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    };
+  });
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() => expect(store.stageCounts().found).toBe(1), {
+    timeout: 10000,
+  });
+  await runner.scoreUnscored();
+  expect(runner.status().search?.state).toBe("running");
+  expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(82);
+  expect(access.pending(1)).toBe(true);
+  const before = engine.collectSource.mock.calls.filter(
+    ([input]) => input.target.id === "2",
+  ).length;
+  unlocked = true;
+  sites.update({ id: 1, enabled: false });
+  await runner.retrySource(1);
+  await vi.waitFor(() => expect(access.pending(1)).toBe(false), {
+    timeout: 10000,
+  });
+  expect(
+    engine.collectSource.mock.calls.filter(
+      ([input]) => input.target.id === "2",
+    ),
+  ).toHaveLength(before);
+  expect(sites.get(1)?.enabled).toBe(false);
+  held.resolve({ cards: [], pagesRead: 1, complete: true, notes: [] });
+  await finished(runner);
+  expect(runner.status().search?.sourcesTotal).toBe(2);
+  expect(runner.status().search?.sourcesDone).toBe(2);
+  expect(store.sql("SELECT count(*) AS n FROM needs_you").get()).toMatchObject({
+    n: 1,
+  });
+});
+
+test("900 sites have compact progress and paged results; a repeat does not reread or refit saved jobs", async () => {
+  const { runner, store, engine, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({
+    text: Array.from(
+      { length: 900 },
+      (_, i) => `https://boards.example/site-${i}/`,
+    ).join("\n"),
+  });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  let largest = 0;
+  const off = runner.onStatus((status) => {
+    largest = Math.max(largest, status.sources.length);
+  });
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(runner.status().search).toMatchObject({
+    sourcesTotal: 900,
+    sourcesDone: 900,
+  });
+  expect(largest).toBeLessThanOrEqual(3);
+  expect(createSearchSourcesStore(store).list({ limit: 25 })).toMatchObject({
+    total: 900,
+  });
+  expect(createSearchSourcesStore(store).list({ limit: 25 }).rows).toHaveLength(
+    25,
+  );
+  const before = engine.fitJobs.mock.calls.length;
+  engine.readListings.mockClear();
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  off();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(before);
+  expect(
+    engine.readListings.mock.calls.every(([input]) => input.cards.length === 0),
+  ).toBe(true);
+});
+
+test("a closed related vacancy is saved hidden with its full text and no fit spend; a known card can retire an open Found row", async () => {
+  const { runner, engine, store } = setup();
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((card) => ({
+        ...found(card),
+        hiddenReason:
+          "Closed: this vacancy is no longer accepting applications.",
+      })),
+      failures: [],
+    }),
+  );
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(store.stageCounts().found).toBe(0);
+  expect(store.stageCounts().hidden).toBe(1);
+  expect(engine.fitJobs).not.toHaveBeenCalled();
+  const hidden = store.listJobs({ stage: "hidden" }).rows[0]!;
+  expect(store.getJob(hidden.id)?.description).toContain(
+    "Full published listing",
+  );
+  store.moveJobs({ selection: { ids: [hidden.id] }, to: "found" });
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [{ ...card(target.id), closed: true }],
+      complete: true,
+      pagesRead: 1,
+      notes: [],
+    }),
+  );
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(store.getJob(hidden.id)?.stage).toBe("hidden");
+  expect(store.getJob(hidden.id)?.stageNote).toMatch(/^Closed:/);
 });

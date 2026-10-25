@@ -55,3 +55,11 @@ Resume parsing is simulated: a TXT resume may contain `Name:`, `Email:` and `Pho
 The local ATS offers guest applications and an optional synthetic profile. Its warning appears after 60 seconds and the form times out after 120 seconds; Keep working preserves answers and restarts the timer. `/slowgrove/` and application pages wait three seconds; detail pages wait five seconds, except job 2 which waits eight. `/pacer/` allows eight requests in three seconds, then returns HTTP 429 with `Retry-After` for a two-second cooldown. Requests rejected by the limiter do not reach the POST parser or submission log.
 
 New modules live in `sites/`; the original site assets and routes remain separate. `check-more.mjs` is called by `check.mjs` and uses the same owned server and temporary log. No dependencies, external resources or internet requests are needed.
+
+## Large source set
+
+`/__scale__/manifest` generates 900 source URLs across `127.0.0.1` through `127.0.0.12` on this server's port. The additional listeners start only when the manifest is requested and close with the server. The catalog contains 4,320 distinct fictional jobs, including 180 senior backend jobs in the US and 60 entry-level part-time analyst jobs in Berlin; `expected.dev` and `expected.lina` enumerate their canonical URLs.
+
+There are 540 employer boards, 270 overlapping aggregators, 30 empty boards, 12 script-rendered boards, 18 sign-in gates, 12 verification gates, 10 first-request rate limits and 8 slow boards. Lists use JSON-LD, plain list items or articles, with observed next-page links. Gates have a local-only Continue with synthetic session button; no credentials are needed. `GET /__scale__/metrics` reports request/detail/browser/gate counts and peak requests per hostname. `POST /__scale__/reset` resets counters and first-request rate limits, without signing out browser sessions.
+
+This tests generic HTML and structured-data collection, queues, duplicates, access and repeat behavior. It does not emulate the public APIs of every supported ATS provider.
