@@ -34,7 +34,7 @@ it("creates and reads the real Needs you answer library through MCP", async () =
   });
   const ctx = context();
   ctx.session.assertPersonAnswerAuthority = () => Promise.resolve();
-  ctx.session.recordChange = vi.fn<
+  const recordChange = vi.fn<
     AssistantToolContext["session"]["recordChange"]
   >((input) =>
     Promise.resolve({
@@ -47,6 +47,7 @@ it("creates and reads the real Needs you answer library through MCP", async () =
       part: { type: "text", text: "Saved answer changed" },
     }),
   );
+  ctx.session.recordChange = recordChange;
   const mcp = await connectAssistantMcp(needsYouCommandTools(run), ctx);
   try {
     for (const [prompt, answer] of [
@@ -89,6 +90,10 @@ it("creates and reads the real Needs you answer library through MCP", async () =
     const notice = applications.needsYou.getAnswerByKey({
       key: "notice_period",
     })!;
+    const availability = await run("create_form_answer", {
+      prompt: "Interview availability",
+      answer: "Weekday mornings",
+    });
     const edit = await mcp.tools
       .find((tool) => tool.name === "save_form_answer")!
       .execute({ id: notice.id, answer: "Four weeks" }, ctx);
@@ -96,14 +101,49 @@ it("creates and reads the real Needs you answer library through MCP", async () =
     expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
       "Four weeks",
     );
+    await mcp.tools
+      .find((tool) => tool.name === "save_form_answer")!
+      .execute({ id: availability.id, answer: "Weekday afternoons" }, ctx);
+    const receipts = recordChange.mock.calls;
+    expect(receipts.slice(-2).map(([receipt]) => receipt.entries)).toEqual([
+      [
+        expect.objectContaining({
+          label: "My notice period",
+          before: "Two weeks",
+          after: "Four weeks",
+        }),
+      ],
+      [
+        expect.objectContaining({
+          label: "Interview availability",
+          before: "Weekday mornings",
+          after: "Weekday afternoons",
+        }),
+      ],
+    ]);
     const forgot = await mcp.tools
       .find((tool) => tool.name === "forget_form_answers")!
-      .execute({ ids: [notice.id] }, ctx);
+      .execute({ ids: [notice.id, availability.id] }, ctx);
     const forgetChange = forgot.data as { undoId: number };
     expect(applications.needsYou.savedAnswer(notice.id)).toBeNull();
+    expect(receipts.at(-1)![0].entries).toEqual([
+      expect.objectContaining({
+        label: "My notice period",
+        before: "Four weeks",
+        after: "Forgotten",
+      }),
+      expect.objectContaining({
+        label: "Interview availability",
+        before: "Weekday afternoons",
+        after: "Forgotten",
+      }),
+    ]);
     await run("undo_form_answer_change", { undoId: forgetChange.undoId });
     expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
       "Four weeks",
+    );
+    expect(applications.needsYou.savedAnswer(availability.id)?.answer).toBe(
+      "Weekday afternoons",
     );
     await run("undo_form_answer_change", { undoId: editChange.undoId });
     expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(

@@ -19,9 +19,17 @@ import {
   UpsertSavedFormAnswerInputSchema,
 } from "./applications";
 
+export const SavedFormAnswerChangeSchema = z.object({
+  id: z.number().int().positive(),
+  prompt: z.string(),
+  before: z.string().nullable(),
+  after: z.string().nullable(),
+});
+
 const AnswerChangeSchema = z.object({
   undoId: z.number().int().positive().nullable(),
   undoCount: z.number().int().nonnegative(),
+  answerChanges: z.array(SavedFormAnswerChangeSchema),
 });
 
 export const NEEDS_YOU_COMMANDS = {

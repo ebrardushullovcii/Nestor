@@ -41,7 +41,14 @@ export function createRowUndo(
   };
   const same = (a: Row | null, b: Row | null) =>
     JSON.stringify(a) === JSON.stringify(b);
+  const changes = (undoId: number | null): Change[] => {
+    const saved = store
+      .sql(`SELECT items_json FROM ${options.journal} WHERE id = ?`)
+      .get(undoId) as { items_json: string } | undefined;
+    return saved ? (JSON.parse(saved.items_json) as Change[]) : [];
+  };
   return {
+    changes,
     begin() {
       const pending: { target: Target; before: Row | null }[] = [];
       const captured = new Set<string>();
@@ -70,11 +77,7 @@ export function createRowUndo(
     },
     undo(undoId: number) {
       return store.transaction(() => {
-        const saved = store
-          .sql(`SELECT items_json FROM ${options.journal} WHERE id = ?`)
-          .get(undoId) as { items_json: string } | undefined;
-        if (!saved) return { changed: 0, skipped: 0 };
-        const items = JSON.parse(saved.items_json) as Change[];
+        const items = changes(undoId);
         const ids = new Set<number>();
         let changed = 0;
         let skipped = 0;
