@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type {
   ApplicationAutomationMode,
-  CampaignNotification,
   DiscoveryActivityEvent,
   JobFinderSearchRequest,
   JobFinderRendererWorkspaceSnapshot,
@@ -16,10 +15,8 @@ import {
   PageHeaderStack,
   type PageStatusItem,
 } from "../../components/page-header";
-import { CampaignNotificationCenter } from "../../components/campaign-notification-center";
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
-import { listApplicationsAwaitingUser } from "../../lib/needs-you-count";
 import { useApplicationPageStates } from "../../hooks/use-application-page-states";
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
@@ -47,10 +44,6 @@ export interface JobSearchHomeScreenProps {
   activityPending: boolean;
   applicationAutomationMode?: ApplicationAutomationMode;
   browserSessionPending?: boolean;
-  campaignNotificationAllPending?: boolean;
-  campaignNotificationError?: string | null;
-  campaignNotificationPending?: (notificationId: string) => boolean;
-  campaignNotifications?: readonly CampaignNotification[];
   discoveryRunFeedback?: DiscoveryRunFeedback | null;
   discoveryRunPending?: boolean;
   isDiscoveryPending?: boolean;
@@ -62,136 +55,15 @@ export interface JobSearchHomeScreenProps {
   onSendPreparedApplications?: (
     jobIds: readonly string[],
   ) => Promise<unknown> | void;
-  onMarkAllCampaignNotificationsRead?: () => void;
-  onMarkCampaignNotificationRead?: (notificationId: string) => void;
   onNavigate: (path: string) => void;
   onOpenBrowserSession?: () => void;
   onPauseActivity: () => void;
   onResumeActivity: () => void;
   onRunDiscovery?: (request?: JobFinderSearchRequest) => void;
   onResumeSetup?: (step: ProfileSetupStep) => void;
-  onSelectCampaign: (campaignId: string) => void;
   onStopApply?: (runId: string) => void;
   onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
   onStopSearch?: (runId: string) => void;
-}
-
-/**
- * Unread notifications that still say something true. A "Failed" or
- * "Blocked" note about a job that has since been sent is history, not news:
- * Home kept four "could not open the application page" notes for jobs every
- * other screen showed as Applied.
- */
-export function listCurrentUnreadNotifications(
-  notifications: readonly CampaignNotification[],
-  workspace: Pick<
-    JobFinderRendererWorkspaceSnapshot,
-    | "applicationRecords"
-    | "userActionRequests"
-    | "applyJobResults"
-    | "applyRuns"
-  >,
-): CampaignNotification[] {
-  const sentJobIds = new Set(
-    (workspace.applicationRecords ?? [])
-      .filter(
-        (record) =>
-          record.status === "submitted" ||
-          record.lastAttemptState === "submitted",
-      )
-      .map((record) => record.jobId),
-  );
-  // A source that asked for a sign-in and got it is searched again by
-  // itself; its "Blocked: sign in from Needs you" note is done with once
-  // that step resolved and none is open for the source.
-  const sourceSteps = (workspace.userActionRequests ?? []).flatMap((request) =>
-    request.scope.type === "discovery_source"
-      ? [{ request, targetId: request.scope.targetId }]
-      : [],
-  );
-  const sourceBlockResolved = (notification: CampaignNotification) => {
-    const targetId = notification.sourceTargetId;
-    if (!targetId) return false;
-    const steps = sourceSteps.filter((step) => step.targetId === targetId);
-    return (
-      steps.length > 0 &&
-      steps.every(
-        ({ request }) =>
-          request.state === "resolved" ||
-          request.state === "skipped" ||
-          request.state === "cancelled",
-      ) &&
-      steps.some(
-        ({ request }) =>
-          (request.state === "resolved" ||
-            request.state === "skipped" ||
-            request.state === "cancelled") &&
-          request.updatedAt >= notification.createdAt,
-      )
-    );
-  };
-  // A job's failure note describes one attempt. Once a newer attempt for
-  // that job has started, the note is about an attempt that is over; the
-  // newer attempt writes its own note if it fails too.
-  const latestAttemptStartByJobId = new Map<string, string>();
-  for (const result of workspace.applyJobResults ?? []) {
-    const previous = latestAttemptStartByJobId.get(result.jobId);
-    if (!previous || previous < result.startedAt) {
-      latestAttemptStartByJobId.set(result.jobId, result.startedAt);
-    }
-  }
-  const jobRetriedSince = (jobId: string, since: string) => {
-    const latestStart = latestAttemptStartByJobId.get(jobId);
-    return Boolean(latestStart && latestStart > since);
-  };
-  const supersededByNewerAttempt = (notification: CampaignNotification) => {
-    if (notification.jobId) {
-      return jobRetriedSince(notification.jobId, notification.createdAt);
-    }
-    // A run's own failure note (its id ends in `apply_run_<run id>`, see
-    // `deriveCampaignNotifications`) is over once every job of that run has
-    // been tried again.
-    const runId = /_apply_run_(.+)$/u.exec(notification.id)?.[1];
-    const run = runId
-      ? (workspace.applyRuns ?? []).find((entry) => entry.id === runId)
-      : undefined;
-    return Boolean(
-      run &&
-      run.jobIds.length > 0 &&
-      run.jobIds.every((jobId) =>
-        jobRetriedSince(jobId, notification.createdAt),
-      ),
-    );
-  };
-  return notifications.filter(
-    (notification) =>
-      notification.unread &&
-      !(
-        notification.kind === "blocked_work" &&
-        ((notification.jobId && sentJobIds.has(notification.jobId)) ||
-          supersededByNewerAttempt(notification) ||
-          sourceBlockResolved(notification) ||
-          isRetiredGateNotification(notification))
-      ),
-  );
-}
-
-/**
- * Blocks that no longer exist. ADR 0051 removed the hold on roles the resume
- * writer left off, but notifications saved while it existed still said the
- * resume "leaves out 2 roles that Job Finder wants you to confirm first", a
- * step the app no longer asks for and nothing on screen can do.
- */
-const RETIRED_GATE_NOTICE_PATTERNS: readonly RegExp[] = [
-  /wants you to confirm first/iu,
-  /confirm the hidden roles? (?:is|are) intentional/iu,
-];
-
-export function isRetiredGateNotification(
-  notification: Pick<CampaignNotification, "body" | "title">,
-): boolean {
-  const text = `${notification.title} ${notification.body ?? ""}`;
-  return RETIRED_GATE_NOTICE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 const PANEL_CLASS =
@@ -326,40 +198,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     props.discoveryRunFeedback.recovery?.kind !== "source_setup"
       ? props.discoveryRunFeedback
       : null;
-  const applicationsAwaitingUser = new Set(
-    listApplicationsAwaitingUser({
-      applicationRecords: props.workspace.applicationRecords,
-      applyJobResults: props.workspace.applyJobResults,
-      requests: props.workspace.userActionRequests,
-    }).map((record) => record.id),
-  );
-  const activeActionRecordIds = new Set(
-    props.workspace.userActionRequests
-      .filter(
-        (request) =>
-          ![
-            "resolved",
-            "skipped",
-            "cancelled",
-            "expired",
-            "superseded",
-          ].includes(request.state),
-      )
-      .flatMap((request) =>
-        request.scope?.type === "application" &&
-        request.scope.applicationRecordId
-          ? [request.scope.applicationRecordId]
-          : [],
-      ),
-  );
-  const applicationRecoveryRecords = props.workspace.applicationRecords
-    .filter(
-      (record) =>
-        !applicationsAwaitingUser.has(record.id) &&
-        !activeActionRecordIds.has(record.id),
-    )
-    .map((record) => ({ jobId: record.jobId, applicationRecordId: record.id }));
-
   const run = (action: HomeAction) => {
     switch (action.kind) {
       case "navigate":
@@ -427,17 +265,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
       button.action.kind === "resume_activity") &&
       props.activityPending);
 
-  const unreadNotifications = listCurrentUnreadNotifications(
-    props.campaignNotifications ?? [],
-    props.workspace,
-  );
-  const showNotifications =
-    unreadNotifications.length > 0 &&
-    Boolean(
-      props.onMarkCampaignNotificationRead ||
-      props.onMarkAllCampaignNotificationsRead,
-    );
-
   return (
     // The header stack owns its 12px seam; the -mb-2 cancels the part of
     // the 20px grid gap that would double it.
@@ -458,22 +285,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
               <Play aria-hidden="true" className="size-4" />
               Resume
             </Button>
-          ) : model.showPlanSelector ? (
-            <label className="flex min-w-0 items-center gap-2 text-xs text-foreground-muted">
-              <span>Search plan</span>
-              <select
-                aria-label="Active search plan"
-                className="h-9 min-w-0 max-w-56 rounded-(--radius-field) border border-(--field-border) bg-(--field) px-2 text-sm outline-none focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)]"
-                onChange={(event) => props.onSelectCampaign(event.target.value)}
-                value={props.workspace.activeCampaignId}
-              >
-                {props.workspace.campaigns.map((campaign) => (
-                  <option key={campaign.id} value={campaign.id}>
-                    {campaign.name}
-                  </option>
-                ))}
-              </select>
-            </label>
           ) : undefined
         }
         description="Your search, shortlisted jobs, and applications."
@@ -764,24 +575,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
             </button>
           ))}
         </nav>
-      ) : null}
-
-      {showNotifications ? (
-        <CampaignNotificationCenter
-          applicationRecoveryRecords={applicationRecoveryRecords}
-          errorMessage={props.campaignNotificationError ?? null}
-          loading={false}
-          notifications={unreadNotifications}
-          onNavigate={props.onNavigate}
-          onMarkAllRead={() => props.onMarkAllCampaignNotificationsRead?.()}
-          onMarkRead={(notificationId) =>
-            props.onMarkCampaignNotificationRead?.(notificationId)
-          }
-          pendingMarkAll={props.campaignNotificationAllPending ?? false}
-          pendingNotificationId={(notificationId) =>
-            props.campaignNotificationPending?.(notificationId) ?? false
-          }
-        />
       ) : null}
     </section>
   );

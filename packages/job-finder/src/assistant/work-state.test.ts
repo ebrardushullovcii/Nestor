@@ -5,18 +5,15 @@ import {
 } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
-import { buildContextBlock, ASSISTANT_SYSTEM_PROMPT } from "./prompt";
-import { readAssistantWorkState, runningSearchState } from "./work-state";
 import type { AssistantHostPorts } from "./ports";
+import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
+import { readRunStatus } from "./run-watch";
 import type { AssistantTurnSession } from "./tool-kit";
-import {
-  getWorkspaceSummaryTool,
-  openInAppTool,
-} from "./tools/workspace-tools";
 import { searchForJobsTool } from "./tools/jobs-tools";
 import { readProfileTool } from "./tools/profile-tools";
-import { readRunStatus } from "./run-watch";
 import { pauseActivityTool } from "./tools/settings-tools";
+import { getWorkspaceSummaryTool } from "./tools/workspace-tools";
+import { readAssistantWorkState, runningSearchState } from "./work-state";
 
 const openInApp = vi.fn();
 const session = {
@@ -162,31 +159,6 @@ it("shows current approval and saved level, instead of an earlier approval claim
   expect(block).toContain('"level":"aggressive"');
   expect(block).toContain('"approved":false');
   expect(block).toContain(workspace.draft.updatedAt);
-});
-
-it("exposes the existing schedule screen and answers questions in prose", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const summary = await getWorkspaceSummaryTool.execute(
-    {},
-    { service: workspaceService, session, ports },
-  );
-  expect(summary.data).toMatchObject({
-    searchPlanCapabilities: {
-      namedPlans: true,
-      recurringSchedules: true,
-      assistantCanCreate: true,
-      screen: "search_plans",
-    },
-  });
-  expect(openInAppTool.description).toContain("save_search_plan");
-  await openInAppTool.execute(
-    { screen: "search_plans" },
-    { service: workspaceService, session, ports },
-  );
-  expect(openInApp).toHaveBeenCalledWith("/job-finder/campaigns");
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "answer the question in text first",
-  );
 });
 
 it("reports file reading in read_profile before a new import run exists", async () => {

@@ -1,8 +1,3 @@
-import { recordTriageChange } from "../triage-changes";
-import { diffValues } from "../change-diff";
-import { readAssistantWorkspace } from "../tool-kit";
-import { executeJobFinderAction } from "../action-registry";
-import { runningSearchState } from "../work-state";
 import {
   DiscoveryFeedbackReasonSchema,
   JobDiscoveryTargetSchema,
@@ -11,12 +6,20 @@ import {
   NonEmptyStringSchema,
   discoveryFeedbackReasonValues,
   normalizeCompanyName,
-  type DiscoveryJobView,
   type DiscoveryFeedbackBatchOutcome,
+  type DiscoveryJobView,
 } from "@nestor/contracts";
 import { z } from "zod";
-
-import { AssistantToolError, defineTool, json } from "../tool-kit";
+import { executeJobFinderAction } from "../action-registry";
+import { diffValues } from "../change-diff";
+import {
+  AssistantToolError,
+  defineTool,
+  json,
+  readAssistantWorkspace,
+} from "../tool-kit";
+import { recordTriageChange } from "../triage-changes";
+import { runningSearchState } from "../work-state";
 import {
   allJobs,
   assistantJobStatus,
@@ -30,8 +33,6 @@ import {
   pausedByPersonMessage,
   plural,
 } from "./format";
-
-
 
 function feedbackOutcome(entry: DiscoveryFeedbackBatchOutcome) {
   return {
@@ -89,7 +90,11 @@ function filterJobs(
         return false;
       }
     }
-    if (input.scope === "found" && !["discovered", "shortlisted"].includes(job.status)) return false;
+    if (
+      input.scope === "found" &&
+      !["discovered", "shortlisted"].includes(job.status)
+    )
+      return false;
     if (input.scope === "dismissed" && job.status !== "archived") return false;
     if (
       typeof input.minScore === "number" &&
@@ -113,11 +118,13 @@ function filterJobs(
     return true;
   });
   return filtered.sort((left, right) =>
-    input.sort === "shortlisted" ? (right.shortlistedAt ?? "").localeCompare(left.shortlistedAt ?? "") : input.sort === "recent"
-      ? (right.postedAt ?? right.discoveredAt).localeCompare(
-          left.postedAt ?? left.discoveredAt,
-        )
-      : right.matchAssessment.score - left.matchAssessment.score,
+    input.sort === "shortlisted"
+      ? (right.shortlistedAt ?? "").localeCompare(left.shortlistedAt ?? "")
+      : input.sort === "recent"
+        ? (right.postedAt ?? right.discoveredAt).localeCompare(
+            left.postedAt ?? left.discoveredAt,
+          )
+        : right.matchAssessment.score - left.matchAssessment.score,
   );
 }
 
@@ -139,7 +146,10 @@ export const queryJobsTool = defineTool({
     listingOrigins: json.ids(
       "Only listing URLs on these exact origins, including port, such as http://127.0.0.1:47950. For local-only picks use the requested local origin.",
     ),
-    sort: json.enumOf(["score", "recent", "shortlisted"], "shortlisted orders by the recorded shortlist time; undated older rows are last."),
+    sort: json.enumOf(
+      ["score", "recent", "shortlisted"],
+      "shortlisted orders by the recorded shortlist time; undated older rows are last.",
+    ),
     limit: json.number("Rows to show, at most 25."),
     includeExcludedEmployers: json.boolean(
       "Only when the person names an excluded employer.",
@@ -291,8 +301,14 @@ export const getJobTool = defineTool({
   effect: "read",
   async execute(input, { service, ports, session }) {
     if (ports.readJobDetail) {
-      const result = await ports.readJobDetail(input.jobId, session.context?.list?.campaignId ?? null);
-      return { summary: `${result.job.title} at ${result.job.company}.`, data: jobDetail(result.job) };
+      const result = await ports.readJobDetail(
+        input.jobId,
+        session.context?.list?.campaignId ?? null,
+      );
+      return {
+        summary: `${result.job.title} at ${result.job.company}.`,
+        data: jobDetail(result.job),
+      };
     }
     const snapshot = await readAssistantWorkspace(service);
     const job = findJob(snapshot, input.jobId);
@@ -455,20 +471,29 @@ export const shortlistJobsTool = defineTool({
       .filter((entry) => entry.outcome === "shortlisted")
       .map((entry) => findJob(after, entry.jobId))
       .filter((job): job is DiscoveryJobView => job !== null);
-    const undoParts = await recordTriageChange(session, snapshot, after, uniqueIds, "Shortlisted jobs");
+    const undoParts = await recordTriageChange(
+      session,
+      snapshot,
+      after,
+      uniqueIds,
+      "Shortlisted jobs",
+    );
     return {
       canFinish: done === uniqueIds.length,
       summary: `Shortlisted ${plural(done, "job")} of ${uniqueIds.length}; ${outcomes.filter((entry) => entry.outcome === "not started: stopped").length} not started.`,
       data: outcomes,
-      parts: [...(shortlisted.length
-        ? [
-            jobRowsPart({
-              jobs: shortlisted,
-              title: "Shortlisted",
-              resultSetId: null,
-            }),
-          ]
-        : []), ...undoParts],
+      parts: [
+        ...(shortlisted.length
+          ? [
+              jobRowsPart({
+                jobs: shortlisted,
+                title: "Shortlisted",
+                resultSetId: null,
+              }),
+            ]
+          : []),
+        ...undoParts,
+      ],
     };
   },
 });
@@ -588,7 +613,11 @@ export const removeFromShortlistTool = defineTool({
     for (const jobId of input.jobIds) {
       session.assertCurrent();
       try {
-        await executeJobFinderAction("remove-job-from-review", { jobId: jobId }, { service });
+        await executeJobFinderAction(
+          "remove-job-from-review",
+          { jobId: jobId },
+          { service },
+        );
         outcomes.push({ jobId, outcome: "removed" });
       } catch (error) {
         outcomes.push({
@@ -602,7 +631,13 @@ export const removeFromShortlistTool = defineTool({
       canFinish: outcomes.every((entry) => entry.outcome === "removed"),
       summary: `Removed ${plural(outcomes.filter((entry) => entry.outcome === "removed").length, "job")} from Shortlisted.`,
       data: outcomes,
-      parts: await recordTriageChange(session, before, await readAssistantWorkspace(service), input.jobIds, "Moved jobs back to Find jobs"),
+      parts: await recordTriageChange(
+        session,
+        before,
+        await readAssistantWorkspace(service),
+        input.jobIds,
+        "Moved jobs back to Find jobs",
+      ),
     };
   },
 });
@@ -668,9 +703,17 @@ export const dismissJobsTool = defineTool({
       (jobId) => shortlistedBefore.has(jobId) && !shortlistedAfter.has(jobId),
     );
     return {
-      canFinish: leftShortlist.length === 0 && outcomes.every((entry) => entry.outcome === "hidden"),
+      canFinish:
+        leftShortlist.length === 0 &&
+        outcomes.every((entry) => entry.outcome === "hidden"),
       summary: `Hid ${plural(outcomes.filter((entry) => entry.outcome === "hidden").length, "job")}.${leftShortlist.length > 0 ? ` These were on the shortlist and are no longer: ${leftShortlist.join(", ")}.` : ""}`,
-      parts: await recordTriageChange(session, before, after, input.jobIds, "Hid jobs"),
+      parts: await recordTriageChange(
+        session,
+        before,
+        after,
+        input.jobIds,
+        "Hid jobs",
+      ),
       data: outcomes.map((entry) => ({
         ...entry,
         leftShortlist: leftShortlist.includes(entry.jobId),
@@ -717,7 +760,13 @@ export const restoreJobsTool = defineTool({
       canFinish: outcomes.every((entry) => entry.outcome === "restored"),
       summary: `Restored ${plural(outcomes.filter((entry) => entry.outcome === "restored").length, "job")}.`,
       data: outcomes,
-      parts: await recordTriageChange(session, before, batch?.workspace ?? await readAssistantWorkspace(service), jobIds, "Showed jobs again"),
+      parts: await recordTriageChange(
+        session,
+        before,
+        batch?.workspace ?? (await readAssistantWorkspace(service)),
+        jobIds,
+        "Showed jobs again",
+      ),
     };
   },
 });
@@ -879,7 +928,6 @@ export const searchForJobsTool = defineTool({
       breadth: json.enumOf(["best_only", "wide"]),
       freshness: json.enumOf(["any", "recent"]),
       sourceIds: json.ids("Only these sources; omit for all."),
-      campaignId: json.string("Run this saved search plan without switching the active plan."),
     },
     ["goal"],
   ),
@@ -913,7 +961,6 @@ export const searchForJobsTool = defineTool({
         sourceIds: input.sourceIds ?? "all",
       },
       targetId: null,
-      ...(input.campaignId ? { campaignId: input.campaignId } : {}),
     });
     if (!started.runId) {
       throw new AssistantToolError("refused", started.message);
@@ -923,7 +970,7 @@ export const searchForJobsTool = defineTool({
       "Searching for jobs",
     );
     return {
-      summary: `The search started. Results go to ${before.campaigns.find((plan) => plan.id === (input.campaignId ?? before.activeCampaignId))?.name ?? "your current plan"} in Find jobs and Shortlisted. This conversation continues when it ends.`,
+      summary: `The search started. Results appear in Find jobs. This conversation continues when it ends.`,
       data: {
         runId: started.runId,
         running: runningSearchState(await readAssistantWorkspace(service)),
@@ -933,36 +980,62 @@ export const searchForJobsTool = defineTool({
   },
 });
 
-
-
 export const listSourcesTool = defineTool({
   name: "list_sources",
   group: "jobs",
   description:
     "Lists job sources with ids, addresses, enabled state and last check. Use query to match words in a source's name or address; cursor and limit page the matches. For a simple switch by name, update_sources enableMatching/disableMatching does the lookup and change in one action.",
-  parameters: json.object({ query: json.string(), cursor: json.number(), limit: json.number() }),
+  parameters: json.object({
+    query: json.string(),
+    cursor: json.number(),
+    limit: json.number(),
+  }),
   input: JobFinderSourceQueryInputSchema,
   label: () => "Reading your job sources",
   effect: "read",
   async execute(input, { service }) {
     const snapshot = await readAssistantWorkspace(service);
-    const targets = snapshot.searchPreferences.discovery.targets.filter((target) => !input.query || sourceMatches(target, input.query));
-    const shown = targets.slice(input.cursor ?? 0, (input.cursor ?? 0) + (input.limit ?? 200)).map((target) => ({
-      id: target.id, label: target.label, url: target.startingUrl, enabled: target.enabled,
-      instructions: target.instructionStatus, lastVerifiedAt: target.lastVerifiedAt, staleReason: target.staleReason,
-    }));
+    const targets = snapshot.searchPreferences.discovery.targets.filter(
+      (target) => !input.query || sourceMatches(target, input.query),
+    );
+    const shown = targets
+      .slice(input.cursor ?? 0, (input.cursor ?? 0) + (input.limit ?? 200))
+      .map((target) => ({
+        id: target.id,
+        label: target.label,
+        url: target.startingUrl,
+        enabled: target.enabled,
+        instructions: target.instructionStatus,
+        lastVerifiedAt: target.lastVerifiedAt,
+        staleReason: target.staleReason,
+      }));
     return {
       summary: `${plural(targets.length, "source")}, ${targets.filter((target) => target.enabled).length} on.`,
-      data: input.query || input.cursor !== undefined || input.limit !== undefined
-        ? { sources: shown, total: targets.length, next: (input.cursor ?? 0) + shown.length < targets.length ? (input.cursor ?? 0) + shown.length : null }
-        : shown,
+      data:
+        input.query || input.cursor !== undefined || input.limit !== undefined
+          ? {
+              sources: shown,
+              total: targets.length,
+              next:
+                (input.cursor ?? 0) + shown.length < targets.length
+                  ? (input.cursor ?? 0) + shown.length
+                  : null,
+            }
+          : shown,
     };
   },
 });
 
-function sourceMatches(source: { label: string; startingUrl: string }, query: string): boolean {
+function sourceMatches(
+  source: { label: string; startingUrl: string },
+  query: string,
+): boolean {
   const text = `${source.label} ${source.startingUrl}`.toLowerCase();
-  return query.toLowerCase().split(/\s+/u).filter(Boolean).every((word) => text.includes(word));
+  return query
+    .toLowerCase()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .every((word) => text.includes(word));
 }
 
 function sourceLabel(url: string): string {
@@ -1002,8 +1075,12 @@ export const updateSourcesTool = defineTool({
     ),
     enableIds: json.ids(),
     disableIds: json.ids(),
-    enableMatching: json.string("Turn on sources whose names or addresses match these words."),
-    disableMatching: json.string("Turn off sources whose names or addresses match these words."),
+    enableMatching: json.string(
+      "Turn on sources whose names or addresses match these words.",
+    ),
+    disableMatching: json.string(
+      "Turn off sources whose names or addresses match these words.",
+    ),
   }),
   input: z.object({
     addUrls: z.array(z.string().trim().url()).max(200).default([]),
@@ -1080,11 +1157,15 @@ export const updateSourcesTool = defineTool({
           renames.get(target.id) ??
           named.get(target.startingUrl.replace(/\/+$/u, "")) ??
           target.label,
-        enabled: input.enableIds.includes(target.id) || (input.enableMatching && sourceMatches(target, input.enableMatching))
-          ? true
-          : input.disableIds.includes(target.id) || (input.disableMatching && sourceMatches(target, input.disableMatching))
-            ? false
-            : target.enabled,
+        enabled:
+          input.enableIds.includes(target.id) ||
+          (input.enableMatching && sourceMatches(target, input.enableMatching))
+            ? true
+            : input.disableIds.includes(target.id) ||
+                (input.disableMatching &&
+                  sourceMatches(target, input.disableMatching))
+              ? false
+              : target.enabled,
       })),
       ...additions,
     ];
@@ -1108,24 +1189,61 @@ export const updateSourcesTool = defineTool({
           (before) => before.id === target.id && before.enabled,
         ),
     ).length;
-    const changes = diffValues(preferences.discovery.targets, savedTargets).map((entry) => ({ ...entry, path: ["search_preferences", "discovery", "targets", ...entry.path] }));
+    const changes = diffValues(preferences.discovery.targets, savedTargets).map(
+      (entry) => ({
+        ...entry,
+        path: ["search_preferences", "discovery", "targets", ...entry.path],
+      }),
+    );
     const sourceParts = [];
     if (changes.length && session.recordChange) {
       for (let cursor = 0; cursor < changes.length; cursor += 600) {
-        sourceParts.push((await session.recordChange({ target: "search_preferences", targetId: null, summary: "Updated job sources", entries: changes.slice(cursor, cursor + 600) })).part);
+        sourceParts.push(
+          (
+            await session.recordChange({
+              target: "search_preferences",
+              targetId: null,
+              summary: "Updated job sources",
+              entries: changes.slice(cursor, cursor + 600),
+            })
+          ).part,
+        );
       }
     }
     ports.publishWorkspaceUpdate();
     return {
       parts: sourceParts,
-      canFinish: additions.length + enabledCount + disabledCount > 0 && [...input.enableIds, ...input.disableIds].every((id) => preferences.discovery.targets.some((target) => target.id === id)),
+      canFinish:
+        additions.length + enabledCount + disabledCount > 0 &&
+        [...input.enableIds, ...input.disableIds].every((id) =>
+          preferences.discovery.targets.some((target) => target.id === id),
+        ),
       summary: `Added ${plural(additions.length, "source")}; ${enabledCount} turned on, ${disabledCount} turned off.${targets.some((target) => preferences.discovery.targets.some((before) => before.id === target.id && before.label !== target.label)) ? " Updated source names." : ""}`,
       data: {
-        sources: savedTargets.filter((target) => !input.enableMatching && !input.disableMatching || Boolean(input.enableMatching && sourceMatches(target, input.enableMatching)) || Boolean(input.disableMatching && sourceMatches(target, input.disableMatching))).slice(0, input.enableMatching || input.disableMatching ? 25 : savedTargets.length).map((target) => ({
-          id: target.id,
-          label: target.label,
-          enabled: target.enabled,
-        })),
+        sources: savedTargets
+          .filter(
+            (target) =>
+              (!input.enableMatching && !input.disableMatching) ||
+              Boolean(
+                input.enableMatching &&
+                sourceMatches(target, input.enableMatching),
+              ) ||
+              Boolean(
+                input.disableMatching &&
+                sourceMatches(target, input.disableMatching),
+              ),
+          )
+          .slice(
+            0,
+            input.enableMatching || input.disableMatching
+              ? 25
+              : savedTargets.length,
+          )
+          .map((target) => ({
+            id: target.id,
+            label: target.label,
+            enabled: target.enabled,
+          })),
         resultsPlanName:
           savedSnapshot.campaigns.find(
             (plan) => plan.id === savedSnapshot.activeCampaignId,

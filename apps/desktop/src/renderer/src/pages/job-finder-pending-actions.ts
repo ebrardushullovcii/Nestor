@@ -4,21 +4,6 @@ export const jobFinderPendingActions = {
     `apply:request:${requestId}`,
   applyRun: (runId: string): `apply:run:${string}` => `apply:run:${runId}`,
   browserSession: (): "browser:session" => "browser:session",
-  campaignRule: (
-    campaignId: string,
-    ruleId?: string | null,
-  ): `campaign-rule:${string}` =>
-    `campaign-rule:${campaignId}${ruleId ? `:${ruleId}` : ""}`,
-  campaignRun: (campaignId: string): `campaign-run:${string}` =>
-    `campaign-run:${campaignId}`,
-  campaignNotification: (
-    notificationId: string,
-  ): `campaign-notification:${string}` =>
-    `campaign-notification:${notificationId}`,
-  campaignNotificationAll: (): "campaign-notification:all" =>
-    "campaign-notification:all",
-  campaignRuleFunnel: (campaignId: string): `campaign-rule-funnel:${string}` =>
-    `campaign-rule-funnel:${campaignId}`,
   groupedDecisionSnooze: (
     decisionId: string,
   ): `grouped-decision:snooze:${string}` =>

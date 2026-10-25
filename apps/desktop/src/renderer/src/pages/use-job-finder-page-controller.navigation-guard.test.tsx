@@ -4,7 +4,6 @@ import type {
   CandidateProfile,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
-import { StrictMode } from "react";
 import {
   act,
   cleanup,
@@ -13,6 +12,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import {
   createMemoryRouter,
   type InitialEntry,
@@ -29,12 +29,12 @@ import {
   it,
   vi,
 } from "vitest";
+import type { JobFinderSaveState } from "./job-finder-save-state";
+import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import {
   composeLeaveConfirmation,
   useJobFinderPageController,
 } from "./use-job-finder-page-controller";
-import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
-import type { JobFinderSaveState } from "./job-finder-save-state";
 
 // The data router constructs a real fetch Request for every navigation.
 // jsdom's AbortSignal fails Node's brand check inside the Request constructor,
@@ -750,41 +750,4 @@ describe("useJobFinderPageController navigation guard", () => {
     expect(harness.router.state.location.search).toBe("?section=experience");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
-});
-
-it("protects search-plan drafts on route changes and clears protection after discard", async () => {
-  configureWindowNestor(createReadyWorkspace());
-  const harness = mountGuardedController();
-  await waitForReady(harness);
-  act(() => harness.current?.context?.onSearchPlanSurfaceDirtyChange(true));
-  fireEvent.click(screen.getByTestId("link-to-other"));
-  expect((await openUnsavedChangesDialog()).textContent).toContain(
-    "Unsaved search-plan changes",
-  );
-  await stayOnPage();
-  expect(harness.router.state.location.pathname).toBe("/guard");
-  fireEvent.click(screen.getByTestId("link-to-other"));
-  await openUnsavedChangesDialog();
-  await leaveWithoutSaving();
-  expect(harness.router.state.location.pathname).toBe("/other");
-  await act(async () => {
-    await harness.router.navigate(-1);
-  });
-  expect(harness.router.state.location.pathname).toBe("/guard");
-  expect(screen.queryByRole("dialog")).toBeNull();
-});
-
-it("allows navigation after the search-plan editor reports a successful save", async () => {
-  configureWindowNestor(createReadyWorkspace());
-  const harness = mountGuardedController();
-  await waitForReady(harness);
-  act(() => {
-    harness.current?.context?.onSearchPlanSurfaceDirtyChange(true);
-    harness.current?.context?.onSearchPlanSurfaceDirtyChange(false);
-  });
-  fireEvent.click(screen.getByTestId("link-to-other"));
-  await waitFor(() =>
-    expect(harness.router.state.location.pathname).toBe("/other"),
-  );
-  expect(screen.queryByRole("dialog")).toBeNull();
 });

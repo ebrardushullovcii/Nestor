@@ -1,7 +1,6 @@
-import { describe, expect, test, vi } from "vitest";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
-
+import { createInMemoryJobFinderRepository } from "@nestor/db";
+import { describe, expect, test, vi } from "vitest";
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAiClient,
@@ -83,9 +82,9 @@ describe("workspace campaign and activity controls", () => {
     await service.runSourceDebug("target_linkedin_default").catch((error) => {
       expect(String(error)).not.toContain("activity is paused");
     });
-    expect(
-      (await service.getWorkspaceSnapshot()).activityControl.paused,
-    ).toBe(false);
+    expect((await service.getWorkspaceSnapshot()).activityControl.paused).toBe(
+      false,
+    );
 
     await service.setActivityControl({ paused: true, reason: "Again." });
     const resumed = await service.setActivityControl({ paused: false });
@@ -94,36 +93,6 @@ describe("workspace campaign and activity controls", () => {
       pausedAt: null,
       reason: null,
     });
-  });
-
-  test("rejects discovery when the active campaign itself is paused", async () => {
-    const { service } = createService();
-    const snapshot = await service.getWorkspaceSnapshot();
-    const active = snapshot.campaigns.find(
-      (campaign) => campaign.id === snapshot.activeCampaignId,
-    );
-    if (!active) throw new Error("Expected an active campaign fixture.");
-
-    await service.saveCampaign({
-      id: active.id,
-      name: active.name,
-      description: active.description,
-      mode: active.mode,
-      status: "paused",
-      searchPreferences: active.searchPreferences,
-      sourceTargetIds: active.sourceTargetIds,
-      minimumFitScore: active.minimumFitScore,
-      limits: active.limits,
-      stopRules: active.stopRules,
-      applicationPolicy: active.applicationPolicy,
-      schedule: active.schedule,
-      rules: active.rules,
-      latestDigest: active.latestDigest,
-    });
-
-    await expect(service.runDiscovery()).rejects.toThrow(
-      "Set it to active before starting discovery",
-    );
   });
 
   test("Home pause keeps the current browser run alive until Resume", async () => {

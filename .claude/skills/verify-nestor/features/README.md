@@ -35,4 +35,4 @@ Each file has an H1, one paragraph on the user-visible behavior, then exactly fo
 - [Live Assistant](./live-assistant.md): notices, quick check, a live session with typed questions and popups, post-session review. Proven text-only 2026-10-17 (`journeys/live-assistant-session.mjs`); audio and screenshots are not.
 - [Website](./website.md): the public landing page, signup and tour at desktop and phone widths. Proven 2026-10-17 (`journeys/website.mjs`).
 
-Not mapped yet: the app-wide assistant sidebar, Safeguards, Settings (apply mode, themes), the Needs you inbox, workspace search, search plans, the Companies view, and Live Assistant settings. Add a file when a change touches one.
+Not mapped yet: the app-wide assistant sidebar, Safeguards, Settings (apply mode, themes), the Needs you inbox, workspace search, the Companies view, and Live Assistant settings. Add a file when a change touches one.

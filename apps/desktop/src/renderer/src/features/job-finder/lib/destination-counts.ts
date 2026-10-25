@@ -1,12 +1,11 @@
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
-
 import {
   isDiscoveryAlsoFoundResult,
   isDiscoveryDecidedJob,
 } from "../screens/discovery/discovery-result-groups";
-import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";
 import { listApplyRunsStoppedBySafeguard } from "./apply-run-pause-state";
 import { countWorkspaceNeedsYouItems } from "./needs-you-count";
+import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";
 
 /**
  * One exported owner per destination badge, named for the population it counts.
@@ -101,17 +100,6 @@ export function countApplicationRecords(
   ).length;
 }
 
-/**
- * The lone default plan is not a count worth a badge; only extra plans signal
- * something the user chose, so a single plan reports 0 and the badge hides.
- */
-export function countUserCreatedSearchPlans(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
-  const plans = workspace.campaigns ?? [];
-  return plans.length > 1 ? plans.length : 0;
-}
-
 const NO_SAFEGUARDS = {
   companyApplicationCaps: [],
   simultaneousApplicationConflicts: [],
@@ -149,15 +137,6 @@ export function countNeedsYou(
   workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return countWorkspaceNeedsYouItems(workspace);
-}
-
-export function countUnreadCampaignNotifications(
-  notifications:
-    | JobFinderRendererWorkspaceSnapshot["campaignNotifications"]
-    | undefined,
-): number {
-  return (notifications ?? []).filter((notification) => notification.unread)
-    .length;
 }
 
 /**

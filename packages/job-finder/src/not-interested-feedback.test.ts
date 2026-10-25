@@ -1,14 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-
 import {
   JobFinderDismissDiscoveryJobInputSchema,
   SavedJobSchema,
-  type JobSearchCampaign,
-  type SaveJobSearchCampaignInput,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
-import { mergeSavedJobs } from "./internal/workspace-discovery-state-helpers";
+import { describe, expect, it, vi } from "vitest";
 import { createJobFinderWorkspaceService } from "./index";
+import { mergeSavedJobs } from "./internal/workspace-discovery-state-helpers";
+import { createSeed } from "./workspace-service.test-fixtures";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 import {
   createAiClient,
@@ -16,30 +14,6 @@ import {
   createDocumentManager,
   createResearchAdapter,
 } from "./workspace-service.test-runtimes";
-import { createSeed } from "./workspace-service.test-fixtures";
-
-function campaignInput(
-  campaign: JobSearchCampaign,
-  overrides: Partial<SaveJobSearchCampaignInput> = {},
-): SaveJobSearchCampaignInput {
-  return {
-    id: campaign.id,
-    name: campaign.name,
-    description: campaign.description,
-    mode: campaign.mode,
-    status: campaign.status,
-    searchPreferences: campaign.searchPreferences,
-    sourceTargetIds: campaign.sourceTargetIds,
-    minimumFitScore: campaign.minimumFitScore,
-    limits: campaign.limits,
-    stopRules: campaign.stopRules,
-    applicationPolicy: campaign.applicationPolicy,
-    rules: campaign.rules,
-    schedule: campaign.schedule,
-    latestDigest: campaign.latestDigest,
-    ...overrides,
-  };
-}
 
 function deferred() {
   let resolve!: () => void;
@@ -142,101 +116,6 @@ describe("not-interested discovery feedback", () => {
       status: "archived",
       discoveryFeedback: { employerExclusion: null },
     });
-  });
-
-  it("binds exclusion reversal to its original campaign across a concurrent selection", async () => {
-    const seed = createSeed();
-    seed.searchPreferences = {
-      ...seed.searchPreferences,
-      companyWhitelist: [],
-    };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed,
-    });
-    const initial = await workspaceService.getWorkspaceSnapshot();
-    const campaignA = initial.campaigns.find(
-      (campaign) => campaign.id === initial.activeCampaignId,
-    )!;
-    const created = await workspaceService.saveCampaign(
-      campaignInput(campaignA, {
-        id: null,
-        name: "Campaign B",
-        searchPreferences: {
-          ...campaignA.searchPreferences,
-          companyBlacklist: ["B-only Employer"],
-        },
-      }),
-    );
-    const campaignB = created.campaigns.find(
-      (campaign) => campaign.name === "Campaign B",
-    )!;
-    const originalCommit =
-      repository.commitCampaignPreferencesUpdate.bind(repository);
-    const entered = deferred();
-    const release = deferred();
-    let parkSelection = true;
-    repository.commitCampaignPreferencesUpdate = async <TResult>(
-      update: Parameters<
-        JobFinderRepository["commitCampaignPreferencesUpdate"]
-      >[0],
-    ): Promise<TResult> => {
-      if (parkSelection) {
-        parkSelection = false;
-        entered.resolve();
-        await release.promise;
-      }
-      return originalCommit(update) as Promise<TResult>;
-    };
-
-    const selection = workspaceService.selectCampaign(campaignB.id);
-    await entered.promise;
-    const job = seed.savedJobs.find(
-      (candidate) => candidate.id === "job_generating",
-    )!;
-    const dismissal = workspaceService.dismissDiscoveryJob({
-      jobId: job.id,
-      reasons: ["company"],
-      action: "hide_and_exclude_employer",
-      expectedNormalizedCompanyName: "northwind labs",
-    });
-    await vi.waitFor(async () => {
-      expect(
-        (await repository.listSavedJobs()).find((entry) => entry.id === job.id),
-      ).toMatchObject({ status: "archived" });
-    });
-    release.resolve();
-    await Promise.all([selection, dismissal]);
-
-    expect((await repository.getSearchPreferences()).companyBlacklist).toEqual([
-      "B-only Employer",
-    ]);
-    expect(
-      (await repository.getCampaignState())?.campaigns.find(
-        (campaign) => campaign.id === campaignA.id,
-      )?.searchPreferences.companyBlacklist,
-    ).toContain("Northwind Labs");
-
-    await workspaceService.removeEmployerExclusion({
-      jobId: job.id,
-      normalizedCompanyName: "northwind labs",
-    });
-    const afterReversal = await repository.getCampaignState();
-    expect(
-      afterReversal?.campaigns.find((campaign) => campaign.id === campaignA.id)
-        ?.searchPreferences.companyBlacklist,
-    ).not.toContain("Northwind Labs");
-    expect(
-      afterReversal?.campaigns.find((campaign) => campaign.id === campaignB.id)
-        ?.searchPreferences.companyBlacklist,
-    ).toEqual(["B-only Employer"]);
-    expect((await repository.getSearchPreferences()).companyBlacklist).toEqual([
-      "B-only Employer",
-    ]);
-
-    await workspaceService.selectCampaign(campaignA.id);
-    expect((await repository.getSearchPreferences()).companyBlacklist).toEqual(
-      [],
-    );
   });
 
   it("rejects a transaction-current active-campaign whitelist conflict without partial writes", async () => {

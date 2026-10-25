@@ -1,10 +1,8 @@
 import {
   createElement,
   lazy,
-  useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
@@ -16,10 +14,6 @@ import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
-import {
-  CAMPAIGN_PLAN_EDITOR_SEARCH_PARAM,
-  CAMPAIGN_PLAN_EDITOR_SEARCH_VALUE,
-} from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
 import {
   Navigate,
   useSearchParams,
@@ -33,10 +27,7 @@ import {
 } from "@renderer/features/job-finder/components/profile/setup/guided-setup-auto-open";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import type {
-  CampaignRuleFunnelProjection,
   JobFinderRendererWorkspaceSnapshot,
-  SaveCampaignRuleInput,
-  SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
 } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
@@ -91,11 +82,6 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/components/profile/setup/profile-setup-screen")
   ).ProfileSetupScreen,
 }));
-const loadCampaignsScreen = createSharedRouteLoader(async () => ({
-  default: (
-    await import("@renderer/features/job-finder/screens/campaigns/campaigns-screen")
-  ).CampaignsScreen,
-}));
 const loadJobSearchHomeScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/screens/job-search-home/job-search-home-screen")
@@ -129,7 +115,6 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
     for (const load of [
       loadJobSearchHomeScreen,
       loadSettingsScreen,
-      loadCampaignsScreen,
       loadActionsScreen,
       loadProfileSetupScreen,
     ])
@@ -141,7 +126,6 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
 }
 
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
-const CampaignsScreen = lazyScreen(loadCampaignsScreen);
 const JobSearchHomeScreen = lazyScreen(loadJobSearchHomeScreen);
 const ActionsScreen = lazyScreen(loadActionsScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
@@ -489,15 +473,6 @@ export function JobFinderHomeRoute() {
         browserSessionPending={context.isPending(
           jobFinderPendingActions.browserSession(),
         )}
-        campaignNotificationAllPending={context.isPending(
-          jobFinderPendingActions.campaignNotificationAll(),
-        )}
-        campaignNotificationPending={(notificationId) =>
-          context.isPending(
-            jobFinderPendingActions.campaignNotification(notificationId),
-          )
-        }
-        campaignNotifications={context.workspace.campaignNotifications}
         discoveryRunFeedback={context.discoveryRunFeedback}
         discoveryRunPending={context.isPending(
           jobFinderPendingActions.discoveryAll(),
@@ -518,10 +493,6 @@ export function JobFinderHomeRoute() {
         }
         onSendPreparedApplications={context.onSendPreparedApplications}
         onResumeSetup={context.onResumeProfileSetup}
-        onMarkAllCampaignNotificationsRead={
-          context.onMarkAllCampaignNotificationsRead
-        }
-        onMarkCampaignNotificationRead={context.onMarkCampaignNotificationRead}
         onNavigate={context.onNavigateSafely}
         onOpenBrowserSession={() => {
           void context.onOpenBrowserSession();
@@ -537,9 +508,6 @@ export function JobFinderHomeRoute() {
         {...(context.onRunAgentDiscovery
           ? { onRunDiscovery: context.onRunAgentDiscovery }
           : {})}
-        onSelectCampaign={(campaignId) => {
-          void context.onSelectCampaign(campaignId);
-        }}
         onStopApply={stopApplyRun}
         onControlApplyQueue={context.onControlApplyQueue}
         {...(context.onCancelDiscovery
@@ -571,229 +539,6 @@ const HOME_FIRST_VIEW_COLLECTIONS = [
   "documents",
   "intelligence",
 ] as const;
-
-export function JobFinderCampaignsRoute() {
-  const context = useJobFinderPageContext();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [dismissedActionState, setDismissedActionState] = useState<
-    typeof context.actionState | null
-  >(null);
-  const [pending, setPending] = useState(false);
-  const [rulePending, setRulePending] = useState(false);
-  const [funnelProjection, setFunnelProjection] =
-    useState<CampaignRuleFunnelProjection | null>(null);
-  const requestedCampaignId = searchParams.get("campaignId");
-  const linkedPlanRequestRef = useRef<{ key: string } | null>(null);
-  const linkedPlanRequestsRef = useRef(new Set<{ key: string }>());
-  const [linkedPlanPendingCount, setLinkedPlanPendingCount] = useState(0);
-  useEffect(
-    () => () => {
-      linkedPlanRequestRef.current = null;
-      linkedPlanRequestsRef.current.clear();
-    },
-    [],
-  );
-  const requestedPlanEditorId =
-    searchParams.get(CAMPAIGN_PLAN_EDITOR_SEARCH_PARAM) ===
-    CAMPAIGN_PLAN_EDITOR_SEARCH_VALUE
-      ? requestedCampaignId
-      : null;
-  // Latched, not read straight from the URL: the effect below clears the
-  // request once the plan is current, and the screen is lazy-loaded, so the
-  // params can be gone before the editor ever mounts.
-  const [editCampaignId, setEditCampaignId] = useState<string | null>(
-    requestedPlanEditorId,
-  );
-  useEffect(() => {
-    if (requestedPlanEditorId !== null) {
-      setEditCampaignId(requestedPlanEditorId);
-    }
-  }, [requestedPlanEditorId]);
-
-  useEffect(() => {
-    if (
-      !requestedCampaignId ||
-      !context.workspace.campaigns.some(
-        (campaign) => campaign.id === requestedCampaignId,
-      )
-    ) {
-      if (linkedPlanRequestRef.current) setPending(false);
-      linkedPlanRequestRef.current = null;
-      return;
-    }
-
-    const requestKey = searchParams.toString();
-    const clearRequestedCampaign = () => {
-      setSearchParams(
-        (current) => {
-          if (current.toString() !== requestKey) return current;
-          const next = new URLSearchParams(current);
-          next.delete("campaignId");
-          next.delete(CAMPAIGN_PLAN_EDITOR_SEARCH_PARAM);
-          return next;
-        },
-        { replace: true },
-      );
-    };
-    if (requestedCampaignId === context.workspace.activeCampaignId) {
-      // A prior selection can still publish an older plan. Keep the latest
-      // link until all requests settle so that the effect can reconcile it.
-      if (linkedPlanPendingCount > 0) return;
-      linkedPlanRequestRef.current = null;
-      setPending(false);
-      clearRequestedCampaign();
-      return;
-    }
-    const attemptKey = `${context.workspace.activeCampaignId}:${requestKey}`;
-    if (linkedPlanRequestRef.current?.key === attemptKey) return;
-    const request = { key: attemptKey };
-    linkedPlanRequestRef.current = request;
-    linkedPlanRequestsRef.current.add(request);
-    setLinkedPlanPendingCount(linkedPlanRequestsRef.current.size);
-    setPending(true);
-    void context
-      .onSelectCampaign(requestedCampaignId)
-      .catch(() => undefined)
-      .finally(() => {
-        if (!linkedPlanRequestsRef.current.delete(request)) return;
-        const remaining = linkedPlanRequestsRef.current.size;
-        setLinkedPlanPendingCount(remaining);
-        setPending(remaining > 0);
-      });
-  }, [
-    context.onSelectCampaign,
-    context.workspace.activeCampaignId,
-    context.workspace.campaigns,
-    linkedPlanPendingCount,
-    requestedCampaignId,
-    searchParams,
-    setSearchParams,
-  ]);
-
-  const handleSaveCampaign = (
-    campaign: SaveJobSearchCampaignInput,
-  ): Promise<boolean> => {
-    setPending(true);
-    return context.onSaveCampaign(campaign).finally(() => {
-      setPending(false);
-    });
-  };
-
-  const handleSelectCampaign = (campaignId: string) => {
-    setPending(true);
-    void context.onSelectCampaign(campaignId).finally(() => {
-      setPending(false);
-    });
-  };
-
-  const refreshCampaignRuleFunnel = useCallback(
-    (campaignId: string) => {
-      setRulePending(true);
-      void context
-        .onProjectCampaignRuleFunnel(campaignId)
-        .then((projection) => {
-          setFunnelProjection(projection);
-        })
-        .catch(() => {
-          setFunnelProjection(null);
-        })
-        .finally(() => {
-          setRulePending(false);
-        });
-    },
-    [context],
-  );
-
-  const handleSaveCampaignRule = (
-    campaignId: string,
-    rule: SaveCampaignRuleInput,
-  ) => {
-    void context.onSaveCampaignRule(campaignId, rule).then((saved) => {
-      if (saved) {
-        refreshCampaignRuleFunnel(campaignId);
-      }
-    });
-  };
-
-  const handleDeleteCampaignRule = (campaignId: string, ruleId: string) => {
-    void context.onDeleteCampaignRule(campaignId, ruleId).then((saved) => {
-      if (saved) {
-        refreshCampaignRuleFunnel(campaignId);
-      }
-    });
-  };
-
-  const handleToggleCampaignRule = (
-    campaignId: string,
-    ruleId: string,
-    enabled: boolean,
-  ) => {
-    void context
-      .onToggleCampaignRule(campaignId, ruleId, enabled)
-      .then((saved) => {
-        if (saved) {
-          refreshCampaignRuleFunnel(campaignId);
-        }
-      });
-  };
-
-  const handleRunCampaignNow = (campaignId: string) => {
-    void context.onRunCampaignNow(campaignId);
-  };
-
-  return (
-    <JobFinderHydrationGate
-      collections={["discovery_jobs"]}
-      workspace={context.workspace}
-    >
-      {context.actionState.message &&
-      context.actionState !== dismissedActionState ? (
-        <div
-          aria-atomic="true"
-          className="sticky top-0 z-10 mb-4 flex min-w-0 items-start justify-between gap-3 rounded-(--radius-field) border border-(--surface-panel-border) bg-background px-3 py-2 text-sm leading-5 text-foreground"
-          role="status"
-        >
-          <p className="min-w-0 break-words">{context.actionState.message}</p>
-          <Button
-            onClick={() => setDismissedActionState(context.actionState)}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Dismiss
-          </Button>
-        </div>
-      ) : null}
-      <CampaignsScreen
-        editCampaignId={editCampaignId}
-        safeguardPauses={projectPlanSafeguardPauses(
-          context.workspace.intelligence?.safeguards,
-          context.workspace.campaigns,
-        )}
-        activeCampaignId={context.workspace.activeCampaignId}
-        activeDiscoveryRun={context.workspace.activeDiscoveryRun ?? null}
-        campaignRuleFunnel={funnelProjection}
-        campaignRulePending={rulePending}
-        campaigns={context.workspace.campaigns}
-        profile={context.workspace.profile}
-        discoveryRuns={context.workspace.recentDiscoveryRuns}
-        onDirtyChange={context.onSearchPlanSurfaceDirtyChange}
-        onDeleteCampaign={context.onDeleteCampaign}
-        onDeleteCampaignRule={handleDeleteCampaignRule}
-        onRefreshCampaignRuleFunnel={refreshCampaignRuleFunnel}
-        onRunCampaignNow={handleRunCampaignNow}
-        onSaveCampaign={handleSaveCampaign}
-        onSaveCampaignRule={handleSaveCampaignRule}
-        onSelectCampaign={handleSelectCampaign}
-        onToggleCampaignRule={handleToggleCampaignRule}
-        pending={pending}
-        runCampaignPending={(campaignId) =>
-          context.isPending(jobFinderPendingActions.campaignRun(campaignId))
-        }
-      />
-    </JobFinderHydrationGate>
-  );
-}
 
 export function JobFinderProfileRoute() {
   const context = useJobFinderPageContext();

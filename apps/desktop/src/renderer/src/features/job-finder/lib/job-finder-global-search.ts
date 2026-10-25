@@ -2,7 +2,6 @@ import { matchesCollectionSearch } from "../components/collection-search-toolbar
 
 export type JobFinderGlobalSearchKind =
   | "application"
-  | "campaign"
   | "company"
   | "document"
   | "job"
@@ -25,7 +24,6 @@ export interface JobFinderGlobalSearchGroup {
 
 const kindOrder: readonly JobFinderGlobalSearchKind[] = [
   "screen",
-  "campaign",
   "job",
   "application",
   "company",

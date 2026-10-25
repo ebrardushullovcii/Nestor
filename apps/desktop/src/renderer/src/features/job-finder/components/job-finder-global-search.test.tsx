@@ -161,9 +161,7 @@ describe("JobFinderGlobalSearchDialog", () => {
       }),
     );
     expect(
-      screen.getByText(
-        "Everything saved on this device is searchable. Jobs outside the current search plan say so in their description.",
-      ),
+      screen.getByText("Everything saved on this device is searchable."),
     ).toBeTruthy();
     expect(appRoot.getAttribute("inert")).toBe("");
     expect(appRoot.getAttribute("aria-hidden")).toBe("true");

@@ -3,7 +3,6 @@ import {
   ApplicationCrmSettingsSchema,
   ApplicationPacketSchema,
   ApplyRunSchema,
-  DISCOVERY_NO_JOB_SITES_MESSAGE,
   DiscoveryJobViewSchema,
   DiscoveryRunRecordSchema,
   JobFinderAgentDiscoveryReplySchema,
@@ -14,11 +13,8 @@ import {
   JobFinderUndoProfileRevisionInputSchema,
   JobFinderWorkspaceSnapshotSchema,
   JobFinderWorkspaceSyncResultSchema,
-  MarkAllCampaignNotificationsReadInputSchema,
-  MarkCampaignNotificationReadInputSchema,
   ResumeDraftSchema,
   ResumeQualityBenchmarkReportSchema,
-  SaveCampaignRuleRouteInputSchema,
   SavedJobSchema,
   TailoredAssetSchema,
   UpdateAiBehaviorInputSchema,
@@ -73,7 +69,6 @@ const {
   mockApplyGroupedManualAnswer,
   mockBrowserWindowFromWebContents,
   mockBuildApplicationPacket,
-  mockDeleteCampaignRule,
   mockExportResumePdf,
   mockFocusPreparedApplicationPage,
   mockGetResumeWorkspace,
@@ -86,15 +81,10 @@ const {
   mockImportResumeFromSourcePath,
   mockRetryInterruptedResumeImport,
   mockIsDesktopTestApiEnabled,
-  mockMarkAllCampaignNotificationsRead,
-  mockMarkCampaignNotificationRead,
-  mockProjectCampaignRuleFunnel,
   mockProjectGroupedManualAnswer,
   mockProposeProfileCopilotChange,
   mockQueueJobForReview,
-  mockRunCampaignNow,
   mockRunDesktopResumeQualityBenchmark,
-  mockSaveCampaignRule,
   mockSetResumeClaimConfirmation,
   mockSetWorkHistoryReviewAcknowledgment,
   mockStartApplyCopilotRun,
@@ -105,7 +95,6 @@ const {
   mockShowSaveDialog,
   mockGetPath,
   mockSnoozeGroupedDecision,
-  mockToggleCampaignRule,
   mockUpdateAppearanceTheme,
   mockUpdateApplicationDefaults,
   mockUpdateTrackerCrm,
@@ -122,7 +111,6 @@ const {
     } | null => null,
   ),
   mockBuildApplicationPacket: vi.fn(),
-  mockDeleteCampaignRule: vi.fn(),
   mockExportResumePdf: vi.fn(),
   mockFocusPreparedApplicationPage: vi.fn(),
   mockGetResumeWorkspace: vi.fn(),
@@ -135,15 +123,10 @@ const {
   mockImportResumeFromSourcePath: vi.fn(),
   mockRetryInterruptedResumeImport: vi.fn(),
   mockIsDesktopTestApiEnabled: vi.fn(() => false),
-  mockMarkAllCampaignNotificationsRead: vi.fn(),
-  mockMarkCampaignNotificationRead: vi.fn(),
-  mockProjectCampaignRuleFunnel: vi.fn(),
   mockProjectGroupedManualAnswer: vi.fn(),
   mockProposeProfileCopilotChange: vi.fn(),
   mockQueueJobForReview: vi.fn(),
-  mockRunCampaignNow: vi.fn(),
   mockRunDesktopResumeQualityBenchmark: vi.fn(),
-  mockSaveCampaignRule: vi.fn(),
   mockSetResumeClaimConfirmation: vi.fn(),
   mockSetWorkHistoryReviewAcknowledgment: vi.fn(),
   mockStartApplyCopilotRun: vi.fn(),
@@ -154,7 +137,6 @@ const {
   mockShowSaveDialog: vi.fn(),
   mockGetPath: vi.fn<(name: string) => string>(() => process.cwd()),
   mockSnoozeGroupedDecision: vi.fn(),
-  mockToggleCampaignRule: vi.fn(),
   mockUpdateAppearanceTheme: vi.fn(),
   mockUpdateApplicationDefaults: vi.fn(),
   mockUpdateTrackerCrm: vi.fn(),
@@ -722,7 +704,6 @@ function createEmptyWorkspace(generatedAt: string) {
     jobIds: [],
     minimumFitScore: null,
     ...getDefaultCampaignConfiguration("precision"),
-    schedule: {},
     progress: { lastUpdatedAt: generatedAt },
     history: [],
   };
@@ -3035,303 +3016,6 @@ describe("job-finder resume quality benchmark route", () => {
   });
 });
 
-describe("job-finder campaign run and notification read routes", () => {
-  let runCampaignNowHandler: RegisteredHandler;
-  let markNotificationReadHandler: RegisteredHandler;
-  let markAllNotificationsReadHandler: RegisteredHandler;
-
-  beforeEach(() => {
-    mockRunCampaignNow.mockClear();
-    mockMarkCampaignNotificationRead.mockClear();
-    mockMarkAllCampaignNotificationsRead.mockClear();
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      markAllCampaignNotificationsRead: mockMarkAllCampaignNotificationsRead,
-      markCampaignNotificationRead: mockMarkCampaignNotificationRead,
-      runCampaignNow: mockRunCampaignNow,
-    });
-    mockRunCampaignNow.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:00:00.000Z"),
-    );
-    mockMarkCampaignNotificationRead.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:01:00.000Z"),
-    );
-    mockMarkAllCampaignNotificationsRead.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:02:00.000Z"),
-    );
-
-    const handlers = new Map<string, RegisteredHandler>();
-    const ipcMain = {
-      handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-        handlers.set(channel, handler);
-      }),
-    } as unknown as IpcMain;
-    registerJobFinderRouteHandlers(ipcMain);
-    const runNow = handlers.get("job-finder:run-campaign-now");
-    const markRead = handlers.get("job-finder:mark-campaign-notification-read");
-    const markAllRead = handlers.get(
-      "job-finder:mark-all-campaign-notifications-read",
-    );
-    if (!runNow || !markRead || !markAllRead) {
-      throw new Error(
-        "Campaign run and notification read handlers were not registered.",
-      );
-    }
-    runCampaignNowHandler = runNow;
-    markNotificationReadHandler = markRead;
-    markAllNotificationsReadHandler = markAllRead;
-  });
-
-  it("parses an explicit campaign id for run-campaign-now", async () => {
-    const result = await runCampaignNowHandler(
-      { sender: {} },
-      { campaignId: "campaign-1" },
-    );
-
-    expect(mockRunCampaignNow).toHaveBeenCalledWith(
-      { campaignId: "campaign-1" },
-      expect.any(Function),
-    );
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("treats omitted or null campaign ids as the active campaign", async () => {
-    await runCampaignNowHandler({ sender: {} }, undefined);
-    expect(mockRunCampaignNow).toHaveBeenCalledWith({}, expect.any(Function));
-
-    mockRunCampaignNow.mockClear();
-    await runCampaignNowHandler({ sender: {} }, { campaignId: null });
-    expect(mockRunCampaignNow).toHaveBeenCalledWith(
-      { campaignId: null },
-      expect.any(Function),
-    );
-  });
-
-  it("still tells the renderer to refresh when the run refuses to start", async () => {
-    // A plan whose sources are gone records a failed run and then throws the
-    // reason. The throw skipped the workspace-updated publish, so the plan
-    // card, its history and Home all kept the previous run's success as the
-    // newest thing the app had said.
-    mockRunCampaignNow.mockRejectedValueOnce(
-      new Error(DISCOVERY_NO_JOB_SITES_MESSAGE),
-    );
-    const send = vi.fn();
-
-    await expect(
-      runCampaignNowHandler({ sender: { send } }, { campaignId: "campaign-1" }),
-    ).rejects.toThrow(DISCOVERY_NO_JOB_SITES_MESSAGE);
-
-    expect(send).toHaveBeenCalledWith(JOB_FINDER_WORKSPACE_UPDATED_CHANNEL);
-  });
-
-  it("rejects a malformed run-campaign-now payload", async () => {
-    await expect(
-      runCampaignNowHandler({ sender: {} }, { campaignId: 42 }),
-    ).rejects.toThrow();
-    expect(mockRunCampaignNow).not.toHaveBeenCalled();
-  });
-
-  it("supplies the ISO readAt for mark-campaign-notification-read", async () => {
-    const result = await markNotificationReadHandler(
-      { sender: {} },
-      { notificationId: "notification-1" },
-    );
-
-    const input = MarkCampaignNotificationReadInputSchema.parse(
-      mockMarkCampaignNotificationRead.mock.calls.at(-1)?.[0],
-    );
-    expect(input.notificationId).toBe("notification-1");
-    expect(typeof input.readAt).toBe("string");
-    expect(new Date(input.readAt).toISOString()).toBe(input.readAt);
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a mark-read payload without a notification id", async () => {
-    await expect(
-      markNotificationReadHandler({ sender: {} }, {}),
-    ).rejects.toThrow();
-    expect(mockMarkCampaignNotificationRead).not.toHaveBeenCalled();
-  });
-
-  it("routes mark-all-campaign-notifications-read to the service without extra payload", async () => {
-    const result = await markAllNotificationsReadHandler(
-      { sender: {} },
-      undefined,
-    );
-
-    expect(mockMarkAllCampaignNotificationsRead).toHaveBeenCalledTimes(1);
-    const rawInput: unknown =
-      mockMarkAllCampaignNotificationsRead.mock.calls.at(-1)?.[0];
-    const input = MarkAllCampaignNotificationsReadInputSchema.parse(rawInput);
-    expect(new Date(input.readAt).toISOString()).toBe(input.readAt);
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-});
-
-describe("job-finder campaign rule mutation and funnel routes", () => {
-  let saveRuleHandler: RegisteredHandler;
-  let deleteRuleHandler: RegisteredHandler;
-  let toggleRuleHandler: RegisteredHandler;
-  let projectFunnelHandler: RegisteredHandler;
-
-  const rulePayload = {
-    id: null,
-    kind: "must_have",
-    field: "role",
-    operator: "contains",
-    value: "frontend",
-    provenance: { source: "user", recordedAt: "2026-08-15T10:00:00.000Z" },
-  };
-
-  beforeEach(() => {
-    mockSaveCampaignRule.mockClear();
-    mockDeleteCampaignRule.mockClear();
-    mockToggleCampaignRule.mockClear();
-    mockProjectCampaignRuleFunnel.mockClear();
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      deleteCampaignRule: mockDeleteCampaignRule,
-      projectCampaignRuleFunnel: mockProjectCampaignRuleFunnel,
-      saveCampaignRule: mockSaveCampaignRule,
-      toggleCampaignRule: mockToggleCampaignRule,
-    });
-    mockSaveCampaignRule.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:02:00.000Z"),
-    );
-    mockDeleteCampaignRule.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:03:00.000Z"),
-    );
-    mockToggleCampaignRule.mockResolvedValue(
-      createEmptyWorkspace("2026-08-09T11:04:00.000Z"),
-    );
-    mockProjectCampaignRuleFunnel.mockResolvedValue({
-      campaignId: "campaign-1",
-      generatedAt: "2026-08-09T11:05:00.000Z",
-      rules: [],
-      disabledRuleIds: [],
-      funnel: {
-        sampleSize: 0,
-        hardRemovedCount: 0,
-        retainedCount: 0,
-        preferDowngradedCount: 0,
-        uncertainCount: 0,
-        confirmedRetainedCount: 0,
-        rankedJobIds: [],
-        measuredAt: "2026-08-09T11:05:00.000Z",
-      },
-    });
-
-    const handlers = new Map<string, RegisteredHandler>();
-    const ipcMain = {
-      handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-        handlers.set(channel, handler);
-      }),
-    } as unknown as IpcMain;
-    registerJobFinderRouteHandlers(ipcMain);
-    const saveRule = handlers.get("job-finder:save-campaign-rule");
-    const deleteRule = handlers.get("job-finder:delete-campaign-rule");
-    const toggleRule = handlers.get("job-finder:toggle-campaign-rule");
-    const projectFunnel = handlers.get(
-      "job-finder:project-campaign-rule-funnel",
-    );
-    if (!saveRule || !deleteRule || !toggleRule || !projectFunnel) {
-      throw new Error("Campaign rule handlers were not registered.");
-    }
-    saveRuleHandler = saveRule;
-    deleteRuleHandler = deleteRule;
-    toggleRuleHandler = toggleRule;
-    projectFunnelHandler = projectFunnel;
-  });
-
-  it("parses a save-campaign-rule payload and returns a snapshot", async () => {
-    const result = await saveRuleHandler(
-      { sender: {} },
-      { campaignId: "campaign-1", rule: rulePayload },
-    );
-
-    const input = SaveCampaignRuleRouteInputSchema.parse(
-      mockSaveCampaignRule.mock.calls.at(-1)?.[0],
-    );
-    expect(input.campaignId).toBe("campaign-1");
-    expect(input.rule.kind).toBe("must_have");
-    expect(input.rule.field).toBe("role");
-    expect(input.rule.operator).toBe("contains");
-    expect(input.rule.value).toBe("frontend");
-    // The route input defaults the id, enabled state, and effect so the
-    // service always receives a complete rule.
-    expect(input.rule.id).toBeNull();
-    expect(input.rule.enabled).toBe(true);
-    expect(input.rule.effect.sampleSize).toBe(0);
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a save-campaign-rule payload without a campaign id", async () => {
-    await expect(
-      saveRuleHandler({ sender: {} }, { rule: rulePayload }),
-    ).rejects.toThrow();
-    expect(mockSaveCampaignRule).not.toHaveBeenCalled();
-  });
-
-  it("parses a delete-campaign-rule payload", async () => {
-    const result = await deleteRuleHandler(
-      { sender: {} },
-      { campaignId: "campaign-1", ruleId: "rule_1" },
-    );
-    expect(mockDeleteCampaignRule).toHaveBeenCalledWith({
-      campaignId: "campaign-1",
-      ruleId: "rule_1",
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a delete-campaign-rule payload without a rule id", async () => {
-    await expect(
-      deleteRuleHandler({ sender: {} }, { campaignId: "campaign-1" }),
-    ).rejects.toThrow();
-    expect(mockDeleteCampaignRule).not.toHaveBeenCalled();
-  });
-
-  it("parses a toggle-campaign-rule payload", async () => {
-    const result = await toggleRuleHandler(
-      { sender: {} },
-      { campaignId: "campaign-1", ruleId: "rule_1", enabled: false },
-    );
-    expect(mockToggleCampaignRule).toHaveBeenCalledWith({
-      campaignId: "campaign-1",
-      ruleId: "rule_1",
-      enabled: false,
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a toggle-campaign-rule payload with a non-boolean enabled flag", async () => {
-    await expect(
-      toggleRuleHandler(
-        { sender: {} },
-        { campaignId: "campaign-1", ruleId: "rule_1", enabled: "yes" },
-      ),
-    ).rejects.toThrow();
-    expect(mockToggleCampaignRule).not.toHaveBeenCalled();
-  });
-
-  it("returns a parsed funnel projection from project-campaign-rule-funnel", async () => {
-    const result = await projectFunnelHandler(
-      { sender: {} },
-      { campaignId: "campaign-1" },
-    );
-    expect(mockProjectCampaignRuleFunnel).toHaveBeenCalledWith({
-      campaignId: "campaign-1",
-    });
-    expect(result).toMatchObject({
-      campaignId: "campaign-1",
-      funnel: { sampleSize: 0 },
-    });
-  });
-
-  it("rejects a project-campaign-rule-funnel payload without a campaign id", async () => {
-    await expect(projectFunnelHandler({ sender: {} }, {})).rejects.toThrow();
-    expect(mockProjectCampaignRuleFunnel).not.toHaveBeenCalled();
-  });
-});
-
 describe("job-finder grouped manual-answer routes", () => {
   let projectHandler: RegisteredHandler;
   let applyHandler: RegisteredHandler;
@@ -3856,29 +3540,6 @@ describe("job-finder synthetic save failure route", () => {
         "profile",
       ),
     ).toThrow(/Desktop test API is disabled/);
-  });
-
-  it("fails one campaign save before persistence and allows retry", async () => {
-    process.env.NESTOR_ENABLE_TEST_API = "1";
-    mockIsDesktopTestApiEnabled.mockReturnValue(true);
-    const snapshot = createEmptyWorkspace("2026-09-26T10:00:00.000Z");
-    const saveCampaign = vi.fn().mockResolvedValue(snapshot);
-    mockGetJobFinderWorkspaceService.mockResolvedValue({ saveCampaign });
-    const handlers = registerHandlers();
-    requireHandler(handlers, "job-finder:test-fail-next-save")(
-      { sender: {} },
-      "campaign",
-    );
-    const save = requireHandler(handlers, "job-finder:save-campaign");
-    const campaign = snapshot.campaigns[0];
-    await expect(save({ sender: {} }, campaign)).rejects.toThrow(
-      /could not write the campaign change/,
-    );
-    expect(saveCampaign).not.toHaveBeenCalled();
-    await expect(save({ sender: {} }, campaign)).resolves.toEqual(
-      wholeViewAnswer(snapshot),
-    );
-    expect(saveCampaign).toHaveBeenCalledTimes(1);
   });
 
   it("fails exactly one save on the armed surface and leaves other surfaces alone", async () => {

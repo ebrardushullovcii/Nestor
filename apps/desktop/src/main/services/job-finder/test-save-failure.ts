@@ -2,7 +2,6 @@ import {
   JobFinderTestSaveSurfaceSchema,
   type JobFinderTestSaveSurface,
 } from "@nestor/contracts";
-
 import { isDesktopTestApiEnabled } from "./test-api";
 
 /**
@@ -17,7 +16,6 @@ import { isDesktopTestApiEnabled } from "./test-api";
  * setup save of whichever surface was armed is exactly the intent.
  */
 const JOB_FINDER_TEST_SAVE_SURFACE_CHANNELS = {
-  campaign: ["job-finder:save-campaign"],
   profile: [
     "job-finder:save-profile",
     "job-finder:save-search-preferences",

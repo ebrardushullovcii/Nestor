@@ -280,17 +280,6 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     const idsOf = (kind: string) =>
       entries.filter((entry) => entry.kind === kind).map((entry) => entry.id);
 
-    expect(idsOf("campaign")).toEqual(["campaign-active", "campaign-other"]);
-    expect(entries.find((entry) => entry.id === "campaign-other")?.href).toBe(
-      "/job-finder/campaigns?campaignId=campaign-other",
-    );
-    expect(
-      searchJobFinderEntries(entries, "plan", {
-        campaignId: "campaign-other",
-      })
-        .flatMap((group) => group.entries)
-        .some((entry) => entry.id === "campaign-other"),
-    ).toBe(true);
     expect(idsOf("job")).toEqual(["job-active", "job-other", "job-unassigned"]);
     expect(idsOf("application")).toEqual([
       "application-active",
@@ -323,7 +312,6 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     const idsOf = (kind: string) =>
       entries.filter((entry) => entry.kind === kind).map((entry) => entry.id);
 
-    expect(idsOf("campaign")).toEqual(["campaign-active", "campaign-other"]);
     expect(idsOf("job")).toEqual(["job-active", "job-other", "job-unassigned"]);
     expect(idsOf("application")).toEqual([
       "application-active",

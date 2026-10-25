@@ -64,8 +64,6 @@ import {
   countApplicationRecords,
   countDiscoveryVisibleJobs,
   countNeedsYou,
-  countUnreadCampaignNotifications,
-  countUserCreatedSearchPlans,
   selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
@@ -127,7 +125,6 @@ const screenRouteMap: Record<Exclude<JobFinderScreen, "profile">, string> = {
   discovery: "/job-finder/discovery",
   "review-queue": "/job-finder/review-queue",
   applications: "/job-finder/applications",
-  campaigns: "/job-finder/campaigns",
   actions: "/job-finder/actions",
   settings: "/job-finder/settings",
 };
@@ -138,7 +135,6 @@ const screenLabelMap: Record<JobFinderScreen, string> = {
   discovery: "Find jobs",
   "review-queue": "Shortlisted",
   applications: "Applications",
-  campaigns: "Search plans",
   actions: "Needs you",
   settings: "Settings",
 };
@@ -156,8 +152,6 @@ export function countUnresolvedUserActions(
 ): number {
   return countNeedsYouItems({ groupedDecisions, requests });
 }
-
-export { countUnreadCampaignNotifications };
 
 export const LOCKED_LAYOUT_SCREENS: readonly JobFinderScreen[] = [
   "profile",
@@ -485,10 +479,6 @@ function getActiveScreen(pathname: string): JobFinderScreen {
     return "applications";
   }
 
-  if (pathname.endsWith("/campaigns")) {
-    return "campaigns";
-  }
-
   if (pathname.endsWith("/actions")) {
     return "actions";
   }
@@ -685,13 +675,6 @@ export function JobFinderShell({
         ),
         countKind: "inventory",
         icon: FileText,
-      },
-      {
-        id: "campaigns",
-        label: "Search plans",
-        count: toDestinationBadgeCount(countUserCreatedSearchPlans(workspace)),
-        countKind: "inventory",
-        icon: Layers3,
       },
       {
         id: "actions",

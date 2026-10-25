@@ -58,8 +58,7 @@
     "ui:resume-workspace": "pnpm build && node ./scripts/capture-resume-workspace.mjs",
     "ui:resume-workspace-dirty": "pnpm build && node ./scripts/capture-resume-workspace-dirty.mjs",
     "ui:action-inbox": "pnpm build && node ./scripts/capture-action-inbox.mjs",
-    "ui:action-inbox:built": "node ./scripts/capture-action-inbox.mjs",
-    "ui:job-finder-phase-two": "pnpm build && node ./scripts/capture-job-finder-phase-two.mjs"
+    "ui:action-inbox:built": "node ./scripts/capture-action-inbox.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

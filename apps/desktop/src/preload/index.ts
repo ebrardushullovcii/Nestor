@@ -61,7 +61,6 @@ import type {
   CandidateAssetOpenResult,
   CandidateAssetRestoreInput,
   CandidateAssetRestoreResult,
-  CampaignRuleFunnelProjection,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
   EditApplicationDocumentInput,
@@ -130,7 +129,6 @@ import type {
   ResumeQualityBenchmarkReport,
   ResumeQualityBenchmarkRequest,
   SaveApplicationAnswerCommandInput,
-  SaveCampaignRuleInput,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkRequest,
@@ -169,8 +167,6 @@ import type {
   JobFinderWorkspaceEntityMutationInput,
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
-  SaveJobSearchCampaignInput,
-  RunCampaignNowInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
@@ -609,16 +605,23 @@ const desktopApi = {
       ) as Promise<JobFinderRendererWorkspaceSnapshot>,
   },
   jobFinder: {
-    applyJobs: (input: ApplyJobsInput) => ipcRenderer
-      .invoke("job-finder:apply-jobs", ApplyJobsInputSchema.parse(input))
-      .then((result) => ApplyJobsResultSchema.parse(result)),
-    listApplications: (input: ApplicationListQuery = {}) => ipcRenderer
-      .invoke("job-finder:list-applications", ApplicationListQuerySchema.parse(input))
-      .then((result) => ApplicationListPageSchema.parse(result)),
+    applyJobs: (input: ApplyJobsInput) =>
+      ipcRenderer
+        .invoke("job-finder:apply-jobs", ApplyJobsInputSchema.parse(input))
+        .then((result) => ApplyJobsResultSchema.parse(result)),
+    listApplications: (input: ApplicationListQuery = {}) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:list-applications",
+          ApplicationListQuerySchema.parse(input),
+        )
+        .then((result) => ApplicationListPageSchema.parse(result)),
     onApplicationsChange: (listener: (change: JobChange) => void) => {
-      const handler = (_event: unknown, value: unknown) => listener(JobChangeSchema.parse(value));
+      const handler = (_event: unknown, value: unknown) =>
+        listener(JobChangeSchema.parse(value));
       ipcRenderer.on("job-finder:applications-changed", handler);
-      return () => ipcRenderer.removeListener("job-finder:applications-changed", handler);
+      return () =>
+        ipcRenderer.removeListener("job-finder:applications-changed", handler);
     },
     queries: createWorkspaceQueryBridge(),
     getTailoredAsset: (assetId: string): Promise<TailoredAsset | null> =>
@@ -858,56 +861,6 @@ const desktopApi = {
         "job-finder:save-search-preferences",
         searchPreferences,
       ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveCampaign: (campaign: SaveJobSearchCampaignInput) =>
-      ipcRenderer.invoke(
-        "job-finder:save-campaign",
-        campaign,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    selectCampaign: (campaignId: string) =>
-      ipcRenderer.invoke("job-finder:select-campaign", {
-        campaignId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    runCampaignNow: (input?: RunCampaignNowInput) =>
-      ipcRenderer.invoke(
-        "job-finder:run-campaign-now",
-        input ?? {},
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    markCampaignNotificationRead: (notificationId: string) =>
-      ipcRenderer.invoke("job-finder:mark-campaign-notification-read", {
-        notificationId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    markAllCampaignNotificationsRead: () =>
-      ipcRenderer.invoke(
-        "job-finder:mark-all-campaign-notifications-read",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveCampaignRule: (campaignId: string, rule: SaveCampaignRuleInput) =>
-      ipcRenderer.invoke("job-finder:save-campaign-rule", {
-        campaignId,
-        rule,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    deleteCampaignRule: (campaignId: string, ruleId: string) =>
-      ipcRenderer.invoke("job-finder:delete-campaign-rule", {
-        campaignId,
-        ruleId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    deleteJobSearchCampaign: (campaignId: string) =>
-      ipcRenderer.invoke("job-finder:delete-campaign", {
-        campaignId,
-      }) as Promise<boolean>,
-    toggleCampaignRule: (
-      campaignId: string,
-      ruleId: string,
-      enabled: boolean,
-    ) =>
-      ipcRenderer.invoke("job-finder:toggle-campaign-rule", {
-        campaignId,
-        ruleId,
-        enabled,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    projectCampaignRuleFunnel: (campaignId: string) =>
-      ipcRenderer.invoke("job-finder:project-campaign-rule-funnel", {
-        campaignId,
-      }) as Promise<CampaignRuleFunnelProjection>,
     setActivityControl: (input: SetJobFinderActivityControlInput) =>
       ipcRenderer.invoke(
         "job-finder:set-activity-control",
@@ -1571,9 +1524,15 @@ const desktopApi = {
     ...(testApiEnabled
       ? {
           test: {
-            loadApplicationsStoreDemo: (input: { sourceUrl: string }) => ipcRenderer
-              .invoke("job-finder:test-load-applications-store-demo", ApplicationStoreDemoInputSchema.parse(input))
-              .then((result) => ApplicationStoreDemoResultSchema.parse(result)),
+            loadApplicationsStoreDemo: (input: { sourceUrl: string }) =>
+              ipcRenderer
+                .invoke(
+                  "job-finder:test-load-applications-store-demo",
+                  ApplicationStoreDemoInputSchema.parse(input),
+                )
+                .then((result) =>
+                  ApplicationStoreDemoResultSchema.parse(result),
+                ),
             getSystemThemeOverride: () => currentSystemThemeOverride,
             setSystemThemeOverride: (theme: "dark" | "light" | null) =>
               Promise.resolve().then(() => {

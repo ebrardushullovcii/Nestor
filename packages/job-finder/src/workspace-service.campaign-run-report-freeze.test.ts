@@ -1,7 +1,6 @@
-import { describe, expect, test } from "vitest";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
 import type { JobFinderRepository } from "@nestor/db";
-
+import { createInMemoryJobFinderRepository } from "@nestor/db";
+import { describe, expect, test } from "vitest";
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAiClient,
@@ -45,18 +44,17 @@ describe("a finished run's frozen counts", () => {
       researchAdapter: createResearchAdapter(),
     });
 
-    const before = await workspaceService.getWorkspaceSnapshot();
-    const campaignId = before.activeCampaignId;
-    await workspaceService.runCampaignNow({ campaignId });
+    await workspaceService.getWorkspaceSnapshot();
+    await workspaceService.runDiscovery();
 
     const afterRun = await repository.getDiscoveryState();
     const frozenReport = afterRun.recentRuns[0]?.summary.report;
     expect(frozenReport).toBeTruthy();
 
     failNextSettingsRead = true;
-    await expect(
-      workspaceService.runCampaignNow({ campaignId }),
-    ).rejects.toThrow(/Settings could not be read/u);
+    await expect(workspaceService.runDiscovery()).rejects.toThrow(
+      /Settings could not be read/u,
+    );
 
     const afterRefusal = await repository.getDiscoveryState();
     expect(afterRefusal.recentRuns[0]?.id).toBe(afterRun.recentRuns[0]?.id);

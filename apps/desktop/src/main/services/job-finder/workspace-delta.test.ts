@@ -202,39 +202,6 @@ describe("Job Finder workspace delta tracker", () => {
     });
   });
 
-  it("replaces a changed untracked field in a delta instead of resending the workspace", () => {
-    const tracker = createJobFinderWorkspaceDeltaTracker();
-    const initial = createWorkspace({
-      generatedAt: "2026-08-09T10:00:00.000Z",
-      jobIds: ["job-1"],
-      selectedJobId: "job-1",
-    });
-    const changed = createWorkspace({
-      generatedAt: "2026-08-09T10:01:00.000Z",
-      jobIds: ["job-1"],
-      selectedJobId: "job-1",
-      profileSummary: "Changed summary",
-    });
-
-    tracker.synchronize(null, initial);
-
-    const result = tracker.synchronize(1, changed);
-    expect(result).toMatchObject({
-      kind: "delta",
-      delta: {
-        baseRevision: 1,
-        currentRevision: 2,
-        replaced: { profile: changed.profile },
-      },
-    });
-    if (result.kind !== "delta") throw new Error("expected a delta");
-    // Unchanged plan state, notifications and dashboard are left out.
-    expect(result.delta).not.toHaveProperty("campaigns");
-    expect(result.delta).not.toHaveProperty("dashboard");
-    expect(result.delta).not.toHaveProperty("campaignNotifications");
-    expect(Object.keys(result.delta.replaced ?? {})).toEqual(["profile"]);
-  });
-
   it("sends nothing for unchanged plan state on an idle refresh", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();
     const workspace = createWorkspace({

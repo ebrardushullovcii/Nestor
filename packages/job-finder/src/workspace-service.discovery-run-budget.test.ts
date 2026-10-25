@@ -377,23 +377,6 @@ function createScaleCampaignInput(input: {
       qualityReviewSampleRatio: 0.2,
       simultaneousApplicationWindowDays: 1,
     },
-    rules: [],
-    schedule: {
-      mode: "manual" as const,
-      enabled: false,
-      daysOfWeek: [],
-      localStartTime: null,
-      timeZone: null,
-      pauseWindows: [],
-      runFacts: {
-        nextRunAt: null,
-        lastRunAt: null,
-        lastRunOutcome: null,
-        lastRunSummary: null,
-        consecutiveFailures: 0,
-      },
-    },
-    latestDigest: null,
   };
 }
 
@@ -402,17 +385,28 @@ async function saveScaleCampaign(
   searchPreferences: JobSearchPreferences,
   discoveryRunJobBudget?: number | null,
 ): Promise<string> {
-  const snapshot = await harness.workspaceService.saveCampaign(
-    createScaleCampaignInput({
-      name: "Budget Campaign",
-      searchPreferences,
-      ...(discoveryRunJobBudget !== undefined ? { discoveryRunJobBudget } : {}),
-    }),
-  );
-  const created = snapshot.campaigns.find(
-    (candidate) => candidate.name === "Budget Campaign",
-  );
-  if (!created) throw new Error("Expected the created campaign.");
+  await harness.workspaceService.getWorkspaceSnapshot();
+  const state = (await harness.repository.getCampaignState())!;
+  const campaign = state.campaigns.find(
+    (entry) => entry.id === state.activeCampaignId,
+  )!;
+  await harness.repository.saveCampaignState({
+    ...state,
+    campaigns: [
+      {
+        ...campaign,
+        ...createScaleCampaignInput({
+          name: "Budget Campaign",
+          searchPreferences,
+          ...(discoveryRunJobBudget !== undefined
+            ? { discoveryRunJobBudget }
+            : {}),
+        }),
+        id: campaign.id,
+      },
+    ],
+  });
+  const created = campaign;
   return created.id;
 }
 
@@ -446,8 +440,8 @@ describe("campaign discovery run budgets", () => {
     const { repository, workspaceService } = harness;
 
     const globalPreferences = await repository.getSearchPreferences();
-    const campaignId = await saveScaleCampaign(harness, globalPreferences);
-    await workspaceService.runCampaignNow({ campaignId });
+    await saveScaleCampaign(harness, globalPreferences);
+    await workspaceService.runAgentDiscovery();
 
     expect(agentCalls).toHaveLength(1);
     expect(directCalls).toHaveLength(0);
@@ -465,46 +459,6 @@ describe("campaign discovery run budgets", () => {
     const run = discoveryState.recentRuns.at(-1);
     expect(run?.summary.outcome).toBe("completed");
     expect(run?.targetExecutions[0]?.requestedJobBudget).toBe(1_000);
-  }, 60_000);
-
-  test("passes a precision campaign's focus to the browser agent", async () => {
-    const base = createBrowserRuntime();
-    const agentCalls: Array<
-      Parameters<NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>>[1]
-    > = [];
-    const browserRuntime: BrowserSessionRuntime = {
-      ...base,
-      runAgentDiscovery: (source, options) => {
-        agentCalls.push(options);
-        return base.runAgentDiscovery!(source, options);
-      },
-    };
-    const seed = createEmptyDiscoverySeed();
-    seed.searchPreferences.discovery.targets = [
-      createBrowserTarget("target_precision", "Precision Board"),
-    ];
-    const harness = createWorkspaceServiceHarness({ seed, browserRuntime });
-    const preferences = await harness.repository.getSearchPreferences();
-    const snapshot = await harness.workspaceService.saveCampaign({
-      ...createScaleCampaignInput({
-        name: "Precision Campaign",
-        searchPreferences: preferences,
-        discoveryRunJobBudget: null,
-      }),
-      mode: "precision",
-    });
-    const campaign = snapshot.campaigns.find(
-      (candidate) => candidate.name === "Precision Campaign",
-    );
-    if (!campaign) throw new Error("Expected the precision campaign.");
-
-    await harness.workspaceService.runCampaignNow({ campaignId: campaign.id });
-
-    expect(agentCalls).toHaveLength(1);
-    expect(agentCalls[0]?.searchMode).toBe("precision");
-    expect(agentCalls[0]?.retainAllFound).toBe(true);
-    expect(agentCalls[0]?.runControl?.timeBudgetMs).toBe(60 * 60_000);
-    expect(agentCalls[0]?.runControl?.noProgressStepLimit).toBe(24);
   }, 60_000);
 
   test("honors the run-scoped goal, breadth, freshness, and selected sources", async () => {
@@ -576,11 +530,11 @@ describe("campaign discovery run budgets", () => {
     const { repository, workspaceService } = harness;
 
     const globalPreferences = await repository.getSearchPreferences();
-    const campaignId = await saveScaleCampaign(harness, globalPreferences);
+    await saveScaleCampaign(harness, globalPreferences);
     // The only configured target fails truthfully, so the manual run rejects.
-    await expect(
-      workspaceService.runCampaignNow({ campaignId }),
-    ).rejects.toThrow(/bounded browser agent runtime/);
+    await expect(workspaceService.runAgentDiscovery()).rejects.toThrow(
+      /bounded browser agent runtime/,
+    );
 
     const discoveryState = await repository.getDiscoveryState();
     const run = discoveryState.recentRuns.at(-1);
@@ -590,127 +544,6 @@ describe("campaign discovery run budgets", () => {
     expect(execution?.warning).toContain("bounded browser agent runtime");
     expect(execution?.warning).toContain("direct discovery");
     expect(run?.summary.warnings.length).toBeGreaterThan(0);
-  }, 60_000);
-
-  test("isolates a failing browser target while healthy targets complete, and schedules obey pause and cancellation", async () => {
-    const healthyRuntime = createBrowserRuntime();
-    const isolatedRuntime: BrowserSessionRuntime = {
-      ...healthyRuntime,
-      runAgentDiscovery: (source, options) =>
-        options.siteLabel === "Broken Board"
-          ? Promise.reject(new Error("browser navigation collapsed"))
-          : healthyRuntime.runAgentDiscovery!(source, options),
-    };
-
-    const seed = createEmptyDiscoverySeed();
-    seed.searchPreferences.discovery.targets = [
-      createBrowserTarget("target_broken", "Broken Board"),
-      createBrowserTarget("target_healthy", "Healthy Board"),
-    ];
-    const harness = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: isolatedRuntime,
-    });
-    const { repository, workspaceService } = harness;
-
-    const globalPreferences = await repository.getSearchPreferences();
-    await workspaceService.saveCampaign(
-      createScaleCampaignInput({
-        name: "Isolation Campaign",
-        searchPreferences: globalPreferences,
-      }),
-    );
-    let snapshot = await workspaceService.getWorkspaceSnapshot();
-    const campaignId = snapshot.activeCampaignId;
-
-    // Give the campaign an enabled daily schedule that is already due.
-    const stateWithSchedule = await repository.getCampaignState();
-    const savedCampaign = stateWithSchedule?.campaigns.find(
-      (candidate) => candidate.id === campaignId,
-    );
-    if (!savedCampaign) throw new Error("Expected the saved campaign.");
-    const overdue = new Date(Date.now() - 60 * 60 * 1_000).toISOString();
-    await workspaceService.saveCampaign({
-      id: campaignId,
-      name: savedCampaign.name,
-      description: savedCampaign.description,
-      mode: savedCampaign.mode,
-      status: "active",
-      searchPreferences: globalPreferences,
-      sourceTargetIds: savedCampaign.sourceTargetIds,
-      minimumFitScore: null,
-      limits: savedCampaign.limits,
-      stopRules: savedCampaign.stopRules,
-      applicationPolicy: savedCampaign.applicationPolicy,
-      rules: savedCampaign.rules,
-      latestDigest: null,
-      schedule: {
-        mode: "daily" as const,
-        enabled: true,
-        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-        localStartTime: "09:00",
-        timeZone: "UTC",
-        pauseWindows: [],
-        runFacts: {
-          nextRunAt: overdue,
-          lastRunAt: null,
-          lastRunOutcome: null,
-          lastRunSummary: null,
-          consecutiveFailures: 0,
-        },
-      },
-    });
-
-    // While activity is paused, the due schedule never starts browser work.
-    await workspaceService.setActivityControl({
-      paused: true,
-      reason: "qa pause",
-    });
-    await workspaceService.runDueScheduledCampaigns();
-    const pausedState = await repository.getCampaignState();
-    const pausedCampaign = pausedState?.campaigns.find(
-      (candidate) => candidate.id === campaignId,
-    );
-    expect(pausedCampaign?.schedule.runFacts.lastRunAt).toBeNull();
-    await workspaceService.setActivityControl({ paused: false });
-
-    // A mid-run cancellation finalizes the run truthfully as cancelled.
-    const controller = new AbortController();
-    const cancelPromise = workspaceService.runAgentDiscovery(
-      undefined,
-      controller.signal,
-    );
-    controller.abort();
-    snapshot = await cancelPromise;
-    expect(snapshot.recentDiscoveryRuns.at(-1)?.summary.outcome).toBe(
-      "cancelled",
-    );
-
-    // Per-target isolation inside one campaign run: the broken board records
-    // its own failure warning while the healthy board completes.
-    await workspaceService.runCampaignNow({ campaignId });
-    const ranState = await repository.getCampaignState();
-    const ranCampaign = ranState?.campaigns.find(
-      (candidate) => candidate.id === campaignId,
-    );
-    expect(ranCampaign?.schedule.runFacts.lastRunOutcome).toBe("partial");
-
-    const discoveryState = await repository.getDiscoveryState();
-    const run = discoveryState.recentRuns.find(
-      (candidate) => candidate.campaignId === campaignId,
-    );
-    expect(run?.summary.outcome).toBe("completed");
-    const brokenExecution = run?.targetExecutions.find(
-      (execution) => execution.targetId === "target_broken",
-    );
-    const healthyExecution = run?.targetExecutions.find(
-      (execution) => execution.targetId === "target_healthy",
-    );
-    expect(brokenExecution?.state).toBe("failed");
-    expect(brokenExecution?.warning).toContain("browser navigation collapsed");
-    expect(brokenExecution?.requestedJobBudget).toBeNull();
-    expect(healthyExecution?.state).toBe("completed");
-    expect(healthyExecution?.jobsPersisted).toBeGreaterThan(0);
   }, 60_000);
 
   test("samples every API target while retaining only the run budget", async () => {
@@ -746,8 +579,8 @@ describe("campaign discovery run budgets", () => {
     });
 
     const globalPreferences = await repository.getSearchPreferences();
-    const campaignId = await saveScaleCampaign(harness, globalPreferences, 1);
-    await workspaceService.runCampaignNow({ campaignId });
+    await saveScaleCampaign(harness, globalPreferences, 1);
+    await workspaceService.runDiscovery();
 
     expect(fetchUrls).toHaveLength(3);
 
@@ -803,8 +636,8 @@ describe("campaign discovery run budgets", () => {
     const { repository, workspaceService } = harness;
 
     const globalPreferences = await repository.getSearchPreferences();
-    const campaignId = await saveScaleCampaign(harness, globalPreferences, 1);
-    await workspaceService.runCampaignNow({ campaignId });
+    await saveScaleCampaign(harness, globalPreferences, 1);
+    await workspaceService.runAgentDiscovery();
 
     expect(agentCalls).toHaveLength(2);
     expect(agentCalls[0]?.siteLabel).toBe("Funded Board");

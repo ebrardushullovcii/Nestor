@@ -1,11 +1,11 @@
-import {
-  formatDiscoveryAccounting,
-  formatDiscoverySourceAccounting,
-} from "@nestor/contracts";
 import type {
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
   DiscoveryRunReport,
+} from "@nestor/contracts";
+import {
+  formatDiscoveryAccounting,
+  formatDiscoverySourceAccounting,
 } from "@nestor/contracts";
 
 /**
@@ -408,7 +408,7 @@ export function formatDiscoveryResultBandTotal(
     normalizeCount(counts.worthOpening) +
     normalizeCount(counts.titleMatches ?? 0) +
     normalizeCount(counts.alsoFound);
-  return `${kept} ${kept === 1 ? "job" : "jobs"} kept in this search plan.`;
+  return `${kept} ${kept === 1 ? "job" : "jobs"} kept in this search.`;
 }
 
 /**
@@ -483,7 +483,7 @@ function formatSavedAndKeptCounts(
   // sent people looking for 35 jobs that no screen lists.
   return `${savedByRun} new ${
     savedByRun === 1 ? "job" : "jobs"
-  } saved on this device · ${keptInPlan} kept in your current search plan (its 'Jobs to retain' limit; raise it in Search plans → Edit to keep more)`;
+  } saved on this device · ${keptInPlan} kept in this search`;
 }
 
 /** A source's part of the same run report; older runs say what was not recorded. */

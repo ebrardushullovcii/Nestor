@@ -433,7 +433,7 @@ export function createDiscoveryRunSucceededFeedback(
           ? runCountLabel
           : newJobCount === 0
             ? "No new jobs this time."
-            : `${newJobCount} new ${newJobCount === 1 ? "job" : "jobs"} saved to this plan.`,
+            : `${newJobCount} new ${newJobCount === 1 ? "job" : "jobs"} saved.`,
     },
   };
 }

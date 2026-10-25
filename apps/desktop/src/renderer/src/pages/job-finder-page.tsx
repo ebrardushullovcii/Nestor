@@ -91,16 +91,15 @@ import {
   useJobFinderPageController,
 } from "./use-job-finder-page-controller";
 
+export type { JobFinderPageContext } from "./job-finder-page-context";
 export {
   JobFinderActionsRoute,
-  JobFinderCampaignsRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
   JobFinderRouteErrorBoundary,
   JobFinderSettingsRoute,
 } from "./job-finder-page-routes";
-export type { JobFinderPageContext } from "./job-finder-page-context";
 
 /**
  * Exactly one window-close responder stays mounted across every render state

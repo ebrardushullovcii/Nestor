@@ -1384,17 +1384,6 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
     expect(model.stages?.[2]).toMatchObject({ count: 1, detail: "1 applied" });
   });
-
-  it("shows the plan selector only with two or more plans", () => {
-    const one = build(workspace());
-    expect(one.showPlanSelector).toBe(false);
-    const ws = workspace();
-    ws.campaigns = [
-      ...ws.campaigns,
-      { ...ws.campaigns[0]!, id: "campaign-2", name: "Backend" },
-    ];
-    expect(build(ws).showPlanSelector).toBe(true);
-  });
 });
 
 describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {

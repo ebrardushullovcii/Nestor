@@ -1,37 +1,39 @@
+import type {
+  JobSearchCampaignMode,
+  SourceAccessPrompt,
+} from "@nestor/contracts";
 import {
+  getDefaultCampaignConfiguration,
   JobFinderDashboardSummarySchema,
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignSchema,
   resolveCampaignSourceTargetIds,
-  getDefaultCampaignConfiguration,
+  type ApplicationRecord,
   type ApplyJobResult,
   type ApplyRun,
-  type ApplicationRecord,
+  type GroupedManualAnswerDecision,
   type JobFinderDashboardSummary,
-  type JobFinderIntelligenceSafeguards,
   type JobFinderDiscoveryState,
+  type JobFinderIntelligenceSafeguards,
   type JobSearchCampaign,
   type JobSearchCampaignCollection,
-  type JobSearchCampaignMode,
   type JobSearchPreferences,
   type ReviewQueueItem,
   type SavedJob,
-  type GroupedManualAnswerDecision,
   type UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
-import { parseSearchPreferencesOnce } from "./validated-search-preferences";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
-import type { SourceAccessPrompt } from "@nestor/contracts";
+import {
+  deriveEnabledSourceHealthCounts,
+  deriveSourceHealthSignals,
+} from "../source-health";
 import {
   getApplicationCrmData,
   isApplicationAwaitingUserApproval,
   projectApplicationCrmDashboard,
 } from "./application-crm";
-import {
-  deriveEnabledSourceHealthCounts,
-  deriveSourceHealthSignals,
-} from "../source-health";
+import { parseSearchPreferencesOnce } from "./validated-search-preferences";
 
 const FINAL_ACTION_STATES = new Set([
   "resolved",
@@ -145,7 +147,6 @@ function createDefaultCampaign(
     jobIds,
     minimumFitScore: null,
     ...getDefaultCampaignConfiguration("precision"),
-    schedule: {},
     progress: { lastUpdatedAt: now },
     history: [
       ...legacyRuns.map((run) => ({
@@ -440,44 +441,6 @@ export function searchPreferencesForCampaignRun(
   };
 }
 
-export function createCampaign(input: {
-  id: string;
-  name: string;
-  description?: string;
-  mode: JobSearchCampaignMode;
-  searchPreferences: JobSearchPreferences;
-  now: string;
-}): JobSearchCampaign {
-  return JobSearchCampaignSchema.parse({
-    id: input.id,
-    name: input.name,
-    description: input.description ?? "",
-    mode: input.mode,
-    status: "active",
-    createdAt: input.now,
-    updatedAt: input.now,
-    searchPreferences: input.searchPreferences,
-    sourceTargetIds: input.searchPreferences.discovery.targets
-      .filter((target) => target.enabled)
-      .map((target) => target.id),
-    jobIds: [],
-    minimumFitScore: null,
-    ...getDefaultCampaignConfiguration(input.mode),
-    schedule: {},
-    progress: { lastUpdatedAt: input.now },
-    history: [
-      {
-        id: `${input.id}_created`,
-        campaignId: input.id,
-        kind: "created",
-        occurredAt: input.now,
-        summary: `${input.name} created with the ${input.mode === "precision" ? "Focused search" : "Wider search"} setting.`,
-        discoveryRunId: null,
-      },
-    ],
-  });
-}
-
 export function assertCampaignCanRun(campaign: JobSearchCampaign): void {
   if (campaign.status !== "active") {
     throw new Error(
@@ -708,5 +671,42 @@ export function deriveDashboardSummary(input: {
     sourceHealth,
     backgroundOperationCount,
     recommendedNextAction,
+  });
+}
+
+export function createCampaign(input: {
+  id: string;
+  name: string;
+  description?: string;
+  mode: JobSearchCampaignMode;
+  searchPreferences: JobSearchPreferences;
+  now: string;
+}): JobSearchCampaign {
+  return JobSearchCampaignSchema.parse({
+    id: input.id,
+    name: input.name,
+    description: input.description ?? "",
+    mode: input.mode,
+    status: "active",
+    createdAt: input.now,
+    updatedAt: input.now,
+    searchPreferences: input.searchPreferences,
+    sourceTargetIds: input.searchPreferences.discovery.targets
+      .filter((target) => target.enabled)
+      .map((target) => target.id),
+    jobIds: [],
+    minimumFitScore: null,
+    ...getDefaultCampaignConfiguration(input.mode),
+    progress: { lastUpdatedAt: input.now },
+    history: [
+      {
+        id: `${input.id}_created`,
+        campaignId: input.id,
+        kind: "created",
+        occurredAt: input.now,
+        summary: `${input.name} created with the ${input.mode === "precision" ? "Focused search" : "Wider search"} setting.`,
+        discoveryRunId: null,
+      },
+    ],
   });
 }

@@ -11,10 +11,7 @@ import {
   JobFinderRouteErrorBoundary,
   JobFinderSettingsRoute,
 } from "../pages/job-finder-page";
-import {
-  JobFinderCampaignsRoute,
-  JobFinderHomeRoute,
-} from "../pages/job-finder-page-routes";
+import { JobFinderHomeRoute } from "../pages/job-finder-page-routes";
 
 const loadLiveAssistantRoutes = () =>
   import("../features/live-assistant/live-assistant-page");
@@ -76,11 +73,6 @@ export const appRouter = createHashRouter([
         path: "home",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
         element: <JobFinderHomeRoute />,
-      },
-      {
-        path: "campaigns",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderCampaignsRoute />,
       },
       {
         path: "profile",

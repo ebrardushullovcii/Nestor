@@ -398,7 +398,6 @@ export const jobFinderTestSaveSurfaceValues = [
   "answers",
   "settings",
   "resume",
-  "campaign",
 ] as const;
 export const JobFinderTestSaveSurfaceSchema = z.enum(
   jobFinderTestSaveSurfaceValues,

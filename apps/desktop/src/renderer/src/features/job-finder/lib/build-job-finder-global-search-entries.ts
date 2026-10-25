@@ -69,13 +69,6 @@ const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
     ["tracker", "interviews"],
   ),
   screen(
-    "campaigns",
-    "Search plans",
-    "Roles, places and sources",
-    JOB_FINDER_ROUTE_PATHS.campaigns,
-    ["plans"],
-  ),
-  screen(
     "settings",
     "Settings",
     "Applying, AI, appearance",
@@ -239,27 +232,8 @@ export function buildJobFinderGlobalSearchEntries(
     })),
   ];
 
-  const campaignEntries: JobFinderGlobalSearchEntry[] = campaigns.map(
-    (campaign) => ({
-      campaignId: campaign.id,
-      href: `${JOB_FINDER_ROUTE_PATHS.campaigns}?campaignId=${encodeURIComponent(campaign.id)}`,
-      id: campaign.id,
-      kind: "campaign",
-      metadata: [campaign.description, campaign.mode, campaign.status].filter(
-        (value): value is string =>
-          typeof value === "string" && value.length > 0,
-      ),
-      subtitle:
-        campaign.id === workspace.activeCampaignId
-          ? "Current search plan"
-          : "Search plan",
-      title: campaign.name,
-    }),
-  );
-
   return [
     ...SCREEN_ENTRIES,
-    ...campaignEntries,
     ...jobEntries,
     ...applicationEntries,
     ...documentEntries,

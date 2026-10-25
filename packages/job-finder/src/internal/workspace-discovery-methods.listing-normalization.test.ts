@@ -230,9 +230,7 @@ describe("run-wide salary normalization", () => {
     );
     if (!active) throw new Error("Expected the default search plan.");
 
-    const snapshot = await workspaceService.runCampaignNow({
-      campaignId: active.id,
-    });
+    const snapshot = await workspaceService.runAgentDiscovery();
     const sanitized = snapshot.discoveryJobs.find(
       (job) => job.sourceJobId === "salary_retention_1",
     );

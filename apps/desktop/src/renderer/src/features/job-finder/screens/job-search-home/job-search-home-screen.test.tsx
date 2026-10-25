@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import type {
-  CampaignNotification,
   JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
 } from "@nestor/contracts";
@@ -13,10 +12,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  JobSearchHomeScreen,
-  listCurrentUnreadNotifications,
-} from "./job-search-home-screen";
+import { JobSearchHomeScreen } from "./job-search-home-screen";
 
 afterEach(cleanup);
 
@@ -112,7 +108,10 @@ function workspace(): JobFinderRendererWorkspaceSnapshot {
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function withReadyShortlist(ws: JobFinderRendererWorkspaceSnapshot, ids: string[]) {
+function withReadyShortlist(
+  ws: JobFinderRendererWorkspaceSnapshot,
+  ids: string[],
+) {
   return {
     ...ws,
     campaigns: ws.campaigns.map((campaign) => ({ ...campaign, jobIds: ids })),
@@ -580,262 +579,6 @@ describe("JobSearchHomeScreen", () => {
     );
     expect(onApplyToJobs).toHaveBeenCalledWith(["job_b", "job_c"]);
     expect(props.onNavigate).not.toHaveBeenCalled();
-  });
-
-  it("shows notifications only while one is unread", () => {
-    const notification = (
-      id: string,
-      unread: boolean,
-    ): CampaignNotification => ({
-      id,
-      campaignId: "campaign-1",
-      kind: "strong_match",
-      title: `Strong match: ${id}`,
-      body: null,
-      createdAt: "2026-08-15T10:00:00.000Z",
-      readAt: unread ? null : "2026-08-15T11:00:00.000Z",
-      unread,
-      jobId: null,
-      sourceTargetId: null,
-    });
-    const props = {
-      ...baseProps(),
-      onMarkCampaignNotificationRead: vi.fn(),
-      onMarkAllCampaignNotificationsRead: vi.fn(),
-    };
-    const { rerender } = render(
-      <JobSearchHomeScreen
-        {...props}
-        campaignNotifications={[notification("a", false)]}
-        workspace={workspace()}
-      />,
-    );
-    expect(screen.queryByRole("region", { name: "Notifications" })).toBeNull();
-    rerender(
-      <JobSearchHomeScreen
-        {...props}
-        campaignNotifications={[
-          notification("a", false),
-          notification("b", true),
-        ]}
-        workspace={workspace()}
-      />,
-    );
-    const region = screen.getByRole("region", { name: "Notifications" });
-    expect(within(region).getByText("Strong match: b")).toBeTruthy();
-    expect(within(region).queryByText("Strong match: a")).toBeNull();
-  });
-});
-
-describe("listCurrentUnreadNotifications", () => {
-  it("drops a failure note about a job that has since been sent", () => {
-    const note = (id: string, jobId: string | null) =>
-      ({
-        id,
-        campaignId: "c",
-        kind: "blocked_work",
-        title: "Failed: Cedar",
-        body: "The application page could not be opened.",
-        createdAt: "2026-09-25T00:00:00.000Z",
-        unread: true,
-        readAt: null,
-        jobId,
-        sourceTargetId: null,
-      }) as unknown as CampaignNotification;
-    const kept = listCurrentUnreadNotifications(
-      [
-        note("n_sent", "job_sent"),
-        note("n_open", "job_open"),
-        note("n_src", null),
-      ],
-      {
-        applicationRecords: [
-          {
-            jobId: "job_sent",
-            status: "submitted",
-            lastAttemptState: "submitted",
-          },
-          {
-            jobId: "job_open",
-            status: "ready_for_review",
-            lastAttemptState: "failed",
-          },
-        ],
-      } as unknown as JobFinderRendererWorkspaceSnapshot,
-    );
-    expect(kept.map((entry) => entry.id)).toEqual(["n_open", "n_src"]);
-  });
-
-  it("drops a note about a hold that no longer exists (ADR 0051)", () => {
-    const note = (id: string, body: string) =>
-      ({
-        id,
-        campaignId: "c",
-        kind: "blocked_work",
-        title: "Blocked: QA Lead",
-        body,
-        createdAt: "2026-10-17T01:23:11.597Z",
-        unread: true,
-        readAt: null,
-        jobId: "job_qa",
-        sourceTargetId: null,
-      }) as unknown as CampaignNotification;
-    const kept = listCurrentUnreadNotifications(
-      [
-        note(
-          "n_retired",
-          "The resume for 'QA Lead' leaves out 2 roles that Job Finder wants you to confirm first.",
-        ),
-        note("n_current", "The application page could not be opened."),
-      ],
-      {
-        applicationRecords: [],
-      } as unknown as JobFinderRendererWorkspaceSnapshot,
-    );
-    expect(kept.map((entry) => entry.id)).toEqual(["n_current"]);
-  });
-
-  it("drops a job's failure note once a newer attempt for that job started", () => {
-    const note = {
-      id: "n_failed_willow",
-      campaignId: "c",
-      kind: "blocked_work",
-      title: "Failed: Willow",
-      body: "The prepared application page is no longer open.",
-      createdAt: "2026-09-27T00:24:18.426Z",
-      unread: true,
-      readAt: null,
-      jobId: "job_willow",
-      sourceTargetId: null,
-    } as unknown as CampaignNotification;
-    const workspace = (startedAt: readonly string[]) =>
-      ({
-        applicationRecords: [
-          {
-            jobId: "job_willow",
-            status: "ready_for_review",
-            lastAttemptState: "failed",
-          },
-        ],
-        applyJobResults: startedAt.map((at) => ({
-          jobId: "job_willow",
-          startedAt: at,
-        })),
-      }) as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    // Only the attempt the note is about: it stays.
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace(["2026-09-27T00:14:47.900Z"]),
-      ),
-    ).toHaveLength(1);
-    // A newer attempt started after the note: the note is over.
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace(["2026-09-27T00:14:47.900Z", "2026-09-27T00:26:00.000Z"]),
-      ),
-    ).toEqual([]);
-  });
-
-  it("drops a run's failure note once every job of that run was tried again", () => {
-    const runNote = {
-      id: "n_campaign_default_failed_apply_run_apply_run_1",
-      campaignId: "campaign_default",
-      kind: "blocked_work",
-      title: "Failed: Application run",
-      body: "The dedicated browser could not load this employer page.",
-      createdAt: "2026-09-27T01:07:16.014Z",
-      unread: true,
-      readAt: null,
-      jobId: null,
-      sourceTargetId: null,
-    } as unknown as CampaignNotification;
-    const workspace = (startedAt: Record<string, string>) =>
-      ({
-        applicationRecords: [],
-        applyRuns: [{ id: "apply_run_1", jobIds: ["job_a", "job_b"] }],
-        applyJobResults: Object.entries(startedAt).map(([jobId, at]) => ({
-          jobId,
-          startedAt: at,
-        })),
-      }) as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    // Only one of the run's two jobs was tried again: the note stays.
-    expect(
-      listCurrentUnreadNotifications(
-        [runNote],
-        workspace({
-          job_a: "2026-09-27T01:10:00.000Z",
-          job_b: "2026-09-27T01:06:00.000Z",
-        }),
-      ),
-    ).toHaveLength(1);
-    expect(
-      listCurrentUnreadNotifications(
-        [runNote],
-        workspace({
-          job_a: "2026-09-27T01:10:00.000Z",
-          job_b: "2026-09-27T01:10:00.000Z",
-        }),
-      ),
-    ).toEqual([]);
-  });
-
-  it("drops a source's sign-in note once that sign-in resolved", () => {
-    const note = {
-      id: "n_blocked_src",
-      campaignId: "c",
-      kind: "blocked_work",
-      title: "Blocked: Job source localhost/authboard",
-      body: "Sign in from Needs you; the search carries on by itself.",
-      createdAt: "2026-09-26T22:10:06.820Z",
-      unread: true,
-      readAt: null,
-      jobId: null,
-      sourceTargetId: "target_auth",
-    } as unknown as CampaignNotification;
-    const step = (state: string, resolvedAt: string | null) => ({
-      scope: { type: "discovery_source", targetId: "target_auth" },
-      state,
-      resolvedAt,
-      updatedAt: resolvedAt,
-    });
-    const workspace = (steps: unknown[]) =>
-      ({
-        applicationRecords: [],
-        userActionRequests: steps,
-      }) as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace([step("resolved", "2026-09-26T22:10:59.041Z")]),
-      ),
-    ).toEqual([]);
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace([step("cancelled", "2026-09-26T22:11:00.000Z")]),
-      ),
-    ).toEqual([]);
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace([step("skipped", "2026-09-26T22:11:00.000Z")]),
-      ),
-    ).toEqual([]);
-    // Still waiting for the sign-in: the note stays.
-    expect(
-      listCurrentUnreadNotifications(
-        [note],
-        workspace([
-          step("resolved", "2026-09-26T22:10:59.041Z"),
-          step("pending", null),
-        ]),
-      ),
-    ).toHaveLength(1);
   });
 });
 

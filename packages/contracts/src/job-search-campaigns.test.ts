@@ -1,14 +1,15 @@
-import { JobSearchPreferencesSchema } from "./discovery";
-import { resolveCampaignSourceTargetIds } from "./job-search-campaigns";
 import { describe, expect, test } from "vitest";
-
 import {
-  JobSearchCampaignLimitsSchema,
-  JobSearchCampaignSchema,
+  DISCOVERY_RUN_JOB_BUDGET_MAX,
+  JobSearchPreferencesSchema,
+} from "./discovery";
+import {
   DEFAULT_SCALE_CAMPAIGN_DISCOVERY_RUN_JOB_BUDGET,
   getDefaultCampaignConfiguration,
+  JobSearchCampaignLimitsSchema,
+  JobSearchCampaignSchema,
+  resolveCampaignSourceTargetIds,
 } from "./job-search-campaigns";
-import { DISCOVERY_RUN_JOB_BUDGET_MAX } from "./discovery";
 
 const searchPreferences = {
   targetRoles: ["Software engineer"],
@@ -47,7 +48,6 @@ describe("JobSearchCampaignSchema", () => {
         searchPreferences,
         sourceTargetIds: [],
         ...configuration,
-        schedule: {},
         progress: { lastUpdatedAt: now },
       });
 
@@ -122,7 +122,6 @@ describe("JobSearchCampaignSchema", () => {
           ...getDefaultCampaignConfiguration("scale").applicationPolicy,
           finalSubmitAuthorized: true,
         },
-        schedule: {},
         progress: { lastUpdatedAt: now },
       }),
     ).toThrow();

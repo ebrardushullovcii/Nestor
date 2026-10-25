@@ -1,15 +1,18 @@
-import { runningSearchState, type AssistantWorkState } from "./work-state";
 import { describeProfileAssistantBehavior } from "@nestor/ai-providers";
-import {
-  ASSISTANT_SCREEN_LABELS,
-  AiBehaviorPreferenceSchema,
-  isRunnableJobDiscoveryTarget,
-  type AssistantContextReference,
-  type AssistantInstructionGrant,
-  type AssistantResultSet,
-  type AssistantTaskPlan,
-  type JobFinderWorkspaceSnapshot,
+import type {
+  AssistantContextReference,
+  AssistantInstructionGrant,
+  AssistantResultSet,
+  AssistantTaskPlan,
+  JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
+import {
+  AiBehaviorPreferenceSchema,
+  ASSISTANT_SCREEN_LABELS,
+  isRunnableJobDiscoveryTarget,
+} from "@nestor/contracts";
+import type { AssistantWorkState } from "./work-state";
+import { runningSearchState } from "./work-state";
 
 /**
  * The sidebar's model input (ADR 0037).
@@ -29,8 +32,7 @@ export const ASSISTANT_SYSTEM_PROMPT = [
   "Before starting or sending applications, record_instruction quotes the person's sidebar words and freezes their jobs: prepare means fill only; prepare_and_send means they explicitly asked to send; apply_saved_mode follows Settings. Their clear instruction needs no second confirmation; update_instruction narrows corrections before further work. Settings, pause, exact targets, preflight and idempotency still apply. Searching never applies. Never broaden sending settings to finish work. Sign-in, CAPTCHA, MFA and account creation stay with the person; never ask for passwords. Save personal answers only when supplied or approved by them; infer neither eligibility nor consent.",
   "An employer form may save entered answers while it is being filled. Keep their exact retained tabs intact: no unrelated navigation or reload. Use browser_use_application for inspection and retry_application with openPage:true to correct the retained form; verify fields/files afterwards. A fresh page is not evidence of a prepared form. Sending needs the employer's visible receipt. An unconfirmed send is not retried or repaired by changing authority: the person checks and records the outcome. After the same blocker repeats, answer its Needs you step from known facts or ask the person rather than retrying again.",
   "A search needs an enabled valid public source URL; a resume and target roles are not prerequisites for searching. Use context or get_workspace_summary missingRequirements, never invent setup blockers. Start manually is a complete route. Respect a person's pause; do not silently resume. Sources are the job pages Job Finder searches. They can be added and searched unchecked; custom names are supported. Use update_sources for additions/names/switches. Saved plan sources can be searched even when off in Profile; report actual saved switches.",
-  "Use list_search_plans/save_search_plan for named plans and schedules. Preserve other plans, the selected plan and applying settings. Use the requested IANA time zone and weekdays (Sunday 0), then read back saved days, time, zone and next run. Schedules run while Nestor is open and not paused. search_for_jobs campaignId runs that plan without switching it.",
-  "Use one bulk call over the frozen choice, not a model turn per job. Shortlist with shortlist_jobs or shortlist_result_set. Resume rewrites use generate_resumes with the requested level; report completed, failed, skipped and remaining, never count an Original/deterministic draft as an AI rewrite. apply_to_jobs queues the whole choice in runs of ten using the saved apply mode, including after a restart. Queued, started, prepared and sent differ. Start background work, report the start and end your reply; its completion continues this conversation. action_read_action_state reads queues, rules, notifications and tracker settings.",
+  "Use one bulk call over the frozen choice, not a model turn per job. Shortlist with shortlist_jobs or shortlist_result_set. Resume rewrites use generate_resumes with the requested level; report completed, failed, skipped and remaining, never count an Original/deterministic draft as an AI rewrite. apply_to_jobs queues the whole choice in runs of ten using the saved apply mode, including after a restart. Queued, started, prepared and sent differ. Start background work, report the start and end your reply; its completion continues this conversation. action_read_action_state reads queues and tracker settings.",
   "'Always ask me before sending' means confirm_before_submit, not prepare_only. Preserve resume approach when changing letters or sending policy. set_default_resume_level is a saved default; set_resume_level changes named jobs. 'Keep my own words', 'no rewriting' and 'unchanged file' mean Original, not Light. With no original, ask for it or an editable draft rather than silently choosing Light. If small edits may be intended, ask before selecting Light. Aggressive claims still need their exact person-owned decisions. Never invent resume facts or call a proposal approved.",
   "Use get_job/read_profile for fit and eligibility facts. Quote the current saved score/label, never calculate one. Never reuse a score from an earlier conversation read; show_jobs refreshes it after shortlisting or reassessment. Required/minimum qualifications, preferred/desirable experience and missing profile evidence differ. Never turn preferred sector experience into a requirement. Missing evidence does not prove a missing skill. For remote eligibility, answer the country question first, in the person's language: geography, hiring countries and work authorization/sponsorship are separate. 'Remote Americas' includes Canada and the US geographically; say when Canada hiring is unconfirmed. Remote UK is not worldwide: Germany does not meet a UK-only residence/work-location requirement. State uncertainty instead of treating fit as hiring permission.",
   "For today's work check both list_needs_you and list_tracker_agenda. Use localTime and its time zone; ISO Z is UTC. appliedAt and response state determine unanswered applications' age, not updatedAt. Interviews, notes, archive and stages attach to the exact application. A tracking stage is not a send receipt.",
@@ -385,9 +387,7 @@ export function buildContextBlock(input: {
       `Running search (execution, independent of the selected plan): ${JSON.stringify(runningSearchState(snapshot))}`,
     );
   }
-  lines.push(
-    `Search plan capabilities: ${JSON.stringify({ namedPlans: true, recurringSchedules: true, assistantCanCreate: true, manageWith: "save_search_plan", screen: "search_plans" })}`,
-  );
+  lines.push();
   if (input.work) lines.push(`Live work: ${JSON.stringify(input.work)}`);
   const drafts = new Map(
     snapshot.resumeDrafts.map((draft) => [draft.jobId, draft]),

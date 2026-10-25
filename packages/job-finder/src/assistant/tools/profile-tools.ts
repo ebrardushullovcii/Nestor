@@ -1,7 +1,4 @@
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
-import { readAssistantWorkState } from "../work-state";
-import { profileProposalPreview } from "../proposal-preview";
-import { isResumeImportRunInProgress } from "@nestor/contracts";
+import { findBulletsOnTwoCards } from "@nestor/ai-providers";
 import {
   NonEmptyStringSchema,
   ProfileCopilotPatchOperationSchema,
@@ -9,28 +6,30 @@ import {
   evaluateProfileSetupReadiness,
   getProfileSetupReadinessBlockers,
   isProfileSetupFinishBlockingReviewItem,
+  isResumeImportRunInProgress,
   type AssistantChangeEntry,
   type AssistantChangeReceipt,
   type AssistantChangeTarget,
   type AssistantMessagePart,
   type CandidateProfile,
-  type JobSearchPreferences,
   type JobFinderWorkspaceSnapshot,
-  type ResumeImportFieldCandidate,
+  type JobSearchPreferences,
   type ProfileCopilotPatchOperation,
+  type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
-import { findBulletsOnTwoCards } from "@nestor/ai-providers";
 import { z } from "zod";
-
+import { assertPersonAnswerAuthority } from "../person-answer-authority";
+import { plainFieldName } from "../prompt";
+import { profileProposalPreview } from "../proposal-preview";
 import {
   AssistantToolError,
-  defineTool,
   argText,
+  defineTool,
   describeZodIssues,
   json,
   type AssistantToolContext,
 } from "../tool-kit";
-import { plainFieldName } from "../prompt";
+import { readAssistantWorkState } from "../work-state";
 import { plural } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
@@ -1105,11 +1104,6 @@ export async function undoReceipt(
   if (receipt.target === "job_triage") {
     const { undoTriageChange } = await import("../triage-changes");
     const result = await undoTriageChange(context, receipt);
-    undone = result.undoneLabels;
-    conflicts = result.conflictLabels;
-  } else if (receipt.target === "search_plan") {
-    const { undoSearchPlanChange } = await import("./search-plan-tools");
-    const result = await undoSearchPlanChange(context, receipt);
     undone = result.undoneLabels;
     conflicts = result.conflictLabels;
   } else if (receipt.target === "resume_draft") {

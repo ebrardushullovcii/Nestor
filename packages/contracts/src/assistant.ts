@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { RESUME_PIPELINE_CAPACITY } from "./resume-batch";
-import { ResumeBatchCheckpointSchema } from "./resume";
-
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
+import { ResumeBatchCheckpointSchema } from "./resume";
+import { RESUME_PIPELINE_CAPACITY } from "./resume-batch";
 
 /**
  * The one Job Finder assistant (ADR 0037).
@@ -31,7 +30,6 @@ export const assistantScreenValues = [
   "resume_studio",
   "applications",
   "actions",
-  "campaigns",
   "settings",
   "browser",
   "other",
@@ -49,7 +47,6 @@ export const ASSISTANT_SCREEN_LABELS: Record<AssistantScreen, string> = {
   resume_studio: "Shortlisted › Resume",
   applications: "Applications",
   actions: "Needs you",
-  campaigns: "Search plans",
   settings: "Settings",
   browser: "Browser",
   other: "Job Finder",
@@ -239,7 +236,6 @@ export const assistantChangeTargetValues = [
   "search_preferences",
   "settings",
   "resume_draft",
-  "search_plan",
   "job_triage",
 ] as const;
 export const AssistantChangeTargetSchema = z.enum(assistantChangeTargetValues);
@@ -277,7 +273,10 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("proposal"),
       proposalId: IdSchema,
-      kind: z.enum(["profile_operations", "resume_patches", "job_finder_action",
+      kind: z.enum([
+        "profile_operations",
+        "resume_patches",
+        "job_finder_action",
       ]),
       summary: NonEmptyStringSchema.max(400),
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
@@ -673,7 +672,7 @@ export const AssistantRunRefSchema = z
     kind: z.enum([
       "discovery",
       "apply_batch",
-          "apply_queue",
+      "apply_queue",
       "apply_run",
       "resume_generation",
       "source_check",

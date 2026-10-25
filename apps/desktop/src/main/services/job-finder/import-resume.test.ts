@@ -1,19 +1,19 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import type * as FsPromises from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   CandidateProfileSchema,
   JobFinderWorkspaceSnapshotSchema,
   JobSearchCampaignSchema,
-  ResumeImportVisionArtifactSchema,
   ResumeImportRunSchema,
+  ResumeImportVisionArtifactSchema,
   getDefaultCampaignConfiguration,
   type ResumeDocumentBundle,
   type ResumeImportProgressEvent,
   type ResumeSourceDocument,
 } from "@nestor/contracts";
+import type * as FsPromises from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 
 const {
@@ -164,7 +164,6 @@ function createSnapshot(baseResume: ResumeSourceDocument) {
     searchPreferences: state.searchPreferences,
     sourceTargetIds: [],
     ...getDefaultCampaignConfiguration("precision"),
-    schedule: {},
     progress: { lastUpdatedAt: generatedAt },
   });
   return JobFinderWorkspaceSnapshotSchema.parse({
