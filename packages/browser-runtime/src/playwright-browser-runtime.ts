@@ -2631,11 +2631,36 @@ export function createBrowserAgentRuntime(
       };
     },
     async reloadApplicationPageBinding(_source, pageBindingKey, applicationUrl) {
-      await rebindPreparedApplicationPage(pageBindingKey);
-      const page = selectPreparedApplicationPage(
-        preparedApplicationPages,
-        pageBindingKey,
-      );
+      await rebindPreparedApplicationPage(pageBindingKey).catch(() => undefined);
+      let page = preparedApplicationPages.get(pageBindingKey);
+      if (!page || page.isClosed()) {
+        if (!applicationUrl || !isHttpUrlLike(applicationUrl))
+          throw new Error("The application entry page is unavailable.");
+        await options.browserHost?.assertAutomationSafe();
+        const context = await getContext();
+        const release = usesEmbeddedBrowserHost
+          ? await reserveEmbeddedApplicationTab(
+              context, undefined, undefined, undefined,
+              hostTabCount, hostWorkingTabCount, hostHasCapacity,
+            )
+          : () => undefined;
+        try {
+          page = await context.newPage();
+          await ensurePrepareOnlyMutationGuard(page, false);
+          await page.goto(applicationUrl, {
+            waitUntil: "domcontentloaded", timeout: 15_000,
+          });
+          bindPreparedApplicationPage(pageBindingKey, page);
+          await options.onApplicationPageRestored?.(pageBindingKey, page);
+          return;
+        } catch (error) {
+          preparedApplicationPages.delete(pageBindingKey);
+          await page?.close({ runBeforeUnload: false }).catch(() => undefined);
+          throw error;
+        } finally {
+          release();
+        }
+      }
       // Re-enter with GET; never replay a credential, challenge or application POST.
       await page.goto(applicationUrl ?? page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
     },

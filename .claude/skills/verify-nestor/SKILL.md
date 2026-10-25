@@ -168,7 +168,7 @@ Internals, for fixing the helpers: `bin/lib/cli.mjs` (commands), `bin/lib/driver
 - **`navigator.webdriver` is true** in the in-app browser under Playwright. Google sign-in rejects at the email step and Cloudflare challenges it. Neither matters for the replica sites; do not conclude a real site is broken from this.
 - **The Job Finder browser peek is a modal.** After "Open the Job Finder browser" it covers the app; `drive press Escape` closes it before you click elsewhere.
 - **A shortlisted job may already be `drafting`**: shortlisting can start the resume draft in the background.
-- **Restarts lose prepared pages.** `drive restart` keeps the data, but an application at "Ready to send" loses its page and becomes "Could not apply". Send before restarting.
+- **Restarts close browser pages.** Open restores a saved Ready form when it can verify the fields and attachments. Otherwise it queues a fresh Fill-only preparation for review. A waiting sign-in card reopens the original application entry; credentials, CAPTCHA and MFA stay with the person.
 - **After an "Apply to all" batch** (seen 2026-09-23), a pending quality sample review in Safeguards blocks every later search with "Something unexpected stopped this search". Mark it in Safeguards first.
 - **Cold first `up`** after a reboot or Electron upgrade takes about 20 s; warm ones about 2 s.
 - **`pnpm --filter @nestor/desktop qa`** (docs/AGENT_QA.md) is the repo's one-shot Playwright session. It takes an exclusive lease per checkout, keeps its artifacts in `/tmp`, has no focus patch, and treats a running verify instance in the same checkout as a conflict. Use one or the other per checkout at a time.
