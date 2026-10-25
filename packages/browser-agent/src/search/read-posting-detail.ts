@@ -13,7 +13,7 @@ import {
 } from "./listing-detail-extraction";
 import { isBotCheckInterstitial } from "./bot-check";
 
-function blockedByCheck(html: string): boolean {
+export function blockedByCheck(html: string): boolean {
   const title = htmlToPlainText(
     html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
   );

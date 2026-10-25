@@ -72,3 +72,5 @@ export {
   APPLY_ACTION_SELECTOR,
   APPLY_CONTROL_SELECTOR,
 } from "./apply-page-mechanics";
+
+export { createHttpPageReader } from "./http-page-reader";

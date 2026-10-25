@@ -1,4 +1,5 @@
 export * from './types'
+export { collectSource, screenCards, readListings, fitJobs, roleGoalsKey, type ListingEngineModel } from './search/listing-engine'
 
 // Re-export commonly used types
 export type {

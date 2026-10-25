@@ -5,7 +5,7 @@ export async function readRenderedPageHtml(
   context: BrowserContext,
   url: string,
   options: {
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
     onPage?: (page: Page) => void | Promise<void>;
     ready?: (html: string) => boolean;
   } = {},

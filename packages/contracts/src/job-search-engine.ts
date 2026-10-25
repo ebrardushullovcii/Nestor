@@ -32,7 +32,7 @@ export type KnownJobUrlLookup = (
 export type ReadDiscoveryPostingPage = (
   url: string,
   options: {
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
     rendered?: boolean;
     ready?: (html: string) => boolean;
   },

@@ -125,6 +125,9 @@ export const JobFitSchema = z.object({
   reasons: z.array(z.string()),
   gaps: z.array(z.string()),
   scoredAt: z.string(),
+  role: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
+  preferences: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
+  coverage: z.object({ assessment: z.string(), explanation: z.string() }).optional(),
 });
 export type JobFit = z.infer<typeof JobFitSchema>;
 

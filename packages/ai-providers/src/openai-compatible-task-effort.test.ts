@@ -13,6 +13,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("batch callers can require valid JSON from the provider", async () => {
+  const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(
+      typeof init?.body === "string" ? init.body : "{}",
+    ) as { response_format?: unknown };
+    expect(body.response_format).toEqual({ type: "json_object" });
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: '{"fits":[]}' }, finish_reason: "stop" },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  const client = createJobFinderAiClientFromEnvironment(createEnvironment());
+  expect(
+    (await client.chatWithTools!([], [], { jsonOutput: true })).content,
+  ).toBe('{"fits":[]}');
+});
+
 test("application callers can request actual token usage without a stream listener", async () => {
   const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(

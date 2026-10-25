@@ -11,6 +11,7 @@ import {
   type JobStageCounts,
   type MoveJobsResult,
   type SaveFoundJobsResult,
+  type SeenListingCard,
   type TriageStage,
 } from "@nestor/contracts";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
@@ -29,6 +30,7 @@ import {
 import { JOB_STORE_SCHEMA, JOB_STORE_VERSION } from "./schema";
 import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
+import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
 export {
   createResumeStore,
@@ -59,6 +61,8 @@ export interface JobStore {
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
   findKnownUrls(urls: readonly string[]): string[];
+  lookupSeenCards(cards: readonly Pick<SeenListingCard, "url" | "cardFingerprint">[], roleGoalsKey: string): SeenListingCard[];
+  rememberSeenCards(cards: readonly SeenListingCard[]): void;
 
   listJobs(query: JobListQueryInput): JobListPage;
   getJob(id: number): JobDetail | null;
@@ -189,6 +193,9 @@ export function openJobStore(filePath: string): JobStore {
       return () => listeners.delete(listener);
     },
     notify,
+
+    lookupSeenCards: (cards, roleGoalsKey) => lookupSeenCards(sql, cards, roleGoalsKey),
+    rememberSeenCards: cards => transaction(() => rememberSeenCards(sql, cards)),
 
     findKnownUrls(urls) {
       const find = sql("SELECT 1 FROM job_keys WHERE key = ?");

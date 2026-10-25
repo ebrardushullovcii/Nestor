@@ -767,6 +767,8 @@ export interface JobFinderAiClient {
 }
 
 export interface ChatWithToolsOptions {
+  /** Ask the provider to constrain the answer to valid JSON. */
+  jsonOutput?: boolean;
   includeUsage?: boolean;
   signal?: AbortSignal;
   parallelToolCalls?: boolean;

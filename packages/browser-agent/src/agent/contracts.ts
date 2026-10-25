@@ -13,7 +13,7 @@ export type AgentExtractorPageType = 'search_results' | 'job_detail'
  * thinks: search and source-check turns, form-filling turns, and fact checks
  * of written answers.
  */
-export type BrowserAgentReasoningTask = 'search' | 'apply' | 'claim_check'
+export type BrowserAgentReasoningTask = 'search' | 'listing_screen' | 'page_read' | 'fit_batch' | 'apply' | 'claim_check'
 
 export interface LLMClient {
   chatWithTools: (
@@ -25,6 +25,7 @@ export interface LLMClient {
       maxOutputTokens?: number
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean
+      jsonOutput?: boolean
     }
   ) => Promise<{
     content?: string
