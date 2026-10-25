@@ -75,10 +75,16 @@ it("schema-checks displayed navigation acknowledgments before sending to main", 
     "job-finder:assistant:acknowledge-navigation",
     ack,
   );
+  const longAck = { ...ack, displayedRoute: "x".repeat(4000) };
+  await bridge.acknowledgeNavigation(longAck);
+  expect(invoke).toHaveBeenLastCalledWith(
+    "job-finder:assistant:acknowledge-navigation",
+    longAck,
+  );
   await expect(
-    bridge.acknowledgeNavigation({ ...ack, displayedRoute: "x".repeat(401) }),
+    bridge.acknowledgeNavigation({ ...ack, displayedRoute: "x".repeat(4001) }),
   ).rejects.toThrow();
-  expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke).toHaveBeenCalledTimes(2);
 });
 
 it("sends the resume stop through the typed bridge", async () => {
