@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
+import { createResumeStore, openJobStore } from "@nestor/db/job-store";
 import { createGeneratedResumeCleanup } from "./generated-resume-cleanup";
 
 test("prunes obsolete exports and HTML while retaining current, application and in-flight files", async () => {
@@ -133,6 +134,84 @@ test("discards measured files only from a render reservation inside the managed 
     expect(await readdir(directory)).toEqual(["current.pdf"]);
     expect(await readFile(outside, "utf8")).toBe("resume");
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps the PDFs the job store's resumes and applications still point at", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "resume-retention-store-"));
+  const directory = path.join(root, "documents/resumes/generated");
+  const store = openJobStore(":memory:");
+  try {
+    await mkdir(directory, { recursive: true });
+    const file = (name: string) => path.join(directory, name);
+    for (const name of ["approved.pdf", "undo.pdf", "sent.pdf", "stale.pdf"])
+      await writeFile(file(name), "synthetic");
+    const { added } = store.saveFoundJobs({
+      searchId: null,
+      jobs: [1, 2].map((n) => ({
+        title: `Designer ${n}`,
+        company: "Northfield",
+        location: "Remote",
+        workModes: ["remote" as const],
+        url: `https://jobs.example.test/${n}`,
+        applyUrl: null,
+        sourceId: "board",
+        sourceLabel: "Board",
+        sourceJobId: String(n),
+        postedAt: null,
+        salaryText: null,
+        salaryMin: null,
+        salaryMax: null,
+        salaryCurrency: null,
+        seniority: null,
+        employmentType: null,
+        summary: null,
+        description: `Listing ${n}`,
+      })),
+    });
+    const [approvedJob, sentJob] = added as [number, number];
+    // An approved resume whose level was changed: Undo would put undo.pdf back.
+    store
+      .sql(
+        `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path, previous_json)
+         VALUES (?, 'tailored', 'ready', 1, 1, ?, ?)`,
+      )
+      .run(
+        approvedJob,
+        file("approved.pdf"),
+        JSON.stringify({ level: "light", pdfPath: file("undo.pdf") }),
+      );
+    // An application Apply was given its own copy of.
+    const application = Number(
+      store
+        .sql(
+          `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
+           VALUES (?, 'confirm_before_submit', 'failed', 1, 1)`,
+        )
+        .run(sentJob).lastInsertRowid,
+    );
+    store
+      .sql(
+        `INSERT INTO application_details (application_id, attempt, resume_artifact_json, profile_digest)
+         VALUES (?, 1, ?, 'digest')`,
+      )
+      .run(application, JSON.stringify({ filePath: file("sent.pdf") }));
+
+    // As at startup: the old library knows none of them.
+    await createGeneratedResumeCleanup({
+      directory,
+      retainedPaths: () =>
+        Promise.resolve(createResumeStore(store).pdfPathsInUse()),
+    }).prune();
+
+    expect((await readdir(directory)).sort()).toEqual([
+      "approved.pdf",
+      "sent.pdf",
+      "undo.pdf",
+    ]);
+  } finally {
+    store.close();
     await rm(root, { recursive: true, force: true });
   }
 });

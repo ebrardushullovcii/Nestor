@@ -1,5 +1,5 @@
 import { readSavedApplicationAnswers } from "@nestor/db/applications";
-import { createJobSitesStore } from "@nestor/db/job-store";
+import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
@@ -687,8 +687,11 @@ export async function createJobFinderWorkspaceServiceAsync(
     ...(getJobFinderStartupResetRecoveryFact().status === "degraded"
       ? {}
       : {
-          retainedResumePaths: () =>
-            jobFinderRepository.listRetainedResumeExportPaths(),
+          // The job store's resumes and applications use the same folder.
+          retainedResumePaths: async () => [
+            ...(await jobFinderRepository.listRetainedResumeExportPaths()),
+            ...createResumeStore(getJobStore()).pdfPathsInUse(),
+          ],
         }),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)

@@ -95,6 +95,12 @@ export interface ResumeStore {
   saveListing(jobId: number, description: string, facts: JobListingFacts): void;
   /** Approves it and hands the job to Apply in one write. */
   approve(jobId: number, pdfPath: string | null): StoredResume;
+  /**
+   * Every resume PDF the store still points at: approved ones, the one a
+   * level Undo would put back, and the copy each application was given.
+   * Cleanup of generated files must keep all of them.
+   */
+  pdfPathsInUse(): string[];
 }
 
 export function createResumeStore(store: JobStore): ResumeStore {
@@ -127,6 +133,17 @@ export function createResumeStore(store: JobStore): ResumeStore {
   };
 
   return {
+    pdfPathsInUse() {
+      return (
+        sql(
+          `SELECT pdf_path AS path FROM resumes WHERE pdf_path IS NOT NULL
+           UNION SELECT json_extract(previous_json, '$.pdfPath') FROM resumes
+             WHERE json_extract(previous_json, '$.pdfPath') IS NOT NULL
+           UNION SELECT json_extract(resume_artifact_json, '$.filePath') FROM application_details
+             WHERE json_extract(resume_artifact_json, '$.filePath') IS NOT NULL`,
+        ).all() as { path: string }[]
+      ).map((row) => row.path);
+    },
     listUnwritten(limit) {
       return (
         sql(
@@ -263,8 +280,15 @@ export function createResumeStore(store: JobStore): ResumeStore {
     undoLevel(jobId, changeId) {
       return store.transaction(() => {
         const row = require(jobId);
-        if (changeId && (!row.previous_json || (JSON.parse(row.previous_json) as PreviousResume).changeId !== changeId))
-          throw new ResumeChangedError("This resume changed since that level change. Later edits were kept.");
+        if (
+          changeId &&
+          (!row.previous_json ||
+            (JSON.parse(row.previous_json) as PreviousResume).changeId !==
+              changeId)
+        )
+          throw new ResumeChangedError(
+            "This resume changed since that level change. Later edits were kept.",
+          );
         if (!row.previous_json) return toStoredResume(row);
         const previous = JSON.parse(row.previous_json) as PreviousResume;
         const now = Date.now();
