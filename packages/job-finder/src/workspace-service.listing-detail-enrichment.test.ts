@@ -98,115 +98,6 @@ const RECORD_PAGE = (title: string | null, company: string) =>
   })}</script></head><body></body></html>`;
 
 describe("listing detail enrichment inside a discovery run", () => {
-  test("reads each retained card's page, upgrades it to full detail, re-scores it, and logs the stage", async () => {
-    const fetched: string[] = [];
-    const fetchListingHtml: ListingHtmlFetcher = (url) => {
-      fetched.push(url);
-      return Promise.resolve({
-        status: 200,
-        html: RECORD_PAGE(null, "Signal Systems"),
-        finalUrl: url,
-      });
-    };
-    const { aiClient, extractJobsFromPage } = createDetailReadingAiClient();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      fetchListingHtml,
-      aiClient,
-    });
-    const before = await repository.listSavedJobs();
-    const cardOnlyBefore = before.filter(
-      (job) => job.detailQuality !== "detail_enriched",
-    );
-    expect(cardOnlyBefore.length).toBeGreaterThan(0);
-
-    await workspaceService.runDiscovery();
-
-    const planId =
-      (await repository.getCampaignState())?.activeCampaignId ?? null;
-    const after = (await repository.listSavedJobs()).map((job) =>
-      readPlanAssessment(job, planId),
-    );
-    const read = after.filter((job) => job.listingDetailFetch !== null);
-    expect(fetched.length).toBeGreaterThan(0);
-    expect(read.length).toBe(fetched.length);
-    expect(extractJobsFromPage).toHaveBeenCalledTimes(fetched.length);
-    for (const job of read) {
-      expect(job.listingDetailFetch).toMatchObject({
-        outcome: "enriched",
-        method: "page_text",
-      });
-      expect(job.detailQuality).toBe("detail_enriched");
-      expect(job.description).toContain("Six or more years of product design");
-      // The full page can correct the card's pay, employer and place.
-      expect(job.salaryText).toBe("USD 150,000 – 190,000 / year");
-      expect(job.company).toBe("Signal Systems");
-      expect(job.location).toBe("Austin, TX, US");
-      // A fresh score against the body, not the card.
-      expect(job.matchAssessment.postingFingerprint).toBeTruthy();
-    }
-
-    const discoveryState = await repository.getDiscoveryState();
-    const run = discoveryState.recentRuns.at(-1);
-    expect(run?.summary.outcome).toBe("completed");
-    const messages = (run?.activity ?? []).map((event) => event.message);
-    const progress = (run?.activity ?? [])
-      .map((event) => event.progress)
-      .filter((entry) => entry?.phase === "reading_listings");
-    expect(progress.map((entry) => entry?.completed)).toEqual([
-      0,
-      ...Array.from({ length: fetched.length }, (_, index) => index + 1),
-    ]);
-    expect(progress.every((entry) => entry!.total <= 60)).toBe(true);
-    expect(
-      messages.some((message) =>
-        /^Read \d+ of \d+ listing pages?/u.test(message),
-      ),
-    ).toBe(true);
-  }, 30_000);
-
-  test("without a configured reader the run never fetches and jobs stay honest cards", async () => {
-    const { repository, workspaceService } = createWorkspaceServiceHarness();
-
-    await workspaceService.runDiscovery();
-
-    const after = await repository.listSavedJobs();
-    expect(after.every((job) => job.listingDetailFetch === null)).toBe(true);
-    const run = (await repository.getDiscoveryState()).recentRuns.at(-1);
-    expect(
-      (run?.activity ?? []).some((event) =>
-        /listing details/iu.test(event.message),
-      ),
-    ).toBe(false);
-  }, 30_000);
-
-  test("a page that will not read leaves the card scored as a title match with the attempt recorded", async () => {
-    const fetchListingHtml: ListingHtmlFetcher = (url) =>
-      Promise.resolve({
-        status: 403,
-        html: "",
-        finalUrl: url,
-      });
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      fetchListingHtml,
-    });
-
-    await workspaceService.runDiscovery();
-
-    const after = await repository.listSavedJobs();
-    const attempted = after.filter((job) => job.listingDetailFetch !== null);
-    expect(attempted.length).toBeGreaterThan(0);
-    for (const job of attempted) {
-      expect(job.listingDetailFetch?.outcome).toBe("blocked");
-      expect(job.detailQuality).not.toBe("detail_enriched");
-    }
-    const run = (await repository.getDiscoveryState()).recentRuns.at(-1);
-    expect(run?.summary.outcome).toBe("completed");
-    expect(
-      (run?.activity ?? []).some((event) =>
-        /blocked or rate-limited/u.test(event.message),
-      ),
-    ).toBe(true);
-  }, 30_000);
 
   test("shortlisting returns before its background listing read and persists the later assessment", async () => {
     let release!: (result: Awaited<ReturnType<ListingHtmlFetcher>>) => void;
@@ -263,7 +154,7 @@ describe("listing detail enrichment inside a discovery run", () => {
   });
 });
 
-test("an explicit listing read reports a job outside saved and pending lists", async () => {
+test("an explicit listing read reports a job outside the saved list", async () => {
   const fetchListingHtml = vi.fn<ListingHtmlFetcher>();
   const { workspaceService } = createWorkspaceServiceHarness({
     fetchListingHtml,
@@ -271,7 +162,7 @@ test("an explicit listing read reports a job outside saved and pending lists", a
   await expect(
     workspaceService.assessJobListing("missing_synthetic_job"),
   ).rejects.toThrow(
-    "This job is not in the saved or pending list. Use Assess next 1 listing in Find jobs to assess the search results.",
+    "This job is not in the saved list.",
   );
   expect(fetchListingHtml).not.toHaveBeenCalled();
 });

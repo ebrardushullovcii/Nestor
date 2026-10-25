@@ -1,14 +1,11 @@
 import type {
   ApplicationAttempt,
-  DiscoveryLedgerEntry,
   ListingActivity,
   ListingSignalRecord,
   SavedJob,
 } from "@nestor/contracts";
 
 import {
-  createJobIdentityIndex,
-  type JobIdentityIndex,
   type JobIdentityInput,
 } from "./job-identity";
 import { copyView } from "@nestor/core";
@@ -152,69 +149,12 @@ function activeCandidate(
     : undefined;
 }
 
-const inactiveLedgerEntries = new WeakMap<
-  readonly DiscoveryLedgerEntry[],
-  readonly DiscoveryLedgerEntry[]
->();
-let lastInactiveEntries: readonly DiscoveryLedgerEntry[] = [];
-
-/** Active ledger sightings do not affect listing activity. Keep that dependency stable. */
-export function inactiveListingLedger(
-  ledger: readonly DiscoveryLedgerEntry[],
-): readonly DiscoveryLedgerEntry[] {
-  const cached = inactiveLedgerEntries.get(ledger);
-  if (cached) return cached;
-  const entries = ledger.filter(
-    (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
-  );
-  if (!Object.isFrozen(ledger)) return entries;
-  if (
-    entries.length !== lastInactiveEntries.length ||
-    !entries.every((entry, index) => entry === lastInactiveEntries[index])
-  )
-    lastInactiveEntries = Object.freeze(entries);
-  inactiveLedgerEntries.set(ledger, lastInactiveEntries);
-  return lastInactiveEntries;
-}
-
-/**
- * Projects non-persisted listing activity in linear indexed passes. Ledger
- * aliases must resolve to exactly one job; possible, ambiguous, and conflicting
- * identities cannot change another listing's activity.
- */
+/** Projects non-persisted listing activity in linear indexed passes. */
 export function projectDiscoveryJobViews<T extends ListingActivityJob>(input: {
   jobs: readonly T[];
-  discoveryLedger: readonly DiscoveryLedgerEntry[];
   listingSignals: readonly ListingSignalRecord[];
   applicationAttempts?: readonly ApplicationAttempt[];
-  /** Complete inventory for ambiguity checks when projecting only selected rows. */
-  identityJobs?: readonly T[];
-  /**
-   * An index the caller keeps between projections of the same workspace,
-   * brought in step with `jobs` here. Indexing every job again on each
-   * refresh took about a second with 12,000 jobs while a search changed a
-   * few of them at a time.
-   */
-  identityIndex?: {
-    warm?(values: readonly T[]): Promise<void>;
-    sync(
-      values: readonly T[],
-    ): Pick<JobIdentityIndex<Pick<SavedJob, "id">>, "resolve">;
-  };
 }): Array<T & { listingActivity: ListingActivity }> {
-  const inactiveEntries = inactiveListingLedger(input.discoveryLedger);
-  // Active sightings are projected directly from their jobs. Normalizing every
-  // full listing for an identity index only helps when an inactive sighting
-  // actually needs resolving; doing it on every progress update was wasteful.
-  const jobIdentityIndex =
-    inactiveEntries.length === 0
-      ? null
-      : input.identityIndex
-        ? input.identityIndex.sync(input.identityJobs ?? input.jobs)
-        : createJobIdentityIndex(
-            input.identityJobs ?? input.jobs,
-            (job) => job,
-          );
   const candidateByJob = new Map<T, ActivityCandidate>();
   const uniqueJobById = new Map<string, T | null>();
 
@@ -231,25 +171,6 @@ export function projectDiscoveryJobViews<T extends ListingActivityJob>(input: {
       );
     }
     uniqueJobById.set(job.id, uniqueJobById.has(job.id) ? null : job);
-  }
-
-  for (const entry of inactiveEntries) {
-    if (entry.inactiveAt === null) continue;
-    const resolution = jobIdentityIndex!.resolve(entry);
-    if (resolution.status !== "matched") continue;
-    const job = uniqueJobById.get(resolution.value.id);
-    if (!job) continue;
-    candidateByJob.set(
-      job,
-      newerActivity(candidateByJob.get(job), {
-        status: "inactive",
-        observedAt: entry.inactiveAt,
-        ledgerEntryId: entry.id,
-        provenance: "discovery_ledger",
-        explanation:
-          "A source inventory observation marked this exact listing inactive.",
-      }),
-    );
   }
 
   for (const signal of input.listingSignals) {

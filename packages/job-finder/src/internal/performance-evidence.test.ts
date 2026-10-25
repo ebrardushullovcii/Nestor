@@ -1,6 +1,5 @@
 import {
   ApplicationAttemptSchema,
-  DiscoveryRunRecordSchema,
   ResumeImportRunSchema,
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -10,43 +9,15 @@ import { buildJobFinderPerformanceSnapshot } from "./performance-evidence";
 
 type EvidenceWorkspace = Pick<
   JobFinderWorkspaceSnapshot,
-  | "activeDiscoveryRun"
-  | "applicationAttempts"
-  | "latestResumeImportRun"
-  | "recentDiscoveryRuns"
+  "applicationAttempts" | "latestResumeImportRun"
 >;
 
 const startedAt = "2026-08-09T10:00:00.000Z";
 const completedAt = "2026-08-09T10:00:08.000Z";
 
 function createWorkspace(): EvidenceWorkspace {
-  const discoveryRun = DiscoveryRunRecordSchema.parse({
-    id: "discovery-performance",
-    state: "completed",
-    startedAt,
-    completedAt,
-    targetIds: ["public-provider"],
-    summary: {
-      durationMs: 4_500,
-      timing: {
-        totalDurationMs: 4_500,
-        firstActivityMs: 0,
-        firstCandidateMs: 1_200,
-        firstDistinctUsefulJobMs: 4_000,
-        longestGapMs: 700,
-        eventCount: 5,
-        stageDurations: [
-          { stage: "planning", durationMs: 300 },
-          { stage: "extraction", durationMs: 2_100 },
-          { stage: "persistence", durationMs: 600 },
-        ],
-      },
-    },
-  });
 
   return {
-    activeDiscoveryRun: null,
-    recentDiscoveryRuns: [discoveryRun],
     latestResumeImportRun: ResumeImportRunSchema.parse({
       id: "resume-import-performance",
       sourceResumeId: "resume-1",
@@ -135,10 +106,9 @@ describe("buildJobFinderPerformanceSnapshot", () => {
       durationMs: 0,
       budgetStatus: "not_evaluated",
     });
+    // Searches run on the job store; the old run timings are gone.
     expect(byArea.get("discovery")).toMatchObject({
-      measurementStatus: "available",
-      durationMs: 4_500,
-      budgetStatus: "warning",
+      measurementStatus: "unavailable",
     });
     expect(byArea.get("application_preparation")).toMatchObject({
       measurementStatus: "available",
@@ -264,8 +234,6 @@ describe("buildJobFinderPerformanceSnapshot", () => {
   it("returns an explicit unavailable entry for every area when no timing exists", () => {
     const snapshot = buildJobFinderPerformanceSnapshot({
       workspace: {
-        activeDiscoveryRun: null,
-        recentDiscoveryRuns: [],
         latestResumeImportRun: null,
         applicationAttempts: [],
       },

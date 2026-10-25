@@ -239,30 +239,6 @@ export function selectApplicationSighting<T extends SightingInput>(job: {
 }
 
 /**
- * Sightings worth reading for their apply link: the job has more than one,
- * none is yet known to be the employer's own form, and this one has not been
- * read. Reading them is what lets the rule above choose.
- */
-export function listUnreadSightings<T extends SightingInput>(
-  provenance: readonly T[],
-): T[] {
-  const sightings = listJobSightings(provenance);
-  if (sightings.length < 2) return [];
-  if (
-    sightings.some(
-      (entry) => classifySightingRoute(entry, sightings) === "employer_form",
-    )
-  ) {
-    return [];
-  }
-  return sightings.filter(
-    (entry) =>
-      !entry.routeReadAt &&
-      classifySightingRoute(entry, sightings) === "unknown",
-  );
-}
-
-/**
  * Only jobs nobody has started work on may change which listing they show.
  * From a resume draft on, the listing and application link stay put so a
  * later sighting can neither stale an approved resume nor move an

@@ -24,7 +24,6 @@ import {
 import { collapseRepeatedLocationTokens } from "./listing-field-shapes";
 import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { enrichDiscoveredPosting } from "./matching";
-import { listUnreadSightings } from "./listing-sightings";
 import { normalizeText } from "./shared";
 import { reconcileSalaryTextWithListingBody } from "./matching-compensation";
 
@@ -691,111 +690,6 @@ export interface SightingRouteReadSummary {
   rateLimited: boolean;
 }
 
-/**
- * Reads the other listings of jobs seen on several sources, once each, for
- * the apply link each page shows. Nothing else from those pages is used; the
- * job's content still comes from its own listing. Bounded like the body read
- * and polite about rate limits: the first 429 ends the pass, and the rest are
- * read on the next search.
- */
-export async function readSightingApplyRoutes(input: {
-  jobs: readonly SavedJob[];
-  fetchHtml: ListingHtmlFetcher;
-  /** A source handed to the person is not retried elsewhere in the same run. */
-  canReadUrl?: (url: string) => boolean;
-  readPage?: ListingPageReader;
-  now?: () => string;
-  signal?: AbortSignal;
-  perRequestTimeoutMs?: number;
-  maxReads?: number;
-}): Promise<{
-  jobs: SavedJob[];
-  changedJobIds: string[];
-  summary: SightingRouteReadSummary;
-}> {
-  const now = input.now ?? (() => new Date().toISOString());
-  const perRequestTimeoutMs =
-    input.perRequestTimeoutMs ?? DEFAULT_PER_REQUEST_TIMEOUT_MS;
-  let budget = input.maxReads ?? LISTING_DETAIL_READS_PER_RUN;
-  const summary: SightingRouteReadSummary = { read: 0, rateLimited: false };
-  const changed = new Set<string>();
-  const nextJobs: SavedJob[] = [];
-
-  for (const job of input.jobs) {
-    let current = job;
-    for (const sighting of listUnreadSightings(job.provenance)) {
-      if (budget <= 0 || summary.rateLimited || input.signal?.aborted) break;
-      const listingUrl = sighting.listingUrl;
-      if (!listingUrl || !isHttpUrl(listingUrl)) continue;
-      if (input.canReadUrl && !input.canReadUrl(listingUrl)) continue;
-      budget -= 1;
-      let response: ListingHtmlFetchResult;
-      try {
-        response = await input.fetchHtml(listingUrl, {
-          signal: combineSignals(input.signal, perRequestTimeoutMs),
-        });
-      } catch {
-        // Unreachable this time; it stays unread and is tried next search.
-        continue;
-      }
-      if (response.status === 429) {
-        summary.rateLimited = true;
-        break;
-      }
-      let pageApplyUrl: string | null = null;
-      let listingFacts: SavedJob["provenance"][number]["listingFacts"];
-      try {
-        if (response.status >= 400) continue;
-        const detail = await readListingDetail({
-          html: response.html,
-          url: response.finalUrl,
-          expectedTitle: job.title,
-          ...(input.readPage ? { readPage: input.readPage } : {}),
-          ...(input.signal ? { signal: input.signal } : {}),
-        });
-        if (!detail) continue;
-        pageApplyUrl = detail.directApplyUrl;
-        // A canonical switch uses this sighting's own facts. Keeping only
-        // its apply link discarded the body we just read, so the later
-        // switch replaced a complete saved listing with the card's title.
-        listingFacts = {
-          ...sighting.listingFacts,
-          title: detail.title ?? sighting.listingFacts?.title ?? job.title,
-          company:
-            detail.company ?? sighting.listingFacts?.company ?? job.company,
-          location:
-            detail.location ?? sighting.listingFacts?.location ?? job.location,
-          salaryText:
-            detail.salaryText ?? sighting.listingFacts?.salaryText ?? null,
-          seniority:
-            detail.seniority ?? sighting.listingFacts?.seniority ?? null,
-          description:
-            detail.description || sighting.listingFacts?.description || "",
-          summary: sighting.listingFacts?.summary ?? null,
-        };
-      } catch {
-        // A failed model read stays unread so a later search can retry.
-        continue;
-      }
-      summary.read += 1;
-      current = prepareDiscoveryPosting<SavedJob>({
-        ...current,
-        provenance: recordSightingApplyLink(
-          current.provenance,
-          listingUrl,
-          pageApplyUrl,
-          now(),
-          listingFacts,
-        ),
-      });
-      changed.add(job.id);
-    }
-    nextJobs.push(current);
-  }
-
-  return { jobs: nextJobs, changedJobIds: [...changed], summary };
-}
-
 function recordFailedAttempt(
   job: SavedJob,
   attemptedAt: string,
@@ -1135,30 +1029,4 @@ export async function enrichSavedJobListingDetails(
     summary,
     ...(providerAccessError === undefined ? {} : { providerAccessError }),
   };
-}
-
-/** One sentence for the run log and the Home status line. */
-export function describeListingDetailEnrichment(
-  summary: ListingDetailEnrichmentSummary,
-): string {
-  if (summary.attempted === 0) {
-    return "No listing pages needed reading.";
-  }
-  const parts: string[] = [];
-  const read = summary.enriched + summary.partial;
-  parts.push(
-    `Read ${read} of ${summary.attempted} listing ${summary.attempted === 1 ? "page" : "pages"}`,
-  );
-  if (summary.noDetail > 0) {
-    parts.push(`${summary.noDetail} had no listing text`);
-  }
-  if (summary.blocked > 0) {
-    parts.push(
-      `${summary.blocked} ${summary.blocked === 1 ? "was" : "were"} blocked or rate-limited`,
-    );
-  }
-  if (summary.failed > 0) {
-    parts.push(`${summary.failed} could not be reached`);
-  }
-  return `${parts.join(" · ")}.`;
 }

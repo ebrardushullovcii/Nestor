@@ -1,13 +1,10 @@
-import { preserveCompletedAssessment } from "./fit-judgment-apply";
+
 import type {
   BrowserSessionState,
   DiscoveryLedgerEntry,
   JobFinderDiscoveryState,
   JobSource,
-  SavedJob,
 } from "@nestor/contracts";
-
-import { compareDiscoveryJobs } from "./matching-review-queue";
 
 /**
  * Decision identity of a ledger entry. Metadata such as lastSeenAt changes on
@@ -18,28 +15,6 @@ function getDiscoveryLedgerDecisionKey(
   entry: DiscoveryLedgerEntry | null,
 ): string | null {
   return entry ? `${entry.latestStatus}\u0000${entry.skipReason ?? ""}` : null;
-}
-
-export function rebaseDiscoveryLedgerEntry(
-  baseline: DiscoveryLedgerEntry | null,
-  working: DiscoveryLedgerEntry,
-  persisted: DiscoveryLedgerEntry | null,
-): DiscoveryLedgerEntry {
-  if (!persisted) return working;
-  const runChanged =
-    getDiscoveryLedgerDecisionKey(working) !==
-    getDiscoveryLedgerDecisionKey(baseline);
-  const persistedChanged =
-    getDiscoveryLedgerDecisionKey(persisted) !==
-    getDiscoveryLedgerDecisionKey(baseline);
-  if (!persistedChanged) return working;
-  if (
-    !runChanged ||
-    persisted.latestStatus === "skipped" ||
-    persisted.latestStatus === "applied"
-  )
-    return persisted;
-  return working;
 }
 
 const ledgerEntriesById = new WeakMap<
@@ -128,114 +103,6 @@ export function mergeSessionStates(
   );
   nextByKind.set(nextSession.adapterKind, nextSession);
   return [...nextByKind.values()];
-}
-
-export function mergePendingJobs(
-  currentJobs: readonly SavedJob[],
-  nextJobs: readonly SavedJob[],
-): SavedJob[] {
-  const nextById = new Map(currentJobs.map((job) => [job.id, job]));
-  for (const job of nextJobs) {
-    const current = nextById.get(job.id);
-    nextById.set(job.id, {
-      ...job,
-      ...(current?.planAssessments || job.planAssessments
-        ? {
-            planAssessments: {
-              ...current?.planAssessments,
-              ...job.planAssessments,
-            },
-          }
-        : {}),
-      matchAssessment: preserveCompletedAssessment(
-        current?.matchAssessment,
-        job.matchAssessment,
-      ),
-    });
-  }
-  return [...nextById.values()].sort(compareDiscoveryJobs);
-}
-
-export function mergeSavedJobs(
-  currentJobs: readonly SavedJob[],
-  nextJobs: readonly SavedJob[],
-): SavedJob[] {
-  const nextById = new Map(currentJobs.map((job) => [job.id, job]));
-  for (const job of nextJobs) {
-    const currentJob = nextById.get(job.id);
-    const jobWithPersistedLocalChoices = {
-      ...job,
-      ...(currentJob?.planAssessments || job.planAssessments
-        ? {
-            planAssessments: {
-              ...currentJob?.planAssessments,
-              ...job.planAssessments,
-            },
-          }
-        : {}),
-      matchAssessment: preserveCompletedAssessment(
-        currentJob?.matchAssessment,
-        job.matchAssessment,
-      ),
-      resumeApplicationMode:
-        currentJob?.resumeApplicationMode ?? job.resumeApplicationMode,
-      resumeTailoringMode:
-        currentJob?.resumeTailoringMode ?? job.resumeTailoringMode ?? null,
-      latestMatchAssessmentAudit:
-        job.latestMatchAssessmentAudit ??
-        currentJob?.latestMatchAssessmentAudit ??
-        null,
-    };
-    const preservesExplicitDismissal =
-      currentJob?.status === "archived" &&
-      currentJob.discoveryFeedback !== null &&
-      job.status === "discovered";
-    nextById.set(
-      job.id,
-      preservesExplicitDismissal
-        ? {
-            ...jobWithPersistedLocalChoices,
-            status: "archived",
-            discoveryFeedback: currentJob.discoveryFeedback,
-          }
-        : jobWithPersistedLocalChoices,
-    );
-  }
-  return [...nextById.values()];
-}
-
-export function overlayTouchedSavedJobs(
-  currentJobs: readonly SavedJob[],
-  nextJobs: readonly SavedJob[],
-  touchedIds: ReadonlySet<string>,
-): SavedJob[] {
-  return mergeSavedJobs(
-    currentJobs.filter((job) => !touchedIds.has(job.id)),
-    nextJobs.filter((job) => touchedIds.has(job.id)),
-  );
-}
-
-/**
- * Overlays the run's touched pending jobs onto the latest persisted pending
- * jobs. A touched job that existed at run start but was removed from the
- * persisted state while the run was in flight (an explicit user dismissal)
- * stays removed; only run-staged jobs may (re)enter the pending list.
- */
-export function overlayTouchedPendingJobs(
-  currentJobs: readonly SavedJob[],
-  nextJobs: readonly SavedJob[],
-  touchedIds: ReadonlySet<string>,
-  baselineIds?: ReadonlySet<string>,
-): SavedJob[] {
-  const currentIds = new Set(currentJobs.map((job) => job.id));
-  return mergePendingJobs(
-    currentJobs.filter((job) => !touchedIds.has(job.id)),
-    nextJobs.filter(
-      (job) =>
-        touchedIds.has(job.id) &&
-        (!baselineIds || !baselineIds.has(job.id) || currentIds.has(job.id)),
-    ),
-  );
 }
 
 /**

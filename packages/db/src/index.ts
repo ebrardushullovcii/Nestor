@@ -1,10 +1,6 @@
 export type {
   ApplicationAnswerMutationResult,
   ApplicationRecordBatchCommitResult,
-  CampaignPreferencesCommitCurrent,
-  CampaignPreferencesCommitNext,
-  DiscoveryFeedbackCommitCurrent,
-  DiscoveryFeedbackCommitNext,
   JobFinderRepository,
   JobFinderDisplayCollections,
   JobFinderRepositorySeed,

@@ -688,16 +688,6 @@ function sameAliasBasis(left: AliasBasis, right: AliasBasis): boolean {
   );
 }
 
-export function hasSameJobIdentity(
-  left: JobIdentityInput,
-  right: JobIdentityInput,
-): boolean {
-  return (
-    left.seniority === right.seniority &&
-    sameAliasBasis(readAliasBasis(left), readAliasBasis(right))
-  );
-}
-
 type CompactIdentity = DiscoveryPreparedKeys & { basis: AliasBasis };
 // Only foreign frozen inputs cannot carry their own preparation.
 const frozenIdentities = new WeakMap<JobIdentityInput, CompactIdentity>();

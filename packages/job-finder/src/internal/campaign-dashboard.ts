@@ -127,7 +127,6 @@ function createDefaultCampaign(
   searchPreferences: JobSearchPreferences,
   now: string,
   jobIds: readonly string[],
-  legacyRuns: JobFinderDiscoveryState["recentRuns"],
 ): JobSearchCampaign {
   const id = "campaign_default";
   return JobSearchCampaignSchema.parse({
@@ -149,14 +148,6 @@ function createDefaultCampaign(
     ...getDefaultCampaignConfiguration("precision"),
     progress: { lastUpdatedAt: now },
     history: [
-      ...legacyRuns.map((run) => ({
-        id: `campaign_history_discovery_${run.id}`,
-        campaignId: id,
-        kind: "discovery_run" as const,
-        occurredAt: run.completedAt ?? run.startedAt,
-        summary: `Imported discovery run ${run.id}.`,
-        discoveryRunId: run.id,
-      })),
       {
         id: "campaign_history_default_created",
         campaignId: id,
@@ -375,7 +366,6 @@ export async function ensureCampaignState(input: {
       input.searchPreferences,
       now,
       await input.repository.listSavedJobIds(),
-      (await input.repository.getDiscoveryState()).recentRuns,
     );
     const created = JobSearchCampaignCollectionSchema.parse({
       activeCampaignId: campaign.id,
@@ -439,14 +429,6 @@ export function searchPreferencesForCampaignRun(
       })),
     },
   };
-}
-
-export function assertCampaignCanRun(campaign: JobSearchCampaign): void {
-  if (campaign.status !== "active") {
-    throw new Error(
-      `The active search plan is ${campaign.status}. Set it to active before starting discovery.`,
-    );
-  }
 }
 
 /**
@@ -547,10 +529,7 @@ export function deriveDashboardSummary(input: {
    * omitting it means "no grouping applies".
    */
   groupedDecisions?: readonly GroupedManualAnswerDecision[];
-  discovery: Pick<
-    JobFinderDiscoveryState,
-    "activeRun" | "recentRuns" | "runState" | "activeSourceDebugRun"
-  >;
+  discovery: Pick<JobFinderDiscoveryState, "activeSourceDebugRun">;
   searchPreferences: JobSearchPreferences;
   sourceAccessPrompts?: readonly Pick<
     SourceAccessPrompt,
@@ -588,8 +567,8 @@ export function deriveDashboardSummary(input: {
   const sourceHealth = deriveEnabledSourceHealthCounts(
     enabledTargets,
     deriveSourceHealthSignals({
-      activeRun: input.discovery.activeRun,
-      recentRuns: input.discovery.recentRuns,
+      activeRun: null,
+      recentRuns: [],
       sourceAccessPrompts: input.sourceAccessPrompts ?? [],
     }),
   );
@@ -600,7 +579,6 @@ export function deriveDashboardSummary(input: {
     isApplicationAwaitingUserApproval,
   ).length;
   const backgroundOperationCount =
-    (input.discovery.runState === "running" ? 1 : 0) +
     input.applyRuns.filter((run) => run.state === "running").length +
     (input.discovery.activeSourceDebugRun?.state === "running" ? 1 : 0);
 

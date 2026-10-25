@@ -12,40 +12,14 @@ import { createSeed } from "../workspace-service.test-support";
 import {
   findClosedListingPhrase,
   projectDiscoveryJobViews,
-  inactiveListingLedger,
 } from "./listing-activity";
-
-test("active sightings keep the listing dependency stable and subset projections preserve ambiguous identities", () => {
-  const saved = job();
-  const inactive = Object.freeze(ledger(saved));
-  const before = Object.freeze([inactive]);
-  const after = Object.freeze([
-    inactive,
-    Object.freeze(
-      ledger(saved, { id: "active", latestStatus: "seen", inactiveAt: null }),
-    ),
-  ]);
-  expect(inactiveListingLedger(after)).toBe(inactiveListingLedger(before));
-  const changed = Object.freeze([{ ...inactive, inactiveAt: hour(11) }]);
-  expect(inactiveListingLedger(changed)).not.toBe(
-    inactiveListingLedger(before),
-  );
-  const duplicate = { ...saved, id: "other-id" };
-  const views = projectDiscoveryJobViews({
-    jobs: [saved],
-    identityJobs: [saved, duplicate],
-    discoveryLedger: [inactive],
-    listingSignals: [],
-  });
-  expect(views[0]?.listingActivity.status).toBe("unknown");
-});
 
 const hour = (value: number) =>
   `2026-08-23T${String(value).padStart(2, "0")}:00:00.000Z`;
 
 test("unchanged immutable rows retain their activity view while changed evidence replaces it", () => {
   const saved = Object.freeze(job());
-  const input = { jobs: [saved], discoveryLedger: [], listingSignals: [] };
+  const input = { jobs: [saved], listingSignals: [] };
   const first = projectDiscoveryJobViews(input)[0]!;
   expect(projectDiscoveryJobViews(input)[0]).toBe(first);
   const changed = projectDiscoveryJobViews({
@@ -137,7 +111,6 @@ function activity(input: {
 }) {
   return projectDiscoveryJobViews({
     jobs: [input.job],
-    discoveryLedger: input.ledger ?? [],
     listingSignals: input.signals ?? [],
   })[0]!.listingActivity;
 }
@@ -170,7 +143,6 @@ describe("listing activity projection", () => {
     });
     const views = projectDiscoveryJobViews({
       jobs: [target, other],
-      discoveryLedger: [],
       listingSignals: [],
       applicationAttempts: [attempt],
     });
@@ -197,31 +169,6 @@ describe("listing activity projection", () => {
       observedAt: hour(10),
       evidence: "last_verified_active_at",
     });
-  });
-
-  test("uses only an exact inactive ledger fact and ignores workflow statuses", () => {
-    const target = job();
-    expect(activity({ job: target, ledger: [ledger(target)] })).toMatchObject({
-      status: "inactive",
-      observedAt: hour(10),
-      ledgerEntryId: "ledger-activity",
-      provenance: "discovery_ledger",
-    });
-
-    for (const latestStatus of ["applied", "skipped", "seen"] as const) {
-      expect(
-        activity({
-          job: target,
-          ledger: [ledger(target, { latestStatus })],
-        }),
-      ).toEqual({ status: "unknown" });
-    }
-    expect(
-      activity({
-        job: target,
-        ledger: [ledger(target, { inactiveAt: null })],
-      }),
-    ).toEqual({ status: "unknown" });
   });
 
   test.each(["stale", "closed"] as const)(
@@ -286,15 +233,10 @@ describe("listing activity projection", () => {
       sourceJobId: "other-id",
       canonicalUrl: "https://jobs.example.com/second",
     });
-    const conflictingLedger = ledger(first, {
-      canonicalUrl: second.canonicalUrl,
-      applicationUrl: second.applicationUrl,
-    });
 
     expect(
       projectDiscoveryJobViews({
         jobs: [first, second],
-        discoveryLedger: [conflictingLedger],
         listingSignals: [],
       }).map((view) => view.listingActivity.status),
     ).toEqual(["unknown", "unknown"]);
@@ -339,7 +281,6 @@ describe("a listing the model read as closed", () => {
     const closed = judgedJob(true, "This position has been filled.");
     const [view] = projectDiscoveryJobViews({
       jobs: [closed],
-      discoveryLedger: [],
       listingSignals: [],
     });
 
@@ -353,7 +294,6 @@ describe("a listing the model read as closed", () => {
     const open = judgedJob(false, null);
     const [view] = projectDiscoveryJobViews({
       jobs: [open],
-      discoveryLedger: [],
       listingSignals: [],
     });
 
@@ -370,7 +310,6 @@ describe("a listing the model read as closed", () => {
 
     const [view] = projectDiscoveryJobViews({
       jobs: [open],
-      discoveryLedger: [],
       listingSignals: [],
     });
 

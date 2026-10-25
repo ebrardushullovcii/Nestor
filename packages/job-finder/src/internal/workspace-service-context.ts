@@ -12,7 +12,6 @@ import type {
   ApplyJobResult,
   ResumeDraftProcessor,
   JobFinderDiscoveryState,
-  FitJudgmentProgress,
   JobFinderWorkspaceSnapshot,
   JobSearchPreferences,
   JobDiscoveryTarget,
@@ -91,20 +90,10 @@ export interface WorkspaceServiceContext {
     operation: (signal: AbortSignal) => Promise<T>,
   ) => Promise<T>;
   isWorkspaceClosing?: () => boolean;
-  fitJudgmentProgressRef?: MutableRef<FitJudgmentProgress | null>;
   onListingAssessmentFinished?: () => void;
   onShortlistResumeChanged?: () => void;
   onSavedJobsRescored?: () => void;
-  activeDiscoveryAbortControllerRef: MutableRef<AbortController | null>;
-  /**
-   * The run id the in-flight discovery pipeline belongs to. A stop request
-   * arrives while the run record may not be persisted yet, so matching on the
-   * stored state alone let the request be acknowledged without ever reaching
-   * the pipeline — the search kept working and the toolbar kept saying
-   * "Stopping".
-   */
-  activeDiscoveryRunIdRef: MutableRef<string | null>;
-  activeDiscoveryPromiseRef: MutableRef<Promise<unknown> | null>;
+  hasRunJobSearch?: () => boolean;
   activeSourceDebugExecutionIdRef: MutableRef<string | null>;
   activeSourceDebugAbortControllerRef: MutableRef<AbortController | null>;
   activeSourceDebugPromiseRef: MutableRef<Promise<unknown> | null>;
@@ -140,16 +129,6 @@ export interface WorkspaceServiceContext {
     request: UserActionRequest,
     taskLocalCredentials?: TaskLocalApplicationCredentials,
   ) => Promise<void>;
-  /**
-   * Reads one source again after the person cleared whatever stopped it (a
-   * sign-in page, a human-verification check, a full-page message). The search
-   * that hit the wall ended at that source, so clearing it has to continue the
-   * search rather than leave the person to start a whole new one.
-   */
-  continueDiscoveryForSource: (
-    targetId: string,
-    discoveryRunId: string,
-  ) => Promise<DiscoveryContinuationResult>;
   runSourceDebugWorkflow: (
     targetId: string,
     signal?: AbortSignal,
@@ -169,10 +148,6 @@ export interface WorkspaceServiceContext {
     searchPreferences: JobSearchPreferences,
     knownSessions?: JobFinderDiscoveryState["sessions"],
   ) => Promise<JobFinderDiscoveryState["sessions"]>;
-  saveDiscoveryTargetUpdate: (
-    targetId: string,
-    updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
-  ) => Promise<JobSearchPreferences>;
   saveJobSiteMetadata: (
     targetId: string,
     updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,

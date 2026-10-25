@@ -191,24 +191,6 @@ test("unknown rows refuse the batch before changing any valid row", async () => 
   );
 });
 
-test("deduplicates requests, promotes pending rows atomically, and preserves other pending rows", async () => {
-  const seed = batchSeed(3);
-  seed.discovery.pendingDiscoveryJobs = seed.savedJobs.slice(1);
-  seed.savedJobs = seed.savedJobs.slice(0, 1);
-  const { repository, workspaceService } = createWorkspaceServiceHarness({
-    seed,
-  });
-  await workspaceService.queueJobsForReview!(["batch_0", "batch_1", "batch_1"]);
-  expect((await repository.listSavedJobsByIds(["batch_1"]))[0]?.status).toBe(
-    "drafting",
-  );
-  expect(
-    (await repository.getDiscoveryState()).pendingDiscoveryJobs.map(
-      (job) => job.id,
-    ),
-  ).toEqual(["batch_2"]);
-});
-
 test("runs at most two automatic listing reads and fences them across shutdown", async () => {
   const pending: Array<() => void> = [];
   let active = 0;

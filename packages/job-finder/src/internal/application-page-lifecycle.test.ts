@@ -222,28 +222,6 @@ describe("application page ownership", () => {
     }
   });
 
-  test("removing a job closes its waiting form", async () => {
-    const releaseApplicationPageBinding = vi.fn<
-      NonNullable<BrowserSessionRuntime["releaseApplicationPageBinding"]>
-    >(() => Promise.resolve());
-    const harness = createWorkspaceServiceHarness({
-      seed: seedPages(),
-      browserRuntime: {
-        ...createBrowserRuntime(),
-        releaseApplicationPageBinding,
-      },
-    });
-    await harness.workspaceService.dismissDiscoveryJob({
-      jobId: "job_ready",
-      action: "hide_job",
-      reasons: ["other"],
-    });
-    expect(releaseApplicationPageBinding).toHaveBeenCalledWith(
-      "target_site",
-      "result_0",
-    );
-  });
-
   test.each(["cancel", "skip"] as const)(
     "%s closes a dismissed application's page",
     async (action) => {

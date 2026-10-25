@@ -49,10 +49,7 @@ export type JobFinderRuntimePerformanceObservation = {
 
 type PerformanceEvidenceWorkspace = Pick<
   JobFinderWorkspaceSnapshot,
-  | "activeDiscoveryRun"
-  | "applicationAttempts"
-  | "latestResumeImportRun"
-  | "recentDiscoveryRuns"
+  "applicationAttempts" | "latestResumeImportRun"
 >;
 
 function buildBudgetMetadata(
@@ -185,29 +182,6 @@ function buildResumeImportEvidence(
   });
 }
 
-function buildDiscoveryEvidence(
-  workspace: PerformanceEvidenceWorkspace,
-  budgetEvaluations: readonly PerformanceBudgetEvaluation[],
-): JobFinderPerformanceEvidence {
-  const run =
-    workspace.activeDiscoveryRun ?? workspace.recentDiscoveryRuns[0] ?? null;
-  if (!run?.summary.timing) {
-    return unavailableEvidence("discovery");
-  }
-
-  return measuredEvidence({
-    area: "discovery",
-    budgetEvaluations,
-    durationMs: run.summary.durationMs,
-    method: "discovery_run",
-    recordedAt: run.completedAt ?? run.startedAt,
-    stageDurations: run.summary.timing.stageDurations.map((stage) => ({
-      id: `discovery.${stage.stage}` as const,
-      durationMs: stage.durationMs,
-    })),
-  });
-}
-
 function buildApplicationPreparationEvidence(
   workspace: PerformanceEvidenceWorkspace,
   budgetEvaluations: readonly PerformanceBudgetEvaluation[],
@@ -273,13 +247,8 @@ export function buildJobFinderPerformanceSnapshot(input: {
   runtimeObservations?: readonly JobFinderRuntimePerformanceObservation[];
 }): JobFinderPerformanceSnapshot {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const latestDiscoveryRun =
-    input.workspace.activeDiscoveryRun ??
-    input.workspace.recentDiscoveryRuns[0] ??
-    null;
-  const budgetEvaluations = buildDiscoveryPerformanceBudgetEvaluations(
-    input.workspace.recentDiscoveryRuns,
-  );
+  // Searches run on the job store; the old run timings are gone.
+  const budgetEvaluations = buildDiscoveryPerformanceBudgetEvaluations([]);
   const evidenceByArea = new Map<
     PerformanceEvidenceArea,
     JobFinderPerformanceEvidence
@@ -289,7 +258,7 @@ export function buildJobFinderPerformanceSnapshot(input: {
       buildResumeImportEvidence(input.workspace, budgetEvaluations),
     ],
     ["resume_generation", unavailableEvidence("resume_generation")],
-    ["discovery", buildDiscoveryEvidence(input.workspace, budgetEvaluations)],
+    ["discovery", unavailableEvidence("discovery")],
     [
       "application_preparation",
       buildApplicationPreparationEvidence(input.workspace, budgetEvaluations),
@@ -308,7 +277,7 @@ export function buildJobFinderPerformanceSnapshot(input: {
 
   return JobFinderPerformanceSnapshotSchema.parse({
     generatedAt,
-    latestDiscoveryRun,
+    latestDiscoveryRun: null,
     latestSourceDebugRun: input.latestSourceDebugRun,
     budgetEvaluations,
     evidence: performanceAreaOrder.map((area) => evidenceByArea.get(area)),

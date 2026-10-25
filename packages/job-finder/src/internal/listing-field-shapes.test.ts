@@ -5,11 +5,6 @@ import {
   looksLikePlaceValue,
   splitListingLocations,
 } from "./listing-field-shapes";
-import {
-  normalizeListingText,
-  resolveListingEmployer,
-  resolveListingLocation,
-} from "./workspace-discovery-methods";
 
 describe("looksLikePlaceValue", () => {
   it("recognises a country, a city-region pair and a work mode as places", () => {
@@ -24,34 +19,6 @@ describe("looksLikePlaceValue", () => {
     expect(looksLikePlaceValue("Rose, Klein & Marias")).toBe(false);
     expect(looksLikePlaceValue("Transportation Partners & Logistics")).toBe(
       false,
-    );
-  });
-
-  it.each([
-    "Acme, Inc",
-    "Acme, Inc.",
-    "Acme, LLC",
-    "Acme, Ltd",
-    "Acme, Ltd.",
-    "Acme, GmbH",
-    "Acme, PLC",
-    "Acme, Corp",
-    "Acme, Corp.",
-    "Acme, Co.",
-    "Acme, S.A.",
-    "Acme, AG",
-    "Acme, BV",
-    "Acme, Pty",
-    "Acme, LLP",
-    "Acme, LP",
-    "Acme, SRL",
-    "Acme, Global Solutions",
-    "Acme, Inc., USA",
-    "Acme Solutions, Germany",
-  ])("recognises company-shaped comma tails in %s", (employer) => {
-    expect(looksLikePlaceValue(employer)).toBe(false);
-    expect(resolveListingEmployer(employer, "Security Engineer")).toBe(
-      employer,
     );
   });
 
@@ -105,41 +72,6 @@ describe("collapseRepeatedLocationTokens", () => {
   it("keeps a genuine city and region pair", () => {
     expect(collapseRepeatedLocationTokens("Philadelphia, PA")).toBe(
       "Philadelphia, PA",
-    );
-  });
-});
-
-describe("the stored employer and location pair", () => {
-  it("refuses a place in the employer field", () => {
-    expect(resolveListingEmployer("United States", "Security Engineer")).toBe(
-      "Employer not stated",
-    );
-  });
-
-  it("refuses a fragment in the location field", () => {
-    expect(resolveListingLocation("Security Remote in")).toBe(
-      "Location not stated",
-    );
-  });
-
-  it("keeps a real employer and a real place", () => {
-    expect(resolveListingEmployer("Garner Health", "Security Engineer")).toBe(
-      "Garner Health",
-    );
-    expect(resolveListingLocation("Chicago, IL")).toBe("Chicago, IL");
-  });
-});
-
-describe("normalizeListingText", () => {
-  it("decodes a double-encoded entity all the way to readable text", () => {
-    expect(
-      normalizeListingText("Transportation Partners &amp;amp; Logistics"),
-    ).toBe("Transportation Partners & Logistics");
-  });
-
-  it("still decodes a single-encoded entity", () => {
-    expect(normalizeListingText("Rose, Klein &amp; Marias")).toBe(
-      "Rose, Klein & Marias",
     );
   });
 });

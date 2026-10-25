@@ -32,7 +32,6 @@ export const AUTOMATIC_FAILURE_WINDOW_DAYS = 7;
 
 /** Stable pause id prefixes; campaign ids are appended to keep policies scoped. */
 import {
-  AUTOMATIC_DISCOVERY_FAILURE_PAUSE_ID,
   AUTOMATIC_SOURCE_DEBUG_FAILURE_PAUSE_ID,
 } from "../plan-safeguard-pauses";
 export {
@@ -425,39 +424,6 @@ async function persistAutomaticFailurePause(input: {
         updatedAt: input.now,
       }),
     );
-  });
-}
-
-/** Re-derives a campaign's automatic discovery pause from durable run history. */
-export async function persistAutomaticDiscoverySafeguard(input: {
-  ctx: Pick<
-    WorkspaceServiceContext,
-    "repository" | "withIntelligenceTransition"
-  >;
-  campaign: JobSearchCampaign;
-  now: string;
-}): Promise<void> {
-  // The writer already published these canonical runs. This decision uses
-  // only their outcomes; refreshing display history also read every changed
-  // ledger body and cleared thousands of display markers.
-  const discovery = await (input.ctx.repository.readDiscoveryStateForRun?.() ??
-    input.ctx.repository.getDiscoveryState());
-  const runs = discovery.recentRuns.filter(
-    (run) => run.campaignId === input.campaign.id,
-  );
-  await persistAutomaticFailurePause({
-    ctx: input.ctx,
-    campaign: input.campaign,
-    pauseId: `${AUTOMATIC_DISCOVERY_FAILURE_PAUSE_ID}:${input.campaign.id}`,
-    // Whole runs, not single source attempts, and only the unbroken run of
-    // failures at the end of the history.
-    evidence: deriveDiscoveryRunFailureEvidence(runs),
-    minimumSample: Math.max(
-      AUTOMATIC_DISCOVERY_CONSECUTIVE_FAILED_RUNS,
-      input.campaign.stopRules.failureRateMinimumSample,
-    ),
-    failureRateThresholdPercent: 100,
-    now: input.now,
   });
 }
 

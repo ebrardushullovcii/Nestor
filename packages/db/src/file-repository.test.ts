@@ -10,10 +10,6 @@ import {
   ApplyJobResultSchema,
   SourceDebugEvidenceRefSchema,
   ApplyRunSchema,
-  getDefaultCampaignConfiguration,
-  JobSearchCampaignSchema,
-  type JobSearchCampaign,
-  type JobSearchPreferences,
   ResumeDraftRevisionSchema,
   ResumeDraftSchema,
   ResumeExportArtifactSchema,
@@ -2716,128 +2712,6 @@ describe("repository backend parity", () => {
         storagePath: null,
         updatedAt: "2026-07-31T09:00:00.000Z",
       });
-    },
-  );
-
-  test.each(backends)(
-    "advances the profile epoch when discovery feedback writes preferences ($label)",
-    async ({ create }) => {
-      const repository = await createBackend(create);
-      const job = createSavedJob({ id: "job_parity_epoch" });
-      await repository.commitSavedJobDelta({ upserts: [job] });
-      const before = await repository.getProfileWithRevision();
-
-      // An ordinary dismissal rewrites the same preferences. It must not
-      // invalidate an in-flight profile operation that captured this epoch.
-      await repository.commitDiscoveryFeedbackUpdate(job.id, (current) => ({
-        result: null,
-        searchPreferences: current.searchPreferences,
-        campaignState: current.campaignState,
-        discoveryState: current.discoveryState,
-      }));
-      expect((await repository.getProfileWithRevision()).revision).toBe(
-        before.revision,
-      );
-
-      await repository.commitDiscoveryFeedbackUpdate(job.id, (current) => ({
-        result: null,
-        searchPreferences: {
-          ...current.searchPreferences,
-          companyBlacklist: [
-            ...current.searchPreferences.companyBlacklist,
-            "Excluded Employer",
-          ],
-        },
-        campaignState: current.campaignState,
-        discoveryState: current.discoveryState,
-      }));
-
-      const after = await repository.getProfileWithRevision();
-      expect(after.revision).toBeGreaterThan(before.revision);
-      expect(
-        (await repository.getSearchPreferences()).companyBlacklist,
-      ).toContain("Excluded Employer");
-
-      // A copilot commit that captured the pre-feedback epoch must fail
-      // closed instead of reverting the exclusion the user just made.
-      const staleCommit = await repository.commitProfileCopilotState({
-        profile: before.profile,
-        searchPreferences: {
-          ...(await repository.getSearchPreferences()),
-          companyBlacklist: [],
-        },
-        profileSetupState: await repository.getProfileSetupState(),
-        expectedProfileRevision: before.revision,
-      });
-      expect(staleCommit).toMatchObject({ status: "stale" });
-      expect(
-        (await repository.getSearchPreferences()).companyBlacklist,
-      ).toContain("Excluded Employer");
-    },
-  );
-
-  test.each(backends)(
-    "advances the profile epoch when campaign preferences are committed ($label)",
-    async ({ create }) => {
-      const repository = await createBackend(create);
-      const before = await repository.getProfileWithRevision();
-      const now = "2026-08-01T10:00:00.000Z";
-      const buildCampaign = (
-        searchPreferences: JobSearchPreferences,
-      ): JobSearchCampaign =>
-        JobSearchCampaignSchema.parse({
-          id: "campaign_parity",
-          name: "Parity campaign",
-          mode: "precision",
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-          searchPreferences,
-          sourceTargetIds: [],
-          ...getDefaultCampaignConfiguration("precision"),
-          schedule: {},
-          progress: { lastUpdatedAt: now },
-        });
-
-      // A campaign-only edit leaves the shared preferences untouched and must
-      // not invalidate an in-flight profile operation.
-      await repository.commitCampaignPreferencesUpdate((current) => ({
-        result: null,
-        campaignState: {
-          campaigns: [buildCampaign(current.searchPreferences)],
-          activeCampaignId: "campaign_parity",
-          notifications: [],
-        },
-        searchPreferences: current.searchPreferences,
-      }));
-      expect((await repository.getProfileWithRevision()).revision).toBe(
-        before.revision,
-      );
-
-      await repository.commitCampaignPreferencesUpdate((current) => {
-        const campaign = buildCampaign(current.searchPreferences);
-        return {
-          result: null,
-          campaignState: {
-            campaigns: [campaign],
-            activeCampaignId: campaign.id,
-            notifications: [],
-          },
-          searchPreferences: {
-            ...current.searchPreferences,
-            companyBlacklist: [
-              ...current.searchPreferences.companyBlacklist,
-              "Campaign Excluded Employer",
-            ],
-          },
-        };
-      });
-
-      const after = await repository.getProfileWithRevision();
-      expect(after.revision).toBeGreaterThan(before.revision);
-      expect(
-        (await repository.getSearchPreferences()).companyBlacklist,
-      ).toContain("Campaign Excluded Employer");
     },
   );
 });

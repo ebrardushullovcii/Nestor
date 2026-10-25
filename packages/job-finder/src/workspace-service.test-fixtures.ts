@@ -541,12 +541,8 @@ export function createSeed(): JobFinderRepositorySeed {
     },
     discovery: JobFinderDiscoveryStateSchema.parse({
       sessions: [],
-      runState: "idle",
-      activeRun: null,
-      recentRuns: [],
       activeSourceDebugRun: null,
       recentSourceDebugRuns: [],
-      pendingDiscoveryJobs: [],
     }),
     campaigns: [],
     activeCampaignId: null,

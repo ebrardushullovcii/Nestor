@@ -1,5 +1,4 @@
 import {
-  DISCOVERY_NO_JOB_SITES_MESSAGE,
   DiscoveryRunRecordSchema,
   buildDiscoveryCardOnlyEvidenceWarning,
 } from "@nestor/contracts";
@@ -49,19 +48,6 @@ describe("discovery run failure recovery classification", () => {
         },
       ]),
     ).toEqual([detail]);
-  });
-
-  it("sends a plan with no job sites to Profile instead of calling it unexpected", () => {
-    const recovery = getDiscoveryRunFailureRecovery(
-      DISCOVERY_NO_JOB_SITES_MESSAGE,
-    );
-
-    expect(recovery.kind).toBe("source_setup");
-    expect(recovery.headline).toBe("This plan has no job sites to search.");
-    expect(recovery.actionLabel).toBe("Review job sources");
-    expect(recovery.nextStep).toBe(
-      "Add a job site in Profile, then run this plan again.",
-    );
   });
 
   it("sends a source address that returned 404 to job sources instead of saying wait and retry", () => {

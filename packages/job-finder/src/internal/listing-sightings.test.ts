@@ -1,8 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { createFileJobFinderRepository } from "@nestor/db";
 import {
   JobPostingSchema,
   SavedJobDiscoveryProvenanceSchema,
@@ -13,13 +9,10 @@ import {
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
   classifySightingRoute,
-  listUnreadSightings,
   selectApplicationSighting,
   selectCanonicalSighting,
 } from "./listing-sightings";
-import { applySightingRoute, mergeDiscoveredPostings } from "./matching";
-import { applySavedJobDelta } from "./workspace-discovery-methods";
-import { readSightingApplyRoutes } from "./listing-detail-enrichment";
+import { mergeDiscoveredPostings } from "./matching";
 
 const HOST = "http://127.0.0.1:47000";
 
@@ -167,17 +160,6 @@ describe("selectCanonicalSighting", () => {
       "target_forms",
     );
   });
-
-  test("unread sightings are listed only while no employer form is known", () => {
-    expect(listUnreadSightings([boardFirst, formSecond])).toHaveLength(2);
-    expect(listUnreadSightings([boardFirst])).toHaveLength(0);
-    const readForm = {
-      ...formSecond,
-      pageApplyUrl: `${HOST}/forms/apply/9`,
-      routeReadAt: "2026-09-23T10:05:00.000Z",
-    };
-    expect(listUnreadSightings([boardFirst, readForm])).toHaveLength(0);
-  });
 });
 
 describe("merging the same job from two sources", () => {
@@ -231,60 +213,6 @@ describe("merging the same job from two sources", () => {
       provenanceFor,
     );
   }
-
-  test("a second source's route read keeps complete listing text through a lazy-row merge", async () => {
-    const firstBody = "Build accessible interfaces and reliable TypeScript services. Partner with product and engineering, test changes and document their behavior. ".repeat(5).trim();
-    const secondBody = firstBody + " The employer's own page also describes mentoring and release ownership.";
-    const board = { ...posting("board", "2026-09-23T10:00:00.000Z"),
-      description: firstBody, detailQuality: "detail_enriched" as const,
-      applicationUrl: `${HOST}/employer-a/apply/9`,
-    };
-    const provenanceFor = (item: JobPosting) => ({
-      targetId: `target_${item.canonicalUrl.split("/")[3]}`,
-      adapterKind: "auto" as const, resolvedAdapterKind: "target_site" as const,
-      startingUrl: `${HOST}/${item.canonicalUrl.split("/")[3]}/`,
-      discoveredAt: item.discoveredAt, collectionMethod: item.collectionMethod,
-      providerKey: null, providerBoardToken: null,
-      titleTriageOutcome: "pass" as const,
-    });
-    const first = mergeDiscoveredPostings(seed.profile, seed.searchPreferences, [], [board], provenanceFor).mergedJobs[0]!;
-    first.provenance = first.provenance.map((entry) => ({ ...entry,
-      routeReadAt: "2026-09-23T10:01:00.000Z", pageApplyUrl: board.applicationUrl,
-    }));
-    const directory = await mkdtemp(path.join(os.tmpdir(), "nestor-cross-source-body-"));
-    const repository = await createFileJobFinderRepository({
-      filePath: path.join(directory, "workspace.sqlite"), seed: { ...seed, savedJobs: [first] },
-    });
-    try {
-      const [lazy] = await repository.readSavedJobsProjection();
-      expect(typeof Object.getOwnPropertyDescriptor(lazy!, "description")?.get).toBe("function");
-      const card = { ...posting("forms", "2026-09-23T11:00:00.000Z"), applicationUrl: null, description: first.title };
-      const merge = mergeDiscoveredPostings(seed.profile, seed.searchPreferences, [lazy!], [card], provenanceFor);
-      expect(merge.duplicatesMerged).toBe(1);
-      const merged = merge.mergedJobs[0]!;
-      expect(merged.description).toBe(firstBody);
-      const read = await readSightingApplyRoutes({
-        jobs: [merged],
-        fetchHtml: (url) => Promise.resolve({ status: 200, finalUrl: url,
-          html: `<h1>${first.title}</h1><p>${secondBody}</p><a href="/forms/apply/9">Apply now</a>`,
-        }),
-        readPage: () => Promise.resolve({ ...card, description: secondBody, applicationUrl: `${HOST}/forms/apply/9` }),
-      });
-      expect(read.summary.read).toBe(1);
-      const winner = selectCanonicalSighting(read.jobs[0]!.provenance)!;
-      expect(winner.listingUrl).toBe(card.canonicalUrl);
-      const routed = applySightingRoute(read.jobs[0]!, winner);
-      expect(routed.description).toBe(secondBody);
-      await repository.commitSavedJobDelta({
-        borrowCurrentJobs: true, updateJobIds: [first.id],
-        update: (current) => applySavedJobDelta(current, lazy!, routed),
-      });
-      expect((await repository.listSavedJobsByIds([first.id]))[0]?.description).toBe(secondBody);
-    } finally {
-      await repository.close();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
 
   test("the later sighting no longer takes over the listing, and the pair is never mixed", () => {
     const result = mergeInOrder("board", "forms");
@@ -451,99 +379,6 @@ describe("merging the same job from two sources", () => {
       () => read.provenance[0]!,
     );
     expect(result.mergedJobs[0]?.listingDetailFetch?.outcome).toBe("enriched");
-  });
-
-  test("reading the listings once records each page's apply link, then the employer's form wins", async () => {
-    const job = mergeInOrder("board", "forms").mergedJobs[0]!;
-    const requested: string[] = [];
-    const pages: Record<string, string> = {
-      [`${HOST}/board/jobs/9`]: `<a href="/employer-a/apply/9">Apply now</a>`,
-      [`${HOST}/forms/jobs/9`]: `<a href="/forms/apply/9">Apply for this job</a>`,
-    };
-    const read = await readSightingApplyRoutes({
-      jobs: [job],
-      fetchHtml: (url) => {
-        requested.push(url);
-        return Promise.resolve({
-          status: 200,
-          html: pages[url] ?? "",
-          finalUrl: url,
-        });
-      },
-      readPage: ({ pageUrl }) =>
-        Promise.resolve({
-          ...job,
-          applicationUrl: pageUrl.includes("/forms/")
-            ? `${HOST}/forms/apply/9`
-            : `${HOST}/employer-a/apply/9`,
-        }),
-      now: () => "2026-09-23T10:10:00.000Z",
-    });
-    expect(requested).toHaveLength(2);
-    expect(read.summary.read).toBe(2);
-    const winner = selectCanonicalSighting(read.jobs[0]!.provenance);
-    expect(winner?.listingUrl).toBe(`${HOST}/forms/jobs/9`);
-    const again = await readSightingApplyRoutes({
-      jobs: read.jobs,
-      fetchHtml: (url) => {
-        requested.push(url);
-        return Promise.resolve({ status: 200, html: "", finalUrl: url });
-      },
-    });
-    expect(again.summary.read).toBe(0);
-    expect(requested).toHaveLength(2);
-  });
-
-  test("a rate-limited listing ends the reads for this search and stays unread", async () => {
-    const job = mergeInOrder("board", "forms").mergedJobs[0]!;
-    const read = await readSightingApplyRoutes({
-      jobs: [job],
-      fetchHtml: (url) =>
-        Promise.resolve({ status: 429, html: "", finalUrl: url }),
-    });
-    expect(read.summary).toEqual({ read: 0, rateLimited: true });
-    expect(listUnreadSightings(read.jobs[0]!.provenance)).toHaveLength(2);
-  });
-
-  test.each([200, 404])(
-    "a failed route read (HTTP %s) stays unread and keeps its collected destination",
-    async (status) => {
-      const job = mergeInOrder("board", "forms").mergedJobs[0]!;
-      const read = await readSightingApplyRoutes({
-        jobs: [job],
-        fetchHtml: (url) =>
-          Promise.resolve({
-            status,
-            html: "<main>Unread page</main>",
-            finalUrl: url,
-          }),
-        readPage: () => Promise.resolve(null),
-      });
-      expect(read.summary.read).toBe(0);
-      expect(read.jobs[0]?.provenance).toEqual(job.provenance);
-      expect(listUnreadSightings(read.jobs[0]!.provenance)).toHaveLength(2);
-    },
-  );
-
-  test("skips a source already handed to the person and keeps its sightings", async () => {
-    const job = mergeInOrder("board", "forms").mergedJobs[0]!;
-    const requested: string[] = [];
-    const read = await readSightingApplyRoutes({
-      jobs: [job],
-      canReadUrl: (url) => url !== `${HOST}/board/jobs/9`,
-      readPage: () => Promise.resolve({ ...job, applicationUrl: null }),
-      fetchHtml: (url) => {
-        requested.push(url);
-        return Promise.resolve({ status: 200, html: "", finalUrl: url });
-      },
-    });
-    expect(requested).toEqual([`${HOST}/forms/jobs/9`]);
-    expect(read.jobs[0]?.provenance).toHaveLength(2);
-    expect(
-      listUnreadSightings(read.jobs[0]!.provenance).map(
-        (entry) => entry.listingUrl,
-      ),
-    ).toEqual([`${HOST}/board/jobs/9`]);
   });
 });
 

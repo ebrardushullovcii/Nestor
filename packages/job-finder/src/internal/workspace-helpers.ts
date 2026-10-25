@@ -256,14 +256,6 @@ export function normalizeResumeDraftTemplate(
   });
 }
 
-export function getActiveDiscoveryTargets(
-  searchPreferences: JobSearchPreferences,
-): JobDiscoveryTarget[] {
-  return searchPreferences.discovery.targets
-    .map((target) => normalizeDiscoveryTarget(target))
-    .filter((target) => target.enabled);
-}
-
 export function getPreferredSessionAdapter(
   searchPreferences: JobSearchPreferences,
 ): JobSource {
@@ -416,32 +408,4 @@ export function resolveActiveSourceInstructionArtifact(
           artifact.status === "validated",
       ) ?? null)
     : null;
-}
-
-export function updateDiscoveryTarget(
-  searchPreferences: JobSearchPreferences,
-  targetId: string,
-  updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
-): JobSearchPreferences {
-  let found = false;
-  const nextTargets = searchPreferences.discovery.targets.map((target) => {
-    if (target.id !== targetId) {
-      return target;
-    }
-
-    found = true;
-    return updater(target);
-  });
-
-  if (!found) {
-    throw new Error(`Unknown discovery target '${targetId}'.`);
-  }
-
-  return JobSearchPreferencesSchema.parse({
-    ...searchPreferences,
-    discovery: {
-      ...searchPreferences.discovery,
-      targets: nextTargets,
-    },
-  });
 }

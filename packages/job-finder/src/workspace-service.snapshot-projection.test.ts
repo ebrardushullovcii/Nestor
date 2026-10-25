@@ -1,5 +1,4 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { StatementSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -82,16 +81,6 @@ async function fixture(storage: "memory" | "file", noRuntimeRefresh = false) {
   });
   seed.discovery = {
     ...seed.discovery,
-    runState: "running",
-    activeRun: run,
-    recentRuns: [run],
-    pendingDiscoveryJobs: [
-      pending,
-      {
-        ...seed.savedJobs[0]!,
-        title: "Duplicate pending row must yield to saved row",
-      },
-    ],
   };
   const temp =
     storage === "file"
@@ -117,41 +106,6 @@ async function fixture(storage: "memory" | "file", noRuntimeRefresh = false) {
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} snapshot display projection`, () => {
     if (storage === "file")
-      test("a second snapshot does not read discovery storage", async () => {
-        const { repo, close } = await fixture(storage, true);
-        try {
-          const workspace = service(repo);
-          await vi.waitFor(async () =>
-            expect((await repo.getDiscoveryState()).activeRun).toBeNull(),
-          );
-          await workspace.getWorkspaceBootstrap();
-          await workspace.getWorkspaceProjection();
-          const reads: string[] = [];
-          const all = Reflect.get(StatementSync.prototype, "all");
-          const spy = vi
-            .spyOn(StatementSync.prototype, "all")
-            .mockImplementation(function (
-              this: StatementSync,
-              ...args: Parameters<StatementSync["all"]>
-            ) {
-              if (
-                /\bFROM\s+(?:discovery_runs|discovery_ledger|discovery_run_targets|discovery_run_activity|discovery_ledger_observations)\b/i.test(
-                  this.sourceSQL,
-                )
-              )
-                reads.push(this.sourceSQL);
-              return all.apply(this, args);
-            });
-          try {
-            await workspace.getWorkspaceProjection();
-            expect(reads).toEqual([]);
-          } finally {
-            spy.mockRestore();
-          }
-        } finally {
-          await close();
-        }
-      });
     test("company membership edits preserve discovery rows and match canonical company lists", async () => {
       const { repo, close } = await fixture(storage);
       try {
@@ -190,69 +144,6 @@ for (const storage of ["memory", "file"] as const) {
             expect(row).toBe(
               before.discoveryJobs.find((job) => job.id === row.id),
             );
-      } finally {
-        await close();
-      }
-    });
-
-    test("changed rows and activity converge while display progress never rewrites plans", async () => {
-      const { repo, close } = await fixture(storage);
-      try {
-        const workspace = service(repo);
-        await workspace.getWorkspaceProjection();
-        // Settle adoption before measuring ordinary display reads.
-        await workspace.getWorkspaceProjection();
-        const save = vi.spyOn(repo, "saveCampaignState");
-        const [job] = await repo.listSavedJobs();
-        if (!job) throw new Error("Expected a saved job");
-        const original = await workspace.getWorkspaceProjection();
-        await repo.commitSavedJobDelta({
-          updateJobIds: [job.id],
-          update: (current) => ({
-            ...current,
-            status: "archived",
-            discoveryFeedback: {
-              version: 1,
-              revision: 1,
-              reasons: [],
-              recordedAt: "2026-10-23T00:00:00.000Z",
-              priorStatus: current.status,
-              employerExclusion: null,
-            },
-          }),
-        });
-        const hidden = await workspace.getWorkspaceProjection();
-        expect(hidden.discoveryJobs.some((row) => row.id === job.id)).toBe(
-          false,
-        );
-        expect(
-          hidden.dismissedDiscoveryJobs.some((row) => row.id === job.id),
-        ).toBe(true);
-        const unchanged = await workspace.getWorkspaceProjection();
-        expect(unchanged.campaigns).toEqual(hidden.campaigns);
-        expect(save).not.toHaveBeenCalled();
-        await repo.commitSavedJobDelta({
-          updateJobIds: [job.id],
-          update: (current) => ({
-            ...current,
-            status: job.status,
-            discoveryFeedback: job.discoveryFeedback,
-          }),
-        });
-        const restored = await workspace.getWorkspaceProjection();
-        expect(restored.discoveryJobs.map((row) => row.id)).toEqual(
-          original.discoveryJobs.map((row) => row.id),
-        );
-        expect(restored.dismissedDiscoveryJobs.map((row) => row.id)).toEqual(
-          original.dismissedDiscoveryJobs.map((row) => row.id),
-        );
-        const canonical = await workspace.getWorkspaceSnapshot();
-        expect(structuredClone(restored.discoveryJobs)).toEqual(
-          structuredClone(canonical.discoveryJobs),
-        );
-        expect(structuredClone(restored.companyJobs)).toEqual(
-          structuredClone(canonical.companyJobs),
-        );
       } finally {
         await close();
       }
@@ -326,130 +217,6 @@ for (const storage of ["memory", "file"] as const) {
         const originalLabel = canonical.tailoredAssets[0]!.label;
         canonical.tailoredAssets[0]!.label = "Caller-only edit";
         expect((await repo.listTailoredAssets())[0]?.label).toBe(originalLabel);
-      } finally {
-        await close();
-      }
-    });
-    test("recovery retains the newest transaction-current checkpoints; only display/bootstrap omit them", async () => {
-      const { repo, run, close } = await fixture(storage);
-      try {
-        let intercept = true;
-        const recoveryRead = vi.spyOn(repo, "readDiscoveryBootstrapProjection");
-        const displayRead = vi.spyOn(repo, "readDiscoveryDisplayProjection");
-        const wrapped: JobFinderRepository = {
-          ...repo,
-          commitDiscoveryStateUpdate: async (update) => {
-            if (intercept) {
-              intercept = false;
-              await repo.commitDiscoveryStateUpdate((current) => ({
-                ...current,
-                activeRun: current.activeRun
-                  ? {
-                      ...current.activeRun,
-                      targetExecutions: current.activeRun.targetExecutions.map(
-                        (execution) => ({
-                          ...execution,
-                          agentCheckpoint: execution.agentCheckpoint
-                            ? { ...execution.agentCheckpoint, revision: 8 }
-                            : null,
-                        }),
-                      ),
-                    }
-                  : null,
-              }));
-            }
-            return repo.commitDiscoveryStateUpdate(update);
-          },
-        };
-        const workspace = service(wrapped);
-        const activeBootstrap = await workspace.getWorkspaceBootstrap();
-        expect(
-          activeBootstrap.activeDiscoveryRun?.targetExecutions[0]
-            ?.agentCheckpoint,
-        ).toBeNull();
-        expect(activeBootstrap.recentDiscoveryRuns).toEqual([]);
-        recoveryRead.mockClear();
-        displayRead.mockClear();
-        const display = await workspace.getWorkspaceProjection();
-        expect(recoveryRead).toHaveBeenCalledOnce();
-        expect(displayRead).toHaveBeenCalledOnce();
-        const recovered = display.recentDiscoveryRuns.find(
-          (item) => item.id === run.id,
-        );
-        expect(recovered).toMatchObject({
-          state: "failed",
-          runPhase: "interrupted",
-        });
-        expect(recovered?.targetExecutions[0]).toMatchObject({
-          targetId: "target_checkpoint",
-          state: "failed",
-          agentCheckpoint: null,
-        });
-        const canonical = await workspace.getWorkspaceSnapshot();
-        expect(
-          canonical.recentDiscoveryRuns.find((item) => item.id === run.id)
-            ?.targetExecutions[0]?.agentCheckpoint,
-        ).toMatchObject({
-          revision: 8,
-          collectedJobs: [{ description: "Durable checkpoint body" }],
-        });
-        const bootstrap = await workspace.getWorkspaceBootstrap();
-        expect(bootstrap.recentDiscoveryRuns).toEqual([]);
-        expect(
-          (await repo.exportState()).discovery.recentRuns[0]
-            ?.targetExecutions[0]?.agentCheckpoint?.revision,
-        ).toBe(8);
-      } finally {
-        await close();
-      }
-    });
-
-    test("pending listings and saved-row precedence match canonical snapshots; unchanged display refreshes avoid canonical discovery reads", async () => {
-      const { repo, pending, close } = await fixture(storage);
-      try {
-        const workspace = service(repo);
-        const readIntelligence = vi.spyOn(repo, "getIntelligenceState");
-        const bootstrap = await workspace.getWorkspaceBootstrap();
-        expect(bootstrap.hydration.phase).toBe("bootstrap");
-        expect(readIntelligence).not.toHaveBeenCalled();
-        readIntelligence.mockRestore();
-        await vi.waitFor(async () =>
-          expect((await repo.getDiscoveryState()).activeRun).toBeNull(),
-        );
-        const canonical = await workspace.getWorkspaceSnapshot();
-        const readCanonical = vi.spyOn(repo, "getDiscoveryState");
-        const first = await workspace.getWorkspaceProjection();
-        const second = await workspace.getWorkspaceProjection();
-        expect(readCanonical).not.toHaveBeenCalled();
-        expect(structuredClone(first.discoveryJobs)).toEqual(
-          structuredClone(canonical.discoveryJobs),
-        );
-        expect(structuredClone(second.discoveryJobs)).toEqual(
-          structuredClone(first.discoveryJobs),
-        );
-        expect(
-          first.discoveryJobs.filter((job) => job.id === pending.id),
-        ).toHaveLength(1);
-        expect(
-          first.discoveryJobs.some(
-            (job) =>
-              job.title === "Duplicate pending row must yield to saved row",
-          ),
-        ).toBe(false);
-        expect(
-          canonical.recentDiscoveryRuns[0]?.targetExecutions[0]
-            ?.agentCheckpoint,
-        ).not.toBeNull();
-        expect(
-          first.recentDiscoveryRuns[0]?.targetExecutions[0]?.agentCheckpoint,
-        ).toBeNull();
-        canonical.recentDiscoveryRuns[0]!.targetExecutions[0]!.agentCheckpoint!.collectedJobs[0]!.description =
-          "Caller mutation";
-        expect(
-          (await repo.getDiscoveryState()).recentRuns[0]?.targetExecutions[0]
-            ?.agentCheckpoint?.collectedJobs[0]?.description,
-        ).toBe("Durable checkpoint body");
-        readCanonical.mockRestore();
       } finally {
         await close();
       }

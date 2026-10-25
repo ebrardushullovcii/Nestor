@@ -72,19 +72,6 @@ export type DiscoveryRunHealthFields = {
   }[];
 };
 
-/** A terminal source counts as completed only when its execution succeeded. */
-export function deriveDiscoverySourceOutcome(run: DiscoveryRunHealthFields): {
-  completed: number;
-  planned: number;
-} {
-  return {
-    completed: run.targetExecutions.filter(
-      (execution) => execution.state === "completed",
-    ).length,
-    planned: run.targetExecutions.length,
-  };
-}
-
 /**
  * Collect the targets whose most recent discovery execution across the given
  * runs finished in the `completed` state. Only the latest execution per

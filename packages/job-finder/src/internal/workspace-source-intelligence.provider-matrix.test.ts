@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  readDiscoveryPreparation,
-  readPreparedBodySalaryRange,
-  readPreparedDiscoveryFingerprints,
   type JobDiscoveryTarget,
   type JobSource,
 } from "@nestor/contracts";
 import {
   setDiscoveryFeedExecutor,
-  takePreparedDiscoveryPosting,
 } from "./discovery-feed-executor";
 
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
@@ -18,7 +14,6 @@ import {
   prepareListingContent,
   rememberPreparedListingContent,
 } from "./job-identity";
-import { extractSalaryRangeFromListingBody } from "./matching-compensation";
 import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import {
@@ -160,45 +155,6 @@ afterEach(() => {
 });
 
 describe("public provider ATS acceptance matrix", () => {
-  test("reattaches explicit preparation after the real worker transport drops symbols", async () => {
-    const { target, payload } = providerCases[0];
-    const intelligence = inferSourceIntelligenceFromTarget({
-      target,
-      currentArtifact: null,
-    });
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify(payload), {
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-    );
-    setDiscoveryFeedExecutor(async (task) =>
-      structuredClone(await preparePublicProviderFeed(task)),
-    );
-    const result = await collectPublicProviderJobs({
-      target,
-      artifact: { intelligence },
-      source: "target_site",
-      prepareForDiscovery: true,
-    });
-    expect(result.jobs).toHaveLength(1);
-    const raw = result.jobs[0]!;
-    expect(readDiscoveryPreparation(raw)?.identity).toBeDefined();
-    expect(readPreparedBodySalaryRange(raw)).toBe("EUR 96,000 per year");
-    expect(readPreparedDiscoveryFingerprints(raw)).toEqual(
-      createDiscoveryListingFingerprints(structuredClone(raw)),
-    );
-    const normalized = takePreparedDiscoveryPosting(raw)!;
-    expect(normalized).not.toBeNull();
-    expect(readDiscoveryPreparation(normalized)?.identity).toBeDefined();
-    expect(readPreparedBodySalaryRange(normalized)).toBe(
-      extractSalaryRangeFromListingBody(normalized.description),
-    );
-    expect(readPreparedDiscoveryFingerprints(normalized)).toEqual(
-      createDiscoveryListingFingerprints(structuredClone(normalized)),
-    );
-  });
   test.each(providerCases)(
     "$name prepares exactly the same posting, fingerprints and identity evidence off main",
     async ({ target, payload }) => {

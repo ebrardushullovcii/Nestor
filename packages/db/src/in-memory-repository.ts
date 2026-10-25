@@ -12,6 +12,7 @@ import {
 } from "./internal/saved-job-fingerprints";
 import { applySavedJobSightings } from "./internal/saved-job-sightings";
 import { applySavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
+import type { SavedJobSchema } from "@nestor/contracts";
 import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
@@ -46,7 +47,6 @@ import {
   ResumeImportRunSchema,
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
-  SavedJobSchema,
   SourceDebugEvidenceRefSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
@@ -826,79 +826,6 @@ export function createInMemoryJobFinderRepository(
         }
 
         return Promise.resolve();
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
-    commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
-      try {
-        const singleton = <T>(value: T): T =>
-          feedbackOptions?.borrowUnchangedState
-            ? freezeProjection(cloneValue(value))
-            : cloneValue(value);
-        const pendingJob =
-          state.discovery.pendingDiscoveryJobs.find(
-            (job) => job.id === jobId,
-          ) ?? null;
-        const savedJob =
-          state.savedJobs.find((job) => job.id === jobId) ?? null;
-        const next = update({
-          job: cloneValue(pendingJob ?? savedJob),
-          jobIsPending: pendingJob !== null,
-          searchPreferences: singleton(state.searchPreferences),
-          campaignState:
-            state.campaigns.length === 0 || !state.activeCampaignId
-              ? null
-              : singleton(
-                  JobSearchCampaignCollectionSchema.parse({
-                    campaigns: state.campaigns,
-                    activeCampaignId: state.activeCampaignId,
-                    notifications: state.campaignNotifications,
-                  }),
-                ),
-          intelligenceState: singleton(state.intelligence),
-          discoveryState: freezeProjection(cloneValue(state.discovery)),
-        });
-        const nextSearchPreferences = JobSearchPreferencesSchema.parse(
-          cloneValue(next.searchPreferences),
-        );
-        const nextCampaignState =
-          next.campaignState === null
-            ? null
-            : JobSearchCampaignCollectionSchema.parse(
-                cloneValue(next.campaignState),
-              );
-        const nextDiscoveryState = JobFinderDiscoveryStateSchema.parse(
-          cloneValue(next.discoveryState),
-        );
-        const nextSavedJob = next.savedJob
-          ? SavedJobSchema.parse(cloneValue(next.savedJob))
-          : null;
-
-        if (nextSavedJob) {
-          state.savedJobs = upsertById(state.savedJobs, nextSavedJob);
-        }
-        // A changed preference advances the shared profile epoch so a
-        // copilot commit that captured the older preferences fails closed as
-        // stale instead of reverting this feedback. Most discovery feedback
-        // leaves preferences untouched; those rewrites must not invalidate
-        // unrelated in-flight profile work.
-        if (
-          JSON.stringify(nextSearchPreferences) !==
-          JSON.stringify(state.searchPreferences)
-        ) {
-          profileRevision += 1;
-        }
-        state.searchPreferences = nextSearchPreferences;
-        if (nextCampaignState !== null) {
-          state.campaigns = nextCampaignState.campaigns;
-          state.activeCampaignId = nextCampaignState.activeCampaignId;
-          state.campaignNotifications = nextCampaignState.notifications;
-        }
-        state.discovery = nextDiscoveryState;
-        return Promise.resolve(next.result);
       } catch (error) {
         return Promise.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -2553,7 +2480,6 @@ export function createInMemoryJobFinderRepository(
       }));
       const projected = projectDiscoveryJobViews({
         jobs,
-        discoveryLedger: state.discovery.discoveryLedger,
         listingSignals: state.intelligence.safeguards.listingSignals,
         applicationAttempts: state.applicationAttempts,
       });
@@ -2644,56 +2570,6 @@ export function createInMemoryJobFinderRepository(
       state.activeCampaignId = normalized.activeCampaignId;
       state.campaignNotifications = normalized.notifications;
       return Promise.resolve();
-    },
-    commitCampaignPreferencesUpdate(update) {
-      try {
-        const campaignState =
-          state.campaigns.length === 0 || !state.activeCampaignId
-            ? null
-            : JobSearchCampaignCollectionSchema.parse({
-                campaigns: state.campaigns,
-                activeCampaignId: state.activeCampaignId,
-                notifications: state.campaignNotifications,
-              });
-        const next = update({
-          campaignState: cloneValue(campaignState),
-          searchPreferences: cloneValue(state.searchPreferences),
-          intelligenceState: cloneValue(state.intelligence),
-        });
-        const nextCampaignState = JobSearchCampaignCollectionSchema.parse(
-          cloneValue(next.campaignState),
-        );
-        const nextSearchPreferences = JobSearchPreferencesSchema.parse(
-          cloneValue(next.searchPreferences),
-        );
-        const nextIntelligenceState =
-          next.intelligenceState === undefined
-            ? null
-            : JobFinderIntelligenceStateSchema.parse(
-                cloneValue(next.intelligenceState),
-              );
-        state.campaigns = nextCampaignState.campaigns;
-        state.activeCampaignId = nextCampaignState.activeCampaignId;
-        state.campaignNotifications = nextCampaignState.notifications;
-        // A changed preference advances the shared profile epoch so a
-        // copilot commit that captured the older preferences fails closed as
-        // stale instead of reverting this campaign preference change. A
-        // campaign-only edit leaves preferences untouched and must not
-        // invalidate unrelated in-flight profile work.
-        if (
-          JSON.stringify(nextSearchPreferences) !==
-          JSON.stringify(state.searchPreferences)
-        ) {
-          profileRevision += 1;
-        }
-        state.searchPreferences = nextSearchPreferences;
-        if (nextIntelligenceState) state.intelligence = nextIntelligenceState;
-        return Promise.resolve(next.result);
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
     },
     readIntelligenceProjection() {
       if (

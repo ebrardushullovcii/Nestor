@@ -1,5 +1,4 @@
 import { describe, expect, test, vi } from "vitest";
-import { readPlanAssessment, withPlanAssessment } from "./plan-assessment";
 import type { JobRequirementAssessment } from "@nestor/contracts";
 import {
   createSeed,
@@ -130,72 +129,6 @@ describe("Round two fit findings", () => {
     expect(assessed.dimensions.preferenceAlignment.state).toBe("conflict");
     expect(assessed.locationReach).toBe("outside_area");
     expect(assessed.recommendation).toBe("skip");
-  });
-
-  test("the requested assessment reads a pending result without shortlisting it", async () => {
-    const seed = createSeed();
-    const job = {
-      ...seed.savedJobs[0]!,
-      status: "discovered" as const,
-      detailQuality: "card_only" as const,
-      description: "Senior Software Engineer",
-      listingDetailFetch: null,
-    };
-    const body =
-      "Very good German is required. Candidates must remain enrolled for at least eight months. Experience with Power BI is required. You will collaborate with the analytics team, gather stakeholder requirements, build dashboards and explain the results to colleagues. We provide structured onboarding and support from an experienced manager.";
-    const requirements = [
-      requirement("Very good German", "missing"),
-      requirement("Eight months of enrollment", "unknown", "experience"),
-    ];
-    const { workspaceService, repository } = createWorkspaceServiceHarness({
-      seed: {
-        ...seed,
-        savedJobs: [],
-        discovery: { ...seed.discovery, pendingDiscoveryJobs: [job] },
-      },
-      aiClient: {
-        ...createAiClient(),
-        extractJobsFromPage: () =>
-          Promise.resolve([
-            {
-              ...job,
-              description: body,
-              minimumQualifications: [
-                "Very good German",
-                "Eight months of enrollment",
-              ],
-            },
-          ]),
-        assessJobFit: () =>
-          Promise.resolve({
-            score: 90,
-            reasons: [],
-            gaps: [],
-            requirements,
-          }),
-      },
-      fetchListingHtml: (url) =>
-        Promise.resolve({
-          status: 200,
-          finalUrl: url,
-          html: `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: job.title, description: body })}</script>`,
-        }),
-    });
-    await workspaceService.assessJobListing(job.id);
-    expect(await repository.listSavedJobs()).toEqual([]);
-    const updated = (await repository.getDiscoveryState())
-      .pendingDiscoveryJobs[0]!;
-    expect(updated.description).toContain("eight months");
-    expect(updated.status).toBe("discovered");
-    expect(updated.matchAssessment.requirements).toEqual(
-      expect.arrayContaining(requirements),
-    );
-    expect(updated.matchAssessment.contextFingerprint).toBeTruthy();
-    await workspaceService.getWorkspaceSnapshot();
-    expect(
-      (await repository.getDiscoveryState()).pendingDiscoveryJobs[0]
-        ?.matchAssessment.requirements,
-    ).toEqual(expect.arrayContaining(requirements));
   });
   test("reuses a current full assessment on shortlist and honors an explicit reassessment", async () => {
     const seed = createSeed();
@@ -371,91 +304,6 @@ describe("completed full reads (R3-019, R3-106)", () => {
     expect(next.recommendationRationale).toContain("from 48% to 32%");
     expect(next.recommendationRationale).toContain("Java experience");
   });
-});
-
-test("changed goals refresh a full assessment with a full read, not a batch (R3-019)", async () => {
-  const seed = createSeed();
-  const full = await createMatchAssessmentAsync(
-    {
-      ...createAiClient(),
-      assessJobFit: () =>
-        Promise.resolve({
-          score: 58,
-          reasons: [],
-          gaps: [],
-          requirements: [requirement("Java", "missing")],
-        }),
-    },
-    seed.profile,
-    seed.searchPreferences,
-    seed.savedJobs[0]!,
-  );
-  const job = {
-    ...seed.savedJobs[0]!,
-    matchAssessment: full,
-    detailQuality: "detail_enriched" as const,
-    listingDetailFetch: {
-      outcome: "enriched" as const,
-      method: "json_ld" as const,
-      attemptedAt: "2026-10-04T00:00:00Z",
-      detail: "Read",
-    },
-  };
-  const assessJobFit = vi.fn(() =>
-    Promise.resolve({
-      score: 32,
-      reasons: [],
-      gaps: ["UK work permission not evidenced"],
-      requirements: [
-        requirement("UK work permission", "missing", "work_authorization"),
-      ],
-    }),
-  );
-  const judgeJobFits = vi.fn<
-    NonNullable<ReturnType<typeof createAiClient>["judgeJobFits"]>
-  >(() => Promise.resolve([]));
-  const { workspaceService, repository } = createWorkspaceServiceHarness({
-    seed: {
-      ...seed,
-      savedJobs: [job],
-      searchPreferences: { ...seed.searchPreferences, locations: ["Canada"] },
-    },
-    aiClient: { ...createAiClient(), assessJobFit, judgeJobFits },
-    fetchListingHtml: (url) =>
-      Promise.resolve({
-        status: 200,
-        finalUrl: url,
-        html: "",
-      }),
-  });
-  const planId = (await workspaceService.getWorkspaceSnapshot())
-    .activeCampaignId;
-  await repository.commitSavedJobDelta({
-    update: (stored) =>
-      stored.id === job.id ? withPlanAssessment(stored, planId, full) : stored,
-  });
-  await workspaceService.runDiscovery().catch((error: unknown) => {
-    // This source fixture has no new listings. Existing jobs still need a
-    // fresh full comparison when the saved goals change.
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("No supported listings matched");
-  });
-  expect(assessJobFit).toHaveBeenCalled();
-  expect(
-    readPlanAssessment(
-      (await repository.listSavedJobs()).find((entry) => entry.id === job.id)!,
-      planId,
-    ).matchAssessment,
-  ).toMatchObject({
-    score: 32,
-    judgment: { source: "full" },
-    requirementsSource: "model",
-  });
-  expect(
-    judgeJobFits.mock.calls.flatMap(([input]) =>
-      input.jobs.map((entry) => entry.jobId),
-    ),
-  ).not.toContain(job.id);
 });
 
 test.each([

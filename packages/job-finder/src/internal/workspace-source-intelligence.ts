@@ -6,19 +6,14 @@ import {
   computeMatchAssessmentPostingFingerprint,
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
-  type CandidateProfile,
-  type FitJudgment,
   type SourceIntelligenceArtifact,
   type JobDiscoveryCollectionMethod,
-  type JobDiscoveryMethod,
   type JobDiscoveryTarget,
   type JobPosting,
-  type JobSearchPreferences,
   type JobSource,
   type SourceDebugWorkerAttempt,
   type SourceInstructionArtifact,
 } from "@nestor/contracts";
-import { matchesExcludedLocation } from "./matching";
 import { isExplicitSearchProbeDisproof } from "./source-instruction-evidence";
 import { normalizeText, uniqueStrings } from "./shared";
 import {
@@ -1323,31 +1318,6 @@ function resolveDeniedDiscoveryRoutes(
   return uniqueStrings([...deniedRouteOverrides, ...deniedRouteHints]);
 }
 
-export function selectDiscoveryCollectionMethod(
-  target: JobDiscoveryTarget,
-  artifact: SourceInstructionArtifact | null,
-): JobDiscoveryCollectionMethod {
-  const inferredIntelligence = inferSourceIntelligenceFromTarget({
-    target,
-    currentArtifact: artifact,
-  });
-
-  return (
-    artifact?.intelligence.overrides.forceMethod ??
-    artifact?.intelligence.collection.preferredMethod ??
-    inferredIntelligence.collection.preferredMethod ??
-    (tryParseUrl(target.startingUrl)?.pathname.match(/jobs|careers|openings/i)
-      ? "careers_page"
-      : "fallback_search")
-  );
-}
-
-export function selectDiscoveryMethod(
-  collectionMethod: JobDiscoveryCollectionMethod,
-): JobDiscoveryMethod {
-  return collectionMethod === "api" ? "public_api" : "browser_agent";
-}
-
 function htmlToText(value: string | null | undefined): string {
   if (!value) {
     return "";
@@ -2111,92 +2081,4 @@ export async function collectPublicProviderJobs(input: {
       warning: describeProviderFailure(error),
     };
   }
-}
-
-export function applyDiscoveryTitleTriage(input: {
-  posting: JobPosting;
-  searchPreferences: JobSearchPreferences;
-  profile: CandidateProfile | null | undefined;
-  /** The model's verdict on this posting, when it judged it before keeping. */
-  judgment?: FitJudgment | null;
-}) {
-  const { posting, searchPreferences } = input;
-  const normalizedCompany = normalizeText(posting.company);
-
-  if (
-    searchPreferences.companyBlacklist.some(
-      (company) => normalizeText(company) === normalizedCompany,
-    )
-  ) {
-    return {
-      outcome: "skip_company" as const,
-      reason: "Company is on the blacklist.",
-    };
-  }
-
-  if (
-    searchPreferences.excludedLocations.length > 0 &&
-    matchesExcludedLocation(
-      posting.location,
-      searchPreferences.excludedLocations,
-    )
-  ) {
-    return {
-      outcome: "skip_location" as const,
-      reason: "Location is explicitly excluded.",
-    };
-  }
-
-  // Talent pools, closed listings and sign-in pages are not filtered here by
-  // phrase lists: the model reading the page skips them, and the model
-  // judging fit marks any that arrive as skip (ADR 0041).
-  if (searchPreferences.discovery.collectOnlyHardCriteriaMatches !== true) {
-    return {
-      outcome: "pass" as const,
-      reason: null,
-    };
-  }
-
-  // "Best matches only" keeps what the model judged a fit (ADR 0041): a job
-  // whose role, place or other goals it judged wrong, or that it would skip,
-  // is not kept. A job it has not judged is kept rather than guessed about.
-  const judgment = input.judgment;
-  if (!judgment) {
-    return { outcome: "pass" as const, reason: null };
-  }
-  const why = (fallback: string) =>
-    judgment.summary ??
-    judgment.gaps[0] ??
-    judgment.roleExplanation ??
-    judgment.preferencesExplanation ??
-    fallback;
-  if (judgment.role === "conflict") {
-    return {
-      outcome: "skip_title" as const,
-      reason: why("The model judged this role outside the work you want."),
-    };
-  }
-  if (judgment.locationReach === "outside_area") {
-    return {
-      outcome: "skip_location" as const,
-      reason: why("The model judged this job outside your places."),
-    };
-  }
-  if (judgment.preferences === "conflict") {
-    return {
-      outcome: "skip_work_mode" as const,
-      reason: why("The model judged this job against your saved goals."),
-    };
-  }
-  if (judgment.recommendation === "skip") {
-    return {
-      outcome: "skip_title" as const,
-      reason: why("The model judged this job not worth applying to."),
-    };
-  }
-
-  return {
-    outcome: "pass" as const,
-    reason: null,
-  };
 }

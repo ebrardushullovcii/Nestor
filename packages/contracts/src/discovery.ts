@@ -1382,39 +1382,6 @@ export function buildDiscoveryCardOnlyEvidenceWarning(
 }
 
 /**
- * Removes the card-only sentence from a run or target warning once it stopped
- * being true (the listing bodies were read after the scan). Other warnings in
- * the same string are kept; an emptied string becomes null.
- */
-export function stripDiscoveryCardOnlyEvidenceWarning(
-  warning: string | null | undefined,
-): string | null {
-  if (!warning) {
-    return null;
-  }
-  const sentinel = "\u0000";
-  const [prefix = "", suffix = ""] =
-    buildDiscoveryCardOnlyEvidenceWarning(sentinel).split(sentinel);
-  if (prefix.length === 0) {
-    return warning;
-  }
-  const start = warning.indexOf(prefix);
-  if (start < 0) {
-    return warning;
-  }
-  const suffixStart = warning.indexOf(suffix, start + prefix.length);
-  if (suffixStart < 0) {
-    return warning;
-  }
-  const stripped = `${warning.slice(0, start)}${warning.slice(
-    suffixStart + suffix.length,
-  )}`
-    .replace(/\s{2,}/gu, " ")
-    .trim();
-  return stripped.length > 0 ? stripped : null;
-}
-
-/**
  * True when a run retained at least one posting and every retained posting is
  * `card_only`. A single partly or fully detailed posting makes the run's
  * evidence mixed, and an empty run has nothing to warn about.
@@ -1563,7 +1530,6 @@ export const ListingScreenRecordSchema = z.object({
   category: ListingRejectionCategorySchema.nullable().default(null),
   reason: NonEmptyStringSchema.nullable().default(null),
 });
-export type ListingScreenRecord = z.infer<typeof ListingScreenRecordSchema>;
 
 export const DiscoveryLedgerEntrySchema = z.object({
   id: NonEmptyStringSchema,
@@ -2470,9 +2436,6 @@ export const DiscoveryTimingSummarySchema = z.object({
   stageDurations: z.array(DiscoveryStageDurationSchema).default([]),
   waitReasonDurations: z.array(DiscoveryWaitReasonDurationSchema).default([]),
 });
-export type DiscoveryTimingSummary = z.infer<
-  typeof DiscoveryTimingSummarySchema
->;
 
 export const DiscoveryChangeDigestSchema = z.object({
   new: z.number().int().nonnegative().default(0),
@@ -2544,9 +2507,6 @@ export const DiscoverySourceListingCountsSchema = z.object({
   deferred: z.number().int().nonnegative(),
   pagesCovered: z.number().int().nonnegative().nullable(),
 });
-export type DiscoverySourceListingCounts = z.infer<
-  typeof DiscoverySourceListingCountsSchema
->;
 export const DiscoveryTargetExecutionSchema = z.object({
   sourceCounts: z.array(DiscoverySourceListingCountsSchema).optional(),
   inspectedJobIds: z.array(NonEmptyStringSchema).optional(),
@@ -2591,9 +2551,6 @@ export const DiscoveryTargetExecutionSchema = z.object({
    */
   encounteredJobIds: z.array(NonEmptyStringSchema).default([]),
 });
-export type DiscoveryTargetExecution = z.infer<
-  typeof DiscoveryTargetExecutionSchema
->;
 
 export const DiscoveryActivityEventSchema = z.object({
   progress: z
@@ -2815,28 +2772,6 @@ export function getDiscoveryRunPhase(
 }
 
 /**
- * Why a run failed, in the run's own words, or null when it did not fail.
- *
- * A failed run records the reason it stopped as the last warning it wrote, and
- * every surface that reports the failure reads it from here rather than
- * matching on any one sentence: a plan whose run failed because it had no job
- * sites left said only "0 of 0 sources completed", which reads as a search
- * that found nothing rather than one that never started.
- */
-export function describeDiscoveryRunFailureReason(
-  run: Pick<DiscoveryRunRecord, "state" | "summary"> | null | undefined,
-): string | null {
-  if (!run || run.state !== "failed") {
-    return null;
-  }
-
-  const reasons = run.summary.warnings.filter(
-    (warning) => warning.trim().length > 0,
-  );
-  return reasons.at(-1) ?? null;
-}
-
-/**
  * What the app says about a run the close interrupted, and what it kept.
  *
  * The counts come from the run's own frozen report, never recomputed from
@@ -2856,40 +2791,6 @@ export function describeInterruptedDiscoveryRun(
 }
 
 /**
- * Marks a run that was still in flight when the app closed.
- *
- * The state becomes `failed` because the run did not finish, but the phase
- * says why, so a screen can distinguish "this search broke" from "this search
- * was cut short and here is what survived". Runs that already reached a
- * terminal state are returned untouched.
- */
-export function recoverInterruptedDiscoveryRun(
-  run: DiscoveryRunRecord,
-  completedAt: string,
-): DiscoveryRunRecord | null {
-  if (getDiscoveryRunPhase(run) !== "in_progress") {
-    return null;
-  }
-
-  return DiscoveryRunRecordSchema.parse({
-    ...run,
-    state: "failed",
-    runPhase: "interrupted",
-    completedAt: run.completedAt ?? completedAt,
-    summary: {
-      ...run.summary,
-      outcome: "failed",
-      warnings: [
-        ...run.summary.warnings.filter(
-          (warning) => warning !== describeInterruptedDiscoveryRun(run),
-        ),
-        describeInterruptedDiscoveryRun(run),
-      ],
-    },
-  });
-}
-
-/**
  * What the service says when a second search is asked for while one is still
  * running (including while a Stop is still finishing). Plain user copy, shared
  * so the renderer can recognise it and show "still stopping" instead of a
@@ -2905,18 +2806,6 @@ export const ACTIVITY_PAUSED_MESSAGE =
 
 export const DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE =
   "A search is already running for this plan.";
-
-/**
- * What a run says when the plan has nothing left to search — every job site
- * it named is switched off or has been removed from Profile.
- *
- * It is one sentence in one place because three surfaces have to agree on it:
- * the run record's own warnings, the plan card, and the Find jobs failure
- * banner. Pressing Run now used to do nothing at all in this case, which left
- * an older "Last run succeeded" standing as the newest thing the app said.
- */
-export const DISCOVERY_NO_JOB_SITES_MESSAGE =
-  "This plan has no job sites to search; add one in Profile.";
 
 /** Cancels the service-owned discovery run with this durable run identity. */
 export const JobFinderDiscoveryCancellationInputSchema = z

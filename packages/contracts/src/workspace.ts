@@ -53,7 +53,6 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryJobViewSchema,
   JobListRowSchema,
-  DiscoveryFeedbackReasonSchema,
   DiscoveryAdapterSessionStateSchema,
   DiscoveryRunRecordSchema,
   JobSearchPreferencesSchema,
@@ -192,31 +191,6 @@ export type JobFinderJobResumeApplicationModeInput = z.infer<
   typeof JobFinderJobResumeApplicationModeInputSchema
 >;
 
-export const JobFinderDismissDiscoveryJobInputSchema = z
-  .object({
-    jobId: NonEmptyStringSchema,
-    reasons: z.array(DiscoveryFeedbackReasonSchema).max(9),
-    action: z.enum(["hide_job", "hide_and_exclude_employer"]).optional(),
-    expectedNormalizedCompanyName: NonEmptyStringSchema.nullish(),
-  })
-  .strict()
-  .superRefine((input, context) => {
-    if (
-      input.action === "hide_and_exclude_employer" &&
-      input.expectedNormalizedCompanyName == null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["expectedNormalizedCompanyName"],
-        message:
-          "Employer exclusion requires the previewed normalized company name.",
-      });
-    }
-  });
-export type JobFinderDismissDiscoveryJobInput = z.infer<
-  typeof JobFinderDismissDiscoveryJobInputSchema
->;
-
 export const employerExclusionUnavailableReasonValues = [
   "missing_or_generic_company",
   "ambiguous_company_name",
@@ -252,19 +226,6 @@ export const EmployerExclusionPreviewSchema = z.discriminatedUnion("status", [
     })
     .strict(),
 ]);
-export type EmployerExclusionPreview = z.infer<
-  typeof EmployerExclusionPreviewSchema
->;
-
-export const RemoveEmployerExclusionInputSchema = z
-  .object({
-    jobId: NonEmptyStringSchema,
-    normalizedCompanyName: NonEmptyStringSchema,
-  })
-  .strict();
-export type RemoveEmployerExclusionInput = z.infer<
-  typeof RemoveEmployerExclusionInputSchema
->;
 
 export const JobFinderApplicationTargetSchema = z
   .object({
@@ -1410,7 +1371,6 @@ export const FitJudgmentProgressSchema = z.object({
   startedAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
-export type FitJudgmentProgress = z.infer<typeof FitJudgmentProgressSchema>;
 
 const WorkspaceSnapshotCoreSchema = z.object({
   module: z.literal("job-finder"),
@@ -1856,18 +1816,12 @@ export const JobFinderDiscoveryCommandReplySchema = z
     newJobs: z.number().int().nonnegative(),
   })
   .strict();
-export type JobFinderDiscoveryCommandReply = z.infer<
-  typeof JobFinderDiscoveryCommandReplySchema
->;
 export const JobFinderDiscoveryCancellationReplySchema = z
   .object({
     runId: NonEmptyStringSchema,
     accepted: z.boolean(),
   })
   .strict();
-export type JobFinderDiscoveryCancellationReply = z.infer<
-  typeof JobFinderDiscoveryCancellationReplySchema
->;
 
 export const SaveCandidateProfileInputSchema = CandidateProfileSchema;
 export type SaveCandidateProfileInput = z.infer<

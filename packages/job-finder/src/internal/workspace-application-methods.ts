@@ -1,13 +1,5 @@
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
 import { createReturnToShortlistMethods } from "./application-return-to-shortlist";
-import type {
-  DiscoveryFeedbackBatchOutcome,
-  DiscoveryFeedbackBatchResult,
-  JobFinderDiscoveryState,
-  JobFinderDismissDiscoveryJobInput,
-} from "@nestor/contracts";
-import { normalizeCompanyName } from "@nestor/contracts";
-import type { DiscoveryFeedbackBatchOptions } from "./workspace-service-contracts";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -97,7 +89,6 @@ import {
   reconcileApplyRunAfterConfirmedSubmission,
   summarizeApplyJobResultStates,
 } from "./workspace-apply-run-support";
-import { markSavedJobStatusInLedger } from "./workspace-discovery-ledger";
 import {
   buildConsentSummary,
   buildEvidenceRefIdsFromInstruction,
@@ -114,7 +105,7 @@ import {
   resolveActiveSourceInstructionArtifact,
   toApplicationEvents,
 } from "./workspace-helpers";
-import { createUniqueId, normalizeText, uniqueStrings } from "./shared";
+import { createUniqueId, uniqueStrings } from "./shared";
 import {
   DEFAULT_RESUME_APPLICATION_MODE,
   resolveJobResumeApplicationMode,
@@ -140,11 +131,6 @@ import {
 } from "./workspace-application-user-action";
 import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { resolvePrepareOnlyIntermediateMutationAuthority } from "./prepare-only-intermediate-mutation-authority";
-import {
-  appendExactEmployerExclusion,
-  removeExactEmployerExclusion,
-  resolveEmployerExclusionPreview,
-} from "./employer-exclusion";
 import {
   resolveApplicationRecordForJob,
   withApplicationRecordTransition,
@@ -206,13 +192,6 @@ function getApplyResultSortTime(input: {
   return Date.parse(input.completedAt ?? input.updatedAt ?? input.startedAt);
 }
 
-class FeedbackMutationStoppedError extends Error {
-  constructor() {
-    super("The workspace changed or closed, or the assistant stopped.");
-  }
-}
-class FeedbackMutationHeldError extends Error {}
-
 type WorkspaceApplicationMethods = Omit<
   Pick<
     JobFinderWorkspaceService,
@@ -221,13 +200,13 @@ type WorkspaceApplicationMethods = Omit<
     | "queueJobsForReview"
     | "removeJobFromReview"
     | "removeJobsFromReview"
-    | "dismissDiscoveryJob"
-    | "dismissDiscoveryJobs"
-    | "excludeEmployerDiscoveryJobs"
-    | "previewEmployerExclusion"
-    | "removeEmployerExclusion"
-    | "restoreDismissedDiscoveryJob"
-    | "restoreDismissedDiscoveryJobs"
+    
+    
+    
+    
+    
+    
+    
     | "startApplyCopilotRun"
     | "startAutoApplyRun"
     | "startAutoApplyQueueRun"
@@ -639,16 +618,8 @@ export function createWorkspaceApplicationMethods(
     if (ids.length === 0) return;
     const requested = new Set(ids);
     const display = await ctx.repository.readDisplayCollections?.();
-    const [
-      discovery,
-      settings,
-      preferences,
-      selectedSaved,
-      intelligence,
-      assets,
-      attempts,
-    ] = await Promise.all([
-      ctx.repository.readDiscoveryDisplayProjection(),
+    const [settings, preferences, selectedSaved, intelligence, assets, attempts] =
+      await Promise.all([
       ctx.repository.getSettings(),
       ctx.repository.readSearchPreferencesProjection?.() ??
         ctx.repository.getSearchPreferences(),
@@ -658,33 +629,12 @@ export function createWorkspaceApplicationMethods(
       display?.tailoredAssets ?? ctx.repository.listTailoredAssets(),
       display?.applicationAttempts ?? ctx.repository.listApplicationAttempts(),
     ]);
-    const selectedPending = discovery.pendingDiscoveryJobs.filter((job) =>
-      requested.has(job.id),
-    );
-    const selected = new Map(
-      [...selectedSaved, ...selectedPending].map((job) => [job.id, job]),
-    );
+    const selected = new Map(selectedSaved.map((job) => [job.id, job]));
     for (const id of ids)
       if (!selected.has(id))
         throw new Error(`Unable to shortlist unknown job '${id}'.`);
-    // Resolving inactive aliases needs the complete identity inventory; the common
-    // active-listing path reads only the rows this shortlist actually changes.
-    const identityJobs = discovery.discoveryLedger.some(
-      (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
-    )
-      ? await ctx.repository.readSavedJobsProjection()
-      : [...selected.values()];
-    const activityJobs =
-      selectedPending.length > 0
-        ? [...identityJobs, ...selectedPending]
-        : identityJobs;
     const views = projectDiscoveryJobViews({
       jobs: [...selected.values()],
-      identityJobs: activityJobs,
-      ...(ctx.listingActivityIdentityIndex
-        ? { identityIndex: ctx.listingActivityIdentityIndex }
-        : {}),
-      discoveryLedger: discovery.discoveryLedger,
       listingSignals: intelligence.safeguards.listingSignals,
       applicationAttempts: attempts,
     });
@@ -730,26 +680,8 @@ export function createWorkspaceApplicationMethods(
     };
     assertCurrent();
     await ctx.repository.commitSavedJobDelta({
-      ...(selectedPending.length > 0
-        ? {
-            upsertsFromBorrowedDiscovery: (current) =>
-              current.pendingDiscoveryJobs
-                .filter((job) => requested.has(job.id))
-                .map((job) => SavedJobSchema.parse(shortlist(job))),
-          }
-        : {}),
       updateJobIds: ids,
       update: (job) => shortlist(job),
-      ...(selectedPending.length > 0
-        ? {
-            updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
-              ...current,
-              pendingDiscoveryJobs: current.pendingDiscoveryJobs.filter(
-                (job) => !requested.has(job.id),
-              ),
-            }),
-          }
-        : {}),
     });
     for (const id of ids) {
       if (listingReadGenerations.get(id) === generation) continue;
@@ -787,22 +719,14 @@ export function createWorkspaceApplicationMethods(
       const generation = listingGeneration();
       const signal = ctx.listingAssessmentAbortControllerRef?.current.signal;
       if (!listingReadCurrent(generation)) return;
-      const savedJobs = await ctx.repository.listSavedJobsByIds([jobId]);
-      const job =
-        savedJobs[0] ??
-        (await ctx.repository.getDiscoveryState()).pendingDiscoveryJobs.find(
-          (entry) => entry.id === jobId,
-        );
+      const [job] = await ctx.repository.listSavedJobsByIds([jobId]);
       if (!job) {
         if (options.throwOnFailure) {
-          throw new Error(
-            "This job is not in the saved or pending list. Use Assess next 1 listing in Find jobs to assess the search results.",
-          );
+          throw new Error("This job is not in the saved list.");
         }
         return;
       }
       if (!listingReadCurrent(generation)) return;
-      const isPending = savedJobs.length === 0;
       const alreadyRead = hasCompleteListingDetail(job);
       // Resume writing needs the captured posting body, not another fit
       // verdict. Explicit assessment controls still request a fresh judgment.
@@ -867,24 +791,6 @@ export function createWorkspaceApplicationMethods(
             current.id === jobId && current.description === job.description
               ? withPlanAssessment(current, assessmentPlanId, matchAssessment)
               : current,
-          ...(isPending
-            ? {
-                updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
-                  ...current,
-                  pendingDiscoveryJobs: current.pendingDiscoveryJobs.map(
-                    (entry) =>
-                      entry.id === jobId &&
-                      entry.description === job.description
-                        ? withPlanAssessment(
-                            entry,
-                            assessmentPlanId,
-                            matchAssessment,
-                          )
-                        : entry,
-                  ),
-                }),
-              }
-            : {}),
         });
         return;
       }
@@ -974,15 +880,6 @@ export function createWorkspaceApplicationMethods(
       await ctx.repository.commitSavedJobDelta({
         updateJobIds: [jobId],
         update: applyRead,
-        ...(isPending
-          ? {
-              updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
-                ...current,
-                pendingDiscoveryJobs:
-                  current.pendingDiscoveryJobs.map(applyRead),
-              }),
-            }
-          : {}),
       });
       if (enrichment.providerAccessError instanceof Error)
         throw enrichment.providerAccessError;
@@ -3630,263 +3527,6 @@ export function createWorkspaceApplicationMethods(
     resolveJobApplyPrerequisites,
   });
 
-  function feedbackFence(options?: DiscoveryFeedbackBatchOptions): () => void {
-    const generation = listingGeneration();
-    return () => {
-      if (!listingReadCurrent(generation) || options?.signal?.aborted) {
-        throw new FeedbackMutationStoppedError();
-      }
-      try {
-        options?.assertCurrent?.();
-      } catch {
-        throw new FeedbackMutationStoppedError();
-      }
-    };
-  }
-
-  async function runFeedbackBatch(
-    jobIds: readonly string[],
-    success: "hidden" | "restored",
-    options: DiscoveryFeedbackBatchOptions | undefined,
-    mutate: (jobId: string, fence: () => void) => Promise<void>,
-  ): Promise<DiscoveryFeedbackBatchResult> {
-    const generation = listingGeneration();
-    const fence = feedbackFence(options);
-    const outcomes: DiscoveryFeedbackBatchOutcome[] = [];
-    let stopped = false;
-    for (const jobId of jobIds) {
-      if (stopped) {
-        outcomes.push({ jobId, status: "stopped" });
-        continue;
-      }
-      try {
-        fence();
-        await mutate(jobId, fence);
-        outcomes.push({ jobId, status: success });
-      } catch (error) {
-        if (error instanceof FeedbackMutationStoppedError) {
-          stopped = true;
-          outcomes.push({ jobId, status: "stopped" });
-        } else {
-          outcomes.push({
-            jobId,
-            status:
-              error instanceof FeedbackMutationHeldError ? "held" : "failed",
-            message:
-              error instanceof Error ? error.message.slice(0, 200) : "error",
-          });
-        }
-      }
-    }
-    let workspace = listingReadCurrent(generation)
-      ? await ctx.getWorkspaceSnapshot()
-      : null;
-    if (!listingReadCurrent(generation)) workspace = null;
-    return { outcomes, workspace };
-  }
-
-  async function dismissDiscoveryJobWithoutSnapshot(
-    input: JobFinderDismissDiscoveryJobInput,
-    assertCurrent: () => void,
-    discoveredEmployer?: string,
-  ): Promise<void> {
-    assertCurrent();
-    const occurredAt = new Date().toISOString();
-    const reasons = [...new Set(input.reasons)];
-    await ctx.repository.commitDiscoveryFeedbackUpdate(
-      input.jobId,
-      (current) => {
-        assertCurrent();
-        const targetJob = current.job;
-        if (!targetJob) {
-          throw new Error("Unable to hide unknown job '" + input.jobId + "'.");
-        }
-
-        if (discoveredEmployer !== undefined) {
-          if (targetJob.status !== "discovered") {
-            throw new FeedbackMutationHeldError(
-              "The job is no longer in the found list.",
-            );
-          }
-          if (normalizeCompanyName(targetJob.company) !== discoveredEmployer) {
-            throw new FeedbackMutationHeldError(
-              "The employer identity changed after preview.",
-            );
-          }
-        }
-        let nextSearchPreferences = current.searchPreferences;
-        let nextCampaignState = current.campaignState;
-        let employerExclusion =
-          targetJob.discoveryFeedback?.employerExclusion ?? null;
-        if (input.action === "hide_and_exclude_employer") {
-          const activeCampaign = current.campaignState?.campaigns.find(
-            (campaign) =>
-              campaign.id === current.campaignState?.activeCampaignId,
-          );
-          const activePreferences =
-            activeCampaign?.searchPreferences ?? current.searchPreferences;
-          const preview = resolveEmployerExclusionPreview({
-            job: targetJob,
-            searchPreferences: {
-              ...activePreferences,
-              companyWhitelist: uniqueStrings([
-                ...current.searchPreferences.companyWhitelist,
-                ...activePreferences.companyWhitelist,
-              ]),
-            },
-            companies: current.intelligenceState.companies,
-          });
-          if (preview.status !== "available") {
-            throw new Error(
-              `Employer exclusion is unavailable: ${preview.reason}.`,
-            );
-          }
-          if (
-            preview.normalizedCompanyName !==
-            input.expectedNormalizedCompanyName
-          ) {
-            throw new Error(
-              "The employer identity changed after preview. Review it again before excluding this employer.",
-            );
-          }
-          const appended = appendExactEmployerExclusion(
-            activePreferences.companyBlacklist,
-            preview.displayCompanyName,
-            preview.normalizedCompanyName,
-          );
-          nextSearchPreferences = {
-            ...current.searchPreferences,
-            companyBlacklist: appended.values,
-          };
-          employerExclusion = {
-            normalizedCompanyName: preview.normalizedCompanyName,
-            displayCompanyName: preview.displayCompanyName,
-            addedByThisFeedback: appended.added,
-            campaignId: activeCampaign?.id ?? null,
-          };
-          if (nextCampaignState !== null) {
-            nextCampaignState = {
-              ...nextCampaignState,
-              campaigns: nextCampaignState.campaigns.map((campaign) =>
-                campaign.id === nextCampaignState!.activeCampaignId
-                  ? {
-                      ...campaign,
-                      searchPreferences: {
-                        ...campaign.searchPreferences,
-                        companyBlacklist: appended.values,
-                      },
-                    }
-                  : campaign,
-              ),
-            };
-          }
-        }
-
-        const priorStatus =
-          targetJob.status === "archived"
-            ? (targetJob.discoveryFeedback?.priorStatus ?? null)
-            : current.jobIsPending
-              ? null
-              : targetJob.status;
-        const nextJob = SavedJobSchema.parse({
-          ...targetJob,
-          status: "archived",
-          discoveryFeedback: {
-            version: 1,
-            revision: (targetJob.discoveryFeedback?.revision ?? 0) + 1,
-            reasons,
-            recordedAt: occurredAt,
-            priorStatus,
-            employerExclusion,
-          },
-        });
-        return {
-          result: null,
-          savedJob: nextJob,
-          searchPreferences: nextSearchPreferences,
-          campaignState: nextCampaignState,
-          discoveryState: {
-            ...current.discoveryState,
-            discoveryLedger: markSavedJobStatusInLedger({
-              ledger: current.discoveryState.discoveryLedger,
-              job: nextJob,
-              status: "skipped",
-              occurredAt,
-              skipReason: "Not interested: " + reasons.join(", ") + ".",
-            }),
-            pendingDiscoveryJobs:
-              current.discoveryState.pendingDiscoveryJobs.filter(
-                (job) => job.id !== input.jobId,
-              ),
-          },
-        };
-      },
-      { borrowUnchangedState: true },
-    );
-    await releaseFinishedApplicationPages({
-      ...ctx,
-      jobId: input.jobId,
-      removed: true,
-    });
-  }
-
-  async function restoreDismissedDiscoveryJobWithoutSnapshot(
-    jobId: string,
-    assertCurrent: () => void,
-  ): Promise<void> {
-    assertCurrent();
-    const requestedAt = new Date().toISOString();
-    await ctx.repository.commitDiscoveryFeedbackUpdate(
-      jobId,
-      (current) => {
-        assertCurrent();
-        const targetJob = current.job;
-        if (
-          !targetJob ||
-          current.jobIsPending ||
-          targetJob.status !== "archived"
-        ) {
-          throw new Error(
-            "Unable to restore unknown hidden job '" + jobId + "'.",
-          );
-        }
-        const recordedAt = targetJob.discoveryFeedback?.recordedAt ?? null;
-        if (recordedAt && Date.parse(recordedAt) > Date.parse(requestedAt)) {
-          throw new Error(
-            "The hidden-job decision changed while it was being restored.",
-          );
-        }
-        const feedbackPriorStatus =
-          targetJob.discoveryFeedback?.priorStatus ?? null;
-        const restoredJob = SavedJobSchema.parse({
-          ...targetJob,
-          status:
-            feedbackPriorStatus && feedbackPriorStatus !== "archived"
-              ? feedbackPriorStatus
-              : "discovered",
-          discoveryFeedback: null,
-        });
-        return {
-          result: null,
-          savedJob: restoredJob,
-          searchPreferences: current.searchPreferences,
-          campaignState: current.campaignState,
-          discoveryState: {
-            ...current.discoveryState,
-            discoveryLedger: markSavedJobStatusInLedger({
-              ledger: current.discoveryState.discoveryLedger,
-              job: restoredJob,
-              status: "seen",
-              occurredAt: requestedAt,
-              skipReason: null,
-            }),
-          },
-        };
-      },
-      { borrowUnchangedState: true },
-    );
-  }
-
   return {
     resumeApplicationUserAction,
     ...createReturnToShortlistMethods({
@@ -4067,176 +3707,6 @@ export function createWorkspaceApplicationMethods(
         );
       }
     },
-    async dismissDiscoveryJob(input) {
-      await dismissDiscoveryJobWithoutSnapshot(input, feedbackFence());
-      return ctx.getWorkspaceSnapshot();
-    },
-    async dismissDiscoveryJobs(inputs, options) {
-      const byId = new Map(inputs.map((input) => [input.jobId, input]));
-      return runFeedbackBatch(
-        [...byId.keys()],
-        "hidden",
-        options,
-        (jobId, fence) =>
-          dismissDiscoveryJobWithoutSnapshot(byId.get(jobId)!, fence),
-      );
-    },
-    async excludeEmployerDiscoveryJobs(input, options) {
-      let excluded = false;
-      const jobIds = [...new Set([input.jobId, ...input.jobIds])];
-      return runFeedbackBatch(
-        jobIds,
-        "hidden",
-        options,
-        async (jobId, fence) => {
-          if (jobId !== input.jobId && !excluded) {
-            throw new FeedbackMutationHeldError(
-              "The employer exclusion was not applied.",
-            );
-          }
-          await dismissDiscoveryJobWithoutSnapshot(
-            {
-              jobId,
-              reasons: ["company"],
-              action:
-                jobId === input.jobId
-                  ? "hide_and_exclude_employer"
-                  : "hide_job",
-              expectedNormalizedCompanyName:
-                input.expectedNormalizedCompanyName,
-            },
-            fence,
-            input.expectedNormalizedCompanyName,
-          );
-          if (jobId === input.jobId) excluded = true;
-        },
-      );
-    },
-    async previewEmployerExclusion(jobId) {
-      const [savedJobs, discoveryState, searchPreferences, intelligenceState] =
-        await Promise.all([
-          ctx.repository.listSavedJobsByIds([jobId]),
-          ctx.repository.readDiscoveryDisplayProjection(),
-          ctx.repository.getSearchPreferences(),
-          ctx.repository.getIntelligenceState(),
-        ]);
-      const job =
-        discoveryState.pendingDiscoveryJobs.find(
-          (entry) => entry.id === jobId,
-        ) ??
-        savedJobs.find((entry) => entry.id === jobId) ??
-        null;
-      if (!job) {
-        throw new Error(`Unable to preview an unknown job '${jobId}'.`);
-      }
-      return resolveEmployerExclusionPreview({
-        job,
-        searchPreferences,
-        companies: intelligenceState.companies,
-      });
-    },
-    async removeEmployerExclusion(input) {
-      await ctx.repository.commitDiscoveryFeedbackUpdate(
-        input.jobId,
-        (current) => {
-          if (!current.job || current.job.status !== "archived") {
-            throw new Error(
-              `Unable to change employer exclusion for unknown hidden job '${input.jobId}'.`,
-            );
-          }
-          const reference = current.job.discoveryFeedback?.employerExclusion;
-          if (
-            !reference ||
-            reference.normalizedCompanyName !== input.normalizedCompanyName
-          ) {
-            throw new Error("The saved employer exclusion reference is stale.");
-          }
-          const matchingCampaignIds =
-            current.campaignState?.campaigns
-              .filter((campaign) =>
-                campaign.searchPreferences.companyBlacklist.some(
-                  (value) =>
-                    normalizeText(value.trim()) === input.normalizedCompanyName,
-                ),
-              )
-              .map((campaign) => campaign.id) ?? [];
-          const campaignId =
-            reference.campaignId ??
-            (matchingCampaignIds.length === 1 ? matchingCampaignIds[0]! : null);
-          if (current.campaignState !== null && campaignId === null) {
-            throw new Error(
-              "The legacy employer exclusion cannot be tied to one campaign.",
-            );
-          }
-          if (
-            campaignId !== null &&
-            !current.campaignState?.campaigns.some(
-              (campaign) => campaign.id === campaignId,
-            )
-          ) {
-            throw new Error("The saved employer exclusion campaign is stale.");
-          }
-          const updatesGlobalPreferences =
-            current.campaignState === null ||
-            current.campaignState.activeCampaignId === campaignId;
-          const nextJob = SavedJobSchema.parse({
-            ...current.job,
-            discoveryFeedback: {
-              ...current.job.discoveryFeedback,
-              employerExclusion: null,
-            },
-          });
-          return {
-            result: null,
-            savedJob: nextJob,
-            searchPreferences: updatesGlobalPreferences
-              ? {
-                  ...current.searchPreferences,
-                  companyBlacklist: removeExactEmployerExclusion(
-                    current.searchPreferences.companyBlacklist,
-                    input.normalizedCompanyName,
-                  ),
-                }
-              : current.searchPreferences,
-            campaignState:
-              current.campaignState === null
-                ? null
-                : {
-                    ...current.campaignState,
-                    campaigns: current.campaignState.campaigns.map(
-                      (campaign) =>
-                        campaign.id === campaignId
-                          ? {
-                              ...campaign,
-                              searchPreferences: {
-                                ...campaign.searchPreferences,
-                                companyBlacklist: removeExactEmployerExclusion(
-                                  campaign.searchPreferences.companyBlacklist,
-                                  input.normalizedCompanyName,
-                                ),
-                              },
-                            }
-                          : campaign,
-                    ),
-                  },
-            discoveryState: current.discoveryState,
-          };
-        },
-      );
-      return ctx.getWorkspaceSnapshot();
-    },
-    async restoreDismissedDiscoveryJob(jobId) {
-      await restoreDismissedDiscoveryJobWithoutSnapshot(jobId, feedbackFence());
-      return ctx.getWorkspaceSnapshot();
-    },
-    async restoreDismissedDiscoveryJobs(jobIds, options) {
-      return runFeedbackBatch(
-        [...new Set(jobIds)],
-        "restored",
-        options,
-        restoreDismissedDiscoveryJobWithoutSnapshot,
-      );
-    },
     async approveApply(
       jobId,
       applicationRecordId?: string | null,
@@ -4306,11 +3776,6 @@ export function createWorkspaceApplicationMethods(
               (target) => target.id === provenanceTargetId,
             ) ?? null)
           : null;
-        const activeLedgerTargetId =
-          provenanceTarget?.id ??
-          (searchPreferences.discovery.targets.length === 1
-            ? (searchPreferences.discovery.targets[0]?.id ?? null)
-            : null);
         const activeInstruction = provenanceTarget
           ? resolveActiveSourceInstructionArtifact(
               provenanceTarget,
@@ -4640,19 +4105,6 @@ export function createWorkspaceApplicationMethods(
                       ),
                     })
                   : savedJob,
-              updateDiscoveryState: (current) => ({
-                ...current,
-                discoveryLedger: markSavedJobStatusInLedger({
-                  ledger: current.discoveryLedger,
-                  job,
-                  ...(activeLedgerTargetId
-                    ? { activeTargetId: activeLedgerTargetId }
-                    : {}),
-                  status: "applied",
-                  occurredAt: executionResult.submittedAt ?? now,
-                  skipReason: null,
-                }),
-              }),
             });
           } else {
             await ctx.repository.commitSavedJobDelta({

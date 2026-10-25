@@ -4,14 +4,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   DISCOVERY_READER_LOST_ERROR,
-  JobPostingSchema,
   type JobDiscoveryTarget,
-  type JobSearchPreferences,
   type JobSource,
 } from "@nestor/contracts";
 
 import {
-  applyDiscoveryTitleTriage,
   buildDiscoveryStartingUrls,
   collectPublicProviderJobs,
   inferSourceIntelligenceFromTarget,
@@ -19,7 +16,6 @@ import {
 } from "./workspace-source-intelligence";
 import { setDiscoveryFeedExecutor } from "./discovery-feed-executor";
 import {
-  createSeed,
   createSourceInstructionArtifact,
 } from "../workspace-service.test-fixtures";
 
@@ -122,173 +118,6 @@ function createSearchSurfaceTarget(): JobDiscoveryTarget {
     lastVerifiedAt: null,
     staleReason: null,
   };
-}
-
-function createSearchPreferences(
-  overrides: Partial<JobSearchPreferences> = {},
-): JobSearchPreferences {
-  return {
-    targetRoles: [],
-    jobFamilies: [],
-    locations: [],
-    excludedLocations: [],
-    workModes: [],
-    seniorityLevels: [],
-    targetIndustries: [],
-    targetCompanyStages: [],
-    employmentTypes: [],
-    minimumSalaryUsd: null,
-    targetSalaryUsd: null,
-    salaryCurrency: "USD",
-    compensation: {
-      minimum: null,
-      maximum: null,
-      interval: "year",
-      currency: null,
-      currencyStatus: "needs_clarification",
-    },
-    approvalMode: "draft_only",
-    tailoringMode: "conservative",
-    companyBlacklist: [],
-    companyWhitelist: [],
-    discovery: {
-      targets: [],
-      historyLimit: 5,
-      collectOnlyHardCriteriaMatches: true,
-    },
-    ...overrides,
-  };
-}
-
-test("keeps jobs outside soft preferences visible unless strict collection is enabled", () => {
-  const seed = createSeed();
-  const posting = createPosting({
-    title: "Product Designer",
-    location: "Toronto, Canada",
-    workMode: ["onsite"],
-  });
-  const broadPreferences = createSearchPreferences({
-    targetRoles: ["Senior Software Engineer"],
-    locations: ["Berlin, Germany"],
-    workModes: ["remote"],
-    discovery: {
-      targets: [],
-      historyLimit: 5,
-      collectOnlyHardCriteriaMatches: false,
-    },
-  });
-
-  expect(
-    applyDiscoveryTitleTriage({
-      posting,
-      profile: seed.profile,
-      searchPreferences: broadPreferences,
-    }),
-  ).toEqual({ outcome: "pass", reason: null });
-});
-
-test("leaves sign-in walls and talent pools to the model rather than phrase lists", () => {
-  const seed = createSeed();
-  const searchPreferences = createSearchPreferences({
-    targetRoles: ["Marketing Coordinator"],
-    discovery: {
-      targets: [],
-      historyLimit: 5,
-      collectOnlyHardCriteriaMatches: false,
-    },
-  });
-  for (const posting of [
-    createPosting({
-      title: "Customer Service",
-      description:
-        "Sign in to continue. Welcome back. Email or phone. Password. New to LinkedIn? Join now.",
-    }),
-    createPosting({ title: "Keep me in mind!" }),
-  ]) {
-    // The model reading the page skips these, and fit judging marks any that
-    // arrive as skip (ADR 0041).
-    expect(
-      applyDiscoveryTitleTriage({
-        posting,
-        profile: seed.profile,
-        searchPreferences,
-      }),
-    ).toEqual({ outcome: "pass", reason: null });
-  }
-});
-
-test("always skips an explicitly excluded location", () => {
-  const seed = createSeed();
-  const posting = createPosting({
-    location: "Toronto, Canada",
-  });
-  const searchPreferences = createSearchPreferences({
-    excludedLocations: ["Toronto, Canada"],
-    discovery: {
-      targets: [],
-      historyLimit: 5,
-      collectOnlyHardCriteriaMatches: false,
-    },
-  });
-
-  expect(
-    applyDiscoveryTitleTriage({
-      posting,
-      profile: seed.profile,
-      searchPreferences,
-    }),
-  ).toEqual({
-    outcome: "skip_location",
-    reason: "Location is explicitly excluded.",
-  });
-});
-
-function createPosting(
-  overrides: Partial<ReturnType<typeof JobPostingSchema.parse>> = {},
-) {
-  return JobPostingSchema.parse({
-    source: "target_site",
-    sourceJobId: "job_1",
-    discoveryMethod: "browser_agent",
-    collectionMethod: "fallback_search",
-    canonicalUrl: "https://example.com/jobs/job_1",
-    applicationUrl: null,
-    title: "Software Engineer",
-    company: "Example Co",
-    location: "Remote",
-    workMode: ["remote"],
-    applyPath: "unknown",
-    easyApplyEligible: false,
-    postedAt: null,
-    postedAtText: null,
-    discoveredAt: "2026-03-20T10:00:00.000Z",
-    firstSeenAt: null,
-    lastSeenAt: null,
-    lastVerifiedActiveAt: null,
-    salaryText: null,
-    summary: "Build product features.",
-    description: "Build product features with TypeScript and React.",
-    keySkills: ["TypeScript", "React"],
-    responsibilities: [],
-    minimumQualifications: [],
-    preferredQualifications: [],
-    seniority: null,
-    employmentType: null,
-    department: null,
-    team: null,
-    employerWebsiteUrl: null,
-    employerDomain: null,
-    atsProvider: null,
-    providerKey: null,
-    providerBoardToken: null,
-    providerIdentifier: null,
-    titleTriageOutcome: "pass",
-    sourceIntelligence: null,
-    screeningHints: {},
-    keywordSignals: [],
-    benefits: [],
-    ...overrides,
-  });
 }
 
 async function collectGreenhouseJobs(
@@ -1568,102 +1397,3 @@ describe("collectPublicProviderJobs", () => {
   });
 });
 
-describe("Best matches only keeps what the model judged a fit (ADR 0041)", () => {
-  const strict = () =>
-    createSearchPreferences({
-      targetRoles: ["Frontend Engineer"],
-      locations: ["Berlin, Germany"],
-      discovery: {
-        targets: [],
-        historyLimit: 5,
-        collectOnlyHardCriteriaMatches: true,
-      },
-    });
-  const verdict = (
-    overrides: Partial<
-      NonNullable<Parameters<typeof applyDiscoveryTitleTriage>[0]["judgment"]>
-    >,
-  ) => ({
-    source: "batch" as const,
-    judgedAt: "2026-10-02T10:00:00.000Z",
-    contextFingerprint: null,
-    postingFingerprint: null,
-    score: 80,
-    recommendation: "strong_fit" as const,
-    role: "exact" as const,
-    roleExplanation: null,
-    preferences: "aligned" as const,
-    preferencesExplanation: null,
-    locationReach: "in_area" as const,
-    reasons: [],
-    gaps: [],
-    listingClosed: false,
-    listingClosedEvidence: null,
-    ...overrides,
-  });
-  const triage = (
-    judgment: ReturnType<typeof verdict> | null,
-    searchPreferences = strict(),
-  ) =>
-    applyDiscoveryTitleTriage({
-      posting: createPosting({ title: "Backend Engineer" }),
-      profile: createSeed().profile,
-      searchPreferences,
-      judgment,
-    });
-
-  test("keeps a job the model has not judged rather than guessing", () => {
-    expect(triage(null)).toEqual({ outcome: "pass", reason: null });
-  });
-
-  test("keeps a job the model judged a fit", () => {
-    expect(triage(verdict({}))).toEqual({ outcome: "pass", reason: null });
-  });
-
-  test("drops a different role, saying why in the model's words", () => {
-    expect(
-      triage(
-        verdict({
-          role: "conflict",
-          recommendation: "skip",
-          gaps: ["Backend work, not the frontend role you want"],
-        }),
-      ),
-    ).toEqual({
-      outcome: "skip_title",
-      reason: "Backend work, not the frontend role you want",
-    });
-  });
-
-  test("drops a job outside the person's places", () => {
-    expect(triage(verdict({ locationReach: "outside_area" })).outcome).toBe(
-      "skip_location",
-    );
-  });
-
-  test("drops a job that contradicts another saved goal", () => {
-    expect(triage(verdict({ preferences: "conflict" })).outcome).toBe(
-      "skip_work_mode",
-    );
-  });
-
-  test("drops a job the model would skip", () => {
-    expect(triage(verdict({ recommendation: "skip" })).outcome).toBe(
-      "skip_title",
-    );
-  });
-
-  test("keeps everything when Best matches only is off", () => {
-    const broad = createSearchPreferences({
-      targetRoles: ["Frontend Engineer"],
-      discovery: {
-        targets: [],
-        historyLimit: 5,
-        collectOnlyHardCriteriaMatches: false,
-      },
-    });
-    expect(
-      triage(verdict({ role: "conflict", recommendation: "skip" }), broad),
-    ).toEqual({ outcome: "pass", reason: null });
-  });
-});

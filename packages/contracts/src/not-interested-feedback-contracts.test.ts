@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   DiscoveryFeedbackSchema,
   EmployerExclusionPreviewSchema,
-  JobFinderDismissDiscoveryJobInputSchema,
   SavedJobSchema,
 } from "./index";
 
@@ -26,49 +25,6 @@ const legacyJob = {
 };
 
 describe("discovery feedback contracts", () => {
-  it("persists reason-free hiding through the input and saved feedback schemas", () => {
-    expect(
-      JobFinderDismissDiscoveryJobInputSchema.parse({
-        jobId: "job_1",
-        reasons: [],
-        action: "hide_job",
-      }).reasons,
-    ).toEqual([]);
-    expect(
-      DiscoveryFeedbackSchema.parse({
-        version: 1,
-        revision: 1,
-        reasons: [],
-        recordedAt: "2026-07-31T12:00:00.000Z",
-      }).reasons,
-    ).toEqual([]);
-  });
-
-  it("parses a bounded set of fact-neutral reason chips", () => {
-    expect(
-      JobFinderDismissDiscoveryJobInputSchema.parse({
-        jobId: "job_1",
-        reasons: ["role", "location"],
-      }),
-    ).toEqual({ jobId: "job_1", reasons: ["role", "location"] });
-  });
-
-  it("accepts empty feedback and rejects unknown reasons", () => {
-    expect(
-      JobFinderDismissDiscoveryJobInputSchema.parse({
-        jobId: "job_1",
-        reasons: [],
-      }).reasons,
-    ).toEqual([]);
-    expect(() =>
-      DiscoveryFeedbackSchema.parse({
-        version: 1,
-        revision: 1,
-        reasons: ["salary_is_a_hard_fact"],
-        recordedAt: "2026-07-31T12:00:00.000Z",
-      }),
-    ).toThrow();
-  });
 
   it("migrates legacy jobs without feedback to an explicit null", () => {
     expect(SavedJobSchema.parse(legacyJob).discoveryFeedback).toBeNull();
@@ -119,24 +75,6 @@ describe("discovery feedback contracts", () => {
         },
       }).employerExclusion?.campaignId,
     ).toBeNull();
-  });
-
-  it("requires an expected normalized identity for reusable exclusion", () => {
-    expect(
-      JobFinderDismissDiscoveryJobInputSchema.safeParse({
-        jobId: "job_1",
-        reasons: ["company"],
-        action: "hide_and_exclude_employer",
-      }).success,
-    ).toBe(false);
-    expect(
-      JobFinderDismissDiscoveryJobInputSchema.parse({
-        jobId: "job_1",
-        reasons: ["company"],
-        action: "hide_and_exclude_employer",
-        expectedNormalizedCompanyName: "example",
-      }).action,
-    ).toBe("hide_and_exclude_employer");
   });
 
   it("keeps employer exclusion previews strict and discriminated", () => {
