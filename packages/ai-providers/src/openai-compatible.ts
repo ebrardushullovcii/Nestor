@@ -150,18 +150,6 @@ function isStableFitRoute(route: {
   );
 }
 
-/** These OpenCode Responses routes were exercised with required keyed output. */
-function supportsStrictResponseSchema(
-  route: Parameters<typeof isStableFitRoute>[0],
-): boolean {
-  return (
-    isStableFitRoute(route) ||
-    (route.apiMode === "responses" &&
-      route.model === "gpt-6-luna" &&
-      isOpenCodeBaseUrl(route.baseUrl))
-  );
-}
-
 /** Token usage in one shape whatever API reported it. */
 export function normalizeModelUsage(usage: ModelUsagePayload): {
   inputTokens: number;
@@ -871,7 +859,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
             ...(options?.jsonOutput ? { jsonOutput: true } : {}),
             ...(options?.jsonSchema &&
-            supportsStrictResponseSchema({ ...validatedOptions, apiMode })
+            isStableFitRoute({ ...validatedOptions, apiMode })
               ? { jsonSchema: options.jsonSchema }
               : {}),
             reasoningSummary: streamingEnabled,
@@ -1290,14 +1278,14 @@ export function createJobFinderAiClientFromEnvironment(
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
     ...parsedResilience,
   });
-  // Profession classification does not need a reasoning transcript. On Go,
-  // Luna at none spends fewer tokens per decision than Muse's minimum effort.
+  // Profession classification does not need a reasoning transcript. MiMo Flash
+  // accepts none on Go without a reduced-allowance multiplier.
   const screeningClient = isStableFitRoute(primaryRoute)
     ? createOpenAiCompatibleJobFinderAiClient({
         apiKey,
         baseUrl: primaryRoute.baseUrl,
-        model: "gpt-6-luna",
-        apiMode: "responses",
+        model: "mimo-v2.6-flash",
+        apiMode: "chat_completions",
         reasoningEffort: "none",
         taskReasoningEfforts: {
           listing_screen:

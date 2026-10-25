@@ -1419,9 +1419,9 @@ test("uses the verified no-reasoning title route while keeping fit on the primar
       },
     );
     expect(JSON.parse(capture.getCapturedBody())).toMatchObject({
-      model: "gpt-6-luna",
-      reasoning: { effort: "none" },
-      text: { format: { type: "json_schema", strict: true } },
+      model: "mimo-v2.6-flash",
+      reasoning_effort: "none",
+      response_format: { type: "json_object" },
     });
     await client.chatWithTools!(
       [{ role: "user", content: "Fit evidence" }],

@@ -12,8 +12,8 @@ export const modelReasoningEfforts = [
 export type ModelReasoningEffort = (typeof modelReasoningEfforts)[number];
 
 export const DEFAULT_OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
-// Primary text and vision use Muse Spark 1.3; title screening uses GPT-6
-// Luna without reasoning. Aggressive resume tailoring uses DeepSeek V4.1
+// Primary text and vision use Muse Spark 1.3; title screening uses MiMo
+// Flash without reasoning. Aggressive resume tailoring uses DeepSeek V4.1
 // Flash. Model ids are verified against /models on the gateway.
 export const DEFAULT_TEXT_MODEL = "muse-spark-1.3-contributor";
 export const DEFAULT_TEXT_MODEL_API_MODE: ModelApiMode = "responses";
