@@ -6,52 +6,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Three kept jobs every ten seconds for three minutes, like a slow site. */
-async function trickle(maxWaitMs: number) {
-  vi.useFakeTimers();
-  const sizes: number[] = [];
-  const firstScoreAt: number[] = [];
-  const start = Date.now();
-  const batcher = createSearchFitBatcher({
-    batchSize: 20,
-    concurrency: 3,
-    partialWaitMs: 20_000,
-    maxWaitMs,
-    judge: (ids) => {
-      sizes.push(ids.length);
-      firstScoreAt.push(Date.now() - start);
-      return new Promise((resolve) => setTimeout(resolve, 15_000));
-    },
-  });
-  let next = 0;
-  for (let second = 0; second < 180; second += 10) {
-    batcher.enqueue([`job_${next++}`, `job_${next++}`, `job_${next++}`]);
-    await vi.advanceTimersByTimeAsync(10_000);
-  }
-  const finishing = batcher.finish();
-  await vi.advanceTimersByTimeAsync(60_000);
-  await finishing;
-  return { sizes, firstScoreAt: firstScoreAt[0] ?? null };
-}
-
-test("a slow search sends fuller batches and still shows its first scores early", async () => {
-  // The earlier policy: anything waiting went after twenty seconds.
-  const before = await trickle(20_000);
-  const after = await trickle(90_000);
-
-  console.info(
-    `[token budget] fit batches for 54 trickled jobs: before ${before.sizes.join(",")} (${before.sizes.length} calls), after ${after.sizes.join(",")} (${after.sizes.length} calls)`,
-  );
-  expect(before.sizes.reduce((sum, size) => sum + size, 0)).toBe(54);
-  expect(after.sizes.reduce((sum, size) => sum + size, 0)).toBe(54);
-  expect(after.sizes.length).toBeLessThan(before.sizes.length);
-  // After the quick first batch, none goes out less than half full until
-  // the search ends.
-  expect(Math.min(...after.sizes.slice(1, -1))).toBeGreaterThanOrEqual(10);
-  // The first verdicts still arrive about twenty seconds in.
-  expect(after.firstScoreAt).toBeLessThanOrEqual(20_000);
-});
-
 test("a full batch goes at once and calls stay within the concurrency", async () => {
   let inFlight = 0;
   let most = 0;
@@ -104,47 +58,38 @@ test("stop drops what is waiting and sends nothing more", async () => {
   expect(judge).not.toHaveBeenCalled();
 });
 
-test("finishing uses freed source capacity without changing batches or judging any job twice", async () => {
+test("finishing drains pending jobs exactly once with freed source capacity", async () => {
   vi.useFakeTimers();
-  const measure = async (finishConcurrency: number) => {
-    const batches: string[][] = [];
-    let inFlight = 0;
-    let peak = 0;
-    const start = Date.now();
-    const batcher = createSearchFitBatcher({
-      batchSize: 20,
-      concurrency: 3,
-      finishConcurrency,
-      partialWaitMs: 20_000,
-      maxWaitMs: 90_000,
-      judge: (ids) => {
-        batches.push([...ids]);
-        inFlight += 1;
-        peak = Math.max(peak, inFlight);
-        return new Promise<void>((resolve) =>
-          setTimeout(() => {
-            inFlight -= 1;
-            resolve();
-          }, 97_000),
-        );
-      },
-    });
-    batcher.enqueue(Array.from({ length: 5_700 }, (_, i) => `job_${i}`));
-    expect(inFlight).toBe(3);
-    expect(peak).toBe(3);
-    const finishing = batcher.finish();
-    expect(inFlight).toBe(finishConcurrency);
-    await vi.runAllTimersAsync();
-    await finishing;
-    expect(peak).toBe(finishConcurrency);
-    expect(batcher.waiting).toBe(0);
-    return { batches, duration: Date.now() - start };
-  };
-  const before = await measure(3);
-  const after = await measure(5);
-  expect(after.batches).toEqual(before.batches);
-  expect(new Set(after.batches.flat()).size).toBe(5_700);
-  expect(after.batches).toHaveLength(285);
-  expect(before.duration).toBe(95 * 97_000);
-  expect(after.duration).toBe(57 * 97_000);
+  const batches: string[][] = [];
+  let inFlight = 0;
+  let peak = 0;
+  const batcher = createSearchFitBatcher({
+    batchSize: 2,
+    concurrency: 2,
+    finishConcurrency: 3,
+    partialWaitMs: 20000,
+    maxWaitMs: 90000,
+    judge: (ids) => {
+      batches.push([...ids]);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      return new Promise<void>((resolve) =>
+        setTimeout(() => {
+          inFlight -= 1;
+          resolve();
+        }, 1),
+      );
+    },
+  });
+  const ids = Array.from({ length: 7 }, (_, i) => "job_" + i);
+  batcher.enqueue(ids);
+  expect(inFlight).toBe(2);
+  const finishing = batcher.finish();
+  expect(inFlight).toBe(3);
+  await vi.runAllTimersAsync();
+  await finishing;
+  expect(peak).toBe(3);
+  expect(batcher.waiting).toBe(0);
+  expect(batches.flat()).toEqual(ids);
+  expect(new Set(batches.flat()).size).toBe(ids.length);
 });

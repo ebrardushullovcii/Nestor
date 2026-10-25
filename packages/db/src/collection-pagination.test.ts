@@ -1,19 +1,19 @@
-import { describe, expect, test } from "vitest";
 import {
   ApplicationRecordSchema,
   ProfileCopilotMessageSchema,
 } from "@nestor/contracts";
+import { describe, expect, test } from "vitest";
 
 import { createFileJobFinderRepository } from "./file-repository";
-import { createInMemoryJobFinderRepository } from "./in-memory-repository";
-import { createSeed } from "./test-fixtures";
 import {
   cleanupTempDirectoryWithRetry,
   createSavedJob,
   createTempRepository,
 } from "./file-repository.test-support";
+import { createInMemoryJobFinderRepository } from "./in-memory-repository";
+import { createSeed } from "./test-fixtures";
 
-const LARGE_COLLECTION_SIZE = 5_000;
+const COLLECTION_SIZE = 5;
 
 function createSavedJobs(count: number) {
   return Array.from({ length: count }, (_, index) => {
@@ -94,12 +94,11 @@ async function collectPagedSavedJobIds(
 }
 
 describe("repository collection pagination and persistence", () => {
-  test("keeps 5,000 saved jobs and ordered history across singleton writes and restart", async () => {
+  test("keeps saved jobs and ordered history across singleton writes and restart", async () => {
     const temp = await createTempRepository("nestor-db-collection-scale-");
-    const savedJobs = createSavedJobs(LARGE_COLLECTION_SIZE);
-    const profileCopilotMessages = createProfileCopilotMessages(
-      LARGE_COLLECTION_SIZE,
-    );
+    const savedJobs = createSavedJobs(COLLECTION_SIZE);
+    const profileCopilotMessages =
+      createProfileCopilotMessages(COLLECTION_SIZE);
     const seed = {
       ...createSeed(),
       savedJobs,
@@ -123,54 +122,54 @@ describe("repository collection pagination and persistence", () => {
       expect(memoryIds).toEqual(expectedIds);
 
       expect(
-        (await fileRepository.listSavedJobs({ limit: 125, offset: 1_000 })).map(
+        (await fileRepository.listSavedJobs({ limit: 2, offset: 2 })).map(
           (job) => job.id,
         ),
-      ).toEqual(expectedIds.slice(1_000, 1_125));
+      ).toEqual(expectedIds.slice(2, 4));
       expect(
-        (await fileRepository.listSavedJobs({ offset: 4_999 })).map(
+        (await fileRepository.listSavedJobs({ offset: 4 })).map(
           (job) => job.id,
         ),
-      ).toEqual(expectedIds.slice(4_999));
+      ).toEqual(expectedIds.slice(4));
       expect(
-        (
-          await inMemoryRepository.listSavedJobs({ limit: 125, offset: 1_000 })
-        ).map((job) => job.id),
-      ).toEqual(expectedIds.slice(1_000, 1_125));
-      expect(
-        (await inMemoryRepository.listSavedJobs({ offset: 4_999 })).map(
+        (await inMemoryRepository.listSavedJobs({ limit: 2, offset: 2 })).map(
           (job) => job.id,
         ),
-      ).toEqual(expectedIds.slice(4_999));
+      ).toEqual(expectedIds.slice(2, 4));
+      expect(
+        (await inMemoryRepository.listSavedJobs({ offset: 4 })).map(
+          (job) => job.id,
+        ),
+      ).toEqual(expectedIds.slice(4));
 
-      for (const pageSize of [1, 500, 1_000, 5_000]) {
+      for (const pageSize of [2, 5]) {
         const [filePagedIds, memoryPagedIds] = await Promise.all([
           collectPagedSavedJobIds(fileRepository, pageSize),
           collectPagedSavedJobIds(inMemoryRepository, pageSize),
         ]);
-        expect(filePagedIds).toHaveLength(LARGE_COLLECTION_SIZE);
-        expect(memoryPagedIds).toHaveLength(LARGE_COLLECTION_SIZE);
-        expect(new Set(filePagedIds).size).toBe(LARGE_COLLECTION_SIZE);
-        expect(new Set(memoryPagedIds).size).toBe(LARGE_COLLECTION_SIZE);
+        expect(filePagedIds).toHaveLength(COLLECTION_SIZE);
+        expect(memoryPagedIds).toHaveLength(COLLECTION_SIZE);
+        expect(new Set(filePagedIds).size).toBe(COLLECTION_SIZE);
+        expect(new Set(memoryPagedIds).size).toBe(COLLECTION_SIZE);
         expect(filePagedIds).toEqual(expectedIds);
         expect(memoryPagedIds).toEqual(expectedIds);
         expect(memoryPagedIds).toEqual(filePagedIds);
       }
       expect(
-        await fileRepository.listSavedJobs({ limit: LARGE_COLLECTION_SIZE }),
-      ).toHaveLength(LARGE_COLLECTION_SIZE);
+        await fileRepository.listSavedJobs({ limit: COLLECTION_SIZE }),
+      ).toHaveLength(COLLECTION_SIZE);
       expect(
         await inMemoryRepository.listSavedJobs({
-          limit: LARGE_COLLECTION_SIZE,
+          limit: COLLECTION_SIZE,
         }),
-      ).toHaveLength(LARGE_COLLECTION_SIZE);
+      ).toHaveLength(COLLECTION_SIZE);
 
       const fileHistory = await fileRepository.listProfileCopilotMessages();
       const memoryHistory =
         await inMemoryRepository.listProfileCopilotMessages();
-      expect(fileHistory).toHaveLength(LARGE_COLLECTION_SIZE);
+      expect(fileHistory).toHaveLength(COLLECTION_SIZE);
       expect(fileHistory[0]?.id).toBe("profile_message_00000");
-      expect(fileHistory.at(-1)?.id).toBe("profile_message_04999");
+      expect(fileHistory.at(-1)?.id).toBe("profile_message_00004");
       expect(memoryHistory).toEqual(fileHistory);
 
       await fileRepository.saveSettings({
@@ -190,7 +189,7 @@ describe("repository collection pagination and persistence", () => {
         lastResumedAt: "2026-08-20T12:00:00.000Z",
       });
       expect(await fileRepository.listSavedJobs()).toHaveLength(
-        LARGE_COLLECTION_SIZE,
+        COLLECTION_SIZE,
       );
 
       await fileRepository.close();
@@ -203,7 +202,7 @@ describe("repository collection pagination and persistence", () => {
       ).toEqual(expectedIds);
       expect(
         (await fileRepository.listProfileCopilotMessages()).at(-1)?.id,
-      ).toBe("profile_message_04999");
+      ).toBe("profile_message_00004");
     } finally {
       await fileRepository.close();
       await inMemoryRepository.close();

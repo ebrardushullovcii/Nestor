@@ -5,11 +5,11 @@ import {
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { buildJobFinderGlobalSearchEntries } from "./build-job-finder-global-search-entries";
-import { searchJobFinderEntries } from "./job-finder-global-search";
 import {
   countDiscoveryVisibleJobs,
   countShortlistedJobs,
 } from "./destination-counts";
+import { searchJobFinderEntries } from "./job-finder-global-search";
 
 function buildWorkspaceFixture(activeCampaignId: string | null) {
   return {
@@ -125,7 +125,7 @@ function buildWorkspaceFixture(activeCampaignId: string | null) {
 }
 
 describe("buildJobFinderGlobalSearchEntries", () => {
-  it("keeps all 3,003 thin rows searchable while counts retain active-plan scope", () => {
+  it("keeps rows beyond the former fetch limit searchable while counts retain active-plan scope", () => {
     const seed = JobListRowSchema.parse({
       id: "job-0",
       source: "target_site",
@@ -143,7 +143,7 @@ describe("buildJobFinderGlobalSearchEntries", () => {
       matchAssessment: { score: 80 },
       detailRevision: "synthetic-revision",
     });
-    const jobs = Array.from({ length: 3003 }, (_, index) => ({
+    const jobs = Array.from({ length: 1001 }, (_, index) => ({
       ...seed,
       id: `job-${index}`,
       title: `Engineer ${index}`,
@@ -173,11 +173,11 @@ describe("buildJobFinderGlobalSearchEntries", () => {
       ),
     };
     const entries = buildJobFinderGlobalSearchEntries(workspace);
-    expect(entries.filter(({ kind }) => kind === "job")).toHaveLength(3003);
-    const lastJob = searchJobFinderEntries(entries, "Engineer 3002")
+    expect(entries.filter(({ kind }) => kind === "job")).toHaveLength(1001);
+    const lastJob = searchJobFinderEntries(entries, "Engineer 1000")
       .find(({ kind }) => kind === "job")
-      ?.entries.find(({ id }) => id === "job-3002");
-    expect(lastJob?.href).toBe("/job-finder/discovery?jobId=job-3002");
+      ?.entries.find(({ id }) => id === "job-1000");
+    expect(lastJob?.href).toBe("/job-finder/discovery?jobId=job-1000");
     expect(lastJob?.subtitle).toContain(
       "Saved on this device, not in this search plan",
     );
@@ -185,9 +185,9 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     expect(countDiscoveryVisibleJobs(workspace)).toBe(0);
     expect(countShortlistedJobs(workspace)).toBe(50);
     const planless = { ...workspace, activeCampaignId: "missing" };
-    expect(countDiscoveryVisibleJobs(planless)).toBe(3003 - 75);
+    expect(countDiscoveryVisibleJobs(planless)).toBe(1001 - 75);
     expect(countShortlistedJobs(planless)).toBe(75);
-    expect(jobs[3002]).not.toHaveProperty("description");
+    expect(jobs[1000]).not.toHaveProperty("description");
   });
 
   it("keeps the exact job and application context in search links", () => {

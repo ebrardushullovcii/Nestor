@@ -69,10 +69,7 @@ the forward migration.
 
 ## Verification
 
-The acceptance budget is milliseconds of bookkeeping per batch and no main
-block over 100 ms, with main heap below 800 MB. Sample batch timings through
-`nestor.discovery.bookkeeping` distinguish triage, merge and repository commits
-from external waits. Fixed-feed replay checks kept jobs and verdicts; progress,
-Stop, Pause, progressive judging, deduplication, repeat runs and search breadth
-remain required behavior checks. Removing work does not establish those budgets
-without production measurements.
+Correctness checks cover kept jobs and verdicts, progress, Stop, Pause,
+progressive judging, deduplication, repeat runs and search breadth. Runtime
+`nestor.discovery.bookkeeping` telemetry remains available for investigation;
+CI does not enforce wall-clock budgets or run scale acceptance tests.

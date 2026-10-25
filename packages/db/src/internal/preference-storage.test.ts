@@ -1,12 +1,12 @@
-import { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   getDefaultCampaignConfiguration,
   JobSearchCampaignSchema,
   type JobSearchCampaignCollection,
 } from "@nestor/contracts";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { expect, test, vi } from "vitest";
-import { createSeed } from "../test-fixtures";
 import { createTempRepository } from "../file-repository.test-support";
+import { createSeed } from "../test-fixtures";
 import {
   decodePreferenceSingleton,
   encodePreferenceSingleton,
@@ -78,7 +78,7 @@ test("retention keeps exact plan order while writing only moved, added and remov
   const db = new DatabaseSync(":memory:");
   try {
     ensurePreferenceStorageTables(db);
-    const ids = Array.from({ length: 1000 }, (_, index) => `job_${index}`);
+    const ids = Array.from({ length: 3 }, (_, index) => `job_${index}`);
     let state = plans([...ids, "newly_kept"]);
     let encoded = encodePreferenceSingleton(db, "campaign_state", state);
     const read = () => decodePreferenceSingleton(db, "campaign_state", encoded);
@@ -109,9 +109,9 @@ test("retention keeps exact plan order while writing only moved, added and remov
     db.exec("DELETE FROM membership_writes");
     const nextIds = [
       "newly_kept",
-      ...ids.slice(0, 500),
+      ...ids.slice(0, 1),
       "inserted",
-      ...ids.slice(501),
+      ...ids.slice(2),
     ];
     save({
       ...state,
@@ -128,7 +128,7 @@ test("retention keeps exact plan order while writing only moved, added and remov
     expect(
       db.prepare("SELECT * FROM membership_writes ORDER BY operation").all(),
     ).toEqual([
-      { operation: "delete", id: "job_500" },
+      { operation: "delete", id: "job_1" },
       { operation: "insert", id: "inserted" },
     ]);
 

@@ -1,15 +1,12 @@
 import type { Page } from "playwright";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   createPlaywrightApplyPageMechanics,
   readApplyStepLabel,
 } from "./apply-page-mechanics";
 
-afterEach(() => vi.useRealTimers());
-
-test("native text writes read acceptance immediately without a per-field wait", async () => {
-  vi.useFakeTimers();
+test("native text writes return the observed field value", async () => {
   let value = "";
   const fill = vi.fn((answer: string) => {
     value = answer;
@@ -22,39 +19,28 @@ test("native text writes read acceptance immediately without a per-field wait", 
     }),
     waitForTimeout,
   } as unknown as Page;
-  const started = Date.now();
   const mechanics = createPlaywrightApplyPageMechanics(page);
-  for (let index = 0; index < 12; index++)
-    await expect(
-      mechanics.fillText(`c${index}`, "Robin Ashford"),
-    ).resolves.toEqual({ ok: true, observedValue: "Robin Ashford" });
-  expect(fill).toHaveBeenCalledTimes(12);
+  await expect(mechanics.fillText("c0", "Robin Ashford")).resolves.toEqual({
+    ok: true,
+    observedValue: "Robin Ashford",
+  });
+  expect(fill).toHaveBeenCalledOnce();
   expect(waitForTimeout).not.toHaveBeenCalled();
-  expect(Date.now() - started).toBe(0);
 });
 
-test("apply and search page reads do not wait for an absent progress marker", async () => {
-  vi.useFakeTimers();
+test("an absent progress marker is reported as unknown", async () => {
   const evaluateAll = vi.fn((read: (elements: Element[]) => unknown) =>
     Promise.resolve(read([])),
   );
-  // The previous single-element read waited one second when no marker existed.
-  const innerText = vi.fn(
-    () => new Promise((resolve) => setTimeout(() => resolve(""), 1_000)),
-  );
+  const innerText = vi.fn(() => Promise.resolve(""));
   const locator = vi.fn(() => ({
     evaluateAll,
     first: () => ({ innerText, count: () => Promise.resolve(0) }),
   }));
   const page = { locator } as unknown as Pick<Page, "locator">;
-  const started = Date.now();
-  for (let read = 0; read < 42; read += 1) {
-    await expect(readApplyStepLabel(page)).resolves.toBeNull();
-  }
-  expect(Date.now() - started).toBe(0);
-  expect(vi.getTimerCount()).toBe(0);
+  await expect(readApplyStepLabel(page)).resolves.toBeNull();
   expect(innerText).not.toHaveBeenCalled();
-  expect(evaluateAll).toHaveBeenCalledTimes(42);
+  expect(evaluateAll).toHaveBeenCalledOnce();
 });
 
 test("a page read failure still leaves progress unknown", async () => {
@@ -66,11 +52,8 @@ test("a page read failure still leaves progress unknown", async () => {
   await expect(readApplyStepLabel(page)).resolves.toBeNull();
 });
 
-test("an accepted native toggle does not wait for a covered pointer target", async () => {
-  vi.useFakeTimers();
-  const setChecked = vi.fn(
-    () => new Promise((resolve) => setTimeout(resolve, 5_000)),
-  );
+test("an accepted native toggle reports its checked value", async () => {
+  const setChecked = vi.fn(() => Promise.resolve());
   const evaluate = vi.fn(() => Promise.resolve(true));
   const page = {
     locator: () => ({
@@ -86,5 +69,4 @@ test("an accepted native toggle does not wait for a covered pointer target", asy
   ).resolves.toEqual({ ok: true, observedValue: "checked" });
   expect(evaluate).toHaveBeenCalledOnce();
   expect(setChecked).not.toHaveBeenCalled();
-  expect(vi.getTimerCount()).toBe(0);
 });

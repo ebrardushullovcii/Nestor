@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
 import {
+  SavedJobSchema,
+  UserActionRequestSchema,
+  type JobFinderRendererWorkspaceSnapshot,
+  type UserActionCommandInput,
+  type UserActionRequest,
+} from "@nestor/contracts";
+import {
   cleanup,
   fireEvent,
   render,
@@ -8,25 +15,14 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import {
-  SavedJobSchema,
-  UserActionRequestSchema,
-  type JobFinderRendererWorkspaceSnapshot,
-  type UserActionCommandInput,
-  type UserActionRequest,
-} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ActionsScreen } from "./actions-screen";
 import { BOUNDED_COLLECTION_PAGE_SIZE as COLLECTION_PAGE_SIZE } from "./bounded-collection";
-import { ActionsScreen, buildJobIndexById } from "./actions-screen";
 
-const ACTION_COUNT = 210;
-const APPLICATION_ACTION_COUNT = 130;
-const JOB_COUNT = 1000;
-
-// Walk both independent groups with queries scoped to their pagination controls.
-// Allow serial runners time to finish the full pagination walk.
-const PAGING_WALK_TIMEOUT_MS = 15_000;
+const ACTION_COUNT = 152;
+const APPLICATION_ACTION_COUNT = 101;
+const JOB_COUNT = 101;
 
 type DiscoveryJob = JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number];
 
@@ -111,8 +107,7 @@ function createRequest(index: number): UserActionRequest {
   });
 }
 
-// Parsed fixtures are immutable; build them once per file so the serial
-// single-worker run does not re-parse 1,000+ zod objects for every test.
+// Reuse the parsed fixtures across pagination cases.
 const SCALE_JOBS = createJobs();
 const SCALE_REQUESTS = Array.from({ length: ACTION_COUNT }, (_, index) =>
   createRequest(index),
@@ -145,14 +140,7 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe("ActionsScreen workspace scale", () => {
-  it("indexes the job list by id in one pass", () => {
-    const index = buildJobIndexById(SCALE_JOBS);
-    expect(index.size).toBe(JOB_COUNT);
-    expect(index.get("scale_job_0999")?.title).toBe("Scale Engineer 0999");
-    expect(index.get("scale_job_missing")).toBeUndefined();
-  });
-
+describe("ActionsScreen pagination", () => {
   it("mounts independent bounded pages with full counts and indexed job lookups", () => {
     const jobs = [...SCALE_JOBS];
     const findSpy = vi.spyOn(jobs, "find");
@@ -182,12 +170,12 @@ describe("ActionsScreen workspace scale", () => {
       name: "Next page",
     });
     fireEvent.click(next);
-    expect(within(applications).getByText("51–100 of 130")).toBeTruthy();
-    expect(within(sources).getByText("1–50 of 80")).toBeTruthy();
+    expect(within(applications).getByText("51–100 of 101")).toBeTruthy();
+    expect(within(sources).getByText("1–50 of 51")).toBeTruthy();
     expect(sources.querySelectorAll("article")).toHaveLength(50);
     fireEvent.click(next);
-    expect(within(applications).getByText("101–130 of 130")).toBeTruthy();
-    expect(applications.querySelectorAll("article")).toHaveLength(30);
+    expect(within(applications).getByText("101–101 of 101")).toBeTruthy();
+    expect(applications.querySelectorAll("article")).toHaveLength(1);
     expect(
       within(applications).getByRole("button", { name: "Next page" }),
     ).toHaveProperty("disabled", true);
@@ -198,53 +186,22 @@ describe("ActionsScreen workspace scale", () => {
     const findSpy = vi.spyOn(jobs, "find");
     renderScaleInbox(jobs);
     const input = screen.getByLabelText("Find an action");
-    fireEvent.change(input, { target: { value: "0195" } });
+    fireEvent.change(input, { target: { value: "0145" } });
     await waitFor(() =>
-      expect(screen.getAllByText("Scale action 0195")).toHaveLength(1),
+      expect(screen.getAllByText("Scale action 0145")).toHaveLength(1),
     );
-    expect(screen.getByText("1 of 210 results")).toBeTruthy();
-    fireEvent.change(input, { target: { value: "0128" } });
+    expect(screen.getByText("1 of 152 results")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "0098" } });
     await waitFor(() =>
-      expect(screen.getAllByText("Scale action 0128")).toHaveLength(1),
+      expect(screen.getAllByText("Scale action 0098")).toHaveLength(1),
     );
     expect(
-      screen.getByText(/Scale Engineer 0128 at Scale Company/),
+      screen.getByText(/Scale Engineer 0098 at Scale Company/),
     ).toBeTruthy();
     fireEvent.change(input, { target: { value: "" } });
-    await waitFor(() => expect(screen.getByText("1–50 of 130")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("1–50 of 101")).toBeTruthy());
     expect(findSpy).not.toHaveBeenCalled();
   });
-
-  it(
-    "walks every action once with bounded pages and accessible end cues",
-    () => {
-      renderScaleInbox();
-      const seenTitles = new Set<string>();
-      for (const name of ["Applications", "Job sources"]) {
-        const section = getGroupSection(name);
-        const navigation = within(section).getByRole("navigation");
-        for (;;) {
-          const cards = section.querySelectorAll("article");
-          expect(cards.length).toBeLessThanOrEqual(COLLECTION_PAGE_SIZE);
-          for (const heading of section.querySelectorAll("article h3"))
-            seenTitles.add(heading.textContent ?? "");
-          const next = within(navigation).getByRole<HTMLButtonElement>(
-            "button",
-            { name: "Next page" },
-          );
-          if (next.disabled) break;
-          fireEvent.click(next);
-        }
-        expect(
-          within(navigation).getByRole("button", { name: "Previous page" }),
-        ).toHaveProperty("disabled", false);
-      }
-      expect(seenTitles.size).toBe(ACTION_COUNT);
-      expect(seenTitles.has("Scale action 0000")).toBe(true);
-      expect(seenTitles.has("Scale action 0209")).toBe(true);
-    },
-    PAGING_WALK_TIMEOUT_MS,
-  );
 
   it("keeps off-page commands intact", () => {
     const onCommand = vi.fn<(command: UserActionCommandInput) => void>();

@@ -1,12 +1,12 @@
-import { expect, test } from "vitest";
 import type { RawApplyPage } from "@nestor/contracts";
-import recordedPage from "./synthetic-page.snapshot.json";
-import { buildApplyFormObservation } from "./page-hands";
+import { expect, test } from "vitest";
 import {
+  applyStepShape,
   describeObservation,
   describeObservationUpdate,
-  applyStepShape,
 } from "./apply-prompts";
+import { buildApplyFormObservation } from "./page-hands";
+import recordedPage from "./synthetic-page.snapshot.json";
 
 const observation = () =>
   buildApplyFormObservation(
@@ -29,9 +29,6 @@ test("a recorded local synthetic form sends only changed fields with its earlier
     "Unchanged fields and page text remain as last shown",
   );
   expect(applyStepShape(after)).toBe(applyStepShape(before));
-  console.info(
-    `Synthetic form observation: full=${full.length} chars update=${update.length} chars`,
-  );
 });
 
 test("page updates keep new and removed fields, constraints and validation; navigation gets a full page", () => {

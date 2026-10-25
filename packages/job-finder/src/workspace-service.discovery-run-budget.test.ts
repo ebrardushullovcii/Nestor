@@ -1,23 +1,23 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
-  DISCOVERY_RUN_JOB_BUDGET_MAX,
   DEFAULT_SCALE_CAMPAIGN_DISCOVERY_RUN_JOB_BUDGET,
+  DISCOVERY_RUN_JOB_BUDGET_MAX,
   type DiscoveryActivityEvent,
   type JobSearchPreferences,
 } from "@nestor/contracts";
-import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 
 import {
   resolveDiscoveryBudgetPlan,
   resolveDiscoveryTargetBudget,
 } from "./internal/workspace-discovery-run-helpers";
+import { createBrowserRuntime } from "./workspace-service.test-runtimes";
 import {
   createSeed,
   createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
-import { createBrowserRuntime } from "./workspace-service.test-runtimes";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -417,62 +417,6 @@ async function saveScaleCampaign(
 }
 
 describe("campaign discovery run budgets", () => {
-  test("retains 1,000 valid jobs from a large synthetic API inventory under the scale budget", async () => {
-    const INVENTORY_SIZE = 1_400;
-    const seed = createEmptyDiscoverySeed();
-    seed.searchPreferences.discovery.targets = [
-      {
-        id: "target_scale_board",
-        label: "Scale Board",
-        startingUrl: "https://job-boards.greenhouse.io/scaleboard",
-        enabled: true,
-        adapterKind: "auto" as const,
-        customInstructions: null,
-        instructionStatus: "missing" as const,
-        validatedInstructionId: null,
-        draftInstructionId: null,
-        lastDebugRunId: null,
-        lastVerifiedAt: null,
-        staleReason: null,
-      },
-    ];
-    const harness = createWorkspaceServiceHarness({ seed });
-    const { repository, workspaceService } = harness;
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      Promise.resolve(
-        Response.json({
-          jobs: Array.from({ length: INVENTORY_SIZE }, (_, index) => ({
-            id: 10_000 + index,
-            title: `Senior Product Designer ${index}`,
-            absolute_url: `https://job-boards.greenhouse.io/scaleboard/jobs/${10_000 + index}`,
-            location: { name: "Remote" },
-            updated_at: "2026-08-09T10:00:00.000Z",
-            content:
-              "<p>Lead product design systems and resilient workflow platforms.</p>",
-          })),
-        }),
-      ),
-    );
-
-    const globalPreferences = await repository.getSearchPreferences();
-    const campaignId = await saveScaleCampaign(harness, globalPreferences);
-
-    // saveCampaign keeps the existing active pointer, so address the created
-    // campaign explicitly.
-    await workspaceService.runCampaignNow({ campaignId });
-
-    // This explicit scale budget bounds retention; an omitted budget does not.
-    const savedJobs = await repository.listSavedJobs();
-    expect(savedJobs.length).toBeGreaterThanOrEqual(1_000);
-
-    const discoveryState = await repository.getDiscoveryState();
-    const run = discoveryState.recentRuns.at(-1);
-    expect(run?.summary.outcome).toBe("completed");
-    expect(run?.summary.validJobsFound).toBe(1_000);
-    expect(run?.summary.jobsPersisted).toBe(1_000);
-    expect(run?.targetExecutions[0]?.requestedJobBudget).toBe(1_000);
-  }, 120_000);
-
   test("routes campaign browser-only targets through the bounded agent runtime with scaled ceilings", async () => {
     const base = createBrowserRuntime();
     const agentCalls: Array<

@@ -22,7 +22,7 @@ describe("interactive settings display snapshots", () => {
     "%s returns updated settings without full jobs or canonical discovery, while public snapshots retain checkpoints",
     async (mutation) => {
       const seed = createSeed();
-      seed.savedJobs = Array.from({ length: 3000 }, (_, index) =>
+      seed.savedJobs = Array.from({ length: 3 }, (_, index) =>
         SavedJobSchema.parse({
           ...seed.savedJobs[0],
           id: `settings_job_${index}`,

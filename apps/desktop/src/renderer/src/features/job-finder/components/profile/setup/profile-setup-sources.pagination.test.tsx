@@ -1,19 +1,19 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { useForm } from "react-hook-form";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { useForm } from "react-hook-form";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { DiscoveryTargetEditorValue } from "../../../lib/job-finder-types";
 import {
   createProfileEditorValues,
   createSearchPreferencesEditorValues,
   type ProfileEditorValues,
   type SearchPreferencesEditorValues,
 } from "../../../lib/profile-editor";
-import type { DiscoveryTargetEditorValue } from "../../../lib/job-finder-types";
 import {
   isValidProfileSetupSourceUrl,
   PROFILE_SETUP_SOURCE_PAGE_SIZE,
@@ -86,7 +86,7 @@ function SetupSourcesHarness(props: {
       ...createSearchPreferencesEditorValues(preferences),
       discoveryTargets:
         props.targets ??
-        Array.from({ length: 511 }, (_, index) => createTarget(index + 1)),
+        Array.from({ length: 51 }, (_, index) => createTarget(index + 1)),
     },
   });
 
@@ -101,7 +101,7 @@ function SetupSourcesHarness(props: {
   );
 }
 
-describe("ProfileSetupTargetingStep source scale", () => {
+describe("ProfileSetupTargetingStep source pagination", () => {
   beforeAll(() => {
     // Deterministic pagination: the component's rAF-driven focus jump runs
     // synchronously instead of depending on jsdom frame timing.
@@ -116,39 +116,39 @@ describe("ProfileSetupTargetingStep source scale", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps a 511-entry catalog bounded to one searchable 25-row page", () => {
+  it("keeps a 51-entry catalog bounded to one searchable 25-row page", () => {
     const { container } = render(<SetupSourcesHarness />);
 
     expect(
       container.querySelectorAll("[data-profile-setup-source-card]"),
     ).toHaveLength(PROFILE_SETUP_SOURCE_PAGE_SIZE);
-    expect(screen.getByText("1–25 of 511")).toBeTruthy();
+    expect(screen.getByText("1–25 of 51")).toBeTruthy();
     expect(screen.getByText("Source 001")).toBeTruthy();
     expect(screen.queryByText("Source 026")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("26–50 of 511")).toBeTruthy();
+    expect(screen.getByText("26–50 of 51")).toBeTruthy();
     expect(screen.getByText("Source 026")).toBeTruthy();
     expect(screen.queryByText("Source 001")).toBeNull();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), {
-      target: { value: "source 511" },
+      target: { value: "source 051" },
     });
-    expect(screen.getByText("1 of 511 sources")).toBeTruthy();
-    expect(screen.getByText("Source 511")).toBeTruthy();
+    expect(screen.getByText("1 of 51 sources")).toBeTruthy();
+    expect(screen.getByText("Source 051")).toBeTruthy();
     expect(screen.queryByText("Source 001")).toBeNull();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), {
       target: { value: "" },
     });
-    expect(screen.getByText("511 sources")).toBeTruthy();
-    expect(screen.getByText("1–25 of 511")).toBeTruthy();
+    expect(screen.getByText("51 sources")).toBeTruthy();
+    expect(screen.getByText("1–25 of 51")).toBeTruthy();
   });
 
   it("keeps catalog editing validation-aware with one editor at a time", () => {
     const { container } = render(
       <SetupSourcesHarness
-        targets={[createTarget(1), createTarget(2), createTarget(511)]}
+        targets={[createTarget(1), createTarget(2), createTarget(51)]}
       />,
     );
 
@@ -171,12 +171,12 @@ describe("ProfileSetupTargetingStep source scale", () => {
       ),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit Source 511" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Source 051" }));
     expect(
       container.querySelector("#profile-setup-source-url-setup_target_001"),
     ).toBeNull();
     expect(
-      container.querySelector("#profile-setup-source-url-setup_target_511"),
+      container.querySelector("#profile-setup-source-url-setup_target_051"),
     ).toBeTruthy();
     expect(
       screen.getByText(

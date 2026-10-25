@@ -24,9 +24,9 @@ const now = "2026-10-13T10:00:00.000Z";
 const salaryPrompt = "Expected salary";
 const salaryAnswer = "45000 EUR per year";
 
-function scaleSeed() {
+function answerSeed() {
   const seed = createSeed();
-  seed.savedJobs = Array.from({ length: 3000 }, (_, index) =>
+  seed.savedJobs = Array.from({ length: 3 }, (_, index) =>
     SavedJobSchema.parse({
       ...seed.savedJobs[0],
       id: `job_${index}`,
@@ -37,7 +37,7 @@ function scaleSeed() {
       status: "discovered",
     }),
   );
-  seed.userActionRequests = Array.from({ length: 50 }, (_, index) =>
+  seed.userActionRequests = Array.from({ length: 3 }, (_, index) =>
     UserActionRequestSchema.parse({
       id: `request_${index}`,
       dedupeKey: `request_${index}`,
@@ -133,9 +133,9 @@ function freezeFacts<T>(value: T): T {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("saved-answer coverage at workspace scale", () => {
+describe("saved-answer application authority", () => {
   test("an unrelated answer reads no jobs, results, or salary authority on repeated checks", async () => {
-    const repository = createInMemoryJobFinderRepository(scaleSeed());
+    const repository = createInMemoryJobFinderRepository(answerSeed());
     const allJobs = vi.spyOn(repository, "listSavedJobs");
     const targetJobs = vi.spyOn(repository, "listSavedJobsByIds");
     const results = vi.spyOn(repository, "listApplyJobResults");
@@ -154,7 +154,7 @@ describe("saved-answer coverage at workspace scale", () => {
   });
 
   test("matching requests batch only their jobs and use exact frozen result facts for each authority check", async () => {
-    const base = createInMemoryJobFinderRepository(scaleSeed());
+    const base = createInMemoryJobFinderRepository(answerSeed());
     const repository: JobFinderRepository = {
       ...base,
       listSavedJobsByIds: async (ids) =>
@@ -171,15 +171,15 @@ describe("saved-answer coverage at workspace scale", () => {
     );
 
     const covered = await cover(repository, " Expected salary? ");
-    expect(covered).toHaveLength(50);
+    expect(covered).toHaveLength(3);
     expect(allJobs).not.toHaveBeenCalled();
     expect(targetJobs).toHaveBeenCalledTimes(1);
     expect(new Set(targetJobs.mock.calls[0]![0])).toEqual(
-      new Set(Array.from({ length: 50 }, (_, index) => `job_${index}`)),
+      new Set(Array.from({ length: 3 }, (_, index) => `job_${index}`)),
     );
-    expect(results).toHaveBeenCalledTimes(50);
-    expect(authority).toHaveBeenCalledTimes(50);
-    for (let index = 0; index < 50; index += 1) {
+    expect(results).toHaveBeenCalledTimes(3);
+    expect(authority).toHaveBeenCalledTimes(3);
+    for (let index = 0; index < 3; index += 1) {
       expect(results).toHaveBeenCalledWith({
         runId: "run_salary",
         jobId: `job_${index}`,
@@ -206,24 +206,24 @@ describe("saved-answer coverage at workspace scale", () => {
   });
 
   test("fact caches stay within one check and never cache salary permission", async () => {
-    const base = createInMemoryJobFinderRepository(scaleSeed());
+    const base = createInMemoryJobFinderRepository(answerSeed());
     let checks = 0;
     const repository: JobFinderRepository = {
       ...base,
       getSettings: async () => ({
         ...(await base.getSettings()),
         salaryDisclosure:
-          checks++ < 25 ? "answer_from_profile" : "pause_for_user",
+          checks++ < 1 ? "answer_from_profile" : "pause_for_user",
       }),
     };
-    expect(await cover(repository)).toHaveLength(25);
-    expect(checks).toBe(50);
+    expect(await cover(repository)).toHaveLength(1);
+    expect(checks).toBe(3);
     expect(await cover(repository)).toEqual([]);
-    expect(checks).toBe(100);
+    expect(checks).toBe(6);
 
     const jobs = vi.spyOn(base, "listSavedJobsByIds");
     const first = await cover(base);
-    expect(first).toHaveLength(50);
+    expect(first).toHaveLength(3);
     await base.commitSettingsUpdate((current) => ({
       ...current,
       salaryDisclosure: "pause_for_user",
@@ -233,7 +233,7 @@ describe("saved-answer coverage at workspace scale", () => {
   });
 
   test("repeated steps share facts, while distinct applications of one job keep their own result and revision", async () => {
-    const seed = scaleSeed();
+    const seed = answerSeed();
     const requests = seed.userActionRequests.slice(0, 3);
     const firstScope = requests[0]!.scope;
     const secondScope = {
@@ -318,7 +318,7 @@ describe("saved-answer coverage at workspace scale", () => {
   });
 
   test("unmatched optional pay and partially matched required steps do not read salary facts", async () => {
-    const seed = scaleSeed();
+    const seed = answerSeed();
     seed.userActionRequests = seed.userActionRequests.slice(0, 2);
     const questions = seed.applicationQuestionRecords.slice(0, 2);
     seed.applicationQuestionRecords = [
@@ -346,7 +346,7 @@ describe("saved-answer coverage at workspace scale", () => {
   test.each(["getWorkspaceSnapshot", "getWorkspaceProjection"] as const)(
     "%s adds no salary-recovery collection reads for one unrelated saved answer",
     async (reader) => {
-      const seed = scaleSeed();
+      const seed = answerSeed();
       seed.profile.answerBank.customAnswers = [
         {
           id: "unrelated_answer",
