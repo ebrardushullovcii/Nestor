@@ -172,7 +172,7 @@ async function setup(count: number, concurrency?: number) {
     isPaused: () => Promise.resolve(false),
     isHoldingCurrent: () => Promise.resolve(false),
     authorizeSending,
-    concurrency,
+    ...(concurrency === undefined ? {} : { concurrency }),
     onError,
   });
   cleanups.push(async () => {
