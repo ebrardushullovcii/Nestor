@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { AppCommandDefinition } from "./app-commands";
+
 import { ApplicationWorkStateSchema } from "./applications";
 import { JobIdSchema, type JobDetail } from "./jobs";
 
@@ -64,6 +66,16 @@ export const TrackerFilterSchema = z
   .strict();
 export type TrackerFilter = z.infer<typeof TrackerFilterSchema>;
 export type TrackerFilterInput = z.input<typeof TrackerFilterSchema>;
+
+/** Navigation applies this state to the same list the person uses. */
+export const AssistantTrackerViewSchema = TrackerFilterSchema.partial()
+  .extend({
+    sort: TrackerSortSchema.optional(),
+    selectedIds: z.array(JobIdSchema).max(50).optional(),
+    all: z.boolean().optional(),
+  })
+  .strict();
+export type AssistantTrackerView = z.infer<typeof AssistantTrackerViewSchema>;
 
 export const TrackerListQuerySchema = TrackerFilterSchema.extend({
   sort: TrackerSortSchema.default("recent"),
@@ -134,6 +146,17 @@ export interface TrackedApplication {
 
 const IdsSchema = z.array(JobIdSchema).min(1).max(1000);
 
+export const TrackerSelectionSchema = z.union([
+  z.object({ ids: IdsSchema }).strict(),
+  z
+    .object({
+      filter: TrackerFilterSchema,
+      except: z.array(JobIdSchema).max(1000).default([]),
+    })
+    .strict(),
+]);
+export type TrackerSelectionInput = z.input<typeof TrackerSelectionSchema>;
+
 export const AddTrackerEventInputSchema = z
   .object({
     jobId: JobIdSchema,
@@ -168,65 +191,100 @@ export const TrackerViewSchema = z.object({
 });
 export type TrackerView = z.infer<typeof TrackerViewSchema>;
 
+export const TrackerExportInputSchema = TrackerFilterSchema.extend({
+  sort: TrackerSortSchema.default("recent"),
+}).strict();
+export type TrackerExportInput = z.input<typeof TrackerExportInputSchema>;
+
 /** The tracker's commands; the screen and the Assistant both call these. */
 export const TRACKER_COMMANDS = {
+  export_applications: {
+    effect: "local_write",
+    description:
+      "Exports the Applications matching this filter and sort as CSV. The person chooses the file. Report only the outputPath returned; null means cancelled.",
+    input: TrackerExportInputSchema,
+  },
+  list_tracker_agenda: {
+    effect: "read",
+    description:
+      "Open interviews and reminders due by the next days, earliest first, including overdue entries. Each entry has its jobId and an ISO date with timezone; display dates in the person's timezone.",
+    input: z
+      .object({
+        days: z.number().int().min(1).max(60).default(14),
+        limit: z.number().int().min(1).max(100).default(40),
+      })
+      .strict(),
+  },
   list_applications: {
+    effect: "read",
     description:
       "One page of applications with their status (applying, applied, replied, assessment, interview, offer, rejected, withdrawn, no_reply), Apply's step while applying, tags and the next interview or reminder. Filter by statuses, tag, text, due follow-ups or applications quiet for some days.",
     input: TrackerListQuerySchema,
   },
   get_application: {
+    effect: "read",
     description:
       "One application in full: the listing, its status and its history of replies, interviews, reminders, notes and status changes.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
   set_status: {
+    effect: "local_write",
     description:
-      "Moves applications to a status after they were sent: replied, assessment, interview, offer, rejected, withdrawn, no_reply or back to applied. Returns an undoId for undo_status.",
+      "Moves applications by IDs or the whole filtered selection (except some) to a status after they were sent: replied, assessment, interview, offer, rejected, withdrawn, no_reply or back to applied. Returns an undoId for undo_tracker_change.",
     input: z
       .object({
-        ids: IdsSchema,
+        selection: TrackerSelectionSchema,
         status: TrackerStatusSchema.exclude(["applying"]),
       })
       .strict(),
   },
-  undo_status: {
-    description: "Puts back the statuses one set_status changed.",
+  undo_tracker_change: {
+    effect: "local_write",
+    description:
+      "Undoes one tracker change by undoId, preserving any later edits. Returns changed and skipped counts.",
     input: z.object({ undoId: z.number().int().positive() }).strict(),
   },
   add_event: {
+    effect: "local_write",
     description:
       "Logs a reply, schedules an interview, sets a reminder or adds a note on one application.",
     input: AddTrackerEventInputSchema,
   },
   update_event: {
+    effect: "local_write",
     description:
       "Edits a reply, interview, reminder or note, or marks an interview or reminder done (done: true) or open again.",
     input: UpdateTrackerEventInputSchema,
   },
   delete_event: {
+    effect: "local_write",
     description: "Deletes a reply, interview, reminder or note.",
     input: z.object({ id: z.number().int().positive() }).strict(),
   },
   set_tags: {
-    description: "Adds and removes tags on applications.",
+    effect: "local_write",
+    description:
+      "Adds and removes tags on applications by IDs or the whole filtered selection (except some).",
     input: z
       .object({
-        ids: IdsSchema,
+        selection: TrackerSelectionSchema,
         add: z.array(z.string().trim().min(1).max(60)).max(20).default([]),
         remove: z.array(z.string().trim().min(1).max(60)).max(20).default([]),
       })
       .strict(),
   },
   list_tags: {
+    effect: "read",
     description: "Every tag in use, with how many applications carry it.",
     input: z.object({}).strict(),
   },
   list_views: {
+    effect: "read",
     description: "The saved views: a named filter and sort.",
     input: z.object({}).strict(),
   },
   save_view: {
+    effect: "local_write",
     description:
       "Saves a filter and sort under a name; the same name replaces it.",
     input: z
@@ -238,10 +296,11 @@ export const TRACKER_COMMANDS = {
       .strict(),
   },
   delete_view: {
+    effect: "local_write",
     description: "Deletes a saved view.",
     input: z.object({ id: z.number().int().positive() }).strict(),
   },
-} as const;
+} as const satisfies Record<string, AppCommandDefinition>;
 
 export type TrackerCommandName = keyof typeof TRACKER_COMMANDS;
 export type TrackerCommandInput<K extends TrackerCommandName> = z.input<
@@ -252,29 +311,32 @@ export type TrackerCommandParsedInput<K extends TrackerCommandName> = z.output<
   (typeof TRACKER_COMMANDS)[K]["input"]
 >;
 
+export interface TrackerChange {
+  undoId: number | null;
+  undoCount: number;
+}
+
 export interface TrackerCommandOutputs {
+  export_applications: TrackerExportResult;
+  list_tracker_agenda: { jobId: number; job: string; event: TrackerEvent }[];
   list_applications: TrackerPage;
   get_application: TrackedApplication | null;
-  set_status: { changed: number; undoId: number | null };
-  undo_status: { changed: number };
-  add_event: TrackerEvent;
-  update_event: TrackerEvent;
-  delete_event: { deleted: boolean };
-  set_tags: { changed: number };
+  set_status: { changed: number } & TrackerChange;
+  undo_tracker_change: { changed: number; skipped: number };
+  add_event: TrackerEvent & TrackerChange;
+  update_event: TrackerEvent & TrackerChange;
+  delete_event: { deleted: boolean } & TrackerChange;
+  set_tags: { changed: number } & TrackerChange;
   list_tags: { tags: { tag: string; count: number }[] };
   list_views: { views: TrackerView[] };
-  save_view: TrackerView;
-  delete_view: { deleted: boolean };
+  save_view: TrackerView & TrackerChange;
+  delete_view: { deleted: boolean } & TrackerChange;
 }
 export type TrackerCommandOutput<K extends TrackerCommandName> =
   TrackerCommandOutputs[K];
 
 export const TRACKER_RUN_CHANNEL = "tracker:run";
 export const TRACKER_EXPORT_CHANNEL = "tracker:export";
-export const TrackerExportInputSchema = TrackerFilterSchema.extend({
-  sort: TrackerSortSchema.default("recent"),
-}).strict();
-export type TrackerExportInput = z.input<typeof TrackerExportInputSchema>;
 /** What Export did: the file it wrote and how many rows, or null when cancelled. */
 export interface TrackerExportResult {
   outputPath: string | null;

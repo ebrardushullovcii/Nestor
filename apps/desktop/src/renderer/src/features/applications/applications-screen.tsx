@@ -1,16 +1,19 @@
 import {
   TRACKER_STATUS_LABEL,
+  matchesAssistantListView,
   trackerStatusValues,
   type TrackerFilterInput,
+  type TrackerFilter,
   type TrackerRow,
   type TrackerSort,
   type TrackerStatus,
   type TrackerStatusCounts,
   type TrackerView,
+  type TrackerSelectionInput,
 } from "@nestor/contracts";
 import { Download, Save } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
@@ -37,7 +40,14 @@ import {
 } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
 
-import { ApplicationDetail, useSetStatus } from "./application-detail";
+import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
+import { useAssistantTrackerView } from "@renderer/features/job-lists/use-assistant-list-view";
+
+import {
+  ApplicationDetail,
+  useSetStatus,
+  useTrackerChangeToast,
+} from "./application-detail";
 import { ApplicationsBoard } from "./applications-board";
 import {
   countGroup,
@@ -91,39 +101,15 @@ function readPrefs(): Prefs {
   }
 }
 
-/** The filter a view or the chips describe, with defaults left out. */
-interface FilterState {
-  group: string | null;
-  tag: string | null;
-  text: string;
-  due: boolean;
-  quiet: boolean;
-  sort: TrackerSort;
-}
-
+type FilterState = TrackerFilter & { sort: TrackerSort };
 const NO_FILTER: FilterState = {
-  group: null,
+  statuses: [],
   tag: null,
   text: "",
   due: false,
-  quiet: false,
+  quietForDays: null,
   sort: "recent",
 };
-
-function toQuery(
-  state: FilterState,
-): TrackerFilterInput & { sort: TrackerSort } {
-  const statuses =
-    STAGE_GROUPS.find((group) => group.id === state.group)?.statuses ?? [];
-  return {
-    statuses: [...statuses],
-    tag: state.tag,
-    text: state.text,
-    due: state.due,
-    quietForDays: state.quiet ? QUIET_DAYS : null,
-    sort: state.sort,
-  };
-}
 
 /**
  * Applications: every application from the moment Apply takes it, where it
@@ -133,6 +119,7 @@ function toQuery(
 export function ApplicationsScreen() {
   const { showToast } = useToast();
   const setStatus = useSetStatus();
+  const showChange = useTrackerChangeToast();
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
   const [filter, setFilter] = useState<FilterState>(NO_FILTER);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -141,7 +128,13 @@ export function ApplicationsScreen() {
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
   const [naming, setNaming] = useState<string | null>(null);
   const [dueCount, setDueCount] = useState(0);
-  const query = useMemo(() => toQuery(filter), [filter]);
+  const query = filter;
+  const groupId =
+    STAGE_GROUPS.find(
+      (group) =>
+        group.statuses.length === filter.statuses.length &&
+        group.statuses.every((status) => filter.statuses.includes(status)),
+    )?.id ?? null;
 
   const list = useStoreList<TrackerRow, TrackerStatusCounts>({
     key: JSON.stringify(query),
@@ -181,10 +174,11 @@ export function ApplicationsScreen() {
 
   // `?jobId=` opens that application, for links from Home and the Assistant.
   const [searchParams] = useSearchParams();
+  const { key: navigationKey } = useLocation();
   const linked = Number(searchParams.get("jobId") ?? "");
   useEffect(() => {
     if (Number.isInteger(linked) && linked > 0) setActiveId(linked);
-  }, [linked]);
+  }, [linked, navigationKey]);
 
   // A new list starts with nothing ticked; its first application opens.
   useEffect(() => setSelection(NO_SELECTION), [query]);
@@ -193,17 +187,77 @@ export function ApplicationsScreen() {
       setActiveId(list.rows[0]?.id ?? null);
   }, [activeId, list.loading, list.rows]);
 
+  useAssistantTrackerView(searchParams.get("applications"), {
+    requestId: navigationKey,
+    current: query,
+    setSelection,
+    applyView(view) {
+      setFilter((current) => {
+        const next = {
+          statuses: view.statuses ?? current.statuses,
+          tag: view.tag === undefined ? current.tag : view.tag,
+          text: view.text ?? current.text,
+          due: view.due ?? current.due,
+          quietForDays:
+            view.quietForDays === undefined
+              ? current.quietForDays
+              : view.quietForDays,
+          sort: view.sort ?? current.sort,
+        };
+        return matchesAssistantListView(current, next) ? current : next;
+      });
+      setPrefs((current) => ({ ...current, layout: "list" }));
+    },
+  });
+
   const latest = useRef({ selection, activeId, query, list });
   latest.current = { selection, activeId, query, list };
+  useAssistantContextSource("applications", () => {
+    const { selection, activeId, query, list } = latest.current;
+    const active = list.rows.find((row) => row.id === activeId);
+    return {
+      screen: "applications",
+      focus:
+        activeId === null
+          ? null
+          : {
+              kind: "application",
+              id: String(activeId),
+              label: active ? `${active.title} at ${active.company}` : null,
+            },
+      list: {
+        listKind: "applications",
+        selectedIds: list.rows
+          .filter((row) => isSelected(selection, row.id))
+          .map((row) => String(row.id)),
+        displayedIds: list.rows.map((row) => String(row.id)),
+        filteredIds: [],
+        totalFilteredCount: list.total,
+        filterSummary: JSON.stringify({
+          ...query,
+          allSelected: selection.all,
+          except: selection.all ? [...selection.ids] : [],
+        }),
+        campaignId: null,
+      },
+    };
+  });
 
   /** The ticked applications on screen, or the open one. */
-  const targetIds = useCallback((): number[] => {
-    const { selection, activeId, list } = latest.current;
-    if (selection.all || selection.ids.size > 0)
-      return list.rows
-        .filter((row) => isSelected(selection, row.id))
-        .map((row) => row.id);
-    return activeId !== null ? [activeId] : [];
+  const target = useCallback((): TrackerSelectionInput | null => {
+    const { selection, activeId, query } = latest.current;
+    if (selection.all) {
+      const filter = {
+        statuses: query.statuses,
+        tag: query.tag,
+        text: query.text,
+        due: query.due,
+        quietForDays: query.quietForDays,
+      };
+      return { filter, except: [...selection.ids] };
+    }
+    if (selection.ids.size) return { ids: [...selection.ids] };
+    return activeId === null ? null : { ids: [activeId] };
   }, []);
 
   const toggle = (id: number, shiftKey: boolean) =>
@@ -241,8 +295,12 @@ export function ApplicationsScreen() {
   const saveView = async (name: string) => {
     const { sort, ...filter } = query;
     try {
-      await window.nestor.tracker.run("save_view", { name, filter, sort });
-      showToast({ title: `Saved the view ${name}` });
+      const result = await window.nestor.tracker.run("save_view", {
+        name,
+        filter,
+        sort,
+      });
+      showChange(`Saved the view ${name}`, result);
       setNaming(null);
       loadSide();
     } catch (error) {
@@ -250,24 +308,8 @@ export function ApplicationsScreen() {
     }
   };
 
-  const applyView = (view: TrackerView) => {
-    const group =
-      STAGE_GROUPS.find(
-        (candidate) =>
-          candidate.statuses.length === view.filter.statuses.length &&
-          candidate.statuses.every((status) =>
-            view.filter.statuses.includes(status),
-          ),
-      )?.id ?? null;
-    setFilter({
-      group,
-      tag: view.filter.tag,
-      text: view.filter.text,
-      due: view.filter.due,
-      quiet: view.filter.quietForDays !== null,
-      sort: view.sort,
-    });
-  };
+  const applyView = (view: TrackerView) =>
+    setFilter({ ...view.filter, sort: view.sort });
 
   const counts = list.counts;
   const total = trackerStatusValues.reduce((sum, s) => sum + counts[s], 0);
@@ -281,21 +323,21 @@ export function ApplicationsScreen() {
         role="group"
       >
         <FilterChip
-          active={filter.group === null}
+          active={filter.statuses.length === 0}
           count={total}
           label="All"
-          onClick={() => setFilter((f) => ({ ...f, group: null }))}
+          onClick={() => setFilter((f) => ({ ...f, statuses: [] }))}
         />
         {STAGE_GROUPS.map((group) => (
           <FilterChip
-            active={filter.group === group.id}
+            active={groupId === group.id}
             count={countGroup(counts, group.statuses)}
             key={group.id}
             label={group.label}
             onClick={() =>
               setFilter((f) => ({
                 ...f,
-                group: f.group === group.id ? null : group.id,
+                statuses: groupId === group.id ? [] : [...group.statuses],
               }))
             }
           />
@@ -307,9 +349,14 @@ export function ApplicationsScreen() {
         onClick={() => setFilter((f) => ({ ...f, due: !f.due }))}
       />
       <FilterChip
-        active={filter.quiet}
-        label={`Quiet ${QUIET_DAYS}+ days`}
-        onClick={() => setFilter((f) => ({ ...f, quiet: !f.quiet }))}
+        active={filter.quietForDays !== null}
+        label={`Quiet ${filter.quietForDays ?? QUIET_DAYS}+ days`}
+        onClick={() =>
+          setFilter((f) => ({
+            ...f,
+            quietForDays: f.quietForDays === null ? QUIET_DAYS : null,
+          }))
+        }
       />
       {tags.length > 0 ? (
         <select
@@ -429,6 +476,11 @@ export function ApplicationsScreen() {
     >
       {prefs.layout === "board" ? (
         <ListDetailLayout
+          applicationState={{
+            ...query,
+            selectedIds: [...selection.ids],
+            all: selection.all,
+          }}
           detail={detail}
           list={
             <ApplicationsBoard
@@ -441,6 +493,11 @@ export function ApplicationsScreen() {
         />
       ) : (
         <ListDetailLayout
+          applicationState={{
+            ...query,
+            selectedIds: [...selection.ids],
+            all: selection.all,
+          }}
           detail={detail}
           table
           list={
@@ -457,7 +514,9 @@ export function ApplicationsScreen() {
                         "applying"
                       >;
                       if (!status) return;
-                      void setStatus(targetIds(), status).then(() =>
+                      const selection = target();
+                      if (!selection) return;
+                      void setStatus(selection, status).then(() =>
                         setSelection(NO_SELECTION),
                       );
                     }}

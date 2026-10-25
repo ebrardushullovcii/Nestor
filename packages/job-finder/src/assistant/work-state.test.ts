@@ -71,41 +71,30 @@ it("reports a UI import even before the new import has a stored run and only off
   );
 });
 
-it("uses the running plan and the run's source IDs when another plan is selected", async () => {
+it("keeps the running search's source IDs when enabled sources change", async () => {
   const { workspaceService } = createWorkspaceServiceHarness();
   const snapshot = await workspaceService.getWorkspaceSnapshot();
-  const selected = snapshot.campaigns[0]!;
   const sources = Array.from({ length: 8 }, (_, index) => ({
     ...snapshot.searchPreferences.discovery.targets[0]!,
     id: `local_${index}`,
     label: `Synthetic source ${index}`,
     startingUrl: `http://127.0.0.1:47951/source-${index}`,
   }));
-  snapshot.campaigns.push({
-    ...selected,
-    id: "running_plan",
-    name: "Staff platform any location",
-    searchPreferences: {
-      ...selected.searchPreferences,
-      discovery: { ...selected.searchPreferences.discovery, targets: sources },
-    },
-  });
-  snapshot.activeCampaignId = selected.id;
+  snapshot.searchPreferences.discovery.targets = sources.map((source, index) => ({
+    ...source,
+    enabled: index !== 0,
+  }));
   snapshot.activeDiscoveryRun = DiscoveryRunRecordSchema.parse({
     id: "running_search",
     state: "running",
-    campaignId: "running_plan",
     startedAt: snapshot.generatedAt,
-    targetIds: sources.map((source) => source.id),
+    targetIds: sources.slice(0, 2).map((source) => source.id),
     searchIntent: "Staff platform anywhere",
   });
   const running = runningSearchState(snapshot)!;
-  expect(running.plan).toEqual({
-    id: "running_plan",
-    name: "Staff platform any location",
-  });
+  expect(running.plan).toBeNull();
   expect(running.sources.map((source) => source.url)).toEqual(
-    sources.map((source) => source.startingUrl),
+    sources.slice(0, 2).map((source) => source.startingUrl),
   );
   vi.spyOn(workspaceService, "getWorkspaceSnapshot").mockResolvedValue(
     snapshot,
@@ -129,8 +118,8 @@ it("uses the running plan and the run's source IDs when another plan is selected
   );
   expect(summary.data).toMatchObject({
     search: { running },
-    selectedSearchPlan: { id: selected.id },
   });
+  expect(summary.data).not.toHaveProperty("selectedSearchPlan");
 });
 
 it("shows current approval and saved level, instead of an earlier approval claim", async () => {

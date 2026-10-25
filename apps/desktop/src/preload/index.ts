@@ -1579,7 +1579,7 @@ const desktopApi = {
     ...(testApiEnabled
       ? {
           test: {
-            loadApplicationsStoreDemo: (input: { sourceUrl: string }) =>
+            loadApplicationsStoreDemo: (input: { sourceUrl: string; trackApplications?: boolean }) =>
               ipcRenderer
                 .invoke(
                   "job-finder:test-load-applications-store-demo",

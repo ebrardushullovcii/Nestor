@@ -254,7 +254,7 @@ export function assistantModelToolDefinition(definition: AssistantToolDefinition
     function: {
       name: definition.name,
       description: definition.description,
-      get parameters() { return receiptReplyTools.has(definition.name) ? {
+      get parameters() { return receiptReplyTools.has(definition.name) && !("complete" in definition.parameters.properties) ? {
         ...definition.parameters,
         properties: { ...definition.parameters.properties, complete: { type: "boolean", description: "True only when this single action completes the person's entire request. Its verified receipt becomes the reply. Leave false for advice, multiple steps or a requested explanation." } },
       } : definition.parameters; },
@@ -465,9 +465,9 @@ export function toConversationTool(
         typeof parsedJson === "object" && parsedJson !== null
           ? { ...(parsedJson as Record<string, unknown>) }
           : {};
-      delete record.status;
-      const complete = record.complete === true && receiptReplyTools.has(definition.name);
-      delete record.complete;
+      const hasCompletionHint = receiptReplyTools.has(definition.name) && !("complete" in definition.parameters.properties);
+      const complete = hasCompletionHint && record.complete === true;
+      if (hasCompletionHint) delete record.complete;
       try {
         await resolvePageJobReferences(definition.name, record, context);
       } catch {

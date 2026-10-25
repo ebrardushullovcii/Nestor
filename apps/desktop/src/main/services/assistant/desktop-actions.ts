@@ -15,7 +15,7 @@ import {
 import { buildWorkspaceFileExport } from "../job-finder/workspace-file-exports";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
-import { writeExportFile } from "./tracker-export-file";
+import { writeExportFile } from "./write-export-file";
 import {
   resetJobFinderBrowser,
   resetJobFinderWorkspace,

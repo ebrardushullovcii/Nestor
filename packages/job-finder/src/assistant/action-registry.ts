@@ -724,13 +724,6 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.updateAppearanceTheme(i.appearanceTheme),
     { name: "set_appearance", custom: true },
   ),
-  "update-tracker-crm": action(
-    C.ApplicationCrmSettingsSchema,
-    "tracking",
-    "local",
-    "Change reminders, no-response rules and tracker settings.",
-    (i, c) => c.service.updateTrackerCrm(i),
-  ),
   "set-activity-control": action(
     C.SetJobFinderActivityControlInputSchema,
     "settings",
@@ -954,7 +947,7 @@ export const JOB_FINDER_ACTIONS = {
     "Read an application's state, questions and receipts.",
     (i, c) =>
       c.service.getApplyRunDetails(i.runId, i.jobId, i.applicationRecordId),
-    { name: "get_application", custom: true },
+    { name: "get_application_run", custom: true },
   ),
   "clear-application-answer": action(
     C.ClearApplicationAnswerCommandSchema,
@@ -983,28 +976,6 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Undo moving an application back to Shortlisted.",
     (i, c) => c.service.undoReturnApplicationToShortlist(i.jobId),
-  ),
-  "mutate-application-crm": action(
-    C.ApplicationCrmMutationInputSchema,
-    "tracking",
-    "local",
-    "Edit application stage, notes, contacts, interviews or archive state.",
-    (i, c) => c.service.mutateApplicationCrm(i),
-  ),
-  "mutate-application-crm-bulk-stage": action(
-    C.ApplicationCrmBulkStageMutationInputSchema,
-    "tracking",
-    "local",
-    "Change the stage of several applications.",
-    (i, c) => c.service.mutateApplicationCrmBulkStage(i),
-    { name: "set_stage_for_applications", custom: true },
-  ),
-  "run-application-no-response-automation": action(
-    empty,
-    "tracking",
-    "local",
-    "Run due no-response tracker rules.",
-    (_i, c) => c.service.runApplicationNoResponseAutomation(),
   ),
 } as const;
 

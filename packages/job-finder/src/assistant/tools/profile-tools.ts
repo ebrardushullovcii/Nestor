@@ -1107,9 +1107,10 @@ export async function undoReceipt(
     try {
       const result = await command.execute(command.input.parse(undo.input), context);
       if (undo.expectedCount !== undefined) {
-        const moved = z.object({ moved: z.number() }).parse(result.data).moved;
-        if (moved > 0) undone.push(...receipt.fieldLabels);
-        if (moved < undo.expectedCount) conflicts.push("Jobs changed since this move");
+          const outcome = z.union([z.object({ moved: z.number() }), z.object({ changed: z.number() })]).parse(result.data);
+          const changed = "moved" in outcome ? outcome.moved : outcome.changed;
+          if (changed > 0) undone.push(...receipt.fieldLabels);
+          if (changed < undo.expectedCount) conflicts.push(...receipt.fieldLabels);
       } else undone.push(...receipt.fieldLabels);
     } catch (error) {
       if (error instanceof Error && /changed since/iu.test(error.message))

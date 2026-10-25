@@ -80,7 +80,7 @@ describe("applications tracker", () => {
     expect(tracker.counts()).toMatchObject({ applied: 1, rejected: 2 });
     expect(tracker.events(ids[0]!)[0]?.title).toBe("Rejected");
 
-    tracker.undoStatus(undoId!);
+    tracker.undoChange(undoId!);
     expect(tracker.counts()).toMatchObject({ applied: 3, rejected: 0 });
     expect(tracker.events(ids[0]!).some((e) => e.title === "Rejected")).toBe(
       false,
@@ -156,5 +156,99 @@ describe("applications tracker", () => {
     );
     expect(new Set(seen).size).toBe(5);
     expect(third.nextCursor).toBeNull();
+  });
+  it("undoes each status and note independently, preserving a later status and edited note", () => {
+    const { tracker, ids, send } = sent(1);
+    send(ids);
+    const id = ids[0]!;
+    const first = tracker.setStatus([id], "rejected");
+    const note = tracker.addEvent({
+      jobId: id,
+      kind: "note",
+      title: "Recruiter asked for samples",
+    });
+    tracker.setStatus([id], "offer");
+    const oldStatus = tracker.undoChange(first.undoId!);
+    expect(oldStatus.skipped).toBe(1);
+    expect(tracker.getRow(id)?.status).toBe("offer");
+    tracker.updateEvent({ id: note.id, title: "Samples sent" });
+    expect(tracker.undoChange(note.undoId!).changed).toBe(0);
+    expect(tracker.events(id).find((e) => e.id === note.id)?.title).toBe(
+      "Samples sent",
+    );
+    const second = tracker.addEvent({
+      jobId: id,
+      kind: "note",
+      title: "Asked about start date",
+    });
+    tracker.undoChange(second.undoId!);
+    expect(tracker.events(id).map((e) => e.id)).not.toContain(second.id);
+  });
+
+  it("restores a deleted interview, next date and agenda, and undoes its automatic status", () => {
+    const { tracker, ids, send } = sent(1);
+    send(ids);
+    const id = ids[0]!;
+    const interview = tracker.addEvent({
+      jobId: id,
+      kind: "interview",
+      title: "Phone interview",
+      dueAt: new Date(Date.now() + 86400000).toISOString(),
+    });
+    expect(tracker.getRow(id)?.status).toBe("interview");
+    const deleted = tracker.deleteEvent(interview.id);
+    expect(tracker.agenda(14, 40)).toEqual([]);
+    tracker.undoChange(deleted.undoId!);
+    expect(tracker.getRow(id)?.nextTitle).toBe(interview.title);
+    expect(tracker.agenda(14, 40)[0]?.event.id).toBe(interview.id);
+    tracker.undoChange(interview.undoId!);
+    expect(tracker.getRow(id)).toMatchObject({
+      status: "applied",
+      nextAt: null,
+    });
+  });
+
+  it("undoes tags and saved views without removing later tags or overwriting a reused view name", () => {
+    const { tracker, ids, send } = sent(1);
+    send(ids);
+    const tags = tracker.setTags(ids, ["priority"], []);
+    tracker.setTags(ids, ["remote"], []);
+    tracker.undoChange(tags.undoId!);
+    expect(tracker.getRow(ids[0]!)?.tags).toEqual(["remote"]);
+    const view = tracker.saveView(
+      "Interviews",
+      {
+        statuses: ["interview"],
+        tag: null,
+        text: "",
+        due: false,
+        quietForDays: null,
+      },
+      "next",
+    );
+    const deleted = tracker.deleteView(view.id);
+    const replacement = tracker.saveView(
+      "Interviews",
+      { ...view.filter, statuses: ["offer"] },
+      "recent",
+    );
+    expect(tracker.undoChange(deleted.undoId!)).toMatchObject({
+      changed: 0,
+      skipped: 1,
+    });
+    expect(tracker.views().views[0]?.id).toBe(replacement.id);
+  });
+  it("moves the whole filtered selection beyond one page, except unticked applications", () => {
+    const { tracker, ids, send } = sent(205);
+    send(ids);
+    const selected = tracker.selectedIds({
+      filter: { statuses: ["applied"] },
+      except: [ids[0]!],
+    });
+    const result = tracker.setStatus(selected, "replied");
+    expect(result.changed).toBe(204);
+    expect(tracker.counts()).toMatchObject({ applied: 1, replied: 204 });
+    tracker.undoChange(result.undoId!);
+    expect(tracker.counts().applied).toBe(205);
   });
 });

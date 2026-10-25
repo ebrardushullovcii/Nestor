@@ -1,6 +1,7 @@
 import {
   AssistantJobViewSchema,
-  matchesAssistantJobView,
+  AssistantTrackerViewSchema,
+  matchesAssistantListView,
   type AssistantNavigationDisplay,
 } from "@nestor/contracts";
 
@@ -33,15 +34,7 @@ export async function waitForDisplayedDestination(
     const panel = shownElements('[role="tabpanel"][aria-labelledby]')[0];
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
-    const trackerMounted = [
-      ...shownElements("main h1, main h2, [role=main] h1, [role=main] h2"),
-    ].some((heading) => heading.textContent?.trim() === "Tracker");
-    const section =
-      actual.pathname === "/job-finder/profile"
-        ? profileSection
-        : trackerMounted
-          ? "tracker"
-          : null;
+    const section = actual.pathname === "/job-finder/profile" ? profileSection : null;
     const dialog = shownElements("[role]").find(
       (element) =>
         ["dialog", "alertdialog"].includes(
@@ -76,13 +69,13 @@ export async function waitForDisplayedDestination(
       [...expected.searchParams].every(
         ([key, value]) => actual.searchParams.get(key) === value,
       );
-    const expectedSection =
-      expected.searchParams.get("section") ??
-      (expected.searchParams.get("view") === "tracker" ? "tracker" : null);
+    const expectedSection = expected.searchParams.get("section");
     const contentMounted = expected.pathname.includes("/resume")
       ? shownElements("[data-resume-studio-content-area]").length > 0
       : expected.pathname === "/job-finder/profile"
         ? Boolean(panel)
+        : expected.pathname === "/job-finder/applications"
+          ? shownElements("main h1, [role=main] h1").some((heading) => heading.textContent?.trim() === "Applications")
         : Boolean(
             shownElements(
               "main h1, main h2, [role=main] h1, [role=main] h2",
@@ -97,15 +90,17 @@ export async function waitForDisplayedDestination(
         (element) => element.getAttribute("data-job-detail-id") === jobId,
       );
     let viewDisplayed = true;
-    const view = expected.searchParams.get("jobs");
+    const trackerView = expected.pathname === "/job-finder/applications";
+    const schema = trackerView ? AssistantTrackerViewSchema : AssistantJobViewSchema;
+    const view = expected.searchParams.get(trackerView ? "applications" : "jobs");
     if (view) {
       try {
-        const requested = AssistantJobViewSchema.parse(JSON.parse(view));
+        const requested = schema.parse(JSON.parse(view));
         const state = shownElements(
-          "main [data-job-list-state]",
-        )[0]?.getAttribute("data-job-list-state");
-        viewDisplayed = matchesAssistantJobView(
-          AssistantJobViewSchema.parse(JSON.parse(state ?? "null")),
+          trackerView ? "main [data-application-list-state]" : "main [data-job-list-state]",
+        )[0]?.getAttribute(trackerView ? "data-application-list-state" : "data-job-list-state");
+        viewDisplayed = matchesAssistantListView(
+          schema.parse(JSON.parse(state ?? "null")),
           requested,
         );
       } catch {

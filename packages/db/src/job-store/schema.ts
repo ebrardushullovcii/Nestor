@@ -12,7 +12,7 @@ import { TRACKER_SCHEMA } from "./tracker-schema";
 import { APPLICATION_SCHEMA } from "./application-schema";
 import { SEEN_CARDS_SCHEMA } from "./seen-cards";
 
-export const JOB_STORE_VERSION = 3;
+export const JOB_STORE_VERSION = 4;
 
 const JOBS = `
 CREATE TABLE IF NOT EXISTS jobs (

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { writeExportFile } from "./tracker-export-file";
+import { writeExportFile } from "./write-export-file";
 
 let directory: string | null = null;
 afterEach(async () => {

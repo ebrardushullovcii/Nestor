@@ -1,6 +1,5 @@
 import {
   AppearanceThemeSchema,
-  ApplicationCrmSettingsSchema,
   ApplicationPacketSchema,
   ApplyRunSchema,
   DiscoveryJobViewSchema,
@@ -97,7 +96,6 @@ const {
   mockSnoozeGroupedDecision,
   mockUpdateAppearanceTheme,
   mockUpdateApplicationDefaults,
-  mockUpdateTrackerCrm,
   mockUpdateWorkspaceBehavior,
   mockUpdateAiBehavior,
 } = vi.hoisted(() => ({
@@ -139,7 +137,6 @@ const {
   mockSnoozeGroupedDecision: vi.fn(),
   mockUpdateAppearanceTheme: vi.fn(),
   mockUpdateApplicationDefaults: vi.fn(),
-  mockUpdateTrackerCrm: vi.fn(),
   mockUpdateWorkspaceBehavior: vi.fn(),
   mockUpdateAiBehavior: vi.fn(),
 }));
@@ -2847,25 +2844,6 @@ describe("job-finder scoped settings routes", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("routes tracker CRM payloads to updateTrackerCrm and never through saveSettings", async () => {
-    const snapshot = createEmptyWorkspace("2026-08-22T10:01:00.000Z");
-    mockUpdateTrackerCrm.mockResolvedValue(snapshot);
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      updateTrackerCrm: mockUpdateTrackerCrm,
-    });
-
-    const input = ApplicationCrmSettingsSchema.parse({
-      noResponseAutomation: { enabled: true, afterDays: 7 },
-    });
-    const result = await registerAndFindHandler(
-      "job-finder:update-tracker-crm",
-    )({ sender: {} }, input);
-
-    expect(mockUpdateTrackerCrm).toHaveBeenCalledOnce();
-    expect(mockUpdateTrackerCrm).toHaveBeenCalledWith(input);
-    expect(answeredView(result)).toEqual(snapshot);
-  });
-
   it("routes workspace-behavior payloads to updateWorkspaceBehavior", async () => {
     const snapshot = createEmptyWorkspace("2026-08-22T10:02:00.000Z");
     mockUpdateWorkspaceBehavior.mockResolvedValue(snapshot);
@@ -2940,26 +2918,6 @@ describe("job-finder scoped settings routes", () => {
     ).rejects.toThrow();
 
     expect(mockUpdateApplicationDefaults).not.toHaveBeenCalled();
-  });
-
-  it("propagates scoped service failures so renderer save state can report them", async () => {
-    mockUpdateTrackerCrm.mockRejectedValue(
-      new Error("Tracker settings could not be committed."),
-    );
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      updateTrackerCrm: mockUpdateTrackerCrm,
-    });
-
-    const handler = registerAndFindHandler("job-finder:update-tracker-crm");
-
-    await expect(
-      handler(
-        { sender: {} },
-        ApplicationCrmSettingsSchema.parse({
-          noResponseAutomation: { enabled: false, afterDays: 30 },
-        }),
-      ),
-    ).rejects.toThrow(/could not be committed/);
   });
 });
 
@@ -3153,58 +3111,6 @@ describe("job-finder grouped manual-answer routes", () => {
       ),
     ).rejects.toThrow();
     expect(mockSnoozeGroupedDecision).not.toHaveBeenCalled();
-  });
-});
-
-describe("job-finder application CRM bulk stage route", () => {
-  const mockMutateApplicationCrmBulkStage = vi.fn();
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("validates one batch payload and returns one parsed workspace snapshot", async () => {
-    const snapshot = createEmptyWorkspace("2026-08-15T10:00:00.000Z");
-    mockMutateApplicationCrmBulkStage.mockResolvedValue(snapshot);
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      mutateApplicationCrmBulkStage: mockMutateApplicationCrmBulkStage,
-    });
-
-    const handlers = new Map<string, RegisteredHandler>();
-    const ipcMain = {
-      handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-        handlers.set(channel, handler);
-      }),
-    } as unknown as IpcMain;
-    registerJobFinderRouteHandlers(ipcMain);
-    const handler = handlers.get(
-      "job-finder:mutate-application-crm-bulk-stage",
-    );
-    if (!handler) {
-      throw new Error("Application CRM bulk stage handler was not registered.");
-    }
-
-    const result = await handler(
-      { sender: {} },
-      {
-        items: [
-          { applicationRecordId: "application_1", expectedRevision: 2 },
-          { applicationRecordId: "application_2", expectedRevision: 0 },
-        ],
-        stage: "reviewing",
-      },
-    );
-
-    expect(mockMutateApplicationCrmBulkStage).toHaveBeenCalledWith({
-      items: [
-        { applicationRecordId: "application_1", expectedRevision: 2 },
-        { applicationRecordId: "application_2", expectedRevision: 0 },
-      ],
-      stage: "reviewing",
-      customStageId: null,
-      note: null,
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 });
 

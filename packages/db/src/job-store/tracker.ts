@@ -3,6 +3,7 @@ import {
   TRACKER_STATUS_LABEL,
   TrackerFilterSchema,
   TrackerListQuerySchema,
+  TrackerSelectionSchema,
   UpdateTrackerEventInputSchema,
   trackerStatusValues,
   type AddTrackerEventInput,
@@ -15,13 +16,16 @@ import {
   type TrackerSort,
   type TrackerStatus,
   type TrackerStatusCounts,
+  type TrackerSelectionInput,
   type TrackerView,
   type UpdateTrackerEventInput,
 } from "@nestor/contracts";
+import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
 
 import type { JobStore } from "./job-store";
 import { toIso, toTextMatch } from "./job-list";
+import { createTrackerUndo } from "./tracker-undo";
 
 const DAY_MS = 86_400_000;
 const TOTAL_CAP = 1000;
@@ -116,6 +120,7 @@ export type TrackerStore = ReturnType<typeof createTrackerStore>;
 /** The Applications tracker. Every list, filter and count reads an index. */
 export function createTrackerStore(store: JobStore) {
   const { sql } = store;
+  const undo = createTrackerUndo(store);
   const changed = (ids: number[] | null) =>
     store.notify({
       cause: "tracker",
@@ -180,24 +185,21 @@ export function createTrackerStore(store: JobStore) {
     return row ?? null;
   };
 
-  const writeStatus = (
-    jobId: number,
-    status: TrackerStatus,
-    at: number,
-  ): void => {
-    sql("UPDATE tracker SET status = ?, status_at = ? WHERE job_id = ?").run(
-      status,
-      at,
-      jobId,
-    );
+  const writeStatus = (jobId: number, status: TrackerStatus, at: number) => {
     sql(
-      "INSERT INTO tracker_events (job_id, kind, at, title) VALUES (?, 'status', ?, ?)",
-    ).run(jobId, at, TRACKER_STATUS_LABEL[status]);
+      "UPDATE tracker SET status = ?, status_at = ?, status_change_id = ? WHERE job_id = ?",
+    ).run(status, at, randomUUID(), jobId);
+    return Number(
+      sql(
+        "INSERT INTO tracker_events (job_id, kind, at, title) VALUES (?, 'status', ?, ?)",
+      ).run(jobId, at, TRACKER_STATUS_LABEL[status]).lastInsertRowid,
+    );
   };
 
   return {
     counts,
     getRow,
+    undoChange: (id: number) => undo.undo(id),
 
     list(input: TrackerListQueryInput = {}): TrackerPage {
       const query = TrackerListQuerySchema.parse(input);
@@ -250,12 +252,45 @@ export function createTrackerStore(store: JobStore) {
       } while (cursor);
     },
 
+    agenda(days: number, limit: number) {
+      return (
+        sql(`SELECT e.*, j.title AS job_title, j.company FROM tracker_events e
+        JOIN jobs j ON j.id = e.job_id JOIN tracker t ON t.job_id = e.job_id
+        WHERE e.due_at IS NOT NULL AND e.done_at IS NULL AND e.kind IN ('interview', 'reminder')
+          AND e.due_at <= ? ORDER BY e.due_at, e.id LIMIT ?`).all(
+          Date.now() + days * DAY_MS,
+          limit,
+        ) as (EventRecord & {
+          job_id: number;
+          job_title: string;
+          company: string;
+        })[]
+      ).map((row) => ({
+        jobId: row.job_id,
+        job: `${row.job_title} at ${row.company}`,
+        event: toEvent(row),
+      }));
+    },
+
     events(jobId: number): TrackerEvent[] {
       return (
         sql(
           "SELECT * FROM tracker_events WHERE job_id = ? ORDER BY at DESC, id DESC LIMIT 500",
         ).all(jobId) as EventRecord[]
       ).map(toEvent);
+    },
+
+    selectedIds(input: TrackerSelectionInput): number[] {
+      const selection = TrackerSelectionSchema.parse(input);
+      if ("ids" in selection) return selection.ids;
+      const filter = toFilterSql(selection.filter, Date.now());
+      return (
+        sql(`SELECT t.job_id FROM tracker t JOIN jobs j ON j.id = t.job_id
+        WHERE ${filter.where} AND t.job_id NOT IN (SELECT value FROM json_each(?))`).all(
+          ...filter.params,
+          JSON.stringify(selection.except),
+        ) as { job_id: number }[]
+      ).map((row) => row.job_id);
     },
 
     setStatus(ids: readonly number[], status: TrackerStatus) {
@@ -269,54 +304,25 @@ export function createTrackerStore(store: JobStore) {
           status: TrackerStatus;
           status_at: number;
         }[];
-        if (current.length === 0) return { changed: 0, undoId: null };
-        const now = Date.now();
-        for (const row of current) writeStatus(row.job_id, status, now);
-        const undoId = Number(
-          sql("INSERT INTO tracker_undo (at, items_json) VALUES (?, ?)").run(
-            now,
-            JSON.stringify(current),
-          ).lastInsertRowid,
-        );
-        sql("DELETE FROM tracker_undo WHERE id <= ?").run(undoId - 50);
-        changed(current.map((row) => row.job_id));
-        return { changed: current.length, undoId };
-      });
-    },
-
-    undoStatus(undoId: number) {
-      return store.transaction(() => {
-        const undo = sql(
-          "SELECT items_json FROM tracker_undo WHERE id = ?",
-        ).get(undoId) as { items_json: string } | undefined;
-        if (!undo) return { changed: 0 };
-        const items = JSON.parse(undo.items_json) as {
-          job_id: number;
-          status: TrackerStatus;
-          status_at: number;
-        }[];
-        for (const item of items) {
-          sql(
-            "UPDATE tracker SET status = ?, status_at = ? WHERE job_id = ?",
-          ).run(item.status, item.status_at, item.job_id);
-          // The status change Undo takes back leaves no trace in the history.
-          sql(
-            `DELETE FROM tracker_events WHERE id = (
-               SELECT id FROM tracker_events WHERE job_id = ? AND kind = 'status'
-               ORDER BY at DESC, id DESC LIMIT 1)`,
-          ).run(item.job_id);
+        const change = undo.begin();
+        for (const row of current) {
+          change.capture({ table: "tracker", job_id: row.job_id });
+          const id = writeStatus(row.job_id, status, Date.now());
+          change.capture({ table: "tracker_events", id }, null);
         }
-        sql("DELETE FROM tracker_undo WHERE id = ?").run(undoId);
-        changed(items.map((item) => item.job_id));
-        return { changed: items.length };
+        const receipt = change.finish();
+        if (current.length) changed(current.map((row) => row.job_id));
+        return { changed: current.length, ...receipt };
       });
     },
 
-    addEvent(input: AddTrackerEventInput): TrackerEvent {
+    addEvent(input: AddTrackerEventInput) {
       const event = AddTrackerEventInputSchema.parse(input);
       return store.transaction(() => {
         if (!getRow(event.jobId))
           throw new Error("That job is not in Applications.");
+        const change = undo.begin();
+        change.capture({ table: "tracker", job_id: event.jobId });
         const now = Date.now();
         const id = Number(
           sql(
@@ -332,6 +338,7 @@ export function createTrackerStore(store: JobStore) {
             event.place,
           ).lastInsertRowid,
         );
+        change.capture({ table: "tracker_events", id }, null);
         // A reply or an interview is news: the application moves on with it.
         const row = getRow(event.jobId);
         const next: TrackerStatus | null =
@@ -345,17 +352,27 @@ export function createTrackerStore(store: JobStore) {
                 )
               ? "interview"
               : null;
-        if (next) writeStatus(event.jobId, next, now);
+        if (next)
+          change.capture(
+            {
+              table: "tracker_events",
+              id: writeStatus(event.jobId, next, now),
+            },
+            null,
+          );
         changed([event.jobId]);
-        return toEvent(getEvent(id)!);
+        return { ...toEvent(getEvent(id)!), ...change.finish() };
       });
     },
 
-    updateEvent(input: UpdateTrackerEventInput): TrackerEvent {
+    updateEvent(input: UpdateTrackerEventInput) {
       const patch = UpdateTrackerEventInputSchema.parse(input);
       return store.transaction(() => {
         const event = getEvent(patch.id);
-        if (!event) throw new Error("That entry no longer exists.");
+        if (!event || event.kind === "status")
+          throw new Error("That entry cannot be edited.");
+        const change = undo.begin();
+        change.capture({ table: "tracker_events", id: patch.id });
         sql(
           `UPDATE tracker_events SET title = ?, body = ?, due_at = ?, place = ?, done_at = ?
            WHERE id = ?`,
@@ -372,17 +389,20 @@ export function createTrackerStore(store: JobStore) {
           patch.id,
         );
         changed([event.job_id]);
-        return toEvent(getEvent(patch.id)!);
+        return { ...toEvent(getEvent(patch.id)!), ...change.finish() };
       });
     },
 
     deleteEvent(id: number) {
       return store.transaction(() => {
         const event = getEvent(id);
-        if (!event || event.kind === "status") return { deleted: false };
+        if (!event || event.kind === "status")
+          return { deleted: false, undoId: null, undoCount: 0 };
+        const change = undo.begin();
+        change.capture({ table: "tracker_events", id });
         sql("DELETE FROM tracker_events WHERE id = ?").run(id);
         changed([event.job_id]);
-        return { deleted: true };
+        return { deleted: true, ...change.finish() };
       });
     },
 
@@ -393,6 +413,10 @@ export function createTrackerStore(store: JobStore) {
     ) {
       return store.transaction(() => {
         const json = JSON.stringify(ids);
+        const change = undo.begin();
+        for (const job_id of new Set(ids))
+          for (const tag of new Set([...add, ...remove]))
+            change.capture({ table: "tracker_tags", job_id, tag });
         let changes = 0;
         for (const tag of add)
           changes += Number(
@@ -408,7 +432,7 @@ export function createTrackerStore(store: JobStore) {
             ).run(tag, json).changes,
           );
         if (changes > 0) changed([...ids]);
-        return { changed: changes };
+        return { changed: changes, ...change.finish() };
       });
     },
 
@@ -439,20 +463,38 @@ export function createTrackerStore(store: JobStore) {
     },
 
     saveView(name: string, filter: TrackerFilter, sort: TrackerSort) {
-      sql(
-        `INSERT INTO tracker_views (name, filter_json, sort) VALUES (?, ?, ?)
-         ON CONFLICT (name) DO UPDATE SET filter_json = excluded.filter_json, sort = excluded.sort`,
-      ).run(name, JSON.stringify(filter), sort);
-      return this.views().views.find((view) => view.name === name)!;
+      return store.transaction(() => {
+        const change = undo.begin();
+        const existing = this.views().views.find((view) => view.name === name);
+        if (existing)
+          change.capture({ table: "tracker_views", id: existing.id });
+        sql(`INSERT INTO tracker_views (name, filter_json, sort) VALUES (?, ?, ?)
+          ON CONFLICT (name) DO UPDATE SET filter_json = excluded.filter_json, sort = excluded.sort`).run(
+          name,
+          JSON.stringify(filter),
+          sort,
+        );
+        const view = this.views().views.find((view) => view.name === name)!;
+        if (!existing)
+          change.capture({ table: "tracker_views", id: view.id }, null);
+        const result = { ...view, ...change.finish() };
+        changed([]);
+        return result;
+      });
     },
 
     deleteView(id: number) {
-      return {
-        deleted:
+      return store.transaction(() => {
+        const change = undo.begin();
+        change.capture({ table: "tracker_views", id });
+        const deleted =
           Number(
             sql("DELETE FROM tracker_views WHERE id = ?").run(id).changes,
-          ) > 0,
-      };
+          ) > 0;
+        const result = { deleted, ...change.finish() };
+        if (deleted) changed([]);
+        return result;
+      });
     },
   };
 }

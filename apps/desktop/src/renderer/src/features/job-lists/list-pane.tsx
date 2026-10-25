@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useRef, type ReactNode } from "react";
-import type { AssistantJobView } from "@nestor/contracts";
+import type { AssistantJobView, AssistantTrackerView } from "@nestor/contracts";
 
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import { SelectableRow } from "@renderer/components/ui/selectable-row";
@@ -34,9 +34,11 @@ export function ListDetailLayout(props: {
   detail: ReactNode;
   table?: boolean;
   state?: AssistantJobView;
+  applicationState?: AssistantTrackerView;
 }) {
   return (
     <div
+      data-application-list-state={props.applicationState ? JSON.stringify(props.applicationState) : undefined}
       data-job-list-state={props.state ? JSON.stringify(props.state) : undefined}
       className={cn(
         "grid min-h-0 flex-1 gap-4 xl:grid-rows-[minmax(0,1fr)]",

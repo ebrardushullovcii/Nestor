@@ -384,7 +384,7 @@ it("R3-214 describes a combined Undo for edits sharing one receipt", () => {
 
 it("R3-200 directs a factual letter to the correct application's built-in editor and export", () => {
   expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "read get_application for the correct job",
+    "read get_application_run for the correct job",
   );
   for (const label of [
     "Application documents",

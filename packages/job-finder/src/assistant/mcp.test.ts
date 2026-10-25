@@ -7,7 +7,7 @@ import { createJobCommandRunner } from "../job-commands";
 import { assistantCommandTools } from "./command-tools";
 import { connectAssistantMcp } from "./mcp";
 import { buildAssistantToolCatalog } from "./tools";
-import type { AssistantToolContext } from "./tool-kit";
+import { toConversationTool, type AssistantToolContext } from "./tool-kit";
 
 function context(): AssistantToolContext {
   return {
@@ -125,4 +125,26 @@ it("discovers a newly registered command without another Assistant schema or too
   } finally {
     await mcp.close();
   }
+});
+
+
+it("preserves command fields named status and complete through the chat wrapper and MCP", async () => {
+  const catalog = {
+    save_status: {
+      effect: "local_write" as const,
+      description: "Save this status.",
+      input: z.object({ status: z.enum(["interview"]), complete: z.boolean() }).strict(),
+    },
+  };
+  const run = vi.fn((_name: "save_status", input: { status: "interview"; complete: boolean }) => Promise.resolve(input));
+  const commands = assistantCommandTools<typeof catalog, { save_status: { status: "interview"; complete: boolean } }>(catalog, run, { group: "tracking" });
+  const ctx = context();
+  ctx.session.now = () => "2026-10-25T12:00:00.000Z";
+  const mcp = await connectAssistantMcp(commands, ctx);
+  try {
+    const tool = toConversationTool(mcp.tools[0]!, ctx, { parts: [], activity: [], endTurn: null, touched: [] });
+    const result = await tool.execute(JSON.stringify({ status: "interview", complete: true }), { step: 1 });
+    expect(result).toMatchObject({ kind: "ok", status: "done" });
+    expect(run).toHaveBeenCalledWith("save_status", { status: "interview", complete: true });
+  } finally { await mcp.close(); }
 });

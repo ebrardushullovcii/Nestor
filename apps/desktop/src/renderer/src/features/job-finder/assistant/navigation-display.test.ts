@@ -27,30 +27,15 @@ it("acknowledges filters and selection only after the list actually applies them
   expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
 });
 
-it("acknowledges Tracker only when its mounted heading matches the requested route", async () => {
-  document.body.innerHTML = "<main><h1>Resume studio</h1></main>";
-  expect(
-    await waitForDisplayedDestination(
-      "/job-finder/applications?view=tracker",
-      () => "/job-finder/review-queue/job/resume",
-      0,
-    ),
-  ).toMatchObject({ status: "blocked" });
-  expect(
-    await waitForDisplayedDestination(
-      "/job-finder/applications?view=tracker",
-      () => "/job-finder/applications?view=tracker",
-      0,
-    ),
-  ).toMatchObject({ status: "blocked" });
-  document.body.innerHTML = "<main><h1>Tracker</h1></main>";
-  expect(
-    await waitForDisplayedDestination(
-      "/job-finder/applications?view=tracker",
-      () => "/job-finder/applications?view=tracker",
-      0,
-    ),
-  ).toMatchObject({ status: "displayed", section: "tracker", overlay: "none" });
+it("waits for the linked Application and its actual filter and selection", async () => {
+  const view = { statuses: ["interview"], selectedIds: [7] };
+  const route = `/job-finder/applications?jobId=7&applications=${encodeURIComponent(JSON.stringify(view))}`;
+  document.body.innerHTML = '<main><h1>Applications</h1><section data-job-detail-id="3"></section><div data-application-list-state="{}"></div></main>';
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.querySelector("section")!.setAttribute("data-job-detail-id", "7");
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.querySelector("[data-application-list-state]")!.setAttribute("data-application-list-state", JSON.stringify(view));
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed", section: null });
 });
 
 it("does not acknowledge a Profile query until the visible tab changes", async () => {
@@ -80,7 +65,7 @@ it("returns a blocked route and dialog state when unsaved edits prevent navigati
     '<main><h1>Resume studio</h1></main><div role="dialog">Save your changes</div>';
   expect(
     await waitForDisplayedDestination(
-      "/job-finder/applications?view=tracker",
+      "/job-finder/applications",
       () => "/job-finder/review-queue/job/resume",
       0,
     ),
@@ -92,7 +77,7 @@ it("returns a blocked route and dialog state when unsaved edits prevent navigati
 });
 
 it("does not acknowledge a route covered by the embedded browser", async () => {
-  document.body.innerHTML = "<main><h1>Tracker</h1></main>";
+  document.body.innerHTML = "<main><h1>Applications</h1></main>";
   (window as unknown as { nestor: unknown }).nestor = {
     browser: {
       getState: () =>
@@ -102,24 +87,12 @@ it("does not acknowledge a route covered by the embedded browser", async () => {
   try {
     expect(
       await waitForDisplayedDestination(
-        "/job-finder/applications?view=tracker",
-        () => "/job-finder/applications?view=tracker",
+        "/job-finder/applications",
+        () => "/job-finder/applications",
         0,
       ),
     ).toMatchObject({ status: "blocked", overlay: "browser" });
   } finally {
     delete (window as { nestor?: unknown }).nestor;
   }
-});
-
-it("does not mistake a Tracker heading in chat for the displayed app view", async () => {
-  document.body.innerHTML =
-    "<main><h1>Applications</h1></main><aside><h2>Tracker</h2></aside>";
-  expect(
-    await waitForDisplayedDestination(
-      "/job-finder/applications?view=tracker",
-      () => "/job-finder/applications?view=tracker",
-      0,
-    ),
-  ).toMatchObject({ status: "blocked", section: null });
 });

@@ -486,7 +486,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Applications",
     action: "See questions, answers, blocker",
     channels: ["job-finder:get-apply-run-details"],
-    coverage: tools("get_application", "list_applications"),
+    coverage: tools("get_application_run"),
   },
   {
     id: "apply.answer",
@@ -592,40 +592,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     coverage: tools("resolve_needs_you"),
   },
 
-  // Tracking
+  // Store commands are shared with Applications; their runtime tests exercise them over MCP.
   {
-    id: "tracking.stage",
+    id: "tracking.commands",
     screen: "Applications",
-    action: "Stage, notes, reminders, tags, interviews",
-    channels: ["job-finder:mutate-application-crm"],
-    coverage: tools("update_tracking"),
-  },
-  {
-    id: "tracking.bulk",
-    screen: "Applications",
-    action: "Move several to a stage",
-    channels: ["job-finder:mutate-application-crm-bulk-stage"],
-    coverage: tools("set_stage_for_applications"),
-  },
-  {
-    id: "tracking.export",
-    screen: "Applications",
-    action: "Export the tracker",
-    channels: ["job-finder:export-application-crm"],
-    coverage: tools("export_tracker"),
-  },
-  {
-    id: "tracking.no_response",
-    screen: "Settings",
-    action: "No-response automation",
-    channels: [
-      "job-finder:run-application-no-response-automation",
-      "job-finder:update-tracker-crm",
-    ],
-    coverage: tools(
-      "action_update_tracker_crm",
-      "action_run_application_no_response_automation",
-    ),
+    action: "Status, history, tags, saved views, export and per-change Undo",
+    channels: ["tracker:run", "tracker:export"],
+    coverage: tools("list_applications", "get_application", "set_status", "add_event", "update_event", "delete_event", "set_tags", "save_view", "delete_view", "export_applications", "undo_tracker_change", "list_tracker_agenda"),
   },
 
   // Settings

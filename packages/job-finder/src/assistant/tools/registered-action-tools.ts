@@ -63,30 +63,9 @@ export async function executeRegisteredAssistantAction(
       "Use the named assistant tool for that action; its grants and edit safeguards are required.",
     );
   }
-  const value =
-    actionId.startsWith("mutate-application-crm") &&
-    input &&
-    typeof input === "object"
-      ? { ...input, actor: "assistant" }
-      : input;
-  const parsed: unknown = action.input.parse(value);
+  const parsed: unknown = action.input.parse(input);
   context.session.assertCurrent();
-  // Removing nested notes/contacts/history is also hard to undo.
-  const destructiveMutation =
-    parsed &&
-    typeof parsed === "object" &&
-    "mutation" in parsed &&
-    parsed.mutation &&
-    typeof parsed.mutation === "object" &&
-    "type" in parsed.mutation &&
-    [
-      "remove_note",
-      "remove_contact",
-      "remove_reminder",
-      "remove_interview",
-      "remove_salary_offer_evidence",
-    ].includes(String(parsed.mutation.type));
-  if ((action.safety === "confirm" || destructiveMutation) && !confirmed) {
+  if (action.safety === "confirm" && !confirmed) {
     const { part } = await context.session.createProposal({
       kind: "job_finder_action",
       targetId: null,

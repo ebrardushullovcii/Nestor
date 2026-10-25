@@ -549,13 +549,8 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "needs_you.act": "Mark the first step waiting on me as done.",
   "needs_you.grouped":
     "Answer the work authorization question once for every application that asks.",
-  "tracking.stage":
+  "tracking.commands":
     "Move my Northwind application to Interview and add a note: first call on Monday.",
-  "tracking.bulk": "Move all my applications from last week to No response.",
-  "tracking.outcome": "I got an offer from Northwind. Record it.",
-  "tracking.export": "Export my application tracker as a spreadsheet.",
-  "tracking.no_response":
-    "After three weeks without a reply, mark applications as no response.",
   "companies.preference": "Prefer Northwind Labs in my results.",
   "companies.intelligence": "Add a note to Northwind Labs: design team of 12.",
   "settings.read": "What are my apply settings?",

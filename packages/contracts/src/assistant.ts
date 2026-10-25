@@ -89,7 +89,7 @@ export const AssistantListReferenceSchema = z
     displayedIds: z.array(IdSchema).max(300).default([]),
     filteredIds: z.array(IdSchema).max(3000).default([]),
     totalFilteredCount: z.number().int().nonnegative().default(0),
-    filterSummary: z.string().trim().max(400).nullable().default(null),
+    filterSummary: z.string().trim().max(4000).nullable().default(null),
     campaignId: IdSchema.nullable().default(null),
   })
   .strict();

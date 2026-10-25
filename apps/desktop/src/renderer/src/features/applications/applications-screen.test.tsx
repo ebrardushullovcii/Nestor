@@ -99,9 +99,9 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-function renderScreen() {
+function renderScreen(route = "/job-finder/applications") {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <ToastProvider>
         <ApplicationsScreen />
       </ToastProvider>
@@ -153,5 +153,68 @@ describe("Applications", () => {
     );
     await waitFor(() => expect(row.textContent).toContain("Applied"));
     expect(screen.getByRole("button", { name: "Applying 0" })).toBeTruthy();
+  });
+  it("applies the Assistant's filter, selection and focused application to the real list", async () => {
+    const view = {
+      statuses: ["applied"],
+      text: "Northfield 1",
+      selectedIds: [ids[0]!],
+    };
+    renderScreen(
+      `/job-finder/applications?jobId=${ids[0]}&applications=${encodeURIComponent(JSON.stringify(view))}`,
+    );
+    await waitFor(() => {
+      const state: unknown = JSON.parse(
+        document
+          .querySelector("[data-application-list-state]")!
+          .getAttribute("data-application-list-state")!,
+      );
+      expect(state).toMatchObject(view);
+    });
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 1",
+    });
+    expect(detail.getAttribute("data-job-detail-id")).toBe(String(ids[0]));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("list", { name: "Applications" })).queryByRole(
+          "button",
+          { name: /^Northfield 2 / },
+        ),
+      ).toBeNull(),
+    );
+  });
+
+  it("offers an independent Undo for a note and updates the history", async () => {
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 1 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 1",
+    });
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Note" }),
+    );
+    fireEvent.change(
+      within(detail).getByRole("textbox", { name: "Note title" }),
+      { target: { value: "Recruiter wants samples" } },
+    );
+    fireEvent.click(within(detail).getByRole("button", { name: "Add note" }));
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(
+      await within(detail).findByText("Recruiter wants samples", {
+        exact: false,
+      }),
+    ).toBeTruthy();
+    fireEvent.click(undo);
+    await waitFor(() =>
+      expect(
+        createTrackerStore(store)
+          .events(ids[0]!)
+          .filter((event) => event.kind === "note"),
+      ).toEqual([]),
+    );
+    expect(createTrackerStore(store).getRow(ids[0]!)?.status).toBe("applied");
   });
 });

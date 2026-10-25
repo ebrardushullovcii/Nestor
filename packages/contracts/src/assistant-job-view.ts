@@ -15,20 +15,15 @@ export const AssistantJobViewSchema = z
   .strict();
 export type AssistantJobView = z.infer<typeof AssistantJobViewSchema>;
 
-export function matchesAssistantJobView(
-  actual: AssistantJobView,
-  requested: AssistantJobView,
+export function matchesAssistantListView(
+  actual: object,
+  requested: object,
 ): boolean {
-  return (Object.keys(requested) as (keyof AssistantJobView)[]).every((key) => {
-    const expected = requested[key];
-    const value = actual[key];
-    if (!Array.isArray(expected) || !Array.isArray(value))
-      return expected === value;
-    const ids = [...expected].sort((a, b) => a - b);
-    const actualIds = [...value].sort((a, b) => a - b);
-    return (
-      ids.length === actualIds.length &&
-      ids.every((id, index) => id === actualIds[index])
-    );
+  return Object.entries(requested).every(([key, expected]) => {
+    const value = (actual as Record<string, unknown>)[key];
+    return Array.isArray(expected) && Array.isArray(value)
+      ? JSON.stringify((expected as unknown[]).slice().sort()) ===
+          JSON.stringify((value as unknown[]).slice().sort())
+      : expected === value;
   });
 }

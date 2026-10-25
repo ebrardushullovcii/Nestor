@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS tracker (
     'rejected', 'withdrawn', 'no_reply'
   )),
   status_at INTEGER NOT NULL,
+  status_change_id TEXT,
   applied_at INTEGER,
   -- The soonest open interview or reminder, kept by the event triggers.
   next_at INTEGER,
@@ -43,7 +44,7 @@ END;
 
 -- Replies, interviews, reminders, notes, and each status change.
 CREATE TABLE IF NOT EXISTS tracker_events (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('status', 'reply', 'interview', 'reminder', 'note')),
   at INTEGER NOT NULL,
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tracker_events (
   place TEXT
 );
 CREATE INDEX IF NOT EXISTS tracker_events_by_job ON tracker_events (job_id, at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS tracker_agenda ON tracker_events (due_at, id) WHERE due_at IS NOT NULL AND done_at IS NULL;
 CREATE INDEX IF NOT EXISTS tracker_events_open ON tracker_events (job_id, due_at)
   WHERE due_at IS NOT NULL AND done_at IS NULL;
 -- Interviews and replies by day, for Home's charts.
@@ -66,15 +68,15 @@ CREATE TABLE IF NOT EXISTS tracker_tags (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS tracker_tags_by_job ON tracker_tags (job_id, tag);
 
--- Status changes Undo can put back.
+-- Individual tracker changes Undo can put back without overwriting later edits.
 CREATE TABLE IF NOT EXISTS tracker_undo (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
   items_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tracker_views (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   filter_json TEXT NOT NULL,
   sort TEXT NOT NULL

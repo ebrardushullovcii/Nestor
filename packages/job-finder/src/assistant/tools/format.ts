@@ -151,12 +151,8 @@ export function compactApplication(record: ApplicationRecord) {
     next: record.nextActionLabel,
     last: record.lastActionLabel,
     blocker: record.latestBlocker?.summary ?? null,
-    stage: record.crm?.stage ?? null,
-    crmRevision: record.crm?.revision ?? 0,
     mode: record.automationMode,
     updatedAt: record.lastUpdatedAt,
-    appliedAt: record.crm?.appliedAt ?? null,
-    lastEmployerActivityAt: record.crm?.lastEmployerActivityAt ?? null,
   };
 }
 
@@ -390,67 +386,4 @@ export function outstandingReviews(snapshot: JobFinderWorkspaceSnapshot) {
     route: APPLICATION_ROUTE(record.id),
   }));
   return [...resumes, ...applications];
-}
-
-/**
- * What the tracker says is due: pending reminders and scheduled interviews,
- * overdue first, with the time zone each was saved in. One reading for the
- * workspace summary, the agenda tool and Home's wording, so "nothing needs
- * you" can never sit beside an overdue follow-up or tomorrow's interview.
- */
-export function trackerAgenda(
-  snapshot: Pick<JobFinderWorkspaceSnapshot, "applicationRecords">,
-  now: number,
-  horizonDays = 14,
-) {
-  const horizon = now + horizonDays * 86_400_000;
-  const items: {
-    kind: "reminder" | "interview";
-    applicationRecordId: string;
-    job: string;
-    title: string;
-    at: string;
-    timeZone: string | null;
-    overdue: boolean;
-  }[] = [];
-  for (const record of snapshot.applicationRecords) {
-    const job = `${record.title} at ${record.company}`;
-    for (const reminder of record.crm?.reminders ?? []) {
-      if (reminder.status !== "pending") continue;
-      const due = Date.parse(reminder.dueAt);
-      if (!Number.isFinite(due) || due > horizon) continue;
-      items.push({
-        kind: "reminder",
-        applicationRecordId: record.id,
-        job,
-        title: reminder.title,
-        at: reminder.dueAt,
-        timeZone: null,
-        overdue: due < now,
-      });
-    }
-    for (const interview of record.crm?.interviews ?? []) {
-      if (interview.status !== "scheduled") continue;
-      const starts = Date.parse(interview.startsAt);
-      if (!Number.isFinite(starts) || starts < now || starts > horizon) {
-        continue;
-      }
-      items.push({
-        kind: "interview",
-        applicationRecordId: record.id,
-        job,
-        title: interview.title,
-        at: interview.startsAt,
-        timeZone: interview.timeZone,
-        overdue: false,
-      });
-    }
-  }
-  // By instant, not by text: saved times can carry different UTC offsets.
-  return items
-    .map((item) => ({
-      ...item,
-      localTime: localDateTime(item.at, item.timeZone),
-    }))
-    .sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
 }
