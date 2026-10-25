@@ -14,6 +14,52 @@ import {
 import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
+  test("a person-held native form remains live when its automation Page detaches", async () => {
+    const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
+    const hasApplicationPageBinding = vi.fn(() => Promise.resolve(false));
+    const focusApplicationPageBinding = vi.fn(() => Promise.resolve(false));
+    const closed = {
+      resultId: "result",
+      state: "needs_preparing" as const,
+      reason: "reopen_failed" as const,
+    };
+    const wrapped = withEmbeddedBrowserActivity(
+      {
+        ...base,
+        hasApplicationPageBinding,
+        focusApplicationPageBinding,
+        getApplicationPageState: () => Promise.resolve(closed),
+        reopenApplicationPage: () => Promise.resolve(closed),
+      },
+      {
+        getApplicationTabIds: (key: string) =>
+          key === "result" ? ["native-form"] : [],
+        showTab: vi.fn(() => true),
+      } as unknown as EmbeddedBrowser,
+    );
+    await expect(
+      wrapped.hasApplicationPageBinding!("target_site", "result"),
+    ).resolves.toBe(true);
+    await expect(
+      wrapped.focusApplicationPageBinding!("target_site", "result"),
+    ).resolves.toBe(true);
+    await expect(
+      wrapped.getApplicationPageState!("target_site", "result"),
+    ).resolves.toMatchObject({ state: "open" });
+    await expect(
+      wrapped.reopenApplicationPage!("target_site", "result"),
+    ).resolves.toMatchObject({ state: "open" });
+    expect(focusApplicationPageBinding).not.toHaveBeenCalled();
+    expect(hasApplicationPageBinding).not.toHaveBeenCalled();
+    await expect(
+      wrapped.hasApplicationPageBinding!("target_site", "other-result"),
+    ).resolves.toBe(false);
+    expect(hasApplicationPageBinding).toHaveBeenCalledExactlyOnceWith(
+      "target_site",
+      "other-result",
+    );
+  });
+
   test("terminal cleanup reaches the host even when its automation page was detached", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const releaseApplicationPageBinding = vi.fn(() =>
@@ -28,25 +74,25 @@ describe("withEmbeddedBrowserActivity", () => {
       wrapped.releaseApplicationPageBinding!("target_site", "sent_result"),
     ).rejects.toThrow("Page detached");
     expect(releaseOwnedTabs).toHaveBeenCalledExactlyOnceWith("sent_result", {
-      keepForPerson: false,
+      finished: true,
     });
   });
 
-  test("a finished form the person has stays open as their tab", async () => {
+  test("terminal cleanup closes the person's completed form through the native host", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const releaseOwnedTabs = vi.fn();
     const wrapped = withEmbeddedBrowserActivity(
       {
         ...base,
-        releaseApplicationPageBinding: vi.fn(() => Promise.resolve(false)),
+        releaseApplicationPageBinding: vi.fn(() => Promise.resolve()),
       },
       { releaseOwnedTabs } as unknown as EmbeddedBrowser,
     );
     await expect(
       wrapped.releaseApplicationPageBinding!("target_site", "sent_result"),
-    ).resolves.toBe(false);
+    ).resolves.toBeUndefined();
     expect(releaseOwnedTabs).toHaveBeenCalledExactlyOnceWith("sent_result", {
-      keepForPerson: true,
+      finished: true,
     });
   });
 

@@ -20,6 +20,61 @@ test.each([
 });
 
 describe("application preparation ownership", () => {
+  test("concurrent hands both wait for a busy redirect destination", async () => {
+    const scheduler = createApplicationPreparationScheduler(2);
+    const moving = await scheduler.acquire("https://first.example/apply");
+    const busy = await scheduler.acquire("https://second.example/apply");
+    let moved = 0;
+    const moves = [
+      moving.moveTo("https://second.example/form"),
+      moving.moveTo("https://second.example/form"),
+    ].map((pending) =>
+      pending.then(() => {
+        moved += 1;
+      }),
+    );
+    await tick();
+    expect(moved).toBe(0);
+    busy.release();
+    await Promise.all(moves);
+    expect(moved).toBe(2);
+    moving.release();
+  });
+
+  test("releasing a redirect waiter settles its pending hands and frees its slot", async () => {
+    const scheduler = createApplicationPreparationScheduler(2);
+    const moving = await scheduler.acquire("https://first.example/apply");
+    const busy = await scheduler.acquire("https://second.example/apply");
+    const pending = moving.moveTo("https://second.example/form");
+    await tick();
+    moving.release();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    const other = await scheduler.acquire("https://third.example/apply");
+    other.release();
+    busy.release();
+  });
+
+  test("an unbounded requested capacity still admits at most sixteen workers", async () => {
+    const scheduler = createApplicationPreparationScheduler(Infinity);
+    const leases = await Promise.all(
+      Array.from({ length: 16 }, (_, index) =>
+        scheduler.acquire(`https://site${index}.example/apply`),
+      ),
+    );
+    let started = false;
+    const next = scheduler
+      .acquire("https://extra.example/apply")
+      .then((lease) => {
+        started = true;
+        return lease;
+      });
+    await tick();
+    expect(started).toBe(false);
+    leases[0]!.release();
+    (await next).release();
+    for (const lease of leases) lease.release();
+  });
+
   test("different sites overlap within the configured limit", async () => {
     const scheduler = createApplicationPreparationScheduler(2);
     const first = await scheduler.acquire("https://jobs.alpha.example/apply");

@@ -442,27 +442,28 @@ export class EmbeddedBrowser {
   }
 
   /**
-   * A finished owner lets go of its tabs. They close, except a tab the person
-   * has: with `keepForPerson` (they opened the form to finish it) it becomes
-   * their own tab, and a tab they hold or a parked tab is never closed under
-   * them.
+   * Releasing work preserves a person's takeover. A completed application
+   * closes all its own tabs, including the one the person used to send it.
    */
-  releaseOwnedTabs(
-    owner: string,
-    options: { keepForPerson?: boolean } = {},
-  ): void {
+  releaseOwnedTabs(owner: string, options: { finished?: boolean } = {}): void {
     const tabs = this.ownedTabs.get(owner);
     this.ownedTabs.delete(owner);
     this.preparedForms.delete(owner);
     this.discardedFormLabels.delete(owner);
     for (const id of tabs ?? []) {
-      if (options.keepForPerson || this.personInputTabs.has(id)) {
+      if (options.finished) {
+        this.heldTabs.delete(id);
+        this.parkedTabs.delete(id);
+        this.personTabs.delete(id);
+        this.personInputTabs.delete(id);
+        this.personInputAt.delete(id);
+      }
+      if (!options.finished && this.personInputTabs.has(id)) {
         this.personTabs.add(id);
         this.bridge?.releasePage(id);
       } else this.releasedOwnedTabs.add(id);
     }
     this.closeReleasedOwnedTabs();
-    if (options.keepForPerson && tabs?.size) this.emit();
   }
 
   private closeReleasedOwnedTabs(): void {

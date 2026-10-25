@@ -146,12 +146,19 @@ describe("embedded browser tab state", () => {
     expect(state.ownedTabs.has("sent_result")).toBe(false);
   });
 
-  test("a form the person opened to finish becomes their tab when it is sent", () => {
+  test("completed applications close their handed-off tabs and leave other owners alone", () => {
     const { browser, state, pages } = makeBrowser();
-    state.ownedTabs.set("sent_result", new Set(["prepared"]));
-    browser.releaseOwnedTabs("sent_result", { keepForPerson: true });
-    expect(pages.get("prepared")?.close).not.toHaveBeenCalled();
-    expect(state.personTabs.has("prepared")).toBe(true);
+    state.ownedTabs.set("sent_result", new Set(["prepared", "held", "parked"]));
+    state.ownedTabs.set("other_result", new Set(["person"]));
+    state.personTabs.add("prepared");
+    state.personTabs.add("person");
+    state.heldTabs.set("held", ["sent_result"]);
+    state.parkedTabs.set("parked", null);
+    browser.releaseOwnedTabs("sent_result", { finished: true });
+    for (const id of ["prepared", "held", "parked"])
+      expect(pages.get(id)?.close).toHaveBeenCalledOnce();
+    expect(pages.get("person")?.close).not.toHaveBeenCalled();
+    expect(state.personTabs.has("prepared")).toBe(false);
     expect(state.ownedTabs.has("sent_result")).toBe(false);
   });
 

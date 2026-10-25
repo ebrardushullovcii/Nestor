@@ -794,7 +794,7 @@ let defaultService: JobFinderApplicationAuthorityService | null = null;
 export function getJobFinderApplicationAuthorityService(): JobFinderApplicationAuthorityService {
   defaultService ??= createJobFinderApplicationAuthorityService({
     releaseApplicationPage: (resultId) =>
-      getEmbeddedBrowser().releaseOwnedTabs(resultId),
+      getEmbeddedBrowser().releaseOwnedTabs(resultId, { finished: true }),
     resolveRepository: async () => {
       const workspaceService = await getJobFinderWorkspaceService();
       const repository =
