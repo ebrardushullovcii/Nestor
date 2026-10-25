@@ -3763,16 +3763,10 @@ export function createPrimaryPageActions(
         // the saved path and its Open folder action.
         applyRouteScopedMessage(
           {
-            message:
-              result.outcome === "cancelled"
-                ? "Export cancelled. No file was saved."
-                : result.outputPath
-                  ? `Saved your resume PDF to ${result.outputPath}.`
-                  : "Your resume PDF is ready in Job Finder. No folder was chosen, so nothing was written to disk.",
-            savedFilePath:
-              result.outcome === "cancelled"
-                ? null
-                : (result.outputPath ?? null),
+            message: result.outputPath
+              ? `Saved your resume PDF to ${result.outputPath}.`
+              : "Export cancelled. No file was saved.",
+            savedFilePath: result.outputPath,
           },
           ownerStartRoute,
         );
