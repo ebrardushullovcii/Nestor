@@ -139,6 +139,7 @@ export interface AssistantTurnSession {
     targetId: string | null;
     summary: string;
     entries: readonly AssistantChangeEntry[];
+    undoCommand?: AssistantChangeReceipt["undoCommand"];
   }): Promise<{ receipt: AssistantChangeReceipt; part: AssistantMessagePart }>;
   getReceipt(id: string): Promise<AssistantChangeReceipt | null>;
   listReceipts(): Promise<AssistantChangeReceipt[]>;
@@ -214,6 +215,8 @@ export interface AssistantToolDefinition<
   TSchema extends ZodTypeAny = ZodTypeAny,
 > {
   name: string;
+  /** Earlier Assistant executors replaced by this screen command. */
+  replaces?: readonly string[];
   group: AssistantToolGroup;
   description: string;
   /** JSON schema the model sees; the zod schema is the truth. */

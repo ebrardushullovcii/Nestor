@@ -7,7 +7,7 @@ import {
   type TriageStage,
 } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -42,6 +42,8 @@ import { JobDetailPane } from "./job-detail-pane";
 import { SearchPanel } from "./search-panel";
 import { TRIAGE_ACTIONS, type TriageAction } from "./triage-actions";
 import { useSearchStatus } from "./use-search-status";
+import { useAssistantListView } from "../job-lists/use-assistant-list-view";
+import { useAssistantContextSource } from "../job-finder/assistant/assistant-provider";
 
 const TABS: readonly TriageStage[] = ["found", "shortlisted", "hidden"];
 const SORTS: Record<TriageStage, readonly JobSort[]> = {
@@ -102,6 +104,8 @@ export function FindJobsScreen() {
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [activeId, setActiveId] = useState(remembered.activeId);
   const [searchParams] = useSearchParams();
+  const navigationKey = useLocation().key;
+
   const linkedJob = Number(searchParams.get("job") ?? "");
   const [starting, setStarting] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -130,6 +134,23 @@ export function FindJobsScreen() {
     if (activeId === null && !list.loading)
       setActiveId(list.rows[0]?.id ?? null);
   }, [activeId, list.loading, list.rows]);
+  useAssistantListView(searchParams.get("jobs"), {
+    requestId: navigationKey,
+    setSelection,
+    current: { stage, text, minFit: floor, sort: sortByStage[stage] },
+    applyView(view) {
+      const nextStage = view.stage ?? stage;
+      if (!TABS.includes(nextStage as TriageStage)) return false;
+      const targetStage = nextStage as TriageStage;
+      const changed = targetStage !== stage || (view.text !== undefined && view.text !== text) || (view.minFit !== undefined && view.minFit !== floor);
+      setStage(targetStage);
+      if (view.text !== undefined) setText(view.text);
+      if (view.minFit !== undefined) { setFitFloor(view.minFit); setFloorTouched(true); }
+      if (view.sort) setSortByStage((current) => ({ ...current, [targetStage]: view.sort! }));
+      return changed;
+    },
+  });
+
 
   // `?job=<id>` opens that job in its tab, so a link or the Assistant can
   // point at one job.
@@ -143,7 +164,7 @@ export function FindJobsScreen() {
         setStage(job.stage as TriageStage);
       setText("");
     });
-  }, [linkedJob]);
+  }, [linkedJob, navigationKey]);
 
   useEffect(() => {
     remembered = { stage, sortByStage, text, fitFloor, floorTouched, activeId };
@@ -151,6 +172,18 @@ export function FindJobsScreen() {
 
   const latest = useRef({ list, selection, activeId, filter, stage });
   latest.current = { list, selection, activeId, filter, stage };
+  useAssistantContextSource("find-jobs", () => {
+    const { list, selection, activeId, filter } = latest.current;
+    return {
+      screen: "discovery",
+      focus: activeId === null ? null : { kind: "job", id: String(activeId), label: list.rows.find((row) => row.id === activeId)?.title ?? null },
+      list: {
+        listKind: "jobs", selectedIds: selection.all ? [] : [...selection.ids].map(String),
+        displayedIds: list.rows.map((row) => String(row.id)), filteredIds: [],
+        totalFilteredCount: list.total, filterSummary: JSON.stringify({ ...filter, allSelected: selection.all, except: selection.all ? [...selection.ids] : [] }), campaignId: null,
+      },
+    };
+  });
 
   const undo = useCallback(
     async (entry?: { moveId: number; label: string }) => {
@@ -368,6 +401,7 @@ export function FindJobsScreen() {
         value={stage}
       />
       <ListDetailLayout
+        state={{ stage, text, minFit: floor, sort, selectedIds: [...selection.ids], all: selection.all }}
         detail={
           <JobDetailPane
             actions={actions}

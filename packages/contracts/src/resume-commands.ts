@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AppCommandDefinition } from "./app-commands";
 
 import { JobIdSchema, JobListQuerySchema, type JobDetail } from "./jobs";
 import type { ResumeTemplateId } from "./base";
@@ -16,16 +17,19 @@ import {
  */
 export const RESUME_COMMANDS = {
   list_shortlisted: {
+    effect: "read",
     description:
       "One page of shortlisted jobs with each one's resume: stage shortlisted lists the jobs being written or waiting for approval, stage resume lists the approved ones Apply can take. Each row's resume has its level, state (queued, writing, ready, failed) and approvedAt.",
     input: JobListQuerySchema,
   },
   get_resume: {
+    effect: "read",
     description:
       "One shortlisted job and its resume: the listing and the resume draft, its level and state, and whether a level change can be undone.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
   save_resume: {
+    effect: "local_write",
     description:
       "Saves an edited resume draft. Pass the updatedAt you read; a newer save wins. An approved resume needs approving again.",
     input: z
@@ -37,26 +41,30 @@ export const RESUME_COMMANDS = {
       .strict(),
   },
   set_resume_level: {
+    effect: "local_write",
     description:
       "Writes a job's resume again at another level: original (the imported file as it is), light, tailored or aggressive. undo_resume_level puts the previous resume back.",
     input: z.object({ jobId: JobIdSchema, level: ResumeLevelSchema }).strict(),
   },
   undo_resume_level: {
+    effect: "local_write",
     description:
       "Puts back the resume, level and approval a level change replaced.",
     input: z.object({ jobId: JobIdSchema, changeId: z.string().min(1).max(100).optional() }).strict(),
   },
   rewrite_resume: {
+    effect: "local_write",
     description:
       "Writes a job's resume again at its own level, for one that failed or that the person wants written again.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
   approve_resume: {
+    effect: "local_write",
     description:
       "Approves a written resume. The job moves to the resume stage, where Apply can take it at once.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
-} as const;
+} as const satisfies Record<string, AppCommandDefinition>;
 
 export type ResumeCommandName = keyof typeof RESUME_COMMANDS;
 

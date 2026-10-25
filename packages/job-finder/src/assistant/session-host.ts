@@ -806,6 +806,7 @@ export class AssistantSessionHost {
         assembleMessages: async (turnMessages) => {
           const current = await this.readWorkspaceSnapshot();
           const currentContext = buildContextBlock({
+            storeCommands: Boolean(this.ports.commands?.length),
             context: live.sourceMessage?.context ?? null,
             resultSets: live.sourceMessage
               ? await this.resultSetsFor(live.sourceMessage)
@@ -978,6 +979,7 @@ export class AssistantSessionHost {
     this.answeredElsewhere.delete(conversationId);
     const block = [
       buildContextBlock({
+        storeCommands: Boolean(this.ports.commands?.length),
         context: live.sourceMessage?.context ?? null,
         resultSets,
         snapshot,
@@ -1020,6 +1022,7 @@ export class AssistantSessionHost {
         const resultSets = await this.resultSetsFor(message);
         const snapshot = await this.readWorkspaceSnapshot();
         const block = buildContextBlock({
+          storeCommands: Boolean(this.ports.commands?.length),
           context: message.context,
           resultSets,
           snapshot,
@@ -1471,6 +1474,7 @@ export class AssistantSessionHost {
             ),
           ].slice(0, 60),
           entries: [...input.entries].slice(0, 600),
+          ...(input.undoCommand ? { undoCommand: input.undoCommand } : {}),
           createdAt: this.now(),
           status: "applied",
           undoneAt: null,

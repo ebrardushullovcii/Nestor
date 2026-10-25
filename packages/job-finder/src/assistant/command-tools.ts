@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { AppCommandDefinition } from "@nestor/contracts";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type {
@@ -8,10 +9,7 @@ import type {
   AssistantToolResult,
 } from "./tool-kit";
 
-type Catalog = Record<
-  string,
-  { description: string; input: z.ZodType<unknown> }
->;
+type Catalog = Record<string, AppCommandDefinition>;
 
 /** Schemas and descriptions come from the commands the screens call. */
 export function assistantCommandTools<
@@ -25,7 +23,7 @@ export function assistantCommandTools<
   ) => O[K] | Promise<O[K]>,
   options: {
     group: AssistantToolGroup;
-    writes: readonly (keyof C)[];
+    replaces?: Partial<Record<keyof C, readonly string[]>>;
     results?: {
       [K in keyof C]?: (
         value: O[K],
@@ -44,6 +42,7 @@ export function assistantCommandTools<
     }) as Record<string, unknown>;
     return {
       name,
+      ...(options.replaces?.[name] ? { replaces: options.replaces[name] } : {}),
       group: options.group,
       description: command.description,
       input: command.input,
@@ -52,7 +51,7 @@ export function assistantCommandTools<
         type: "object",
         properties: (derived.properties ?? {}) as Record<string, unknown>,
       },
-      effect: options.writes.includes(name) ? "local_write" : "read",
+      effect: command.effect,
       label: () => name.replaceAll("_", " "),
       async execute(input: unknown, context) {
         context.session.assertCurrent();

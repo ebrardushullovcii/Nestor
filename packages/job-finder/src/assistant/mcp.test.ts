@@ -48,7 +48,6 @@ it("lists, shortlists and undoes real stored jobs over MCP using the screen comm
     JobCommandOutputs
   >(JOB_COMMANDS, run, {
     group: "jobs",
-    writes: ["move_jobs", "undo_move"],
   });
   const ctx = context();
   const mcp = await connectAssistantMcp(definitions, ctx);
@@ -82,6 +81,7 @@ it("lists, shortlists and undoes real stored jobs over MCP using the screen comm
 it("discovers a newly registered command without another Assistant schema or tool list", async () => {
   const catalog = {
     test_count: {
+      effect: "read" as const,
       description: "Read the count.",
       input: z.object({ count: z.number().int() }).strict(),
     },
@@ -96,7 +96,6 @@ it("discovers a newly registered command without another Assistant schema or too
     { test_count: { value: number } }
   >(catalog, run, {
     group: "jobs",
-    writes: [],
   });
   const ctx = context();
   const mcp = await connectAssistantMcp(commands, ctx);

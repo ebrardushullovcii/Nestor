@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AppCommandDefinition } from "./app-commands";
 
 import {
   JobIdSchema,
@@ -24,49 +25,58 @@ const NoInputSchema = z.object({}).strict();
  */
 export const JOB_COMMANDS = {
   list_jobs: {
+    effect: "read",
     description:
       "One page of jobs in one stage (found = Find jobs inbox, hidden, shortlisted, resume = ready to apply, applied), with filters, a sort, the matching total and every stage's count. Pass nextCursor back as cursor for the next page.",
     input: JobListQuerySchema,
   },
   get_job: {
+    effect: "read",
     description:
       "One job in full: listing text, salary, every site that lists it, and its fit score with reasons and gaps.",
     input: z.object({ id: JobIdSchema }).strict(),
   },
   stage_counts: {
+    effect: "read",
     description: "How many jobs are in each stage.",
     input: NoInputSchema,
   },
   move_jobs: {
+    effect: "local_write",
     description:
       "Shortlist, hide or move back to Find jobs: some jobs by id, or every job a filter matches except some. Only jobs in found, hidden or shortlisted move. Returns a moveId for undo_move.",
     input: MoveJobsInputSchema,
   },
   undo_move: {
+    effect: "local_write",
     description:
       "Puts the jobs of one move back where each was, unless something moved them since.",
     input: UndoMoveInputSchema,
   },
   list_sites: {
+    effect: "read",
     description:
       "The person's job sites a search can use: the ones turned on in Profile. Pass some ids as sourceIds to start_search to search only those.",
     input: NoInputSchema,
   },
   start_search: {
+    effect: "external",
     description:
       "Starts a background search of the person's job sites. depth: quick look or thorough; picky: open, balanced or strict; postedWithin: week, month or any; note: anything specific. Jobs appear in found as they are found. Returns at once.",
     input: JobSearchSettingsSchema,
   },
   stop_search: {
+    effect: "local_write",
     description: "Stops the running search. Jobs already found stay.",
     input: NoInputSchema,
   },
   search_status: {
+    effect: "read",
     description:
       "The running or last search: its choices, counts and per-site progress.",
     input: NoInputSchema,
   },
-} as const;
+} as const satisfies Record<string, AppCommandDefinition>;
 
 export type JobCommandName = keyof typeof JOB_COMMANDS;
 

@@ -1,4 +1,17 @@
-import type { AssistantNavigationDisplay } from "@nestor/contracts";
+import {
+  AssistantJobViewSchema,
+  matchesAssistantJobView,
+  type AssistantNavigationDisplay,
+} from "@nestor/contracts";
+
+function shownElements(selector: string): Element[] {
+  return [...document.querySelectorAll(selector)].filter(
+    (element) =>
+      !element.closest(
+        '[data-kept-route="hidden"], [hidden], [aria-hidden="true"]',
+      ),
+  );
+}
 
 /** A route request is complete only after its content is mounted and uncovered. */
 export async function waitForDisplayedDestination(
@@ -17,13 +30,11 @@ export async function waitForDisplayedDestination(
   };
   do {
     const actual = new URL(readRoute(), "https://nestor.local");
-    const panel = document.querySelector('[role="tabpanel"][aria-labelledby]');
+    const panel = shownElements('[role="tabpanel"][aria-labelledby]')[0];
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
     const trackerMounted = [
-      ...document.querySelectorAll(
-        "main h1, main h2, [role=main] h1, [role=main] h2",
-      ),
+      ...shownElements("main h1, main h2, [role=main] h1, [role=main] h2"),
     ].some((heading) => heading.textContent?.trim() === "Tracker");
     const section =
       actual.pathname === "/job-finder/profile"
@@ -31,16 +42,16 @@ export async function waitForDisplayedDestination(
         : trackerMounted
           ? "tracker"
           : null;
-    const dialog = [...document.querySelectorAll("[role]")].find(
+    const dialog = shownElements("[role]").find(
       (element) =>
         ["dialog", "alertdialog"].includes(
           element.getAttribute("role") ?? "",
         ) && !element.closest('[aria-hidden="true"], [hidden]'),
     );
     const chat =
-      document.querySelector(
+      shownElements(
         '[data-assistant-narrow-switch] button[aria-pressed="true"]',
-      )?.textContent === "Chat";
+      )[0]?.textContent === "Chat";
     let overlay: AssistantNavigationDisplay["overlay"] = dialog
       ? "dialog"
       : chat
@@ -69,20 +80,38 @@ export async function waitForDisplayedDestination(
       expected.searchParams.get("section") ??
       (expected.searchParams.get("view") === "tracker" ? "tracker" : null);
     const contentMounted = expected.pathname.includes("/resume")
-      ? Boolean(document.querySelector("[data-resume-studio-content-area]"))
+      ? shownElements("[data-resume-studio-content-area]").length > 0
       : expected.pathname === "/job-finder/profile"
         ? Boolean(panel)
         : Boolean(
-            document.querySelector(
+            shownElements(
               "main h1, main h2, [role=main] h1, [role=main] h2",
-            ),
+            )[0],
           );
-    const jobId = expected.searchParams.get("jobId");
-    const jobDisplayed = !jobId || (expected.pathname === "/job-finder/review-queue"
-      ? [...document.querySelectorAll("main [data-job-detail-id]")].some((element) => element.getAttribute("data-job-detail-id") === jobId)
-      : [...document.querySelectorAll("main [data-job-result-id], main [data-list-row-id]")].some((element) =>
-          (element.getAttribute("data-job-result-id") ?? element.getAttribute("data-list-row-id")) === jobId &&
-          Boolean(element.matches('[data-selected="true"], [aria-current="true"]') || element.querySelector('[data-selected="true"], [aria-current="true"]'))));
+    const jobId = expected.searchParams.get(
+      expected.pathname === "/job-finder/discovery" ? "job" : "jobId",
+    );
+    const jobDisplayed =
+      !jobId ||
+      shownElements("main [data-job-detail-id]").some(
+        (element) => element.getAttribute("data-job-detail-id") === jobId,
+      );
+    let viewDisplayed = true;
+    const view = expected.searchParams.get("jobs");
+    if (view) {
+      try {
+        const requested = AssistantJobViewSchema.parse(JSON.parse(view));
+        const state = shownElements(
+          "main [data-job-list-state]",
+        )[0]?.getAttribute("data-job-list-state");
+        viewDisplayed = matchesAssistantJobView(
+          AssistantJobViewSchema.parse(JSON.parse(state ?? "null")),
+          requested,
+        );
+      } catch {
+        viewDisplayed = false;
+      }
+    }
     display = {
       displayedRoute: `${actual.pathname}${actual.search}`,
       section,
@@ -97,6 +126,7 @@ export async function waitForDisplayedDestination(
       matches &&
       contentMounted &&
       jobDisplayed &&
+      viewDisplayed &&
       overlay === "none" &&
       (!expectedSection || section === expectedSection)
     )

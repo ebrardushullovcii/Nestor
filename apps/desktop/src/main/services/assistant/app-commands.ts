@@ -17,11 +17,34 @@ export function assistantAppCommands() {
       runJobCommand,
       {
         group: "jobs",
-        writes: ["move_jobs", "undo_move"],
+        replaces: {
+          list_jobs: ["query_jobs", "show_jobs", "compare_jobs"],
+          move_jobs: [
+            "shortlist_jobs",
+            "shortlist_result_set",
+            "remove_from_shortlist",
+            "dismiss_jobs",
+            "restore_jobs",
+          ],
+          start_search: ["search_for_jobs"],
+          stop_search: ["cancel_search"],
+        },
         results: {
           list_jobs: (page) => ({
             summary: `${page.rows.length} jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
-            data: page,
+            data: {
+              ...page,
+              rows: page.rows.map(
+                ({ id, stage, title, company, location, fitScore }) => ({
+                  id,
+                  stage,
+                  title,
+                  company,
+                  location,
+                  fitScore,
+                }),
+              ),
+            },
           }),
           get_job: (job) => ({
             summary: job
@@ -30,19 +53,29 @@ export function assistantAppCommands() {
             data: job,
           }),
           async move_jobs(result, input, { session }) {
-            const summary = `Moved ${result.moved} jobs to ${input.to}.`;
+            const destination = {
+              found: "Find jobs",
+              hidden: "Hidden",
+              shortlisted: "Shortlisted",
+            }[input.to];
+            const summary = `Moved ${result.moved} ${result.moved === 1 ? "job" : "jobs"} to ${destination}.`;
             if (!result.moveId || !result.moved)
               return { summary, data: result };
             const { part } = await session.recordChange({
               target: "app_command",
               targetId: String(result.moveId),
               summary,
+              undoCommand: {
+                name: "undo_move",
+                input: { moveId: result.moveId },
+                expectedCount: result.moved,
+              },
               entries: [
                 {
-                  path: ["undo_move"],
+                  path: ["stage"],
                   kind: "set",
-                  before: result.moved,
-                  after: { moveId: result.moveId },
+                  before: "Previous stages",
+                  after: destination,
                   index: null,
                   label: "Job stage",
                 },
@@ -62,14 +95,26 @@ export function assistantAppCommands() {
       runResumeCommand,
       {
         group: "resume",
-        writes: [
-          "save_resume",
-          "set_resume_level",
-          "undo_resume_level",
-          "rewrite_resume",
-          "approve_resume",
-        ],
+        replaces: {
+          get_resume: ["read_resume"],
+          save_resume: ["edit_resume", "revise_resume", "set_resume_template"],
+          rewrite_resume: ["generate_resumes"],
+          approve_resume: ["action_approve_resumes"],
+        },
         results: {
+          list_shortlisted: (page) => ({
+            summary: `${page.rows.length} shortlisted jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
+            data: {
+              ...page,
+              rows: page.rows.map(({ id, stage, title, company, resume }) => ({
+                id,
+                stage,
+                title,
+                company,
+                resume,
+              })),
+            },
+          }),
           async set_resume_level(value, input, { session }) {
             const label = `${value.level[0]!.toUpperCase()}${value.level.slice(1)}`;
             const summary = `Writing this resume at ${label}.`;
@@ -78,12 +123,18 @@ export function assistantAppCommands() {
               target: "app_command",
               targetId: String(input.jobId),
               summary,
+              undoCommand: {
+                name: "undo_resume_level",
+                input: { jobId: input.jobId, changeId: value.levelChangeId },
+              },
               entries: [
                 {
-                  path: ["undo_resume_level"],
+                  path: ["level"],
                   kind: "set",
-                  before: value.previousLevel,
-                  after: { jobId: input.jobId, changeId: value.levelChangeId },
+                  before: value.previousLevel
+                    ? `${value.previousLevel[0]!.toUpperCase()}${value.previousLevel.slice(1)}`
+                    : null,
+                  after: label,
                   label: "Resume level",
                   index: null,
                 },

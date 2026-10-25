@@ -184,7 +184,7 @@ export type AssistantAttachment = z.infer<typeof AssistantAttachmentSchema>;
 export const AssistantContextReferenceSchema = z
   .object({
     screen: AssistantScreenSchema.catch("other"),
-    route: z.string().trim().max(400).default(""),
+    route: z.string().trim().max(4000).default(""),
     sectionLabel: z.string().trim().max(160).nullable().default(null),
     focus: AssistantEntityRefSchema.nullable().default(null),
     list: AssistantListReferenceSchema.nullable().default(null),
@@ -550,6 +550,11 @@ export const AssistantChangeReceiptSchema = z
     summary: NonEmptyStringSchema.max(400),
     fieldLabels: z.array(NonEmptyStringSchema.max(160)).max(60).default([]),
     entries: z.array(AssistantChangeEntrySchema).max(600),
+    undoCommand: z.object({
+      name: NonEmptyStringSchema.max(100),
+      input: z.record(z.unknown()),
+      expectedCount: z.number().int().nonnegative().optional(),
+    }).strict().optional(),
     createdAt: IsoDateTimeSchema,
     status: z
       .enum(["applied", "undone", "partially_undone"])
@@ -874,7 +879,7 @@ export const AssistantEventPayloadSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("open_route"),
       navigationRequestId: IdSchema.nullable().default(null),
-      route: NonEmptyStringSchema.max(400),
+      route: NonEmptyStringSchema.max(4000),
     })
     .strict(),
   z.object({ type: z.literal("conversation_deleted") }).strict(),
@@ -941,7 +946,7 @@ export type AssistantConversationView = z.infer<
 
 export const AssistantNavigationDisplaySchema = z
   .object({
-    displayedRoute: z.string().max(400).nullable(),
+    displayedRoute: z.string().max(4000).nullable(),
     section: z.string().max(80).nullable(),
     overlay: z.enum(["none", "browser", "dialog", "chat"]),
     status: z.enum(["displayed", "blocked"]),

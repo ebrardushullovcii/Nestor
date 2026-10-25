@@ -455,7 +455,7 @@ describe("assistant session host", () => {
       context({ screen: "home" }),
     );
     expect(offered[0]).toContain("load_tools");
-    expect(offered[0]).toContain("edit_profile");
+    expect(offered[0]).not.toContain("edit_profile");
     expect(offered[0]).not.toContain("import_resume");
     expect(offered[1]).toContain("import_resume");
     expect(offered[1]).toContain("edit_profile");

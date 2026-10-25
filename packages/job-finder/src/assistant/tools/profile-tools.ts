@@ -1099,22 +1099,22 @@ export async function undoReceipt(
   let undone: string[] = [];
   let conflicts: string[] = [];
   if (receipt.target === "app_command") {
-    for (const entry of receipt.entries) {
-      const command = context.ports.commands?.find((tool) => tool.name === entry.path[0]);
-      if (!command) throw new AssistantToolError("not_found", "That command is unavailable.");
-      session.assertCurrent();
-      try {
-        const result = await command.execute(command.input.parse(entry.after), context);
-        if (command.name === "undo_move") {
-          const moved = z.object({ moved: z.number() }).parse(result.data).moved;
-          if (moved > 0) undone.push(entry.label ?? "Job stage");
-          if (moved < Number(entry.before)) conflicts.push("Jobs changed since this move");
-        } else undone.push(entry.label ?? "Resume level");
-      } catch (error) {
-        if (error instanceof Error && /changed since/iu.test(error.message))
-          conflicts.push(entry.label ?? "Resume level");
-        else throw error;
-      }
+    const undo = receipt.undoCommand;
+    const command = context.ports.commands?.find((tool) => tool.name === undo?.name);
+    if (!undo || !command || command.effect !== "local_write")
+      throw new AssistantToolError("not_found", "That Undo command is unavailable.");
+    session.assertCurrent();
+    try {
+      const result = await command.execute(command.input.parse(undo.input), context);
+      if (undo.expectedCount !== undefined) {
+        const moved = z.object({ moved: z.number() }).parse(result.data).moved;
+        if (moved > 0) undone.push(...receipt.fieldLabels);
+        if (moved < undo.expectedCount) conflicts.push("Jobs changed since this move");
+      } else undone.push(...receipt.fieldLabels);
+    } catch (error) {
+      if (error instanceof Error && /changed since/iu.test(error.message))
+        conflicts.push(...receipt.fieldLabels);
+      else throw error;
     }
   } else if (receipt.target === "job_triage") {
     const { undoTriageChange } = await import("../triage-changes");
