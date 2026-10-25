@@ -25,64 +25,51 @@ import { getApplicationService } from "../services/applications";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 
+/** The registered Assistant actions and preload bridge execute the same commands. */
+export async function executeApplicationStoreCommand(actionId: string, input: unknown): Promise<unknown> {
+  await getJobFinderWorkspaceService();
+  const store = getApplicationStore();
+  switch (actionId) {
+    case "apply-jobs": {
+      const value = ApplyJobsInputSchema.parse(input);
+      const service = await getJobFinderWorkspaceService();
+      const repository = getJobFinderRepositoryForWorkspaceService(service);
+      if (!repository) throw new Error("Job Finder could not read the Apply setting.");
+      const settings = await repository.getSettings();
+      return ApplyJobsResultSchema.parse(store.applyJobs(value, settings.applicationAutomationMode ?? DEFAULT_APPLICATION_APPLY_MODE));
+    }
+    case "list-applications":
+      return ApplicationListPageSchema.parse(store.listApplications(ApplicationListQuerySchema.parse(input ?? {})));
+    case "applications-for-jobs":
+      return ApplicationRowSchema.array().parse(store.forJobs(ApplicationsForJobsInputSchema.parse(input).jobIds));
+    case "get-application-details": {
+      const { id } = ApplicationTargetSchema.parse(input);
+      const application = store.getApplication(id);
+      if (!application) return null;
+      const work = store.getWork(id);
+      return ApplicationDetailsSchema.parse({ application, summary: work?.execution.summary ?? null,
+        detail: work?.execution.detail ?? null, resumeFileName: store.getResumeArtifact(id)?.fileName ?? null,
+        reviewCard: work?.reviewCard ?? null, receipt: store.getSubmissionReceipt(id) });
+    }
+    case "stop-application":
+      return (await getApplicationService()).stopApplication(ApplicationTargetSchema.parse(input).id);
+    case "open-application": {
+      const opened = await (await getApplicationService()).open(ApplicationTargetSchema.parse(input).id);
+      if (opened) await getEmbeddedBrowser().command({ type: "open" });
+      return opened;
+    }
+    case "list-needs-you":
+      return NeedsYouPageSchema.parse(store.needsYou.list(NeedsYouListQuerySchema.parse(input ?? {})));
+    case "answer-needs-you":
+      return AnswerNeedsYouResultSchema.parse(store.needsYou.answer(AnswerNeedsYouInputSchema.parse(input)));
+    default: throw new Error("Unknown application command.");
+  }
+}
+
 export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
-  ipcMain.handle("job-finder:apply-jobs", async (_event, input: unknown) => {
-    const value = ApplyJobsInputSchema.parse(input);
-    const service = await getJobFinderWorkspaceService();
-    const repository = getJobFinderRepositoryForWorkspaceService(service);
-    if (!repository)
-      throw new Error("Job Finder could not read the Apply setting.");
-    const settings = await repository.getSettings();
-    return ApplyJobsResultSchema.parse(
-      getApplicationStore().applyJobs(
-        value,
-        settings.applicationAutomationMode ?? DEFAULT_APPLICATION_APPLY_MODE,
-      ),
-    );
-  });
-  ipcMain.handle("job-finder:list-applications", (_event, input: unknown) =>
-    ApplicationListPageSchema.parse(
-      getApplicationStore().listApplications(
-        ApplicationListQuerySchema.parse(input ?? {}),
-      ),
-    ),
-  );
-  ipcMain.handle("job-finder:applications-for-jobs", (_event, input: unknown) => {
-    const { jobIds } = ApplicationsForJobsInputSchema.parse(input);
-    return ApplicationRowSchema.array().parse(getApplicationStore().forJobs(jobIds));
-  });
-  ipcMain.handle("job-finder:get-application-details", (_event, input: unknown) => {
-    const { id } = ApplicationTargetSchema.parse(input);
-    const store = getApplicationStore();
-    const application = store.getApplication(id);
-    if (!application) return null;
-    const work = store.getWork(id);
-    return ApplicationDetailsSchema.parse({ application,
-      summary: work?.execution.summary ?? null,
-      detail: work?.execution.detail ?? null,
-      resumeFileName: store.getResumeArtifact(id)?.fileName ?? null,
-      reviewCard: work?.reviewCard ?? null,
-      receipt: store.getSubmissionReceipt(id),
-    });
-  });
-  ipcMain.handle("job-finder:stop-application", async (_event, input: unknown) => {
-    const { id } = ApplicationTargetSchema.parse(input);
-    await getJobFinderWorkspaceService();
-    return (await getApplicationService()).stopApplication(id);
-  });
-  ipcMain.handle("job-finder:open-application", async (_event, input: unknown) => {
-    const { id } = ApplicationTargetSchema.parse(input);
-    await getJobFinderWorkspaceService();
-    const opened = await (await getApplicationService()).open(id);
-    if (opened) await getEmbeddedBrowser().command({ type: "open" });
-    return opened;
-  });
-  ipcMain.handle("job-finder:list-needs-you", (_event, input: unknown) =>
-    NeedsYouPageSchema.parse(getApplicationStore().needsYou.list(NeedsYouListQuerySchema.parse(input ?? {}))),
-  );
-  ipcMain.handle("job-finder:answer-needs-you", (_event, input: unknown) =>
-    AnswerNeedsYouResultSchema.parse(getApplicationStore().needsYou.answer(AnswerNeedsYouInputSchema.parse(input))),
-  );
+  for (const action of ["apply-jobs", "list-applications", "applications-for-jobs", "get-application-details", "stop-application", "open-application", "list-needs-you", "answer-needs-you"]) {
+    ipcMain.handle(`job-finder:${action}`, (_event, input: unknown) => executeApplicationStoreCommand(action, input));
+  }
   ipcMain.handle(
     "job-finder:test-load-applications-store-demo",
     (_event, input: unknown) => {

@@ -122,9 +122,6 @@ describe("registered user actions", () => {
       "candidate-assets:restore",
       { assetId: "file", retention: "until_deleted" },
     ],
-    ["control-apply-queue", { action: "pause" }],
-    ["remove-from-apply-queue", { jobIds: ["j"] }],
-    ["approve-resumes", { jobIds: ["j"] }],
     ["get-application-page-states", { resultIds: ["r"] }],
     ["reopen-application-page", { resultId: "r" }],
     ["list-application-documents", { jobId: "j", applicationRecordId: "a" }],
@@ -189,21 +186,12 @@ describe("registered user actions", () => {
     ).toBe(false);
   });
 
-  it("applies an explicitly requested reversible resume approval without another confirmation", async () => {
+  it("stops an explicitly selected application without another confirmation", async () => {
     const executeAction = vi.fn().mockResolvedValue(true);
     const createProposal = vi.fn();
-    const context = {
-      service: {},
-      ports: { executeAction, publishWorkspaceUpdate: vi.fn() },
-      session: { assertCurrent: vi.fn(), createProposal },
-    } as unknown as AssistantToolContext;
-    await executeRegisteredAssistantAction(
-      { actionId: "approve-resumes", input: { jobIds: ["j"] } },
-      context,
-    );
-    expect(executeAction).toHaveBeenCalledExactlyOnceWith("approve-resumes", {
-      jobIds: ["j"],
-    });
+    const context = { service: {}, ports: { executeAction, publishWorkspaceUpdate: vi.fn() }, session: { assertCurrent: vi.fn(), createProposal } } as unknown as AssistantToolContext;
+    await executeRegisteredAssistantAction({ actionId: "stop-application", input: { id: 1 } }, context);
+    expect(executeAction).toHaveBeenCalledExactlyOnceWith("stop-application", { id: 1 });
     expect(createProposal).not.toHaveBeenCalled();
   });
 
@@ -243,7 +231,7 @@ describe("registered user actions", () => {
     );
     await expect(
       executeRegisteredAssistantAction(
-        { actionId: "start-apply-queue", input: { jobIds: ["j"] } },
+        { actionId: "apply-jobs", input: { selection: { ids: [1] } } },
         context,
         true,
       ),

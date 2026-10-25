@@ -1,6 +1,5 @@
 import {
   AiBehaviorPreferenceSchema,
-  type ApplicationAuthorityEnvelope,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import {
@@ -13,6 +12,7 @@ import { withApplicationAuthorityGate, recordApplicationAuthoritySuccessor } fro
 import { getJobStore } from "./job-store";
 import { getApplicationStore } from "./job-finder/application-store";
 import { createJobFinderApplicationAuthorityService } from "./job-finder/application-authority-service";
+import { getCandidateAssetLibrary } from "./job-finder/candidate-asset-library-instance";
 
 let service: ApplicationService | null = null;
 let ready: Promise<ApplicationService> | null = null;
@@ -26,6 +26,10 @@ export async function startApplicationService(deps: Pick<ApplicationServiceDeps,
   const { repository } = deps;
   const applications = getApplicationStore();
   const authority = createJobFinderApplicationAuthorityService({ repository });
+  const instructionMode: NonNullable<ApplicationServiceDeps["instructionMode"]> = async input => {
+    const { assistantApplicationMode } = await import("./assistant/assistant-service");
+    return assistantApplicationMode(input);
+  };
 
   const authorizeSending: ApplicationServiceDeps["authorizeSending"] = async input => withApplicationAuthorityGate(repository, input.signal, async () => {
     for (let retry = 0; retry < 5; retry += 1) {
@@ -35,7 +39,10 @@ export async function startApplicationService(deps: Pick<ApplicationServiceDeps,
       if (approval.status === "stale") continue;
       if (approval.status !== "created" && approval.status !== "duplicate") throw new Error("Your current profile could not be checked before applying. Try Apply again.");
       const settings = await repository.getSettings();
-      if (settings.applicationAutomationMode !== "autonomous_submit") return null;
+      const instruction = applications.instructionFor(input.application.id);
+      if (!input.personClicked && (instruction
+        ? await instructionMode({ ...instruction, jobId: input.job.id }) !== "autonomous_submit"
+        : settings.applicationAutomationMode !== "autonomous_submit")) return null;
       const active = (await authority.list({ status: "active" })).at(0) ?? null;
       // The active permission contains only running work, never every job in storage.
       const running = [...applications.listWorkInState("running"), ...applications.listWorkInState("submitting")];
@@ -81,7 +88,7 @@ export async function startApplicationService(deps: Pick<ApplicationServiceDeps,
 
   service = createApplicationService({
     ...deps,
-    jobs: getJobStore(), applications, authorityRepository: repository,
+    jobs: getJobStore(), applications, authorityRepository: repository, candidateAssets: getCandidateAssetLibrary(),
     readInputs: async () => {
       const [profile, settings, searchPreferences] = await Promise.all([
         repository.getProfile(), repository.getSettings(), repository.getSearchPreferences(),
@@ -90,6 +97,7 @@ export async function startApplicationService(deps: Pick<ApplicationServiceDeps,
     },
     isPaused: async () => (await repository.getActivityControl()).paused,
     authorizeSending,
+    instructionMode,
   });
   await service.start();
   resolveReady?.(service);
@@ -107,4 +115,3 @@ export function stopApplicationService(): void {
   service?.stop(); service = null; ready = null;
 }
 
-export type ApplicationPermission = ApplicationAuthorityEnvelope;

@@ -2636,7 +2636,8 @@ export function createBrowserAgentRuntime(
         preparedApplicationPages,
         pageBindingKey,
       );
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+      // Recheck the current document with GET; never replay an earlier form POST.
+      await page.goto(page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
     },
     async armApplicationFormAction(_source, input) {
       await rebindPreparedApplicationPage(input.pageBindingKey);

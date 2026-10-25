@@ -6,26 +6,20 @@ vi.mock("@nestor/db", () => ({ createAssistantRepository: () => store }));
 vi.mock("electron", () => ({ BrowserWindow: { getAllWindows: () => [] } }));
 vi.mock("./assistant-ports", () => ({ createAssistantHostPorts: vi.fn() }));
 vi.mock("../job-finder/paths", () => ({ getJobFinderUserDataDirectory: () => "synthetic-assistant-test" }));
-import { assistantQueuePolicy } from "./assistant-service";
+import { assistantApplicationMode } from "./assistant-service";
 
-describe("persisted assistant queue scope", () => {
+describe("persisted application instruction", () => {
   it.each(["active", "narrowed", "revoked"] as const)("rechecks the current %s grant on later runs", async (status) => {
-    store.listGrants.mockResolvedValue([AssistantInstructionGrantSchema.parse({ id: "grant", conversationId: "chat", sourceMessageId: "message", action: "prepare", jobIds: ["job"], status, createdAt: "2026-10-24T01:00:00.000Z", updatedAt: "2026-10-24T01:00:00.000Z" })]);
-    const result = await assistantQueuePolicy({ assistantScopes: [{ conversationId: "chat", jobIds: ["job"] }] }, ["job"], "autonomous_submit");
-    if (status === "revoked") expect(result.refused.map(item => item.jobId)).toEqual(["job"]);
-    else expect(result).toMatchObject({ mode: "prepare_only", refused: [] });
+    store.listGrants.mockResolvedValue([AssistantInstructionGrantSchema.parse({ id: "grant", conversationId: "chat", sourceMessageId: "message", action: "prepare", jobIds: ["1"], status, createdAt: "2026-10-24T01:00:00.000Z", updatedAt: "2026-10-24T01:00:00.000Z" })]);
+    const result = await assistantApplicationMode({ conversationId: "chat", jobId: 1, mode: "autonomous_submit" });
+    expect(result).toBe(status === "revoked" ? null : "prepare_only");
   });
-  it("refuses a queue's chat-owned jobs when that chat or its grants were deleted, without claiming UI-owned jobs", async () => {
+  it("refuses a deleted instruction", async () => {
     store.listGrants.mockResolvedValue([]);
-    const result = await assistantQueuePolicy({ assistantScopes: [{ conversationId: "deleted_chat", jobIds: ["chat_job"] }] }, ["chat_job", "ui_job"], "autonomous_submit");
-    expect(store.listGrants).toHaveBeenCalledWith("deleted_chat");
-    expect(result.refused.map((item) => item.jobId)).toEqual(["chat_job"]);
-    expect(result.boundJobIds).toEqual(["chat_job"]);
+    expect(await assistantApplicationMode({ conversationId: "deleted_chat", jobId: 1, mode: "autonomous_submit" })).toBeNull();
   });
-
-  it("does not open the chat store for an ordinary UI queue", async () => {
-    store.listGrants.mockClear();
-    expect(await assistantQueuePolicy({}, ["ui_job"], "prepare_only")).toMatchObject({ mode: "prepare_only", refused: [], boundJobIds: [] });
-    expect(store.listGrants).not.toHaveBeenCalled();
+  it("does not widen a captured preparation instruction", async () => {
+    store.listGrants.mockResolvedValue([AssistantInstructionGrantSchema.parse({ id: "grant", conversationId: "chat", sourceMessageId: "message", action: "prepare_and_send", jobIds: ["1"], status: "active", createdAt: "2026-10-24T01:00:00.000Z", updatedAt: "2026-10-24T01:00:00.000Z" })]);
+    expect(await assistantApplicationMode({ conversationId: "chat", jobId: 1, mode: "prepare_only" })).toBe("prepare_only");
   });
 });

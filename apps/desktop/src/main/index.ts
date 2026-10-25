@@ -309,14 +309,7 @@ void app
 let jobFinderShutdownInFlight = false;
 let quitApprovedByCloseGuard = false;
 
-function resumeApplyQueueAfterRestart(): void {
-  // An Apply queue that was running carries on.
-  void import("./routes/job-finder")
-    .then((routes) => routes.resumeApplyQueueAfterRestart())
-    .catch((error: unknown) => {
-      console.error("Could not carry on the Apply queue.", error);
-    });
-}
+
 
 async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
   if (!jobFinderServicesPromise) {

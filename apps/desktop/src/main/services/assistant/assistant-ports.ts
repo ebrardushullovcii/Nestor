@@ -16,10 +16,9 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { extractResumeDocument } from "../../adapters/resume-document";
-import {
-  listJobsStillReadyToSend,
-  scopeSendPermissionToPreparedJobs,
-} from "../../routes/job-finder";
+import { getApplicationStore } from "../job-finder/application-store";
+import { getApplicationService } from "../applications";
+import { getJobStore } from "../job-store";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { getCandidateAssetLibrary } from "../job-finder/candidate-asset-library-instance";
 import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
@@ -28,7 +27,6 @@ import {
   isDesktopResumeImportActive,
 } from "../job-finder/import-resume";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
-import { listJobsNotInProgress } from "../job-finder/start-apply-batch";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import {
@@ -320,93 +318,41 @@ export function createAssistantHostPorts(input: {
       await service.cancelDiscoveryRun(runId);
       publishJobFinderWorkspaceUpdate();
     },
-    async startApplications({ jobIds, mode, conversationId, onQueued }) {
-      const service = await getJobFinderWorkspaceService();
-      const repository = getJobFinderRepositoryForWorkspaceService(service);
-      if (!repository)
-        throw new Error(
-          "The application workspace is not open, so nothing was started.",
-        );
-      const pending = await listJobsNotInProgress(repository, jobIds);
-      if (!pending.length)
-        return { startedJobIds: [], heldBack: [], runId: null };
-      const { getApplyQueueRunner } = await import("../../routes/job-finder");
-      const queue = await getApplyQueueRunner().start(
-        pending,
-        mode,
-        async (saved) => {
-          if (conversationId)
-            saved.assistantScopes = [
-              ...(saved.assistantScopes ?? []),
-              { conversationId, jobIds: pending },
-            ];
-          await onQueued?.(saved.id);
-        },
-      );
-      const wanted = new Set(pending);
-      return {
-        startedJobIds: queue.startedJobIds.filter((id) => wanted.has(id)),
-        queuedJobIds: queue.jobIds.filter((id) => wanted.has(id)),
-        heldBack: queue.skipped
-          .filter((entry) => wanted.has(entry.jobId))
-          .map((entry) => ({ ...entry, title: entry.jobId })),
-        queueId: queue.id,
-        runId: queue.activeRunId,
-      };
+    async startApplications({ jobIds, mode, conversationId }) {
+      await getJobFinderWorkspaceService();
+      if (!conversationId) throw new Error("Record the person's sidebar instruction before applying.");
+      const store = getApplicationStore();
+      const queuedJobIds: string[] = [];
+      const heldBack: { jobId: string; title: string; reason: string }[] = [];
+      for (let offset = 0; offset < jobIds.length; offset += 200) {
+        const batch = jobIds.slice(offset, offset + 200);
+        const ids = batch.map(id => Number(id));
+        if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error("Use job ids from Find jobs or Shortlisted.");
+        const before = new Map(store.forJobs(ids).map(row => [row.jobId, row]));
+        store.applyJobs({ selection: { ids } }, mode === "autonomous_submit" ? mode : "confirm_before_submit", { conversationId, mode });
+        for (const id of ids) {
+          const job = getJobStore().getJob(id);
+          const previous = before.get(id);
+          if (job?.stage !== "resume") heldBack.push({ jobId: String(id), title: job?.title ?? String(id), reason: "Approve this job's resume on Shortlisted before applying." });
+          else if (previous && !["stopped", "failed"].includes(previous.state)) heldBack.push({ jobId: String(id), title: job.title, reason: "This application is already queued, prepared, or sent." });
+          else queuedJobIds.push(String(id));
+        }
+      }
+      return { startedJobIds: [], queuedJobIds, heldBack, runId: null };
     },
     async sendPreparedApplications({ jobIds }) {
-      const service = await getJobFinderWorkspaceService();
-      const ready = await listJobsStillReadyToSend(service, jobIds);
-      const failed: { jobId: string; reason: string }[] = jobIds
-        .filter((jobId) => !ready.includes(jobId))
-        .map((jobId) => ({
-          jobId,
-          reason: "This application is not filled in and waiting to be sent.",
-        }));
-      if (ready.length === 0) return { sentJobIds: [], failed };
-      // The written instruction is the send press (ADR 0039).
-      await scopeSendPermissionToPreparedJobs(
-        service,
-        ready,
-        "confirm_before_submit",
-      );
+      await getJobFinderWorkspaceService();
+      const runner = await getApplicationService();
+      const store = getApplicationStore();
       const sentJobIds: string[] = [];
-      for (const jobId of ready) {
+      const failed: { jobId: string; reason: string }[] = [];
+      for (const jobId of jobIds) {
+        const [row] = Number.isSafeInteger(Number(jobId)) ? store.forJobs([Number(jobId)]) : [];
         try {
-          const snapshot = await service.submitPreparedApplication(jobId);
-          const latest = snapshot.applyJobResults
-            .filter((result) => result.jobId === jobId)
-            .sort((left, right) =>
-              right.updatedAt.localeCompare(left.updatedAt),
-            )[0];
-          if (
-            latest?.state === "submitted" &&
-            latest.privacyReceipt?.finalSubmitOccurred === true &&
-            latest.privacyReceipt.submissionOutcome?.outcome === "submitted"
-          )
-            sentJobIds.push(jobId);
-          else {
-            failed.push({
-              jobId,
-              reason:
-                latest?.privacyReceipt?.submissionOutcome?.outcome ===
-                "outcome_uncertain"
-                  ? "The site did not confirm the application; check it on the employer's page before trying again."
-                  : (latest?.detail ??
-                    latest?.blockerSummary ??
-                    "The site did not confirm the application."),
-            });
-          }
+          if (row && await runner.sendPrepared(row.id)) sentJobIds.push(jobId);
+          else failed.push({ jobId, reason: row ? store.getApplication(row.id)?.error ?? "This application is not ready to send." : "No application for this job." });
         } catch (error) {
-          failed.push({
-            jobId,
-            reason:
-              error instanceof Error
-                ? error.message.slice(0, 300)
-                : "It could not be sent.",
-          });
-        } finally {
-          publishJobFinderWorkspaceUpdate();
+          failed.push({ jobId, reason: error instanceof Error ? error.message.slice(0, 300) : "It could not be sent." });
         }
       }
       return { sentJobIds, failed };

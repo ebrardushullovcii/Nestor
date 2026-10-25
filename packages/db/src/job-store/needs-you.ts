@@ -261,12 +261,30 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
 
-    /** The browser watcher calls this after verifying sign-in/CAPTCHA/MFA is done. */
-    completeAccess(id: number): boolean {
+    accessForApplication(applicationId: number): NeedsYouTask[] {
+      return (sql(`SELECT t.* FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+        JOIN applications a ON a.id = n.application_id
+        WHERE n.application_id = ? AND n.attempt = a.attempt AND t.kind <> 'question'
+          AND t.resolved_at IS NULL`).all(applicationId) as Task[]).map(toTask);
+    },
+
+    /** The browser watcher verifies one exact bound page before completing its task. */
+    completeAccess(id: number, verifiedApplicationId: number): boolean {
       return store.transaction(() => {
         const task = get(id);
         if (!task || task.kind === "question" || task.resolved_at !== null)
           return false;
+        const linked = sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
+          WHERE n.task_id = ? AND n.application_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'`).get(id, verifiedApplicationId);
+        if (!linked) return false;
+        // A shared sign-in changes the session for other pages. Those pages
+        // need a GET at their checkpoint; the page the person finished keeps
+        // its current form and answers.
+        if (task.kind === "sign_in") sql(`UPDATE application_details SET access_recheck = 1
+          WHERE application_id <> ? AND application_id IN (
+            SELECT n.application_id FROM application_needs_you n JOIN applications a ON a.id = n.application_id
+            WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'
+          )`).run(verifiedApplicationId, id);
         resolve(task, null);
         return true;
       });

@@ -555,7 +555,22 @@ export async function runAgentApplicationPreparation(
   );
   const outcome = await runApplyAgentSafely(input, {
     hands: createApplyPageHands(input.session, now),
-    safety: input.session,
+    safety: {
+      ...input.session,
+      openIntermediateWriteWindow: async () => {
+        if (executionInput.recheckIntermediateMutationAuthority) {
+          const page = await input.session.readPage();
+          const origin = page.url ? originOf(page.url) : null;
+          if (!origin || !await executionInput.recheckIntermediateMutationAuthority(origin))
+            throw new Error("The application's permission to save fields changed.");
+          await input.session.installPrepareOnlyGuard({
+            intermediateMutationsAuthorized: executionInput.intermediateMutationsAuthorized === true,
+            allowedOrigins,
+          });
+        }
+        await input.session.openIntermediateWriteWindow();
+      },
+    },
     modelQuestionClassification: true,
     ...(input.questionReadCacheScope
       ? { questionReadCacheScope: input.questionReadCacheScope }
@@ -631,7 +646,7 @@ export async function runAgentApplicationPreparation(
         const widened =
           await executionInput.authorizeReviewedApplicationOrigin(origin);
         if (widened) {
-          activeEnvelope = widened;
+          if (widened !== true) activeEnvelope = widened;
           allowedOrigins.push(origin);
         }
       }

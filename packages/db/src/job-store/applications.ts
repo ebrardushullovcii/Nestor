@@ -12,6 +12,7 @@ import {
   type ApplicationListQuery,
   type ApplicationRow,
   type ApplicationApplyMode,
+  type ApplicationAutomationMode,
   type ApplicationPreparationUpdate,
   type ApplyJobsInput,
   type ApplyJobsResult,
@@ -32,6 +33,8 @@ export interface ApplicationWork {
   execution: ApplyExecutionResult;
   reviewCard: ApplicationReviewCard | null;
   authorityEnvelopeId: string | null;
+  accessRecheck: boolean;
+  profileDigest: string;
 }
 
 type Row = {
@@ -92,6 +95,7 @@ export function createApplicationStore(store: JobStore) {
     applyJobs(
       input: ApplyJobsInput,
       requestedMode: ApplicationApplyMode = DEFAULT_APPLICATION_APPLY_MODE,
+      instruction?: { conversationId: string; mode: ApplicationAutomationMode },
     ): ApplyJobsResult {
       const mode = ApplicationApplyModeSchema.parse(requestedMode);
       const { selection } = ApplyJobsInputSchema.parse(input);
@@ -127,9 +131,15 @@ export function createApplicationStore(store: JobStore) {
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL
            WHERE applications.state IN ('stopped', 'failed')
-             AND applications.submitted_at IS NULL`,
-        ).run(mode, now, now, ...params);
-        const queued = Number(result.changes);
+             AND applications.submitted_at IS NULL RETURNING id`,
+        ).all(mode, now, now, ...params) as { id: number }[];
+        for (const { id } of result) {
+          if (instruction) sql(`INSERT INTO application_instructions (application_id, conversation_id, mode)
+            VALUES (?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET conversation_id = excluded.conversation_id, mode = excluded.mode`)
+            .run(id, instruction.conversationId, instruction.mode);
+          else sql("DELETE FROM application_instructions WHERE application_id = ?").run(id);
+        }
+        const queued = result.length;
         if (queued > 0)
           changed(selected && selected.length <= 200 ? selected : null);
         return {
@@ -141,6 +151,11 @@ export function createApplicationStore(store: JobStore) {
     },
 
     getApplication,
+
+    instructionFor(id: number): { conversationId: string; mode: ApplicationAutomationMode } | null {
+      const row = sql("SELECT conversation_id, mode FROM application_instructions WHERE application_id = ?").get(id) as { conversation_id: string; mode: ApplicationAutomationMode } | undefined;
+      return row ? { conversationId: row.conversation_id, mode: row.mode } : null;
+    },
 
     forJobs(jobIds: readonly number[]): ApplicationRow[] {
       if (jobIds.length > 200) throw new Error("Read applications for one page of jobs at a time.");
@@ -167,7 +182,7 @@ export function createApplicationStore(store: JobStore) {
     getWork(id: number): ApplicationWork | null {
       const row = sql("SELECT * FROM application_details WHERE application_id = ?").get(id) as {
         attempt: number; resume_artifact_json: string; execution_json: string | null;
-        review_json: string | null; authority_envelope_id: string | null;
+        review_json: string | null; authority_envelope_id: string | null; access_recheck: number; profile_digest: string;
       } | undefined;
       return row?.execution_json ? {
         attempt: row.attempt,
@@ -175,6 +190,8 @@ export function createApplicationStore(store: JobStore) {
         execution: ApplyExecutionResultSchema.parse(JSON.parse(row.execution_json)),
         reviewCard: row.review_json ? ApplicationReviewCardSchema.parse(JSON.parse(row.review_json)) : null,
         authorityEnvelopeId: row.authority_envelope_id,
+        accessRecheck: row.access_recheck === 1,
+        profileDigest: row.profile_digest,
       } : null;
     },
 
@@ -183,21 +200,21 @@ export function createApplicationStore(store: JobStore) {
       return row ? ApplicationResumeArtifactSchema.parse(JSON.parse(row.resume_artifact_json)) : null;
     },
 
-    setResumeArtifact(id: number, attempt: number, artifact: ApplicationResumeArtifact): boolean {
+    setResumeArtifact(id: number, attempt: number, artifact: ApplicationResumeArtifact, profileDigest: string): boolean {
       artifact = ApplicationResumeArtifactSchema.parse(artifact);
       return store.transaction(() => {
         const row = getApplication(id);
         if (!row || row.attempt !== attempt || row.state !== "running") return false;
         if (artifact.jobId !== String(row.jobId)) throw new Error("The application resume belongs to another job.");
-        sql(`INSERT INTO application_details (application_id, attempt, resume_artifact_json)
-          VALUES (?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET attempt = excluded.attempt,
+        sql(`INSERT INTO application_details (application_id, attempt, resume_artifact_json, profile_digest)
+          VALUES (?, ?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET attempt = excluded.attempt,
           resume_artifact_json = excluded.resume_artifact_json, execution_json = NULL,
-          review_json = NULL, authority_envelope_id = NULL`).run(id, attempt, JSON.stringify(artifact));
+          review_json = NULL, authority_envelope_id = NULL, profile_digest = excluded.profile_digest`).run(id, attempt, JSON.stringify(artifact), profileDigest);
         return true;
       });
     },
 
-    saveWork(id: number, work: ApplicationWork): boolean {
+    saveWork(id: number, work: Omit<ApplicationWork, "accessRecheck">): boolean {
       const resumeArtifact = ApplicationResumeArtifactSchema.parse(work.resumeArtifact);
       const execution = ApplyExecutionResultSchema.parse(work.execution);
       const review = ApplicationReviewCardSchema.nullable().parse(work.reviewCard);
@@ -206,13 +223,13 @@ export function createApplicationStore(store: JobStore) {
         if (!current || current.attempt !== work.attempt || current.state !== "running") return false;
         if (resumeArtifact.jobId !== String(current.jobId)) throw new Error("The application resume belongs to another job.");
         sql(`INSERT INTO application_details
-          (application_id, attempt, resume_artifact_json, execution_json, review_json, authority_envelope_id)
-          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET
+          (application_id, attempt, resume_artifact_json, execution_json, review_json, authority_envelope_id, profile_digest)
+          VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(application_id) DO UPDATE SET
           attempt = excluded.attempt, resume_artifact_json = excluded.resume_artifact_json,
           execution_json = excluded.execution_json, review_json = excluded.review_json,
-          authority_envelope_id = excluded.authority_envelope_id`).run(
+          authority_envelope_id = excluded.authority_envelope_id, profile_digest = excluded.profile_digest, access_recheck = 0`).run(
             id, work.attempt, JSON.stringify(resumeArtifact), JSON.stringify(execution),
-            review ? JSON.stringify(review) : null, work.authorityEnvelopeId,
+            review ? JSON.stringify(review) : null, work.authorityEnvelopeId, work.profileDigest,
           );
         changed([current.jobId]);
         return true;
@@ -264,8 +281,8 @@ export function createApplicationStore(store: JobStore) {
       receipt = SubmissionOutcomeRecordSchema.parse(receipt);
       return store.transaction(() => {
         const current = getApplication(id);
-        if (!current || current.attempt !== attempt || current.state === "submitted" || current.state === "uncertain") return false;
-        if (receipt.jobId !== String(current.jobId) || receipt.applicationRecordId !== `application_${id}`) throw new Error("The submission receipt belongs to another application.");
+        if (!current || current.attempt !== attempt || !["ready", "submitting"].includes(current.state)) return false;
+        if (receipt.jobId !== String(current.jobId) || receipt.applicationRecordId !== `application_${id}` || receipt.runId !== `application_run_${id}` || receipt.resultId !== `application_${id}_attempt_${attempt}`) throw new Error("The submission receipt belongs to another application attempt.");
         const state = receipt.outcome === "submitted" ? "submitted" : receipt.outcome === "outcome_uncertain" ? "uncertain" : "ready";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
           submission_outcome_id = ?, submission_outcome_json = ?, error = NULL WHERE id = ?`).run(
