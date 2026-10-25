@@ -73,6 +73,7 @@ export function createScalarValues(
     ),
   );
   const read = (keys: readonly string[] = table.fields): Fields => {
+    if (!store.db.isOpen) throw new Error("The workspace changed or closed.");
     for (const key of keys)
       if (!allowed.has(key)) throw new Error(`Unknown field: ${key}`);
     const selected = keys

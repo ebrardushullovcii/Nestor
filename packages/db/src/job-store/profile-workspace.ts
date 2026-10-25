@@ -67,11 +67,13 @@ export function createProfileWorkspace(
       stages: [],
       searchId: null,
     });
-  const revision = () =>
-    Number(
+  const revision = () => {
+    if (!store.db.isOpen) throw new Error("The workspace changed or closed.");
+    return Number(
       store.sql("SELECT version FROM profile_revision WHERE id=1").get()!
         .version,
     );
+  };
   const current = () => CandidateProfileSchema.parse(profile.read());
   const messages = (): ProfileCopilotMessage[] =>
     store

@@ -145,6 +145,10 @@ export function createProfileStore(store: JobStore) {
   };
   const readSource = (): ResumeSourceDocument => {
     const data = inflate(source.read());
+    const identity = data.sourceIdentity as
+      | { fullName: string | null; email: string | null }
+      | undefined;
+    if (!identity?.fullName && !identity?.email) delete data.sourceIdentity;
     return ResumeSourceDocumentSchema.parse({
       ...data,
       textContent:
@@ -211,7 +215,9 @@ export function createProfileStore(store: JobStore) {
         baseResume: readSource(),
         workEligibility: {
           ...(data.workEligibility as Record<string, unknown>),
-          limitedWorkPermissions: permissions(),
+          ...(permissions().length
+            ? { limitedWorkPermissions: permissions() }
+            : {}),
         },
         resumeIdentityOwnership: ack
           ? {
@@ -298,7 +304,11 @@ export function createProfileStore(store: JobStore) {
           },
           sourceFields,
         );
-        let changed = source.patch(flat);
+        let changed = source.patch(
+          Object.fromEntries(
+            Object.entries(flat).map(([key, value]) => [key, value ?? null]),
+          ),
+        );
         const bodyChanged = store
           .sql(
             "INSERT INTO profile_resume_text(id,body) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE body IS NOT excluded.body",

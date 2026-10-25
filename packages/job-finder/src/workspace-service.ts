@@ -440,7 +440,7 @@ export function createJobFinderWorkspaceService(
     persistDiscoveryState: (updater) =>
       repository.commitDiscoveryStateUpdate(updater),
     async refreshDiscoverySessions(
-      searchPreferences: JobSearchPreferences,
+      _searchPreferences: JobSearchPreferences,
       knownSessions?: JobFinderDiscoveryState["sessions"],
     ): Promise<JobFinderDiscoveryState["sessions"]> {
       // Every source reads through the same generic adapter (see
@@ -448,8 +448,8 @@ export function createJobFinderWorkspaceService(
       // Normalizing all 900 sources of a large workspace to learn that took
       // about 4 ms of every workspace read.
       const adapterKinds: JobSource[] =
-        searchPreferences.discovery.targets.some((target) => target.enabled)
-          ? [getPreferredSessionAdapter(searchPreferences)]
+        Boolean(options.jobSites?.list({ filter: "enabled", limit: 1 }).rows.length)
+          ? [getPreferredSessionAdapter(options.jobSites)]
           : [];
       if (adapterKinds.length === 0) {
         return [];

@@ -14,7 +14,7 @@ import {
 function createPausedRun(summary: string) {
   return SourceDebugRunRecordSchema.parse({
     id: "source_debug_run_login_required",
-    targetId: "target_linkedin_default",
+    targetId: "1",
     state: "paused_manual",
     startedAt: "2026-07-30T08:00:00.000Z",
     updatedAt: "2026-07-30T08:01:00.000Z",
@@ -68,13 +68,13 @@ describe("discovery source login UserActionRequest adoption", () => {
       accountCreationAuthorized: false,
       scope: {
         type: "discovery_source",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         source: "target_site",
         sourceDebugRunId: run.id,
       },
       verification: {
         type: "source_access",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         expectedOrigin: "https://www.linkedin.com/",
       },
     });

@@ -162,18 +162,18 @@ test("import commits Profile, artifacts and accepted saved answers together and 
     const answers = createSavedAnswersStore(store);
     expect(answers.get({ key: answer.key })?.answer).toBe(answer.answer);
     answers.upsert({ ...answer, answer: "The person's edited introduction" });
-    await api.finalizeResumeImportRun({
+    const nextInput: Parameters<typeof api.finalizeResumeImportRun>[0] = {
       ...input,
-      expectedProfileRevision: undefined,
-    });
+    };
+    delete nextInput.expectedProfileRevision;
+    await api.finalizeResumeImportRun(nextInput);
     expect(answers.get({ key: answer.key })?.answer).toBe(
       "The person's edited introduction",
     );
     const stable = workspace.state();
     await expect(
       api.finalizeResumeImportRun({
-        ...input,
-        expectedProfileRevision: undefined,
+        ...nextInput,
         profile: { ...input.profile, headline: "Must roll back" },
         savedAnswers: [
           {

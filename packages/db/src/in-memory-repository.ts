@@ -1,5 +1,5 @@
 import { createProfileWorkspace } from "./job-store/profile-workspace";
-import { openJobStore } from "./job-store/job-store";
+import { openJobStore, type JobStore } from "./job-store/job-store";
 import {
   retainedResumeExportPaths,
   collectResumeFileReferences,
@@ -137,9 +137,10 @@ function assertAtMostOneActiveApplicationAuthority(
 
 export function createInMemoryJobFinderRepository(
   seed: JobFinderRepositorySeed,
+  options: { store?: JobStore } = {},
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
-  const profileStore = openJobStore(":memory:");
+  const profileStore = options.store ?? openJobStore(":memory:");
   const profileWorkspace = createProfileWorkspace(profileStore, state);
   assertAtMostOneActiveApplicationAuthority(state);
   let applyQueue: ApplyQueue | null = null;
@@ -202,7 +203,7 @@ export function createInMemoryJobFinderRepository(
       },
     }),
     close() {
-      profileStore.close();
+      if (!options.store) profileStore.close();
       return Promise.resolve();
     },
     exportState: () =>

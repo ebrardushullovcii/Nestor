@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import { withResumeBatchLiveness } from "./resume-batch-checkpoint";
 import { readPlanAssessment } from "./plan-assessment";
 import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
@@ -127,9 +128,7 @@ import {
   createCampaign,
   ensureCampaignState,
 } from "./campaign-dashboard";
-import {
-  projectDiscoveryJobViews,
-} from "./listing-activity";
+import { projectDiscoveryJobViews } from "./listing-activity";
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
@@ -1355,9 +1354,8 @@ export function createWorkspaceSnapshotProfileMethods(
       return null;
     }
 
-    const target =
-      input.targets.find((candidate) => candidate.id === input.targetId) ??
-      null;
+    const site = ctx.jobSites?.get(Number(input.targetId));
+    const target = site ? jobSiteTarget(site) : null;
 
     if (!target) {
       throw new Error("The requested job source is no longer available.");
@@ -1521,9 +1519,7 @@ export function createWorkspaceSnapshotProfileMethods(
           setupContext.searchPreferences,
           discovery.sessions,
         );
-    const preferredSessionAdapter = getPreferredSessionAdapter(
-      setupContext.searchPreferences,
-    );
+    const preferredSessionAdapter = getPreferredSessionAdapter(ctx.jobSites);
     const browserSession = createBrowserSessionSnapshot(
       discoverySessions,
       preferredSessionAdapter,
@@ -1535,7 +1531,15 @@ export function createWorkspaceSnapshotProfileMethods(
     );
     const generatedAt = new Date().toISOString();
     const sourceAccessInput = {
-      targets: setupContext.searchPreferences.discovery.targets,
+      targets: [
+        ...new Set([
+          ...discovery.recentSourceDebugRuns.map((run) => run.targetId),
+          ...sourceInstructionArtifacts.map((artifact) => artifact.targetId),
+        ]),
+      ].flatMap((id) => {
+        const site = ctx.jobSites?.get(Number(id));
+        return site ? [jobSiteTarget(site)] : [];
+      }),
       recentSourceDebugRuns: discovery.recentSourceDebugRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
       sourceDebugAttempts,
@@ -2075,7 +2079,7 @@ export function createWorkspaceSnapshotProfileMethods(
     const bootstrapRuntimeSession = await readUninitializedRuntimeSession(
       ctx,
       discovery.sessions,
-      getPreferredSessionAdapter(setupContext.searchPreferences),
+      getPreferredSessionAdapter(ctx.jobSites),
     );
     // Bootstrap intentionally omits sourceAccessPrompts: login-required
     // prompts need deferred debug history, so attention here reflects stored
@@ -2109,7 +2113,7 @@ export function createWorkspaceSnapshotProfileMethods(
       profileSetupState: setupContext.profileSetupState,
       browserSession: createBrowserSessionSnapshot(
         discovery.sessions,
-        getPreferredSessionAdapter(setupContext.searchPreferences),
+        getPreferredSessionAdapter(ctx.jobSites),
         bootstrapRuntimeSession,
       ),
       sourceAccessPrompts: [],
@@ -2349,14 +2353,12 @@ export function createWorkspaceSnapshotProfileMethods(
       );
       const sourceInstructionArtifacts =
         await ctx.repository.listSourceInstructionArtifacts();
-      const configuredTargets = searchPreferences.discovery.targets;
       const target = resolveBrowserSessionTarget({
-        targets: configuredTargets,
         targetId: input?.targetId,
       });
       const sessionSource = target
         ? resolveAdapterKind(target)
-        : getPreferredSessionAdapter(searchPreferences);
+        : getPreferredSessionAdapter(ctx.jobSites);
       try {
         const session = await ctx.browserRuntime.openSession(
           sessionSource,
@@ -2387,11 +2389,8 @@ export function createWorkspaceSnapshotProfileMethods(
       }
     },
     async checkBrowserSession() {
-      const searchPreferences = normalizeSearchPreferences(
-        await ctx.repository.getSearchPreferences(),
-      );
       const session = await ctx.browserRuntime.getSessionState(
-        getPreferredSessionAdapter(searchPreferences),
+        getPreferredSessionAdapter(ctx.jobSites),
       );
       await ctx.persistBrowserSessionState(session);
       return getWorkspaceSnapshot(true);
@@ -2725,14 +2724,18 @@ export function createWorkspaceSnapshotProfileMethods(
       const nextResumeApplicationMode =
         nextSettings.resumeApplicationMode ?? "tailored_per_job";
 
-      const updateSettings = (latest: JobFinderSettings): JobFinderSettings => ({
+      const updateSettings = (
+        latest: JobFinderSettings,
+      ): JobFinderSettings => ({
         ...nextSettings,
         applicationAutomationMode:
           settings.applicationAutomationMode ??
           latest.applicationAutomationMode ??
           "confirm_before_submit",
         salaryDisclosure:
-          settings.salaryDisclosure ?? latest.salaryDisclosure ?? "pause_for_user",
+          settings.salaryDisclosure ??
+          latest.salaryDisclosure ??
+          "pause_for_user",
       });
       if (currentResumeApplicationMode === nextResumeApplicationMode) {
         await ctx.repository.commitSettingsUpdate(updateSettings);

@@ -1,3 +1,7 @@
+import {
+  createTestJobSites,
+  createTestJobStore,
+} from "./job-sites.test-support";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
@@ -47,9 +51,12 @@ export function createWorkspaceServiceHarness(
     onSavedJobsRescored?: () => void;
   } = {},
 ) {
-  const repository = createInMemoryJobFinderRepository(
-    options.seed ?? createSeed(),
-  );
+  const seed = options.seed ?? createSeed();
+  const store = createTestJobStore();
+  const repository = createInMemoryJobFinderRepository(seed, { store });
+  const jobSites =
+    options.jobSites ??
+    createTestJobSites(seed.searchPreferences.discovery.targets, store);
   const browserRuntime = options.browserRuntime ?? createBrowserRuntime();
   const aiClient = options.aiClient ?? createAiClient();
   const documentManager = options.documentManager ?? createDocumentManager();
@@ -59,7 +66,7 @@ export function createWorkspaceServiceHarness(
   const researchAdapter = options.researchAdapter ?? createResearchAdapter();
   const workspaceService = createJobFinderWorkspaceService({
     repository,
-    ...(options.jobSites ? { jobSites: options.jobSites } : {}),
+    jobSites,
     ...(options.onResumeEvidenceFinished
       ? { onResumeEvidenceFinished: options.onResumeEvidenceFinished }
       : {}),
@@ -85,6 +92,7 @@ export function createWorkspaceServiceHarness(
   workspaceHarnessInputs.set(workspaceService, { repository, documentManager });
   return {
     repository,
+    jobSites,
     browserRuntime,
     aiClient,
     documentManager,

@@ -287,7 +287,7 @@ export function createSeed(): JobFinderRepositorySeed {
         historyLimit: 5,
         targets: [
           {
-            id: "target_linkedin_default",
+            id: "1",
             label: "Primary target",
             startingUrl: "https://www.linkedin.com/jobs/search/",
             enabled: true,

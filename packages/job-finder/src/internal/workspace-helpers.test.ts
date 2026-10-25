@@ -120,7 +120,7 @@ describe("workspace discovery instruction guidance", () => {
   test("passes the reviewed guidance through as written, by category", () => {
     const artifact = createSourceInstructionArtifact({
       id: "instruction_linkedin_discovery_guidance_filtering",
-      targetId: "target_linkedin_default",
+      targetId: "1",
       status: "draft",
       createdAt: "2026-04-21T10:26:35.684Z",
       updatedAt: "2026-04-21T10:31:47.360Z",

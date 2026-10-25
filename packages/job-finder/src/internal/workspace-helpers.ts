@@ -1,5 +1,7 @@
+import type { JobSitesStore } from "@nestor/db/job-store";
 import {
   JobDiscoveryTargetSchema,
+  jobSiteTarget,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   JobSourceAdapterKindSchema,
@@ -257,17 +259,10 @@ export function normalizeResumeDraftTemplate(
 }
 
 export function getPreferredSessionAdapter(
-  searchPreferences: JobSearchPreferences,
+  sites?: Pick<JobSitesStore, "list">,
 ): JobSource {
-  // Normalizing does not change whether a source is enabled, so only the
-  // first enabled one is normalized, not every saved source on each read.
-  const preferredTarget = searchPreferences.discovery.targets.find(
-    (target) => target.enabled,
-  );
-
-  return preferredTarget
-    ? resolveAdapterKind(normalizeDiscoveryTarget(preferredTarget))
-    : "target_site";
+  const site = sites?.list({ filter: "enabled", limit: 1 }).rows[0];
+  return site ? resolveAdapterKind(jobSiteTarget(site)) : "target_site";
 }
 
 export function nextAssetVersion(
