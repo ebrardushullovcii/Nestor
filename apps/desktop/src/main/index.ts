@@ -18,6 +18,8 @@ import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
 import { closeJobStore, getJobStore } from "./services/job-store";
+import { registerResumeRoutes } from "./routes/resumes";
+import { stopResumeService } from "./services/resumes";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -240,6 +242,7 @@ if (hasSingleInstanceLock) {
     ensureJobFinderAssetRoutesReady,
     ensureLiveAssistantRoutesReady,
   );
+  registerResumeRoutes(ipcMain);
 }
 
 recordStartupDiagnostic("main module loaded");
@@ -453,6 +456,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopResumeService();
   closeJobStore();
   disposeInterviewSessionControls();
 });

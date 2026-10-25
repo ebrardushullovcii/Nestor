@@ -208,7 +208,15 @@ export type MoveJobsResult = z.infer<typeof MoveJobsResultSchema>;
  * these stages. `ids` names the jobs when there are few; null means many.
  */
 export const JobChangeSchema = z.object({
-  cause: z.enum(["found", "fit", "move", "undo", "stage", "application"]),
+  cause: z.enum([
+    "found",
+    "fit",
+    "move",
+    "undo",
+    "stage",
+    "application",
+    "resume",
+  ]),
   stages: z.array(JobStageSchema),
   ids: z.array(JobIdSchema).nullable(),
   searchId: z.string().nullable(),

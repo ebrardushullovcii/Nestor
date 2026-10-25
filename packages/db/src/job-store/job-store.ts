@@ -29,6 +29,12 @@ import {
 import { JOB_STORE_SCHEMA, JOB_STORE_VERSION } from "./schema";
 import { createStatements, type Statements } from "./statements";
 
+export {
+  createResumeStore,
+  ResumeChangedError,
+  type ResumeStore,
+} from "./resumes";
+
 export interface JobStore {
   /** For tables that live beside `jobs`; see `schema.ts`. */
   readonly db: DatabaseSync;

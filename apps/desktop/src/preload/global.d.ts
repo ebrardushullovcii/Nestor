@@ -1,3 +1,4 @@
+import type { DesktopResumesBridge } from "./resumes";
 import type {
   ApplicationListPage,
   ApplicationListQuery,
@@ -176,6 +177,7 @@ declare global {
     nestor: {
       browser: DesktopBrowserBridge;
       assistant: DesktopAssistantBridge;
+      resumes: DesktopResumesBridge;
       ping: () => Promise<DesktopPlatformPing>;
       window: {
         close: () => Promise<{ ok: true }>;

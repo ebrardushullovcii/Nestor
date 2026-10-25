@@ -128,6 +128,10 @@ const workspaceAliases = {
   ),
   "@nestor/db": dbPath,
   "@nestor/live-assistant": liveAssistantPath,
+  "@nestor/job-finder/resumes": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/resumes/index.ts",
+  ),
   "@nestor/job-finder/assistant-attention": path.resolve(
     currentDir,
     "../../packages/job-finder/src/assistant/attention.ts",

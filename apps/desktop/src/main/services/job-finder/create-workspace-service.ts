@@ -1,3 +1,4 @@
+import { startResumeService } from "../resumes";
 import {
   createApplicationPageAccess,
   createPreparedApplicationFormStore,
@@ -676,6 +677,22 @@ export async function createJobFinderWorkspaceServiceAsync(
     publishJobFinderWorkspaceUpdate(),
   );
   installDiscoveryFeedWorkers();
+  // Listing bodies are read over plain HTTP from the main process; the
+  // package only reads when a host hands it a reader, so tests stay offline.
+  // A source the person signed in to in the Job Finder browser is read
+  // again with that sign-in when the plain read meets its sign-in page.
+  const fetchListingHtml = withBrowserSignInRetry(
+    createDefaultListingHtmlFetcher(),
+    usesEmbeddedBrowser
+      ? createSessionListingHtmlFetcher(() => getEmbeddedBrowser().getSession())
+      : null,
+  );
+  startResumeService({
+    aiClient,
+    documentManager,
+    fetchListingHtml,
+    repository: jobFinderRepository,
+  });
   const workspaceService = createJobFinderWorkspaceService({
     resumeDraftProcessor,
     aiClient,
@@ -686,18 +703,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     browserRuntime,
     candidateAssetResolver: getCandidateAssetLibrary(),
     ...(researchAdapter ? { researchAdapter } : {}),
-    // Listing bodies are read over plain HTTP from the main process; the
-    // package only reads when a host hands it a reader, so tests stay offline.
-    // A source the person signed in to in the Job Finder browser is read
-    // again with that sign-in when the plain read meets its sign-in page.
-    fetchListingHtml: withBrowserSignInRetry(
-      createDefaultListingHtmlFetcher(),
-      usesEmbeddedBrowser
-        ? createSessionListingHtmlFetcher(() =>
-            getEmbeddedBrowser().getSession(),
-          )
-        : null,
-    ),
+    fetchListingHtml,
     onDetachedApplyRunFinished: () => publishJobFinderWorkspaceUpdate(),
     onResumeEvidenceFinished: () => publishJobFinderWorkspaceUpdate(),
     onShortlistResumeChanged: () => publishJobFinderWorkspaceUpdate(),
