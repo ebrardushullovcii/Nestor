@@ -27,6 +27,10 @@ This extends the existing batch method and table, without a second identity cach
 Canonical reads attach owned preparation; borrowed rows attach it before freezing.
 Root-row changes invalidate stored preparation before typed writes replace it in
 the same transaction, so a changed job never inherits an older identity proof.
+Invalidation compares the contract's exact fingerprint and identity inputs;
+changes to status, timestamps or verdicts alone preserve preparation. Writers
+compare the transaction-current serialized preparation before binding a body,
+so an unchanged value causes no insert attempt or projection invalidation.
 
 The table is additive and initially empty: creating it does not scan or transform
 existing saved jobs. There is no hash backfill, duplicate JSON field, downgrade

@@ -17,6 +17,12 @@ The existing renderer summary/detail IPC contracts remain unchanged.
 Each immutable projection version keeps its canonical JSON in a connection-local
 SQLite TEMP table. This lets a search or an older workspace view read exactly the
 version it captured even after a local write, reset or another connection's write.
+Projection versions with identical lazy getter inputs share one evidence row.
+The key covers every detail field and ordered source listing fact, distinguishes
+absent values from null, and uses immutable listing content keys rather than
+reusable integer IDs. An external commit changes the key's generation. A changed
+timestamp, verdict or fingerprint alone does not copy evidence. Each view still
+owns its current list facts; the shared row serves only unchanged lazy getters.
 Only sixteen parsed full versions and sixteen scalar descriptions are cached.
 Identity reads validate only the requested description field; full detail reads
 validate the complete saved job. List SQL removes detail evidence before any JSON

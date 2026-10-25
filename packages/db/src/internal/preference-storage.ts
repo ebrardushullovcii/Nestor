@@ -146,11 +146,21 @@ export function encodePreferenceSingleton(
       const { searchPreferences, jobIds, sourceTargetIds, ...body } = plan;
       const preferenceId = preference(db, searchPreferences);
       const value = JSON.stringify(body);
-      db.prepare(
-        `INSERT INTO job_search_plans(id, preference_id, position, value) VALUES (?, ?, ?, ?)
+      const previous = db
+        .prepare(
+          "SELECT preference_id, position, value FROM job_search_plans WHERE id = ?",
+        )
+        .get(plan.id);
+      if (
+        previous?.preference_id !== preferenceId ||
+        previous.position !== position ||
+        previous.value !== value
+      )
+        db.prepare(
+          `INSERT INTO job_search_plans(id, preference_id, position, value) VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET preference_id = excluded.preference_id, position = excluded.position, value = excluded.value
         WHERE preference_id IS NOT excluded.preference_id OR position IS NOT excluded.position OR value IS NOT excluded.value`,
-      ).run(plan.id, preferenceId, position, value);
+        ).run(plan.id, preferenceId, position, value);
       replaceLinks(db, "plan_job_memberships", plan.id, jobIds);
       replaceLinks(db, "plan_sources", plan.id, sourceTargetIds);
     }

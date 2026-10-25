@@ -19,6 +19,7 @@ import { listCollectionValues, parsePersistedRowJson } from "./state";
 import {
   createSavedJobDetails,
   savedJobDetailFields,
+  savedJobDetailKeySql,
 } from "./saved-job-details";
 
 /** Saved jobs parsed per turn of the event loop on a full projection read. */
@@ -239,11 +240,12 @@ export function createSavedJobProjectionReader(
   // still never enters JS.
   const factsQuery = (selection: string) => `
     WITH saved_job_list_source AS MATERIALIZED (
-      SELECT id, CASE WHEN json_valid(value) THEN jsonb(${
-        relational ? savedJobValueSql("saved_jobs", false, false) : "value"
-      }) ELSE value END AS value${preparationSql}
+      SELECT id, CASE WHEN json_valid(value) THEN ${savedJobDetailKeySql(relational)} END AS detail_key,
+        CASE WHEN json_valid(value) THEN jsonb(${
+          relational ? savedJobValueSql("saved_jobs", false, false) : "value"
+        }) ELSE value END AS value${preparationSql}
       FROM saved_jobs ${selection}
-    ) SELECT id, discovery_fingerprints, body_salary_prepared, body_salary_range,
+    ) SELECT id, detail_key, discovery_fingerprints, body_salary_prepared, body_salary_range,
     CASE WHEN typeof(saved_jobs.value) = 'blob' THEN json(
       CASE WHEN json_type(saved_jobs.value, '$.provenance') = 'array'
         AND NOT EXISTS (SELECT 1 FROM json_each(saved_jobs.value, '$.provenance') WHERE type != 'object')
@@ -290,14 +292,20 @@ export function createSavedJobProjectionReader(
    * the last was parsed. A write landing between pages is caught by the
    * change markers, which this read leaves for the next one.
    */
-  async function readAllRowsInPages(): Promise<Map<string, SavedJob>> {
+  async function readAllRowsInPages(
+    version: number,
+  ): Promise<Map<string, SavedJob>> {
     const jobs = new Map<string, SavedJob>();
     let after = "";
     for (;;) {
       const rows = (readFactsPage ?? readPage).all(after, pageRows);
       for (const row of rows) {
         const job = details
-          ? details.project(readListFacts(row))
+          ? details.project(
+              readListFacts(row),
+              undefined,
+              `${version}:${String(row.detail_key)}`,
+            )
           : toProjectionRow(
               attachStoredSavedJobSalary(
                 attachStoredSavedJobFingerprints(
@@ -336,7 +344,7 @@ export function createSavedJobProjectionReader(
       return snapshot;
 
     if (snapshot === null || version !== externalVersion) {
-      jobsById = await readAllRowsInPages();
+      jobsById = await readAllRowsInPages(version);
     } else {
       // Changed rows a page at a time, like a full read: a search that just
       // rewrote thousands of jobs held main for seconds when they were all
@@ -353,7 +361,14 @@ export function createSavedJobProjectionReader(
           for (const row of readChangedFacts.all(JSON.stringify(pageIds))) {
             const facts = readListFacts(row);
             found.add(facts.id);
-            next.set(facts.id, details.project(facts));
+            next.set(
+              facts.id,
+              details.project(
+                facts,
+                undefined,
+                `${version}:${String(row.detail_key)}`,
+              ),
+            );
           }
           for (const id of pageIds) if (!found.has(id)) next.delete(id);
           continue;
