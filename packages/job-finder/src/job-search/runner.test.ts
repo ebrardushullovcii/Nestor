@@ -385,3 +385,60 @@ test("a closed related vacancy is saved hidden with its full text and no fit spe
   expect(store.getJob(hidden.id)?.stage).toBe("hidden");
   expect(store.getJob(hidden.id)?.stageNote).toMatch(/^Closed:/);
 });
+
+test.each(["incomplete", "browser error", "listing error"])(
+  "%s without an access wall never creates a sign-in ticket",
+  async (kind) => {
+    const { runner, engine, store, context } = setup(),
+      sites = createJobSitesStore(store);
+    sites.add({ text: "https://readable.example/source" });
+    context.sources = sites.enabled().map(jobSiteTarget);
+    engine.collectSource.mockImplementation(({ target, lane }) => {
+      if (kind === "listing error")
+        return Promise.resolve({
+          cards: [card(target.id)],
+          pagesRead: 1,
+          complete: true,
+          notes: [],
+        });
+      if (lane === "http")
+        return Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: false,
+          requiresBrowser: true,
+          notes: [],
+        });
+      if (kind === "browser error")
+        return Promise.reject(new Error("The page could not be read"));
+      return Promise.resolve({
+        cards: [],
+        pagesRead: 1,
+        complete: false,
+        notes: ["No listings found."],
+      });
+    });
+    if (kind === "listing error")
+      engine.readListings.mockImplementation(({ cards, lane }) =>
+        lane === "browser"
+          ? Promise.reject(new Error("The listing could not be read"))
+          : Promise.resolve({
+              jobs: [],
+              failures: cards.map((card) => ({
+                url: card.url,
+                reason: "Needs rendering",
+                requiresBrowser: true,
+              })),
+            }),
+      );
+    await runner.start({ postedWithin: "any" });
+    await finished(runner);
+    expect(createSourceAccessStore(store).pending(1)).toBe(false);
+    expect(
+      (store.sql("SELECT count(*) AS n FROM needs_you").get() as { n: number })
+        .n,
+    ).toBe(0);
+    expect(sites.get(1)?.health).not.toBe("needs_sign_in");
+    expect(sites.get(1)?.signInState).not.toBe("required");
+  },
+);

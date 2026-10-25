@@ -451,3 +451,74 @@ test("an expired published closing date closes a listing; posting age and future
   ).toBeNull();
   expect(listingClosedReason("Posted three months ago. Apply now.")).toBeNull();
 });
+
+test("a source can be an unlinked single vacancy; its complete page is reused for metadata and full text", async () => {
+  const direct = { ...source, url: "https://board.example/a-vacancy" };
+  const html =
+    '<main><p>Real Employer · Remote</p><h1>Frontend Engineer</h1><h2>About the role</h2><p>Build reliable software with TypeScript and SQL. Collaborate across product and engineering on accessible interfaces.</p><h2>What you bring</h2><p>Professional development experience and clear communication.</p><a href="/apply">Apply now</a></main>';
+  const readPage = vi.fn(() => Promise.resolve({ html, finalUrl: direct.url })),
+    fallback = vi.fn(() => Promise.reject(new Error("No navigation needed")));
+  const inventory = await collectSource({
+    source: direct,
+    readPage,
+    navigateFallback: fallback,
+  });
+  expect(inventory.complete).toBe(true);
+  expect(inventory.needsYou).not.toBe(true);
+  expect(inventory.cards).toHaveLength(1);
+  expect(inventory.cards[0]?.url).toBe(direct.url);
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: JSON.stringify({
+          jobs: [
+            {
+              id: 0,
+              title: "Frontend Engineer",
+              company: "Real Employer",
+              location: "Remote",
+              workModes: ["remote"],
+              sourceJobId: null,
+              employmentType: null,
+              seniority: null,
+              salaryText: null,
+            },
+          ],
+        }),
+      }),
+    ),
+  };
+  const detail = await readListings({
+    cards: inventory.cards,
+    readPage,
+    client,
+  });
+  expect(detail.jobs[0]?.description).toContain(
+    "Professional development experience",
+  );
+  expect(readPage).toHaveBeenCalledTimes(1);
+  expect(fallback).not.toHaveBeenCalled();
+});
+
+test.each(["http", "browser"] as const)(
+  "a readable %s page with no vacancies reports zero listings without a sign-in or navigation fallback",
+  async (lane) => {
+    const fallback = vi.fn(() =>
+      Promise.reject(new Error("No navigation needed")),
+    );
+    const inventory = await collectSource({
+      source,
+      lane,
+      readPage: () =>
+        Promise.resolve({
+          html: `${lane === "browser" ? '<head><script src="/app.js"></script></head>' : ""}<main><h1>About our company</h1><p>We make useful products with a thoughtful team.</p></main>`,
+          finalUrl: source.url,
+        }),
+      navigateFallback: fallback,
+    });
+    expect(inventory.cards).toEqual([]);
+    expect(inventory.complete).toBe(true);
+    expect(inventory.needsYou).not.toBe(true);
+    expect(fallback).not.toHaveBeenCalled();
+  },
+);

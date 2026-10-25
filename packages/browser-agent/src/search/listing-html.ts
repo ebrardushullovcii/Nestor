@@ -253,6 +253,50 @@ export function readInventoryHtml(
         : {}),
     });
   }
+  // A source can point at a vacancy itself, with no linked title/card around it.
+  if (!cards.size) {
+    const root =
+      nodes.find(
+        (node) => node.tagName === "main" || attr(node, "role") === "main",
+      ) ?? nodes.find((node) => node.tagName === "body");
+    const content = root ? descendants(root) : nodes;
+    const headings = content.filter(
+      (node) => node.tagName === "h1" && text(node),
+    );
+    const hasJobSections = content.some(
+      (node) =>
+        /^h[2-4]$/u.test(node.tagName) &&
+        /(?:about (?:the |this )?(?:role|job|position)|job description|responsibilities|requirements|qualifications|what you|aufgaben|anforderungen|vos missions|profil recherch)/iu.test(
+          text(node),
+        ),
+    );
+    const hasApplyAction = content.some(
+      (node) =>
+        (node.tagName === "a" || node.tagName === "button") &&
+        /^(?:apply(?: now| for (?:this |the )?(?:job|role|position))?|bewerben|jetzt bewerben|postuler|solicitar|応募する)$/iu.test(
+          text(node).trim(),
+        ),
+    );
+    const heading = headings.length === 1 ? headings[0] : undefined;
+    if (heading && hasJobSections && hasApplyAction) {
+      const title = text(heading),
+        body = root ? text(root) : "";
+      if (
+        body.length > title.length + 80 &&
+        !/^(?:apply|sign in|log in|create (?:an )?account)\b/iu.test(title)
+      )
+        cards.set(url, {
+          url,
+          title,
+          text: body,
+          sourceId: source.id,
+          sourceLabel: source.label,
+          cardFingerprint: fingerprint(title.trim().toLowerCase()),
+          listingPage: { html, finalUrl: url },
+          ...(listingClosedReason(body) ? { closed: true } : {}),
+        });
+    }
+  }
   const next = new Set<string>();
   for (const node of nodes.filter((node) => node.tagName === "a")) {
     const label = text(node).toLowerCase();

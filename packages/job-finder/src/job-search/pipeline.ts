@@ -116,7 +116,7 @@ export function createSearchPipeline(input: {
     const touched = new Set(cards.map((card) => card.sourceId));
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (source.row.state !== "needs_you") {
+      if (source.row.state !== "needs_you" && source.row.state !== "failed") {
         source.row.state = "searching";
         source.row.phase = "screening";
       }
@@ -147,7 +147,8 @@ export function createSearchPipeline(input: {
     }
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (source.row.state !== "needs_you") source.row.phase = "reading";
+      if (source.row.state !== "needs_you" && source.row.state !== "failed")
+        source.row.phase = "reading";
       input.write(source);
       input.settled(source);
     }
@@ -195,7 +196,6 @@ export function createSearchPipeline(input: {
             failures: group.map((card) => ({
               url: card.url,
               reason: error instanceof Error ? error.message : String(error),
-              needsYou: true,
             })),
           };
         }
