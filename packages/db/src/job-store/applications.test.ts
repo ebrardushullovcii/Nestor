@@ -79,6 +79,28 @@ function question(
 }
 
 describe("applications on the job store", () => {
+  it("retains the mode chosen at Apply and accepts a changed mode only on an explicit retry", () => {
+    const { jobs, applications } = open();
+    const ids = add(jobs, 1);
+    applications.applyJobs({ selection: { ids } }, "confirm_before_submit");
+    const original = applications.listApplications().rows[0]!;
+    expect(original.mode).toBe("confirm_before_submit");
+    expect(
+      applications.applyJobs({ selection: { ids } }, "autonomous_submit")
+        .queued,
+    ).toBe(0);
+    expect(applications.getApplication(original.id)?.mode).toBe(
+      "confirm_before_submit",
+    );
+    applications.stop(original.id);
+    expect(
+      applications.applyJobs({ selection: { ids } }, "autonomous_submit")
+        .queued,
+    ).toBe(1);
+    expect(applications.getApplication(original.id)?.mode).toBe(
+      "autonomous_submit",
+    );
+  });
   it("queues ids or the complete Approved filter once, skips unapproved jobs, and pages the queue", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 7);

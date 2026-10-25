@@ -5,19 +5,31 @@ import {
   ApplyJobsResultSchema,
   ApplicationStoreDemoInputSchema,
   ApplicationStoreDemoResultSchema,
+  DEFAULT_APPLICATION_APPLY_MODE,
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 
 import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
+import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";
+import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 
 export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
-  ipcMain.handle("job-finder:apply-jobs", (_event, input: unknown) =>
-    ApplyJobsResultSchema.parse(
-      getApplicationStore().applyJobs(ApplyJobsInputSchema.parse(input)),
-    ),
-  );
+  ipcMain.handle("job-finder:apply-jobs", async (_event, input: unknown) => {
+    const value = ApplyJobsInputSchema.parse(input);
+    const service = await getJobFinderWorkspaceService();
+    const repository = getJobFinderRepositoryForWorkspaceService(service);
+    if (!repository)
+      throw new Error("Job Finder could not read the Apply setting.");
+    const settings = await repository.getSettings();
+    return ApplyJobsResultSchema.parse(
+      getApplicationStore().applyJobs(
+        value,
+        settings.applicationAutomationMode ?? DEFAULT_APPLICATION_APPLY_MODE,
+      ),
+    );
+  });
   ipcMain.handle("job-finder:list-applications", (_event, input: unknown) =>
     ApplicationListPageSchema.parse(
       getApplicationStore().listApplications(

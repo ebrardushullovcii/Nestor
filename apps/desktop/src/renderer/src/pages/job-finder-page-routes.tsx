@@ -574,7 +574,7 @@ export function JobFinderHomeRoute() {
         actionState={context.actionState}
         activityPending={activityPending}
         applicationAutomationMode={
-          context.workspace.settings.applicationAutomationMode ?? "prepare_only"
+          context.workspace.settings.applicationAutomationMode ?? "confirm_before_submit"
         }
         browserSessionPending={context.isPending(
           jobFinderPendingActions.browserSession(),
@@ -602,8 +602,7 @@ export function JobFinderHomeRoute() {
         onApplyToJobs={(jobIds) =>
           context.onStartAutoApplyQueue(
             [...jobIds],
-            context.workspace.settings.applicationAutomationMode ??
-              "prepare_only",
+            context.workspace.settings.applicationAutomationMode ?? "confirm_before_submit",
             { stayOnCurrentPage: true },
           )
         }
@@ -1715,7 +1714,7 @@ export function JobFinderApplicationsRoute() {
         onResolveApplyConsentRequest={context.onResolveApplyConsentRequest}
         onRevokeApplyRunApproval={context.onRevokeApplyRunApproval}
         applicationAutomationMode={
-          context.workspace.settings.applicationAutomationMode ?? "prepare_only"
+          context.workspace.settings.applicationAutomationMode ?? "confirm_before_submit"
         }
         onStartAutoApplyQueue={(jobIds, applicationAutomationMode) => {
           void context.onStartAutoApplyQueue(jobIds, applicationAutomationMode);

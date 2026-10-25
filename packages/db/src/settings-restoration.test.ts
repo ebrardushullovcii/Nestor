@@ -146,7 +146,7 @@ test("legacy repair keeps valid nested choices and disables corrupt permissions"
       const recovered = await repository.getSettings();
       expect(recovered).toMatchObject({
         appearanceTheme: seed.settings.appearanceTheme,
-        applicationAutomationMode: "prepare_only",
+        applicationAutomationMode: "confirm_before_submit",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
         aiBehavior: {

@@ -2,6 +2,7 @@ export const APPLICATION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK (mode IN ('confirm_before_submit', 'autonomous_submit')),
   state TEXT NOT NULL CHECK (state IN (
     'queued', 'running', 'needs_you', 'ready', 'submitting',
     'submitted', 'stopped', 'failed', 'uncertain'

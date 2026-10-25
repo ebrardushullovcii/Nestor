@@ -115,7 +115,7 @@ export const getWorkspaceSummaryTool = defineTool({
           ? { id: campaign.id, name: campaign.name }
           : null,
         applyMode:
-          snapshot.settings.applicationAutomationMode ?? "prepare_only",
+          snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
         activityPaused: snapshot.activityControl.paused ?? false,
       },
     };

@@ -589,7 +589,7 @@ export function SettingsScreen(props: {
                 throw new Error("Your pay choice did not save.");
             }}
             headingId="settings-application-authority-heading"
-            mode={settings.applicationAutomationMode ?? "prepare_only"}
+            mode={settings.applicationAutomationMode ?? "confirm_before_submit"}
             onSave={async (input) => {
               onSettingsDraftEdited();
               const saved = await onUpdateApplicationDefaults({

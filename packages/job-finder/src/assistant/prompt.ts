@@ -181,7 +181,7 @@ export function buildProfileDigest(
         : "; add or enable a valid public job-source URL before searching"
     }`,
     "Search needs an enabled valid source; a resume and saved target roles are not required for searching.",
-    `Apply mode: ${settings.applicationAutomationMode ?? "prepare_only"}`,
+    `Apply mode: ${settings.applicationAutomationMode ?? "confirm_before_submit"}`,
     `Resume level for new jobs: ${settings.resumeApplicationMode === "original_resume" ? "original file" : preferences.tailoringMode}`,
   ];
   return [
@@ -365,7 +365,7 @@ export function buildContextBlock(input: {
   }
   const snapshot = input.snapshot;
   lines.push(
-    `Current saved sending mode: ${snapshot.settings.applicationAutomationMode ?? "prepare_only"}. Searching does not apply; use read_settings for any sending-policy detail.`,
+    `Current saved sending mode: ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}. Searching does not apply; use read_settings for any sending-policy detail.`,
   );
   const searchReadiness = getAssistantSearchReadiness(snapshot);
   lines.push(

@@ -17,7 +17,7 @@ function renderSection(
 ) {
   const onSave = vi.fn();
   render(
-    <SettingsApplyModeSection mode="prepare_only"
+    <SettingsApplyModeSection mode="confirm_before_submit"
       onSave={onSave}
       {...props}
     />,
@@ -36,14 +36,15 @@ describe("SettingsApplyModeSection", () => {
     const onSave = vi.fn(() => Promise.reject(new Error("offline")));
     renderSection({ onSave });
 
-    fireEvent.click(screen.getByRole("radio", { name: /Ask before sending/ }));
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("radio", { name: /Send for me/ }));
 
     expect(
       await screen.findByText(
         "That did not save, so Apply still uses the mode shown. Try again.",
       ),
     ).toBeTruthy();
-    await waitFor(() => expect(checkedMode()).toMatch(/Prepare for me/));
+    await waitFor(() => expect(checkedMode()).toMatch(/Fill in for me/));
   });
 
   it("does not save again when the saved mode is picked", () => {
