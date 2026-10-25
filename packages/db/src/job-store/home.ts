@@ -97,19 +97,26 @@ export function createHomeStore(store: JobStore) {
 
       const count = (query: string, ...params: number[]) =>
         (sql(query).get(...params) as { n: number }).n;
+      const needsYou = (kind: string) =>
+        (
+          sql(`SELECT n FROM needs_you_counts WHERE kind = ?`).get(kind) as
+            | { n: number }
+            | undefined
+        )?.n ?? 0;
 
+      // Every open interview and reminder, not just each application's next
+      // one: an overdue reminder must not hide an interview on the same job.
+      // Interviews come first so a pile of overdue reminders can't push
+      // today's interview off the list.
       const upcoming = (
         sql(
-          `SELECT t.job_id AS jobId, j.company, j.title, t.next_at AS at, t.next_title AS what,
-             (SELECT e.kind FROM tracker_events e
-              WHERE e.job_id = t.job_id AND e.due_at = t.next_at AND e.done_at IS NULL
-              ORDER BY e.id LIMIT 1) AS kind,
-             (SELECT e.place FROM tracker_events e
-              WHERE e.job_id = t.job_id AND e.due_at = t.next_at AND e.done_at IS NULL
-              ORDER BY e.id LIMIT 1) AS place
-           FROM tracker t JOIN jobs j ON j.id = t.job_id
-           WHERE t.next_at IS NOT NULL AND t.next_at <= ?
-           ORDER BY t.next_at, t.job_id LIMIT ${UPCOMING_LIMIT}`,
+          `SELECT e.job_id AS jobId, j.company, j.title, e.due_at AS at, e.title AS what,
+             e.kind, e.place
+           FROM tracker_events e JOIN jobs j ON j.id = e.job_id
+           WHERE e.kind IN ('interview', 'reminder') AND e.due_at IS NOT NULL
+             AND e.done_at IS NULL AND e.due_at <= ?
+           ORDER BY e.kind = 'interview' DESC, e.due_at, e.id
+           LIMIT ${UPCOMING_LIMIT}`,
         ).all(now + UPCOMING_MS) as {
           jobId: number;
           company: string;
@@ -139,8 +146,17 @@ export function createHomeStore(store: JobStore) {
           `SELECT COUNT(*) AS n FROM jobs j WHERE j.stage = 'resume'
            AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)`,
         ),
-        needsYou: count(
-          `SELECT COUNT(*) AS n FROM needs_you WHERE resolved_at IS NULL`,
+        needsYou: {
+          questions: needsYou("question"),
+          signIns: needsYou("sign_in"),
+          checks: needsYou("captcha") + needsYou("mfa"),
+        },
+        interviewsThisWeek: count(
+          `SELECT COUNT(*) AS n FROM tracker_events
+           WHERE kind = 'interview' AND due_at IS NOT NULL AND done_at IS NULL
+             AND due_at >= ? AND due_at <= ?`,
+          today * DAY_MS - offset,
+          now + UPCOMING_MS,
         ),
         followUpsDue: count(
           `SELECT COUNT(*) AS n FROM tracker WHERE next_at IS NOT NULL AND next_at <= ?`,

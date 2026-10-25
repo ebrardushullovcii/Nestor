@@ -15,7 +15,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HomeScreen } from "./home-screen";
@@ -83,6 +83,10 @@ afterEach(() => {
   store.close();
 });
 
+function NeedsYouProbe() {
+  return <p>Needs you opened at {useLocation().search}</p>;
+}
+
 function renderHome() {
   render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
@@ -92,6 +96,7 @@ function renderHome() {
           element={<p>Applications opened</p>}
           path="/job-finder/applications"
         />
+        <Route element={<NeedsYouProbe />} path="/job-finder/actions" />
       </Routes>
     </MemoryRouter>,
   );
@@ -139,5 +144,22 @@ describe("Home", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Follow up/ }));
     expect(await screen.findByText("Applications opened")).toBeTruthy();
+  });
+
+  it("names site sign-ins as sign-ins and opens Needs you on them", async () => {
+    store
+      .sql(
+        `INSERT INTO needs_you (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at)
+         VALUES ('sign_in', 'account', '', ?, 'Sign in', 'text', '[]', ?)`,
+      )
+      .run("https://jobs.example.test", Date.now());
+    renderHome();
+
+    expect(await screen.findByText("Sign in to 1 job site")).toBeTruthy();
+    expect(screen.queryByText(/questions? for your applications/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Sign in/ }));
+    expect(
+      await screen.findByText("Needs you opened at ?kind=sign_in"),
+    ).toBeTruthy();
   });
 });

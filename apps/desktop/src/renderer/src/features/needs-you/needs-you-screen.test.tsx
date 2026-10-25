@@ -8,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { FoundJob } from "@nestor/contracts";
 import {
@@ -140,11 +141,13 @@ function ask(
   if (result.status !== "needs_you") throw new Error("Missing question");
   return result.task;
 }
-function show() {
+function show(route = "/job-finder/actions") {
   return render(
-    <ToastProvider>
-      <NeedsYouScreen />
-    </ToastProvider>,
+    <MemoryRouter initialEntries={[route]}>
+      <ToastProvider>
+        <NeedsYouScreen />
+      </ToastProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -316,4 +319,28 @@ it("updates tab counts while a saved answer is being edited, without moving the 
   });
   await screen.findByRole("button", { name: "Needs you 0" });
   expect(answer).toHaveProperty("value", "Six weeks");
+});
+
+it("opens on one kind of item from a link, and shows everything again on request", async () => {
+  ask(0);
+  const row = claimed[1]!;
+  const signIn = applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "account",
+    key: "account",
+    scope: {},
+    prompt: "Sign in to Example careers",
+    kind: "sign_in",
+    input: "text",
+    options: [],
+  });
+  if (signIn.status !== "needs_you") throw new Error("Missing sign-in");
+  show("/job-finder/actions?kind=sign_in");
+  await screen.findByRole("button", { name: /^Sign in to Example careers/ });
+  expect(
+    screen.queryByRole("button", { name: /^What is your notice/ }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show everything" }));
+  await screen.findByRole("button", { name: /^What is your notice/ });
 });

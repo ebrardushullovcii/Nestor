@@ -45,8 +45,10 @@ export interface HomeSummary {
   resumes: { writing: number; toReview: number; failed: number };
   /** Approved resumes not yet handed to Apply. */
   readyToApply: number;
-  /** Apply's open questions, sign-ins and checks. */
-  needsYou: number;
+  /** Open Needs you items: questions for applications, site sign-ins, and CAPTCHA or verification codes. */
+  needsYou: { questions: number; signIns: number; checks: number };
+  /** Open interviews from the start of today through the next 7 days. */
+  interviewsThisWeek: number;
   /** Applications whose next interview or reminder is due. */
   followUpsDue: number;
   /** Jobs found since the person's midnight that are still in Find jobs. */

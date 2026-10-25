@@ -60,6 +60,9 @@ CREATE INDEX IF NOT EXISTS tracker_events_open ON tracker_events (job_id, due_at
   WHERE due_at IS NOT NULL AND done_at IS NULL;
 -- Interviews and replies by day, for Home's charts.
 CREATE INDEX IF NOT EXISTS tracker_events_by_kind ON tracker_events (kind, at);
+-- Open interviews and reminders by when they are due, for Home's Coming up.
+CREATE INDEX IF NOT EXISTS tracker_events_due ON tracker_events (kind, due_at)
+  WHERE due_at IS NOT NULL AND done_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS tracker_tags (
   tag TEXT NOT NULL,
