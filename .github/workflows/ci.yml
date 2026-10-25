@@ -37,9 +37,11 @@ jobs:
 
   tests:
     name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The app ships on Windows, and some tests only hold there.
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
+      - run: git config --global core.longpaths true
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
         with:
@@ -53,7 +55,7 @@ jobs:
       - name: Install Chromium for the browser tests
         shell: bash
         run: |
-          pnpm --dir apps/desktop exec playwright install --with-deps chromium
+          pnpm --dir apps/desktop exec playwright install chromium
           CHROME_PATH="$(pnpm --dir apps/desktop exec node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
           echo "NESTOR_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
       - run: pnpm test:correctness
