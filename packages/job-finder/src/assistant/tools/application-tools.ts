@@ -1,6 +1,9 @@
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import {
+<<<<<<< HEAD
   ApplicationAnswerValueSchema,
+=======
+  isApplicationTrackedAsSentByPerson,
+>>>>>>> 7847827c (Rebuild Needs you on application store)
   AssistantGrantActionSchema,
   JobSelectionSchema,
   NonEmptyStringSchema,
@@ -249,6 +252,7 @@ async function latestRunFor(service: JobFinderWorkspaceService, jobId: string) {
   return { snapshot, result: result ?? null, record };
 }
 
+<<<<<<< HEAD
 export const answerApplicationQuestionTool = defineTool({
   name: "answer_application_question",
   group: "applications",
@@ -321,6 +325,197 @@ export const answerApplicationQuestionTool = defineTool({
     });
     ports.publishWorkspaceUpdate();
     return { summary: "Answer saved." };
+=======
+export const getApplicationRunTool = defineTool({
+  name: "get_application_run",
+  group: "applications",
+  description:
+    "Reads one application by job id: its state, the questions the form asked and the answers given, what blocks it, and its attached files. Use get_application for Applications tracking.",
+  parameters: json.object({ jobId: json.string() }, ["jobId"]),
+  input: z.object({ jobId: Id }),
+  label: () => "Reading the application",
+  effect: "read",
+  async execute(input, { service }) {
+    const { result, record, snapshot } = await latestRunFor(
+      service,
+      input.jobId,
+    );
+    if (!result && !record) {
+      throw new AssistantToolError(
+        "not_found",
+        "This job has no application yet.",
+      );
+    }
+    const details = result
+      ? await service.getApplyRunDetails(
+          result.runId,
+          input.jobId,
+          record?.id ?? null,
+        )
+      : null;
+    const steps = (snapshot.userActionRequests ?? [])
+      .filter(
+        (request) =>
+          request.scope.type === "application" &&
+          request.scope.jobId === input.jobId &&
+          OPEN_STEP_STATES.has(request.state),
+      )
+      .slice(0, 10);
+    const verifying = steps.some((step) => step.state === "verifying");
+    const unconfirmedLegacy =
+      result?.state === "submitted" &&
+      result.privacyReceipt?.finalSubmitOccurred !== true &&
+      !record?.personSendReceipt &&
+      !isApplicationTrackedAsSentByPerson(record?.crm);
+    return {
+      summary: [
+        record
+          ? `${record.title} at ${record.company}: ${record.lastActionLabel}.`
+          : `Application in state ${result?.state}.`,
+        verifying
+          ? "An answer given for this application is being put on the form now (its Needs you step is verifying). It is not waiting on the person; question rows update when that finishes."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      data: {
+        record: record ? compactApplication(record) : null,
+        submission:
+          result?.privacyReceipt?.submissionOutcome ??
+          record?.personSendReceipt ??
+          null,
+        recovery:
+          result?.privacyReceipt?.submissionOutcome?.outcome ===
+          "outcome_uncertain"
+            ? "Check the site and ask the person to record the outcome. Do not send again or change permission settings."
+            : null,
+        needsYouSteps: steps.map((step) => ({
+          id: step.id,
+          title: step.title,
+          state: step.state,
+        })),
+        run: result
+          ? {
+              runId: result.runId,
+              resultId: result.id,
+              state: unconfirmedLegacy ? "not_confirmed" : result.state,
+            }
+          : null,
+        questions: (details?.questionRecords ?? [])
+          .slice(0, 30)
+          .map((question) => ({
+            id: question.id,
+            prompt: question.prompt,
+            kind: question.kind,
+            required: question.isRequired,
+            options: question.answerOptions.slice(0, 20),
+            status: question.status,
+            answer: question.submittedAnswer,
+          })),
+        answers: (details?.answerRecords ?? []).slice(0, 30).map((answer) => ({
+          questionId: answer.questionId,
+          text: answer.text,
+          revision: answer.revision,
+          status: answer.status,
+        })),
+        // Files the form was given: the review card the run wrote, and any
+        // uploaded-file records, so "was it attached?" has an answer.
+        attachedFiles: [
+          ...(details?.reviewCard?.attachments ?? []).map((attachment) => ({
+            fileName: attachment.fileName,
+            field: attachment.label,
+          })),
+          ...(details?.artifactRefs ?? [])
+            .filter((artifact) => artifact.kind === "uploaded_asset")
+            .map((artifact) => ({ fileName: artifact.label, field: null })),
+        ].slice(0, 20),
+        blocker: record?.latestBlocker ?? null,
+
+      },
+    };
+  },
+});
+
+export const continueApplicationTool = defineTool({
+  name: "continue_application",
+  group: "applications",
+  description:
+    "Tries a stopped or failed application again, or opens its kept page for the person (openPage). Retrying needs a covering instruction like any start. An application paused on a Needs you step is not retried: it continues when that step is answered or marked done with resolve_needs_you.",
+  parameters: json.object({ jobId: json.string(), openPage: json.boolean() }, [
+    "jobId",
+  ]),
+  input: z.object({ jobId: Id, openPage: z.boolean().default(false) }),
+  label: (input) =>
+    input.openPage
+      ? "Opening the application page"
+      : "Trying the application again",
+  effect: "external",
+  async execute(input, context) {
+    const { service, session, ports } = context;
+    const { result, record } = await latestRunFor(service, input.jobId);
+    if (input.openPage) {
+      if (!result || !record)
+        throw new AssistantToolError("not_found", "No kept page for this job.");
+      await service.inspectPreparedApplicationPage({
+        runId: result.runId,
+        jobId: input.jobId,
+        resultId: result.id,
+        applicationRecordId: record.id,
+      });
+      await service.focusPreparedApplicationPage({
+        runId: result.runId,
+        jobId: input.jobId,
+        resultId: result.id,
+        applicationRecordId: record.id,
+      });
+      if (!ports.browser?.show) {
+        return {
+          summary:
+            "The application tab is selected. Open the Job Finder browser to see it.",
+        };
+      }
+      // The same retained tab is now the target of later browser tools in
+      // this turn, even when the message was sent with the browser minimized.
+      await session.browserLease({ applicationResultId: result.id });
+      await ports.browser.show();
+      return {
+        summary:
+          "The application page is open in the browser. Browser tools now use this filled form; sending still uses send_applications.",
+      };
+    }
+    const outcome = await applyToJobsTool.execute(
+      { jobIds: [input.jobId], evenIfExcludedOrApplied: true },
+      context,
+    );
+    void ports;
+    void session;
+    return outcome;
+  },
+});
+
+export const cancelApplicationsTool = defineTool({
+  name: "cancel_applications",
+  group: "applications",
+  description:
+    "Stops a running application batch by its run id; work already sent stays sent. Name in skippedJobIds the jobs the person asked to skip, so they read as skipped, not as failed.",
+  parameters: json.object({ runId: json.string(), skippedJobIds: json.ids() }, [
+    "runId",
+  ]),
+  input: z.object({
+    runId: Id,
+    skippedJobIds: z.array(Id).max(100).default([]),
+  }),
+  label: () => "Stopping the applications",
+  effect: "local_write",
+  async execute(input, { service, ports }) {
+    await service.cancelApplyRun(input.runId, {
+      skippedByPerson: input.skippedJobIds,
+    });
+    ports.publishWorkspaceUpdate();
+    return {
+      summary: `Stopped the batch.${input.skippedJobIds.length > 0 ? ` Marked as skipped at the person's request: ${input.skippedJobIds.join(", ")}.` : ""}`,
+    };
+>>>>>>> 7847827c (Rebuild Needs you on application store)
   },
 });
 
@@ -328,5 +523,13 @@ export const applicationTools = [
   recordInstructionTool,
   updateInstructionTool,
   listInstructionsTool,
+<<<<<<< HEAD
   answerApplicationQuestionTool,
+=======
+  applyToJobsTool,
+  sendApplicationsTool,
+  getApplicationRunTool,
+  continueApplicationTool,
+  cancelApplicationsTool,
+>>>>>>> 7847827c (Rebuild Needs you on application store)
 ];

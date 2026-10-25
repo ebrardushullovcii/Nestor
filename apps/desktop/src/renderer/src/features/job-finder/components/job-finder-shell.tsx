@@ -1,3 +1,4 @@
+import { useNeedsYouCount } from "@renderer/features/needs-you/use-needs-you-count";
 import type { CSSProperties, ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import type { RecentChange } from "../lib/recent-changes";
@@ -59,11 +60,9 @@ import {
 } from "./job-finder-global-search";
 import { JobFinderTaskCenter } from "./task-center/job-finder-task-center";
 import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
-import { countNeedsYouItems } from "../lib/needs-you-count";
 import {
   countApplicationRecords,
   countDiscoveryVisibleJobs,
-  countNeedsYou,
   selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
@@ -139,25 +138,12 @@ const screenLabelMap: Record<JobFinderScreen, string> = {
   settings: "Settings",
 };
 
-/**
- * Thin adapter over the one exported owner in `lib/needs-you-count.ts`. The
- * shell no longer derives this population itself; the argument order is kept
- * so existing callers and tests read the same helper.
- */
-export function countUnresolvedUserActions(
-  requests:
-    | JobFinderRendererWorkspaceSnapshot["userActionRequests"]
-    | undefined,
-  groupedDecisions?: readonly GroupedManualAnswerDecision[],
-): number {
-  return countNeedsYouItems({ groupedDecisions, requests });
-}
-
 export const LOCKED_LAYOUT_SCREENS: readonly JobFinderScreen[] = [
   "profile",
   "discovery",
   "review-queue",
   "applications",
+  "actions",
 ];
 
 // The More menu's own preferred width, and the height it needs for seven
@@ -508,6 +494,7 @@ export function JobFinderShell({
   toReviewCount = null,
   workspace,
 }: JobFinderShellProps) {
+  const needsYouCount = useNeedsYouCount();
   const isMac = platform === "darwin";
   const isWindows = platform === "win32";
   const location = useLocation();
@@ -679,7 +666,7 @@ export function JobFinderShell({
       {
         id: "actions",
         label: "Needs you",
-        count: toDestinationBadgeCount(countNeedsYou(workspace)),
+        count: toDestinationBadgeCount(needsYouCount),
         countKind: "attention",
         countNoun: "unresolved",
         icon: BellRing,
@@ -692,7 +679,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [launchCounts, searchCounts, toReviewCount, workspace]);
+  }, [launchCounts, searchCounts, toReviewCount, needsYouCount, workspace]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",
@@ -1770,7 +1757,7 @@ export function JobFinderShell({
                   ? MACOS_TRAFFIC_LIGHT_INSET
                   : undefined
               }
-              hasUnresolvedAttention={countNeedsYou(workspace) > 0}
+              hasUnresolvedAttention={needsYouCount > 0}
             />
             {actionScreen ? (
               <button

@@ -40,7 +40,6 @@ import {
 } from "./settings-tools";
 import {
   getWorkspaceSummaryTool,
-  listNeedsYouTool,
   openInAppTool,
 } from "./workspace-tools";
 
@@ -649,43 +648,6 @@ describe("R3 assistant safety findings", () => {
     );
   });
 
-  it("R3-048 lists unapproved resumes and final sends even without a browser question", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.userActionRequests = [];
-    snapshot.applicationRecords = [
-      {
-        ...application(),
-        jobId: "other",
-        status: "ready_for_review",
-        lastAttemptState: "ready",
-        crm: null,
-      },
-    ];
-    snapshot.applyJobResults = [];
-    snapshot.reviewQueue = [
-      {
-        ...snapshot.reviewQueue[0]!,
-        jobId: "review",
-        resumeReview: { status: "needs_review" },
-        resumeApplicationMode: "tailored_per_job",
-      },
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const result = await listNeedsYouTool.execute({}, ctx);
-    expect(result.data).toMatchObject({
-      needsYou: { count: 0 },
-      resumeReviews: [expect.objectContaining({ kind: "resume_review" })],
-      readyToSend: [expect.objectContaining({ kind: "application_send" })],
-    });
-    const summary = await getWorkspaceSummaryTool.execute({}, ctx);
-    expect(summary.data).toMatchObject({
-      needsYou: 0,
-      readyToSend: 1,
-      resumeReviews: 1,
-    });
-  });
-
   it("R3-068 / R3-057 gives known privacy controls without inventing a current-pay switch", () => {
     expect(ASSISTANT_SYSTEM_PROMPT).toContain(
       "Settings > Delete everything > Reset everything",
@@ -831,34 +793,6 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
   ).toEqual([]);
 });
 
-it("chat uses the shared Needs you projection for paused records without live requests", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  snapshot.userActionRequests = [];
-  snapshot.applyJobResults = [];
-  snapshot.reviewQueue = [];
-  snapshot.applicationRecords = [
-    {
-      ...application(),
-      status: "drafting",
-      lastAttemptState: "paused",
-      crm: null,
-      nextActionLabel: "Answer relocation",
-      consentSummary: { status: "requested", pendingCount: 1 },
-    },
-  ];
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  expect((await listNeedsYouTool.execute({}, ctx)).data).toMatchObject({
-    needsYou: {
-      count: 1,
-      applications: [expect.objectContaining({ reason: "Answer relocation" })],
-    },
-  });
-  expect((await getWorkspaceSummaryTool.execute({}, ctx)).data).toMatchObject({
-    needsYou: 1,
-  });
-});
-
 it("bulk selection submits eligible jobs once and preserves held-back outcomes", async () => {
   const ctx = world();
   const snapshot = await ctx.service.getWorkspaceSnapshot();
@@ -947,6 +881,7 @@ it("bulk selection starts at most three slow reads and retains out-of-order outc
   );
 });
 
+<<<<<<< HEAD
 it("chat and the queue retain existing display rules for a legacy quoted question", async () => {
   const ctx = world();
   const snapshot = await ctx.service.getWorkspaceSnapshot();
@@ -983,6 +918,129 @@ it("chat and the queue retain existing display rules for a legacy quoted questio
   });
 });
 
+=======
+describe("opening a retained application", () => {
+  it("shows the browser and lends the exact retained result for subsequent browser tools", async () => {
+    const ctx = world();
+    const snapshot = await ctx.service.getWorkspaceSnapshot();
+    snapshot.applyJobResults = [
+      ApplyJobResultSchema.parse({
+        id: "result",
+        jobId: "job_ready",
+        runId: "run",
+        applicationRecordId: "record",
+        state: "awaiting_review",
+        summary: "Ready",
+        detail: "Synthetic form",
+        startedAt: "2026-10-04T12:00:00.000Z",
+        updatedAt: "2026-10-04T12:00:00.000Z",
+      }),
+    ];
+    snapshot.applicationRecords = [
+      ApplicationRecordSchema.parse({
+        id: "record",
+        jobId: "job_ready",
+        status: "approved",
+        lastActionLabel: "Prepared",
+        nextActionLabel: "Send",
+        company: "Synthetic",
+        title: "Analyst",
+        lastUpdatedAt: "2026-10-04T12:00:00.000Z",
+      }),
+    ];
+    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
+    const order: string[] = [];
+    vi.spyOn(ctx.service, "inspectPreparedApplicationPage").mockResolvedValue(
+      page(),
+    );
+    const browserLease = vi.fn(() => {
+      order.push("lease");
+      return Promise.resolve({} as AssistantBrowserLease);
+    });
+    ctx.session.browserLease = browserLease;
+    vi.spyOn(ctx.service, "focusPreparedApplicationPage").mockImplementation(
+      () => {
+        order.push("focus");
+        return Promise.resolve(snapshot);
+      },
+    );
+    const show = vi.fn(() => {
+      order.push("show");
+      return Promise.resolve();
+    });
+    const lease = vi.fn();
+    ctx.ports.browser = { show, visibleTab: vi.fn(() => null), lease };
+    const outcome = await continueApplicationTool.execute(
+      { jobId: "job_ready", openPage: true },
+      ctx,
+    );
+    expect(order).toEqual(["focus", "lease", "show"]);
+    expect(browserLease).toHaveBeenCalledWith({
+      applicationResultId: "result",
+    });
+    expect(lease).not.toHaveBeenCalled();
+    expect(outcome.summary).toContain("Browser tools now use this filled form");
+    show.mockRejectedValueOnce(new Error("Browser could not open"));
+    await expect(
+      continueApplicationTool.execute(
+        { jobId: "job_ready", openPage: true },
+        ctx,
+      ),
+    ).rejects.toThrow("Browser could not open");
+  });
+});
+
+it("chat send cards name the result rather than claiming failed or unconfirmed sends were SENT", async () => {
+  const { sendApplicationsTool } = await import("./application-tools");
+  const ctx = world();
+  const snapshot = await ctx.service.getWorkspaceSnapshot();
+  snapshot.applicationRecords = [application()];
+  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
+  ctx.session.grants = {
+    list: () =>
+      Promise.resolve([
+        {
+          id: "grant",
+          jobIds: ["job_ready"],
+          status: "active",
+          action: "prepare_and_send",
+        },
+      ] as never),
+    save: vi.fn(),
+  };
+  ctx.ports.sendPreparedApplications = vi.fn(() =>
+    Promise.resolve({
+      sentJobIds: [],
+      failed: [{ jobId: "job_ready", reason: "Waiting for approval" }],
+    }),
+  );
+  const result = await sendApplicationsTool.execute(
+    { jobIds: ["job_ready"] },
+    ctx,
+  );
+  expect(result.parts?.[0]).toMatchObject({
+    type: "records",
+    title: "Sending results",
+  });
+  expect(result.summary).toContain("0 applications");
+  expect(result.summary).toContain("1 not sent");
+  snapshot.applyJobResults = [1, 2].map(
+    (index) =>
+      ({
+        jobId: "job_ready",
+        updatedAt: `2026-10-04T12:00:0${index}.000Z`,
+        privacyReceipt: { submissionOutcome: { outcome: "outcome_uncertain" } },
+      }) as unknown as (typeof snapshot.applyJobResults)[number],
+  );
+  const uncertain = await sendApplicationsTool.execute(
+    { jobIds: ["job_ready"] },
+    ctx,
+  );
+  expect(uncertain.summary).toContain("1 send unconfirmed");
+  expect(uncertain.summary).not.toContain("not sent");
+});
+
+>>>>>>> 7847827c (Rebuild Needs you on application store)
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {
   const ctx = world();
   ctx.session.sourceMessage = AssistantMessageSchema.parse({

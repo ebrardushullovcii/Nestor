@@ -143,9 +143,20 @@ export const NeedsYouTaskSchema = z.object({
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 
+export const NeedsYouCountsSchema = z.object({
+  question: z.number().int().nonnegative(),
+  sign_in: z.number().int().nonnegative(),
+  captcha: z.number().int().nonnegative(),
+  mfa: z.number().int().nonnegative(),
+  saved: z.number().int().nonnegative(),
+});
+export type NeedsYouCounts = z.infer<typeof NeedsYouCountsSchema>;
 export const NeedsYouPageSchema = z.object({
   rows: z.array(NeedsYouTaskSchema),
   nextCursor: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative(),
+  totalCapped: z.boolean(),
+  counts: NeedsYouCountsSchema,
 });
 export type NeedsYouPage = z.infer<typeof NeedsYouPageSchema>;
 
@@ -170,6 +181,8 @@ export type RequestNeedsYouResult = z.infer<typeof RequestNeedsYouResultSchema>;
 
 export const NeedsYouListQuerySchema = z
   .object({
+    kind: NeedsYouKindSchema.nullable().default(null),
+    text: z.string().trim().max(200).default(""),
     after: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(200).default(50),
   })
@@ -203,4 +216,91 @@ export const ApplicationStoreDemoResultSchema = z.object({
 });
 export type ApplicationStoreDemoResult = z.infer<
   typeof ApplicationStoreDemoResultSchema
+>;
+
+export const NeedsYouDraftSchema = z.object({
+  answer: z.string().max(20000),
+  remember: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+export type NeedsYouDraft = z.infer<typeof NeedsYouDraftSchema>;
+export const SaveNeedsYouDraftInputSchema = NeedsYouDraftSchema.extend({
+  id: z.number().int().positive(),
+}).strict();
+export type SaveNeedsYouDraftInput = z.infer<
+  typeof SaveNeedsYouDraftInputSchema
+>;
+export const SaveNeedsYouDraftResultSchema = z.object({
+  saved: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+export type SaveNeedsYouDraftResult = z.infer<
+  typeof SaveNeedsYouDraftResultSchema
+>;
+export const NeedsYouDetailsSchema = z.object({
+  task: NeedsYouTaskSchema,
+  applications: z.array(
+    ApplicationRowSchema.pick({
+      id: true,
+      jobId: true,
+      title: true,
+      company: true,
+      location: true,
+      state: true,
+    }),
+  ),
+  draft: NeedsYouDraftSchema.nullable(),
+});
+export type NeedsYouDetails = z.infer<typeof NeedsYouDetailsSchema>;
+export const SavedFormAnswerSummarySchema = z.object({
+  id: z.number().int().positive(),
+  prompt: z.string(),
+  preview: z.string(),
+  scope: FormAnswerScopeSchema,
+  input: NeedsYouTaskSchema.shape.input,
+  updatedAt: IsoDateTimeSchema,
+});
+export type SavedFormAnswerSummary = z.infer<
+  typeof SavedFormAnswerSummarySchema
+>;
+export const SavedFormAnswerSchema = SavedFormAnswerSummarySchema.extend({
+  answer: z.string(),
+  options: z.array(z.string()),
+});
+export type SavedFormAnswer = z.infer<typeof SavedFormAnswerSchema>;
+export const SavedFormAnswersQuerySchema = z
+  .object({
+    after: z.number().int().nonnegative().default(0),
+    text: z.string().trim().max(200).default(""),
+    limit: z.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type SavedFormAnswersQuery = z.input<typeof SavedFormAnswersQuerySchema>;
+export const SavedFormAnswersPageSchema = z.object({
+  rows: z.array(SavedFormAnswerSummarySchema),
+  nextCursor: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative(),
+  totalCapped: z.boolean(),
+});
+export type SavedFormAnswersPage = z.infer<typeof SavedFormAnswersPageSchema>;
+export const SaveFormAnswerInputSchema = z
+  .object({
+    id: z.number().int().positive(),
+    answer: z.string().trim().min(1).max(20000),
+  })
+  .strict();
+export type SaveFormAnswerInput = z.infer<typeof SaveFormAnswerInputSchema>;
+export const ForgetFormAnswersInputSchema = z.union([
+  z
+    .object({ ids: z.array(z.number().int().positive()).min(1).max(2000) })
+    .strict(),
+  z
+    .object({
+      filter: z.object({ text: z.string().trim().max(200) }).strict(),
+      except: z.array(z.number().int().positive()).max(2000),
+    })
+    .strict(),
+]);
+export type ForgetFormAnswersInput = z.infer<
+  typeof ForgetFormAnswersInputSchema
 >;

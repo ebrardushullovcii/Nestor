@@ -93,7 +93,6 @@ import {
 
 export type { JobFinderPageContext } from "./job-finder-page-context";
 export {
-  JobFinderActionsRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,

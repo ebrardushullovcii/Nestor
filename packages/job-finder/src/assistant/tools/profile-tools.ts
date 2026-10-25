@@ -18,7 +18,6 @@ import {
   type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
 import { z } from "zod";
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import { defaultResumeLevelLabel, plainFieldName } from "../prompt";
 import { profileProposalPreview } from "../proposal-preview";
 import {
@@ -51,14 +50,14 @@ export const PROFILE_EDITING_RULES = [
   "Spoken languages live in Profile > Background (a tab, not a section to scroll to). Use upsert_language_record with record.language and proficiency, then read_profile background to verify the saved list. Import success does not prove every collection was saved: read_document and compare work history, education, skills, links and spoken languages with read_profile; add missing facts from the supplied resume before declaring the import complete.",
   "The professional summary shown in Basics is replace_professional_summary_fields with fullSummary. Headline, contact details and location are replace_identity_fields.",
   "Work eligibility (countries, sponsorship, remote eligibility, relocation, notice period) is replace_work_eligibility_fields; record only what the person said or the resume states.",
-  "When the person asks you to remember application answers, save the explicit facts with edit_profile before starting applications, then verify the saved answers with read_profile background. Facts with no dedicated field, such as street address and postcode, use upsert_reusable_answer with record fields kind (other), label, question and answer; reuse an existing answer's id when updating it. currentLocation is the city/region/country, never a street address or postcode. record_instruction records application authorization, not saved answer facts, so it cannot justify saying an address or answer was remembered. Save answers for later only when asked, and never guess missing facts.",
+  "Form answers are read and saved only in Needs you: list_needs_you, resolve_needs_you and the Needs you saved-answer commands. Keep structured eligibility and resume facts in Profile. Never invent personal answers or save them for later without the person choosing it.",
   "The resume level for jobs shortlisted from now on is set_resume_approach: original_resume, conservative (Light), balanced (Tailored) or aggressive.",
   "Never invent experience, credentials, dates, pay currency or metrics.",
   "Setup readiness comes from the setup data returned by read_profile and edit_profile. Before saying setup is finished, check its blockers and required review items. Fill a missing headline from the person's stated target focus when setting up their profile; do not invent past experience. Tell them any remaining required step plainly; a phone number is not required when an email is saved. When the person asks to finish a ready setup, call finish_profile_setup; it saves completion without starting a search.",
   "For setup eligibility, ask only for setup.missingWorkEligibilityAnswers: where the person is legally authorized to work and whether employer visa sponsorship is needed. Existing explicit saved answers count; never ask for an answered item again. Relocation, notice period, availability, remote eligibility and work-mode preferences are optional and must never be described as required setup answers.",
   "For a scanned resume, read_profile section review returns the visual extraction's values and evidence for both saved and pending details, even when read_document has no text. Inspect those results before saying the scan is unreadable. Zero pending suggestions means none needs review; inspect the current import outcome counts and saved profile before reporting what was extracted. Use resolve_import_suggestion for explicit authorized, unambiguous confirmations; leave conflicts or uncertain values for the person rather than accepting every scan suggestion automatically.",
   "Resume import supports PDF, DOCX, TXT and Markdown. Scanned image PDFs have no readable text; visual extraction may read them when available but is not guaranteed. Standalone PNG/JPG images are not supported resume imports. For an unsupported or empty import, ask for a supported file or pasted text, not another photo.",
-  'Exact shapes (field replacements take a value object of only the fields that change; set_resume_approach takes a scalar string): {"operation":"replace_identity_fields","value":{"headline":"Staff designer"}}; {"operation":"replace_profile_list_fields","value":{"skills":["Figma","Accessibility"]}} (send the whole new list); {"operation":"replace_profile_list_fields","value":{"targetRoles":["Frontend Engineer","Platform Engineer"]}}; {"operation":"remove_profile_list_entries","field":"skills","values":["Sketch"]}; {"operation":"replace_work_eligibility_fields","value":{"requiresVisaSponsorship":false}}; {"operation":"replace_professional_summary_fields","value":{"fullSummary":"…"}}; {"operation":"set_resume_approach","value":"aggressive"}; {"operation":"upsert_reusable_answer","record":{"kind":"other","label":"Street address","question":"What is your street address?","answer":"14 Fiction Lane"}}; {"operation":"upsert_experience_record","record":{"id":"<card id>","endDate":"2024-06","isCurrent":false}}; {"operation":"remove_experience_record","recordId":"<card id>"}.',
+  'Exact shapes (field replacements take a value object of only the fields that change; set_resume_approach takes a scalar string): {"operation":"replace_identity_fields","value":{"headline":"Staff designer"}}; {"operation":"replace_profile_list_fields","value":{"skills":["Figma","Accessibility"]}} (send the whole new list); {"operation":"replace_profile_list_fields","value":{"targetRoles":["Frontend Engineer","Platform Engineer"]}}; {"operation":"remove_profile_list_entries","field":"skills","values":["Sketch"]}; {"operation":"replace_work_eligibility_fields","value":{"requiresVisaSponsorship":false}}; {"operation":"replace_professional_summary_fields","value":{"fullSummary":"…"}}; {"operation":"set_resume_approach","value":"aggressive"}; {"operation":"upsert_experience_record","record":{"id":"<card id>","endDate":"2024-06","isCurrent":false}}; {"operation":"remove_experience_record","recordId":"<card id>"}.',
 ].join(" ");
 
 /** Keep the model's field names and types tied to the canonical contracts. */
@@ -258,10 +257,6 @@ function background(profile: CandidateProfile) {
     spokenLanguages: profile.spokenLanguages,
     proofBank: profile.proofBank,
     narrative: profile.narrative,
-    answerBank: {
-      ...profile.answerBank,
-      customAnswers: profile.answerBank.customAnswers,
-    },
     applicationIdentity: profile.applicationIdentity,
   };
 }
@@ -954,6 +949,9 @@ export const editProfileTool = defineTool({
       }
     }
 
+    if(operations.some(operation => ["upsert_reusable_answer","remove_reusable_answer","replace_answer_bank_fields"].includes(operation.operation)))
+      throw new AssistantToolError("refused","Form answers belong in Needs you. Use list_needs_you and resolve_needs_you for a pending question, or the Needs you saved-answer commands to edit remembered answers.");
+
     if (input.mode === "suggest") {
       const { proposal, part } = await session.createProposal({
         kind: "profile_operations",
@@ -973,37 +971,6 @@ export const editProfileTool = defineTool({
       };
     }
 
-    const savedAnswers = operations.flatMap((operation) => {
-      if (operation.operation === "upsert_reusable_answer") {
-        const existing = snapshot.profile.answerBank.customAnswers.find(
-          (answer) => answer.id === operation.record.id,
-        );
-        if (
-          operation.record.answer === undefined ||
-          existing?.answer === operation.record.answer
-        )
-          return [];
-        const question =
-          operation.record.question ??
-          operation.record.label ??
-          existing?.question ??
-          existing?.label;
-        const answer = operation.record.answer ?? existing?.answer;
-        return question && answer ? [{ question, answer }] : [];
-      }
-      if (operation.operation === "replace_answer_bank_fields")
-        return Object.entries(operation.value).flatMap(([question, answer]) =>
-          typeof answer === "string" && answer.trim()
-            ? [{ question, answer }]
-            : [],
-        );
-      return [];
-    });
-    if (savedAnswers.length)
-      await assertPersonAnswerAuthority(session, {
-        answers: savedAnswers,
-        saveForFuture: true,
-      });
     session.assertCurrent();
     const result = await service.applyAssistantProfileOperations({
       operations,

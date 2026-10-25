@@ -60,6 +60,38 @@ CREATE TABLE IF NOT EXISTS needs_you (
 CREATE UNIQUE INDEX IF NOT EXISTS needs_you_open_key
   ON needs_you(kind, answer_key, country, site_origin) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_open ON needs_you(id) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS needs_you_by_kind ON needs_you(kind, id) WHERE resolved_at IS NULL;
+CREATE TABLE IF NOT EXISTS needs_you_counts (kind TEXT PRIMARY KEY, n INTEGER NOT NULL) WITHOUT ROWID;
+INSERT OR IGNORE INTO needs_you_counts (kind, n) VALUES ('question',0),('sign_in',0),('captcha',0),('mfa',0),('saved',0);
+CREATE TRIGGER IF NOT EXISTS needs_you_count_insert AFTER INSERT ON needs_you WHEN NEW.resolved_at IS NULL BEGIN
+  UPDATE needs_you_counts SET n = n + 1 WHERE kind = NEW.kind;
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_count_resolve AFTER UPDATE OF resolved_at ON needs_you
+WHEN OLD.resolved_at IS NULL AND NEW.resolved_at IS NOT NULL BEGIN
+  UPDATE needs_you_counts SET n = n - 1 WHERE kind = OLD.kind;
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_count_reopen AFTER UPDATE OF resolved_at ON needs_you
+WHEN OLD.resolved_at IS NOT NULL AND NEW.resolved_at IS NULL BEGIN
+  UPDATE needs_you_counts SET n = n + 1 WHERE kind = NEW.kind;
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_count_delete AFTER DELETE ON needs_you WHEN OLD.resolved_at IS NULL BEGIN
+  UPDATE needs_you_counts SET n = n - 1 WHERE kind = OLD.kind;
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_text_update AFTER UPDATE OF prompt ON needs_you BEGIN
+  INSERT INTO needs_you_text(needs_you_text,rowid,prompt) VALUES('delete',OLD.id,OLD.prompt);
+  INSERT INTO needs_you_text(rowid,prompt) VALUES(NEW.id,NEW.prompt);
+END;
+CREATE TABLE IF NOT EXISTS needs_you_drafts (
+  task_id INTEGER PRIMARY KEY REFERENCES needs_you(id) ON DELETE CASCADE,
+  answer TEXT NOT NULL, remember INTEGER NOT NULL, revision INTEGER NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS needs_you_text USING fts5(prompt, content='needs_you', content_rowid='id');
+CREATE TRIGGER IF NOT EXISTS needs_you_text_insert AFTER INSERT ON needs_you BEGIN
+  INSERT INTO needs_you_text(rowid,prompt) VALUES(NEW.id,NEW.prompt);
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_text_delete AFTER DELETE ON needs_you BEGIN
+  INSERT INTO needs_you_text(needs_you_text,rowid,prompt) VALUES('delete',OLD.id,OLD.prompt);
+END;
 
 CREATE TABLE IF NOT EXISTS application_needs_you (
   application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
@@ -102,6 +134,7 @@ END;
 
 -- Form answer memory belongs to Needs you, never Profile or a workspace blob.
 CREATE TABLE IF NOT EXISTS form_answers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   answer_key TEXT NOT NULL,
   country TEXT NOT NULL,
   site_origin TEXT NOT NULL,
@@ -110,6 +143,23 @@ CREATE TABLE IF NOT EXISTS form_answers (
   input TEXT NOT NULL,
   options_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (answer_key, country, site_origin)
-) WITHOUT ROWID;
+  UNIQUE (answer_key, country, site_origin)
+);
+CREATE TRIGGER IF NOT EXISTS form_answers_count_insert AFTER INSERT ON form_answers BEGIN
+  UPDATE needs_you_counts SET n = n + 1 WHERE kind = 'saved';
+END;
+CREATE TRIGGER IF NOT EXISTS form_answers_count_delete AFTER DELETE ON form_answers BEGIN
+  UPDATE needs_you_counts SET n = n - 1 WHERE kind = 'saved';
+END;
+CREATE VIRTUAL TABLE IF NOT EXISTS form_answers_text USING fts5(prompt, answer, content='form_answers', content_rowid='id');
+CREATE TRIGGER IF NOT EXISTS form_answers_text_insert AFTER INSERT ON form_answers BEGIN
+  INSERT INTO form_answers_text(rowid,prompt,answer) VALUES(NEW.id,NEW.prompt,NEW.answer);
+END;
+CREATE TRIGGER IF NOT EXISTS form_answers_text_delete AFTER DELETE ON form_answers BEGIN
+  INSERT INTO form_answers_text(form_answers_text,rowid,prompt,answer) VALUES('delete',OLD.id,OLD.prompt,OLD.answer);
+END;
+CREATE TRIGGER IF NOT EXISTS form_answers_text_update AFTER UPDATE OF prompt,answer ON form_answers BEGIN
+  INSERT INTO form_answers_text(form_answers_text,rowid,prompt,answer) VALUES('delete',OLD.id,OLD.prompt,OLD.answer);
+  INSERT INTO form_answers_text(rowid,prompt,answer) VALUES(NEW.id,NEW.prompt,NEW.answer);
+END;
 `;

@@ -413,4 +413,118 @@ describe("applications on the job store", () => {
     expect(reopened.applications.needsYou.list().rows).toHaveLength(1);
     expect(reopened.jobs.stageCounts().resume).toBe(1);
   });
+  it("keeps task drafts on their exact IDs and rejects out-of-order saves", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const original = applications.needsYou.request(
+      question(first.id, first.attempt),
+    );
+    const later = applications.needsYou.request(
+      question(second.id, second.attempt, {
+        key: "notice",
+        fieldKey: "notice",
+        prompt: "What is your notice period?",
+        input: "text",
+      }),
+    );
+    if (original.status !== "needs_you" || later.status !== "needs_you")
+      throw new Error("Missing task");
+    const memory = applications.needsYou;
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "No",
+        remember: true,
+        revision: 0,
+      }),
+    ).toEqual({ saved: true, revision: 1 });
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "Yes",
+        remember: false,
+        revision: 0,
+      }),
+    ).toEqual({ saved: false, revision: 1 });
+    expect(memory.details(original.task.id)?.draft).toEqual({
+      answer: "No",
+      remember: true,
+      revision: 1,
+    });
+    expect(memory.details(later.task.id)?.draft).toBeNull();
+    expect(memory.list({ limit: 1 }).rows.map((task) => task.id)).toEqual([
+      original.task.id,
+    ]);
+    expect(
+      memory
+        .list({ after: original.task.id, limit: 1 })
+        .rows.map((task) => task.id),
+    ).toEqual([later.task.id]);
+    expect(memory.list({ text: "notice" }).rows.map((task) => task.id)).toEqual(
+      [later.task.id],
+    );
+    expect(memory.counts().question).toBe(2);
+    memory.answer({ id: original.task.id, answer: "No", remember: true });
+    expect(memory.details(original.task.id)).toBeNull();
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "Yes",
+        remember: true,
+        revision: 1,
+      }).saved,
+    ).toBe(false);
+    expect(memory.counts()).toEqual({
+      question: 1,
+      sign_in: 0,
+      captcha: 0,
+      mfa: 0,
+      saved: 1,
+    });
+  });
+
+  it("pages, edits and forgets saved answers without changing a previous answer or another scope", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [application, country] of [
+      [first, "US"],
+      [second, "DE"],
+    ] as const) {
+      const request = memory.request(
+        question(application.id, application.attempt, { scope: { country } }),
+      );
+      if (request.status !== "needs_you") throw new Error("Missing task");
+      memory.answer({ id: request.task.id, answer: "No", remember: true });
+    }
+    const page = memory.listAnswers({ limit: 1 });
+    expect(page.total).toBe(2);
+    expect(page.nextCursor).toBe(page.rows[0]!.id);
+    const us = memory.savedAnswer(page.rows[0]!.id)!;
+    expect(us.scope.country).toBe("US");
+    expect(() => memory.saveAnswer({ id: us.id, answer: "Maybe" })).toThrow(
+      "valid answer",
+    );
+    expect(memory.saveAnswer({ id: us.id, answer: "Yes" })).toBe(true);
+    expect(memory.findAnswer("sponsorship", { country: "US" })).toBe("Yes");
+    expect(memory.findAnswer("sponsorship", { country: "DE" })).toBe("No");
+    expect(
+      memory.listAnswers({ text: "Yes" }).rows.map((row) => row.id),
+    ).toEqual([us.id]);
+    expect(
+      memory.forgetAnswers({
+        filter: { text: "sponsorship" },
+        except: [us.id],
+      }),
+    ).toBe(1);
+    expect(memory.counts().saved).toBe(1);
+    expect(memory.listAnswers({ after: us.id }).rows).toEqual([]);
+    expect(memory.forgetAnswers({ ids: [us.id] })).toBe(1);
+    expect(memory.counts().saved).toBe(0);
+    expect(memory.listAnswers({ text: "Yes" }).total).toBe(0);
+  });
 });

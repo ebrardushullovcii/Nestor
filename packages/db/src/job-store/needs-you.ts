@@ -2,6 +2,20 @@ import {
   AnswerNeedsYouInputSchema,
   FormAnswerScopeSchema,
   NeedsYouTaskSchema,
+  NeedsYouCountsSchema,
+  SaveNeedsYouDraftInputSchema,
+  SavedFormAnswersQuerySchema,
+  SaveFormAnswerInputSchema,
+  ForgetFormAnswersInputSchema,
+  type NeedsYouCounts,
+  type NeedsYouDetails,
+  type SaveNeedsYouDraftInput,
+  type SaveNeedsYouDraftResult,
+  type SavedFormAnswersQuery,
+  type SavedFormAnswersPage,
+  type SavedFormAnswer,
+  type SaveFormAnswerInput,
+  type ForgetFormAnswersInput,
   NeedsYouListQuerySchema,
   RequestNeedsYouInputSchema,
   type AnswerNeedsYouInput,
@@ -14,6 +28,7 @@ import {
   type RequestNeedsYouResult,
 } from "@nestor/contracts";
 
+import type { SQLInputValue } from "node:sqlite";
 import type { JobStore } from "./job-store";
 import { toIso } from "./job-list";
 
@@ -70,6 +85,27 @@ function toTask(row: Task): NeedsYouTask {
   });
 }
 
+const totalCap = 1000;
+const matchText = (text: string) =>
+  (text.match(/[\p{L}\p{N}]+/gu) ?? [])
+    .map((word) => `"${word}"*`)
+    .join(" AND ");
+function validateAnswer(
+  task: Pick<Task, "input" | "options_json">,
+  answer: string,
+): string {
+  answer = answer.trim();
+  const options = JSON.parse(task.options_json) as string[];
+  if (
+    !answer ||
+    (task.input === "boolean" && !["Yes", "No"].includes(answer)) ||
+    (task.input === "choice" && !options.includes(answer)) ||
+    (task.input === "number" && !Number.isFinite(Number(answer)))
+  )
+    throw new Error("Choose a valid answer for this question.");
+  return answer;
+}
+
 export function createNeedsYouStore(store: JobStore, changed: () => void) {
   const { sql } = store;
   const get = (id: number) =>
@@ -111,11 +147,185 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
            AND t.resolved_at IS NULL
        )`,
     ).run(Date.now(), Date.now(), task.id);
+    sql("DELETE FROM needs_you_drafts WHERE task_id = ?").run(task.id);
     changed();
     return Number(queued.changes);
   };
 
+  const counts = (): NeedsYouCounts => {
+    const value = { question: 0, sign_in: 0, captcha: 0, mfa: 0, saved: 0 };
+    for (const row of sql(
+      "SELECT kind, n FROM needs_you_counts",
+    ).all() as Array<{ kind: keyof NeedsYouCounts; n: number }>)
+      value[row.kind] = row.n;
+    return NeedsYouCountsSchema.parse(value);
+  };
+  const savedAnswer = (id: number): SavedFormAnswer | null => {
+    const row = sql("SELECT * FROM form_answers WHERE id = ?").get(id) as
+      | {
+          id: number;
+          answer_key: string;
+          country: string;
+          site_origin: string;
+          prompt: string;
+          answer: string;
+          input: Task["input"];
+          options_json: string;
+          updated_at: number;
+        }
+      | undefined;
+    return row
+      ? {
+          id: row.id,
+          prompt: row.prompt,
+          answer: row.answer,
+          preview: row.answer.slice(0, 140),
+          scope: { country: row.country, siteOrigin: row.site_origin },
+          input: row.input,
+          options: JSON.parse(row.options_json) as string[],
+          updatedAt: toIso(row.updated_at),
+        }
+      : null;
+  };
+
   return {
+    counts,
+    details(id: number): NeedsYouDetails | null {
+      const task = get(id);
+      if (!task || task.resolved_at !== null) return null;
+      const applications =
+        sql(`SELECT a.id, a.job_id AS jobId, j.title, j.company, j.location, a.state
+        FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
+        WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you' ORDER BY a.id LIMIT 50`).all(
+          id,
+        ) as NeedsYouDetails["applications"];
+      const draft = sql(
+        "SELECT answer, remember, revision FROM needs_you_drafts WHERE task_id = ?",
+      ).get(id) as
+        | { answer: string; remember: number; revision: number }
+        | undefined;
+      return {
+        task: toTask(task),
+        applications,
+        draft: draft
+          ? {
+              answer: draft.answer,
+              remember: draft.remember === 1,
+              revision: draft.revision,
+            }
+          : null,
+      };
+    },
+    saveDraft(input: SaveNeedsYouDraftInput): SaveNeedsYouDraftResult {
+      const value = SaveNeedsYouDraftInputSchema.parse(input);
+      return store.transaction(() => {
+        const task = get(value.id);
+        const draft = sql(
+          "SELECT revision FROM needs_you_drafts WHERE task_id = ?",
+        ).get(value.id) as { revision: number } | undefined;
+        const revision = draft?.revision ?? 0;
+        if (
+          !task ||
+          task.resolved_at !== null ||
+          task.kind !== "question" ||
+          revision !== value.revision
+        )
+          return { saved: false, revision };
+        sql(`INSERT INTO needs_you_drafts(task_id,answer,remember,revision) VALUES(?,?,?,?)
+          ON CONFLICT(task_id) DO UPDATE SET answer=excluded.answer,remember=excluded.remember,revision=excluded.revision`).run(
+          value.id,
+          value.answer,
+          value.remember ? 1 : 0,
+          revision + 1,
+        );
+        return { saved: true, revision: revision + 1 };
+      });
+    },
+    savedAnswer,
+    listAnswers(input: SavedFormAnswersQuery = {}): SavedFormAnswersPage {
+      const query = SavedFormAnswersQuerySchema.parse(input);
+      const countsNow = counts();
+      const match = matchText(query.text);
+      const where = query.text
+        ? match
+          ? "id IN (SELECT rowid FROM form_answers_text WHERE form_answers_text MATCH ?)"
+          : "0"
+        : "1";
+      const params: SQLInputValue[] = match && query.text ? [match] : [];
+      const records =
+        sql(`SELECT id,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
+        FROM form_answers WHERE ${where} AND id > ? ORDER BY id LIMIT ?`).all(
+          ...params,
+          query.after,
+          query.limit + 1,
+        ) as Array<{
+          id: number;
+          prompt: string;
+          preview: string;
+          country: string;
+          site_origin: string;
+          input: Task["input"];
+          updated_at: number;
+        }>;
+      const total = query.text
+        ? (
+            sql(
+              `SELECT count(*) AS n FROM (SELECT id FROM form_answers WHERE ${where} LIMIT ?)`,
+            ).get(...params, totalCap + 1) as { n: number }
+          ).n
+        : countsNow.saved;
+      const rows = records.slice(0, query.limit).map((row) => ({
+        id: row.id,
+        prompt: row.prompt,
+        preview: row.preview,
+        scope: { country: row.country, siteOrigin: row.site_origin },
+        input: row.input,
+        updatedAt: toIso(row.updated_at),
+      }));
+      return {
+        rows,
+        nextCursor: records.length > query.limit ? rows.at(-1)!.id : null,
+        total: Math.min(total, totalCap),
+        totalCapped: total > totalCap,
+      };
+    },
+    saveAnswer(input: SaveFormAnswerInput): boolean {
+      const value = SaveFormAnswerInputSchema.parse(input);
+      return store.transaction(() => {
+        const previous = sql(
+          "SELECT input,options_json FROM form_answers WHERE id = ?",
+        ).get(value.id) as Pick<Task, "input" | "options_json"> | undefined;
+        if (!previous) return false;
+        const answer = validateAnswer(previous, value.answer);
+        sql(
+          "UPDATE form_answers SET answer = ?, updated_at = ? WHERE id = ?",
+        ).run(answer, Date.now(), value.id);
+        changed();
+        return true;
+      });
+    },
+    forgetAnswers(input: ForgetFormAnswersInput): number {
+      const selection = ForgetFormAnswersInputSchema.parse(input);
+      return store.transaction(() => {
+        const match =
+          "filter" in selection ? matchText(selection.filter.text) : "";
+        const result =
+          "ids" in selection
+            ? sql(
+                "DELETE FROM form_answers WHERE id IN (SELECT value FROM json_each(?))",
+              ).run(JSON.stringify(selection.ids))
+            : selection.filter.text && !match
+              ? { changes: 0 }
+              : sql(
+                  `DELETE FROM form_answers WHERE id NOT IN (SELECT value FROM json_each(?))${match ? " AND id IN (SELECT rowid FROM form_answers_text WHERE form_answers_text MATCH ?)" : ""}`,
+                ).run(
+                  JSON.stringify(selection.except),
+                  ...(match ? [match] : []),
+                );
+        if (result.changes) changed();
+        return Number(result.changes);
+      });
+    },
     /** Answers for the questions currently on a page, scoped before any AI call. */
     answersForQuestions(
       applicationId: number,
@@ -242,17 +452,49 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
     /** Oldest first: newly arriving cards never insert above the one being answered. */
     list(input: NeedsYouListQuery = {}): NeedsYouPage {
-      const { after, limit } = NeedsYouListQuerySchema.parse(input);
+      const { after, limit, kind, text } = NeedsYouListQuerySchema.parse(input);
+      const match = matchText(text);
+      const filters = ["resolved_at IS NULL"];
+      const params: SQLInputValue[] = [];
+      if (kind !== null) {
+        filters.push("kind = ?");
+        params.push(kind);
+      }
+      if (text) {
+        filters.push(
+          match
+            ? "id IN (SELECT rowid FROM needs_you_text WHERE needs_you_text MATCH ?)"
+            : "0",
+        );
+        if (match) params.push(match);
+      }
+      const where = filters.join(" AND ");
       const records = sql(
-        `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url FROM needs_you t
+        `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url
+         FROM (SELECT * FROM needs_you WHERE ${where} AND id > ? ORDER BY id LIMIT ?) t
          LEFT JOIN source_needs_you n ON n.task_id = t.id
-         LEFT JOIN job_sites s ON s.id = n.source_id
-         WHERE t.resolved_at IS NULL AND t.id > ? ORDER BY t.id LIMIT ?`,
-      ).all(after, limit + 1) as Task[];
+         LEFT JOIN job_sites s ON s.id = n.source_id ORDER BY t.id`,
+      ).all(...params, after, limit + 1) as Task[];
       const rows = records.slice(0, limit).map(toTask);
+      const countsNow = counts();
+      const total = text
+        ? (
+            sql(
+              `SELECT count(*) AS n FROM (SELECT id FROM needs_you WHERE ${where} LIMIT ?)`,
+            ).get(...params, totalCap + 1) as { n: number }
+          ).n
+        : kind
+          ? countsNow[kind]
+          : countsNow.question +
+            countsNow.sign_in +
+            countsNow.captcha +
+            countsNow.mfa;
       return {
         rows,
         nextCursor: records.length > limit ? rows.at(-1)!.id : null,
+        total: Math.min(total, totalCap),
+        totalCapped: total > totalCap,
+        counts: countsNow,
       };
     },
 
@@ -264,16 +506,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           return { resolved: false, queued: 0 };
         if (task.kind !== "question")
           throw new Error("Finish this step in the browser.");
-        const options = toTask(task).options;
-        const answer = value.answer.trim();
-        if (
-          !answer ||
-          (task.input === "boolean" && !["Yes", "No"].includes(answer)) ||
-          (task.input === "choice" && !options.includes(answer)) ||
-          (task.input === "number" && !Number.isFinite(Number(answer)))
-        ) {
-          throw new Error("Choose a valid answer for this question.");
-        }
+        const answer = validateAnswer(task, value.answer);
         if (value.remember)
           sql(
             `INSERT INTO form_answers (answer_key, country, site_origin, prompt, answer, input, options_json, updated_at)

@@ -179,106 +179,22 @@ describe("the person's answer authority", () => {
           } as unknown as AssistantHostPorts,
         },
       ),
-    ).rejects.toThrow("approve");
+    ).rejects.toThrow("Needs you");
     expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
       before,
     );
   });
 });
 
-it.each(["application", "needs_you"] as const)(
-  "%s cannot save agent-chosen zeroes through the person's answer API",
-  async (entry) => {
-    const { answerApplicationQuestionTool } =
-      await import("./tools/application-tools");
-    const { resolveNeedsYouTool } = await import("./tools/workspace-tools");
-    const saveApplicationAnswer = vi.fn();
-    const performUserAction = vi.fn();
-    const assertPersonAnswerAuthority = vi.fn(() =>
-      Promise.reject(
-        new Error("The person did not give or approve zero years."),
-      ),
-    );
-    const session = {
-      assertCurrent: () => undefined,
-      createId: () => "command",
-      assertPersonAnswerAuthority,
-    } as unknown as AssistantTurnSession;
-    const service = {
-      getWorkspaceSnapshot: () =>
-        Promise.resolve({
-          applyJobResults: [
-            {
-              id: "result",
-              runId: "run",
-              jobId: "job",
-              updatedAt: "2026-10-05T10:00:00.000Z",
-            },
-          ],
-          applicationRecords: [{ id: "application", jobId: "job" }],
-          userActionRequests: [
-            {
-              id: "request",
-              revision: 1,
-              title: answers[0]!.question,
-              summary: "Give your experience",
-              scope: {
-                type: "application",
-                runId: "run",
-                jobId: "job",
-                resultId: "result",
-                applicationRecordId: "application",
-              },
-            },
-          ],
-        }),
-      getApplyRunDetails: () =>
-        Promise.resolve({
-          questionRecords: [
-            {
-              id: "question",
-              prompt: answers[0]!.question,
-              status: "detected",
-            },
-          ],
-          answerRecords: [],
-        }),
-      saveApplicationAnswer,
-      performUserAction,
-    };
-    const context = {
-      service: service as never,
-      session,
-      ports: {
-        publishWorkspaceUpdate: vi.fn(),
-      } as unknown as AssistantHostPorts,
-    };
-    const work =
-      entry === "application"
-        ? answerApplicationQuestionTool.execute(
-            answerApplicationQuestionTool.input.parse({
-              jobId: "job",
-              questionId: "question",
-              answer: { type: "text", value: "0" },
-              saveForLater: true,
-            }),
-            context,
-          )
-        : resolveNeedsYouTool.execute(
-            resolveNeedsYouTool.input.parse({
-              requestId: "request",
-              action: "answer",
-              answers: [{ questionId: "question", answer: "0" }],
-              saveForLater: true,
-            }),
-            context,
-          );
-    await expect(work).rejects.toThrow("did not give or approve");
-    expect(assertPersonAnswerAuthority).toHaveBeenCalledWith({
-      answers: [answers[0]!],
-      saveForFuture: true,
-    });
-    expect(saveApplicationAnswer).not.toHaveBeenCalled();
-    expect(performUserAction).not.toHaveBeenCalled();
-  },
-);
+it("Needs you refuses an agent-chosen answer before any store write", async () => {
+  const { resolveNeedsYouTool } = await import("./tools/workspace-tools");
+  const assertPersonAnswerAuthority = vi.fn(() => Promise.reject(new Error("The person did not give or approve zero years.")));
+  const executeAction = vi.fn(async (action: string) => action === "needs-you:get_need" ? {task:{id:1,kind:"question",key:"years",prompt:answers[0]!.question,scope:{country:"",siteOrigin:""},input:"number",options:[],openedAt:"2026-10-25T00:00:00.000Z"},applications:[],draft:null} : null);
+  await expect(resolveNeedsYouTool.execute(resolveNeedsYouTool.input.parse({id:1,action:"answer",answer:"0",remember:true}),{
+    service:{} as never,
+    session:{assertCurrent:()=>undefined,assertPersonAnswerAuthority} as unknown as AssistantTurnSession,
+    ports:{executeAction} as unknown as AssistantHostPorts,
+  })).rejects.toThrow("did not give or approve");
+  expect(executeAction.mock.calls.map(call => call[0])).toEqual(["needs-you:get_need"]);
+  expect(assertPersonAnswerAuthority).toHaveBeenCalledWith({answers:[answers[0]!],saveForFuture:true});
+});

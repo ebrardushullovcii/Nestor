@@ -495,13 +495,6 @@ export function useProfileSetupForms(input: {
     name: "proofBank",
     keyName: "fieldKey",
   });
-  const customAnswerArray = useFieldArray({
-    control: profileForm.control,
-    name: "answerBank.customAnswers",
-    keyName: "fieldKey",
-  });
-  // One signal per user-invoked structural mutation; the wrapper preserves
-  // the full field-array shape (fields, registered methods) screens expect.
   const wrapUserFieldArray = <TFieldArray>(
     fieldArray: TFieldArray,
   ): TFieldArray =>
@@ -513,7 +506,6 @@ export function useProfileSetupForms(input: {
     });
   const backgroundArrays: ProfileBackgroundArrays = {
     certificationArray: wrapUserFieldArray(certificationArray),
-    customAnswerArray: wrapUserFieldArray(customAnswerArray),
     educationArray: wrapUserFieldArray(educationArray),
     languageArray: wrapUserFieldArray(languageArray),
     linkArray: wrapUserFieldArray(linkArray),

@@ -1,4 +1,9 @@
-import { JobFinderRegisteredActionInputSchema } from "@nestor/contracts";
+import {
+  JobFinderRegisteredActionInputSchema,
+  SavedFormAnswerSchema,
+  SaveFormAnswerInputSchema,
+} from "@nestor/contracts";
+import { assertPersonAnswerAuthority } from "../person-answer-authority";
 
 import {
   JOB_FINDER_ACTIONS,
@@ -65,6 +70,23 @@ export async function executeRegisteredAssistantAction(
   }
   const parsed: unknown = action.input.parse(input);
   context.session.assertCurrent();
+  if (actionId === "needs-you:save_form_answer") {
+    const value = SaveFormAnswerInputSchema.parse(parsed);
+    const saved = SavedFormAnswerSchema.nullable().parse(
+      await context.ports.executeAction?.("needs-you:get_form_answer", {
+        id: value.id,
+      }),
+    );
+    if (!saved)
+      throw new AssistantToolError(
+        "not_found",
+        "That saved answer no longer exists.",
+      );
+    await assertPersonAnswerAuthority(context.session, {
+      answers: [{ question: saved.prompt, answer: value.answer }],
+      saveForFuture: true,
+    });
+  }
   if (action.safety === "confirm" && !confirmed) {
     const { part } = await context.session.createProposal({
       kind: "job_finder_action",

@@ -264,162 +264,13 @@ function ProfileSetupStorySection(props: {
   );
 }
 
-function ProfileSetupScreenerAnswersSection(props: {
-  backgroundArrays: ProfileBackgroundArrays;
-  isProfileSetupPending: boolean;
+function ProfileSetupApplicationLinksSection(props: {
   profileForm: UseFormReturn<ProfileEditorValues>;
 }) {
-  const availabilityAnswerId = "profile-setup-field-answer-bank-availability";
-  const visaAnswerId = "profile-setup-field-answer-bank-visa-sponsorship";
-  const relocationId = "profile-setup-field-answer-bank-relocation";
-  const selfIntroductionId =
-    "profile-setup-field-answer-bank-self-introduction";
-  const careerTransitionId =
-    "profile-setup-field-answer-bank-career-transition";
-  const preferredEmailId =
-    "profile-setup-field-application-identity-preferred-email";
-  const preferredPhoneId =
-    "profile-setup-field-application-identity-preferred-phone";
-  const preferredLinksId =
-    "profile-setup-field-application-identity-preferred-links";
-  // The spoken introduction is never pre-filled from the written resume
-  // paragraph any more; it is offered as a one-click suggestion instead, from
-  // whichever of the user's own saved texts exists.
-  const introductionSuggestion = (
-    props.profileForm.watch("narrative.professionalStory") ||
-    props.profileForm.watch("summary.fullSummary") ||
-    props.profileForm.watch("identity.summary") ||
-    ""
-  ).trim();
-  const transitionSummary = props.profileForm
-    .watch("narrative.careerTransitionSummary")
-    .trim();
-  const selfIntroduction = props.profileForm
-    .watch("answerBank.selfIntroduction")
-    .trim();
-  const careerTransition = props.profileForm
-    .watch("answerBank.careerTransition")
-    .trim();
-  const copiedFieldOptions = {
-    shouldDirty: true,
-    shouldTouch: true,
-    shouldValidate: true,
-  } as const;
-
-  return (
-    <section aria-labelledby="profile-setup-extras-answers-heading">
-      <div className="grid gap-1 border-b border-border/30 pb-4">
-        <h3
-          className="font-semibold text-foreground"
-          id="profile-setup-extras-answers-heading"
-        >
-          Screener answers you reuse
-        </h3>
-        <p className="text-sm leading-6 text-foreground-soft">
-          Application forms ask the same few questions. Answer them once here
-          and Job Finder reuses them when filling applications in your chosen
-          apply mode.
-        </p>
-      </div>
-      <div className="grid gap-4 pt-4">
-        <div className="grid gap-(--gap-content) md:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor={availabilityAnswerId}>
-              When could you start?
-            </FieldLabel>
-            <ProfileAutoGrowTextarea
-              id={availabilityAnswerId}
-              placeholder="Example: Two weeks after signing."
-              rows={3}
-              {...props.profileForm.register("answerBank.availability")}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={visaAnswerId}>
-              Do you need visa sponsorship?
-            </FieldLabel>
-            <ProfileAutoGrowTextarea
-              id={visaAnswerId}
-              placeholder="Example: No, I can work in the US without sponsorship."
-              rows={3}
-              {...props.profileForm.register("answerBank.visaSponsorship")}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={relocationId}>
-              Are you open to relocating?
-            </FieldLabel>
-            <ProfileAutoGrowTextarea
-              id={relocationId}
-              placeholder="Example: Yes, for the right role, with relocation support."
-              rows={3}
-              {...props.profileForm.register("answerBank.relocation")}
-            />
-          </Field>
-          <Field>
-            <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={selfIntroductionId}>
-                How would you introduce yourself?
-              </FieldLabel>
-              {!selfIntroduction && introductionSuggestion ? (
-                <Button
-                  data-profile-setup-use-summary-as-introduction
-                  onClick={() =>
-                    props.profileForm.setValue(
-                      "answerBank.selfIntroduction",
-                      introductionSuggestion,
-                      copiedFieldOptions,
-                    )
-                  }
-                  size="compact"
-                  type="button"
-                  variant="secondary"
-                >
-                  Use my summary
-                </Button>
-              ) : null}
-            </div>
-            {/* The caveat sits above the field so a sticky footer can never
-                clip the sentence that explains what this answer is for. */}
-            <p className="text-xs leading-5 text-foreground-muted">
-              A short spoken introduction, not your written resume summary.
-              Start from your summary if it helps, then shorten it.
-            </p>
-            <ProfileAutoGrowTextarea
-              id={selfIntroductionId}
-              placeholder="Example: I coordinate daily operations, solve problems and keep teams informed."
-              rows={3}
-              {...props.profileForm.register("answerBank.selfIntroduction")}
-            />
-          </Field>
-          <Field className="md:col-span-2">
-            <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={careerTransitionId}>
-                If your path changed direction, why?
-              </FieldLabel>
-              {!careerTransition && transitionSummary ? (
-                <Button
-                  onClick={() =>
-                    props.profileForm.setValue(
-                      "answerBank.careerTransition",
-                      transitionSummary,
-                      copiedFieldOptions,
-                    )
-                  }
-                  size="compact"
-                  type="button"
-                  variant="ghost"
-                >
-                  Use transition summary
-                </Button>
-              ) : null}
-            </div>
-            <ProfileAutoGrowTextarea
-              id={careerTransitionId}
-              rows={3}
-              {...props.profileForm.register("answerBank.careerTransition")}
-            />
-          </Field>
+  const preferredEmailId = "profile-setup-field-application-identity-preferred-email";
+  const preferredPhoneId = "profile-setup-field-application-identity-preferred-phone";
+  const preferredLinksId = "profile-setup-field-application-identity-preferred-links";
+  return <div className="grid gap-4 md:grid-cols-2">
           <Field>
             <FieldLabel htmlFor={preferredEmailId}>
               Preferred application email
@@ -446,144 +297,7 @@ function ProfileSetupScreenerAnswersSection(props: {
             fieldId={preferredLinksId}
             profileForm={props.profileForm}
           />
-        </div>
-
-        <div className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                Reusable answers
-              </p>
-              <p className="text-sm text-foreground-soft">
-                Save recurring screeners with labels and grounded answers.
-              </p>
-            </div>
-            <Button
-              disabled={props.isProfileSetupPending}
-              onClick={() =>
-                props.backgroundArrays.customAnswerArray.append({
-                  id: `answer_${crypto.randomUUID().slice(0, 8)}`,
-                  label: "",
-                  question: "",
-                  answer: "",
-                  kind: "other",
-                  roleFamilies: "",
-                  proofEntryIds: "",
-                })
-              }
-              type="button"
-              variant="secondary"
-            >
-              Add answer
-            </Button>
-          </div>
-
-          {props.backgroundArrays.customAnswerArray.fields.length > 0 ? (
-            props.backgroundArrays.customAnswerArray.fields.map(
-              (entry, index) => {
-                const fieldIdPrefix = `answer-record-${entry.id}`;
-                return (
-                  <ProfileRecordCard
-                    id={fieldIdPrefix}
-                    key={entry.fieldKey}
-                    // A just-added, empty answer opens so it can be filled in.
-                    defaultOpen={
-                      !props.profileForm.getValues(
-                        `answerBank.customAnswers.${index}.question`,
-                      )
-                    }
-                    summary={
-                      props.profileForm.watch(
-                        `answerBank.customAnswers.${index}.question`,
-                      ) || "Save the exact question and your reusable answer."
-                    }
-                    title={
-                      props.profileForm
-                        .watch(`answerBank.customAnswers.${index}.label`)
-                        ?.trim() || `Answer ${index + 1}`
-                    }
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
-                        Reusable answer
-                      </p>
-                      <Button
-                        disabled={props.isProfileSetupPending}
-                        onClick={() =>
-                          props.backgroundArrays.customAnswerArray.remove(index)
-                        }
-                        size="compact"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                    <div className="grid gap-(--gap-content) md:grid-cols-2 md:items-start">
-                      <Field>
-                        <FieldLabel htmlFor={`${fieldIdPrefix}-label`}>
-                          Label
-                        </FieldLabel>
-                        <ProfileInput
-                          id={`${fieldIdPrefix}-label`}
-                          {...props.profileForm.register(
-                            `answerBank.customAnswers.${index}.label`,
-                          )}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${fieldIdPrefix}-kind`}>
-                          Kind
-                        </FieldLabel>
-                        <ProfileInput
-                          id={`${fieldIdPrefix}-kind`}
-                          {...props.profileForm.register(
-                            `answerBank.customAnswers.${index}.kind`,
-                          )}
-                        />
-                      </Field>
-                      <Field className="md:col-span-2">
-                        <FieldLabel htmlFor={`${fieldIdPrefix}-question`}>
-                          Question
-                        </FieldLabel>
-                        <ProfileTextarea
-                          id={`${fieldIdPrefix}-question`}
-                          rows={4}
-                          {...props.profileForm.register(
-                            `answerBank.customAnswers.${index}.question`,
-                          )}
-                        />
-                      </Field>
-                      <Field className="md:col-span-2">
-                        <FieldLabel htmlFor={`${fieldIdPrefix}-answer`}>
-                          Answer
-                        </FieldLabel>
-                        <ProfileTextarea
-                          id={`${fieldIdPrefix}-answer`}
-                          rows={4}
-                          {...props.profileForm.register(
-                            `answerBank.customAnswers.${index}.answer`,
-                          )}
-                        />
-                      </Field>
-                    </div>
-                  </ProfileRecordCard>
-                );
-              },
-            )
-          ) : (
-            <p
-              className="text-sm leading-6 text-foreground-muted"
-              data-profile-setup-reusable-answers-empty
-            >
-              Nothing saved yet — choose Add answer when a recurring screener is
-              worth keeping.
-            </p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
+  </div>;
 }
 
 /**
@@ -619,12 +333,10 @@ export function ProfileSetupExtrasStep(props: {
           />
         </ProfileOptionalSection>
         <ProfileOptionalSection
-          title="Reusable answers and application links"
-          description="Choose links and save answers for future applications."
+          title="Application links"
+          description="Choose the contact details and links applications should use."
         >
-          <ProfileSetupScreenerAnswersSection
-            backgroundArrays={props.backgroundArrays}
-            isProfileSetupPending={props.isProfileSetupPending}
+          <ProfileSetupApplicationLinksSection
             profileForm={props.profileForm}
           />
         </ProfileOptionalSection>

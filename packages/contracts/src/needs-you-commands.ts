@@ -1,0 +1,94 @@
+import { z } from "zod";
+import {
+  AnswerNeedsYouInputSchema,
+  AnswerNeedsYouResultSchema,
+  ApplicationTargetSchema,
+  NeedsYouCountsSchema,
+  NeedsYouDetailsSchema,
+  NeedsYouListQuerySchema,
+  NeedsYouPageSchema,
+  SaveNeedsYouDraftInputSchema,
+  SaveNeedsYouDraftResultSchema,
+  SavedFormAnswerSchema,
+  SavedFormAnswersQuerySchema,
+  SavedFormAnswersPageSchema,
+  SaveFormAnswerInputSchema,
+  ForgetFormAnswersInputSchema,
+} from "./applications";
+
+export const NEEDS_YOU_COMMANDS = {
+  list_needs_you: {
+    description:
+      "One page of things only the person can do, oldest first, with counts and an optional kind or text filter.",
+    input: NeedsYouListQuerySchema,
+    output: NeedsYouPageSchema,
+  },
+  needs_you_counts: {
+    description:
+      "Counts of unanswered questions, sign-in steps, CAPTCHA, MFA and remembered answers.",
+    input: z.object({}).strict(),
+    output: NeedsYouCountsSchema,
+  },
+  get_need: {
+    description:
+      "One open task, its related applications, and the person's draft answer.",
+    input: ApplicationTargetSchema,
+    output: NeedsYouDetailsSchema.nullable(),
+  },
+  save_need_draft: {
+    description:
+      "Save a draft for this exact question. Pass its last revision; a stale write cannot replace a newer draft.",
+    input: SaveNeedsYouDraftInputSchema,
+    output: SaveNeedsYouDraftResultSchema,
+  },
+  answer_need: {
+    description:
+      "Save the person's answer to one question and continue every application it unblocks. Remember it only when the person asks.",
+    input: AnswerNeedsYouInputSchema,
+    output: AnswerNeedsYouResultSchema,
+  },
+  open_need: {
+    description:
+      "Open the exact application tab for a sign-in, CAPTCHA or MFA step. Source tickets open their own site instead.",
+    input: ApplicationTargetSchema,
+    output: z.boolean(),
+  },
+  check_need: {
+    description:
+      "Check the exact application page after the person completed a browser step. A remaining wall keeps it open.",
+    input: ApplicationTargetSchema,
+    output: z.boolean(),
+  },
+  list_form_answers: {
+    description:
+      "One page of remembered form answers. These are managed only in Needs you.",
+    input: SavedFormAnswersQuerySchema,
+    output: SavedFormAnswersPageSchema,
+  },
+  get_form_answer: {
+    description:
+      "One remembered form answer, including its full text and scope.",
+    input: ApplicationTargetSchema,
+    output: SavedFormAnswerSchema.nullable(),
+  },
+  save_form_answer: {
+    description:
+      "Update the person's remembered answer, preserving the question and its scope.",
+    input: SaveFormAnswerInputSchema,
+    output: z.boolean(),
+  },
+  forget_form_answers: {
+    description:
+      "Forget selected remembered answers. Previously submitted applications keep their receipts.",
+    input: ForgetFormAnswersInputSchema,
+    output: z.number().int().nonnegative(),
+  },
+} as const;
+export type NeedsYouCommandName = keyof typeof NEEDS_YOU_COMMANDS;
+export type NeedsYouCommandInput<K extends NeedsYouCommandName> = z.input<
+  (typeof NEEDS_YOU_COMMANDS)[K]["input"]
+>;
+export type NeedsYouCommandOutput<K extends NeedsYouCommandName> = z.output<
+  (typeof NEEDS_YOU_COMMANDS)[K]["output"]
+>;
+export const NEEDS_YOU_RUN_CHANNEL = "needs-you:run";

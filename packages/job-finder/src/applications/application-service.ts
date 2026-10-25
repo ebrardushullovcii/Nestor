@@ -941,6 +941,20 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       );
       return applications.getApplication(id)?.state === "submitted";
     },
+    async checkAccess(taskId: number): Promise<boolean> {
+      const details = applications.needsYou.details(taskId);
+      if (!details || details.task.kind === "question") return false;
+      for (const row of details.applications) {
+        const app = applications.getApplication(row.id);
+        if (!app || app.state !== "needs_you") continue;
+        const page = await browser.readApplicationPageWithPerson?.("target_site",applicationIdentity(app.id,app.attempt).resultId);
+        if (!page || page.loading) continue;
+        const observation = buildApplyFormObservation(page,new Date().toISOString());
+        if (observation.blocker || observation.controls.some(control => control.visible && control.credentialRole === "password")) continue;
+        if (applications.needsYou.completeAccess(taskId,app.id)) return true;
+      }
+      return false;
+    },
     async stopApplication(id: number): Promise<boolean> {
       const row = applications.getApplication(id);
       if (!row || !applications.stop(id)) return false;

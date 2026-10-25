@@ -3,6 +3,10 @@ import type {
   JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import {
+  NeedsYouListQuerySchema,
+  NeedsYouPageSchema,
+  NeedsYouDetailsSchema,
+  AnswerNeedsYouResultSchema,
   AssistantTaskPlanStepSchema,
   AssistantJobViewSchema,
   AssistantTrackerViewSchema,
@@ -30,13 +34,6 @@ import {
 } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
-
-/**
- * How long answering a Needs you step waits for its check before replying.
- * Several answers in one reply wait one after another, so a long wait here
- * made a two-answer turn take over a minute; the run is followed anyway.
- */
-export const RESOLVE_SETTLE_WAIT_MS = 6_000;
 
 export const getWorkspaceSummaryTool = defineTool({
   name: "get_workspace_summary",
@@ -117,7 +114,8 @@ export const getWorkspaceSummaryTool = defineTool({
         readyToSend: attention.readyToSend.length,
         resumeReviews: attention.resumeReviews.length,
         applyMode:
-          snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
+          snapshot.settings.applicationAutomationMode ??
+          "confirm_before_submit",
         activityPaused: snapshot.activityControl.paused ?? false,
       },
     };
@@ -128,236 +126,101 @@ export const listNeedsYouTool = defineTool({
   name: "list_needs_you",
   group: "workspace",
   description:
-    "The steps waiting on the person (sign-ins, questions an application could not answer, checks), with their ids and revisions.",
-  parameters: json.object({}),
-  input: z.object({}).passthrough(),
+    "Read one page of questions and browser steps waiting on the person. Answers belong only to Needs you.",
+  parameters: json.object({
+    after: json.number("Last task id from the preceding page."),
+    text: json.string("Filter questions."),
+  }),
+  input: NeedsYouListQuerySchema,
   label: () => "Checking what needs you",
   effect: "read",
-  async execute(_input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const attention = projectWorkspaceAttention(snapshot);
-    const reviews = outstandingReviews(snapshot);
-    const count = attention.count + reviews.length;
+  async execute(input, { ports }) {
+    if (!ports.executeAction)
+      throw new AssistantToolError("refused", "Needs you is unavailable.");
+    const page = NeedsYouPageSchema.parse(
+      await ports.executeAction("needs-you:list_needs_you", input),
+    );
     return {
-      summary:
-        count === 0
-          ? "Nothing is waiting on the person."
-          : `${plural(attention.count, "Needs you item")}, ${attention.readyToSend.length} ready to send, ${attention.resumeReviews.length} resume reviews waiting on the person.`,
-      data: {
-        needsYou: {
-          requests: attention.requests.map((request) => ({
-            id: request.id,
-            revision: request.revision,
-            kind: request.kind,
-            state: request.state,
-            title: request.title,
-            summary: request.summary,
-            instructions: request.instructions.slice(0, 6),
-            scope: request.scope,
-            url: request.actionUrl,
-          })),
-          groupedDecisions: attention.groupedDecisions,
-          applications: attention.applications.map((record) => ({
-            id: record.id,
-            jobId: record.jobId,
-            title: record.title,
-            company: record.company,
-            reason: record.nextActionLabel ?? record.lastActionLabel,
-            route: `/job-finder/applications?applicationRecordId=${encodeURIComponent(record.id)}`,
-          })),
-          safeguards: attention.safeguards,
-          count: attention.count,
-        },
-        readyToSend: reviews.filter((item) => item.kind === "application_send"),
-        resumeReviews: reviews.filter((item) => item.kind === "resume_review"),
-      },
+      summary: page.total
+        ? `${plural(page.total, "item")} waiting on the person.`
+        : "Nothing is waiting on the person.",
+      data: page,
     };
   },
-});
-
-const ResolveNeedsYouInput = z.object({
-  requestId: Id,
-  action: z.enum(["answer", "open_page", "done", "skip"]),
-  answer: z.string().trim().min(1).max(4_000).optional(),
-  answers: z
-    .array(
-      z.object({ questionId: Id, answer: z.string().trim().min(1).max(4_000) }),
-    )
-    .max(50)
-    .optional(),
-  reason: z.string().max(400).optional(),
-  saveForLater: z.boolean().default(false),
 });
 
 export const resolveNeedsYouTool = defineTool({
   name: "resolve_needs_you",
   group: "workspace",
   description:
-    "Acts on one Needs you step: answer its question(s) with what the person told you (answers tie each answer to its question id), open its page in the browser, mark it done after the person did it, or skip it. Set saveForLater only when the person chose to save the answers for future applications. Never save an answer you inferred or chose as the person's own answer; get their approval first. Never enter passwords or create accounts; those steps belong to the person.",
+    "Answer one Needs you question using the person's explicit answer, open its exact browser page, or check it after the person finishes. An answer continues every application waiting on that same question. Remember only when the person chooses it. Credentials, CAPTCHA and MFA stay in the browser.",
   parameters: json.object(
     {
-      requestId: json.string(),
-      action: json.enumOf(["answer", "open_page", "done", "skip"]),
-      answer: json.string("One answer for a single-question step."),
-      answers: json.array(
-        json.object({ questionId: json.string(), answer: json.string() }, [
-          "questionId",
-          "answer",
-        ]),
-        "Each answer with its question id, for a step with several questions.",
-      ),
-      reason: json.string("For skip: why, in the person's words."),
-      saveForLater: json.boolean(
-        "For answer: also keep it for the same question on later applications.",
-      ),
+      id: json.number(),
+      action: json.enumOf(["answer", "open_page", "check"]),
+      answer: json.string(),
+      remember: json.boolean(),
     },
-    ["requestId", "action"],
+    ["id", "action"],
   ),
-  input: ResolveNeedsYouInput,
-  label: (input) =>
-    input.action === "answer"
-      ? "Answering a question for an application"
-      : input.action === "open_page"
-        ? "Opening the page that needs you"
-        : "Updating a step that needs you",
+  input: z.object({
+    id: z.number().int().positive(),
+    action: z.enum(["answer", "open_page", "check"]),
+    answer: z.string().trim().min(1).max(20000).optional(),
+    remember: z.boolean().default(false),
+  }),
+  label: () => "Updating Needs you",
   effect: "local_write",
-  async execute(input, { service, session }) {
-    const snapshot = await service.getWorkspaceSnapshot();
-    const request = snapshot.userActionRequests.find(
-      (candidate) => candidate.id === input.requestId,
-    );
-    if (!request) {
-      throw new AssistantToolError(
-        "not_found",
-        "That step is not waiting any more.",
-      );
-    }
-    const base = {
-      requestId: request.id,
-      commandId: session.createId("assistant_user_action"),
-      expectedRevision: request.revision,
-      credentialsPolicy: "browser_only" as const,
-      submitAuthorized: false as const,
-      accountCreationAuthorized: false as const,
-    };
+  async execute(input, { ports, session }) {
+    if (!ports.executeAction)
+      throw new AssistantToolError("refused", "Needs you is unavailable.");
     session.assertCurrent();
-    // Checking an answered step can mean carrying the application on, which
-    // may wait for the site. The answer is saved at once; the check goes on
-    // in the background and the conversation follows the run.
-    const settle = async (work: Promise<unknown>) => {
-      const outcome = await Promise.race([
-        work.then(
-          () => "done" as const,
-          (error: unknown) => error,
-        ),
-        new Promise<"pending">((resolve) =>
-          setTimeout(() => resolve("pending"), RESOLVE_SETTLE_WAIT_MS),
-        ),
-      ]);
-      if (outcome !== "done" && outcome !== "pending") throw outcome;
-      return outcome;
-    };
-    let pending = false;
     if (input.action === "answer") {
-      const answers = input.answers ?? [];
-      const answer = input.answer ?? answers[0]?.answer;
-      if (!answer) {
+      const details = NeedsYouDetailsSchema.nullable().parse(
+        await ports.executeAction("needs-you:get_need", { id: input.id }),
+      );
+      if (!details || details.task.kind !== "question")
+        throw new AssistantToolError(
+          "not_found",
+          "That question is no longer waiting.",
+        );
+      if (!input.answer)
         throw new AssistantToolError(
           "missing_information",
-          "Give the answer the person stated; ask them if they have not said it.",
+          "Ask the person for their answer.",
         );
-      }
-      const details =
-        request.scope.type === "application"
-          ? await service.getApplyRunDetails(
-              request.scope.runId,
-              request.scope.jobId,
-              request.scope.applicationRecordId ?? null,
-            )
-          : null;
-      const promptFor = (questionId?: string) =>
-        details?.questionRecords.find((question) =>
-          questionId
-            ? question.id === questionId
-            : question.status !== "answered",
-        )?.prompt ?? `${request.title}: ${request.summary ?? ""}`;
       await assertPersonAnswerAuthority(session, {
-        answers: answers.length
-          ? answers.map((entry) => ({
-              question: promptFor(entry.questionId),
-              answer: entry.answer,
-            }))
-          : [{ question: promptFor(), answer }],
-        saveForFuture: input.saveForLater,
+        answers: [{ question: details.task.prompt, answer: input.answer }],
+        saveForFuture: input.remember,
       });
-      pending =
-        (await settle(
-          service.performUserAction({
-            ...base,
-            action: "submit_manual_answer",
-            answer,
-            ...(answers.length > 0 ? { answers } : {}),
-            ...(input.saveForLater ? { saveForFuture: true } : {}),
-          }),
-        )) === "pending";
-    } else if (input.action === "open_page") {
-      await service.performUserAction({ ...base, action: "open_page" });
-    } else if (input.action === "done") {
-      pending =
-        (await settle(
-          service.performUserAction({ ...base, action: "confirm_done" }),
-        )) === "pending";
-    } else {
-      await service.performUserAction({
-        ...base,
-        action: "skip",
-        reason: input.reason ?? null,
-      });
-    }
-    const afterSnapshot = await service.getWorkspaceSnapshot();
-    const after = afterSnapshot.userActionRequests.find(
-      (candidate) => candidate.id === request.id,
-    );
-    // An answered or completed application step lets that application carry
-    // on in the background; follow it so the conversation continues when it
-    // ends instead of waiting for the person to ask.
-    const resumes =
-      request.scope.type === "application" &&
-      (input.action === "answer" || input.action === "done");
-    if (resumes && request.scope.type === "application") {
-      await session.watchRun(
-        {
-          kind: "apply_run",
-          id: request.scope.runId,
-          jobIds: [request.scope.jobId],
-        },
-        "The application carried on after the answer",
-        { resumed: true },
+      const result = AnswerNeedsYouResultSchema.parse(
+        await ports.executeAction("needs-you:answer_need", {
+          id: input.id,
+          answer: input.answer,
+          remember: input.remember,
+        }),
       );
+      return {
+        summary: result.resolved
+          ? `Answer saved. ${plural(result.queued, "application")} can continue.`
+          : "That question was already answered or no longer needed.",
+        data: result,
+      };
     }
-    // Say what the application is actually doing, from its run.
-    const progress =
-      request.scope.type === "application"
-        ? describeApplicationProgress(afterSnapshot, request.scope.jobId)
-        : null;
+    const result = await ports.executeAction(
+      input.action === "open_page"
+        ? "needs-you:open_need"
+        : "needs-you:check_need",
+      { id: input.id },
+    );
     return {
-      summary: [
-        `The step "${request.title}" is now ${(after?.state ?? "resolved").replaceAll("_", " ")}.`,
-        pending
-          ? "The answer is saved; checking it is still going on in the background."
-          : "",
-        progress ? `Application: ${progress}.` : "",
-        resumes
-          ? "The conversation continues when the application's run ends; do not describe it as sent or running beyond what this says."
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      data: {
-        requestId: request.id,
-        state: after?.state ?? "resolved",
-        application: progress,
-      },
+      summary:
+        result === true
+          ? input.action === "open_page"
+            ? "Opened the page in the app browser."
+            : "The browser step is complete; applications can continue."
+          : "The step is still waiting. Finish it in the browser, then check again.",
+      data: { completed: result === true },
     };
   },
 });

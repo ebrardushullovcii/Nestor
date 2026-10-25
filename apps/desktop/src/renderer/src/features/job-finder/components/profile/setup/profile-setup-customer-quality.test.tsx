@@ -113,11 +113,6 @@ function FormHarness(props: {
   const preferencesForm = useForm<SearchPreferencesEditorValues>({
     defaultValues: createSearchPreferencesEditorValues(preferences),
   });
-  const customAnswerArray = useFieldArray({
-    control: profileForm.control,
-    keyName: "fieldKey",
-    name: "answerBank.customAnswers",
-  });
   const proofBankArray = useFieldArray({
     control: profileForm.control,
     keyName: "fieldKey",
@@ -151,7 +146,7 @@ function FormHarness(props: {
 
   return (
     <ProfileSetupExtrasStep
-      backgroundArrays={{ customAnswerArray, proofBankArray } as never}
+      backgroundArrays={{ proofBankArray } as never}
       isProfileSetupPending={false}
       profileForm={profileForm}
       renderFooter={() => null}
@@ -386,45 +381,6 @@ describe("profile setup customer-quality guidance", () => {
     ).toBeTruthy();
   });
 
-  it("offers the saved summary as a suggestion instead of pre-filling the spoken intro", () => {
-    render(<FormHarness screen="extras" />);
-
-    // A written resume paragraph must never arrive pre-filled in a spoken
-    // introduction that goes into application forms.
-    const selfIntroductionBefore =
-      container?.querySelector<HTMLTextAreaElement>(
-        "#profile-setup-field-answer-bank-self-introduction",
-      );
-    expect(selfIntroductionBefore?.value).toBe("");
-
-    const useStory = [...(container?.querySelectorAll("button") ?? [])].find(
-      (button) => button.textContent === "Use my summary",
-    );
-    const useTransition = [
-      ...(container?.querySelectorAll("button") ?? []),
-    ].find((button) => button.textContent === "Use transition summary");
-    expect(useStory).toBeTruthy();
-    expect(useTransition).toBeTruthy();
-
-    act(() => {
-      useStory?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      useTransition?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    const selfIntroduction = container?.querySelector<HTMLTextAreaElement>(
-      "#profile-setup-field-answer-bank-self-introduction",
-    );
-    const careerTransition = container?.querySelector<HTMLTextAreaElement>(
-      "#profile-setup-field-answer-bank-career-transition",
-    );
-    expect(selfIntroduction?.value).toBe(
-      "I build dependable products with cross-functional teams.",
-    );
-    expect(careerTransition?.value).toBe(
-      "I am moving from platform delivery into applied AI products.",
-    );
-  });
-
   it("presents Extras as one optional, skippable step", () => {
     render(<FormHarness screen="extras" />);
 
@@ -433,7 +389,7 @@ describe("profile setup customer-quality guidance", () => {
     expect(text).toContain("Skip this step and nothing breaks");
     // Both former steps live here now, under one card.
     expect(text).toContain("Your story, in your own words");
-    expect(text).toContain("Screener answers you reuse");
+    expect(text).toContain("Application links");
     // R3-170: optional sections do not expand into a large setup task.
     const groups = Array.from(container?.querySelectorAll("details") ?? []);
     expect(groups).toHaveLength(2);
@@ -450,23 +406,9 @@ describe("profile setup customer-quality guidance", () => {
     expect(placeholders).not.toMatch(/backend|ten years/i);
   });
 
-  it("associates every reusable-answer label with its field", () => {
+  it("keeps form answer editors out of Profile setup", () => {
     render(<FormHarness screen="extras" />);
-
-    const addAnswer = [...(container?.querySelectorAll("button") ?? [])].find(
-      (button) => button.textContent === "Add answer",
-    );
-    act(() => {
-      addAnswer?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    for (const fieldName of ["label", "kind", "question", "answer"]) {
-      const field = container?.querySelector<HTMLElement>(
-        `[name="answerBank.customAnswers.0.${fieldName}"]`,
-      );
-      const fieldId = field?.id;
-      expect(fieldId).toBeTruthy();
-      expect(container?.querySelector(`label[for="${fieldId}"]`)).toBeTruthy();
-    }
+    expect(container?.querySelector('[name^="answerBank."]')).toBeNull();
+    expect(container?.textContent).not.toContain("Add answer");
   });
 });

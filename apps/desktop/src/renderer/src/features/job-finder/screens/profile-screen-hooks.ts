@@ -543,12 +543,6 @@ export function useProfileScreenForms(input: {
     name: "proofBank",
     keyName: "fieldKey",
   });
-  const customAnswerArray = useFieldArray({
-    control: profileForm.control,
-    name: "answerBank.customAnswers",
-    keyName: "fieldKey",
-  });
-
   const [
     identityValues,
     summaryValues,
@@ -1000,7 +994,6 @@ export function useProfileScreenForms(input: {
     });
   const backgroundArrays: ProfileBackgroundArrays = {
     certificationArray: wrapUserFieldArray(certificationArray),
-    customAnswerArray: wrapUserFieldArray(customAnswerArray),
     educationArray: wrapUserFieldArray(educationArray),
     languageArray: wrapUserFieldArray(languageArray),
     linkArray: wrapUserFieldArray(linkArray),

@@ -336,76 +336,7 @@ describe("profile editing rules", () => {
     expect(savedResume.draft.approvedExportId).toBeNull();
   });
 
-  it("saves explicitly remembered street and postcode answers without replacing the current city", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = await workspaceService.getWorkspaceSnapshot();
-    const result = await editProfileTool.execute(
-      editProfileTool.input.parse({
-        summary: "Remember the provided application answers",
-        operations: [
-          {
-            operation: "upsert_reusable_answer",
-            record: {
-              kind: "other",
-              label: "Street address",
-              question: "What is your street address?",
-              answer: "14 Fiction Lane",
-            },
-          },
-          {
-            operation: "upsert_reusable_answer",
-            record: {
-              kind: "other",
-              label: "Postcode",
-              question: "What is your postcode?",
-              answer: "12345",
-            },
-          },
-        ],
-      }),
-      {
-        service: workspaceService,
-        session: {
-          assertCurrent: () => undefined,
-          assertPersonAnswerAuthority: () => Promise.resolve(),
-          recordChange: () =>
-            Promise.resolve({
-              receipt: {
-                id: "answers_receipt",
-                fieldLabels: ["Saved answers"],
-              },
-              part: { type: "notice", kind: "info", text: "Saved" },
-            }),
-        } as unknown as AssistantTurnSession,
-        ports: {
-          publishWorkspaceUpdate: () => undefined,
-        } as unknown as AssistantHostPorts,
-      },
-    );
-    const after = await workspaceService.getWorkspaceSnapshot();
-    expect(after.profile.currentLocation).toBe(before.profile.currentLocation);
-    expect(after.profile.answerBank.customAnswers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "other",
-          label: "Street address",
-          question: "What is your street address?",
-          answer: "14 Fiction Lane",
-        }),
-        expect.objectContaining({
-          kind: "other",
-          label: "Postcode",
-          question: "What is your postcode?",
-          answer: "12345",
-        }),
-      ]),
-    );
-    expect(result.summary).toContain("Saved:");
-    expect(PROFILE_EDITING_RULES).toContain("before starting applications");
-    expect(PROFILE_EDITING_RULES).toContain(
-      "Save answers for later only when asked",
-    );
-  });
+
 });
 
 describe("sidebar resume import outcomes", () => {
