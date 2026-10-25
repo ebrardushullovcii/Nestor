@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  DiscoveryActivityEvent,
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
 } from "@nestor/contracts";
@@ -20,14 +19,9 @@ import {
 
 interface JobFinderTaskCenterProps {
   workspace: JobFinderRendererWorkspaceSnapshot;
-  isDiscoveryPending: boolean;
   isResumeImportPending: boolean;
-  liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
   onCancelApplyRun?:
-    | ((runId: string) => boolean | void | Promise<boolean | void>)
-    | undefined;
-  onCancelDiscovery?:
     | ((runId: string) => boolean | void | Promise<boolean | void>)
     | undefined;
   onNavigate?: ((path: string) => void | Promise<void>) | undefined;
@@ -110,15 +104,11 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
     () =>
       buildJobFinderTaskCenterModel({
         workspace: props.workspace,
-        isDiscoveryPending: props.isDiscoveryPending,
         isResumeImportPending: props.isResumeImportPending,
-        liveDiscoveryEvents: props.liveDiscoveryEvents,
         resumeImportProgress: props.resumeImportProgress,
       }),
     [
-      props.isDiscoveryPending,
       props.isResumeImportPending,
-      props.liveDiscoveryEvents,
       props.resumeImportProgress,
       props.workspace,
     ],
@@ -197,14 +187,9 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
     });
     setCancelRequestedTaskIds((current) => new Set(current).add(item.id));
     try {
-      const cancelOperation =
-        item.cancelKind === "discovery"
-          ? props.onCancelDiscovery
-            ? () => props.onCancelDiscovery?.(item.id)
-            : undefined
-          : props.onCancelApplyRun
-            ? () => props.onCancelApplyRun?.(item.id)
-            : undefined;
+      const cancelOperation = props.onCancelApplyRun
+        ? () => props.onCancelApplyRun?.(item.id)
+        : undefined;
       const result = cancelOperation ? await cancelOperation() : false;
       if (result !== false) {
         return;
@@ -384,17 +369,14 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
-            Nothing is running. Searches, resume imports, and application runs
-            show here while they work.
+            Nothing is running. Resume imports and application runs show here
+            while they work.
           </p>
         ) : (
           <div className="grid gap-3">
             {visibleItems.map((item) => {
               const cancellationRequested = cancelRequestedTaskIds.has(item.id);
-              const visibleStatus =
-                cancellationRequested && item.cancelKind === "discovery"
-                  ? "stopping"
-                  : item.status;
+              const visibleStatus = item.status;
               return (
                 <article
                   className="grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3"

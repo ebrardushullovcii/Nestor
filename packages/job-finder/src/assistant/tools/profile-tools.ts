@@ -1071,6 +1071,14 @@ export async function undoReceipt(
     receipt.entries
       .filter((entry) => entry.path[0] === target)
       .map((entry) => ({ ...entry, path: entry.path.slice(1) }));
+  // Old triage receipts belong to the retired job tools; job moves made
+  // through the store commands carry app_command receipts.
+  if (receipt.target === "job_triage") {
+    return {
+      receipt,
+      message: "That job move can no longer be undone here.",
+    };
+  }
   let undone: string[] = [];
   let conflicts: string[] = [];
   if (receipt.target === "app_command") {
@@ -1106,11 +1114,6 @@ export async function undoReceipt(
         conflicts.push(...receipt.fieldLabels);
       else throw error;
     }
-  } else if (receipt.target === "job_triage") {
-    const { undoTriageChange } = await import("../triage-changes");
-    const result = await undoTriageChange(context, receipt);
-    undone = result.undoneLabels;
-    conflicts = result.conflictLabels;
   } else if (receipt.target === "resume_draft") {
     const result = await service.undoAssistantResumeChange({
       jobId: receipt.targetId ?? "",

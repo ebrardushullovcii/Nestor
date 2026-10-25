@@ -6,7 +6,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   ApplicationCrmBulkStageMutationInput,
   ApplyGroupedManualAnswerInput,
-  DiscoveryActivityEvent,
   JobFinderResumeWorkspace,
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
@@ -22,9 +21,6 @@ import type {
   ActionState,
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
-import {
-  type DiscoveryRunFeedback,
-} from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import type {
   PendingActionScope,
@@ -59,8 +55,6 @@ type BuildJobFinderPageContextArgs = {
     requestToken: number,
   ) => boolean;
   isCurrentResumeWorkspaceJob: (jobId: string) => boolean;
-  discoveryRunFeedback: DiscoveryRunFeedback | null;
-  liveDiscoveryEvents: readonly DiscoveryActivityEvent[];
   latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
   getLocationPathname: () => string;
   navigate: (
@@ -105,10 +99,6 @@ type BuildJobFinderPageContextArgs = {
   selectedTailoredAsset: JobFinderPageContext["selectedTailoredAsset"];
   setPendingActionState: Dispatch<SetStateAction<PendingActionState>>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
-  setDiscoveryRunFeedback: Dispatch<
-    SetStateAction<DiscoveryRunFeedback | null>
-  >;
-  setLiveDiscoveryEvents: Dispatch<SetStateAction<DiscoveryActivityEvent[]>>;
   setOptimisticProfileCopilotMessages: Dispatch<
     SetStateAction<readonly ProfileCopilotMessage[]>
   >;
@@ -151,8 +141,6 @@ export function buildJobFinderPageContext(
     isPendingAction,
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
-    discoveryRunFeedback,
-    liveDiscoveryEvents,
     latestWorkspaceRef,
     getLocationPathname,
     navigate,
@@ -176,8 +164,6 @@ export function buildJobFinderPageContext(
     selectedTailoredAsset,
     setPendingActionState,
     setActionState,
-    setDiscoveryRunFeedback,
-    setLiveDiscoveryEvents,
     setOptimisticProfileCopilotMessages,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
@@ -225,8 +211,6 @@ export function buildJobFinderPageContext(
     withPendingScope,
     setPendingActionState,
     setActionState,
-    setDiscoveryRunFeedback,
-    setLiveDiscoveryEvents,
     setOptimisticProfileCopilotMessages,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
@@ -244,7 +228,6 @@ export function buildJobFinderPageContext(
   return {
     actionState,
     canImportResume,
-    discoveryRunFeedback,
     importResumeGuardMessage,
     resumeOperationStarts: resumeOperationStarts ?? {},
     isAnyPending: isAnyPendingAction,
@@ -541,7 +524,6 @@ export function buildJobFinderPageContext(
     selectedApplicationAttempt,
     selectedApplicationRecord,
     selectedDiscoveryJob,
-    liveDiscoveryEvents,
     selectedReviewItem,
     selectedReviewJob,
     selectedTailoredAsset,

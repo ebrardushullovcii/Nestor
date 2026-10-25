@@ -27,19 +27,11 @@ export function RecentChangesSection(props: {
   const { workspace } = props;
   const state = useMemo(
     () => ({
-      discoveryJobs: workspace.discoveryJobs,
-      dismissedDiscoveryJobs: workspace.dismissedDiscoveryJobs,
-      reviewQueue: workspace.reviewQueue,
       applicationJobIds: collectPreparedApplicationJobIds(
         workspace.applicationRecords,
       ),
     }),
-    [
-      workspace.discoveryJobs,
-      workspace.dismissedDiscoveryJobs,
-      workspace.reviewQueue,
-      workspace.applicationRecords,
-    ],
+    [workspace.applicationRecords],
   );
   if (changes.length === 0) return null;
   const now = new Date();

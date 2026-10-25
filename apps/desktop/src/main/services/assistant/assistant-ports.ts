@@ -2,7 +2,6 @@ import {
   CandidateAssetSchema,
   type CandidateAsset,
   type CandidateProfile,
-  type DiscoveryActivityEvent,
   type ResumeExportArtifactSummary,
 } from "@nestor/contracts";
 import {
@@ -26,11 +25,8 @@ import {
 } from "../job-finder/import-resume";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
+import { publishJobFinderWorkspaceUpdate } from "../job-finder/workspace-updates";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
-import {
-  createSearchProgressPublisher,
-  publishJobFinderWorkspaceUpdate,
-} from "../job-finder/workspace-updates";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { assistantAppCommands } from "./app-commands";
@@ -43,7 +39,6 @@ import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
  * batch start, the same serialized send.
  */
 
-const SEARCH_START_TIMEOUT_MS = 20_000;
 
 async function readWorkspaceProjection(service: JobFinderWorkspaceService) {
   if (!service.getWorkspaceProjection) {
@@ -253,69 +248,6 @@ export function createAssistantHostPorts(input: {
         }
       }
       return batch;
-    },
-    async startSearch({ searchRequest, targetId }) {
-      const service = await getJobFinderWorkspaceService();
-      const before = await readWorkspaceProjection(service);
-      if (before.activeDiscoveryRun?.state === "running")
-        return {
-          runId: before.activeDiscoveryRun.id,
-          message: "A search is already running.",
-        };
-      const startedAt = new Date().toISOString();
-      let complete!: (runId: string | null) => void;
-      const started = new Promise<string | null>((resolve) => {
-        complete = resolve;
-      });
-      let failure: unknown;
-      const publishProgress = createSearchProgressPublisher();
-      const activity = (event: DiscoveryActivityEvent) => {
-        complete(event.runId);
-        publishProgress();
-      };
-      const work = service.runAgentDiscovery(
-        activity,
-        undefined,
-        targetId ?? undefined,
-        searchRequest,
-      );
-      void work
-        .then(
-          (snapshot) => {
-            const run =
-              snapshot.activeDiscoveryRun ??
-              snapshot.recentDiscoveryRuns.find(
-                (entry) => entry.startedAt >= startedAt,
-              );
-            complete(run?.id ?? null);
-          },
-          (error: unknown) => {
-            failure = error;
-            complete(null);
-          },
-        )
-        .finally(() => publishJobFinderWorkspaceUpdate());
-      const timer = setTimeout(() => complete(null), SEARCH_START_TIMEOUT_MS);
-      let runId: string | null;
-      try {
-        runId = await started;
-      } finally {
-        clearTimeout(timer);
-      }
-      return runId
-        ? { runId, message: "The search started." }
-        : {
-            runId: null,
-            message:
-              failure instanceof Error
-                ? failure.message
-                : "The search did not start. Check that at least one job source is on.",
-          };
-    },
-    async cancelSearch(runId) {
-      const service = await getJobFinderWorkspaceService();
-      await service.cancelDiscoveryRun(runId);
-      publishJobFinderWorkspaceUpdate();
     },
     resolveApprovedJobs: (selection) =>
       Promise.resolve(getApplicationStore().selectedJobIds(selection)),

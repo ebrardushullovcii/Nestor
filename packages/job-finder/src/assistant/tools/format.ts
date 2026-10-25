@@ -2,7 +2,6 @@ import {
   listResumeReviewsNeeded,
   listFinalApplicationActions,
 } from "../attention";
-import { APPLICATION_SKIPPED_BY_PERSON_LABEL } from "@nestor/contracts";
 import { isProvisionalMatchAssessment } from "../../discovery-ordering";
 import { getFitEvidenceDepth } from "../../discovery-result-bands";
 import type {
@@ -115,16 +114,6 @@ export function jobEvidence(job: SavedJob | DiscoveryJobView) {
   };
 }
 
-export function jobDetail(job: SavedJob | DiscoveryJobView) {
-  return {
-    ...jobEvidence(job),
-    summary: job.summary,
-    description: job.description,
-    responsibilities: job.responsibilities.slice(0, 15),
-    benefits: job.benefits.slice(0, 10),
-  };
-}
-
 export function compactShortlistItem(item: ReviewQueueItem) {
   return {
     jobId: item.jobId,
@@ -164,7 +153,6 @@ export function allJobs(
   for (const job of [
     ...snapshot.discoveryJobs,
     ...snapshot.companyJobs,
-    ...snapshot.dismissedDiscoveryJobs,
   ]) {
     if (!byId.has(job.id)) byId.set(job.id, job);
   }
@@ -292,20 +280,6 @@ export function createJobCaveats(snapshot: JobFinderWorkspaceSnapshot) {
           : null,
     };
   };
-}
-
-/** Where a job's application stands, in plain words, from its records. */
-export function describeApplicationStanding(
-  snapshot: JobFinderWorkspaceSnapshot,
-  jobId: string,
-): string {
-  const record = snapshot.applicationRecords.find(
-    (entry) => entry.jobId === jobId,
-  );
-  if (!record) return "not applied";
-  if (record.lastActionLabel === APPLICATION_SKIPPED_BY_PERSON_LABEL)
-    return "skipped";
-  return record.status.replaceAll("_", " ");
 }
 
 /**

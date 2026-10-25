@@ -4,7 +4,6 @@ import type {
   AssistantResumeBatchState,
   CandidateAsset,
   JobFinderJobDetail,
-  JobFinderSearchRequest,
 } from "@nestor/contracts";
 import type { AssistantToolDefinition } from "./tool-kit";
 
@@ -29,12 +28,6 @@ export interface AssistantHostPorts {
   /** The UI-owned queue uses this same stop flag before dispatching a draft. */
   readResumeBatch?(): AssistantResumeBatchState | null;
   stopResumeBatch?(): AssistantResumeBatchState | null;
-  /** Starts a search as Find jobs does and returns once the run exists. */
-  startSearch(input: {
-    searchRequest: JobFinderSearchRequest;
-    targetId: string | null;
-  }): Promise<{ runId: string | null; message: string }>;
-  cancelSearch(runId: string): Promise<void>;
   /** Freeze the approved selection behind a sidebar instruction, without model pagination. */
   resolveApprovedJobs?(selection: JobSelectionInput): Promise<number[]>;
   /** Runs a source check (the same as Check this source). */

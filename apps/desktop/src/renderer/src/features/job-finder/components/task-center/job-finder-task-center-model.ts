@@ -1,33 +1,17 @@
 import type {
   ApplyRunSummary,
-  DiscoveryActivityEvent,
-  DiscoveryRunRecord,
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   ResumeImportRun,
   SourceDebugRunRecord,
 } from "@nestor/contracts";
 import { classifyPausedApplyRun } from "../../lib/apply-run-pause-state";
-import {
-  formatDiscoveryRunCountLabel,
-  formatDiscoveryRunReportLabel,
-  getDiscoveryRunCountEvidence,
-  getDiscoveryRunReportCounts,
-  hasDiscoveryRunReportCounts,
-} from "../../lib/discovery-run-count-label";
 import { applyRunJobNeedsPreparation } from "../../screens/applications/applications-detail-panel-helpers";
 import { WAITING_FOR_BROWSER_TAB_SUMMARY } from "../../screens/applications/applications-recovery-state";
-import {
-  DISCOVERY_RUN_STATE_LABELS,
-  DISCOVERY_STOP_UNACKNOWLEDGED_LABEL,
-  DISCOVERY_STOPPING_LABEL,
-} from "../../lib/status-copy";
-import { getDiscoveryStopState } from "../../lib/discovery-stop-state";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { countApplicationLedgerEntries } from "../../lib/needs-you-count";
 
 export type JobFinderTaskKind =
-  | "discovery"
   | "source_check"
   | "resume_import"
   | "apply"
@@ -51,7 +35,7 @@ export interface JobFinderTaskCenterItem {
   countLabel: string;
   historyEstimateLabel: string | null;
   canCancel: boolean;
-  cancelKind: "discovery" | "apply" | null;
+  cancelKind: "apply" | null;
   resumeRoute: string | null;
   resumeActionLabel: string | null;
   applyRecoveryJobIds?: readonly string[];
@@ -69,43 +53,10 @@ export interface JobFinderTaskCenterModel {
 
 export interface BuildJobFinderTaskCenterModelInput {
   workspace: JobFinderRendererWorkspaceSnapshot;
-  isDiscoveryPending: boolean;
   isResumeImportPending: boolean;
-  liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
   /** Injected by tests so the bounded Stop window is deterministic. */
   now?: number | undefined;
-}
-
-const discoveryStageLabels: Record<DiscoveryActivityEvent["stage"], string> = {
-  planning: "Planning sources",
-  target: "Checking source",
-  navigation: "Opening listings",
-  extraction: "Reading listings",
-  scoring: "Scoring matches",
-  persistence: "Saving results",
-  run: "Finishing search",
-};
-
-function discoveryProgressStageLabel(
-  event: DiscoveryActivityEvent,
-  targetIds: readonly string[],
-): string {
-  if (event.stage === "extraction" && !event.targetId) {
-    return "Reading listing details";
-  }
-  if (
-    event.targetId &&
-    (event.stage === "target" ||
-      event.stage === "navigation" ||
-      event.stage === "extraction")
-  ) {
-    const targetIndex = targetIds.indexOf(event.targetId);
-    if (targetIndex >= 0 && targetIds.length > 0) {
-      return `Reading source ${targetIndex + 1} of ${targetIds.length}`;
-    }
-  }
-  return discoveryStageLabels[event.stage];
 }
 
 const resumeStageLabels: Record<ResumeImportProgressEvent["stage"], string> = {
@@ -180,89 +131,6 @@ function historyEstimate(
   return `${formatDuration(typicalDuration)} from ${durations.length} ${sampleLabel}${suffix}`;
 }
 
-function countTargetIds(targetIds: readonly string[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const targetId of targetIds) {
-    counts.set(targetId, (counts.get(targetId) ?? 0) + 1);
-  }
-  return counts;
-}
-
-function sameTargetCounts(
-  targetIds: readonly string[],
-  expectedCounts: ReadonlyMap<string, number>,
-  expectedLength: number,
-): boolean {
-  if (targetIds.length !== expectedLength) {
-    return false;
-  }
-
-  const actualCounts = countTargetIds(targetIds);
-  if (actualCounts.size !== expectedCounts.size) {
-    return false;
-  }
-
-  for (const [targetId, count] of actualCounts) {
-    if (expectedCounts.get(targetId) !== count) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function targetSourceLabel(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-  targetIds: readonly string[],
-): string {
-  const targetLabels = new Map(
-    (workspace.searchPreferences.discovery.targets ?? []).map((target) => [
-      target.id,
-      target.label,
-    ]),
-  );
-  const labels = targetIds
-    .map((targetId) => targetLabels.get(targetId))
-    .filter((label): label is string => Boolean(label));
-
-  if (labels.length === 0) {
-    return "Configured job sources";
-  }
-
-  if (labels.length <= 2) {
-    return labels.join(" and ");
-  }
-
-  return `${labels[0]} and ${labels.length - 1} more sources`;
-}
-
-function discoveryStatus(
-  run: DiscoveryRunRecord | null,
-  isPending: boolean,
-  now: number,
-): JobFinderTaskStatus {
-  const stopState = getDiscoveryStopState(run, now);
-  if (stopState === "stopping") {
-    return "stopping";
-  }
-
-  // A stop the search never acknowledged is reported as stopped rather than
-  // as a "Stopping" that counts upward forever, and releases its controls.
-  if (stopState === "unacknowledged") {
-    return "cancelled";
-  }
-
-  if (!run || run.state === "idle") {
-    return isPending ? "active" : "interrupted";
-  }
-
-  if (run.state === "running") {
-    return "active";
-  }
-
-  return run.state;
-}
-
 const sourceCheckStageLabels: Record<
   NonNullable<SourceDebugRunRecord["activePhase"]>,
   string
@@ -323,127 +191,6 @@ function buildSourceCheckTask(
     resumeRoute: canResume ? JOB_FINDER_ROUTE_PATHS.profileSources : null,
     resumeActionLabel: canResume ? "Open job sources" : null,
     updatedAt: run.updatedAt,
-  };
-}
-
-function buildDiscoveryTask(
-  input: BuildJobFinderTaskCenterModelInput,
-): JobFinderTaskCenterItem | null {
-  const recentRuns = input.workspace.recentDiscoveryRuns ?? [];
-  const observedLiveEvent = input.liveDiscoveryEvents?.at(-1) ?? null;
-  const activeRun = input.workspace.activeDiscoveryRun;
-  const newestRun =
-    activeRun ?? newestBy(recentRuns, (candidate) => candidate.startedAt);
-  const liveEvent =
-    observedLiveEvent &&
-    newestRun &&
-    observedLiveEvent.runId !== newestRun.id &&
-    observedLiveEvent.timestamp < newestRun.startedAt
-      ? null
-      : observedLiveEvent;
-  // A new search publishes activity before its workspace snapshot arrives.
-  // Never combine that activity with the previous search's sources or counts.
-  const run = liveEvent
-    ? activeRun?.id === liveEvent.runId
-      ? activeRun
-      : (recentRuns.find((candidate) => candidate.id === liveEvent.runId) ??
-        null)
-    : input.isDiscoveryPending
-      ? activeRun?.state === "running"
-        ? activeRun
-        : null
-      : (activeRun ?? newestBy(recentRuns, (candidate) => candidate.startedAt));
-
-  if (!run && !input.isDiscoveryPending && !liveEvent) {
-    return null;
-  }
-
-  const targetIds = run?.targetIds.length
-    ? run.targetIds
-    : liveEvent?.targetId
-      ? [liveEvent.targetId]
-      : input.isDiscoveryPending
-        ? input.workspace.searchPreferences.discovery.targets
-            .filter((target) => target.enabled)
-            .map((target) => target.id)
-        : [];
-  const targetIdCounts = countTargetIds(targetIds);
-  const progressEvent = liveEvent ?? run?.activity.at(-1) ?? null;
-  const countEvidence = getDiscoveryRunCountEvidence(run, progressEvent);
-  // A finished run states its own counts; Tasks quotes them rather than
-  // describing the same search with a second set of numbers. A run still in
-  // flight has nothing frozen yet, so the live evidence label stands.
-  const runReport = getDiscoveryRunReportCounts(run);
-  const runCountLabel =
-    run?.state !== "running" && hasDiscoveryRunReportCounts(runReport)
-      ? formatDiscoveryRunReportLabel(runReport)
-      : formatDiscoveryRunCountLabel(countEvidence);
-  const targetsPlanned = run?.summary.targetsPlanned || targetIds.length;
-  const targetsCompleted = run?.summary.targetsCompleted ?? 0;
-  const now = input.now ?? Date.now();
-  const stopState = getDiscoveryStopState(run, now);
-  const status =
-    run?.runPhase === "interrupted"
-      ? "interrupted"
-      : discoveryStatus(
-          run,
-          input.isDiscoveryPending || Boolean(liveEvent),
-          now,
-        );
-  const compatibleHistory = recentRuns.filter(
-    (candidate) =>
-      candidate.id !== run?.id &&
-      candidate.state === "completed" &&
-      candidate.summary.durationMs > 0 &&
-      (targetIds.length === 0 ||
-        sameTargetCounts(
-          candidate.targetIds,
-          targetIdCounts,
-          targetIds.length,
-        )),
-  );
-  const canCancel = status === "active" && run?.state === "running";
-  const canRunAgain = ["cancelled", "failed", "interrupted"].includes(status);
-
-  return {
-    id: run?.id ?? liveEvent?.runId ?? "discovery-current",
-    updatedAt: run ? (run.completedAt ?? run.startedAt) : null,
-    kind: "discovery",
-    title: "Job search",
-    status,
-    stageLabel:
-      status === "active"
-        ? progressEvent
-          ? discoveryProgressStageLabel(progressEvent, targetIds)
-          : "Starting search"
-        : status === "stopping"
-          ? DISCOVERY_STOPPING_LABEL
-          : stopState === "unacknowledged"
-            ? DISCOVERY_STOP_UNACKNOWLEDGED_LABEL
-            : status === "completed"
-              ? DISCOVERY_RUN_STATE_LABELS.completed
-              : status === "cancelled"
-                ? DISCOVERY_RUN_STATE_LABELS.cancelled
-                : status === "failed"
-                  ? DISCOVERY_RUN_STATE_LABELS.failed
-                  : "Search interrupted",
-    sourceLabel: targetSourceLabel(input.workspace, targetIds),
-    countLabel:
-      targetsPlanned > 0
-        ? `${targetsCompleted} of ${targetsPlanned} sources finished · ${runCountLabel}`
-        : runCountLabel,
-    historyEstimateLabel:
-      status === "active" || status === "stopping"
-        ? historyEstimate(
-            compatibleHistory.map((candidate) => candidate.summary.durationMs),
-            "similar completed search",
-            "similar completed searches",
-          )
-        : null,
-    canCancel,
-    cancelKind: canCancel ? "discovery" : null,
-    resumeRoute: canRunAgain ? "/job-finder/discovery" : null,
-    resumeActionLabel: canRunAgain ? "Open Find jobs" : null,
   };
 }
 
@@ -971,7 +718,6 @@ export function buildJobFinderTaskCenterModel(
   input: BuildJobFinderTaskCenterModelInput,
 ): JobFinderTaskCenterModel {
   const items = [
-    buildDiscoveryTask(input),
     buildSourceCheckTask(input),
     buildResumeTask(input),
     ...buildApplyTasks(input),

@@ -6,7 +6,6 @@ import {
   ApplyRunSchema,
   JobFinderApplyRunActionInputSchema,
   JobFinderApplyRunDetailsQuerySchema,
-  JobFinderAgentDiscoveryActionInputSchema,
   JobFinderAgentDiscoveryOutcomeSchema,
   JobFinderAgentDiscoveryResultSchema,
   JobFinderOpenBrowserSessionInputSchema,
@@ -600,39 +599,6 @@ describe("contracts workspace snapshot schema", () => {
       }),
     ).toEqual({
       targetId: "target_linkedin_default",
-    });
-  });
-
-  test("parses agent discovery action payloads with optional single-target scope", () => {
-    expect(
-      JobFinderAgentDiscoveryActionInputSchema.parse({
-        requestId: "agent_discovery_1",
-      }),
-    ).toEqual({
-      requestId: "agent_discovery_1",
-      targetId: null,
-    });
-
-    expect(
-      JobFinderAgentDiscoveryActionInputSchema.parse({
-        requestId: "agent_discovery_2",
-        targetId: "target_linkedin_default",
-        searchRequest: {
-          intent: "Around engineering",
-          breadth: "wide",
-          freshness: "recent",
-          sourceIds: ["target_linkedin_default"],
-        },
-      }),
-    ).toEqual({
-      requestId: "agent_discovery_2",
-      targetId: "target_linkedin_default",
-      searchRequest: {
-        intent: "Around engineering",
-        breadth: "wide",
-        freshness: "recent",
-        sourceIds: ["target_linkedin_default"],
-      },
     });
   });
 

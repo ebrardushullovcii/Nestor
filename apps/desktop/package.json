@@ -39,7 +39,6 @@
     "ui:live-assistant-basic:built": "node ./scripts/capture-live-assistant-basic.mjs",
     "ui:live-assistant-popups": "pnpm build && node ./scripts/capture-live-assistant-basic.mjs",
     "ui:live-assistant-popups:built": "node ./scripts/capture-live-assistant-basic.mjs",
-    "audit:job-finder-live": "node ./scripts/audit-job-finder-live.mjs",
     "test:live-assistant-audio:built": "node ./scripts/test-live-assistant-audio.mjs",
     "test:live-assistant-live-system-audio": "pnpm build && node ./scripts/test-live-assistant-live-system-audio.mjs",
     "test:live-assistant-live-system-audio:built": "node ./scripts/test-live-assistant-live-system-audio.mjs",

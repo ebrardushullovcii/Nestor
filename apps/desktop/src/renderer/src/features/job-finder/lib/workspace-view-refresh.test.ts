@@ -19,14 +19,10 @@ const detail = (id: string, extra: Record<string, unknown>) =>
     job: { id, title: `Role ${id}`, ...extra },
     planId: "plan",
   }) as unknown as JobFinderJobDetail;
-const feedback = { version: 1, revision: 1, reasons: ["company"] };
 
 describe("patching the Find jobs lists from the change feed", () => {
   const current = {
     discoveryJobs: [row("a"), row("b")],
-    dismissedDiscoveryJobs: [
-      row("h", { status: "archived", discoveryFeedback: feedback } as never),
-    ],
     companyJobs: [row("a")],
   };
 
@@ -45,20 +41,6 @@ describe("patching the Find jobs lists from the change feed", () => {
       listingActivity: { status: "active" },
     });
     expect(lists.companyJobs[0]).toMatchObject({ title: "Renamed" });
-  });
-
-  it("moves a hidden job to Hidden and a restored one back", () => {
-    const hidden = patchFindJobsLists({
-      current,
-      curated: [],
-      jobIds: ["b", "h"],
-      details: [
-        detail("b", { status: "archived", discoveryFeedback: feedback }),
-        detail("h", { status: "discovered", discoveryFeedback: null }),
-      ],
-    });
-    expect(hidden.discoveryJobs.map((job) => job.id)).toEqual(["a", "h"]);
-    expect(hidden.dismissedDiscoveryJobs.map((job) => job.id)).toEqual(["b"]);
   });
 
   it("drops a deleted job and leaves unread ones as they were", () => {

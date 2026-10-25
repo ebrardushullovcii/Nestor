@@ -12,11 +12,7 @@ import type {
   CandidateProfile,
   CandidateReusableAnswer,
   ClearApplicationAnswerCommandInput,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
-  EmployerExclusionPreview,
-  JobFinderAgentDiscoveryResult,
   JobFinderApplicationPacketExportResult,
   JobFinderApplicationStartTarget,
   JobFinderApplyConsentActionInput,
@@ -26,7 +22,6 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApproveResumesInput,
-  JobFinderDiscoveryCancellationInput,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderRemoveFromApplyQueueInput,
@@ -35,7 +30,6 @@ import type {
   JobFinderResumePreview,
   JobFinderResumeWorkspace,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSearchRequest,
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -47,7 +41,6 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
-  RemoveEmployerExclusionInput,
   ResolveSubmissionOutcomeInput,
   ResolveSubmissionOutcomeResult,
   ResumeApplicationMode,
@@ -109,20 +102,9 @@ export interface JobFinderShellActions {
     command: UserActionCommandInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   refreshWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** Judges every job of the plan that has no fit verdict yet. */
-  judgeUnjudgedJobs?: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** A paced background refresh; never stacks on another one. */
   requestWorkspaceRefresh?: () => void;
   resetWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   resetBrowser: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  runAgentDiscovery: (
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-    targetId?: string,
-    searchRequest?: JobFinderSearchRequest,
-  ) => Promise<JobFinderAgentDiscoveryResult>;
-  cancelAgentDiscovery: (
-    input: JobFinderDiscoveryCancellationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   runSourceDebug: (
     targetId: string,
     onProgress?: (event: SourceDebugProgressEvent) => void,
@@ -237,31 +219,12 @@ export interface JobFinderShellActions {
   removeJobsFromReview?: (
     jobIds: readonly string[],
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  dismissDiscoveryJobs?: (
-    jobIds: readonly string[],
-    reasons: readonly DiscoveryFeedbackReason[],
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setJobResumeApplicationMode: (
     jobId: string,
     resumeApplicationMode: ResumeApplicationMode,
     resumeTailoringMode?: TailoringMode | null,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   removeJobFromReview: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  dismissDiscoveryJob: (
-    jobId: string,
-    reasons: readonly DiscoveryFeedbackReason[],
-    action?: "hide_job" | "hide_and_exclude_employer",
-    expectedNormalizedCompanyName?: string | null,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  previewEmployerExclusion: (
-    jobId: string,
-  ) => Promise<EmployerExclusionPreview>;
-  removeEmployerExclusion: (
-    input: RemoveEmployerExclusionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  restoreDismissedDiscoveryJob: (
     jobId: string,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   getResumeWorkspace: (jobId: string) => Promise<JobFinderResumeWorkspace>;
@@ -558,14 +521,3 @@ export interface ActionState {
   /** The Undo button's words; "Undo all" after a move of many jobs. */
   undoLabel?: string | null;
 }
-
-/**
- * Request-local resolution of one Shortlist decision. `onQueueJob` returns
- * this awaited outcome so the Discovery screen can attribute feedback to the
- * exact clicked job; the shared route-scoped `ActionState` keeps serving other
- * surfaces but is never the attribution authority for a shortlist row.
- */
-export type JobFinderQueuedJobOutcome = {
-  message: string;
-  status: "success" | "failure";
-};

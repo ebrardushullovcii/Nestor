@@ -1,4 +1,3 @@
-import { openJobStore } from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import { needsYouCommandTools } from "@nestor/job-finder";
@@ -8,6 +7,7 @@ import {
 } from "@nestor/ai-providers";
 import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
+  JOB_COMMANDS,
   JobFinderIntelligenceStateSchema,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
@@ -17,6 +17,7 @@ import {
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
+  type JobCommandOutputs,
   type JobFinderRepositoryState,
   type JobFinderWorkspaceSnapshot,
   type SavedJob,
@@ -25,8 +26,11 @@ import {
   createAssistantRepository,
   createInMemoryJobFinderRepository,
 } from "@nestor/db";
+import { openJobStore, type JobStore } from "@nestor/db/job-store";
+import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
 import {
   AssistantSessionHost,
+  assistantCommandTools,
   createAssistantModelHandle,
   createJobFinderWorkspaceService,
   createScriptedAssistantModelHandle,
@@ -55,6 +59,8 @@ export interface AssistantLaneWorld {
   events: AssistantEvent[];
   snapshot(): Promise<JobFinderWorkspaceSnapshot>;
   jobs: readonly SavedJob[];
+  /** Where a lane job sits in the job store: found, hidden, shortlisted... */
+  stageOf: (laneJobId: string) => string;
   shutdown(): Promise<void>;
 }
 
@@ -232,16 +238,70 @@ function laneDocumentManager(): DocumentManager {
   };
 }
 
-function recordingPorts(recorder: AssistantLaneRecorder): AssistantHostPorts {
+/** The lane jobs in an in-memory job store, scored, so job commands run on them. */
+function laneJobStore(): { store: JobStore; ids: Map<string, number> } {
+  const store = openJobStore(":memory:");
+  const { added } = store.saveFoundJobs({
+    searchId: null,
+    jobs: LANE_JOBS.map((job) => ({
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      workModes: job.workMode,
+      url: job.canonicalUrl,
+      applyUrl: job.applicationUrl,
+      sourceId: "lane",
+      sourceLabel: "Lane board",
+      sourceJobId: job.sourceJobId,
+      postedAt: job.postedAt,
+      salaryText: null,
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: null,
+      seniority: null,
+      employmentType: null,
+      summary: job.summary,
+      description: job.description,
+    })),
+  });
+  store.setFit(
+    LANE_JOBS.map((job, index) => ({
+      id: added[index]!,
+      score: job.matchAssessment.score,
+      summary: job.summary ?? "",
+      reasons: [],
+      gaps: [],
+    })),
+  );
   return {
-    startSearch: (input) => {
-      recorder.searches.push(JSON.stringify(input.searchRequest).slice(0, 400));
-      return Promise.resolve({
-        runId: `run_search_${recorder.searches.length}`,
-        message: "Search started.",
-      });
-    },
-    cancelSearch: () => Promise.resolve(),
+    store,
+    ids: new Map(LANE_JOBS.map((job, index) => [job.id, added[index]!])),
+  };
+}
+
+function recordingPorts(
+  recorder: AssistantLaneRecorder,
+  store: JobStore,
+  needsYouCommands: NonNullable<AssistantHostPorts["commands"]>,
+): AssistantHostPorts {
+  const runJobCommand = createJobCommandRunner({ store });
+  return {
+    commands: [
+      ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
+        JOB_COMMANDS,
+        (name, input) => {
+          if (name === "start_search") {
+            recorder.searches.push(JSON.stringify(input).slice(0, 400));
+            return Promise.reject(
+              new Error("Searching is not part of this eval world."),
+            );
+          }
+          return runJobCommand(name, input);
+        },
+        { group: "jobs" },
+      ),
+      ...needsYouCommands,
+    ],
     checkSource: () => Promise.resolve(),
     listDocuments: () => Promise.resolve([]),
     readDocumentText: () => Promise.resolve(null),
@@ -287,8 +347,8 @@ export function createAssistantLaneWorld(
     applications: [],
     sends: [],
   };
-  const jobs = openJobStore(":memory:");
-  const applications = createApplicationStore(jobs);
+  const jobs = laneJobStore();
+  const applications = createApplicationStore(jobs.store);
   const needsYou = createNeedsYouCommandRunner(() => applications, {
     open: () => Promise.resolve(false),
     check: () => Promise.resolve(false),
@@ -298,10 +358,7 @@ export function createAssistantLaneWorld(
   const host = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
     service,
-    ports: {
-      ...recordingPorts(recorder),
-      commands: needsYouCommandTools(needsYou),
-    },
+    ports: recordingPorts(recorder, jobs.store, needsYouCommandTools(needsYou)),
     resolveModel: () => resolution,
     publish: (event) => events.push(event),
     stallAfterMs: 60_000,
@@ -313,11 +370,15 @@ export function createAssistantLaneWorld(
     events,
     jobs: LANE_JOBS,
     snapshot: () => service.getWorkspaceSnapshot(),
+    stageOf: (laneJobId) => {
+      const id = jobs.ids.get(laneJobId);
+      return (id ? jobs.store.getJob(id)?.stage : null) ?? "missing";
+    },
     shutdown: async () => {
       try {
         await host.shutdown();
       } finally {
-        jobs.close();
+        jobs.store.close();
       }
     },
   };

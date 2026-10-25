@@ -18,8 +18,6 @@ import type {
   JobChange,
   ApplicationStoreDemoResult,
   WorkspaceQueryApi,
-  JobFinderDiscoveryCommandReply,
-  JobFinderDiscoveryCancellationReply,
   ApplicationPageState,
   ApplicationPageReopenProgress,
   ReopenApplicationPageInput,
@@ -76,11 +74,8 @@ import type {
   DesktopWindowCloseRequest,
   DesktopWindowCloseResolution,
   DesktopWindowControlsState,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
   EditApplicationDocumentInput,
-  EmployerExclusionPreview,
   ExportApplicationDocumentInput,
   GetApplicationAuthorityEnvelopeInput,
   GetApplicationAuthorityReadinessInput,
@@ -100,7 +95,6 @@ import type {
   InterviewTranscriptSegmentInput,
   InterviewWorkspaceView,
   JobChange,
-  JobFinderAgentDiscoveryReply,
   JobFinderApplicationPacketExportResult,
   JobFinderApplicationStartTarget,
   JobFinderApplyConsentActionInput,
@@ -111,9 +105,6 @@ import type {
   JobFinderApplyRunDetailsQuery,
   JobFinderApproveResumesInput,
   JobFinderDiagnosticExportResult,
-  JobFinderDiscoveryCancellationInput,
-  JobFinderDiscoveryCancellationReply,
-  JobFinderDiscoveryCommandReply,
   JobFinderInterviewFollowUpInput,
   JobFinderJobDetail,
   JobFinderOpenBrowserSessionInput,
@@ -126,7 +117,6 @@ import type {
   JobFinderResumePreview,
   JobFinderResumeWorkspace,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSearchRequest,
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -147,7 +137,6 @@ import type {
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
   ProposeApplicationDocumentInput,
-  RemoveEmployerExclusionInput,
   ReopenApplicationPageInput,
   ResolveSubmissionOutcomeInput,
   ResolveSubmissionOutcomeResult,
@@ -401,7 +390,6 @@ declare global {
             input: SaveJobFinderWorkspaceInput,
           ): Promise<JobFinderWorkspaceSyncResult>;
         };
-        judgeUnjudgedJobs: () => Promise<JobFinderWorkspaceSyncResult>;
         analyzeProfileFromResume: () => Promise<JobFinderWorkspaceSyncResult>;
         saveSearchPreferences: (
           searchPreferences: JobSearchPreferences,
@@ -459,20 +447,6 @@ declare global {
           options?: { retryInterrupted?: boolean },
         ) => Promise<JobFinderWorkspaceSyncResult>;
         cancelImportResume: (stopProcessing?: boolean) => void;
-        runDiscovery: () => Promise<JobFinderWorkspaceSyncResult>;
-        runAgentDiscovery: (
-          onActivity?: (event: DiscoveryActivityEvent) => void,
-          targetId?: string,
-          searchRequest?: JobFinderSearchRequest,
-        ) => Promise<JobFinderAgentDiscoveryReply>;
-        runAgentDiscoveryCommand: (
-          onActivity?: (event: DiscoveryActivityEvent) => void,
-          targetId?: string,
-          searchRequest?: JobFinderSearchRequest,
-        ) => Promise<JobFinderDiscoveryCommandReply>;
-        cancelDiscoveryRunCommand: (
-          runId: string,
-        ) => Promise<JobFinderDiscoveryCancellationReply>;
         runSourceDebug: (
           targetId: string,
           onProgress?: (event: SourceDebugProgressEvent) => void,
@@ -528,9 +502,6 @@ declare global {
           targetId: string,
           instructionId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
-        cancelAgentDiscovery: (
-          input: JobFinderDiscoveryCancellationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         resetBrowser: () => Promise<JobFinderWorkspaceSyncResult>;
         resetWorkspace: () => Promise<JobFinderWorkspaceSyncResult>;
         getStartupResetRecovery: () => Promise<JobFinderStartupResetRecoveryFact>;
@@ -545,21 +516,6 @@ declare global {
           resumeTailoringMode?: TailoringMode | null,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         removeJobFromReview: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        dismissDiscoveryJob: (
-          jobId: string,
-          reasons: readonly DiscoveryFeedbackReason[],
-          action?: "hide_job" | "hide_and_exclude_employer",
-          expectedNormalizedCompanyName?: string | null,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        previewEmployerExclusion: (
-          jobId: string,
-        ) => Promise<EmployerExclusionPreview>;
-        removeEmployerExclusion: (
-          input: RemoveEmployerExclusionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        restoreDismissedDiscoveryJob: (
           jobId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         getResumeWorkspace: (

@@ -70,7 +70,6 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -1149,15 +1148,6 @@ export function JobFinderPage() {
   useLayoutEffect(() => {
     latestShellState.current = { context, workspace };
   }, [context, workspace]);
-  const discoveryPendingScopes = useMemo(
-    () => [
-      jobFinderPendingActions.discoveryAll(),
-      ...(workspace?.searchPreferences.discovery.targets ?? []).map((target) =>
-        jobFinderPendingActions.discoveryTarget(target.id),
-      ),
-    ],
-    [workspace?.searchPreferences.discovery.targets],
-  );
   const isSourceDebugPending = useCallback(
     (targetId: string) =>
       latestShellState.current.context?.isPending(
@@ -1193,12 +1183,6 @@ export function JobFinderPage() {
       applicationRecordId: assignedResult.applicationRecordId,
     });
   }, []);
-  const onCancelDiscovery = useCallback(
-    (runId: string) =>
-      latestShellState.current.context?.onCancelDiscovery?.(runId) ??
-      Promise.resolve(false),
-    [],
-  );
   const onPrepareRemainingJobs = useCallback(
     (jobIds: readonly string[]) =>
       latestShellState.current.context?.onStartAutoApplyQueue([...jobIds]),
@@ -1294,13 +1278,10 @@ export function JobFinderPage() {
       <AssistantProvider>
         <JobFinderPageRouteContext.Provider value={context}>
           <MemoizedJobFinderShell
-            isDiscoveryPending={context.isAnyPending(discoveryPendingScopes)}
             isResumeImportPending={context.isPending(
               jobFinderPendingActions.profileImport(),
             )}
-            liveDiscoveryEvents={context.liveDiscoveryEvents}
             onCancelApplyRun={onCancelApplyRun}
-            {...(context.onCancelDiscovery ? { onCancelDiscovery } : {})}
             onDismissSavedStatus={dismissSavedStatus}
             onNavigate={navigateFromShell}
             onPrepareRemainingJobs={onPrepareRemainingJobs}

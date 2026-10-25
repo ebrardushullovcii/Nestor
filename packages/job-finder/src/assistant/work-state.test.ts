@@ -1,6 +1,5 @@
 import {
   AssistantContextReferenceSchema,
-  DiscoveryRunRecordSchema,
   ResumeImportRunSchema,
 } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
@@ -9,11 +8,12 @@ import type { AssistantHostPorts } from "./ports";
 import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
 import { readRunStatus } from "./run-watch";
 import type { AssistantTurnSession } from "./tool-kit";
-import { searchForJobsTool } from "./tools/jobs-tools";
+import {
+  getWorkspaceSummaryTool,
+} from "./tools/workspace-tools";
 import { readProfileTool } from "./tools/profile-tools";
 import { pauseActivityTool } from "./tools/settings-tools";
-import { getWorkspaceSummaryTool } from "./tools/workspace-tools";
-import { readAssistantWorkState, runningSearchState } from "./work-state";
+import { readAssistantWorkState, } from "./work-state";
 
 const openInApp = vi.fn();
 const session = {
@@ -69,57 +69,6 @@ it("reports a UI import even before the new import has a stored run and only off
   expect(paused.summary).toContain(
     "Resume import is still running; it was not stopped.",
   );
-});
-
-it("keeps the running search's source IDs when enabled sources change", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
-  const sources = Array.from({ length: 8 }, (_, index) => ({
-    ...snapshot.searchPreferences.discovery.targets[0]!,
-    id: `local_${index}`,
-    label: `Synthetic source ${index}`,
-    startingUrl: `http://127.0.0.1:47951/source-${index}`,
-  }));
-  snapshot.searchPreferences.discovery.targets = sources.map((source, index) => ({
-    ...source,
-    enabled: index !== 0,
-  }));
-  snapshot.activeDiscoveryRun = DiscoveryRunRecordSchema.parse({
-    id: "running_search",
-    state: "running",
-    startedAt: snapshot.generatedAt,
-    targetIds: sources.slice(0, 2).map((source) => source.id),
-    searchIntent: "Staff platform anywhere",
-  });
-  const running = runningSearchState(snapshot)!;
-  expect(running.plan).toBeNull();
-  expect(running.sources.map((source) => source.url)).toEqual(
-    sources.slice(0, 2).map((source) => source.startingUrl),
-  );
-  vi.spyOn(workspaceService, "getWorkspaceSnapshot").mockResolvedValue(
-    snapshot,
-  );
-  // The assistant reads the display projection when the service offers it.
-  if (workspaceService.getWorkspaceProjection)
-    vi.spyOn(
-      workspaceService as Required<typeof workspaceService>,
-      "getWorkspaceProjection",
-    ).mockResolvedValue(snapshot);
-  const startSearch = vi.fn();
-  const outcome = await searchForJobsTool.execute(
-    { goal: "More Go roles", freshness: "any" },
-    { service: workspaceService, session, ports: { ...ports, startSearch } },
-  );
-  expect(startSearch).not.toHaveBeenCalled();
-  expect(outcome.data).toMatchObject({ started: false, running });
-  const summary = await getWorkspaceSummaryTool.execute(
-    {},
-    { service: workspaceService, session, ports },
-  );
-  expect(summary.data).toMatchObject({
-    search: { running },
-  });
-  expect(summary.data).not.toHaveProperty("selectedSearchPlan");
 });
 
 it("shows current approval and saved level, instead of an earlier approval claim", async () => {

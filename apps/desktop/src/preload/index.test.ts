@@ -38,9 +38,6 @@ import "./index";
 type ExposedJobFinderApi = {
   applyJobs: Window["nestor"]["jobFinder"]["applyJobs"];
   listApplications: Window["nestor"]["jobFinder"]["listApplications"];
-  runAgentDiscovery: Window["nestor"]["jobFinder"]["runAgentDiscovery"];
-  runAgentDiscoveryCommand: Window["nestor"]["jobFinder"]["runAgentDiscoveryCommand"];
-  cancelDiscoveryRunCommand: Window["nestor"]["jobFinder"]["cancelDiscoveryRunCommand"];
   reopenApplicationPage: (
     input: { resultId: string },
     onProgress?: (progress: unknown) => void,
@@ -58,16 +55,8 @@ type ExposedJobFinderApi = {
   approveCurrentApplicationAnswers: (input: unknown) => Promise<unknown>;
   listApplicationAuthorityEnvelopes: (input?: unknown) => Promise<unknown>;
   createApplicationAuthorityEnvelope: (input: unknown) => Promise<unknown>;
-  dismissDiscoveryJob: (
-    jobId: string,
-    reasons: readonly string[],
-    action?: "hide_job" | "hide_and_exclude_employer",
-    expectedNormalizedCompanyName?: string | null,
-  ) => Promise<unknown>;
   importResume: (onProgress?: (event: unknown) => void) => Promise<unknown>;
   cancelImportResume: () => void;
-  previewEmployerExclusion: (jobId: string) => Promise<unknown>;
-  removeEmployerExclusion: (input: unknown) => Promise<unknown>;
   getApplyRunDetails: (input: unknown) => Promise<unknown>;
   exportApplicationPacket: (input: unknown) => Promise<unknown>;
   startApplyCopilotRun: (input: unknown) => Promise<unknown>;
@@ -200,36 +189,6 @@ describe("preload jobFinder grouped manual-answer boundary", () => {
     ]);
   });
 
-  it("exposes atomic employer exclusion preview, hide, and reversal channels", async () => {
-    await exposedJobFinder.previewEmployerExclusion("job-1");
-    expect(mockInvoke).toHaveBeenLastCalledWith(
-      "job-finder:preview-employer-exclusion",
-      { jobId: "job-1" },
-    );
-    await exposedJobFinder.dismissDiscoveryJob(
-      "job-1",
-      ["company"],
-      "hide_and_exclude_employer",
-      "example co",
-    );
-    expect(mockInvoke).toHaveBeenLastCalledWith(
-      "job-finder:dismiss-discovery-job",
-      {
-        jobId: "job-1",
-        reasons: ["company"],
-        action: "hide_and_exclude_employer",
-        expectedNormalizedCompanyName: "example co",
-      },
-    );
-    await exposedJobFinder.removeEmployerExclusion({
-      jobId: "job-1",
-      normalizedCompanyName: "example co",
-    });
-    expect(mockInvoke).toHaveBeenLastCalledWith(
-      "job-finder:remove-employer-exclusion",
-      { jobId: "job-1", normalizedCompanyName: "example co" },
-    );
-  });
 });
 
 describe("preload prepared application page boundary", () => {
@@ -658,45 +617,6 @@ it("reopen validates progress for the requested result and removes its listener 
   );
 });
 
-it("shares the discovery request lock and releases the activity listener for command calls", async () => {
-  mockInvoke.mockReset();
-  let finish!: (value: unknown) => void;
-  mockInvoke.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const activity = vi.fn();
-  const pending = exposedJobFinder.runAgentDiscoveryCommand(
-    activity,
-    "target_test",
-  );
-  await vi.waitFor(() =>
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:run-agent-discovery-command",
-      expect.objectContaining({ targetId: "target_test" }),
-    ),
-  );
-  await expect(exposedJobFinder.runAgentDiscovery()).rejects.toThrow(
-    "already running",
-  );
-  const channel: unknown = mockIpcRendererOn.mock.calls.at(-1)![0];
-  const reply = { outcome: "completed", runId: "command_run", newJobs: 4 };
-  finish(reply);
-  expect(await pending).toEqual(reply);
-  expect(mockIpcRendererOff).toHaveBeenCalledWith(
-    channel,
-    expect.any(Function),
-  );
-  mockInvoke.mockResolvedValueOnce({ runId: "command_run", accepted: true });
-  expect(
-    await exposedJobFinder.cancelDiscoveryRunCommand("command_run"),
-  ).toEqual({ runId: "command_run", accepted: true });
-  expect(mockInvoke).toHaveBeenLastCalledWith(
-    "job-finder:cancel-discovery-run-command",
-    { runId: "command_run" },
-  );
-});
 
 it("exposes the store Apply selection and paged applications without a workspace response", async () => {
   mockInvoke.mockReset();

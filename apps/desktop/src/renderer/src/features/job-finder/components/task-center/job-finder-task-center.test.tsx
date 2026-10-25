@@ -2,7 +2,6 @@
 
 import type {
   ApplyRunSummary,
-  DiscoveryRunRecord,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
 import {
@@ -28,21 +27,6 @@ afterEach(() => {
 });
 
 function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
-  const discoveryRun = {
-    id: "discovery_running",
-    state: "running",
-    startedAt: "2026-07-31T10:00:00.000Z",
-    completedAt: null,
-    targetIds: ["source_1"],
-    targetExecutions: [],
-    activity: [],
-    summary: {
-      targetsPlanned: 1,
-      targetsCompleted: 0,
-      validJobsFound: 2,
-      durationMs: 0,
-    },
-  } as unknown as DiscoveryRunRecord;
   const applyRun = {
     id: "apply_running",
     mode: "copilot",
@@ -59,14 +43,12 @@ function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   } as ApplyRunSummary;
 
   return {
-    activeDiscoveryRun: discoveryRun,
     applicationRecords: [],
     applyRuns: [applyRun],
     discoveryJobs: [
       { id: "job_1", company: "Mercury", title: "Software Engineer" },
     ],
     latestResumeImportRun: null,
-    recentDiscoveryRuns: [],
     searchPreferences: {
       discovery: { targets: [{ id: "source_1", label: "Mercury careers" }] },
     },
@@ -79,7 +61,6 @@ function createQuietWorkspace(): JobFinderRendererWorkspaceSnapshot {
     applyRuns: [],
     discoveryJobs: [],
     latestResumeImportRun: null,
-    recentDiscoveryRuns: [],
     searchPreferences: {
       discovery: { targets: [] },
     },
@@ -95,32 +76,17 @@ describe("JobFinderTaskCenter", () => {
 
   test("clears finished history and keeps it cleared after reopening", () => {
     const workspace = createQuietWorkspace();
-    workspace.recentDiscoveryRuns = [
+    workspace.applyRuns = [
       {
-        id: "finished_search",
+        ...createWorkspace().applyRuns[0]!,
         state: "completed",
-        startedAt: "2026-07-31T10:00:00.000Z",
+        pendingJobs: 0,
+        updatedAt: "2026-07-31T10:00:02.000Z",
         completedAt: "2026-07-31T10:00:02.000Z",
-        targetIds: ["source_1"],
-        targetExecutions: [],
-        activity: [],
-        summary: {
-          targetsPlanned: 1,
-          targetsCompleted: 1,
-          validJobsFound: 2,
-          durationMs: 2_000,
-        },
-      } as unknown as DiscoveryRunRecord,
-    ];
-    workspace.searchPreferences.discovery.targets = [
-      {
-        id: "source_1",
-        label: "Example jobs",
-      } as JobFinderRendererWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"][number],
+      },
     ];
     const first = render(
       <JobFinderTaskCenter
-        isDiscoveryPending={false}
         isResumeImportPending={false}
         workspace={workspace}
       />,
@@ -128,76 +94,50 @@ describe("JobFinderTaskCenter", () => {
 
     fireEvent.click(document.querySelector("summary") as HTMLElement);
     expect(
-      document.querySelector('[data-task-kind="discovery"]'),
+      document.querySelector('[data-task-kind="apply"]'),
     ).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear finished" }));
-    expect(document.querySelector('[data-task-kind="discovery"]')).toBeNull();
+    expect(document.querySelector('[data-task-kind="apply"]')).toBeNull();
     expect(screen.getByText(/Nothing is running/)).toBeTruthy();
 
     first.unmount();
     render(
       <JobFinderTaskCenter
-        isDiscoveryPending={false}
         isResumeImportPending={false}
         workspace={workspace}
       />,
     );
     fireEvent.click(document.querySelector("summary") as HTMLElement);
-    expect(document.querySelector('[data-task-kind="discovery"]')).toBeNull();
+    expect(document.querySelector('[data-task-kind="apply"]')).toBeNull();
   });
 
   test("exposes native keyboard focus and dispatches only supported cancel actions once", () => {
     const onCancelApplyRun = vi.fn();
-    const onCancelDiscovery = vi.fn();
 
     render(
       <JobFinderTaskCenter
-        isDiscoveryPending
         isResumeImportPending={false}
         onCancelApplyRun={onCancelApplyRun}
-        onCancelDiscovery={onCancelDiscovery}
         workspace={createWorkspace()}
       />,
     );
 
-    const summary = screen.getByLabelText("Activity: 2 running");
+    const summary = screen.getByLabelText("Activity: 1 running");
     expect(summary).toBeInstanceOf(HTMLElement);
     summary?.focus();
     expect(document.activeElement).toBe(summary);
 
-    const discoveryTask = document.querySelector(
-      '[data-task-kind="discovery"]',
-    );
     const applyTask = document.querySelector('[data-task-kind="apply"]');
-    expect(discoveryTask).not.toBeNull();
     expect(applyTask).not.toBeNull();
 
-    fireEvent.click(
-      within(discoveryTask as HTMLElement).getByRole("button", {
-        name: "Cancel task",
-      }),
-    );
     fireEvent.click(
       within(applyTask as HTMLElement).getByRole("button", {
         name: "Cancel task",
       }),
     );
 
-    expect(onCancelDiscovery).toHaveBeenCalledOnce();
-    expect(onCancelDiscovery).toHaveBeenCalledWith("discovery_running");
     expect(onCancelApplyRun).toHaveBeenCalledOnce();
     expect(onCancelApplyRun).toHaveBeenCalledWith("apply_running");
-    expect(
-      within(discoveryTask as HTMLElement).getByRole<HTMLButtonElement>(
-        "button",
-      ).disabled,
-    ).toBe(true);
-    expect(discoveryTask?.getAttribute("data-task-status")).toBe("stopping");
-    // The badge says "Stopping"; a "Stage: Stopping" line under it would
-    // only say it again.
-    expect(
-      within(discoveryTask as HTMLElement).getAllByText("Stopping"),
-    ).toHaveLength(1);
     expect(
       within(applyTask as HTMLElement).getByRole<HTMLButtonElement>("button")
         .disabled,
@@ -205,56 +145,11 @@ describe("JobFinderTaskCenter", () => {
     expect(screen.queryByText("History estimate")).toBeNull();
   });
 
-  test("routes a cancelled task to its truthful restart surface and closes the popover", async () => {
-    const onNavigate = vi.fn();
-    const workspace = createWorkspace();
-    workspace.activeDiscoveryRun = null;
-    workspace.recentDiscoveryRuns = [
-      {
-        ...(workspace.recentDiscoveryRuns[0] as DiscoveryRunRecord),
-        id: "discovery_cancelled",
-        state: "cancelled",
-        startedAt: "2026-07-31T10:00:00.000Z",
-        completedAt: "2026-07-31T10:00:02.000Z",
-        targetIds: ["source_1"],
-        targetExecutions: [],
-        activity: [],
-        summary: {
-          targetsPlanned: 1,
-          targetsCompleted: 0,
-          validJobsFound: 2,
-          durationMs: 2_000,
-        },
-      } as unknown as DiscoveryRunRecord,
-    ];
-    workspace.applyRuns = [];
-
-    render(
-      <JobFinderTaskCenter
-        isDiscoveryPending={false}
-        isResumeImportPending={false}
-        onNavigate={onNavigate}
-        workspace={workspace}
-      />,
-    );
-
-    const summary = document.querySelector("summary") as HTMLElement;
-    fireEvent.click(summary);
-    fireEvent.click(screen.getByRole("button", { name: "Open Find jobs" }));
-    expect(onNavigate).toHaveBeenCalledWith("/job-finder/discovery");
-    await waitFor(() =>
-      expect(
-        (document.querySelector("details") as HTMLDetailsElement).open,
-      ).toBe(false),
-    );
-  });
-
   test("closes predictably with Escape, outside interaction, and the visible close control", () => {
     render(
       <>
         <button type="button">Outside control</button>
         <JobFinderTaskCenter
-          isDiscoveryPending
           isResumeImportPending={false}
           workspace={createWorkspace()}
         />
@@ -262,7 +157,7 @@ describe("JobFinderTaskCenter", () => {
     );
 
     const details = document.querySelector("details") as HTMLDetailsElement;
-    const summary = screen.getByLabelText("Activity: 2 running");
+    const summary = screen.getByLabelText("Activity: 1 running");
 
     fireEvent.click(summary);
     expect(details.open).toBe(true);
@@ -300,82 +195,36 @@ describe("JobFinderTaskCenter", () => {
   });
 
   test("re-enables cancellation when the owning operation reports a failure", async () => {
-    const onCancelDiscovery = vi.fn(() => Promise.resolve(false));
+    const onCancelApplyRun = vi.fn(() => Promise.resolve(false));
 
     render(
       <JobFinderTaskCenter
-        isDiscoveryPending
         isResumeImportPending={false}
-        onCancelDiscovery={onCancelDiscovery}
+        onCancelApplyRun={onCancelApplyRun}
         workspace={createWorkspace()}
       />,
     );
 
-    const discoveryTask = document.querySelector(
-      '[data-task-kind="discovery"]',
-    );
-    expect(discoveryTask).not.toBeNull();
-    const cancelButton = within(discoveryTask as HTMLElement).getByRole(
+    const applyTask = document.querySelector('[data-task-kind="apply"]');
+    expect(applyTask).not.toBeNull();
+    const cancelButton = within(applyTask as HTMLElement).getByRole(
       "button",
       { name: "Cancel task" },
     );
     fireEvent.click(cancelButton);
     await waitFor(() => expect(cancelButton).toHaveProperty("disabled", false));
     expect(
-      within(discoveryTask as HTMLElement).getByRole("status").textContent,
+      within(applyTask as HTMLElement).getByRole("status").textContent,
     ).toContain(
       "Cancellation did not complete. Check the task, then try again.",
     );
     fireEvent.click(cancelButton);
-    expect(onCancelDiscovery).toHaveBeenCalledTimes(2);
-  });
-
-  test("keeps the panel open and explains when task navigation fails", async () => {
-    const onNavigate = vi.fn(() => Promise.reject(new Error("route failed")));
-    const workspace = createWorkspace();
-    workspace.activeDiscoveryRun = null;
-    workspace.recentDiscoveryRuns = [
-      {
-        id: "discovery_failed",
-        state: "failed",
-        startedAt: "2026-07-31T10:00:00.000Z",
-        completedAt: "2026-07-31T10:00:02.000Z",
-        targetIds: ["source_1"],
-        targetExecutions: [],
-        activity: [],
-        summary: {
-          targetsPlanned: 1,
-          targetsCompleted: 0,
-          validJobsFound: 0,
-          durationMs: 2_000,
-        },
-      } as unknown as DiscoveryRunRecord,
-    ];
-    workspace.applyRuns = [];
-
-    render(
-      <JobFinderTaskCenter
-        isDiscoveryPending={false}
-        isResumeImportPending={false}
-        onNavigate={onNavigate}
-        workspace={workspace}
-      />,
-    );
-
-    const details = document.querySelector("details") as HTMLDetailsElement;
-    fireEvent.click(document.querySelector("summary") as HTMLElement);
-    fireEvent.click(screen.getByRole("button", { name: "Open Find jobs" }));
-
-    expect((await screen.findByRole("status")).textContent).toContain(
-      "That page could not open. Try again.",
-    );
-    expect(details.open).toBe(true);
+    expect(onCancelApplyRun).toHaveBeenCalledTimes(2);
   });
 
   test("shows useful progress without unavailable capability clutter", () => {
     render(
       <JobFinderTaskCenter
-        isDiscoveryPending
         isResumeImportPending={false}
         workspace={createWorkspace()}
       />,
@@ -416,7 +265,6 @@ test("Activity shows an item cancelled by the person without a failure count", (
   ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   render(
     <JobFinderTaskCenter
-      isDiscoveryPending={false}
       isResumeImportPending={false}
       workspace={workspace}
     />,

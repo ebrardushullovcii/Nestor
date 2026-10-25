@@ -18,6 +18,7 @@ import { LANE_JOBS, laneContext, type AssistantLaneRecorder } from "./world";
 export interface AssistantLaneObservation {
   snapshot: JobFinderWorkspaceSnapshot;
   recorder: AssistantLaneRecorder;
+  stageOf(laneJobId: string): string;
   messages: readonly AssistantMessage[];
   replyText: string;
   toolRuns: readonly { toolName: string; outcome: string }[];
@@ -92,14 +93,9 @@ const usedTool = (observation: AssistantLaneObservation, ...names: string[]) =>
   observation.toolRuns.some((run) => names.includes(run.toolName));
 
 /** A job's status as the screens show it; a shortlisted job may leave Find jobs. */
-function status(observation: AssistantLaneObservation, jobId: string): string {
-  const found = observation.snapshot.discoveryJobs.find(
-    (job) => job.id === jobId,
-  );
-  if (found) return found.status;
-  return observation.snapshot.reviewQueue.some((item) => item.jobId === jobId)
-    ? "shortlisted"
-    : "missing";
+/** A lane job's stage in the job store: found, hidden, shortlisted... */
+function stage(observation: AssistantLaneObservation, jobId: string): string {
+  return observation.stageOf(jobId);
 }
 
 function expect(condition: boolean, failure: string): string[] {
@@ -290,15 +286,15 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     turns: [{ text: "Shortlist the top 2", context: discoveryList() }],
     check: (o) => [
       ...expect(
-        status(o, "job_lane_1") !== "discovered",
+        stage(o, "job_lane_1") === "shortlisted",
         "best match not shortlisted",
       ),
       ...expect(
-        status(o, "job_lane_2") !== "discovered",
+        stage(o, "job_lane_2") === "shortlisted",
         "second match not shortlisted",
       ),
       ...expect(
-        status(o, "job_lane_3") === "discovered",
+        stage(o, "job_lane_3") === "found",
         "a third job was shortlisted",
       ),
     ],
@@ -317,11 +313,11 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     ],
     check: (o) => [
       ...expect(
-        status(o, "job_lane_2") !== "discovered",
+        stage(o, "job_lane_2") === "shortlisted",
         "the second job was not shortlisted",
       ),
       ...expect(
-        status(o, "job_lane_1") === "discovered",
+        stage(o, "job_lane_1") === "found",
         "the first job was shortlisted too",
       ),
     ],
@@ -338,7 +334,7 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
       },
     ],
     check: (o) => [
-      ...expect(usedTool(o, "compare_jobs", "get_job"), "no job was read"),
+      ...expect(usedTool(o, "list_jobs", "get_job"), "no job was read"),
       ...expect(
         /northwind/iu.test(o.replyText) && /bluebird/iu.test(o.replyText),
         "reply does not cover both",

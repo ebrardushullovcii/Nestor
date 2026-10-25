@@ -1,11 +1,9 @@
-import type { JobFinderWorkspaceSnapshot } from "@nestor/contracts";
+
 import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
-import { describeApplicationStanding } from "./format";
-import { dismissJobsTool } from "./jobs-tools";
 import {
   setAppearanceTool,
   updateWorkspaceBehaviorTool,
@@ -34,50 +32,6 @@ describe("settings and application standing the assistant reports", () => {
     expect(
       (await workspaceService.getWorkspaceSnapshot()).settings.appearanceTheme,
     ).toBe("dark");
-  });
-
-  it("says when hiding a job took it off the shortlist", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = await workspaceService.getWorkspaceSnapshot();
-    const shortlisted = before.reviewQueue[0]!.jobId;
-    const result = await dismissJobsTool.execute(
-      { jobIds: [shortlisted], reasons: ["role"] },
-      {
-        service: workspaceService,
-        session: {
-          assertCurrent: () => undefined,
-        } as unknown as AssistantTurnSession,
-        ports,
-      },
-    );
-    const after = await workspaceService.getWorkspaceSnapshot();
-    const stillShortlisted = after.reviewQueue.some(
-      (item) => item.jobId === shortlisted,
-    );
-    expect(stillShortlisted).toBe(false);
-    expect(result.summary).toContain("were on the shortlist and are no longer");
-  });
-
-  it("names the application standing from records, including a skip", () => {
-    const snapshot = {
-      applicationRecords: [
-        {
-          jobId: "job_sent",
-          status: "submitted",
-          lastActionLabel: "Application submitted",
-        },
-        {
-          jobId: "job_skip",
-          status: "discovered",
-          lastActionLabel: "Skipped at your request.",
-        },
-      ],
-    } as unknown as JobFinderWorkspaceSnapshot;
-    expect(describeApplicationStanding(snapshot, "job_sent")).toBe("submitted");
-    expect(describeApplicationStanding(snapshot, "job_skip")).toBe("skipped");
-    expect(describeApplicationStanding(snapshot, "job_none")).toBe(
-      "not applied",
-    );
   });
 
   it("turns off folding the side menu while the assistant is open", async () => {

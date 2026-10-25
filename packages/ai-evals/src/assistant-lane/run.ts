@@ -106,6 +106,7 @@ export async function runAssistantLaneCase(
     const observation: AssistantLaneObservation = {
       snapshot: await world.snapshot(),
       recorder: world.recorder,
+      stageOf: world.stageOf,
       messages: view.messages,
       ...observe(view.messages),
     };

@@ -28,6 +28,10 @@ function call(name: string, args: Record<string, unknown>): AgentLoopToolCall {
   };
 }
 
+function shortlist(ids: readonly number[]): AgentLoopToolCall {
+  return call("move_jobs", { selection: { ids }, to: "shortlisted" });
+}
+
 function stripContext(text: string): string {
   return text.replace(/<context>[\s\S]*?<\/context>/gu, "").trim();
 }
@@ -128,7 +132,7 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
       /checklist/iu.test(text) &&
       /search/iu.test(text)
     ) {
-      return { toolCalls: [call("query_jobs", { scope: "found", limit: 5 })] };
+      return { toolCalls: [call("list_jobs", { stage: "found", limit: 5 })] };
     }
     return {
       content: text
@@ -241,10 +245,7 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
     if (!last) {
       return {
         toolCalls: [
-          call("search_for_jobs", {
-            goal: match[1],
-            status: "Starting a search",
-          }),
+          call("start_search", { note: match[1] }),
         ],
       };
     }
@@ -260,16 +261,16 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
     const count = Number(match[1]);
     if (!last)
       return {
-        toolCalls: [call("query_jobs", { scope: "found", limit: count })],
+        toolCalls: [call("list_jobs", { stage: "found", limit: count })],
       };
-    if (last.name === "query_jobs") {
+    if (last.name === "list_jobs") {
       const data = jsonOf(last.content);
-      const ids = ((data?.jobs as { id: string }[] | undefined) ?? [])
+      const ids = ((data?.rows as { id: number }[] | undefined) ?? [])
         .map((job) => job.id)
         .slice(0, count);
       if (ids.length === 0)
         return { content: "There are no found jobs to shortlist yet." };
-      return { toolCalls: [call("shortlist_jobs", { jobIds: ids })] };
+      return { toolCalls: [shortlist(ids)] };
     }
     return { content: last.content.split("\n")[0]! };
   }
@@ -287,15 +288,15 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
           ],
         };
       if (focused)
-        return { toolCalls: [call("shortlist_jobs", { jobIds: [focused] })] };
+        return { toolCalls: [shortlist([Number(focused)])] };
       return { content: "Which jobs? Select them on Find jobs first." };
     }
     if (last.name === "read_result") {
       const data = jsonOf(last.content);
       const ids = ((data?.items as { id: string }[] | undefined) ?? []).map(
-        (item) => item.id,
+        (item) => Number(item.id),
       );
-      return { toolCalls: [call("shortlist_jobs", { jobIds: ids })] };
+      return { toolCalls: [shortlist(ids)] };
     }
     return { content: last.content.split("\n")[0]! };
   }

@@ -23,18 +23,6 @@ export const DISCOVERY_RUN_STATE_LABELS = {
   failed: "Stopped with a problem",
 } as const satisfies Record<DiscoveryRunState, string>;
 
-export const DISCOVERY_STOPPING_LABEL = "Stopping";
-
-/**
- * What a search that never answered Stop is called.
- *
- * The app cannot see inside a search it has lost hold of, so it says so
- * instead of counting "Stopping" upward forever. Everything the stop request
- * was holding disabled is released at the same moment.
- */
-export const DISCOVERY_STOP_UNACKNOWLEDGED_LABEL =
-  "Stopped, some work may have finished in the background";
-
 /**
  * One status vocabulary for Job Finder.
  *

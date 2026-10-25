@@ -648,7 +648,8 @@ export class AssistantSessionHost {
 
   private async cancelRun(run: AssistantRunRef): Promise<void> {
     try {
-      if (run.kind === "discovery") await this.ports.cancelSearch(run.id);
+      // Searches stop through the stop_search command, not a run ref.
+      if (run.kind === "discovery") return;
       else if (run.kind === "apply_batch" || run.kind === "apply_run") {
         await this.service.cancelApplyRun(run.id);
       } else if (run.kind === "apply_queue") {

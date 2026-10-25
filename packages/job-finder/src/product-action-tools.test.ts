@@ -65,8 +65,6 @@ async function createCapabilityHarness() {
     getApplyRunDetails: vi.fn(() => Promise.resolve(applyDetails)),
     proposeProfileCopilotChange: vi.fn(() => Promise.resolve(snapshot)),
     queueJobForReview: vi.fn(() => Promise.resolve(snapshot)),
-    dismissDiscoveryJob: vi.fn(() => Promise.resolve(snapshot)),
-    restoreDismissedDiscoveryJob: vi.fn(() => Promise.resolve(snapshot)),
     performUserAction: vi.fn(() => Promise.resolve(openedSnapshot)),
   };
   const registry = createJobFinderProductActionToolRegistry(capabilities, {
@@ -86,8 +84,6 @@ describe("Job Finder product action tools", () => {
       "get_apply_run_details",
       "propose_profile_change",
       "shortlist_job",
-      "dismiss_job",
-      "restore_job",
       "open_user_action",
     ]);
     expect(
@@ -161,20 +157,6 @@ describe("Job Finder product action tools", () => {
     ).toMatchObject({ ok: true, data: { status: "shortlisted" } });
     expect(capabilities.queueJobForReview).toHaveBeenCalledWith("job_ready");
 
-    await registry.execute(
-      "dismiss_job",
-      { jobId: "job_ready", reasons: ["role"] },
-      { confirmed: true },
-    );
-    expect(capabilities.dismissDiscoveryJob).toHaveBeenCalledWith({
-      jobId: "job_ready",
-      reasons: ["role"],
-    });
-
-    await registry.execute("restore_job", { jobId: "job_ready" });
-    expect(capabilities.restoreDismissedDiscoveryJob).toHaveBeenCalledWith(
-      "job_ready",
-    );
   });
 
   test("forwards an explicit closed conflict without calling the shortlist mutation", async () => {
@@ -340,9 +322,8 @@ describe("Job Finder product action tools", () => {
       },
     });
     expect(
-      await registry.execute("dismiss_job", {
+      await registry.execute("shortlist_job", {
         jobId: "job_ready",
-        reasons: ["not-a-reason"],
         rawPath: "C:\\private\\resume.pdf",
       }),
     ).toMatchObject({
@@ -353,12 +334,14 @@ describe("Job Finder product action tools", () => {
       },
     });
 
-    capabilities.restoreDismissedDiscoveryJob.mockRejectedValueOnce(
+    capabilities.queueJobForReview.mockRejectedValueOnce(
       new Error("C:\\private\\workspace.sqlite failed unexpectedly"),
     );
-    const failed = await registry.execute("restore_job", {
-      jobId: "job_ready",
-    });
+    const failed = await registry.execute(
+      "shortlist_job",
+      { jobId: "job_ready" },
+      { confirmed: true },
+    );
     expect(failed).toMatchObject({
       ok: false,
       error: { code: "execution_failed" },

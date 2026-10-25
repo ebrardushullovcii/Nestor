@@ -125,11 +125,8 @@ function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
         },
       },
     ],
-    dismissedDiscoveryJobs: [],
-    recentDiscoveryRuns: [],
     discoverySessions: [],
     sourceAccessPrompts: [],
-    activeDiscoveryRun: null,
     browserSession: {
       source: "user",
       status: "unknown",

@@ -1,5 +1,3 @@
-import { JobFinderDiscoveryCancellationInputSchema } from "@nestor/contracts";
-import { holdDiscoveryWorkspaceUpdates } from "../services/job-finder/workspace-updates";
 import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-exports";
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
 import {
@@ -63,9 +61,7 @@ import {
   ApplicationPacketSchema,
   ApplyGroupedManualAnswerInputSchema,
   ApplyRunDetailsSchema,
-  DiscoveryActivityEventSchema,
   DesktopTestOkResponseSchema,
-  JobFinderAgentDiscoveryActionInputSchema,
   JobFinderApplicationPacketExportResultSchema,
   JobFinderApplyCopilotActionInputSchema,
   JobFinderApplyConsentActionInputSchema,
@@ -121,7 +117,6 @@ import {
   WriteClipboardTextResultSchema,
 } from "@nestor/contracts";
 import type {
-  JobFinderAgentDiscoveryReply,
   JobFinderApplyQueueActionInput,
   JobFinderWorkspaceSnapshot,
   JobFinderRendererWorkspaceSnapshot,
@@ -146,14 +141,11 @@ import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-wor
 import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-mode";
 import {
   notifyJobFinderWorkspaceListeners,
-  createSearchProgressPublisher,
   publishJobFinderWorkspaceUpdate,
   scheduleAnswerDraftWorkspaceUpdate,
   withJobFinderWorkspaceUpdates,
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
-import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
-import { searchFinishedNotice } from "../setup/finished-work-notices";
 import {
   listJobsNotInProgress,
   startApplyBatch,
@@ -185,10 +177,6 @@ import {
   type JobFinderSaveChannel,
 } from "../services/job-finder/test-save-failure";
 import { registerJobFinderBootstrapDesktopRoutes } from "../setup/register-job-finder-bootstrap-routes";
-
-function parseAgentDiscoveryRequest(payload: unknown) {
-  return JobFinderAgentDiscoveryActionInputSchema.parse(payload);
-}
 
 function canonicalOrigin(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -725,19 +713,6 @@ export async function approveApplicationResumes(
   }
 }
 
-/** Jobs the search that just ended saved for the person to look at. */
-function countNewJobsOfLatestRun(snapshot: {
-  recentDiscoveryRuns?: readonly {
-    startedAt: string;
-    summary: { jobsPersisted: number; jobsStaged: number };
-  }[];
-}): number {
-  const latest = [...(snapshot.recentDiscoveryRuns ?? [])].sort((left, right) =>
-    right.startedAt.localeCompare(left.startedAt),
-  )[0];
-  return latest ? latest.summary.jobsPersisted + latest.summary.jobsStaged : 0;
-}
-
 function parseOptionalRequestId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -1073,12 +1048,7 @@ export function registerJobFinderRouteHandlers(
         ? { appearanceTheme: payload }
         : (payload ?? {});
     const service = await getJobFinderWorkspaceService();
-    const run = () => executeJobFinderAction(name, value, { service });
-    // Minutes of model calls: keep scores arriving on screen meanwhile.
-    const result =
-      name === "judge-unjudged-jobs"
-        ? await withJobFinderWorkspaceUpdates(event.sender, run)
-        : await run();
+    const result = await executeJobFinderAction(name, value, { service });
     // Some changes answer with their own record (application details, a
     // recommendation); only a workspace snapshot becomes a sync response.
     const isWorkspaceSnapshot =
@@ -1087,13 +1057,9 @@ export function registerJobFinderRouteHandlers(
       (result as { module?: unknown }).module === "job-finder";
     // A change answered with its delta needs no second sync of the whole
     // workspace in this window; main's listeners still hear of it. Shortlist
-    // starts a draft and Stop ends a search, so those keep the follow-up.
+    // starts a draft, so it keeps the follow-up.
     if (JOB_FINDER_ACTIONS[name].safety !== "read") {
-      if (
-        !isWorkspaceSnapshot ||
-        name === "queue-job-for-review" ||
-        name === "cancel-discovery-run"
-      )
+      if (!isWorkspaceSnapshot || name === "queue-job-for-review")
         publishJobFinderWorkspaceUpdate(event.sender);
       else notifyJobFinderWorkspaceListeners();
     }
@@ -1128,8 +1094,6 @@ export function registerJobFinderRouteHandlers(
     "apply-profile-setup-review-action",
     "apply-resume-timeline-repair-action",
     "undo-profile-revision",
-    "judge-unjudged-jobs",
-    "cancel-discovery-run",
     "cancel-source-debug",
     "get-source-debug-run",
     "get-source-debug-run-details",
@@ -1139,10 +1103,6 @@ export function registerJobFinderRouteHandlers(
     "queue-job-for-review",
     "set-job-resume-application-mode",
     "remove-job-from-review",
-    "preview-employer-exclusion",
-    "remove-employer-exclusion",
-    "dismiss-discovery-job",
-    "restore-dismissed-discovery-job",
     "clear-application-answer",
     "snooze-grouped-decision",
     "get-resume-workspace",
@@ -1230,18 +1190,6 @@ export function registerJobFinderRouteHandlers(
             return jobFinderWorkspaceService.removeJobFromReview(
               input.mutation.jobId,
             );
-          case "dismiss_discovery_job":
-            return jobFinderWorkspaceService.dismissDiscoveryJob({
-              jobId: input.mutation.jobId,
-              reasons: input.mutation.reasons,
-              action: input.mutation.action ?? "hide_job",
-              expectedNormalizedCompanyName:
-                input.mutation.expectedNormalizedCompanyName ?? null,
-            });
-          case "restore_dismissed_discovery_job":
-            return jobFinderWorkspaceService.restoreDismissedDiscoveryJob(
-              input.mutation.jobId,
-            );
           case "remove_jobs_from_review":
             if (!jobFinderWorkspaceService.removeJobsFromReview)
               throw new Error(
@@ -1251,28 +1199,6 @@ export function registerJobFinderRouteHandlers(
               input.mutation.jobIds,
             );
             return readWorkspaceProjection(jobFinderWorkspaceService);
-          case "dismiss_discovery_jobs": {
-            if (!jobFinderWorkspaceService.dismissDiscoveryJobs)
-              throw new Error(
-                "Hiding several jobs at once is unavailable. Restart the app to load the current version.",
-              );
-            const { reasons } = input.mutation;
-            const result = await jobFinderWorkspaceService.dismissDiscoveryJobs(
-              [...new Set(input.mutation.jobIds)].map((jobId) => ({
-                jobId,
-                reasons,
-              })),
-            );
-            const failed = result.outcomes.filter(
-              (outcome) => outcome.status !== "hidden",
-            ).length;
-            if (failed > 0 && failed === result.outcomes.length)
-              throw new Error(
-                result.outcomes.find((outcome) => "message" in outcome)
-                  ?.message ?? "None of the selected jobs could be hidden.",
-              );
-            return readWorkspaceProjection(jobFinderWorkspaceService);
-          }
           default: {
             const unreachable: never = input.mutation;
             throw new Error(
@@ -1852,132 +1778,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle("job-finder:run-discovery", async (event) => {
-    const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-    const snapshot = await jobFinderWorkspaceService.runDiscovery();
-
-    return workspaceMutationResponse(event.sender, snapshot);
-  });
-
-  ipcMain.handle(
-    "job-finder:cancel-discovery-run-command",
-    async (_event, payload: unknown) => {
-      const { runId } =
-        JobFinderDiscoveryCancellationInputSchema.parse(payload);
-      return (await getJobFinderWorkspaceService()).cancelDiscoveryRunCommand(
-        runId,
-      );
-    },
-  );
-  ipcMain.handle(
-    "job-finder:run-agent-discovery-command",
-    async (event, payload: unknown) => {
-      const { requestId, targetId, searchRequest } =
-        parseAgentDiscoveryRequest(payload);
-      const service = await getJobFinderWorkspaceService();
-      const release = holdDiscoveryWorkspaceUpdates();
-      const notices = getFinishedWorkNotifier();
-      notices.progress("search", null);
-      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
-      let runId: string | null = null;
-      try {
-        const result = await service.runAgentDiscoveryCommand(
-          (activity) => {
-            runId = activity.runId;
-            if (!event.sender.isDestroyed?.())
-              event.sender.send(
-                `job-finder:discovery-activity:${requestId}`,
-                DiscoveryActivityEventSchema.parse(activity),
-              );
-          },
-          targetId ?? undefined,
-          searchRequest,
-        );
-        if (result.outcome === "completed")
-          finishedNotice = searchFinishedNotice(result.newJobs);
-        return result;
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError")
-          return { outcome: "cancelled", runId, newJobs: 0 };
-        throw error;
-      } finally {
-        release();
-        notices.end("search", finishedNotice);
-      }
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:run-agent-discovery",
-    async (event, payload: unknown) => {
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const window = event.sender;
-      const { requestId, targetId, searchRequest } =
-        parseAgentDiscoveryRequest(payload);
-      const notices = getFinishedWorkNotifier();
-      notices.progress("search", null);
-      const release = holdDiscoveryWorkspaceUpdates();
-      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
-      const publishProgress = createSearchProgressPublisher(window);
-
-      try {
-        const snapshot = await jobFinderWorkspaceService.runAgentDiscovery(
-          (eventPayload) => {
-            window.send(
-              `job-finder:discovery-activity:${requestId}`,
-              DiscoveryActivityEventSchema.parse(eventPayload),
-            );
-            publishProgress();
-          },
-          undefined,
-          targetId ?? undefined,
-          searchRequest,
-        );
-
-        // The service resolves cancelled runs (it finalizes the run record as
-        // `cancelled` and persists incrementally committed jobs before
-        // returning), so the terminal outcome is read from the authoritative
-        // workspace state. Only an AbortError that escaped the pipeline — an
-        // abort before the run record existed — is itself proof of
-        // cancellation.
-        //
-        // The window gets what changed since the revision it holds, like any
-        // other change it asked for. Parsing and sending the whole workspace
-        // here held main for seconds at the end of a large search, and the
-        // window's next refresh then sent it all again.
-        const reply: JobFinderAgentDiscoveryReply = {
-          outcome:
-            snapshot.discoveryRunState === "cancelled"
-              ? "cancelled"
-              : "completed",
-          sync: workspaceMutationResponse(window, snapshot),
-        };
-        if (reply.outcome === "completed") {
-          finishedNotice = searchFinishedNotice(
-            countNewJobsOfLatestRun(snapshot),
-          );
-        }
-        return reply;
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          console.log("[JobFinder] Agent discovery cancelled");
-          // Return current workspace snapshot even on abort
-          const currentSnapshot = await readWorkspaceProjection(
-            jobFinderWorkspaceService,
-          );
-          const reply: JobFinderAgentDiscoveryReply = {
-            outcome: "cancelled",
-            sync: workspaceMutationResponse(window, currentSnapshot),
-          };
-          return reply;
-        }
-        throw error;
-      } finally {
-        release();
-        notices.end("search", finishedNotice);
-      }
-    },
-  );
 
   ipcMain.handle(
     "job-finder:run-source-debug",

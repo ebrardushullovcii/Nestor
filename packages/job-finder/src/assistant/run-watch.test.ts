@@ -25,7 +25,6 @@ function snapshot(stepState: string) {
     ],
     discoveryJobs: [],
     companyJobs: [],
-    dismissedDiscoveryJobs: [],
   } as unknown as JobFinderWorkspaceSnapshot;
 }
 

@@ -17,7 +17,6 @@ import {
   type AssistantTurnSession,
 } from "./tool-kit";
 import { collectPageJobsTool } from "./tools/browser-tools";
-import { getJobTool, shortlistJobsTool } from "./tools/jobs-tools";
 import { recordInstructionTool } from "./tools/application-tools";
 
 function harness() {
@@ -104,55 +103,7 @@ function harness() {
 }
 
 describe("collected page-job references", () => {
-  it.each([true, false])("ends a simple action only when its verified receipt allows it (%s)", async (canFinish) => {
-    const { run } = harness();
-    const execute = vi.fn(() => Promise.resolve({ summary: "Saved the exact headline.", data: { headline: "Engineer" }, canFinish, parts: [{ type: "change" as const, receiptId: "receipt", target: "profile" as const, targetId: null, summary: "Headline", fields: [], preview: [], status: "applied" as const, unsaved: false }] }));
-    const tool: AssistantToolDefinition = { ...getJobTool, name: "edit_profile", execute };
-    const result = await run(tool, { jobId: "job", complete: true });
-    expect(execute).toHaveBeenCalledWith({ jobId: "job" }, expect.anything());
-    expect(result.kind).toBe(canFinish ? "finish" : "ok");
-    if (result.kind === "finish") {
-      expect(result.finish.output).toContain('"headline":"Engineer"');
-      expect(result.finish.output).toContain('"receiptId":"receipt"');
-    }
-  });
 
-  it("keeps the model's next step when it did not request completion", async () => {
-    const { run } = harness();
-    const tool: AssistantToolDefinition = { ...getJobTool, name: "edit_profile", execute: () => Promise.resolve({ summary: "Saved.", canFinish: true }) };
-    expect((await run(tool, { jobId: "job" })).kind).toBe("ok");
-  });
-  it.each([
-    ["get_job", getJobTool],
-    ["shortlist_jobs", shortlistJobsTool],
-  ] as const)(
-    "%s resolves an older collection's job after another collection",
-    async (_name, tool) => {
-      const { context, sets, run } = harness();
-      await collectPageJobsTool.execute({ single: false }, context);
-      const firstId = sets[0]!.itemIds[0]!;
-      await collectPageJobsTool.execute({ single: false }, context);
-      const result = await run(
-        tool,
-        tool.name === "get_job"
-          ? { jobId: firstId }
-          : { jobIds: [firstId], evenIfExcludedOrApplied: false },
-      );
-      expect(result).toMatchObject({ status: "done" });
-      const snapshot = await context.service.getWorkspaceSnapshot();
-      expect(
-        [...snapshot.discoveryJobs, ...snapshot.reviewQueue].some(
-          (job) => job.title === "A Engineer",
-        ),
-      ).toBe(true);
-      expect(
-        snapshot.discoveryJobs.some((job) => job.title === "B Engineer"),
-      ).toBe(false);
-      expect(
-        sets.filter((set) => set.kind === "page_jobs")[1]!.itemIds,
-      ).not.toContain(firstId);
-    },
-  );
 
   it("records a saved mapping before checking an instruction grant", async () => {
     const { context, sets, run, saveGrant } = harness();
@@ -187,17 +138,6 @@ describe("collected page-job references", () => {
     ).toMatchObject({ status: "done" });
   });
 
-  it("does not save a job from ambiguous legacy positional references", async () => {
-    const { context, sets, run } = harness();
-    await collectPageJobsTool.execute({ single: false }, context);
-    await collectPageJobsTool.execute({ single: false }, context);
-    for (const set of sets) set.itemIds = ["page_job_1"];
-    const save = vi.spyOn(context.service, "saveJobsFromPage");
-    expect(await run(getJobTool, { jobId: "page_job_1" })).toMatchObject({
-      status: "failed",
-    });
-    expect(save).not.toHaveBeenCalled();
-  });
 
   it("keeps existing references when appending more jobs", async () => {
     const { context, sets } = harness();

@@ -1,5 +1,4 @@
 import {
-  DismissJobToolInputSchema,
   EmptyProductActionToolInputSchema,
   GetApplyRunDetailsToolInputSchema,
   JobFinderProductActionToolDefinitionSchema,
@@ -8,7 +7,6 @@ import {
   OpenUserActionToolInputSchema,
   ProductActionExecutionResultSchema,
   ProposeProfileChangeToolInputSchema,
-  discoveryFeedbackReasonValues,
   profileCopilotProfileSectionValues,
   profileSetupStepValues,
   type JobFinderProductActionToolDefinition,
@@ -24,13 +22,11 @@ import type { JobFinderWorkspaceService } from "./internal/workspace-service-con
 
 type ProductActionCapabilities = Pick<
   JobFinderWorkspaceService,
-  | "dismissDiscoveryJob"
   | "getApplyRunDetails"
   | "getWorkspaceSnapshot"
   | "performUserAction"
   | "proposeProfileCopilotChange"
   | "queueJobForReview"
-  | "restoreDismissedDiscoveryJob"
 >;
 
 interface ProductActionExecutionContext {
@@ -181,50 +177,6 @@ const runtimeDefinitions = [
       confirmationPolicy: {
         mode: "required",
         reason: "This changes the user's saved workflow state for one job.",
-      },
-    },
-    JobIdProductActionToolInputSchema,
-  ),
-  createDefinition(
-    {
-      name: "dismiss_job",
-      description: "Hide one exact job with explicit bounded feedback reasons.",
-      inputJsonSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          jobId: stringIdJsonSchema,
-          reasons: {
-            type: "array",
-            minItems: 1,
-            maxItems: 9,
-            items: { type: "string", enum: [...discoveryFeedbackReasonValues] },
-          },
-        },
-        required: ["jobId", "reasons"],
-      },
-      confirmationPolicy: {
-        mode: "required",
-        reason:
-          "This hides a job and records a local preference, but it can be restored.",
-      },
-    },
-    DismissJobToolInputSchema,
-  ),
-  createDefinition(
-    {
-      name: "restore_job",
-      description: "Restore one previously dismissed job to discovery.",
-      inputJsonSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: { jobId: stringIdJsonSchema },
-        required: ["jobId"],
-      },
-      confirmationPolicy: {
-        mode: "not_required",
-        reason:
-          "This reverses a prior local dismissal and does not apply externally.",
       },
     },
     JobIdProductActionToolInputSchema,
@@ -410,7 +362,6 @@ export function createJobFinderProductActionToolRegistry(
                 (request) =>
                   !["resolved", "cancelled", "skipped"].includes(request.state),
               ).length,
-              discoveryRunState: snapshot.discoveryRunState,
             },
           });
         }
@@ -515,42 +466,6 @@ export function createJobFinderProductActionToolRegistry(
               createReceiptId,
             }),
             data: { jobId: input.jobId, status: "shortlisted" },
-          });
-        }
-        case "dismiss_job": {
-          const input = DismissJobToolInputSchema.parse(rawInput);
-          const snapshot = await capabilities.dismissDiscoveryJob(input);
-          return ProductActionExecutionResultSchema.parse({
-            ok: true,
-            tool,
-            receipt: buildReceipt({
-              tool,
-              snapshot,
-              affectedEntities: [{ type: "job", id: input.jobId }],
-              nextRoute: "/job-finder/discovery",
-              now,
-              createReceiptId,
-            }),
-            data: { jobId: input.jobId, status: "dismissed" },
-          });
-        }
-        case "restore_job": {
-          const input = JobIdProductActionToolInputSchema.parse(rawInput);
-          const snapshot = await capabilities.restoreDismissedDiscoveryJob(
-            input.jobId,
-          );
-          return ProductActionExecutionResultSchema.parse({
-            ok: true,
-            tool,
-            receipt: buildReceipt({
-              tool,
-              snapshot,
-              affectedEntities: [{ type: "job", id: input.jobId }],
-              nextRoute: "/job-finder/discovery",
-              now,
-              createReceiptId,
-            }),
-            data: { jobId: input.jobId, status: "restored" },
           });
         }
         case "open_user_action": {

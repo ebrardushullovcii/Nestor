@@ -1,20 +1,16 @@
 import { randomUUID } from "node:crypto";
 import {
-  FitJudgmentSchema,
-  DiscoveryRunRecordSchema,
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";
 import {
   ASSISTANT_SYSTEM_PROMPT,
   buildContextBlock,
-  getAssistantSavedSearch,
 } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { getWorkspaceSummaryTool } from "./workspace-tools";
-import { queryJobsTool, showJobsTool } from "./jobs-tools";
 
 function world() {
   const { workspaceService: service } = createWorkspaceServiceHarness();
@@ -50,147 +46,6 @@ function context(snapshot: JobFinderWorkspaceSnapshot) {
     now: "2026-10-05T12:00:00.000Z",
   });
 }
-
-describe("R3-117 saved search on a return visit", () => {
-  it("returns the saved search time and historical counts, never claims a fresh check", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.recentDiscoveryRuns = [
-      DiscoveryRunRecordSchema.parse({
-        id: "old_search",
-        state: "completed",
-        startedAt: "2026-10-03T09:00:00.000Z",
-        completedAt: "2026-10-03T09:10:00.000Z",
-        summary: { changeDigest: { new: 5, changed: 0, inactive: 0 } },
-      }),
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const expected = {
-      startedAt: "2026-10-03T09:00:00.000Z",
-      completedAt: "2026-10-03T09:10:00.000Z",
-      historicalCounts: { new: 5 },
-      availabilitySinceSearch: "not checked by this saved report",
-      changesSinceLastVisit: "unknown; no visit comparison snapshot",
-    };
-    expect(getAssistantSavedSearch(snapshot)).toMatchObject(expected);
-    expect((await getWorkspaceSummaryTool.execute({}, ctx)).data).toMatchObject(
-      { search: { latestSavedSearch: expected } },
-    );
-    expect(context(snapshot)).toContain(
-      "Latest saved search (historical, not a check on this visit)",
-    );
-    expect(context(snapshot)).toContain("2026-10-03T09:00:00.000Z");
-    expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-      "Do not report zero changed or closed jobs without a fresh comparison",
-    );
-  });
-  it("uses the frozen summary report when a cancelled run's digest is empty", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const run = DiscoveryRunRecordSchema.parse({
-      id: "cancelled",
-      state: "cancelled",
-      startedAt: "2026-10-05T09:00:00.000Z",
-      summary: {
-        report: { measuredAt: "2026-10-05T09:10:00.000Z", saved: 33, new: 20 },
-      },
-    });
-    snapshot.recentDiscoveryRuns = [run];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    expect(getAssistantSavedSearch(snapshot)).toMatchObject({
-      historicalCounts: { saved: 33, new: 20 },
-      summaryReport: run.summary.report,
-    });
-    expect((await getWorkspaceSummaryTool.execute({}, ctx)).data).toMatchObject(
-      { search: { latestSavedSearch: { summaryReport: run.summary.report } } },
-    );
-  });
-  it("keeps a search over hundreds of sources to totals and a short digest", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const targetIds = Array.from({ length: 900 }, (_, i) => `target_${i}`);
-    const run = DiscoveryRunRecordSchema.parse({
-      id: "wide",
-      state: "completed",
-      startedAt: "2026-10-05T09:00:00.000Z",
-      targetIds,
-      summary: {
-        report: {
-          measuredAt: "2026-10-05T09:10:00.000Z",
-          saved: 40,
-          new: 40,
-          sources: targetIds.map((targetId, i) => ({
-            targetId,
-            inspected: 10,
-            saved: i < 8 ? 5 : 0,
-            rejected: 0,
-            duplicates: 0,
-            deferred: 0,
-            pagesCovered: 1,
-          })),
-        },
-      },
-    });
-    snapshot.recentDiscoveryRuns = [run];
-    const saved = getAssistantSavedSearch(snapshot);
-    expect(saved).toMatchObject({
-      sourceCount: 900,
-      sourcesWithSavedJobs: 8,
-      historicalCounts: { saved: 40, new: 40 },
-    });
-    expect(saved).not.toHaveProperty("sourceIds");
-    expect(saved?.topSourcesBySaved).toHaveLength(5);
-    // It rides on every message, so it stays a few hundred bytes.
-    expect(JSON.stringify(saved).length).toBeLessThan(1_500);
-  });
-  it("does not fabricate a comparison when no search was saved", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.recentDiscoveryRuns = [];
-    expect(getAssistantSavedSearch(snapshot)).toBeNull();
-  });
-});
-
-describe("R3-142 fit scores beside cards", () => {
-  it("returns current saved scores from the exact read used to draw the cards", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const job = snapshot.discoveryJobs[0]!;
-    job.discoveryMethod = "browser_agent";
-    job.matchAssessment = {
-      ...job.matchAssessment,
-      score: 75,
-      contextFingerprint: "current_profile",
-      postingFingerprint: "current_listing",
-      judgment: FitJudgmentSchema.parse({
-        source: "full",
-        judgedAt: ctx.session.now(),
-        score: 75,
-        recommendation: "review_before_applying",
-      }),
-    };
-    ctx.service.getWorkspaceProjection = vi.fn(() => Promise.resolve(snapshot));
-    const canonicalRead = vi.spyOn(ctx.service, "getWorkspaceSnapshot");
-    const first = await showJobsTool.execute({ jobIds: [job.id, job.id] }, ctx);
-    expect(first.data).toMatchObject({
-      jobs: [{ id: job.id, fit: "75% fit" }],
-    });
-    expect(first.parts?.[0]).toMatchObject({
-      rows: [{ id: job.id, status: "75% fit" }],
-      totalCount: 1,
-    });
-    job.matchAssessment.score = 81;
-    const reassessed = await showJobsTool.execute({ jobIds: [job.id] }, ctx);
-    expect(reassessed.data).toMatchObject({ jobs: [{ fit: "81% fit" }] });
-    expect(reassessed.parts?.[0]).toMatchObject({
-      rows: [{ status: "81% fit" }],
-    });
-    expect(canonicalRead).not.toHaveBeenCalled();
-    expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-      "Never reuse a score from an earlier conversation read",
-    );
-  });
-});
 
 it("R3-120 tells the model that scans have no readable text and extraction can fail", async () => {
   const { importResumeTool, readDocumentTool } =
@@ -276,73 +131,6 @@ it("R3-125 gives source explanations and the current sending boundary before req
   );
 });
 
-it("R3-127 exposes required and preferred listing evidence separately for comparisons", async () => {
-  const { jobEvidence, jobDetail } = await import("./format");
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  const job = snapshot.discoveryJobs[0]!;
-  job.minimumQualifications = ["Agile certification", "Confluence"];
-  job.preferredQualifications = ["Financial-services experience is a big plus"];
-  for (const read of [jobEvidence(job), jobDetail(job)]) {
-    expect(read).toMatchObject({
-      minimumQualifications: ["Agile certification", "Confluence"],
-      preferredQualifications: ["Financial-services experience is a big plus"],
-    });
-  }
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "Never turn preferred sector experience into a requirement",
-  );
-});
-
-it("R3-161 restricts a top-five query to the requested local origin and reports its shortfall", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  const base = snapshot.discoveryJobs[0]!;
-  snapshot.discoveryJobs = [
-    {
-      ...base,
-      id: "local",
-      status: "discovered",
-      canonicalUrl: "http://127.0.0.1:47950/paper/jobs/1",
-      company: "Paper Interfaces",
-    },
-    {
-      ...base,
-      id: "real",
-      status: "discovered",
-      canonicalUrl: "https://employer.example.test/jobs/1",
-      company: "Synthetic Real Employer",
-    },
-    {
-      ...base,
-      id: "other_port",
-      status: "discovered",
-      canonicalUrl: "http://127.0.0.1:47951/jobs/1",
-    },
-  ];
-  snapshot.companyJobs = [];
-  snapshot.dismissedDiscoveryJobs = [];
-  ctx.service.getWorkspaceProjection = vi.fn(() => Promise.resolve(snapshot));
-  const canonicalRead = vi.spyOn(ctx.service, "getWorkspaceSnapshot");
-  const result = await queryJobsTool.execute(
-    queryJobsTool.input.parse({
-      scope: "all",
-      listingOrigins: ["http://127.0.0.1:47950"],
-      limit: 5,
-      show: false,
-    }),
-    ctx,
-  );
-  expect(result.data).toMatchObject({
-    total: 1,
-    jobs: [{ id: "local" }],
-    sourceRestriction: { listingOrigins: ["http://127.0.0.1:47950"] },
-  });
-  expect(canonicalRead).not.toHaveBeenCalled();
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "do not widen sources without the person's request",
-  );
-});
 
 it("R3-214 describes a combined Undo for edits sharing one receipt", () => {
   expect(ASSISTANT_SYSTEM_PROMPT).toContain("share one combined Undo action");
@@ -375,23 +163,6 @@ it("R3-061 exposes remote-country facts and keeps Americas separate from sponsor
   );
   expect(ASSISTANT_SYSTEM_PROMPT).toContain(
     "say when Canada hiring is unconfirmed",
-  );
-});
-
-it("R3-062 gives the model the full country restriction and asks it to answer first in the person's language", async () => {
-  const { jobDetail } = await import("./format");
-  const ctx = world();
-  const job = (await ctx.service.getWorkspaceSnapshot()).discoveryJobs[0]!;
-  job.location = "Remote United Kingdom";
-  job.description = `${"Synthetic role details. ".repeat(300)}You must reside and work in the United Kingdom.`;
-  expect(jobDetail(job).description).toContain(
-    "You must reside and work in the United Kingdom",
-  );
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "answer the country question first, in the person's language",
-  );
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "Germany does not meet a UK-only residence/work-location requirement",
   );
 });
 

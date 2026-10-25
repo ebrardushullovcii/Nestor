@@ -47,11 +47,8 @@ function createBatchWorkspace(
       { id: "campaign_1", jobIds: reviewQueue.map((item) => item.jobId) },
     ],
     discoveryJobs: [],
-    dismissedDiscoveryJobs: [],
-    recentDiscoveryRuns: [],
     discoverySessions: [],
     sourceAccessPrompts: [],
-    activeDiscoveryRun: null,
     reviewQueue,
     tailoredAssets: [],
     applicationRecords: [],
@@ -206,67 +203,6 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     expect(screen.getAllByText("Activity resumed.")).toHaveLength(1);
   });
 
-  it("reports a finished shortlist on Find jobs as a toast, not a route status", async () => {
-    const harness = mountStatusHarness({
-      initialEntry: "/job-finder/discovery",
-    });
-    await waitForReady(harness);
-
-    await act(async () => {
-      await harness.current?.context?.onQueueJob("job_discovery_1");
-    });
-    // ADR 0044: a success on Find jobs is news, so it is a toast with its
-    // Undo, and nothing is left behind to replay on a later visit.
-    expect(await screen.findByText("Job added to Shortlisted.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
-    expect(harness.current?.context?.actionState.message).toBeNull();
-  });
-
-  it("keeps a failed status on its owning route and never leaks it to a sibling route", async () => {
-    const harness = mountStatusHarness({
-      initialEntry: "/job-finder/discovery",
-      mutateWorkspaceEntities: () =>
-        Promise.reject(new Error("The shortlist could not be saved.")),
-    });
-    await waitForReady(harness);
-
-    let failure: string | null = null;
-    // Awaiting inside act pins the tested lifecycle: the status write lands
-    // before the shortlist promise resolves.
-    await act(async () => {
-      const outcome =
-        await harness.current?.context?.onQueueJob("job_discovery_1");
-      failure = outcome?.message ?? null;
-    });
-    expect(failure).not.toBeNull();
-    // A failure never becomes a toast.
-    await waitFor(() => {
-      expect(harness.current?.context?.actionState.message).toBe(failure);
-    });
-    expect(harness.current?.context?.actionState.tone).toBe("failure");
-
-    act(() => {
-      harness.current?.context?.onNavigateSafely("/job-finder/applications");
-    });
-    await waitFor(() => {
-      expect(harness.router.state.location.pathname).toBe(
-        "/job-finder/applications",
-      );
-    });
-    await waitFor(() => {
-      expect(harness.current?.context?.actionState.message).toBeNull();
-    });
-
-    // The status stays attached to its owning route: coming back restores it
-    // instead of a fresh unrelated route silently showing a stale status.
-    act(() => {
-      harness.current?.context?.onNavigateSafely("/job-finder/discovery");
-    });
-    await waitFor(() => {
-      expect(harness.current?.context?.actionState.message).toBe(failure);
-    });
-  });
-
   it("carries an action's completion status to the route it navigates to", async () => {
     const startApplyCopilotRun = vi
       .fn<JobFinderShellActions["startApplyCopilotRun"]>()
@@ -295,73 +231,5 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     expect(harness.current?.context?.actionState.message ?? "").not.toContain(
       "Applications updated",
     );
-  });
-
-  it("keeps a status written after a sibling navigation on the route that owns it", async () => {
-    let releaseQueue: () => void = () => undefined;
-    let hasParked = false;
-    const harness = mountStatusHarness({
-      initialEntry: "/job-finder/discovery",
-      mutateWorkspaceEntities: () =>
-        new Promise((resolve, reject) => {
-          if (!hasParked) {
-            // The late completion fails, so its status stays on the route
-            // that owns it (a success would be a toast, ADR 0044).
-            releaseQueue = () => {
-              hasParked = true;
-              reject(new Error("The shortlist could not be saved."));
-            };
-            return;
-          }
-          resolve({
-            kind: "snapshot" as const,
-            currentRevision: 1,
-            snapshot: createBatchWorkspace(),
-          });
-        }),
-    });
-    await waitForReady(harness);
-
-    let lateOutcome: Promise<{ message: string } | undefined> | undefined;
-    act(() => {
-      // Intentionally un-awaited: this first shortlist stays parked until
-      // `releaseQueue` settles it after the navigation below, which is the
-      // exact late-completion lifecycle under test.
-      lateOutcome = harness.current?.context?.onQueueJob("job_discovery_1");
-    });
-    await waitFor(() => {
-      expect(harness.mutateWorkspaceEntities).toHaveBeenCalledTimes(1);
-    });
-
-    // The user leaves the discovery route while the action is still running.
-    act(() => {
-      harness.current?.context?.onNavigateSafely("/job-finder/applications");
-    });
-    await waitFor(() => {
-      expect(harness.router.state.location.pathname).toBe(
-        "/job-finder/applications",
-      );
-    });
-
-    act(() => {
-      releaseQueue();
-    });
-    await waitFor(() => {
-      expect(hasParked).toBe(true);
-    });
-    const failure = (await lateOutcome)?.message ?? null;
-    expect(failure).not.toBeNull();
-    await waitFor(() => {
-      expect(harness.current?.context?.actionState.message).toBeNull();
-    });
-
-    // The late completion belongs to the discovery route, not to whatever
-    // route the user was on when it landed.
-    act(() => {
-      harness.current?.context?.onNavigateSafely("/job-finder/discovery");
-    });
-    await waitFor(() => {
-      expect(harness.current?.context?.actionState.message).toBe(failure);
-    });
   });
 });

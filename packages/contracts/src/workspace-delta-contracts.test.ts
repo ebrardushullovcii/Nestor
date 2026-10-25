@@ -47,27 +47,6 @@ describe("workspace delta contracts", () => {
       },
     });
 
-    expect(
-      JobFinderWorkspaceEntityMutationInputSchema.safeParse({
-        baseRevision: 4,
-        mutation: {
-          type: "dismiss_discovery_job",
-          jobId: "job-1",
-          reasons: [],
-        },
-      }).success,
-    ).toBe(true);
-    expect(
-      JobFinderWorkspaceEntityMutationInputSchema.safeParse({
-        baseRevision: 4,
-        mutation: {
-          type: "dismiss_discovery_job",
-          jobId: "job-1",
-          reasons: ["company"],
-          action: "hide_and_exclude_employer",
-        },
-      }).success,
-    ).toBe(false);
   });
 
   it("carries current selection IDs in every schema-validated delta", () => {

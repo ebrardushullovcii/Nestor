@@ -3,7 +3,6 @@ import {
   applyQueueFinishedNotice,
   createFinishedWorkNotifier,
   resumesFinishedNotice,
-  searchFinishedNotice,
   type FinishedWorkNotice,
   type FinishedWorkWindow,
 } from "./finished-work-notices";
@@ -33,11 +32,11 @@ describe("finished work notices", () => {
     expect(window.setProgressBar).toHaveBeenLastCalledWith(0.25, {
       mode: "normal",
     });
-    notifier.progress("search", null);
+    notifier.progress("apply", null);
     expect(window.setProgressBar).toHaveBeenLastCalledWith(2, {
       mode: "indeterminate",
     });
-    notifier.end("search", null);
+    notifier.end("apply", null);
     notifier.progress("apply", 0.1);
     expect(window.setProgressBar).toHaveBeenLastCalledWith(0.1, {
       mode: "normal",
@@ -56,22 +55,22 @@ describe("finished work notices", () => {
       showNotification,
     });
 
-    notifier.progress("search", null);
-    notifier.end("search", searchFinishedNotice(34));
+    notifier.progress("resumes", null);
+    notifier.end("resumes", resumesFinishedNotice(34));
     // A second end for the same work is not a second finished job.
-    notifier.end("search", searchFinishedNotice(34));
+    notifier.end("resumes", resumesFinishedNotice(34));
     expect(showNotification).toHaveBeenCalledTimes(1);
     expect(showNotification.mock.calls[0]?.[0]).toEqual({
-      title: "Search finished",
-      body: "34 new jobs to look at",
-      route: "/job-finder/discovery",
+      title: "Resumes ready",
+      body: "Finished 34 resumes",
+      route: "/job-finder/review-queue",
     });
 
     // The click brings the window back on the screen the notice is about.
     showNotification.mock.calls[0]?.[1]();
     expect(unfocused.restore).toHaveBeenCalled();
     expect(unfocused.focus).toHaveBeenCalled();
-    expect(unfocused.openRoute).toHaveBeenCalledWith("/job-finder/discovery");
+    expect(unfocused.openRoute).toHaveBeenCalledWith("/job-finder/review-queue");
 
     const focused = fakeWindow(true);
     const quiet = vi.fn();
@@ -97,8 +96,6 @@ describe("finished work notices", () => {
   });
 
   it("words each finished job plainly", () => {
-    expect(searchFinishedNotice(0).body).toBe("Nothing new this time");
-    expect(searchFinishedNotice(1).body).toBe("1 new job to look at");
     expect(resumesFinishedNotice(12)).toMatchObject({
       title: "Resumes ready",
       body: "Finished 12 resumes",
