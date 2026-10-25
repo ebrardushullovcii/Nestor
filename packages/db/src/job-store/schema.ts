@@ -148,8 +148,29 @@ CREATE TABLE IF NOT EXISTS searches (
 CREATE INDEX IF NOT EXISTS searches_by_start ON searches (started_at DESC);
 `;
 
+/**
+ * A shortlisted job's resume. The draft is one JSON document because only the
+ * editor reads it; what a list shows or filters on is a column.
+ */
+const RESUMES = `
+CREATE TABLE IF NOT EXISTS resumes (
+  job_id INTEGER PRIMARY KEY REFERENCES jobs (id) ON DELETE CASCADE,
+  level TEXT NOT NULL CHECK (level IN ('original', 'light', 'tailored', 'aggressive')),
+  state TEXT NOT NULL CHECK (state IN ('queued', 'writing', 'ready', 'failed')),
+  updated_at INTEGER NOT NULL,
+  error TEXT,
+  draft_json TEXT,
+  -- What the last level change replaced, for its Undo: {level, draft, approvedAt, pdfPath}
+  previous_json TEXT,
+  approved_at INTEGER,
+  pdf_path TEXT
+);
+CREATE INDEX IF NOT EXISTS resumes_by_state ON resumes (state, updated_at);
+`;
+
 export const JOB_STORE_SCHEMA: readonly string[] = [
   JOBS,
   SEARCHES,
+  RESUMES,
   APPLICATION_SCHEMA,
 ];

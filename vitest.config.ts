@@ -62,6 +62,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/job-commands.ts",
       ),
+      "@nestor/job-finder/resumes": path.resolve(
+        currentDir,
+        "packages/job-finder/src/resumes/index.ts",
+      ),
       "@nestor/job-finder/assistant-attention": path.resolve(
         currentDir,
         "packages/job-finder/src/assistant/attention.ts",

@@ -19,6 +19,8 @@ import { createDeferredBackgroundInitController } from "./setup/deferred-backgro
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
 import { closeJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
+import { registerResumeRoutes } from "./routes/resumes";
+import { stopResumeService } from "./services/resumes";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -247,6 +249,7 @@ if (hasSingleInstanceLock) {
   } catch (error) {
     console.error("[Desktop] The Job Finder store failed to open.", error);
   }
+  registerResumeRoutes(ipcMain);
 }
 
 recordStartupDiagnostic("main module loaded");
@@ -455,6 +458,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopResumeService();
   closeJobStore();
   disposeInterviewSessionControls();
 });

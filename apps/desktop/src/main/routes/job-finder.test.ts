@@ -7,6 +7,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { IpcMain } from "electron";
+import type * as TestApiModule from "../services/job-finder/test-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApplicationPacketSchema,
@@ -173,6 +174,11 @@ vi.mock("electron", () => ({
     showOpenDialog: mockShowOpenDialog,
     showSaveDialog: mockShowSaveDialog,
   },
+}));
+
+vi.mock("../services/job-finder/test-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof TestApiModule>()),
+  isDesktopTestApiEnabled: mockIsDesktopTestApiEnabled,
 }));
 
 vi.mock("../services/job-finder", () => ({

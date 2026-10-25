@@ -1,3 +1,4 @@
+import type { DesktopResumesBridge } from "./resumes";
 import type {
   ApplicationListPage,
   ApplicationListQuery,
@@ -178,6 +179,7 @@ declare global {
       browser: DesktopBrowserBridge;
       assistant: DesktopAssistantBridge;
       jobs: DesktopJobsBridge;
+      resumes: DesktopResumesBridge;
       ping: () => Promise<DesktopPlatformPing>;
       window: {
         close: () => Promise<{ ok: true }>;

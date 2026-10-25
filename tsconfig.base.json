@@ -50,6 +50,9 @@
       "@nestor/job-finder/job-commands": [
         "packages/job-finder/src/job-commands.ts"
       ],
+      "@nestor/job-finder/resumes": [
+        "packages/job-finder/src/resumes/index.ts"
+      ],
       "@nestor/job-finder/assistant-attention": [
         "packages/job-finder/src/assistant/attention.ts"
       ],

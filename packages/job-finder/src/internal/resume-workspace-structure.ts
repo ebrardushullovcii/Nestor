@@ -271,6 +271,29 @@ function formatProjectSummary(input: {
   );
 }
 
+/**
+ * A degree that ends after today is still under way: "Expected May 2027"
+ * says so where a bare future date reads as a mistake.
+ */
+function formatEducationDateRange(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  now = new Date(),
+): string | null {
+  const range = formatDateRange(start, end);
+  const endMatch = /^(\d{4})(?:-(\d{2}))?/u.exec(end?.trim() ?? "");
+  if (!range || !endMatch) return range;
+  const year = Number(endMatch[1]);
+  const month = Number(endMatch[2] ?? 12);
+  const endsLater =
+    year > now.getFullYear() ||
+    (year === now.getFullYear() && month > now.getMonth() + 1);
+  if (!endsLater) return range;
+  const parts = range.split(" – ");
+  parts[parts.length - 1] = `Expected ${parts.at(-1)}`;
+  return parts.join(" – ");
+}
+
 function formatDateRange(
   start: string | null | undefined,
   end: string | null | undefined,
@@ -1114,7 +1137,10 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
           )
         : null;
       const profileDateRange = profileEducation
-        ? formatDateRange(profileEducation.startDate, profileEducation.endDate)
+        ? formatEducationDateRange(
+            profileEducation.startDate,
+            profileEducation.endDate,
+          )
         : null;
       const parsedDates = parseResumeDateRange(entry.dateRange);
       return createEntry({
@@ -1723,7 +1749,10 @@ export function seedResumeDraft(input: {
           title: education.schoolName,
           subtitle: formatDegreeLine(education.degree, education.fieldOfStudy),
           location: education.location,
-          dateRange: formatDateRange(education.startDate, education.endDate),
+          dateRange: formatEducationDateRange(
+            education.startDate,
+            education.endDate,
+          ),
           startDate: education.startDate,
           endDate: education.endDate,
           isCurrent: false,
