@@ -68,7 +68,7 @@ async function getSearchService(): Promise<JobSearchService> {
 }
 
 /** Scores jobs a closed app left without a fit. */
-export function scoreUnscoredJobs(): void {
+function scoreUnscoredJobs(): void {
   void getSearchService()
     .then((service) => service.scoreUnscored())
     .catch((error: unknown) => {
@@ -132,7 +132,11 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     }
     return { ok: true as const };
   });
-  getJobStore().onChange((change) =>
+  const store = getJobStore();
+  store.onChange((change) =>
     broadcastToJobSubscribers(JOBS_CHANGED_CHANNEL, change),
   );
+  if (store.unscoredJobIds(1).length > 0) {
+    setTimeout(scoreUnscoredJobs, 5_000).unref?.();
+  }
 }

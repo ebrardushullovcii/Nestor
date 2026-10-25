@@ -838,7 +838,6 @@ export function createPrimaryPageActions(
     setProfileCopilotPendingContextKey,
     setResumeWorkspaceDirty,
     setSelectedReviewJobId,
-    setDiscoveryRunFeedback,
     sourceDebugRunIdRef,
     latestWorkspaceRef,
     workspace,

@@ -42,9 +42,7 @@ const LIST_PANEL_PATHS = [
 ];
 
 /** Where each of those lists renders its ROW. */
-const LIST_ROW_PATHS = [
-  "screens/applications/applications-records-panel.tsx",
-];
+const LIST_ROW_PATHS = ["screens/applications/applications-records-panel.tsx"];
 
 describe("Job Finder list rows carry no chrome of their own", () => {
   it("routes every selectable row through the shared list-row treatment", () => {

@@ -4,7 +4,7 @@ import {
   createPreparedApplicationFormStore,
 } from "./prepared-application-forms";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
-import { scoreUnscoredJobs, setJobSearchServiceFactory } from "../job-commands";
+import { setJobSearchServiceFactory } from "../job-commands";
 import { getJobStore } from "../job-store";
 import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import type { Page } from "playwright";
@@ -681,9 +681,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       }),
     ),
   );
-  if (getJobStore().unscoredJobIds(1).length > 0) {
-    setTimeout(scoreUnscoredJobs, 5_000).unref?.();
-  }
   const resumeDraftProcessor = createResumeDraftProcessor();
   const documentManager = createLocalJobFinderDocumentManager({
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
