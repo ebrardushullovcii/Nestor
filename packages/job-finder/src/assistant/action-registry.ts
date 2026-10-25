@@ -237,6 +237,20 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.exportResumePdf(i.jobId),
     { name: "export_resume", custom: true },
   ),
+  "clear-application-answer": action(
+    C.ClearApplicationAnswerCommandSchema,
+    "applications",
+    "confirm",
+    "Clear a saved application answer.",
+    (i, c) => c.service.clearApplicationAnswer(i),
+  ),
+  "snooze-grouped-decision": action(
+    C.SnoozeGroupedDecisionInputSchema,
+    "applications",
+    "local",
+    "Snooze a grouped Needs you decision.",
+    (i, c) => c.service.snoozeGroupedDecision(i),
+  ),
   "reset-workspace": desktopAction(
     "reset-workspace",
     empty,

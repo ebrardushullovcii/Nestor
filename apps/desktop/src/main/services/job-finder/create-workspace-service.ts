@@ -1,3 +1,4 @@
+import { readSavedApplicationAnswers } from "@nestor/db/applications";
 import { createJobSitesStore } from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
@@ -737,6 +738,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   });
   const workspaceService = createJobFinderWorkspaceService({
     jobSites: createJobSitesStore(getJobStore()),
+    readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),
     resumeDraftProcessor,
     aiClient,
     visionProvider,

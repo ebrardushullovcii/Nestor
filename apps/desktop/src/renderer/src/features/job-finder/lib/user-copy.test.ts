@@ -235,7 +235,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/components/profile/profile-background-sections.tsx",
     "features/job-finder/components/profile/profile-experience-tab.tsx",
     "features/job-finder/components/profile/profile-import-suggestion-list.tsx",
-    "features/job-finder/components/profile/profile-preferences-eligibility-section.tsx",
     "features/job-finder/components/profile/profile-preferences-sections.tsx",
     "features/job-finder/components/profile/setup/profile-setup-step-sections.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-helpers.ts",

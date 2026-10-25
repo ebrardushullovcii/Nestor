@@ -21,7 +21,8 @@ function largeSyntheticProfile() {
   );
   const experiences = Array.from({ length: 10 }, (_, index) => ({
     id: `experience_${index}`,
-    title: index === 0 ? "Working Student, Data Analytics" : `Data Analyst ${index}`,
+    title:
+      index === 0 ? "Working Student, Data Analytics" : `Data Analyst ${index}`,
     companyName: `Example Analytics ${index} GmbH`,
     location: "Berlin, Germany",
     startDate: `${2014 + index}-01`,
@@ -80,7 +81,6 @@ function largeSyntheticProfile() {
     answerBank: {
       workAuthorization:
         "German residence permit for study; EU Blue Card needed for full-time roles after graduation.",
-      availability: "20 hours a week during the semester.",
       customAnswers: Array.from({ length: 40 }, (_, index) => ({
         id: `answer_${index}`,
         label: `Saved answer ${index}`,
@@ -105,7 +105,10 @@ function largeSyntheticProfile() {
     })),
     targetRoles: ["Data Analyst", "Junior Data Scientist"],
     locations: ["Berlin, Germany"],
-    skills: Array.from({ length: 40 }, (_, index) => `Analytics skill ${index}`),
+    skills: Array.from(
+      { length: 40 },
+      (_, index) => `Analytics skill ${index}`,
+    ),
     experiences,
     education: [
       {
@@ -191,12 +194,22 @@ test("a page read gets the goals, eligibility and request, not the whole profile
         authorizedWorkCountries: ["Germany"],
         requiresVisaSponsorship: true,
       },
-      availability: "20 hours a week during the semester.",
     },
   });
   expect(
-    (parsed.person as { workAuthorization: string }).workAuthorization,
-  ).toContain("EU Blue Card");
+    (
+      parsed.person as {
+        workEligibility: { limitedWorkPermissions: unknown[] };
+      }
+    ).workEligibility.limitedWorkPermissions,
+  ).toEqual([
+    {
+      country: "Germany",
+      conditions: "Student residence permit: up to 20 hours a week.",
+      requiresFutureSponsorship: true,
+    },
+  ]);
+  expect(context).not.toContain("EU Blue Card");
   for (const absent of [
     "lina.haddad@example.com",
     "+49 151",
@@ -224,9 +237,14 @@ test("the search prompt leaves out the resume and role write-ups and shares one 
   expect(first.system).not.toContain("Built report 0");
   expect(first.system).not.toContain("Owned the weekly reporting cycle");
   // What fit needs to cast the net stays.
-  expect(first.system).toContain("Data Analyst 1 · at Example Analytics 1 GmbH");
+  expect(first.system).toContain(
+    "Data Analyst 1 · at Example Analytics 1 GmbH",
+  );
   expect(first.system).toContain("Data analyst and data science student");
-  expect(first.system).toContain("EU Blue Card");
+  expect(first.system).toContain(
+    "Student residence permit: up to 20 hours a week.",
+  );
+  expect(first.system).not.toContain("EU Blue Card");
   expect(first.system).toContain('"Part-time analytics roles"');
 
   const marker = "\nThis site: ";

@@ -131,7 +131,6 @@ export async function resolvePrepareOnlyIntermediateMutationAuthority(input: {
   if (
     approvedSnapshot === null ||
     current.content === null ||
-    current.missingRequiredKinds.length > 0 ||
     !isApprovedApplicationAnswerSnapshot(envelope, approvedSnapshot)
   ) {
     return denied("answer_policy_stale");

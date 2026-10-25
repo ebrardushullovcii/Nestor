@@ -5,7 +5,6 @@ import {
   type AssistantInstructionGrant,
 } from "@nestor/contracts";
 import { z } from "zod";
-import type { JobFinderWorkspaceService } from "../../internal/workspace-service-contracts";
 import { checkGrantTargets, narrowGrant } from "../grants";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import { plural } from "./format";

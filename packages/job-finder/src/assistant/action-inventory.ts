@@ -470,17 +470,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     channels: ["needs-you:run"],
     coverage: tools("answer_need", "open_need", "check_need"),
   },
-  {
-    id: "needs_you.grouped",
-    screen: "Needs you",
-    action: "Answer a grouped question once for many",
-    channels: [
-      "job-finder:project-grouped-manual-answer",
-      "job-finder:apply-grouped-manual-answer",
-      "job-finder:snooze-grouped-decision",
-    ],
-    coverage: tools("resolve_needs_you"),
-  },
 
   // Store commands are shared with Applications; their runtime tests exercise them over MCP.
   {

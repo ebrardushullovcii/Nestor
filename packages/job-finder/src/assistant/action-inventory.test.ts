@@ -1,10 +1,15 @@
 import {
+  NEEDS_YOU_COMMANDS,
   TRACKER_COMMANDS,
   APPLICATION_COMMANDS,
   JOB_COMMANDS,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
+import { needsYouCommandTools } from "./needs-you-commands";
+const needsCommands = needsYouCommandTools(() =>
+  Promise.reject(new Error("No command execution in catalog test")),
+);
 import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
@@ -19,13 +24,18 @@ describe("assistant action inventory", () => {
         })),
       ).length;
     const full = bytes(
-      buildAssistantToolCatalog({ mode: "flat", browserAvailable: true }),
+      buildAssistantToolCatalog({
+        commands: needsCommands,
+        mode: "flat",
+        browserAvailable: true,
+      }),
     );
     for (const screen of ["home", "profile", "discovery"] as const) {
       const catalog = buildAssistantToolCatalog({
         mode: "grouped",
         browserAvailable: true,
         screen,
+        commands: needsCommands,
       });
       expect(bytes(catalog), screen).toBeLessThan(full / 2);
       expect(catalog.some((tool) => tool.name === "load_tools")).toBe(true);
@@ -61,6 +71,7 @@ describe("assistant action inventory", () => {
   it("names only tools that exist", () => {
     const known = new Set([
       ...listAllAssistantToolNames(),
+      ...Object.keys(NEEDS_YOU_COMMANDS),
       ...Object.keys(TRACKER_COMMANDS),
       ...Object.keys(APPLICATION_COMMANDS),
       ...Object.keys(JOB_COMMANDS),
@@ -89,9 +100,11 @@ describe("assistant action inventory", () => {
     const all = listAllAssistantToolNames();
     expect(new Set(all).size).toBe(all.length);
     const flat = new Set(
-      buildAssistantToolCatalog({ mode: "flat", browserAvailable: true }).map(
-        (tool) => tool.name,
-      ),
+      buildAssistantToolCatalog({
+        commands: needsCommands,
+        mode: "flat",
+        browserAvailable: true,
+      }).map((tool) => tool.name),
     );
     const grouped = new Set(
       buildAssistantToolCatalog({

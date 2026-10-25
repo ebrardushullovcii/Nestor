@@ -574,25 +574,16 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
     ).toBe(false);
   });
 
-  it("marks collapsed answers needing confirmation and counts them in Preferences", () => {
+  it("keeps reusable form-answer controls out of Profile Preferences", () => {
     const saved = CandidateProfileSchema.parse({
       ...profile,
       answerBank: {
-        ...profile.answerBank,
         customAnswers: [
           {
-            id: "approved",
-            label: "Approved answer",
-            question: "Approved?",
-            answer: "Yes",
-            kind: "other",
-          },
-          {
             id: "review",
-            label: "Review answer",
+            label: "Hours",
             question: "Hours?",
             answer: "20 hours",
-            kind: "other",
             needsConfirmation: true,
           },
         ],
@@ -603,25 +594,14 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
       profile: saved,
     });
     expect(
-      screen.getByRole("tab", { name: /Preferences.*1 to confirm/ }),
-    ).toBeTruthy();
-    const row = view.container.querySelector<HTMLDetailsElement>(
-      "#answer-record-review",
-    );
-    expect(row?.open).toBe(false);
-    expect(row?.querySelector("summary")?.textContent).toContain(
-      "Needs your confirmation",
-    );
-    fireEvent.click(row!.querySelector("summary")!);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Confirm this is my answer" }),
-    );
-    expect(row?.querySelector("summary")?.textContent).not.toContain(
-      "Needs your confirmation",
-    );
+      screen.queryByRole("tab", { name: /Preferences.*to confirm/ }),
+    ).toBeNull();
+    expect(view.container.querySelector("#answer-record-review")).toBeNull();
+    expect(screen.queryByText("Reusable screener answers")).toBeNull();
+    expect(screen.queryByText("Custom answer library")).toBeNull();
     expect(
-      screen.getByRole("tab", { name: /^Preferences/ }).textContent,
-    ).not.toContain("to confirm");
+      screen.queryByRole("button", { name: "Confirm this is my answer" }),
+    ).toBeNull();
   });
 
   it("splits semicolon roles in Profile and wraps chips within their column", () => {

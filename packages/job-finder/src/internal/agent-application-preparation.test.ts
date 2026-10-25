@@ -1685,10 +1685,10 @@ test("a paused unchecked letter stays on the review card without an attachment",
 test("preparation honors an eligibility answer saved on an earlier attempt of this application", async () => {
   const facts = executionInput();
   facts.applicationPageBindingKey = "new_result";
-  facts.profile.answerBank.customAnswers = [
+  const rememberedAnswers = [
     {
       id: "own_answer",
-      kind: "work_authorization",
+      kind: "work_authorization" as const,
       label: "Are you authorized to work here?",
       question: "Are you authorized to work here?",
       answer: "Yes",
@@ -1769,6 +1769,7 @@ test("preparation honors an eligibility answer saved on an earlier attempt of th
   const prepare = createApplyFormPreparer({
     executionInput: facts,
     applicationRecordId: "same_application",
+    readReusableAnswers: () => Promise.resolve(rememberedAnswers),
     aiClient: { chatWithTools },
     siteLabel: "the careers site",
   });
@@ -2129,10 +2130,10 @@ test.each([false, true])(
         preApprovedDeclarations: settingOn ? ["background_check_consent"] : [],
       },
     });
-    facts.profile.answerBank.customAnswers = [
+    const rememberedAnswers = [
       {
         id: "saved_declaration",
-        kind: "other",
+        kind: "other" as const,
         label: prompt,
         question: prompt,
         answer: "Yes",
@@ -2152,6 +2153,7 @@ test.each([false, true])(
     let card: ReturnType<typeof buildApplyReviewCard> | null = null;
     const result = await runAgentApplicationPreparation({
       executionInput: facts,
+      readReusableAnswers: () => Promise.resolve(rememberedAnswers),
       siteLabel: "Example",
       startedAt: "2026-10-06T10:00:00.000Z",
       session: {

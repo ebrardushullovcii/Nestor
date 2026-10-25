@@ -1,3 +1,4 @@
+import type { CandidateReusableAnswer } from "@nestor/contracts";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
@@ -804,6 +805,7 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  readSavedAnswers?: () => readonly CandidateReusableAnswer[];
   jobSites?: JobSitesStore;
   /** Host acknowledgement that the first display transfer has finished. */
   backgroundWorkReady?: PromiseLike<void>;

@@ -1,3 +1,4 @@
+import type { CandidateReusableAnswer } from "@nestor/contracts";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
@@ -78,6 +79,7 @@ export interface WorkspaceServiceContext {
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  readSavedAnswers?: () => readonly CandidateReusableAnswer[];
   backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;
   listingActivityIdentityIndex?: ReturnType<

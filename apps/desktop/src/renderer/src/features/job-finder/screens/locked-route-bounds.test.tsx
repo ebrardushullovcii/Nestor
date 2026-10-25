@@ -38,6 +38,7 @@ const SCROLL_REGION_MARKER = "data-locked-pane-scroll-region";
 /** Route id -> the screen file that renders that route's LockedScreenLayout. */
 const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
   profile: "screens/profile-screen.tsx",
+  actions: "../needs-you/needs-you-screen.tsx",
   "review-queue": "../shortlisted/shortlisted-screen.tsx",
   applications: "../applications/applications-screen.tsx",
 };

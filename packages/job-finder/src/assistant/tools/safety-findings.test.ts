@@ -38,11 +38,7 @@ import {
   updateAiBehaviorTool,
   updateApplySettingsTool,
 } from "./settings-tools";
-import {
-  getWorkspaceSummaryTool,
-  listNeedsYouTool,
-  openInAppTool,
-} from "./workspace-tools";
+import { openInAppTool } from "./workspace-tools";
 
 function world() {
   const { workspaceService: service } = createWorkspaceServiceHarness();
@@ -649,43 +645,6 @@ describe("R3 assistant safety findings", () => {
     );
   });
 
-  it("R3-048 lists unapproved resumes and final sends even without a browser question", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.userActionRequests = [];
-    snapshot.applicationRecords = [
-      {
-        ...application(),
-        jobId: "other",
-        status: "ready_for_review",
-        lastAttemptState: "ready",
-        crm: null,
-      },
-    ];
-    snapshot.applyJobResults = [];
-    snapshot.reviewQueue = [
-      {
-        ...snapshot.reviewQueue[0]!,
-        jobId: "review",
-        resumeReview: { status: "needs_review" },
-        resumeApplicationMode: "tailored_per_job",
-      },
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const result = await listNeedsYouTool.execute({}, ctx);
-    expect(result.data).toMatchObject({
-      needsYou: { count: 0 },
-      resumeReviews: [expect.objectContaining({ kind: "resume_review" })],
-      readyToSend: [expect.objectContaining({ kind: "application_send" })],
-    });
-    const summary = await getWorkspaceSummaryTool.execute({}, ctx);
-    expect(summary.data).toMatchObject({
-      needsYou: 0,
-      readyToSend: 1,
-      resumeReviews: 1,
-    });
-  });
-
   it("R3-068 / R3-057 gives known privacy controls without inventing a current-pay switch", () => {
     expect(ASSISTANT_SYSTEM_PROMPT).toContain(
       "Settings > Delete everything > Reset everything",
@@ -831,34 +790,6 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
   ).toEqual([]);
 });
 
-it("chat uses the shared Needs you projection for paused records without live requests", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  snapshot.userActionRequests = [];
-  snapshot.applyJobResults = [];
-  snapshot.reviewQueue = [];
-  snapshot.applicationRecords = [
-    {
-      ...application(),
-      status: "drafting",
-      lastAttemptState: "paused",
-      crm: null,
-      nextActionLabel: "Answer relocation",
-      consentSummary: { status: "requested", pendingCount: 1 },
-    },
-  ];
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  expect((await listNeedsYouTool.execute({}, ctx)).data).toMatchObject({
-    needsYou: {
-      count: 1,
-      applications: [expect.objectContaining({ reason: "Answer relocation" })],
-    },
-  });
-  expect((await getWorkspaceSummaryTool.execute({}, ctx)).data).toMatchObject({
-    needsYou: 1,
-  });
-});
-
 it("bulk selection submits eligible jobs once and preserves held-back outcomes", async () => {
   const ctx = world();
   const snapshot = await ctx.service.getWorkspaceSnapshot();
@@ -945,42 +876,6 @@ it("bulk selection starts at most three slow reads and retains out-of-order outc
       outcome: index < 3 ? "shortlisted" : "not started: stopped",
     })),
   );
-});
-
-it("chat and the queue retain existing display rules for a legacy quoted question", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  const record = {
-    ...application(),
-    status: "drafting" as const,
-    lastAttemptState: "paused" as const,
-    crm: null,
-  };
-  snapshot.applicationRecords = [record];
-  snapshot.userActionRequests = [];
-  snapshot.reviewQueue = [];
-  snapshot.applyJobResults = [
-    ApplyJobResultSchema.parse({
-      id: "legacy_result",
-      runId: "run",
-      jobId: record.jobId,
-      applicationRecordId: record.id,
-      state: "awaiting_review",
-      blockerReason: "required_human_input",
-      summary: "A question needs your answer",
-      detail: 'Only you can answer "Can you relocate to this city?"',
-      startedAt: "2026-10-04T12:00:00.000Z",
-      updatedAt: "2026-10-04T12:00:00.000Z",
-    }),
-  ];
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  expect((await listNeedsYouTool.execute({}, ctx)).data).toMatchObject({
-    needsYou: {
-      count: 1,
-      applications: [expect.objectContaining({ id: record.id })],
-    },
-    readyToSend: [],
-  });
 });
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {

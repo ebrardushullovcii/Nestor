@@ -433,6 +433,9 @@ export function createJobFinderWorkspaceService(
     documentManager,
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
+    ...(options.readSavedAnswers
+      ? { readSavedAnswers: options.readSavedAnswers }
+      : {}),
     listingAssessmentJobIds: new Set<string>(),
     listingActivityIdentityIndex: createListingActivityIdentityIndex(),
     listingAssessmentGenerationRef: { current: 0 },
