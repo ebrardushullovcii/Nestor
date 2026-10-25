@@ -10,6 +10,7 @@ export interface ListingCard {
   url: string;
   title: string;
   text: string;
+  /** Fingerprint of the title facts read by profession screening. */
   cardFingerprint: string;
   sourceId: string;
   sourceLabel: string;

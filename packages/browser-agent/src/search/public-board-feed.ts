@@ -143,7 +143,7 @@ export async function collectPublicFeed(
         title,
         text,
         listingText,
-        cardFingerprint: fingerprint([title, text, listingText]),
+        cardFingerprint: fingerprint(title.trim().toLowerCase()),
         sourceId: input.source.id,
         sourceLabel: input.source.label,
         ...(typeof job.id === "string" || typeof job.id === "number"

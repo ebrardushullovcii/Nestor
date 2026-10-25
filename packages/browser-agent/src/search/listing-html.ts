@@ -136,7 +136,7 @@ export function readInventoryHtml(
       url: href,
       title: job.title,
       text: body,
-      cardFingerprint: fingerprint(body),
+      cardFingerprint: fingerprint(job.title.trim().toLowerCase()),
       sourceId: source.id,
       sourceLabel: source.label,
       ...(typeof identifier === "string" || typeof identifier === "number"
@@ -238,10 +238,8 @@ export function readInventoryHtml(
       ...(postedAt && Number.isFinite(Date.parse(postedAt))
         ? { postedAt: new Date(postedAt).toISOString() }
         : {}),
-      cardFingerprint: fingerprint([
-        title,
-        body.replace(/\b(?:\d+ days? ago|Today|Sponsored)\b/giu, ""),
-      ]),
+      // Profession screening reads the title, so an age or sponsored badge is not a new decision.
+      cardFingerprint: fingerprint(title.trim().toLowerCase()),
     });
   }
   const next = new Set<string>();

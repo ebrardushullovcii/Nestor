@@ -167,14 +167,7 @@ export function createListingSearchEngine(deps: {
               "\n",
             ),
             cardFingerprint: createHash("sha256")
-              .update(
-                JSON.stringify([
-                  job.title,
-                  job.company,
-                  job.location,
-                  job.description,
-                ]),
-              )
+              .update(JSON.stringify(job.title.trim().toLowerCase()))
               .digest("hex")
               .slice(0, 32),
             sourceId: target.id,

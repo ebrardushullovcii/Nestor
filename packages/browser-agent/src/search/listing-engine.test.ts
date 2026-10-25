@@ -86,6 +86,40 @@ test("screens titles in one call, retains senior variants and skips saved and re
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
+test("a changing age badge does not make a rejected listing cost another model call", async () => {
+  let age = "1 day ago";
+  const readPage = () =>
+    Promise.resolve({
+      finalUrl: source.url,
+      html: `<article><p>Employer</p><h2><a href="/jobs/nurse">Nurse</a></h2><p>Berlin</p><span class="age">${age}</span></article>`,
+    });
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"unrelated":[0]}' }),
+    ),
+  };
+  const goals = {
+    targetRoles: ["Data Analyst"],
+    relatedRoles: [],
+    strategy: "wide_net" as const,
+  };
+  const first = await screenCards({
+    client,
+    cards: (await collectSource({ source, readPage })).cards,
+    goals,
+  });
+  age = "2 days ago";
+  const second = await screenCards({
+    client,
+    cards: (await collectSource({ source, readPage })).cards,
+    goals,
+    lookupSeenCards: () => Promise.resolve(first.seen),
+  });
+  expect(second.related).toEqual([]);
+  expect(second.skipped).toBe(1);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
+
 test("returns full visible requirements beyond sparse JSON-LD and reads metadata for all bodies in one call", async () => {
   const cards = [
     card("Data Analyst", "one"),
