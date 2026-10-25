@@ -14,6 +14,7 @@ export function createNeedsYouCommandRunner(
   browser: {
     open: (id: number) => Promise<boolean>;
     check: (id: number) => Promise<boolean>;
+    retry: (sourceId: number) => Promise<void>;
   },
 ) {
   const handlers: {
@@ -25,25 +26,56 @@ export function createNeedsYouCommandRunner(
     needs_you_counts: () => getStore().needsYou.counts(),
     get_need: ({ id }) => getStore().needsYou.details(id),
     save_need_draft: (input) => getStore().needsYou.saveDraft(input),
-    answer_need: (input) => getStore().needsYou.answer(input),
+    answer_need: (input) => {
+      const { value, ...change } = getStore().needsYou.changeAnswers(() =>
+        getStore().needsYou.answer(input),
+      );
+      return { ...value, ...change };
+    },
     list_form_answers: (input) => getStore().needsYou.listAnswers(input),
     get_form_answer: ({ id }) => getStore().needsYou.savedAnswer(id),
-    create_form_answer: (input) =>
-      getStore().needsYou.remember({
-        ...describeSavedFormAnswer(input.prompt, input.answer),
-        prompt: input.prompt,
-        scope: {},
-      }),
+    create_form_answer: (input) => {
+      const { value, ...change } = getStore().needsYou.changeAnswers(() =>
+        getStore().needsYou.remember({
+          ...describeSavedFormAnswer(input.prompt, input.answer),
+          prompt: input.prompt,
+          scope: {},
+        }),
+      );
+      return { ...value, ...change };
+    },
     get_form_answer_by_key: (input) =>
       getStore().needsYou.getAnswerByKey(input),
-    upsert_form_answer: (input) =>
-      getStore().needsYou.remember(
-        UpsertSavedFormAnswerInputSchema.parse(input),
-      ),
-    save_form_answer: (input) => getStore().needsYou.saveAnswer(input),
-    forget_form_answers: (input) => getStore().needsYou.forgetAnswers(input),
+    upsert_form_answer: (input) => {
+      const { value, ...change } = getStore().needsYou.changeAnswers(() =>
+        getStore().needsYou.remember(
+          UpsertSavedFormAnswerInputSchema.parse(input),
+        ),
+      );
+      return { ...value, ...change };
+    },
+    save_form_answer: (input) => {
+      const { value: saved, ...change } = getStore().needsYou.changeAnswers(
+        () => getStore().needsYou.saveAnswer(input),
+      );
+      return { saved, ...change };
+    },
+    forget_form_answers: (input) => {
+      const { value: forgotten, ...change } = getStore().needsYou.changeAnswers(
+        () => getStore().needsYou.forgetAnswers(input),
+      );
+      return { forgotten, ...change };
+    },
+    undo_form_answer_change: ({ undoId }) =>
+      getStore().needsYou.undoAnswerChange(undoId),
     open_need: ({ id }) => browser.open(id),
     check_need: ({ id }) => browser.check(id),
+    retry_need: async ({ id }) => {
+      const source = getStore().needsYou.details(id)?.task.source;
+      if (!source) return false;
+      await browser.retry(source.id);
+      return true;
+    },
   };
   return async function run<K extends NeedsYouCommandName>(
     name: K,

@@ -17,6 +17,53 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("preserves a recalled tool call for runtime validation instead of reporting empty output", async () => {
+  const recalled = {
+    id: "old-send",
+    type: "function",
+    function: { name: "send_application", arguments: '{"id":1}' },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { tool_calls: [recalled] },
+                finish_reason: "tool_calls",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      ),
+    ),
+  );
+  const client = createJobFinderAiClientFromEnvironment(createEnvironment());
+  const result = await client.chatWithTools!(
+    [
+      {
+        role: "user",
+        content: "Send my ready application now; I authorize it.",
+      },
+    ],
+    [
+      {
+        type: "function",
+        function: {
+          name: "load_tools",
+          description: "Load tools",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  );
+  expect(result.toolCalls).toEqual([recalled]);
+  expect(result.finishReason).toBe("tool_calls");
+});
+
 test("batch callers can require valid JSON from the provider", async () => {
   const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(

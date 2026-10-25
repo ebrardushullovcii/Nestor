@@ -8,6 +8,7 @@ import {
   ApplyRunSchema,
   UserActionEventSchema,
   UserActionRequestSchema,
+  NeedsYouDetailsSchema,
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
@@ -999,26 +1000,27 @@ describe("assistant session host", () => {
   });
 
   it("closes a chat question when its Needs you step is answered on that screen", async () => {
-    const { host, repository, harness } = setup();
+    const { host, repository, ports } = setup();
     const conversation = await host.createConversation();
-    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
-    // The step exists in the chat's question but is no longer waiting.
-    const service = harness.workspaceService as unknown as {
-      getWorkspaceSnapshot: () => Promise<typeof snapshot>;
-    };
-    service.getWorkspaceSnapshot = () =>
-      Promise.resolve({
-        ...snapshot,
-        userActionRequests: [
-          {
-            ...(snapshot.userActionRequests[0] ?? {}),
-            id: "step_consent",
-            state: "resolved",
-          } as (typeof snapshot.userActionRequests)[number],
-        ],
-      });
-    harness.workspaceService.getWorkspaceProjection =
-      service.getWorkspaceSnapshot;
+    const readNeed = vi.fn(() =>
+      Promise.resolve<import("@nestor/contracts").NeedsYouDetails | null>(
+        NeedsYouDetailsSchema.parse({
+          task: {
+            id: 1,
+            kind: "question",
+            key: "consent",
+            scope: {},
+            prompt: "Do you consent to a background check?",
+            input: "boolean",
+            options: [],
+            openedAt: "2026-09-28T09:00:00.000Z",
+          },
+          applications: [],
+          draft: null,
+        }),
+      ),
+    );
+    ports.readNeed = readNeed;
     await repository.upsertMessage(
       AssistantMessageSchema.parse({
         id: "message_question",
@@ -1031,7 +1033,7 @@ describe("assistant session host", () => {
             questionId: "question_consent",
             prompt: "Do you consent to a background check?",
             options: ["Yes", "No"],
-            needsYouRequestId: "step_consent",
+            needsYouRequestId: "1",
           },
         ],
         createdAt: "2026-09-28T09:00:00.000Z",
@@ -1044,9 +1046,15 @@ describe("assistant session host", () => {
     ).linkedQuestions.set(`${conversation.id}:question_consent`, {
       conversationId: conversation.id,
       questionId: "question_consent",
-      requestId: "step_consent",
+      requestId: "1",
     });
 
+    await host.closeQuestionsAnsweredElsewhere();
+    expect(
+      (await repository.listMessages(conversation.id, { limit: 10 }))
+        .messages[0]?.parts[0],
+    ).toMatchObject({ status: "open" });
+    readNeed.mockResolvedValue(null);
     await host.closeQuestionsAnsweredElsewhere();
 
     const { messages } = await repository.listMessages(conversation.id, {
@@ -1057,13 +1065,13 @@ describe("assistant session host", () => {
       .find((entry) => entry.type === "question");
     expect(part).toMatchObject({
       status: "answered",
-      answer: "Answered on the Needs you screen.",
+      answer: "The Needs you step is no longer waiting.",
     });
     const notes = (
       host as unknown as { answeredElsewhere: Map<string, string[]> }
     ).answeredElsewhere.get(conversation.id);
     expect(notes?.[0]).toContain(
-      "is closed: Answered on the Needs you screen.",
+      "is closed: The Needs you step is no longer waiting.",
     );
   });
 
@@ -1504,7 +1512,7 @@ describe("assistant session host", () => {
     for (let index = 0; index < 5; index += 1) {
       await sendAndWait(
         host,
-        `What is my headline? ${"padding ".repeat(80)}`,
+        `What is my headline? ${"padding ".repeat(800)}`,
         context(),
         conversationId,
       );

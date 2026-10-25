@@ -133,6 +133,8 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "get_need",
     "open_need",
     "check_need",
+    "retry_need",
+    "undo_form_answer_change",
     "list_form_answers",
     "get_form_answer",
     "create_form_answer",

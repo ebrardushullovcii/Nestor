@@ -39,6 +39,7 @@ import {
 import type { SQLInputValue } from "node:sqlite";
 import type { JobStore } from "./job-store";
 import { toIso } from "./job-list";
+import { createRowUndo } from "./row-undo";
 
 type Task = {
   id: number;
@@ -118,8 +119,17 @@ function validateAnswer(
 
 export function createNeedsYouStore(store: JobStore, changed: () => void) {
   const { sql } = store;
+  const undo = createRowUndo(store, {
+    journal: "form_answer_undo",
+    cause: "application",
+  });
+  let answerChange: ReturnType<typeof undo.begin> | null = null;
   const get = (id: number) =>
-    sql("SELECT * FROM needs_you WHERE id = ?").get(id) as Task | undefined;
+    sql(`SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url
+      FROM needs_you t LEFT JOIN source_needs_you n ON n.task_id = t.id
+      LEFT JOIN job_sites s ON s.id = n.source_id WHERE t.id = ?`).get(id) as
+      | Task
+      | undefined;
   const findAnswerRecord = (
     key: string,
     inputScope: Partial<FormAnswerScope> = {},
@@ -215,6 +225,13 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       { input: value.input, options_json: JSON.stringify(value.options) },
       value.answer,
     );
+    const previous = sql(
+      "SELECT id FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
+    ).get(value.key, value.scope.country, value.scope.siteOrigin) as
+      | { id: number }
+      | undefined;
+    if (previous)
+      answerChange?.capture({ table: "form_answers", id: previous.id });
     const result =
       sql(`INSERT INTO form_answers(answer_key,country,site_origin,prompt,prompt_key,answer,input,options_json,updated_at,kind,label,role_families_json,proof_entry_ids_json,needs_confirmation)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(answer_key,country,site_origin) DO UPDATE SET
@@ -234,6 +251,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         JSON.stringify(value.proofEntryIds),
         value.needsConfirmation ? 1 : 0,
       ) as { id: number };
+    if (!previous)
+      answerChange?.capture({ table: "form_answers", id: result.id }, null);
     return result.id;
   }
   function resolveMatching(
@@ -258,6 +277,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
   return {
     counts,
+    changeAnswers<T>(work: () => T) {
+      return store.transaction(() => {
+        const change = undo.begin();
+        answerChange = change;
+        try {
+          return { value: work(), ...change.finish() };
+        } finally {
+          answerChange = null;
+        }
+      });
+    },
+    undoAnswerChange: (undoId: number) => undo.undo(undoId),
     remember(input: RememberFormAnswerInput): SavedFormAnswer {
       return store.transaction(() => {
         const value = RememberFormAnswerInputSchema.parse(input);
@@ -406,6 +437,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             >
           | undefined;
         if (!previous) return false;
+        answerChange?.capture({ table: "form_answers", id: value.id });
         const answer = validateAnswer(previous, value.answer);
         sql(
           "UPDATE form_answers SET answer = ?, needs_confirmation = 0, updated_at = ? WHERE id = ?",
@@ -426,6 +458,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       return store.transaction(() => {
         const match =
           "filter" in selection ? matchText(selection.filter.text) : "";
+        const where =
+          "ids" in selection
+            ? "id IN (SELECT value FROM json_each(?))"
+            : `${selection.filter.text && !match ? "0" : "1"} AND id NOT IN (SELECT value FROM json_each(?))${match ? " AND id IN (SELECT rowid FROM form_answers_text WHERE form_answers_text MATCH ?)" : ""}`;
+        const params = [
+          JSON.stringify("ids" in selection ? selection.ids : selection.except),
+          ...(match ? [match] : []),
+        ];
+        for (const row of sql(`SELECT id FROM form_answers WHERE ${where}`).all(
+          ...params,
+        ) as { id: number }[])
+          answerChange?.capture({ table: "form_answers", id: row.id });
         const result =
           "ids" in selection
             ? sql(

@@ -200,6 +200,9 @@ function fallbackDraft(
 export interface AssembleOptions {
   repository: AssistantRepository;
   conversationId: string;
+  activeTurnId?: string;
+  /** Empty-output recovery omits old tool exchanges, never the current work. */
+  recoverEmptyReply?: boolean;
   systemPrompt: string;
   currentContext?: string;
   turnMessages: readonly AgentLoopMessage[];
@@ -232,6 +235,78 @@ async function loadTail(
   });
 }
 
+/** Finished turns need requests and receipts, not private reasoning or old
+ * page snapshots. The full transcript remains available to history tools. */
+export function completedTurnContext(
+  items: readonly AssistantTranscriptItem[],
+  activeTurnId: string,
+  recover: boolean,
+): AssistantTranscriptItem[] {
+  const results = new Map<string, { summary: string; changes: string }>();
+  for (const item of items) {
+    const message = toModelMessage(item);
+    if (message?.role === "tool") {
+      const lines = message.content.split("\n");
+      results.set(message.toolCallId, {
+        summary: lines[0] ?? "",
+        changes: lines.find((line) => line.startsWith('{"changes":')) ?? "",
+      });
+    }
+  }
+  return items.flatMap((item) => {
+    if (item.turnId === activeTurnId) return [item];
+    const message = toModelMessage(item);
+    if (!message) return [];
+    if (message.role === "tool") return [];
+    if (message.role === "user")
+      return [
+        {
+          ...item,
+          message: {
+            role: "user",
+            content: message.content
+              .replace(/<context>[\s\S]*?<\/context>/gu, "")
+              .trim(),
+          },
+        },
+      ];
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      if (recover) {
+        const changes = message.toolCalls.flatMap(
+          (call) => results.get(call.id)?.changes || [],
+        );
+        return changes.length
+          ? [
+              {
+                ...item,
+                message: {
+                  role: "assistant",
+                  content: `[Saved change receipts]\n${changes.join("\n")}`,
+                },
+              },
+            ]
+          : [];
+      }
+      const receipts = message.toolCalls.map((call) => {
+        const outcome = results.get(call.id);
+        return `${call.function.name} ${call.function.arguments.slice(0, 1000)}: ${outcome?.summary ?? "No recorded result; check current state."}${outcome?.changes ? `\n${outcome.changes}` : ""}`;
+      });
+      return [
+        {
+          ...item,
+          message: {
+            role: "assistant",
+            content: `[Earlier action receipts]\n${receipts.join("\n")}`,
+          },
+        },
+      ];
+    }
+    return [
+      { ...item, message: { role: "assistant", content: message.content } },
+    ];
+  });
+}
+
 function compose(
   systemPrompt: string,
   checkpoint: AssistantCheckpoint | null,
@@ -256,7 +331,9 @@ function compose(
               : renderCheckpoint(checkpoint),
           },
         ]
-      : []),
+      : pinned
+        ? [{ role: "user" as const, content: pinned }]
+        : []),
     ...(start > 0 ? history.slice(start) : start === 0 ? history : []),
     ...turnMessages,
   ];
@@ -304,6 +381,12 @@ export async function assembleModelInput(
     options.conversationId,
     checkpoint,
   );
+  if (options.activeTurnId)
+    tail = completedTurnContext(
+      tail,
+      options.activeTurnId,
+      options.recoverEmptyReply ?? false,
+    );
   let turnMessages = options.turnMessages;
   const measure = () =>
     options.calibrator.adjust(
@@ -313,7 +396,7 @@ export async function assembleModelInput(
           checkpoint,
           tail,
           turnMessages,
-          checkpoint ? pinnedForMeasure : null,
+          pinnedForMeasure,
           options.currentContext,
         ),
       ),
@@ -457,7 +540,7 @@ export async function assembleModelInput(
     checkpoint,
     tail,
     turnMessages,
-    checkpoint ? await pinned() : null,
+    await pinned(),
     options.currentContext,
   );
 }

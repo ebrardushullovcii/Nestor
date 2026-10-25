@@ -350,6 +350,7 @@ export function createAssistantLaneWorld(
   const jobs = laneJobStore();
   const applications = createApplicationStore(jobs.store);
   const needsYou = createNeedsYouCommandRunner(() => applications, {
+    retry: () => Promise.resolve(),
     open: () => Promise.resolve(false),
     check: () => Promise.resolve(false),
   });

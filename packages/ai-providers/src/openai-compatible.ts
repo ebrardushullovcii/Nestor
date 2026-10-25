@@ -912,9 +912,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
         const message = choice?.message;
 
         const result: ChatWithToolsResult = {};
-        const requestedToolNames = new Set(
-          tools.map((tool) => tool.function.name),
-        );
 
         if (message?.content) {
           result.content = message.content;
@@ -943,11 +940,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
               typeof toolCall.id !== "string" ||
               !toolCall.function ||
               typeof toolCall.function.name !== "string" ||
-              typeof toolCall.function.arguments !== "string" ||
-              !requestedToolNames.has(toolCall.function.name)
+              typeof toolCall.function.arguments !== "string"
             ) {
               return [];
             }
+
+            // A model can recall a tool from an earlier chat turn even when
+            // a lazy catalog no longer offers it. Preserve the call so the
+            // runtime can validate it or return an unknown-tool result;
+            // silently discarding it looks like a provider outage.
 
             return [
               {

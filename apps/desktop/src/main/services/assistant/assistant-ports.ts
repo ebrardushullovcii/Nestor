@@ -29,6 +29,7 @@ import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { assistantAppCommands } from "./app-commands";
+import { runNeedsYouCommand } from "../../routes/needs-you";
 
 /**
  * The assistant's host ports, implemented with the exact functions the IPC
@@ -36,7 +37,6 @@ import { assistantAppCommands } from "./app-commands";
  * the same resume approval, the same task-scoped sending authority, the same
  * batch start, the same serialized send.
  */
-
 
 async function readWorkspaceProjection(service: JobFinderWorkspaceService) {
   if (!service.getWorkspaceProjection) {
@@ -210,6 +210,7 @@ export function createAssistantHostPorts(input: {
   const library = getCandidateAssetLibrary();
   const ports: AssistantHostPorts = {
     commands: assistantAppCommands(),
+    readNeed: (id) => runNeedsYouCommand("get_need", { id }),
     async readJobDetail(jobId, planId) {
       const { readJobFinderJobDetail } =
         await import("../job-finder/read-job-detail");

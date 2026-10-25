@@ -721,7 +721,9 @@ export class AssistantSessionHost {
       loadedGroups: assistantToolGroupValues,
     });
     const mcp = await connectAssistantMcp(allTools, {
-      service: this.service, ports: this.ports, session,
+      service: this.service,
+      ports: this.ports,
+      session,
     });
     const tools = mcp.tools.map((definition) =>
       this.withOperationRecord(
@@ -744,14 +746,39 @@ export class AssistantSessionHost {
         loadedToolNames: [...loadedToolNames],
       }).map(assistantModelToolDefinition);
     let lastEstimate = 0;
+    let recoverEmptyReply = false;
+    let model = handle.createModel(conversationId);
 
     this.startStallWatch(live);
     let result: Awaited<ReturnType<typeof runConversationTurn>>;
     try {
       result = await runConversationTurn({
-        model: handle.createModel(conversationId),
+        model: { chatWithTools: (...args) => model.chatWithTools(...args) },
         tools,
         getToolDefinitions: definitions,
+        onEmptyReply: async (detail) => {
+          recoverEmptyReply = true;
+          // A fresh provider cache key mirrors the successful new-chat path;
+          // the canonical request, grants and current actions stay in this turn.
+          model = handle.createModel(
+            `${conversationId}:recovery:${live.turn.id}`,
+          );
+          this.log(
+            "Empty Assistant response; retrying with completed tool history removed",
+            {
+              conversationId,
+              estimatedInputTokens: lastEstimate,
+              toolCount: definitions().length,
+              ...detail,
+            },
+          );
+          await this.appendNotice(
+            conversationId,
+            live.turn.id,
+            "continued",
+            "The AI returned an empty reply. Retrying your request with a shorter context.",
+          );
+        },
         signal: live.controller.signal,
         isCurrent: () => live.generation === live.turn.generation,
         ceilings: {
@@ -784,6 +811,8 @@ export class AssistantSessionHost {
           const messages = await assembleModelInput({
             repository: this.repository,
             conversationId,
+            activeTurnId: live.turn.id,
+            recoverEmptyReply,
             systemPrompt,
             currentContext,
             turnMessages,
@@ -1948,31 +1977,17 @@ export class AssistantSessionHost {
    * told on its next turn.
    */
   async closeQuestionsAnsweredElsewhere(): Promise<void> {
-    if (this.linkedQuestions.size === 0) return;
-    let snapshot;
-    try {
-      snapshot = await this.readWorkspaceSnapshot();
-    } catch {
-      return;
-    }
-    const states = new Map(
-      snapshot.userActionRequests.map((request) => [request.id, request]),
-    );
+    if (this.linkedQuestions.size === 0 || !this.ports.readNeed) return;
     for (const [key, link] of [...this.linkedQuestions]) {
-      const request = states.get(link.requestId);
-      const settled =
-        !request ||
-        ["resolved", "skipped", "cancelled", "expired", "superseded"].includes(
-          request.state,
-        );
-      if (!settled) continue;
+      const id = Number(link.requestId);
+      if (!Number.isSafeInteger(id) || id <= 0) continue;
+      try {
+        if (await this.ports.readNeed(id)) continue;
+      } catch {
+        continue;
+      }
       this.linkedQuestions.delete(key);
-      const how =
-        request?.state === "resolved"
-          ? "Answered on the Needs you screen."
-          : request
-            ? `The Needs you step was ${request.state}.`
-            : "The Needs you step is no longer waiting.";
+      const how = "The Needs you step is no longer waiting.";
       const page = await this.repository.listMessages(link.conversationId, {
         limit: 60,
       });

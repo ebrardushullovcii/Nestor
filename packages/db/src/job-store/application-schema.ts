@@ -145,6 +145,7 @@ WHEN OLD.stage = 'resume' AND NEW.stage NOT IN ('resume', 'applied') BEGIN
 END;
 
 -- Form answer memory belongs to Needs you, never Profile or a workspace blob.
+CREATE TABLE IF NOT EXISTS form_answer_undo (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, items_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS form_answers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   answer_key TEXT NOT NULL,

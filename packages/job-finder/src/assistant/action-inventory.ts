@@ -69,7 +69,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   {
     id: "profile.edit_background",
     screen: "Profile",
-    action: "Projects, links, languages, proof points, saved answers",
+    action: "Projects, links, languages, proof points",
     channels: ["job-finder:save-profile"],
     coverage: tools("edit_profile"),
   },

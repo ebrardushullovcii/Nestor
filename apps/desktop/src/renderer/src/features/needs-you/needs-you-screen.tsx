@@ -207,7 +207,7 @@ export function NeedsYouScreen() {
     [showToast],
   );
   async function forget(ids: number[], everything = false) {
-    const forgotten = await window.nestor.needsYou.run(
+    const { forgotten } = await window.nestor.needsYou.run(
       "forget_form_answers",
       everything ? { filter: { text }, except: [...selection.ids] } : { ids },
     );

@@ -1,8 +1,13 @@
-import { openJobStore } from "@nestor/db/job-store";
+import {
+  openJobStore,
+  createJobSitesStore,
+  createSourceAccessStore,
+} from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "../applications/needs-you-commands";
 import {
   JOB_COMMANDS,
+  AssistantChangeReceiptSchema,
   SavedFormAnswersPageSchema,
   type JobCommandOutputs,
 } from "@nestor/contracts";
@@ -23,11 +28,23 @@ it("creates and reads the real Needs you answer library through MCP", async () =
   const store = openJobStore(":memory:");
   const applications = createApplicationStore(store);
   const run = createNeedsYouCommandRunner(() => applications, {
+    retry: () => Promise.resolve(),
     open: () => Promise.resolve(false),
     check: () => Promise.resolve(false),
   });
   const ctx = context();
   ctx.session.assertPersonAnswerAuthority = () => Promise.resolve();
+  ctx.session.recordChange = vi.fn((input) =>
+    Promise.resolve({
+      receipt: AssistantChangeReceiptSchema.parse({
+        id: "receipt",
+        conversationId: "chat",
+        ...input,
+        createdAt: new Date().toISOString(),
+      }),
+      part: { type: "text", text: "Saved answer changed" },
+    }),
+  );
   const mcp = await connectAssistantMcp(needsYouCommandTools(run), ctx);
   try {
     for (const [prompt, answer] of [
@@ -67,6 +84,40 @@ it("creates and reads the real Needs you answer library through MCP", async () =
       kind: "notice_period",
       answer: "Two weeks",
     });
+    const notice = applications.needsYou.getAnswerByKey({
+      key: "notice_period",
+    })!;
+    const edit = await mcp.tools
+      .find((tool) => tool.name === "save_form_answer")!
+      .execute({ id: notice.id, answer: "Four weeks" }, ctx);
+    const editChange = edit.data as { undoId: number };
+    expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
+      "Four weeks",
+    );
+    const forgot = await mcp.tools
+      .find((tool) => tool.name === "forget_form_answers")!
+      .execute({ ids: [notice.id] }, ctx);
+    const forgetChange = forgot.data as { undoId: number };
+    expect(applications.needsYou.savedAnswer(notice.id)).toBeNull();
+    await run("undo_form_answer_change", { undoId: forgetChange.undoId });
+    expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
+      "Four weeks",
+    );
+    await run("undo_form_answer_change", { undoId: editChange.undoId });
+    expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
+      "Two weeks",
+    );
+    const earlier = await run("save_form_answer", {
+      id: notice.id,
+      answer: "Three weeks",
+    });
+    await run("save_form_answer", { id: notice.id, answer: "Five weeks" });
+    expect(
+      await run("undo_form_answer_change", { undoId: earlier.undoId! }),
+    ).toEqual({ changed: 0, skipped: 1 });
+    expect(applications.needsYou.savedAnswer(notice.id)?.answer).toBe(
+      "Five weeks",
+    );
     expect(
       applications.needsYou.answersForQuestions(
         1,
@@ -143,6 +194,38 @@ function context(): AssistantToolContext {
     session: { assertCurrent: vi.fn(), signal: new AbortController().signal },
   } as unknown as AssistantToolContext;
 }
+
+it("reads a source sign-in item and retries its site without completing it early", async () => {
+  const store = openJobStore(":memory:");
+  try {
+    const sites = createJobSitesStore(store);
+    sites.add({ text: "http://127.0.0.1:47950/gated/" });
+    const site = sites.list({}).rows[0]!;
+    const access = createSourceAccessStore(store);
+    const id = access.request(site.id, "Sign in to view jobs")!;
+    const retry = vi.fn(() => Promise.resolve());
+    const run = createNeedsYouCommandRunner(
+      () => createApplicationStore(store),
+      {
+        open: () => Promise.resolve(true),
+        check: () => Promise.resolve(false),
+        retry,
+      },
+    );
+    expect((await run("get_need", { id }))?.task.source).toMatchObject({
+      id: site.id,
+      url: site.url,
+    });
+    expect(await run("retry_need", { id })).toBe(true);
+    expect(retry).toHaveBeenCalledWith(site.id);
+    expect(access.pending(site.id)).toBe(true);
+    access.complete(site.id);
+    expect(await run("retry_need", { id })).toBe(false);
+    expect(retry).toHaveBeenCalledTimes(1);
+  } finally {
+    store.close();
+  }
+});
 
 it("lists, shortlists and undoes real stored jobs over MCP using the screen commands", async () => {
   const store = openJobStore(":memory:");
@@ -251,6 +334,43 @@ it("discovers a newly registered command without another Assistant schema or too
     };
     await expect(tool.execute({ count: 5 }, ctx)).rejects.toThrow("Stopped");
     expect(run).toHaveBeenCalledTimes(1);
+  } finally {
+    await mcp.close();
+  }
+});
+
+it("accepts activity status on strict store commands without passing it to the command", async () => {
+  const run = vi.fn((_name: "read", input: { id: number }) =>
+    Promise.resolve(input),
+  );
+  const commands = assistantCommandTools(
+    {
+      read: {
+        effect: "read",
+        description: "Read",
+        input: z.object({ id: z.number() }).strict(),
+      },
+    },
+    run,
+    { group: "workspace" },
+  );
+  const ctx = context();
+  ctx.session.now = () => "2026-10-25T12:00:00.000Z";
+  const mcp = await connectAssistantMcp(commands, ctx);
+  try {
+    const tool = toConversationTool(mcp.tools[0]!, ctx, {
+      parts: [],
+      activity: [],
+      endTurn: null,
+      touched: [],
+    });
+    expect(
+      await tool.execute(
+        JSON.stringify({ id: 1, status: "Reading the current record" }),
+        { step: 1 },
+      ),
+    ).toMatchObject({ status: "done" });
+    expect(run).toHaveBeenCalledWith("read", { id: 1 });
   } finally {
     await mcp.close();
   }

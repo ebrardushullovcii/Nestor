@@ -89,7 +89,7 @@ export function SavedAnswerPane(props: {
                   setError(null);
                   void window.nestor.needsYou
                     .run("save_form_answer", { id: props.id, answer })
-                    .then((saved) => {
+                    .then(({ saved }) => {
                       if (!saved)
                         throw new Error("This answer no longer exists.");
                       props.onEditing(false);
