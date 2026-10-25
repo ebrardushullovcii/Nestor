@@ -673,3 +673,79 @@ it("shares stable-key answers, kinds and proof references with Needs you and ign
   ).toBe(first.id);
   expect(applications.needsYou.savedAnswer(first.id)?.answer).toBe("6");
 });
+
+it("shares one access card per site through sign-in, CAPTCHA and MFA but verifies each application", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+  const rows = [
+    applications.claimNext()!,
+    applications.claimNext()!,
+    applications.claimNext()!,
+  ];
+  const memory = applications.needsYou;
+  const tasks = rows.map((row, index) =>
+    memory.request({
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "site_access",
+      key: `different:${index}`,
+      kind: (["sign_in", "captcha", "mfa"] as const)[index]!,
+      scope: { siteOrigin: "https://jobs.example.test" },
+      prompt: "Finish the site step",
+      input: "text",
+      options: [],
+    }),
+  );
+  expect(tasks.every((task) => task.status === "needs_you")).toBe(true);
+  const task = memory.list().rows[0]!;
+  expect(memory.list().rows).toHaveLength(1);
+  expect(task.kind).toBe("mfa");
+  expect(memory.counts()).toMatchObject({ sign_in: 0, captcha: 0, mfa: 1 });
+  expect(memory.completeAccess(task.id, 999)).toBe(false);
+  expect(memory.completeAccess(task.id, rows[0]!.id)).toBe(true);
+  expect(applications.getApplication(rows[0]!.id)?.state).toBe("queued");
+  expect(applications.getApplication(rows[1]!.id)?.state).toBe("needs_you");
+  expect(memory.details(task.id)?.applications.map((row) => row.id)).toEqual(
+    rows.slice(1).map((row) => row.id),
+  );
+  expect(memory.completeAccess(task.id, rows[0]!.id)).toBe(false);
+  memory.completeAccess(task.id, rows[1]!.id);
+  expect(memory.list().total).toBe(1);
+  applications.stop(rows[2]!.id);
+  expect(memory.list().total).toBe(0);
+  expect(memory.listAnswers().total).toBe(0);
+});
+
+it("keeps access checks scoped to a site and does not skip another unanswered question", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const rows = [applications.claimNext()!, applications.claimNext()!];
+  const memory = applications.needsYou;
+  const tasks = rows.map((row, index) =>
+    memory.request({
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "site_access",
+      key: "access",
+      kind: "captcha",
+      scope: { siteOrigin: `https://site${index}.example.test` },
+      prompt: "Complete the CAPTCHA",
+      input: "text",
+      options: [],
+    }),
+  );
+  memory.request(question(rows[0]!.id, rows[0]!.attempt));
+  expect(memory.list().total).toBe(3);
+  const task = tasks[0]!;
+  if (task.status !== "needs_you") throw new Error("Missing access task");
+  memory.completeAccess(task.task.id, rows[0]!.id);
+  expect(applications.getApplication(rows[0]!.id)?.state).toBe("needs_you");
+  expect(memory.list().rows.map((task) => task.kind)).toEqual([
+    "captcha",
+    "question",
+  ]);
+  const pending = memory.list().rows.find((task) => task.kind === "question")!;
+  memory.answer({ id: pending.id, answer: "No", remember: true });
+  expect(applications.getApplication(rows[0]!.id)?.state).toBe("queued");
+  expect(applications.getApplication(rows[1]!.id)?.state).toBe("needs_you");
+});

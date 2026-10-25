@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   createPlaywrightApplyPageMechanics,
   readRawApplyPage,
+  collectApplyDocumentSnapshot,
+  APPLY_PAGE_SELECTORS,
 } from "./apply-page-mechanics";
 
 /**
@@ -59,6 +61,37 @@ describe("reading the choices of lists the page draws itself", () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
+
+  test("a detached native read retains a checked challenge and never reads password or one-time-code values", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<label>Password <input type="password" value="synthetic-secret"></label>
+        <label>Verification code <input autocomplete="one-time-code" value="123456"></label>
+        <label><input type="checkbox" checked>I am not a robot</label>
+        <p role="alert" hidden>Please verify you are human</p><p role="alert">Visible error</p>`);
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      const automated = await readRawApplyPage(page);
+      expect(native.controls).toEqual(
+        automated.controls.map((control, index) =>
+          index < 2 ? { ...control, value: "" } : control,
+        ),
+      );
+      expect(
+        native.controls.map((control: { value: string }) => control.value),
+      ).toEqual(["", "", "on"]);
+      expect(native.controls[2]!.checked).toBe(true);
+      expect(native.validationErrors).toEqual(["Visible error"]);
+      expect(automated.validationErrors).toEqual(["Visible error"]);
+      expect(JSON.stringify(native)).not.toContain("synthetic-secret");
+      expect(JSON.stringify(native)).not.toContain("123456");
+    } finally {
+      await page.close();
+    }
+  });
 
   test("full text and link reads retain the tail of a long listing page", async () => {
     const page = await browser.newPage();

@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import {
   buildApplyFormObservation,
+  canContinueApplicationAfterAccess,
   hasSubmissionConfirmationText,
   type ApplyAgentResult,
+  type ApplyBlocker,
 } from "@nestor/browser-agent";
 import {
   applicationPreparationConcurrency,
@@ -107,8 +109,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
-  const accessWallSeen = new Set<number>();
-  const accessContinued = new Set<number>();
   const capacity = applicationPreparationConcurrency(
     String(deps.concurrency ?? 4),
   );
@@ -243,6 +243,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ? await deps.authorizeSending({ application: row, artifact, job, signal })
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
+    const target = job.applyUrl ?? job.url;
     let startingUrl: string | undefined;
     if (
       row.attempt > 1 &&
@@ -251,12 +252,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           previous.execution.state,
         ))
     ) {
-      const transferred = await browser.transferApplicationPageBinding?.(
-        "target_site",
-        applicationIdentity(row.id, previous?.attempt ?? row.attempt - 1)
-          .resultId,
-        identity.resultId,
-      );
+      const transferred = await browser
+        .transferApplicationPageBinding?.(
+          "target_site",
+          applicationIdentity(row.id, previous?.attempt ?? row.attempt - 1)
+            .resultId,
+          identity.resultId,
+        )
+        .catch(() => false);
       if (transferred)
         startingUrl =
           (
@@ -269,9 +272,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         await browser.reloadApplicationPageBinding?.(
           "target_site",
           identity.resultId,
+          target,
         );
+      if (previous?.accessRecheck) startingUrl = target;
     }
-    const target = job.applyUrl ?? job.url;
     const origin = new URL(target).origin;
     const allowedOrigins = new Set([
       origin,
@@ -471,6 +475,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       applications.continuePreparation(row.id, row.attempt);
       return;
     }
+    await checkApplicationAccess(row);
+    if (
+      applications.getApplication(row.id)?.state === "needs_you" &&
+      applications.needsYou.accessForApplication(row.id).length
+    ) {
+      waiting.set(row.id, row.attempt);
+      return;
+    }
     if (result.state === "failed" || result.state === "unsupported") {
       applications.finishPreparation({
         id: row.id,
@@ -478,6 +490,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         state: "failed",
         error: result.detail,
       });
+      await closePage(row.id, row.attempt);
       return;
     }
     let fromMemory = false;
@@ -505,26 +518,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       prepared?.finalUrl ?? result.replay.lastUrl ?? target,
     ).origin;
     for (const pause of prepared?.pauses ?? []) {
-      const code = pause.blocker?.code;
-      const kind: NeedsYouKind | null =
-        code === "security_challenge" && pause.blocker?.requiresPerson
-          ? "captcha"
-          : code === "multi_factor_required"
-            ? "mfa"
-            : code === "site_login_required" ||
-                code === "account_creation_required"
-              ? "sign_in"
-              : null;
+      const kind = accessKind(pause.blocker);
       if (kind)
         applications.needsYou.request({
           applicationId: row.id,
           attempt: row.attempt,
-          fieldKey: kind,
+          fieldKey: "site_access",
           kind,
-          key:
-            kind === "sign_in"
-              ? `${kind}:${taskOrigin}`
-              : `${kind}:application:${row.id}`,
+          key: `access:${taskOrigin}`,
           scope: { siteOrigin: taskOrigin },
           prompt: pause.summary,
           input: "text",
@@ -764,6 +765,76 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     return true;
   }
 
+  function accessKind(
+    blocker: ApplyBlocker | null | undefined,
+  ): Exclude<NeedsYouKind, "question"> | null {
+    return blocker?.code === "security_challenge" && blocker.requiresPerson
+      ? "captcha"
+      : blocker?.code === "multi_factor_required"
+        ? "mfa"
+        : blocker?.code === "site_login_required" ||
+            blocker?.code === "account_creation_required"
+          ? "sign_in"
+          : null;
+  }
+
+  async function checkApplicationAccess(row: ApplicationRow): Promise<void> {
+    const access = applications.needsYou.accessForApplication(row.id);
+    if (!access.length) return;
+    const key = applicationIdentity(row.id, row.attempt).resultId;
+    const personPage = await browser
+      .readApplicationPageWithPerson?.("target_site", key)
+      .catch(() => null);
+    // A login page may stay a login page even with a valid shared cookie.
+    // Let the engine retry its original application entry once, keeping this
+    // task linked until that exact application reaches an accessible form.
+    if (!personPage && applications.getWork(row.id)?.accessRecheck) {
+      applications.recheckAccess(row.id, row.attempt);
+      return;
+    }
+    const raw =
+      personPage ??
+      (await browser
+        .readApplicationPageBinding?.("target_site", key)
+        .catch(() => null));
+    if (!raw || raw.loading || !current(row)) return;
+    const page = buildApplyFormObservation(raw, new Date().toISOString());
+    const kind = accessKind(page.blocker);
+    if (kind) {
+      if (
+        row.state === "needs_you" &&
+        (kind === access[0]!.kind ||
+          kind === "sign_in" ||
+          (kind === "captcha" && access[0]!.kind === "mfa"))
+      )
+        return;
+      applications.needsYou.request({
+        applicationId: row.id,
+        attempt: row.attempt,
+        fieldKey: "site_access",
+        kind,
+        key: access[0]!.key,
+        scope: access[0]!.scope,
+        prompt: page.blocker!.summary,
+        input: "text",
+        options: [],
+      });
+      return;
+    }
+    const job = jobs.getJob(row.jobId);
+    const destination = page.origin;
+    if (!job || !destination || !canContinueApplicationAfterAccess(page))
+      return;
+    for (const task of access) {
+      if (
+        destination !== task.scope.siteOrigin &&
+        destination !== new URL(job.applyUrl ?? job.url).origin
+      )
+        continue;
+      applications.needsYou.completeAccess(task.id, row.id);
+    }
+  }
+
   async function watch(): Promise<void> {
     if (stopped || watching) return;
     watching = true;
@@ -784,48 +855,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           waiting.delete(id);
           continue;
         }
-        const identity = applicationIdentity(id, attempt);
         if (await recordPersonSubmission(row, attempt)) continue;
-        const access = applications.needsYou.accessForApplication(id);
-        if (access.length > 0) {
-          const raw = await browser
-            .readApplicationPageBinding?.("target_site", identity.resultId)
-            .catch(() => null);
-          if (raw) {
-            const observed = buildApplyFormObservation(
-              raw,
-              new Date().toISOString(),
-            );
-            const blocked =
-              observed.controls.some(
-                (control) =>
-                  control.visible && control.credentialRole === "password",
-              ) ||
-              !!(
-                observed.blocker &&
-                ([
-                  "site_login_required",
-                  "account_creation_required",
-                  "multi_factor_required",
-                ].includes(observed.blocker.code) ||
-                  (observed.blocker.code === "security_challenge" &&
-                    observed.blocker.requiresPerson))
-              );
-            if (blocked) {
-              accessWallSeen.add(id);
-              accessContinued.delete(id);
-            } else if (
-              !observed.loading &&
-              (accessWallSeen.has(id) || !accessContinued.has(id))
-            ) {
-              accessWallSeen.delete(id);
-              accessContinued.add(id);
-              for (const task of access)
-                applications.needsYou.completeAccess(task.id, id);
-              continue;
-            }
-          }
-        }
+        await checkApplicationAccess(row);
       }
     } finally {
       watching = false;
@@ -912,6 +943,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       }
       stopped = false;
       applications.recoverPreparation();
+      for (const state of ["ready", "needs_you"] as const)
+        for (const row of applications.listWorkInState(state))
+          waiting.set(row.id, row.attempt);
       unsubscribe = jobs.onChange((change) => {
         if (change.cause !== "application" && !change.stages.includes("resume"))
           return;
@@ -974,27 +1008,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       if (!details || details.task.kind === "question") return false;
       for (const row of details.applications) {
         const app = applications.getApplication(row.id);
-        if (!app || app.state !== "needs_you") continue;
-        const page = await browser.readApplicationPageWithPerson?.(
-          "target_site",
-          applicationIdentity(app.id, app.attempt).resultId,
-        );
-        if (!page || page.loading) continue;
-        const observation = buildApplyFormObservation(
-          page,
-          new Date().toISOString(),
-        );
-        if (
-          observation.blocker ||
-          observation.controls.some(
-            (control) =>
-              control.visible && control.credentialRole === "password",
-          )
-        )
-          continue;
-        if (applications.needsYou.completeAccess(taskId, app.id)) return true;
+        if (app?.state === "needs_you") await checkApplicationAccess(app);
       }
-      return false;
+      return applications.needsYou.details(taskId) === null;
     },
     async stopApplication(id: number): Promise<boolean> {
       const row = applications.getApplication(id);

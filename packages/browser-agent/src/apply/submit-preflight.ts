@@ -82,13 +82,7 @@ export function checkFormReadiness(
       ok: false,
       reason: `The page is still showing a problem: ${invalid?.validationMessage || observation.validationErrors[0] || invalid?.label}`,
     };
-  const { index, total } = observation.step;
-  if (
-    (index !== null && total !== null && index < total) ||
-    observation.actions.some(
-      (action) => action.kind === "advance" && action.visible,
-    )
-  ) {
+  if (hasRemainingApplicationStep(observation)) {
     return {
       ok: false,
       reason:
@@ -162,4 +156,15 @@ export function runSubmitPreflight(input: {
   }
 
   return checkFormReadiness(observation);
+}
+
+/** An optional Save on an explicitly final review step does not mean another step. */
+export function hasRemainingApplicationStep(
+  observation: ApplyFormObservation,
+): boolean {
+  const { index, total } = observation.step;
+  if (index !== null && total !== null) return index < total;
+  return observation.actions.some(
+    (action) => action.kind === "advance" && action.visible,
+  );
 }

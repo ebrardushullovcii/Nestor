@@ -69,6 +69,8 @@ export {
 export {
   createPlaywrightApplyPageMechanics,
   readRawApplyPage,
+  APPLY_PAGE_SELECTORS,
+  collectApplyDocumentSnapshot,
   APPLY_ACTION_SELECTOR,
   APPLY_CONTROL_SELECTOR,
 } from "./apply-page-mechanics";

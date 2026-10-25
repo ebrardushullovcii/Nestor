@@ -343,11 +343,13 @@ export interface BrowserSessionRuntime {
   /**
    * Reload the exact retained application page once: the person signed in
    * to the same site in another tab, and this page still shows the sign-in
-   * it loaded before that.
+   * it loaded before that. A known application URL can re-enter the flow
+   * when a sign-in form stays visible after the session changes.
    */
   reloadApplicationPageBinding?(
     source: JobSource,
     pageBindingKey: string,
+    applicationUrl?: string,
   ): Promise<void>;
   /** Arm one native POST action on the exact retained page for a person. */
   armApplicationFormAction?(

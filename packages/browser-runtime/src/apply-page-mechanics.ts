@@ -516,381 +516,384 @@ export async function readApplyStepLabel(
     .catch(() => null);
 }
 
-async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
-  const selectors = {
-    controls: APPLY_CONTROL_SELECTOR,
-    actions: APPLY_ACTION_SELECTOR,
-    links: APPLY_LINK_SELECTOR,
-    validationErrors: "[role='alert'], [aria-live='assertive']",
-    headings: "h1, h2, h3, [role='heading']",
-    clickables: APPLY_CLICKABLE_SELECTOR,
+export const APPLY_PAGE_SELECTORS = {
+  controls: APPLY_CONTROL_SELECTOR,
+  actions: APPLY_ACTION_SELECTOR,
+  links: APPLY_LINK_SELECTOR,
+  validationErrors: "[role='alert'], [aria-live='assertive']",
+  headings: "h1, h2, h3, [role='heading']",
+  clickables: APPLY_CLICKABLE_SELECTOR,
+};
+
+/** Pure DOM snapshot, also usable after the person detaches the automation connection. */
+export function collectApplyDocumentSnapshot(
+  elements: Element[],
+  selectors: typeof APPLY_PAGE_SELECTORS,
+  redactCredentials = false,
+) {
+  const matching = (selector: string) =>
+    elements.filter((element) => element.matches(selector));
+  const safe = <T>(read: () => T, fallback: T): T => {
+    try {
+      return read();
+    } catch {
+      return fallback;
+    }
   };
-  // One DOM snapshot, preserving selector order and shadow-root access.
-  const [snapshot, stepLabel, openedTabs] = await Promise.all([
-    page
-      .locator(Object.values(selectors).join(", "))
-      .evaluateAll((elements, selectors) => {
-        const matching = (selector: string) =>
-          elements.filter((element) => element.matches(selector));
-        const safe = <T>(read: () => T, fallback: T): T => {
-          try {
-            return read();
-          } catch {
-            return fallback;
-          }
-        };
-        const controls = ((elements: Element[]): RawApplyControl[] => {
-          const labelText = (element: Element | null): string => {
-            if (!element) return "";
-            const clone = element.cloneNode(true) as Element;
-            clone
-              .querySelectorAll(
-                "input, textarea, select, [role='option'], [role='listbox']",
+  const controls = ((elements: Element[]): RawApplyControl[] => {
+    const labelText = (element: Element | null): string => {
+      if (!element) return "";
+      const clone = element.cloneNode(true) as Element;
+      clone
+        .querySelectorAll(
+          "input, textarea, select, [role='option'], [role='listbox']",
+        )
+        .forEach((control) => control.remove());
+      return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+    };
+    const isVisible = (element: HTMLElement): boolean => {
+      if (element.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
+      const style = window.getComputedStyle(element);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0" &&
+        element.getClientRects().length > 0
+      );
+    };
+    const referencedText = (element: Element): string =>
+      (element.getAttribute("aria-labelledby") ?? "")
+        .split(/\s+/u)
+        .filter(Boolean)
+        .map((id) => labelText(document.getElementById(id)))
+        .join(" ")
+        .trim();
+    const directLabel = (element: Element): string => {
+      const aria = element.getAttribute("aria-label")?.trim();
+      if (aria) return aria;
+      const referenced = referencedText(element);
+      if (referenced) return referenced;
+      const labelled = element as HTMLInputElement;
+      const labels =
+        "labels" in labelled && labelled.labels
+          ? Array.from(labelled.labels)
+          : [];
+      const text = labels
+        .map((label) => labelText(label))
+        .filter(Boolean)
+        .join(" ");
+      if (text) return text;
+      const enclosing = labelText(element.closest("label"));
+      if (enclosing) return enclosing;
+      let ancestor = element.parentElement;
+      for (let depth = 0; ancestor && depth < 5; depth += 1) {
+        const clone = ancestor.cloneNode(true) as HTMLElement;
+        clone
+          .querySelectorAll(
+            "input, textarea, select, button, [role='option'], [role='listbox']",
+          )
+          .forEach((candidate) => candidate.remove());
+        const nearby = (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+        if (nearby.length > 0 && nearby.length <= 500) return nearby;
+        ancestor = ancestor.parentElement;
+      }
+      return "";
+    };
+    const groupLabel = (element: Element): string => {
+      const legends: string[] = [];
+      let fieldset = element.closest("fieldset");
+      while (fieldset) {
+        const legend = labelText(fieldset.querySelector(":scope > legend"));
+        if (legend && !legends.includes(legend)) legends.unshift(legend);
+        fieldset = fieldset.parentElement?.closest("fieldset") ?? null;
+      }
+      if (legends.length > 0) return legends.join(" — ");
+      const group = element.closest("[role='group'], [role='radiogroup']");
+      return group
+        ? group.getAttribute("aria-label")?.trim() || referencedText(group)
+        : "";
+    };
+    const customOptions = (element: HTMLElement): string[] => {
+      // Only a list this control says is its own. Reaching into the
+      // nearest listbox in the DOM is how a phone number field ended up
+      // carrying the 200 countries belonging to the picker beside it,
+      // and then refusing the number as "not one of the choices".
+      const owned =
+        element.getAttribute("aria-controls") ??
+        element.getAttribute("aria-owns");
+      const listbox = owned ? document.getElementById(owned) : null;
+      if (!listbox) return [];
+      return Array.from(listbox.querySelectorAll("[role='option']"))
+        .map((option) => option.textContent?.trim() ?? "")
+        .filter(Boolean)
+        .slice(0, 200);
+    };
+
+    const roots = Array.from(
+      new Set(elements.map((element) => element.getRootNode())),
+    );
+    const scopeKeyFor = (element: Element): string => {
+      const root = element.getRootNode();
+      const rootIndex = roots.indexOf(root);
+      const form =
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+          ? element.form
+          : null;
+      const forms =
+        root instanceof Document || root instanceof ShadowRoot
+          ? Array.from(root.querySelectorAll("form"))
+          : [];
+      return `r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
+    };
+
+    return elements.map((element, index) => {
+      const html = element as HTMLElement;
+      const input = element instanceof HTMLInputElement ? element : null;
+      const textarea = element instanceof HTMLTextAreaElement ? element : null;
+      const select = element instanceof HTMLSelectElement ? element : null;
+      const role = element.getAttribute("role")?.toLowerCase() ?? "";
+      const tagName = select
+        ? "select"
+        : textarea
+          ? "textarea"
+          : input
+            ? "input"
+            : "contenteditable";
+      return {
+        index,
+        tagName,
+        inputType: input?.type.toLowerCase() ?? (role || tagName),
+        accept: input?.accept ?? "",
+        min: input?.min ?? "",
+        max: input?.max ?? "",
+        step: input?.step ?? "",
+        maxLength: input?.maxLength ?? textarea?.maxLength ?? -1,
+        role,
+        id: html.id ?? "",
+        name: input?.name ?? textarea?.name ?? select?.name ?? "",
+        scopeKey: scopeKeyFor(element),
+        label: directLabel(element),
+        groupLabel: groupLabel(element),
+        placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
+        autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
+        required:
+          Boolean(input?.required ?? textarea?.required ?? select?.required) ||
+          element.getAttribute("aria-required") === "true",
+        invalid:
+          element.getAttribute("aria-invalid") === "true" ||
+          Boolean(
+            (input ?? textarea ?? select)?.validity &&
+            !(input ?? textarea ?? select)?.validity.valid,
+          ),
+        validationMessage:
+          input?.validationMessage ??
+          textarea?.validationMessage ??
+          select?.validationMessage ??
+          "",
+        disabled:
+          Boolean(input?.disabled ?? textarea?.disabled ?? select?.disabled) ||
+          element.matches(":disabled") ||
+          element.getAttribute("aria-disabled") === "true",
+        readOnly: Boolean(input?.readOnly ?? textarea?.readOnly),
+        // A file input is almost always hidden behind a styled "Attach"
+        // button (Lever, Greenhouse, Workday). Attaching works on the
+        // hidden input, so it stays in the observation; without it the
+        // run saw only the button and could never attach the resume.
+        visible:
+          (input?.type === "file" && !input.matches(":disabled")) ||
+          isVisible(html),
+        value:
+          (redactCredentials &&
+          (input?.type === "password" ||
+            input?.autocomplete === "one-time-code" ||
+            /(?:verification|authentication|one.time) code|\botp\b/iu.test(
+              `${input?.name ?? ""} ${directLabel(element)}`,
+            ))
+            ? ""
+            : input?.value) ??
+          textarea?.value ??
+          select?.value ??
+          html.textContent ??
+          "",
+        checked:
+          input?.checked ?? element.getAttribute("aria-checked") === "true",
+        multiple: select?.multiple ?? false,
+        options: select
+          ? Array.from(select.options)
+              .filter(
+                (option) =>
+                  !option.disabled &&
+                  !(
+                    option.parentElement instanceof HTMLOptGroupElement &&
+                    option.parentElement.disabled
+                  ) &&
+                  !(select.required && option.value === ""),
               )
-              .forEach((control) => control.remove());
-            return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
-          };
-          const isVisible = (element: HTMLElement): boolean => {
-            if (element.getAttribute("aria-hidden") === "true") {
-              return false;
+              .map((option) => option.label.trim())
+              .filter(Boolean)
+          : customOptions(html),
+        selectedOptionLabel:
+          select?.selectedOptions.item(0)?.label.trim() ??
+          element.getAttribute("aria-valuetext")?.trim() ??
+          "",
+      };
+    });
+  })(matching(selectors.controls));
+  const actions = ((elements: Element[]): RawApplyAction[] =>
+    elements.map((element, index) => {
+      const html = element as HTMLElement;
+      const input = element instanceof HTMLInputElement ? element : null;
+      const button = element instanceof HTMLButtonElement ? element : null;
+      const actionElement = input ?? button;
+      const form = actionElement?.form ?? null;
+      const style = window.getComputedStyle(html);
+      return {
+        index,
+        label:
+          element.getAttribute("aria-label")?.trim() ||
+          input?.value.trim() ||
+          html.innerText.trim(),
+        visible:
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          html.getClientRects().length > 0,
+        disabled:
+          Boolean(input?.disabled ?? button?.disabled) ||
+          element.getAttribute("aria-disabled") === "true",
+        ...(form
+          ? {
+              formAction: new URL(
+                (actionElement?.hasAttribute("formaction")
+                  ? actionElement.formAction
+                  : form.action) || window.location.href,
+                window.location.href,
+              ).toString(),
+              formMethod: (
+                (actionElement?.hasAttribute("formmethod")
+                  ? actionElement.formMethod
+                  : form.method) || "GET"
+              ).toUpperCase(),
             }
-            const style = window.getComputedStyle(element);
-            return (
+          : {}),
+      };
+    }))(matching(selectors.actions));
+  const links = safe(
+    () =>
+      ((elements: Element[]): RawApplyLink[] =>
+        elements.map((element, index) => {
+          const html = element as HTMLElement;
+          const anchor = element instanceof HTMLAnchorElement ? element : null;
+          const style = window.getComputedStyle(html);
+          const rect = html.getBoundingClientRect();
+          return {
+            index,
+            label:
+              element.getAttribute("aria-label")?.trim() ||
+              html.innerText.trim() ||
+              element.getAttribute("title")?.trim() ||
+              "",
+            // `href` on the element is already resolved against the page for
+            // a web address, and left as written for anything else.
+            href: anchor?.href || element.getAttribute("href") || "",
+            target: anchor?.target.trim() ?? "",
+            visible:
               style.display !== "none" &&
               style.visibility !== "hidden" &&
               style.opacity !== "0" &&
-              element.getClientRects().length > 0
-            );
+              html.getClientRects().length > 0,
+            topOffset: Math.round(rect.top + window.scrollY),
           };
-          const referencedText = (element: Element): string =>
-            (element.getAttribute("aria-labelledby") ?? "")
-              .split(/\s+/u)
-              .filter(Boolean)
-              .map((id) => labelText(document.getElementById(id)))
-              .join(" ")
-              .trim();
-          const directLabel = (element: Element): string => {
-            const aria = element.getAttribute("aria-label")?.trim();
-            if (aria) return aria;
-            const referenced = referencedText(element);
-            if (referenced) return referenced;
-            const labelled = element as HTMLInputElement;
-            const labels =
-              "labels" in labelled && labelled.labels
-                ? Array.from(labelled.labels)
-                : [];
-            const text = labels
-              .map((label) => labelText(label))
-              .filter(Boolean)
-              .join(" ");
-            if (text) return text;
-            const enclosing = labelText(element.closest("label"));
-            if (enclosing) return enclosing;
-            let ancestor = element.parentElement;
-            for (let depth = 0; ancestor && depth < 5; depth += 1) {
-              const clone = ancestor.cloneNode(true) as HTMLElement;
-              clone
-                .querySelectorAll(
-                  "input, textarea, select, button, [role='option'], [role='listbox']",
-                )
-                .forEach((candidate) => candidate.remove());
-              const nearby = (clone.textContent ?? "")
-                .replace(/\s+/gu, " ")
-                .trim();
-              if (nearby.length > 0 && nearby.length <= 500) return nearby;
-              ancestor = ancestor.parentElement;
-            }
-            return "";
-          };
-          const groupLabel = (element: Element): string => {
-            const legends: string[] = [];
-            let fieldset = element.closest("fieldset");
-            while (fieldset) {
-              const legend = labelText(
-                fieldset.querySelector(":scope > legend"),
-              );
-              if (legend && !legends.includes(legend)) legends.unshift(legend);
-              fieldset = fieldset.parentElement?.closest("fieldset") ?? null;
-            }
-            if (legends.length > 0) return legends.join(" — ");
-            const group = element.closest(
-              "[role='group'], [role='radiogroup']",
-            );
-            return group
-              ? group.getAttribute("aria-label")?.trim() ||
-                  referencedText(group)
-              : "";
-          };
-          const customOptions = (element: HTMLElement): string[] => {
-            // Only a list this control says is its own. Reaching into the
-            // nearest listbox in the DOM is how a phone number field ended up
-            // carrying the 200 countries belonging to the picker beside it,
-            // and then refusing the number as "not one of the choices".
-            const owned =
-              element.getAttribute("aria-controls") ??
-              element.getAttribute("aria-owns");
-            const listbox = owned ? document.getElementById(owned) : null;
-            if (!listbox) return [];
-            return Array.from(listbox.querySelectorAll("[role='option']"))
-              .map((option) => option.textContent?.trim() ?? "")
-              .filter(Boolean)
-              .slice(0, 200);
-          };
-
-          const roots = Array.from(
-            new Set(elements.map((element) => element.getRootNode())),
-          );
-          const scopeKeyFor = (element: Element): string => {
-            const root = element.getRootNode();
-            const rootIndex = roots.indexOf(root);
-            const form =
-              element instanceof HTMLInputElement ||
-              element instanceof HTMLTextAreaElement ||
-              element instanceof HTMLSelectElement
-                ? element.form
-                : null;
-            const forms =
-              root instanceof Document || root instanceof ShadowRoot
-                ? Array.from(root.querySelectorAll("form"))
-                : [];
-            return `r${rootIndex}${
-              form ? `form${forms.indexOf(form)}` : "root"
-            }`;
-          };
-
-          return elements.map((element, index) => {
-            const html = element as HTMLElement;
-            const input = element instanceof HTMLInputElement ? element : null;
-            const textarea =
-              element instanceof HTMLTextAreaElement ? element : null;
-            const select =
-              element instanceof HTMLSelectElement ? element : null;
-            const role = element.getAttribute("role")?.toLowerCase() ?? "";
-            const tagName = select
-              ? "select"
-              : textarea
-                ? "textarea"
-                : input
-                  ? "input"
-                  : "contenteditable";
-            return {
+        }))(matching(selectors.links)),
+    [],
+  );
+  const validationErrors = safe(
+    () =>
+      ((elements: Element[]) =>
+        elements
+          .filter(
+            (element) =>
+              element.getClientRects().length > 0 &&
+              window.getComputedStyle(element).visibility !== "hidden",
+          )
+          .map((element) => (element as HTMLElement).innerText.trim())
+          .filter((text) => text.length > 0 && text.length < 300)
+          .slice(0, 12))(matching(selectors.validationErrors)),
+    [],
+  );
+  const headings = safe(
+    () =>
+      ((elements: Element[]): RawApplyHeading[] =>
+        elements.slice(0, 60).flatMap((element) => {
+          const html = element as HTMLElement;
+          const text = html.innerText.trim().slice(0, 300);
+          if (!text) return [];
+          const explicit = element.getAttribute("aria-level");
+          const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
+          return [
+            {
+              level: Number.parseInt(explicit ?? fromTag ?? "2", 10) || 2,
+              text,
+            },
+          ];
+        }))(matching(selectors.headings)),
+    [],
+  );
+  const clickables = safe(
+    () =>
+      ((elements: Element[]): RawApplyClickable[] =>
+        elements.slice(0, 300).flatMap((element, index) => {
+          const html = element as HTMLElement;
+          const style = window.getComputedStyle(html);
+          const rect = html.getBoundingClientRect();
+          const label = (
+            element.getAttribute("aria-label")?.trim() ||
+            html.innerText.trim() ||
+            element.getAttribute("title")?.trim() ||
+            ""
+          ).slice(0, 300);
+          if (!label) return [];
+          return [
+            {
               index,
-              tagName,
-              inputType: input?.type.toLowerCase() ?? (role || tagName),
-              accept: input?.accept ?? "",
-              min: input?.min ?? "",
-              max: input?.max ?? "",
-              step: input?.step ?? "",
-              maxLength: input?.maxLength ?? textarea?.maxLength ?? -1,
-              role,
-              id: html.id ?? "",
-              name: input?.name ?? textarea?.name ?? select?.name ?? "",
-              scopeKey: scopeKeyFor(element),
-              label: directLabel(element),
-              groupLabel: groupLabel(element),
-              placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
-              autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
-              required:
-                Boolean(
-                  input?.required ?? textarea?.required ?? select?.required,
-                ) || element.getAttribute("aria-required") === "true",
-              invalid:
-                element.getAttribute("aria-invalid") === "true" ||
-                Boolean(
-                  (input ?? textarea ?? select)?.validity &&
-                  !(input ?? textarea ?? select)?.validity.valid,
-                ),
-              validationMessage:
-                input?.validationMessage ??
-                textarea?.validationMessage ??
-                select?.validationMessage ??
-                "",
-              disabled:
-                Boolean(
-                  input?.disabled ?? textarea?.disabled ?? select?.disabled,
-                ) ||
-                element.matches(":disabled") ||
-                element.getAttribute("aria-disabled") === "true",
-              readOnly: Boolean(input?.readOnly ?? textarea?.readOnly),
-              // A file input is almost always hidden behind a styled "Attach"
-              // button (Lever, Greenhouse, Workday). Attaching works on the
-              // hidden input, so it stays in the observation; without it the
-              // run saw only the button and could never attach the resume.
-              visible:
-                (input?.type === "file" && !input.matches(":disabled")) ||
-                isVisible(html),
-              value:
-                input?.value ??
-                textarea?.value ??
-                select?.value ??
-                html.textContent ??
-                "",
-              checked:
-                input?.checked ??
-                element.getAttribute("aria-checked") === "true",
-              multiple: select?.multiple ?? false,
-              options: select
-                ? Array.from(select.options)
-                    .filter(
-                      (option) =>
-                        !option.disabled &&
-                        !(
-                          option.parentElement instanceof HTMLOptGroupElement &&
-                          option.parentElement.disabled
-                        ) &&
-                        !(select.required && option.value === ""),
-                    )
-                    .map((option) => option.label.trim())
-                    .filter(Boolean)
-                : customOptions(html),
-              selectedOptionLabel:
-                select?.selectedOptions.item(0)?.label.trim() ??
-                element.getAttribute("aria-valuetext")?.trim() ??
-                "",
-            };
-          });
-        })(matching(selectors.controls));
-        const actions = ((elements: Element[]): RawApplyAction[] =>
-          elements.map((element, index) => {
-            const html = element as HTMLElement;
-            const input = element instanceof HTMLInputElement ? element : null;
-            const button =
-              element instanceof HTMLButtonElement ? element : null;
-            const actionElement = input ?? button;
-            const form = actionElement?.form ?? null;
-            const style = window.getComputedStyle(html);
-            return {
-              index,
-              label:
-                element.getAttribute("aria-label")?.trim() ||
-                input?.value.trim() ||
-                html.innerText.trim(),
+              label,
+              role: element.getAttribute("role")?.toLowerCase() ?? "",
+              tagName: element.tagName.toLowerCase(),
               visible:
                 style.display !== "none" &&
                 style.visibility !== "hidden" &&
                 style.opacity !== "0" &&
                 html.getClientRects().length > 0,
-              disabled:
-                Boolean(input?.disabled ?? button?.disabled) ||
-                element.getAttribute("aria-disabled") === "true",
-              ...(form
-                ? {
-                    formAction: new URL(
-                      (actionElement?.hasAttribute("formaction")
-                        ? actionElement.formAction
-                        : form.action) || window.location.href,
-                      window.location.href,
-                    ).toString(),
-                    formMethod: (
-                      (actionElement?.hasAttribute("formmethod")
-                        ? actionElement.formMethod
-                        : form.method) || "GET"
-                    ).toUpperCase(),
-                  }
-                : {}),
-            };
-          }))(matching(selectors.actions));
-        const links = safe(
-          () =>
-            ((elements: Element[]): RawApplyLink[] =>
-              elements.map((element, index) => {
-                const html = element as HTMLElement;
-                const anchor =
-                  element instanceof HTMLAnchorElement ? element : null;
-                const style = window.getComputedStyle(html);
-                const rect = html.getBoundingClientRect();
-                return {
-                  index,
-                  label:
-                    element.getAttribute("aria-label")?.trim() ||
-                    html.innerText.trim() ||
-                    element.getAttribute("title")?.trim() ||
-                    "",
-                  // `href` on the element is already resolved against the page for
-                  // a web address, and left as written for anything else.
-                  href: anchor?.href || element.getAttribute("href") || "",
-                  target: anchor?.target.trim() ?? "",
-                  visible:
-                    style.display !== "none" &&
-                    style.visibility !== "hidden" &&
-                    style.opacity !== "0" &&
-                    html.getClientRects().length > 0,
-                  topOffset: Math.round(rect.top + window.scrollY),
-                };
-              }))(matching(selectors.links)),
-          [],
-        );
-        const validationErrors = safe(
-          () =>
-            ((elements: Element[]) =>
-              elements
-                .map((element) => (element as HTMLElement).innerText.trim())
-                .filter((text) => text.length > 0 && text.length < 300)
-                .slice(0, 12))(matching(selectors.validationErrors)),
-          [],
-        );
-        const headings = safe(
-          () =>
-            ((elements: Element[]): RawApplyHeading[] =>
-              elements.slice(0, 60).flatMap((element) => {
-                const html = element as HTMLElement;
-                const text = html.innerText.trim().slice(0, 300);
-                if (!text) return [];
-                const explicit = element.getAttribute("aria-level");
-                const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
-                return [
-                  {
-                    level: Number.parseInt(explicit ?? fromTag ?? "2", 10) || 2,
-                    text,
-                  },
-                ];
-              }))(matching(selectors.headings)),
-          [],
-        );
-        const clickables = safe(
-          () =>
-            ((elements: Element[]): RawApplyClickable[] =>
-              elements.slice(0, 300).flatMap((element, index) => {
-                const html = element as HTMLElement;
-                const style = window.getComputedStyle(html);
-                const rect = html.getBoundingClientRect();
-                const label = (
-                  element.getAttribute("aria-label")?.trim() ||
-                  html.innerText.trim() ||
-                  element.getAttribute("title")?.trim() ||
-                  ""
-                ).slice(0, 300);
-                if (!label) return [];
-                return [
-                  {
-                    index,
-                    label,
-                    role: element.getAttribute("role")?.toLowerCase() ?? "",
-                    tagName: element.tagName.toLowerCase(),
-                    visible:
-                      style.display !== "none" &&
-                      style.visibility !== "hidden" &&
-                      style.opacity !== "0" &&
-                      html.getClientRects().length > 0,
-                    topOffset: Math.round(rect.top + window.scrollY),
-                  },
-                ];
-              }))(matching(selectors.clickables)),
-          [],
-        );
-        return {
-          controls,
-          actions,
-          links,
-          validationErrors,
-          headings,
-          clickables,
-          url: window.location.href,
-          title: document.title,
-          bodyText: document.body?.innerText.slice(0, 20_000) ?? "",
-          loading: document.readyState !== "complete",
-        };
-      }, selectors),
+              topOffset: Math.round(rect.top + window.scrollY),
+            },
+          ];
+        }))(matching(selectors.clickables)),
+    [],
+  );
+  return {
+    controls,
+    actions,
+    links,
+    validationErrors,
+    headings,
+    clickables,
+    url: window.location.href,
+    title: document.title,
+    bodyText: document.body?.innerText.slice(0, 20_000) ?? "",
+    loading: document.readyState !== "complete",
+  };
+}
+
+async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
+  // One DOM snapshot, preserving selector order and shadow-root access.
+  const [snapshot, stepLabel, openedTabs] = await Promise.all([
+    page
+      .locator(Object.values(APPLY_PAGE_SELECTORS).join(", "))
+      .evaluateAll(collectApplyDocumentSnapshot, APPLY_PAGE_SELECTORS),
     readApplyStepLabel(page),
     readOpenedTabs(page),
   ]);

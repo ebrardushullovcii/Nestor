@@ -1,3 +1,4 @@
+import type { ApplyBlocker } from "@nestor/browser-agent";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,6 +20,10 @@ import {
   type ApplicationServiceDeps,
 } from "./application-service";
 
+const preparation = vi.hoisted(() => ({
+  blocker: null as ApplyBlocker | null,
+}));
+
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
   const actual = await importOriginal<typeof ApplicationPreparation>();
   return {
@@ -34,7 +39,16 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           finalUrl: input.executionInput.job.canonicalUrl,
           filled: [],
           attachments: [],
-          pauses: [],
+          pauses: preparation.blocker
+            ? [
+                {
+                  code: "page_blocked",
+                  question: null,
+                  summary: preparation.blocker.summary,
+                  blocker: preparation.blocker,
+                },
+              ]
+            : [],
           notes: [],
           timeline: [],
           modelTurns: 0,
@@ -67,6 +81,7 @@ const ready = () =>
   });
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
+  preparation.blocker = null;
   vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
@@ -142,11 +157,18 @@ async function setup(count: number, concurrency?: number) {
   };
   const browser = {
     executeApplicationFlow: execute,
+    readApplicationPageBinding: vi.fn<
+      (source: string, key: string) => Promise<RawApplyPage | null>
+    >(() => Promise.resolve(null)),
+    reloadApplicationPageBinding: vi.fn<
+      (source: string, key: string, applicationUrl?: string) => Promise<void>
+    >(() => Promise.resolve()),
+    transferApplicationPageBinding: vi.fn(() => Promise.resolve(true)),
     handApplicationPageToPerson: vi.fn(() => Promise.resolve()),
     releaseApplicationPageBinding: vi.fn(() => Promise.resolve()),
-    readApplicationPageWithPerson: vi.fn(() =>
-      Promise.resolve(null as RawApplyPage | null),
-    ),
+    readApplicationPageWithPerson: vi.fn<
+      NonNullable<BrowserSessionRuntime["readApplicationPageWithPerson"]>
+    >(() => Promise.resolve(null as RawApplyPage | null)),
   };
   const authorizeSending = vi.fn(() => Promise.resolve(null));
   const onError = vi.fn();
@@ -273,4 +295,125 @@ it("recovers interrupted preparation but holds an interrupted send for confirmat
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
   expect(f.applications.getApplication(sending.id)?.state).toBe("uncertain");
   expect(f.applications.getApplication(filling.id)?.attempt).toBe(2);
+});
+
+it("automatically carries every waiting page on after one site sign-in and MFA, checking each checkpoint", async () => {
+  const f = await setup(3);
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  preparation.blocker = {
+    code: "site_login_required",
+    requiresPerson: true,
+    summary: "Sign in to continue",
+    detail: "Sign in",
+    nextActionLabel: "Open browser",
+  };
+  const pages = new Map<string, RawApplyPage>();
+  const key = (id: number, attempt = 1) =>
+    `application_${id}_attempt_${attempt}`;
+  const base = {
+    ...f.personPage,
+    title: "Sign in",
+    bodyText: "Sign in to continue",
+  };
+  f.browser.readApplicationPageBinding.mockImplementation((_source, id) =>
+    Promise.resolve(pages.get(id) ?? base),
+  );
+  let personKey: string | null = null;
+  f.browser.readApplicationPageWithPerson.mockImplementation((_source, id) =>
+    Promise.resolve(id === personKey ? (pages.get(id) ?? null) : null),
+  );
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "needs_you" }).rows,
+    ).toHaveLength(3),
+  );
+  const rows = f.applications
+    .listApplications()
+    .rows.sort((a, b) => a.id - b.id);
+  const first = rows[0]!;
+  const second = rows[1]!;
+  const third = rows[2]!;
+  const task = f.applications.needsYou.list().rows[0]!;
+  expect(f.applications.needsYou.list().total).toBe(1);
+  personKey = key(first.id);
+  pages.set(personKey, { ...base, bodyText: "Enter your verification code" });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(f.applications.needsYou.list().rows[0]).toMatchObject({
+    id: task.id,
+    kind: "mfa",
+  });
+  expect(f.execute).toHaveBeenCalledTimes(3);
+  // A blank or error document is never evidence that sign-in succeeded.
+  pages.set(personKey, { ...base, bodyText: "Page not found" });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(f.applications.getApplication(first.id)?.state).toBe("needs_you");
+  const accessible: RawApplyPage = {
+    ...base,
+    bodyText: "Application",
+    links: [
+      {
+        index: 0,
+        label: "Continue application",
+        href: "https://replica.test/application",
+        visible: true,
+        target: "",
+        topOffset: 0,
+      },
+    ],
+  };
+  preparation.blocker = null;
+  f.browser.transferApplicationPageBinding.mockRejectedValueOnce(
+    new Error("The exact prepared application page is no longer open."),
+  );
+  pages.set(personKey, accessible);
+  f.browser.reloadApplicationPageBinding.mockImplementation((_source, id) => {
+    // One page still has its own challenge. Sharing the cookie is not proof.
+    pages.set(
+      id,
+      id === key(third.id, 2)
+        ? { ...base, bodyText: "Verify you are human" }
+        : accessible,
+    );
+    return Promise.resolve();
+  });
+  await vi.advanceTimersByTimeAsync(2000);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(6), {
+    timeout: 5000,
+  });
+  expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
+    "target_site",
+    key(second.id, 2),
+    "https://replica.test/jobs/1",
+  );
+  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalledWith(
+    "target_site",
+    key(first.id, 2),
+    expect.anything(),
+  );
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(third.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.getApplication(second.id)?.state).toBe("ready");
+  expect(
+    f.applications.needsYou.details(task.id)?.applications.map((row) => row.id),
+  ).toEqual([third.id]);
+  personKey = key(third.id, 2);
+  pages.set(personKey, accessible);
+  await vi.advanceTimersByTimeAsync(2000);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(7));
+  expect(f.applications.needsYou.list().total).toBe(0);
+  expect(f.applications.needsYou.listAnswers().total).toBe(0);
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "ready" }).rows,
+    ).toHaveLength(3),
+  );
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  expect(f.onError).not.toHaveBeenCalled();
 });

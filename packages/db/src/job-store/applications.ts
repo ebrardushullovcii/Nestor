@@ -262,7 +262,7 @@ export function createApplicationStore(store: JobStore) {
               ? ApplicationReviewCardSchema.parse(JSON.parse(row.review_json))
               : null,
             authorityEnvelopeId: row.authority_envelope_id,
-            accessRecheck: row.access_recheck === 1,
+            accessRecheck: row.access_recheck > 0,
             profileDigest: row.profile_digest,
           }
         : null;
@@ -302,6 +302,20 @@ export function createApplicationStore(store: JobStore) {
           profileDigest,
         );
         return true;
+      });
+    },
+
+    /** Admit one access retry only after the watcher excludes a person-held page. */
+    recheckAccess(id: number, attempt: number): boolean {
+      return store.transaction(() => {
+        const result =
+          sql(`UPDATE application_details SET access_recheck=2 WHERE application_id=? AND attempt=? AND access_recheck=1
+          AND EXISTS (SELECT 1 FROM applications a WHERE a.id=application_id AND a.attempt=application_details.attempt AND a.state='needs_you')`).run(
+            id,
+            attempt,
+          );
+        if (result.changes) changed([getApplication(id)!.jobId]);
+        return !!result.changes;
       });
     },
 
@@ -529,13 +543,20 @@ export function createApplicationStore(store: JobStore) {
           `UPDATE applications SET state = 'running', attempt = attempt + 1, updated_at = ?
            WHERE id = (
              SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
-             WHERE a.state = 'queued' AND j.stage = 'resume'
+             WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND j.stage = 'resume'
              ORDER BY a.queued_at, a.id LIMIT 1
            ) RETURNING id, job_id`,
         ).get(Date.now()) as { id: number; job_id: number } | undefined;
         if (!row) return null;
+        const application = getApplication(row.id)!;
+        sql(`UPDATE application_needs_you SET attempt=? WHERE application_id=? AND attempt=?
+          AND task_id IN (SELECT id FROM needs_you WHERE kind<>'question' AND resolved_at IS NULL)`).run(
+          application.attempt,
+          row.id,
+          application.attempt - 1,
+        );
         changed([row.job_id]);
-        return getApplication(row.id);
+        return application;
       });
     },
 

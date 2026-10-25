@@ -4,6 +4,7 @@ import type {
   ApplyFormAction,
   ApplyFormControl,
   ApplyPageLink,
+  ApplyFormObservation,
 } from "./types";
 
 /**
@@ -321,7 +322,19 @@ export function detectApplyBlocker(input: {
     };
   }
 
-  if (contains(text, SECOND_FACTOR_SIGNALS)) {
+  if (
+    contains(text, SECOND_FACTOR_SIGNALS) &&
+    (!hasPasswordControl(input.controls) ||
+      input.controls.some(
+        (control) =>
+          control.visible &&
+          ["text", "long_text", "other"].includes(control.kind) &&
+          contains(
+            normalizeSignal(`${control.label} ${control.placeholder}`),
+            SECOND_FACTOR_SIGNALS,
+          ),
+      ))
+  ) {
     return {
       code: "multi_factor_required",
       requiresPerson: true,
@@ -398,4 +411,34 @@ const CONFIRMATION_SIGNALS = [
 export function hasSubmissionConfirmationText(pageText: string): boolean {
   const haystack = normalizeSignal(pageText);
   return CONFIRMATION_SIGNALS.some((signal) => haystack.includes(signal));
+}
+
+/** An absent wall is insufficient: a blank/error/auth callback page cannot resume Apply. */
+export function canContinueApplicationAfterAccess(
+  page: ApplyFormObservation,
+): boolean {
+  if (
+    page.loading ||
+    page.blocker ||
+    page.controls.some(
+      (control) => control.visible && control.credentialRole === "password",
+    )
+  )
+    return false;
+  return (
+    page.controls.some(
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        !control.credentialRole &&
+        !isSecurityChallengeControl(control),
+    ) ||
+    [...page.links, ...page.actions].some(
+      (action) =>
+        action.visible &&
+        /^(?:continue (?:application|to application))$/u.test(
+          normalizeSignal(action.label),
+        ),
+    )
+  );
 }

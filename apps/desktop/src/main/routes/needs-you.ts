@@ -24,12 +24,15 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
       return true;
     }
     await getJobFinderWorkspaceService();
-    const application =
-      getApplicationStore().needsYou.details(id)?.applications[0];
-    if (!application) return false;
-    const opened = await (await getApplicationService()).open(application.id);
-    if (opened) await getEmbeddedBrowser().command({ type: "open" });
-    return opened;
+    const service = await getApplicationService();
+    for (const application of getApplicationStore().needsYou.details(id)
+      ?.applications ?? []) {
+      if (await service.open(application.id)) {
+        await getEmbeddedBrowser().command({ type: "open" });
+        return true;
+      }
+    }
+    return false;
   },
   check: async (id) => {
     await getJobFinderWorkspaceService();

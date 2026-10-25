@@ -1,4 +1,8 @@
 import {
+  APPLY_PAGE_SELECTORS,
+  collectApplyDocumentSnapshot,
+} from "@nestor/browser-runtime";
+import {
   measureWaitingFormMemory,
   waitingFormsHaveCapacity,
 } from "./waiting-form-memory";
@@ -872,25 +876,27 @@ export class EmbeddedBrowser {
       this.personInputTabs.has(id),
     );
     if (tabs.length !== 1) return null;
-    const read = await this.readTab<{ title: string; bodyText: string }>(
+    // The person can detach CDP while signing in. Read the exact owned native
+    // page with the same DOM collector, including checked challenge controls.
+    const read = await this.readTab<
+      Omit<RawApplyPage, "stepLabel" | "openedTabs">
+    >(
       tabs[0]!,
-      "({ title: document.title, bodyText: document.body?.innerText ?? '' })",
+      `(() => {
+        const selector = ${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))};
+        const elements = [];
+        const collect = (root) => {
+          elements.push(...root.querySelectorAll(selector));
+          for (const element of root.querySelectorAll('*'))
+            if (element.shadowRoot) collect(element.shadowRoot);
+        };
+        collect(document);
+        return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true);
+      })()`,
     );
-    if (!read) return null;
-    return {
-      url: read.url,
-      title: read.value.title,
-      bodyText: read.value.bodyText,
-      headings: [],
-      controls: [],
-      actions: [],
-      links: [],
-      clickables: [],
-      openedTabs: [],
-      validationErrors: [],
-      stepLabel: null,
-      loading: false,
-    };
+    return read
+      ? { ...read.value, url: read.url, stepLabel: null, openedTabs: [] }
+      : null;
   }
 
   /** Every open tab, the person's own included; the limit counts them all. */

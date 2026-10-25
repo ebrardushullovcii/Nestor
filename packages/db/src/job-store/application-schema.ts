@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS application_details (
   profile_digest TEXT NOT NULL,
   access_recheck INTEGER NOT NULL DEFAULT 0
 );
+-- 1: session changed; 2: watcher confirmed this page is not held by the person.
+CREATE INDEX IF NOT EXISTS application_access_ready ON application_details(application_id) WHERE access_recheck=2;
 CREATE TABLE IF NOT EXISTS application_origins (
   application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
   origin TEXT NOT NULL,
@@ -61,6 +63,8 @@ CREATE TABLE IF NOT EXISTS needs_you (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS needs_you_open_key
   ON needs_you(kind, answer_key, country, site_origin) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS needs_you_site_access ON needs_you(site_origin,id)
+  WHERE resolved_at IS NULL AND kind <> 'question';
 CREATE INDEX IF NOT EXISTS needs_you_open ON needs_you(id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_by_kind ON needs_you(kind, id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_by_prompt ON needs_you(prompt_key,country,site_origin) WHERE kind='question' AND resolved_at IS NULL AND reuse_prompt=1;
@@ -75,6 +79,11 @@ WHEN OLD.resolved_at IS NULL AND NEW.resolved_at IS NOT NULL BEGIN
 END;
 CREATE TRIGGER IF NOT EXISTS needs_you_count_reopen AFTER UPDATE OF resolved_at ON needs_you
 WHEN OLD.resolved_at IS NOT NULL AND NEW.resolved_at IS NULL BEGIN
+  UPDATE needs_you_counts SET n = n + 1 WHERE kind = NEW.kind;
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_count_kind AFTER UPDATE OF kind ON needs_you
+WHEN OLD.kind <> NEW.kind AND NEW.resolved_at IS NULL AND OLD.resolved_at IS NULL BEGIN
+  UPDATE needs_you_counts SET n = n - 1 WHERE kind = OLD.kind;
   UPDATE needs_you_counts SET n = n + 1 WHERE kind = NEW.kind;
 END;
 CREATE TRIGGER IF NOT EXISTS needs_you_count_delete AFTER DELETE ON needs_you WHEN OLD.resolved_at IS NULL BEGIN

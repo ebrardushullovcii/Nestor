@@ -2630,14 +2630,14 @@ export function createBrowserAgentRuntime(
         ),
       };
     },
-    async reloadApplicationPageBinding(_source, pageBindingKey) {
+    async reloadApplicationPageBinding(_source, pageBindingKey, applicationUrl) {
       await rebindPreparedApplicationPage(pageBindingKey);
       const page = selectPreparedApplicationPage(
         preparedApplicationPages,
         pageBindingKey,
       );
-      // Recheck the current document with GET; never replay an earlier form POST.
-      await page.goto(page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
+      // Re-enter with GET; never replay a credential, challenge or application POST.
+      await page.goto(applicationUrl ?? page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
     },
     async armApplicationFormAction(_source, input) {
       await rebindPreparedApplicationPage(input.pageBindingKey);

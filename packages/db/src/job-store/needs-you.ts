@@ -278,7 +278,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const task = get(id);
       if (!task || task.resolved_at !== null) return null;
       const applications =
-        sql(`SELECT a.id, a.job_id AS jobId, j.title, j.company, j.location, a.state
+        sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, a.state
         FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you' ORDER BY a.id LIMIT 50`).all(
           id,
@@ -576,15 +576,36 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           }
         }
 
-        let task = sql(
-          `SELECT * FROM needs_you WHERE kind = ? AND answer_key = ? AND country = ?
-           AND site_origin = ? AND resolved_at IS NULL`,
-        ).get(
-          value.kind,
-          value.key,
-          value.scope.country,
-          value.scope.siteOrigin,
+        if (value.kind !== "question" && !value.scope.siteOrigin)
+          throw new Error("A browser access task needs a site origin.");
+        let task = (
+          value.kind === "question"
+            ? sql(`SELECT * FROM needs_you WHERE kind = ? AND answer_key = ? AND country = ?
+              AND site_origin = ? AND resolved_at IS NULL`).get(
+                value.kind,
+                value.key,
+                value.scope.country,
+                value.scope.siteOrigin,
+              )
+            : sql(`SELECT * FROM needs_you t WHERE site_origin = ? AND kind <> 'question'
+              AND resolved_at IS NULL AND NOT EXISTS (SELECT 1 FROM source_needs_you s WHERE s.task_id=t.id)
+              ORDER BY id LIMIT 1`).get(value.scope.siteOrigin)
         ) as Task | undefined;
+        // Keep one site card as sign-in advances to a challenge or MFA. An
+        // older waiting page must not turn its MFA card back into sign-in.
+        const priority = { question: 0, sign_in: 1, captcha: 2, mfa: 3 };
+        if (
+          task &&
+          value.kind !== "question" &&
+          priority[value.kind] > priority[task.kind]
+        ) {
+          sql("UPDATE needs_you SET kind=?,prompt=? WHERE id=?").run(
+            value.kind,
+            value.prompt,
+            task.id,
+          );
+          task = get(task.id)!;
+        }
         if (task && !sameFormat(task.input, task.options_json, value)) {
           throw new Error(
             "A shared question key must use the same answer format.",
@@ -706,29 +727,45 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ).map(toTask);
     },
 
-    /** The browser watcher verifies one exact bound page before completing its task. */
+    /** Verify each bound application; a shared cookie is never proof for another page. */
     completeAccess(id: number, verifiedApplicationId: number): boolean {
       return store.transaction(() => {
         const task = get(id);
         if (!task || task.kind === "question" || task.resolved_at !== null)
           return false;
         const linked =
-          sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
-          WHERE n.task_id = ? AND n.application_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'`).get(
+          sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
+          WHERE n.task_id=? AND n.application_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','running')`).get(
             id,
             verifiedApplicationId,
           );
         if (!linked) return false;
-        // A shared sign-in changes the session for other pages. Those pages
-        // need a GET at their checkpoint; the page the person finished keeps
-        // its current form and answers.
-        if (task.kind === "sign_in")
-          sql(`UPDATE application_details SET access_recheck = 1
-          WHERE application_id <> ? AND application_id IN (
-            SELECT n.application_id FROM application_needs_you n JOIN applications a ON a.id = n.application_id
-            WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'
-          )`).run(verifiedApplicationId, id);
-        resolve(task, null);
+        // Other waiting pages may now share the completed session. Re-read
+        // their GET checkpoint; never replay a credential, challenge or form POST.
+        sql(`UPDATE application_details SET access_recheck=1 WHERE application_id<>?
+          AND application_id IN (SELECT n.application_id FROM application_needs_you n
+          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state='needs_you')`).run(
+          verifiedApplicationId,
+          id,
+        );
+        sql(
+          "DELETE FROM application_needs_you WHERE task_id=? AND application_id=?",
+        ).run(id, verifiedApplicationId);
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+          AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+          WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
+          Date.now(),
+          Date.now(),
+          verifiedApplicationId,
+        );
+        sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL AND NOT EXISTS (
+          SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
+          WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('queued','running','needs_you'))`).run(
+          Date.now(),
+          id,
+          id,
+        );
+        changed();
         return true;
       });
     },
