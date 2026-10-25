@@ -1,48 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
-import type {
-  JobFinderRendererWorkspaceSnapshot,
-} from "@nestor/contracts";
-import {
-  selectCampaignApplicationsScope,
-} from "./job-finder-page-routes";
-
-function workspace(): JobFinderRendererWorkspaceSnapshot {
-  return {
-    activeCampaignId: "campaign_1",
-    campaigns: [
-      {
-        id: "campaign_1",
-        name: "Campaign One",
-        jobIds: ["job_a", "job_b"],
-      },
-      {
-        id: "campaign_2",
-        name: "Campaign Two",
-        jobIds: ["job_c"],
-      },
-    ],
-    discoveryJobs: [
-      { id: "job_a", title: "Job A" },
-      { id: "job_b", title: "Job B" },
-      { id: "job_c", title: "Job C" },
-      { id: "job_d", title: "Job D" },
-    ],
-    intelligence: {
-      rapidReviewLogs: [
-        {
-          campaignId: "campaign_1",
-          entries: [{ id: "decision_1", jobId: "job_a" }],
-        },
-        {
-          campaignId: "campaign_2",
-          entries: [{ id: "decision_2", jobId: "job_c" }],
-        },
-      ],
-    },
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
-}
+import { describe, expect, it } from "vitest";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
+import { selectCampaignApplicationsScope } from "./job-finder-page-routes";
 
 describe("selectCampaignApplicationsScope", () => {
   it("shows saved applications across plans when all plans are requested", () => {
@@ -222,4 +182,3 @@ describe("selectCampaignApplicationsScope", () => {
  * the control enabled while pressing it did nothing at all. Gate, status, and
  * command now read one request.
  */
-

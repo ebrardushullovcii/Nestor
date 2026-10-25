@@ -420,50 +420,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     channels: ["job-finder:send-prepared-applications"],
     coverage: tools("record_instruction", "send_application"),
   },
-  {
-<<<<<<< HEAD
-    id: "apply.answer",
-    screen: "Needs you",
-    action: "Answer a question (pending the Needs you store cutover)",
-    channels: [
-      "job-finder:save-application-answer",
-      "job-finder:clear-application-answer",
-    ],
-    coverage: tools("answer_application_question", "resolve_needs_you"),
-=======
-    id: "apply.open_page",
-    screen: "Applications",
-    action: "Open the kept page",
-    channels: ["job-finder:focus-prepared-application-page"],
-    coverage: tools("continue_application"),
-  },
-  {
-    id: "apply.packet",
-    screen: "Applications",
-    action: "Export the application packet",
-    channels: ["job-finder:export-application-packet"],
-    coverage: tools("action_export_application_packet"),
-  },
-  {
-    id: "apply.documents",
-    screen: "Applications",
-    action: "Propose, edit, approve or export a letter",
-    channels: [
-      "job-finder:list-application-documents",
-      "job-finder:propose-application-document",
-      "job-finder:approve-application-document",
-      "job-finder:edit-application-document",
-      "job-finder:export-application-document",
-    ],
-    coverage: tools(
-      "action_list_application_documents",
-      "action_propose_application_document",
-      "action_edit_application_document",
-      "action_approve_application_document",
-      "action_export_application_document",
-    ),
->>>>>>> 7847827c (Rebuild Needs you on application store)
-  },
+
   {
     id: "apply.authority",
     screen: "Settings / Applications",
@@ -511,8 +468,20 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Needs you",
     action: "Answer once, open the page and check completed browser steps",
     channels: ["needs-you:run"],
+    coverage: tools("answer_need", "open_need", "check_need"),
+  },
+  {
+    id: "needs_you.grouped",
+    screen: "Needs you",
+    action: "Answer a grouped question once for many",
+    channels: [
+      "job-finder:project-grouped-manual-answer",
+      "job-finder:apply-grouped-manual-answer",
+      "job-finder:snooze-grouped-decision",
+    ],
     coverage: tools("resolve_needs_you"),
   },
+
   // Store commands are shared with Applications; their runtime tests exercise them over MCP.
   {
     id: "tracking.commands",

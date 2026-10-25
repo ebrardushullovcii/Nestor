@@ -1,8 +1,5 @@
 import { useId } from "react";
-import type {
-  Control,
-  UseFormReturn,
-} from "react-hook-form";
+import type { Control, UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import { Button } from "@renderer/components/ui/button";
 import { ProfileOptionalSection } from "./profile-optional-section";
@@ -78,7 +75,12 @@ export function ProfilePreferencesEligibilitySection(props: {
   busy: boolean;
   profileForm: UseFormReturn<ProfileEditorValues>;
 }) {
-  const { control: profileControl, register, watch, getValues } = props.profileForm;
+  const {
+    control: profileControl,
+    register,
+    watch,
+    getValues,
+  } = props.profileForm;
   const authorizedWorkCountriesId =
     "profile-setup-field-eligibility-authorized-work-countries";
   const preferredRelocationRegionsId =
@@ -360,7 +362,6 @@ export function ProfilePreferencesEligibilitySection(props: {
           />
         </div>
       </article>
-
     </section>
   );
 }

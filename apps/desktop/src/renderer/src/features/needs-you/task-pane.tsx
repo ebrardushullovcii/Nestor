@@ -7,6 +7,7 @@ import type {
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import { AnswerField } from "./answer-field";
+import { SourceNeedPane } from "./source-need-pane";
 
 export const describeError = (error: unknown) =>
   error instanceof Error ? error.message : "Could not save this answer.";
@@ -131,9 +132,6 @@ export function TaskPane(props: {
     );
   }
   const task = details?.task;
-  // The source owner will add optional task.source { id, label, url } here.
-  // Render those before application details: open source.url in the app browser,
-  // then Retry via retry_source. They have no application or answer form.
   return (
     <section
       id="list-detail"
@@ -144,6 +142,8 @@ export function TaskPane(props: {
         <p role="status">Loading question…</p>
       ) : !task ? (
         <p>This item is no longer waiting for you.</p>
+      ) : task.source ? (
+        <SourceNeedPane source={task.source} />
       ) : (
         <div className="grid gap-5">
           <div className="text-sm text-foreground-soft">
@@ -297,9 +297,36 @@ export function TaskPane(props: {
         </div>
       )}
       {error ? (
-        <p role="alert" className="mt-4 text-sm text-destructive">
-          {error}
-        </p>
+        <div className="mt-4 grid gap-3">
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+          {conflict.current ? (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void act(async () => {
+                  const value = await window.nestor.needsYou.run("get_need", {
+                    id,
+                  });
+                  const restored = value?.draft ?? {
+                    answer: "",
+                    remember: true,
+                    revision: 0,
+                  };
+                  latest.current = restored;
+                  setDraft(restored);
+                  setDetails(value);
+                  conflict.current = false;
+                  onEditing(false);
+                })
+              }
+            >
+              Reload saved draft
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

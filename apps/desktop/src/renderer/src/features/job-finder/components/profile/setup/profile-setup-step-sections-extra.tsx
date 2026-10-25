@@ -267,37 +267,38 @@ function ProfileSetupStorySection(props: {
 function ProfileSetupApplicationLinksSection(props: {
   profileForm: UseFormReturn<ProfileEditorValues>;
 }) {
-  const preferredEmailId = "profile-setup-field-application-identity-preferred-email";
-  const preferredPhoneId = "profile-setup-field-application-identity-preferred-phone";
-  const preferredLinksId = "profile-setup-field-application-identity-preferred-links";
-  return <div className="grid gap-4 md:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor={preferredEmailId}>
-              Preferred application email
-            </FieldLabel>
-            <ProfileInput
-              id={preferredEmailId}
-              {...props.profileForm.register(
-                "applicationIdentity.preferredEmail",
-              )}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={preferredPhoneId}>
-              Preferred application phone
-            </FieldLabel>
-            <ProfileInput
-              id={preferredPhoneId}
-              {...props.profileForm.register(
-                "applicationIdentity.preferredPhone",
-              )}
-            />
-          </Field>
-          <PreferredApplicationLinksField
-            fieldId={preferredLinksId}
-            profileForm={props.profileForm}
-          />
-  </div>;
+  const preferredEmailId =
+    "profile-setup-field-application-identity-preferred-email";
+  const preferredPhoneId =
+    "profile-setup-field-application-identity-preferred-phone";
+  const preferredLinksId =
+    "profile-setup-field-application-identity-preferred-links";
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Field>
+        <FieldLabel htmlFor={preferredEmailId}>
+          Preferred application email
+        </FieldLabel>
+        <ProfileInput
+          id={preferredEmailId}
+          {...props.profileForm.register("applicationIdentity.preferredEmail")}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={preferredPhoneId}>
+          Preferred application phone
+        </FieldLabel>
+        <ProfileInput
+          id={preferredPhoneId}
+          {...props.profileForm.register("applicationIdentity.preferredPhone")}
+        />
+      </Field>
+      <PreferredApplicationLinksField
+        fieldId={preferredLinksId}
+        profileForm={props.profileForm}
+      />
+    </div>
+  );
 }
 
 /**

@@ -18,6 +18,40 @@ import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { createNeedsYouCommandRunner } from "../../../../main/services/needs-you-commands";
 import { NeedsYouScreen } from "./needs-you-screen";
+import { SourceNeedPane } from "./source-need-pane";
+
+it("opens a source's URL and retries its ID without dismissing the sign-in item", async () => {
+  const command = vi.fn(() => Promise.resolve({}));
+  const run = vi.fn(() => Promise.resolve({ search: null, sources: [] }));
+  Object.assign(window.nestor, {
+    browser: { command },
+    jobs: {
+      run,
+      onChange: (listener: Parameters<JobStore["onChange"]>[0]) =>
+        jobs.onChange(listener),
+    },
+  });
+  render(
+    <SourceNeedPane
+      source={{
+        id: 900,
+        label: "Example board",
+        url: "https://jobs.example.test/sign-in",
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open to sign in" }));
+  expect(command).toHaveBeenCalledWith({
+    type: "open",
+    url: "https://jobs.example.test/sign-in",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText(/This item closes when the site is readable/);
+  expect(run).toHaveBeenCalledWith("retry_source", { id: 900 });
+  expect(
+    screen.getByRole("heading", { name: "Sign in to Example board" }),
+  ).toBeTruthy();
+});
 
 let jobs: JobStore;
 let applications: ApplicationStore;
@@ -59,11 +93,17 @@ beforeEach(() => {
     applications.claimNext()!,
   ];
   const run = createNeedsYouCommandRunner(() => applications, {
-    open: async () => true,
-    check: async () => false,
+    open: () => Promise.resolve(true),
+    check: () => Promise.resolve(false),
   });
   Object.assign(window, {
-    nestor: { jobs: { onChange: jobs.onChange }, needsYou: { run } },
+    nestor: {
+      jobs: {
+        onChange: (listener: Parameters<JobStore["onChange"]>[0]) =>
+          jobs.onChange(listener),
+      },
+      needsYou: { run },
+    },
   });
   Element.prototype.scrollIntoView = () => undefined;
   vi.stubGlobal(
@@ -127,20 +167,20 @@ it("keeps the editor on its task when new work arrives, and one remembered answe
   expect(applications.getApplication(claimed[1]!.id)?.state).toBe("queued");
   expect(applications.needsYou.findAnswer("notice")).toBe("Four weeks");
   expect(applications.needsYou.details(later.id)?.draft).toBeNull();
-  await screen.findByRole("button", { name: "Yes", exact: true });
+  await screen.findByRole("button", { name: "Yes" });
   expect(screen.queryByRole("combobox")).toBeNull();
   expect(applications.getApplication(claimed[2]!.id)?.state).toBe("needs_you");
 });
 
 it("restores an exact question draft after leaving and returning", async () => {
   const first = ask(0);
-  const second = ask(1, "travel", "Can you travel?", "boolean");
+  ask(1, "travel", "Can you travel?", "boolean");
   show();
   fireEvent.change(await screen.findByRole("textbox", { name: first.prompt }), {
     target: { value: "Two weeks" },
   });
   fireEvent.click(screen.getByRole("button", { name: /^Can you travel/ }));
-  await screen.findByRole("button", { name: "Yes", exact: true });
+  await screen.findByRole("button", { name: "Yes" });
   await waitFor(() =>
     expect(applications.needsYou.details(first.id)?.draft?.answer).toBe(
       "Two weeks",
@@ -163,12 +203,8 @@ it("edits and forgets remembered answers from Needs you", async () => {
     await screen.findByRole("button", { name: "Saved answers 1" }),
   );
   const pane = await screen.findByRole("region", { name: "Saved answer" });
-  fireEvent.click(
-    await within(pane).findByRole("button", { name: "Yes", exact: true }),
-  );
-  fireEvent.click(
-    within(pane).getByRole("button", { name: "Save answer", exact: true }),
-  );
+  fireEvent.click(await within(pane).findByRole("button", { name: "Yes" }));
+  fireEvent.click(within(pane).getByRole("button", { name: "Save answer" }));
   await waitFor(() =>
     expect(applications.needsYou.findAnswer("travel")).toBe("Yes"),
   );

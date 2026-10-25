@@ -947,11 +947,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       for (const row of details.applications) {
         const app = applications.getApplication(row.id);
         if (!app || app.state !== "needs_you") continue;
-        const page = await browser.readApplicationPageWithPerson?.("target_site",applicationIdentity(app.id,app.attempt).resultId);
+        const page = await browser.readApplicationPageWithPerson?.(
+          "target_site",
+          applicationIdentity(app.id, app.attempt).resultId,
+        );
         if (!page || page.loading) continue;
-        const observation = buildApplyFormObservation(page,new Date().toISOString());
-        if (observation.blocker || observation.controls.some(control => control.visible && control.credentialRole === "password")) continue;
-        if (applications.needsYou.completeAccess(taskId,app.id)) return true;
+        const observation = buildApplyFormObservation(
+          page,
+          new Date().toISOString(),
+        );
+        if (
+          observation.blocker ||
+          observation.controls.some(
+            (control) =>
+              control.visible && control.credentialRole === "password",
+          )
+        )
+          continue;
+        if (applications.needsYou.completeAccess(taskId, app.id)) return true;
       }
       return false;
     },

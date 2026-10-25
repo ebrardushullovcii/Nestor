@@ -24,6 +24,12 @@ export function assistantCommandTools<
   options: {
     group: AssistantToolGroup;
     replaces?: Partial<Record<keyof C, readonly string[]>>;
+    before?: {
+      [K in keyof C]?: (
+        input: z.output<C[K]["input"]>,
+        context: AssistantToolContext,
+      ) => void | Promise<void>;
+    };
     results?: {
       [K in keyof C]?: (
         value: O[K],
@@ -56,6 +62,10 @@ export function assistantCommandTools<
       async execute(input: unknown, context) {
         context.session.assertCurrent();
         const parsed = command.input.parse(input);
+        await options.before?.[name]?.(
+          parsed as z.output<C[K]["input"]>,
+          context,
+        );
         const result = await run(name, parsed as z.input<C[K]["input"]>);
         return (
           options.results?.[name]?.(

@@ -25,6 +25,7 @@ import {
 } from "@renderer/features/job-lists";
 import { TaskPane, describeError } from "./task-pane";
 import { SavedAnswerPane } from "./saved-answer-pane";
+import { SourceNeedPane } from "./source-need-pane";
 
 type Item = NeedsYouTask | SavedFormAnswerSummary;
 const EMPTY_COUNTS: NeedsYouCounts = {
@@ -99,6 +100,8 @@ export function NeedsYouScreen() {
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
   const selectedCount = countSelected(selection, list.total);
+  const active = list.rows.find((row) => row.id === activeId);
+  const source = active && "source" in active ? active.source : undefined;
   useListKeys({
     rows: list.rows,
     activeId,
@@ -261,10 +264,12 @@ export function NeedsYouScreen() {
                 id={row.id}
                 title={row.prompt}
                 meta={
-                  [row.scope.country, row.scope.siteOrigin]
-                    .filter(Boolean)
-                    .join(" · ") ||
-                  ("kind" in row ? "Application" : "Reusable answer")
+                  "source" in row && row.source
+                    ? `${row.source.label} · ${row.source.url}`
+                    : [row.scope.country, row.scope.siteOrigin]
+                        .filter(Boolean)
+                        .join(" · ") ||
+                      ("kind" in row ? "Application" : "Reusable answer")
                 }
                 status={"kind" in row ? KIND[row.kind] : row.preview}
                 onActivate={activate}
@@ -280,6 +285,14 @@ export function NeedsYouScreen() {
               className="surface-panel-shell rounded-(--radius-panel) border border-(--surface-panel-border) p-5 text-sm text-foreground-soft"
             >
               Choose an item to see it here.
+            </section>
+          ) : tab === "tasks" && source ? (
+            <section
+              id="list-detail"
+              aria-label="Source sign-in"
+              className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
+            >
+              <SourceNeedPane key={source.id} source={source} />
             </section>
           ) : tab === "tasks" ? (
             <TaskPane

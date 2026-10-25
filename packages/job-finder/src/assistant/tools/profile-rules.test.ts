@@ -335,8 +335,6 @@ describe("profile editing rules", () => {
     expect(savedResume.draft.status).toBe("stale");
     expect(savedResume.draft.approvedExportId).toBeNull();
   });
-
-
 });
 
 describe("sidebar resume import outcomes", () => {

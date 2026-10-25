@@ -401,7 +401,11 @@ describe("JobFinderShell compact nav responsive contract", () => {
 
     render(
       <MemoryRouter initialEntries={["/job-finder/home"]}>
-        <JobFinderShell platform="win32" workspace={workspace}>
+        <JobFinderShell
+          needsYouCount={1}
+          platform="win32"
+          workspace={workspace}
+        >
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,
@@ -426,7 +430,11 @@ describe("JobFinderShell compact nav responsive contract", () => {
     cleanup();
     render(
       <MemoryRouter initialEntries={["/job-finder/home"]}>
-        <JobFinderShell platform="win32" workspace={workspace}>
+        <JobFinderShell
+          needsYouCount={1}
+          platform="win32"
+          workspace={workspace}
+        >
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,

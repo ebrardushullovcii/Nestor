@@ -1,21 +1,11 @@
-import {
-  createElement,
-  lazy,
-  useEffect,
-  useState,
-} from "react";
+import { createElement, lazy, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
-import {
-  Navigate,
-  useSearchParams,
-  useLocation,
-  useOutletContext,
-} from "react-router-dom";
+import { Navigate, useLocation, useOutletContext } from "react-router-dom";
 import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
 import {
   markGuidedSetupAutoOpenSpent,

@@ -3,10 +3,6 @@ import type {
   JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import {
-  NeedsYouListQuerySchema,
-  NeedsYouPageSchema,
-  NeedsYouDetailsSchema,
-  AnswerNeedsYouResultSchema,
   AssistantTaskPlanStepSchema,
   AssistantJobViewSchema,
   AssistantTrackerViewSchema,
@@ -18,20 +14,13 @@ import {
 } from "@nestor/contracts";
 import { z } from "zod";
 import { projectWorkspaceAttention } from "../attention";
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import {
   getAssistantSavedSearch,
   getAssistantSearchReadiness,
 } from "../prompt";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import { readAssistantWorkState, runningSearchState } from "../work-state";
-import {
-  allJobs,
-  compactApplication,
-  compactJob,
-  outstandingReviews,
-  plural,
-} from "./format";
+import { allJobs, compactApplication, compactJob, plural } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
 
@@ -47,19 +36,40 @@ export const getWorkspaceSummaryTool = defineTool({
   async execute(_input, context) {
     const { service, ports } = context;
     const snapshot = await service.getWorkspaceSnapshot();
-    const countsCommand = ports.commands?.find((command) => command.name === "stage_counts");
-    const searchCommand = ports.commands?.find((command) => command.name === "search_status");
-    const trackerCommand = ports.commands?.find((command) => command.name === "list_applications");
+    const countsCommand = ports.commands?.find(
+      (command) => command.name === "stage_counts",
+    );
+    const searchCommand = ports.commands?.find(
+      (command) => command.name === "search_status",
+    );
+    const trackerCommand = ports.commands?.find(
+      (command) => command.name === "list_applications",
+    );
     if (countsCommand && searchCommand) {
       const [countsResult, searchResult, trackerResult] = await Promise.all([
-        countsCommand.execute({}, context), searchCommand.execute({}, context),
+        countsCommand.execute({}, context),
+        searchCommand.execute({}, context),
         trackerCommand?.execute({ limit: 1 }, context),
       ]);
       const counts = JobStageCountsSchema.parse(countsResult.data);
       const search = JobSearchStatusSchema.parse(searchResult.data);
       return {
         summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
-        data: { jobs: counts, search, applications: trackerResult ? z.object({ counts: z.record(z.number()) }).parse(trackerResult.data).counts : null, profile: { setup: snapshot.profileSetupState.status, name: snapshot.profile.fullName }, applyMode: snapshot.settings.applicationAutomationMode, needsYou: projectWorkspaceAttention(snapshot).count },
+        data: {
+          jobs: counts,
+          search,
+          applications: trackerResult
+            ? z
+                .object({ counts: z.record(z.number()) })
+                .parse(trackerResult.data).counts
+            : null,
+          profile: {
+            setup: snapshot.profileSetupState.status,
+            name: snapshot.profile.fullName,
+          },
+          applyMode: snapshot.settings.applicationAutomationMode,
+          needsYou: projectWorkspaceAttention(snapshot).count,
+        },
       };
     }
     const work = readAssistantWorkState(ports, snapshot);
@@ -118,109 +128,6 @@ export const getWorkspaceSummaryTool = defineTool({
           "confirm_before_submit",
         activityPaused: snapshot.activityControl.paused ?? false,
       },
-    };
-  },
-});
-
-export const listNeedsYouTool = defineTool({
-  name: "list_needs_you",
-  group: "workspace",
-  description:
-    "Read one page of questions and browser steps waiting on the person. Answers belong only to Needs you.",
-  parameters: json.object({
-    after: json.number("Last task id from the preceding page."),
-    text: json.string("Filter questions."),
-  }),
-  input: NeedsYouListQuerySchema,
-  label: () => "Checking what needs you",
-  effect: "read",
-  async execute(input, { ports }) {
-    if (!ports.executeAction)
-      throw new AssistantToolError("refused", "Needs you is unavailable.");
-    const page = NeedsYouPageSchema.parse(
-      await ports.executeAction("needs-you:list_needs_you", input),
-    );
-    return {
-      summary: page.total
-        ? `${plural(page.total, "item")} waiting on the person.`
-        : "Nothing is waiting on the person.",
-      data: page,
-    };
-  },
-});
-
-export const resolveNeedsYouTool = defineTool({
-  name: "resolve_needs_you",
-  group: "workspace",
-  description:
-    "Answer one Needs you question using the person's explicit answer, open its exact browser page, or check it after the person finishes. An answer continues every application waiting on that same question. Remember only when the person chooses it. Credentials, CAPTCHA and MFA stay in the browser.",
-  parameters: json.object(
-    {
-      id: json.number(),
-      action: json.enumOf(["answer", "open_page", "check"]),
-      answer: json.string(),
-      remember: json.boolean(),
-    },
-    ["id", "action"],
-  ),
-  input: z.object({
-    id: z.number().int().positive(),
-    action: z.enum(["answer", "open_page", "check"]),
-    answer: z.string().trim().min(1).max(20000).optional(),
-    remember: z.boolean().default(false),
-  }),
-  label: () => "Updating Needs you",
-  effect: "local_write",
-  async execute(input, { ports, session }) {
-    if (!ports.executeAction)
-      throw new AssistantToolError("refused", "Needs you is unavailable.");
-    session.assertCurrent();
-    if (input.action === "answer") {
-      const details = NeedsYouDetailsSchema.nullable().parse(
-        await ports.executeAction("needs-you:get_need", { id: input.id }),
-      );
-      if (!details || details.task.kind !== "question")
-        throw new AssistantToolError(
-          "not_found",
-          "That question is no longer waiting.",
-        );
-      if (!input.answer)
-        throw new AssistantToolError(
-          "missing_information",
-          "Ask the person for their answer.",
-        );
-      await assertPersonAnswerAuthority(session, {
-        answers: [{ question: details.task.prompt, answer: input.answer }],
-        saveForFuture: input.remember,
-      });
-      const result = AnswerNeedsYouResultSchema.parse(
-        await ports.executeAction("needs-you:answer_need", {
-          id: input.id,
-          answer: input.answer,
-          remember: input.remember,
-        }),
-      );
-      return {
-        summary: result.resolved
-          ? `Answer saved. ${plural(result.queued, "application")} can continue.`
-          : "That question was already answered or no longer needed.",
-        data: result,
-      };
-    }
-    const result = await ports.executeAction(
-      input.action === "open_page"
-        ? "needs-you:open_need"
-        : "needs-you:check_need",
-      { id: input.id },
-    );
-    return {
-      summary:
-        result === true
-          ? input.action === "open_page"
-            ? "Opened the page in the app browser."
-            : "The browser step is complete; applications can continue."
-          : "The step is still waiting. Finish it in the browser, then check again.",
-      data: { completed: result === true },
     };
   },
 });
@@ -519,10 +426,16 @@ export const openInAppTool = defineTool({
     "Opens a screen or a record in the app for the person. Use screen applications for the tracker (statuses, notes, interviews and reminders), optionally with its numeric jobId. Open screens only when asked to see them.",
   parameters: json.object({
     screen: json.enumOf(Object.keys(APP_ROUTES)),
-    jobId: json.number("Opens that stored job (its resume when resume is true)."),
-    applicationView: json.looseObject("Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true)."),
+    jobId: json.number(
+      "Opens that stored job (its resume when resume is true).",
+    ),
+    applicationView: json.looseObject(
+      "Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true).",
+    ),
     resume: json.boolean(),
-    view: json.looseObject("Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions."),
+    view: json.looseObject(
+      "Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions.",
+    ),
     section: json.enumOf(
       ["basics", "experience", "background", "preferences", "sources", "files"],
       "Profile tab to show. Languages are in background.",
@@ -551,52 +464,135 @@ export const openInAppTool = defineTool({
   effect: "read",
   async execute(input, context) {
     const { session, ports } = context;
-    if (input.resume && input.screen && input.screen !== "shortlisted") throw new AssistantToolError("invalid_input", "Choose one destination per call: a resume opens in Shortlisted.");
+    if (input.resume && input.screen && input.screen !== "shortlisted")
+      throw new AssistantToolError(
+        "invalid_input",
+        "Choose one destination per call: a resume opens in Shortlisted.",
+      );
     let screen = input.screen ?? (input.resume ? "shortlisted" : undefined);
     let jobView: z.infer<typeof AssistantJobViewSchema> | undefined;
     let applicationView = input.applicationView;
-    const getJob = ports.commands?.find((command) => command.name === "get_job");
+    const getJob = ports.commands?.find(
+      (command) => command.name === "get_job",
+    );
     if (input.jobId) {
       if (!screen && getJob) {
         const result = await getJob.execute({ id: input.jobId }, context);
-        if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
+        if (result.data === null)
+          throw new AssistantToolError(
+            "not_found",
+            "That job no longer exists.",
+          );
         const job = JobDetailSchema.parse(result.data);
-        screen = job.stage === "applied" ? "applications" : ["shortlisted", "resume"].includes(job.stage) ? "shortlisted" : "find_jobs";
+        screen =
+          job.stage === "applied"
+            ? "applications"
+            : ["shortlisted", "resume"].includes(job.stage)
+              ? "shortlisted"
+              : "find_jobs";
       }
       screen ??= "find_jobs";
       if (screen === "applications") {
-        const getApplication = ports.commands?.find((command) => command.name === "get_application");
-        if (!getApplication || (await getApplication.execute({ jobId: input.jobId }, context)).data === null)
-          throw new AssistantToolError("not_found", "That job is not in Applications.");
-        applicationView ??= { statuses: [], text: "", tag: null, due: false, quietForDays: null };
+        const getApplication = ports.commands?.find(
+          (command) => command.name === "get_application",
+        );
+        if (
+          !getApplication ||
+          (await getApplication.execute({ jobId: input.jobId }, context))
+            .data === null
+        )
+          throw new AssistantToolError(
+            "not_found",
+            "That job is not in Applications.",
+          );
+        applicationView ??= {
+          statuses: [],
+          text: "",
+          tag: null,
+          due: false,
+          quietForDays: null,
+        };
       } else {
-        if (screen !== "find_jobs" && screen !== "shortlisted") throw new AssistantToolError("invalid_input", "Choose the job's list screen.");
+        if (screen !== "find_jobs" && screen !== "shortlisted")
+          throw new AssistantToolError(
+            "invalid_input",
+            "Choose the job's list screen.",
+          );
         if (getJob) {
           const result = await getJob.execute({ id: input.jobId }, context);
-          if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
+          if (result.data === null)
+            throw new AssistantToolError(
+              "not_found",
+              "That job no longer exists.",
+            );
           const job = JobDetailSchema.parse(result.data);
-          const stages = screen === "shortlisted" ? ["shortlisted", "resume"] : ["found", "hidden", "shortlisted"];
-          if (!stages.includes(job.stage)) throw new AssistantToolError("invalid_input", "That job belongs to a different screen. Choose its current stage.");
-          jobView = { stage: job.stage, text: "", ...(screen === "shortlisted" ? {} : { minFit: null }) };
+          const stages =
+            screen === "shortlisted"
+              ? ["shortlisted", "resume"]
+              : ["found", "hidden", "shortlisted"];
+          if (!stages.includes(job.stage))
+            throw new AssistantToolError(
+              "invalid_input",
+              "That job belongs to a different screen. Choose its current stage.",
+            );
+          jobView = {
+            stage: job.stage,
+            text: "",
+            ...(screen === "shortlisted" ? {} : { minFit: null }),
+          };
         }
       }
     }
-    if (input.resume && screen !== "shortlisted") throw new AssistantToolError("invalid_input", "A resume opens in Shortlisted.");
-    if (input.applicationView && input.screen !== "applications") throw new AssistantToolError("invalid_input", "Application filters require screen applications.");
+    if (input.resume && screen !== "shortlisted")
+      throw new AssistantToolError(
+        "invalid_input",
+        "A resume opens in Shortlisted.",
+      );
+    if (input.applicationView && input.screen !== "applications")
+      throw new AssistantToolError(
+        "invalid_input",
+        "Application filters require screen applications.",
+      );
     if (input.section && input.screen !== "profile")
       throw new AssistantToolError(
         "invalid_input",
         "A Profile tab requires screen profile.",
       );
-    if (input.view && input.screen !== "find_jobs" && input.screen !== "shortlisted")
-      throw new AssistantToolError("invalid_input", "Job filters and selection require Find jobs or Shortlisted.");
+    if (
+      input.view &&
+      input.screen !== "find_jobs" &&
+      input.screen !== "shortlisted"
+    )
+      throw new AssistantToolError(
+        "invalid_input",
+        "Job filters and selection require Find jobs or Shortlisted.",
+      );
     if (input.view && input.jobId)
-      throw new AssistantToolError("invalid_input", "Open a job or change the list's filters and selection in separate calls.");
-    if (input.view && input.screen === "shortlisted" &&
-      ((input.view.stage && !["shortlisted", "resume"].includes(input.view.stage)) || input.view.minFit !== undefined || input.view.sort !== undefined))
-      throw new AssistantToolError("invalid_input", "Shortlisted supports its shortlisted/resume stage, text filter and selection.");
-    if (input.view?.stage && input.screen === "find_jobs" && !["found", "hidden", "shortlisted"].includes(input.view.stage))
-      throw new AssistantToolError("invalid_input", "Find jobs shows found, hidden or shortlisted jobs.");
+      throw new AssistantToolError(
+        "invalid_input",
+        "Open a job or change the list's filters and selection in separate calls.",
+      );
+    if (
+      input.view &&
+      input.screen === "shortlisted" &&
+      ((input.view.stage &&
+        !["shortlisted", "resume"].includes(input.view.stage)) ||
+        input.view.minFit !== undefined ||
+        input.view.sort !== undefined)
+    )
+      throw new AssistantToolError(
+        "invalid_input",
+        "Shortlisted supports its shortlisted/resume stage, text filter and selection.",
+      );
+    if (
+      input.view?.stage &&
+      input.screen === "find_jobs" &&
+      !["found", "hidden", "shortlisted"].includes(input.view.stage)
+    )
+      throw new AssistantToolError(
+        "invalid_input",
+        "Find jobs shows found, hidden or shortlisted jobs.",
+      );
     let route = input.jobId
       ? screen === "applications"
         ? `/job-finder/applications?jobId=${input.jobId}`
@@ -608,7 +604,10 @@ export const openInAppTool = defineTool({
         : APP_ROUTES[input.screen ?? "home"];
     if (applicationView) {
       const destination = new URL(route, "https://nestor.local");
-      destination.searchParams.set("applications", JSON.stringify(applicationView));
+      destination.searchParams.set(
+        "applications",
+        JSON.stringify(applicationView),
+      );
       route = `${destination.pathname}${destination.search}`;
     }
     const view = input.view ?? jobView;
@@ -630,8 +629,6 @@ export const openInAppTool = defineTool({
 
 export const workspaceTools = [
   getWorkspaceSummaryTool,
-  listNeedsYouTool,
-  resolveNeedsYouTool,
   readResultTool,
   searchConversationTool,
   updatePlanTool,

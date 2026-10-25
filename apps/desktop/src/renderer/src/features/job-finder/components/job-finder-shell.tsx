@@ -1,4 +1,3 @@
-import { useNeedsYouCount } from "@renderer/features/needs-you/use-needs-you-count";
 import type { CSSProperties, ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import type { RecentChange } from "../lib/recent-changes";
@@ -36,7 +35,6 @@ import type { LucideIcon } from "lucide-react";
 import type {
   DesktopWindowControlsState,
   DiscoveryActivityEvent,
-  GroupedManualAnswerDecision,
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   SuiteModule,
@@ -116,6 +114,7 @@ interface JobFinderShellProps {
   saveState?: JobFinderSaveState;
   /** Shortlisted jobs whose resume waits to be read, from the job store. */
   toReviewCount?: number | null;
+  needsYouCount?: number;
   workspace: JobFinderRendererWorkspaceSnapshot;
 }
 
@@ -492,9 +491,9 @@ export function JobFinderShell({
   resumeImportProgress = null,
   saveState,
   toReviewCount = null,
+  needsYouCount = 0,
   workspace,
 }: JobFinderShellProps) {
-  const needsYouCount = useNeedsYouCount();
   const isMac = platform === "darwin";
   const isWindows = platform === "win32";
   const location = useLocation();

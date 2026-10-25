@@ -491,21 +491,12 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "resume.template": "Use a more compact template for the Northwind resume.",
   "resume.history": "Restore the previous version of my Northwind resume.",
   "resume.strategies": "Which resume approach is selected?",
-<<<<<<< HEAD
-  "apply.answer": "For the notice period question, answer four weeks.",
-=======
-  "apply.cancel": "Stop the applications that are running.",
-  "apply.approve_run": "Approve the application run that is waiting.",
-  "apply.details": "What did you answer on my last application?",
-  "apply.open_page": "Open the page of my last application.",
-  "apply.packet": "Export the application packet for Northwind.",
-  "apply.documents":
-    "Write a short cover letter for the Northwind application.",
->>>>>>> 7847827c (Rebuild Needs you on application store)
   "apply.authority":
     "Let Job Finder send applications without asking me each time.",
   "apply.uncertain": "Did my last application actually go through?",
-  "needs_you.act": "Check whether the first browser step waiting on me is complete.",
+  "needs_you.act": "Mark the first step waiting on me as done.",
+  "needs_you.grouped":
+    "Answer the work authorization question once for every application that asks.",
   "tracking.commands":
     "Move my Northwind application to Interview and add a note: first call on Monday.",
   "companies.preference": "Prefer Northwind Labs in my results.",

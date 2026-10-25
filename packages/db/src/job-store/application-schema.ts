@@ -77,10 +77,6 @@ END;
 CREATE TRIGGER IF NOT EXISTS needs_you_count_delete AFTER DELETE ON needs_you WHEN OLD.resolved_at IS NULL BEGIN
   UPDATE needs_you_counts SET n = n - 1 WHERE kind = OLD.kind;
 END;
-CREATE TRIGGER IF NOT EXISTS needs_you_text_update AFTER UPDATE OF prompt ON needs_you BEGIN
-  INSERT INTO needs_you_text(needs_you_text,rowid,prompt) VALUES('delete',OLD.id,OLD.prompt);
-  INSERT INTO needs_you_text(rowid,prompt) VALUES(NEW.id,NEW.prompt);
-END;
 CREATE TABLE IF NOT EXISTS needs_you_drafts (
   task_id INTEGER PRIMARY KEY REFERENCES needs_you(id) ON DELETE CASCADE,
   answer TEXT NOT NULL, remember INTEGER NOT NULL, revision INTEGER NOT NULL
@@ -91,6 +87,10 @@ CREATE TRIGGER IF NOT EXISTS needs_you_text_insert AFTER INSERT ON needs_you BEG
 END;
 CREATE TRIGGER IF NOT EXISTS needs_you_text_delete AFTER DELETE ON needs_you BEGIN
   INSERT INTO needs_you_text(needs_you_text,rowid,prompt) VALUES('delete',OLD.id,OLD.prompt);
+END;
+CREATE TRIGGER IF NOT EXISTS needs_you_text_update AFTER UPDATE OF prompt ON needs_you BEGIN
+  INSERT INTO needs_you_text(needs_you_text,rowid,prompt) VALUES('delete',OLD.id,OLD.prompt);
+  INSERT INTO needs_you_text(rowid,prompt) VALUES(NEW.id,NEW.prompt);
 END;
 
 CREATE TABLE IF NOT EXISTS application_needs_you (

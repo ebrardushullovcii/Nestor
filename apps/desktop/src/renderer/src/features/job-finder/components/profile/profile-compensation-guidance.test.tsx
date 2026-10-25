@@ -2,8 +2,14 @@
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { it, expect, describe, afterEach } from "vitest";
-import { CandidateProfileSchema, JobSearchPreferencesSchema } from "@nestor/contracts";
-import { createProfileEditorValues, createSearchPreferencesEditorValues } from "../../lib/profile-editor";
+import {
+  CandidateProfileSchema,
+  JobSearchPreferencesSchema,
+} from "@nestor/contracts";
+import {
+  createProfileEditorValues,
+  createSearchPreferencesEditorValues,
+} from "../../lib/profile-editor";
 import { ProfilePreferencesEligibilitySection } from "./profile-preferences-eligibility-section";
 import { ProfilePreferencesTargetingSection } from "./profile-preferences-sections";
 const profile = CandidateProfileSchema.parse({
@@ -43,22 +49,52 @@ const preferences = JobSearchPreferencesSchema.parse({
   discovery: { targets: [] },
 });
 
-
 function Harness() {
-  const profileForm = useForm({defaultValues:createProfileEditorValues(profile)});
-  const preferencesForm = useForm({defaultValues:createSearchPreferencesEditorValues(preferences)});
-  return <><ProfilePreferencesEligibilitySection busy={false} profileForm={profileForm} /><ProfilePreferencesTargetingSection preferencesForm={preferencesForm} /></>;
+  const profileForm = useForm({
+    defaultValues: createProfileEditorValues(profile),
+  });
+  const preferencesForm = useForm({
+    defaultValues: createSearchPreferencesEditorValues(preferences),
+  });
+  return (
+    <>
+      <ProfilePreferencesEligibilitySection
+        busy={false}
+        profileForm={profileForm}
+      />
+      <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />
+    </>
+  );
 }
 it("keeps search pay preferences separate from form answers in Needs you", () => {
-  const {container} = render(<Harness />);
+  const { container } = render(<Harness />);
   expect(screen.getByText("Minimum worth considering")).toBeTruthy();
-  expect(container.textContent).toContain("in Needs you when a form asks for it");
+  expect(container.textContent).toContain(
+    "in Needs you when a form asks for it",
+  );
   expect(container.querySelector('[name^="answerBank."]')).toBeNull();
   expect(screen.queryByText("Reusable screener answers")).toBeNull();
 });
 
-function TargetingHarness() { const preferencesForm = useForm({defaultValues:createSearchPreferencesEditorValues(preferences)}); return <ProfilePreferencesTargetingSection preferencesForm={preferencesForm}/>; }
-function EligibilityHarness() { const profileForm = useForm({defaultValues:createProfileEditorValues(profile)}); return <ProfilePreferencesEligibilitySection busy={false} profileForm={profileForm}/>; }
+function TargetingHarness() {
+  const preferencesForm = useForm({
+    defaultValues: createSearchPreferencesEditorValues(preferences),
+  });
+  return (
+    <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />
+  );
+}
+function EligibilityHarness() {
+  const profileForm = useForm({
+    defaultValues: createProfileEditorValues(profile),
+  });
+  return (
+    <ProfilePreferencesEligibilitySection
+      busy={false}
+      profileForm={profileForm}
+    />
+  );
+}
 afterEach(cleanup);
 describe("preference usability controls", () => {
   afterEach(cleanup);

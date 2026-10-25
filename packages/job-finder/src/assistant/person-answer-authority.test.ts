@@ -185,16 +185,3 @@ describe("the person's answer authority", () => {
     );
   });
 });
-
-it("Needs you refuses an agent-chosen answer before any store write", async () => {
-  const { resolveNeedsYouTool } = await import("./tools/workspace-tools");
-  const assertPersonAnswerAuthority = vi.fn(() => Promise.reject(new Error("The person did not give or approve zero years.")));
-  const executeAction = vi.fn(async (action: string) => action === "needs-you:get_need" ? {task:{id:1,kind:"question",key:"years",prompt:answers[0]!.question,scope:{country:"",siteOrigin:""},input:"number",options:[],openedAt:"2026-10-25T00:00:00.000Z"},applications:[],draft:null} : null);
-  await expect(resolveNeedsYouTool.execute(resolveNeedsYouTool.input.parse({id:1,action:"answer",answer:"0",remember:true}),{
-    service:{} as never,
-    session:{assertCurrent:()=>undefined,assertPersonAnswerAuthority} as unknown as AssistantTurnSession,
-    ports:{executeAction} as unknown as AssistantHostPorts,
-  })).rejects.toThrow("did not give or approve");
-  expect(executeAction.mock.calls.map(call => call[0])).toEqual(["needs-you:get_need"]);
-  expect(assertPersonAnswerAuthority).toHaveBeenCalledWith({answers:[answers[0]!],saveForFuture:true});
-});

@@ -694,13 +694,6 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.applyResumePatch(i.patch, i.revisionReason),
     { name: "edit_resume", custom: true },
   ),
-  "clear-application-answer": action(
-    C.ClearApplicationAnswerCommandSchema,
-    "applications",
-    "confirm",
-    "Clear a saved application answer.",
-    (i, c) => c.service.clearApplicationAnswer(i),
-  ),
   "snooze-grouped-decision": action(
     C.SnoozeGroupedDecisionInputSchema,
     "applications",

@@ -1,4 +1,5 @@
 import { useToReviewCount } from "@renderer/features/shortlisted/use-to-review-count";
+import { useNeedsYouCount } from "@renderer/features/needs-you/use-needs-you-count";
 import { AssistantProvider } from "../features/job-finder/assistant/assistant-provider";
 import {
   COMPACT_NAV_PILL_ACTIVE_CLASS,
@@ -1122,6 +1123,7 @@ export function JobFinderPage() {
   // route container, which remounts its content for every screen.
   useDismissToastsOnScreenChange(location.pathname);
   const toReviewCount = useToReviewCount();
+  const needsYouCount = useNeedsYouCount();
   const shellMarkedRef = useRef(false);
   const {
     appearanceTheme,
@@ -1308,6 +1310,7 @@ export function JobFinderPage() {
             resumeImportProgress={context.resumeImportProgress}
             saveState={saveState}
             toReviewCount={toReviewCount}
+            needsYouCount={needsYouCount}
             workspace={workspace}
           >
             {jobFinderPageOutlet}

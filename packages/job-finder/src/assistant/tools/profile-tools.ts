@@ -50,7 +50,7 @@ export const PROFILE_EDITING_RULES = [
   "Spoken languages live in Profile > Background (a tab, not a section to scroll to). Use upsert_language_record with record.language and proficiency, then read_profile background to verify the saved list. Import success does not prove every collection was saved: read_document and compare work history, education, skills, links and spoken languages with read_profile; add missing facts from the supplied resume before declaring the import complete.",
   "The professional summary shown in Basics is replace_professional_summary_fields with fullSummary. Headline, contact details and location are replace_identity_fields.",
   "Work eligibility (countries, sponsorship, remote eligibility, relocation, notice period) is replace_work_eligibility_fields; record only what the person said or the resume states.",
-  "Form answers are read and saved only in Needs you: list_needs_you, resolve_needs_you and the Needs you saved-answer commands. Keep structured eligibility and resume facts in Profile. Never invent personal answers or save them for later without the person choosing it.",
+  "Form answers are read and saved only in Needs you: list_needs_you, answer_need and the Needs you saved-answer commands. Keep structured eligibility and resume facts in Profile. Never invent personal answers or save them for later without the person choosing it.",
   "The resume level for jobs shortlisted from now on is set_resume_approach: original_resume, conservative (Light), balanced (Tailored) or aggressive.",
   "Never invent experience, credentials, dates, pay currency or metrics.",
   "Setup readiness comes from the setup data returned by read_profile and edit_profile. Before saying setup is finished, check its blockers and required review items. Fill a missing headline from the person's stated target focus when setting up their profile; do not invent past experience. Tell them any remaining required step plainly; a phone number is not required when an email is saved. When the person asks to finish a ready setup, call finish_profile_setup; it saves completion without starting a search.",
@@ -949,8 +949,19 @@ export const editProfileTool = defineTool({
       }
     }
 
-    if(operations.some(operation => ["upsert_reusable_answer","remove_reusable_answer","replace_answer_bank_fields"].includes(operation.operation)))
-      throw new AssistantToolError("refused","Form answers belong in Needs you. Use list_needs_you and resolve_needs_you for a pending question, or the Needs you saved-answer commands to edit remembered answers.");
+    if (
+      operations.some((operation) =>
+        [
+          "upsert_reusable_answer",
+          "remove_reusable_answer",
+          "replace_answer_bank_fields",
+        ].includes(operation.operation),
+      )
+    )
+      throw new AssistantToolError(
+        "refused",
+        "Form answers belong in Needs you. Use list_needs_you and answer_need for a pending question, or the Needs you saved-answer commands to edit remembered answers.",
+      );
 
     if (input.mode === "suggest") {
       const { proposal, part } = await session.createProposal({
@@ -1065,17 +1076,31 @@ export async function undoReceipt(
   let conflicts: string[] = [];
   if (receipt.target === "app_command") {
     const undo = receipt.undoCommand;
-    const command = context.ports.commands?.find((tool) => tool.name === undo?.name);
+    const command = context.ports.commands?.find(
+      (tool) => tool.name === undo?.name,
+    );
     if (!undo || !command || command.effect !== "local_write")
-      throw new AssistantToolError("not_found", "That Undo command is unavailable.");
+      throw new AssistantToolError(
+        "not_found",
+        "That Undo command is unavailable.",
+      );
     session.assertCurrent();
     try {
-      const result = await command.execute(command.input.parse(undo.input), context);
+      const result = await command.execute(
+        command.input.parse(undo.input),
+        context,
+      );
       if (undo.expectedCount !== undefined) {
-          const outcome = z.union([z.object({ moved: z.number() }), z.object({ changed: z.number() })]).parse(result.data);
-          const changed = "moved" in outcome ? outcome.moved : outcome.changed;
-          if (changed > 0) undone.push(...receipt.fieldLabels);
-          if (changed < undo.expectedCount) conflicts.push(...receipt.fieldLabels);
+        const outcome = z
+          .union([
+            z.object({ moved: z.number() }),
+            z.object({ changed: z.number() }),
+          ])
+          .parse(result.data);
+        const changed = "moved" in outcome ? outcome.moved : outcome.changed;
+        if (changed > 0) undone.push(...receipt.fieldLabels);
+        if (changed < undo.expectedCount)
+          conflicts.push(...receipt.fieldLabels);
       } else undone.push(...receipt.fieldLabels);
     } catch (error) {
       if (error instanceof Error && /changed since/iu.test(error.message))

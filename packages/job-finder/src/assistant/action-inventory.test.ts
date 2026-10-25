@@ -34,7 +34,7 @@ describe("assistant action inventory", () => {
         expect.arrayContaining([
           "ask_person",
           "list_needs_you",
-          "answer_application_question",
+          "answer_need",
           "read_result",
         ]),
       );
