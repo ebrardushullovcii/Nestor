@@ -129,7 +129,7 @@ export function createWorkspaceSourceDebugStoreMethods(
         acceptedAt: new Date().toISOString(),
       });
       await ctx.repository.upsertSourceInstructionArtifact(acceptedArtifact);
-      await ctx.saveDiscoveryTargetUpdate(targetId, (target) => ({
+      await ctx.saveJobSiteMetadata(targetId, (target) => ({
         ...target,
         draftInstructionId: acceptedArtifact.id,
         instructionStatus: acceptedArtifact.status,

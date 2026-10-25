@@ -1165,7 +1165,8 @@ function createBenchmarkContext(input: {
     persistDiscoveryState: (updater) =>
       repository.commitDiscoveryStateUpdate(updater),
     refreshDiscoverySessions: () => Promise.resolve([]),
-    saveDiscoveryTargetUpdate: () =>
+    saveDiscoveryTargetUpdate: () => repository.getSearchPreferences(),
+    saveJobSiteMetadata: () =>
       Promise.reject(
         new Error("Source metadata is not used by resume import."),
       ),

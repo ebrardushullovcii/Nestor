@@ -11,6 +11,7 @@ import type {
   JobFinderDiscoveryCancellationReply,
   JobFinderDiscoveryCommandReply,
   JobFinderDiscoveryState,
+  JobDiscoveryTarget,
   JobFinderWorkspaceSnapshot,
   JobSearchCampaign,
   JobSearchPreferences,
@@ -24,6 +25,7 @@ import {
   ApplicationRecordSchema,
   JobFinderActivityControlSchema,
   JobFinderDiscoveryCancellationInputSchema,
+  JobSearchCampaignCollectionSchema,
   jobSourceValues,
   SavedJobSchema,
   SetJobFinderActivityControlInputSchema,
@@ -73,7 +75,10 @@ import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
 import { createWorkspaceDiscoveryMethods } from "./internal/workspace-discovery-methods";
 import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
-import { getPreferredSessionAdapter } from "./internal/workspace-helpers";
+import {
+  getPreferredSessionAdapter,
+  updateDiscoveryTarget,
+} from "./internal/workspace-helpers";
 import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
 import type {
   ApplicationPreparationCapacityToken,
@@ -559,7 +564,65 @@ export function createJobFinderWorkspaceService(
       }));
       return next.sessions;
     },
-    saveDiscoveryTargetUpdate(targetId, updater) {
+    async saveDiscoveryTargetUpdate(
+      targetId: string,
+      updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
+    ): Promise<JobSearchPreferences> {
+      // Kept for the legacy discovery caller until pipeline deletion.
+      // Source-debug writes the site row through saveJobSiteMetadata below.
+      return context.withCampaignTransition(async () => {
+        const campaignState = await repository.getCampaignState();
+        if (!campaignState) {
+          // No collection exists yet, so there is nothing to mirror; every
+          // collection creator holds this same transition and therefore none
+          // can appear between this read and the write below.
+          const searchPreferences = await repository.getSearchPreferences();
+          const nextSearchPreferences = updateDiscoveryTarget(
+            searchPreferences,
+            targetId,
+            updater,
+          );
+          await repository.saveSearchPreferences(nextSearchPreferences);
+          return nextSearchPreferences;
+        }
+        return repository.commitCampaignPreferencesUpdate((current) => {
+          const state = current.campaignState;
+          if (!state) {
+            throw new Error("Campaign state is unavailable.");
+          }
+          const nextSearchPreferences = updateDiscoveryTarget(
+            current.searchPreferences,
+            targetId,
+            updater,
+          );
+          const now = new Date().toISOString();
+          const nextState = JobSearchCampaignCollectionSchema.parse({
+            ...state,
+            campaigns: state.campaigns.map((campaign) =>
+              campaign.id === state.activeCampaignId &&
+              campaign.searchPreferences.discovery.targets.some(
+                (candidate) => candidate.id === targetId,
+              )
+                ? {
+                    ...campaign,
+                    searchPreferences: nextSearchPreferences,
+                    sourceTargetIds: nextSearchPreferences.discovery.targets
+                      .filter((target) => target.enabled)
+                      .map((target) => target.id),
+                    updatedAt: now,
+                  }
+                : campaign,
+            ),
+          });
+          return {
+            result: nextSearchPreferences,
+            campaignState: nextState,
+            searchPreferences: nextSearchPreferences,
+          };
+        });
+      });
+    },
+    saveJobSiteMetadata(targetId, updater) {
       return Promise.resolve().then(() => {
         const site = options.jobSites?.get(Number(targetId));
         if (!site || !options.jobSites)

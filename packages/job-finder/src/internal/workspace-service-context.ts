@@ -170,6 +170,10 @@ export interface WorkspaceServiceContext {
   saveDiscoveryTargetUpdate: (
     targetId: string,
     updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
+  ) => Promise<JobSearchPreferences>;
+  saveJobSiteMetadata: (
+    targetId: string,
+    updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
   ) => Promise<JobDiscoveryTarget>;
   persistSourceDebugRun: (run: SourceDebugRunRecord) => Promise<void>;
   persistBrowserSessionState: (
