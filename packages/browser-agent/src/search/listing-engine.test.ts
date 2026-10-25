@@ -59,7 +59,7 @@ test("screens titles in one call, retains senior variants and skips saved and re
   ];
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"related":[0,1]}' }),
+      Promise.resolve({ content: '{"unrelated":[2]}' }),
     ),
   };
   const goals = {
@@ -99,7 +99,9 @@ test("a changing age badge does not make a rejected listing cost another model c
       html: `<article><p>Employer</p><h2><a href="/jobs/nurse">Nurse</a></h2><p>Berlin</p><span class="age">${age}</span></article>`,
     });
   const client = {
-    chatWithTools: vi.fn(() => Promise.resolve({ content: '{"related":[]}' })),
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"unrelated":[0]}' }),
+    ),
   };
   const goals = {
     targetRoles: ["Data Analyst"],
@@ -651,7 +653,7 @@ test("a truncated screen batch is left retryable while other title batches compl
       chatWithTools: vi.fn(() =>
         ++count === 1
           ? Promise.reject(Error("incomplete response"))
-          : Promise.resolve({ content: '{"related":[0]}' }),
+          : Promise.resolve({ content: '{"unrelated":[]}' }),
       ),
     },
   });

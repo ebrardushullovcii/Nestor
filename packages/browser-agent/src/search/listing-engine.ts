@@ -354,7 +354,7 @@ export async function screenCards(
     try {
       const answer = await ask(
         input,
-        'Choose titles whose actual day-to-day profession matches the requested kinds of work. Return {"related":[integer title indices]}; explicitly include every plausible match. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the requested related work and genuinely overlapping functions (Fullstack includes Backend duties; Business Intelligence includes Data Analysis), wide_net also adds genuinely transferable neighboring professions. A broad word such as data, analytics, research or engineer does not establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
+        'Screen actual professions against the requested kinds of work; reject only clear mismatches. Return {"unrelated":[integer title indices]} for ONLY clearly different professions. Every omitted title remains a plausible match for full-text fit. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the requested related work and genuinely overlapping functions (Fullstack includes Backend duties; Business Intelligence includes Data Analysis), wide_net also adds genuinely transferable neighboring professions. Generic or ambiguous Software Engineer titles can include the requested work: keep them for reading. Backend/Platform work includes distributed systems, storage, cloud infrastructure, SRE and DevOps. A broad word such as data, analytics or research does not by itself establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
         {
           goals: input.goals,
           titles: titles.map((title, index) => [
@@ -365,15 +365,15 @@ export async function screenCards(
               ?.text.slice(0, 700) ?? "",
           ]),
         },
-        z.object({ related: z.array(z.number().int().nonnegative()) }),
+        z.object({ unrelated: z.array(z.number().int().nonnegative()) }),
         2000,
         "listing_screen",
       );
-      const selected = new Set(answer.related);
-      if ([...selected].some((index) => !titles[index]))
-        throw new Error("Role screen returned an unknown title.");
-      for (const [index, title] of titles.entries())
-        if (!selected.has(index)) unrelated.add(title);
+      for (const index of answer.unrelated) {
+        const title = titles[index];
+        if (!title) throw new Error("Role screen returned an unknown title.");
+        unrelated.add(title);
+      }
       for (const title of titles) decisions.set(title, !unrelated.has(title));
     } catch (error) {
       input.signal?.throwIfAborted();

@@ -468,3 +468,31 @@ test("a site's screening failure stays visible without stopping successful sites
   expect(failed?.seen).toBe(0);
   expect(failed?.failedReads).toBe(2);
 });
+
+test("a proven access block becomes one source ticket if browser reading also fails", async () => {
+  const { runner, engine, store, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://blocked.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  engine.collectSource.mockImplementation(({ lane }) =>
+    lane === "http"
+      ? Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: false,
+          requiresBrowser: true,
+          accessBlocked: true,
+          notes: ["HTTP 403"],
+        })
+      : Promise.reject(Error("Browser access blocked")),
+  );
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(createSourceAccessStore(store).pending(1)).toBe(true);
+  expect(
+    (store.sql("SELECT count(*) AS n FROM needs_you").get() as { n: number }).n,
+  ).toBe(1);
+  expect(createSearchSourcesStore(store).list({}).rows[0]?.state).toBe(
+    "needs_you",
+  );
+});
