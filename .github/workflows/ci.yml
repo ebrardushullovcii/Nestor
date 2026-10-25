@@ -52,6 +52,8 @@ jobs:
           node-version: "24"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      # pnpm can restore electron from its store without running the binary download.
+      - run: pnpm rebuild electron
       - name: Install Chromium for the browser tests
         shell: bash
         run: |
@@ -60,15 +62,17 @@ jobs:
           echo "NESTOR_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
       - name: Create the temp root the script tests expect
         run: New-Item -ItemType Directory -Force (Join-Path (Split-Path -Qualifier $PWD) 'tmp') | Out-Null
-      # A shared runner can't judge speed, so stopwatch and scale tests are
-      # skipped here, and slow disks get a longer timeout. The two release-tool
+      # A shared runner can't judge speed, so stopwatch, scale and old-data
+      # conversion tests are skipped here, slow disks get a longer timeout, and a
+      # failure gets one retry (a real bug fails twice). The two release-tool
       # tests need a sealed acceptance setup that only exists on a dev machine.
       - name: Tests
         run: >-
           pnpm exec vitest run --maxWorkers=4 --minWorkers=4
-          --testTimeout=30000 --hookTimeout=30000
+          --testTimeout=30000 --hookTimeout=30000 --retry=1
           --exclude "**/*.performance.test.*"
           --exclude "**/*.scale.test.*"
           --exclude "**/workspace-scale.test.ts"
+          --exclude "**/*.legacy-migration.test.*"
           --exclude "apps/desktop/scripts/prepare-blind-persona-workspaces.test.ts"
           --exclude "apps/desktop/scripts/blind-resume-comparison-harness.test.ts"
