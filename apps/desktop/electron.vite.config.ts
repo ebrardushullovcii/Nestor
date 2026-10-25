@@ -370,7 +370,7 @@ function rendererConfig(plugins: PluginOption[]): ViteUserConfig {
       warmup: {
         clientFiles: [
           "./src/main.tsx",
-          "./src/features/job-finder/screens/job-search-home/job-search-home-screen.tsx",
+          "./src/features/home/home-screen.tsx",
         ],
       },
     },

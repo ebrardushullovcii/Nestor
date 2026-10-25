@@ -8,7 +8,6 @@ import {
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
-import { useJobStageCounts } from "@renderer/features/find-jobs/use-job-stage-counts";
 import { readFullWorkspaceIfBehind } from "@renderer/features/job-finder/lib/workspace-view-refresh";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
@@ -28,12 +27,10 @@ import {
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import type {
   JobFinderRendererWorkspaceSnapshot,
-  SetJobFinderActivityControlInput,
 } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
 import { readJobFinderNavigationContext } from "@renderer/features/job-finder/lib/job-finder-context-navigation";
-import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
-import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
+import { HomeScreen } from "@renderer/features/home/home-screen";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
 // Applications) are part of the initial-route bundle so their real headings
@@ -82,11 +79,6 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/components/profile/setup/profile-setup-screen")
   ).ProfileSetupScreen,
 }));
-const loadJobSearchHomeScreen = createSharedRouteLoader(async () => ({
-  default: (
-    await import("@renderer/features/job-finder/screens/job-search-home/job-search-home-screen")
-  ).JobSearchHomeScreen,
-}));
 const loadActionsScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/screens/actions-screen")
@@ -98,22 +90,11 @@ const loadSettingsScreen = createSharedRouteLoader(async () => ({
   ).SettingsScreen,
 }));
 
-// The app opens on Home, so its screen is fetched while the workspace loads
-// rather than after it; by the time the workspace is ready the screen is too.
-if (
-  import.meta.env.MODE !== "test" &&
-  typeof window !== "undefined" &&
-  /^(#\/?(job-finder(\/home)?\/?)?)?$/.test(window.location.hash)
-) {
-  void loadJobSearchHomeScreen().catch(() => undefined);
-}
-
 // Every other screen's code is fetched once the window is idle, so the first
 // click on any of them renders at once instead of waiting on its chunk.
 if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   const preloadScreens = () => {
     for (const load of [
-      loadJobSearchHomeScreen,
       loadSettingsScreen,
       loadActionsScreen,
       loadProfileSetupScreen,
@@ -126,7 +107,6 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
 }
 
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
-const JobSearchHomeScreen = lazyScreen(loadJobSearchHomeScreen);
 const ActionsScreen = lazyScreen(loadActionsScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
 
@@ -402,143 +382,15 @@ export { JobFinderRouteErrorBoundary };
 
 export function JobFinderHomeRoute() {
   const context = useJobFinderPageContext();
-  const launchReads = useLaunchReads();
-  const [activityPending, setActivityPending] = useState(false);
   // A workspace that has not started setup opens guided setup directly; Home
   // is one screen of hallway before it. The redirect is spent immediately so
   // the sidebar's Home destination still works.
-  const autoOpenGuidedSetup = shouldAutoOpenGuidedSetup(
-    context.workspace.profileSetupState,
-  );
-
-  if (autoOpenGuidedSetup) {
+  if (shouldAutoOpenGuidedSetup(context.workspace.profileSetupState)) {
     markGuidedSetupAutoOpenSpent();
     return <Navigate replace to="/job-finder/profile/setup" />;
   }
-
-  const handleActivityControl = (input: SetJobFinderActivityControlInput) => {
-    setActivityPending(true);
-    void context.onSetActivityControl(input).finally(() => {
-      setActivityPending(false);
-    });
-  };
-
-  // The same adapter the shell's Tasks popover uses: the cancel command wants
-  // the run's current job and record, which Home does not hold.
-  const stopApplyRun = (runId: string) => {
-    const run = context.workspace.applyRuns.find(
-      (candidate) => candidate.id === runId,
-    );
-    const result = (context.workspace.applyJobResults ?? []).find(
-      (candidate) =>
-        candidate.runId === runId &&
-        (run?.currentJobId ? candidate.jobId === run.currentJobId : true) &&
-        Boolean(candidate.applicationRecordId),
-    );
-    if (!result?.applicationRecordId) return;
-    void context.onCancelApplyRun({
-      runId,
-      jobId: result.jobId,
-      applicationRecordId: result.applicationRecordId,
-    });
-  };
-
-  // Find jobs' count comes from the job store, which is open at launch.
-  const jobCounts = useJobStageCounts();
-  const findJobsCounts = jobCounts
-    ? { visible: jobCounts.found, weaker: 0 }
-    : null;
-  return (
-    <JobFinderHydrationGate
-      collections={
-        findJobsCounts ? HOME_FIRST_VIEW_COLLECTIONS : HOME_REQUIRED_COLLECTIONS
-      }
-      launchView={
-        launchReads.counts ? (
-          <JobSearchHomeLaunch
-            counts={launchReads.counts}
-            onNavigate={context.onNavigateSafely}
-          />
-        ) : undefined
-      }
-      workspace={context.workspace}
-    >
-      <JobSearchHomeScreen
-        findJobsCounts={findJobsCounts}
-        actionState={context.actionState}
-        activityPending={activityPending}
-        applicationAutomationMode={
-          context.workspace.settings.applicationAutomationMode ?? "confirm_before_submit"
-        }
-        browserSessionPending={context.isPending(
-          jobFinderPendingActions.browserSession(),
-        )}
-        discoveryRunFeedback={context.discoveryRunFeedback}
-        discoveryRunPending={context.isPending(
-          jobFinderPendingActions.discoveryAll(),
-        )}
-        isDiscoveryPending={context.isPending(
-          jobFinderPendingActions.discoveryAll(),
-        )}
-        isResumeImportPending={context.isPending(
-          jobFinderPendingActions.profileImport(),
-        )}
-        liveDiscoveryEvents={context.liveDiscoveryEvents}
-        onApplyToJobs={(jobIds) =>
-          context.onStartAutoApplyQueue(
-            [...jobIds],
-            context.workspace.settings.applicationAutomationMode ?? "confirm_before_submit",
-            { stayOnCurrentPage: true },
-          )
-        }
-        onSendPreparedApplications={context.onSendPreparedApplications}
-        onResumeSetup={context.onResumeProfileSetup}
-        onNavigate={context.onNavigateSafely}
-        onOpenBrowserSession={() => {
-          void context.onOpenBrowserSession();
-        }}
-        onPauseActivity={() =>
-          handleActivityControl({
-            paused: true,
-            reason: "Paused by you.",
-            pauseBehavior: "finish_current",
-          })
-        }
-        onResumeActivity={() => handleActivityControl({ paused: false })}
-        {...(context.onRunAgentDiscovery
-          ? { onRunDiscovery: context.onRunAgentDiscovery }
-          : {})}
-        onStopApply={stopApplyRun}
-        onControlApplyQueue={context.onControlApplyQueue}
-        {...(context.onCancelDiscovery
-          ? {
-              onStopSearch: (runId: string) => {
-                void context.onCancelDiscovery?.(runId);
-              },
-            }
-          : {})}
-        resumeImportProgress={context.resumeImportProgress}
-        workspace={context.workspace}
-      />
-    </JobFinderHydrationGate>
-  );
+  return <HomeScreen />;
 }
-
-const HOME_REQUIRED_COLLECTIONS = [
-  "discovery_jobs",
-  "review_queue",
-  "applications",
-  "source_history",
-] as const;
-
-/** Everything Home reads apart from the Find jobs lists. */
-const HOME_FIRST_VIEW_COLLECTIONS = [
-  "review_queue",
-  "applications",
-  "source_history",
-  "documents",
-  "intelligence",
-] as const;
 
 export function JobFinderProfileRoute() {
   const context = useJobFinderPageContext();

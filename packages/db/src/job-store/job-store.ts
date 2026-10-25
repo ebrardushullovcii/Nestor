@@ -34,6 +34,7 @@ import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
 export { createJobSitesStore, type JobSitesStore } from "./job-sites";
 export { createTrackerStore, type TrackerStore } from "./tracker";
+export { createHomeStore, type HomeStore } from "./home";
 export {
   createResumeStore,
   ResumeChangedError,

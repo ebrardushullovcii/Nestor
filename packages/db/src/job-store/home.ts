@@ -1,0 +1,161 @@
+import {
+  HOME_ACTIVITY_DAYS,
+  HOME_RECENT_DAYS,
+  HomeSummaryInputSchema,
+  trackerStatusValues,
+  type HomeActivityDay,
+  type HomeSummary,
+  type HomeSummaryInput,
+  type HomeUpcoming,
+  type TrackerStatus,
+} from "@nestor/contracts";
+
+import type { JobStore } from "./job-store";
+import { toIso } from "./job-list";
+import { createTrackerStore } from "./tracker";
+
+const DAY_MS = 86_400_000;
+/** Interviews and reminders this far ahead show on Home. */
+const UPCOMING_MS = 7 * DAY_MS;
+const UPCOMING_LIMIT = 6;
+
+/**
+ * Home's numbers. Each one is a count or a day bucket over an indexed column
+ * (stage counts, tracker counts, `applied_at`, event kind and time, `next_at`),
+ * so Home stays as fast at thousands of applications as at ten.
+ */
+export function createHomeStore(store: JobStore) {
+  const { sql } = store;
+  const tracker = createTrackerStore(store);
+
+  // Times can come back as REAL, so each day is cast to a whole number.
+  const perDay = (query: string, since: number, offset: number) => {
+    const counts = new Map<number, number>();
+    for (const row of sql(query).all(offset, since) as {
+      d: number;
+      n: number;
+    }[])
+      counts.set(row.d, row.n);
+    return counts;
+  };
+
+  return {
+    summary(input: HomeSummaryInput, now = Date.now()): HomeSummary {
+      const { utcOffsetMinutes } = HomeSummaryInputSchema.parse(input);
+      const offset = utcOffsetMinutes * 60_000;
+      const today = Math.floor((now + offset) / DAY_MS);
+      const firstDay = today - HOME_ACTIVITY_DAYS + 1;
+      const since = firstDay * DAY_MS - offset;
+
+      const sent = perDay(
+        `SELECT CAST((applied_at + ?) / ${DAY_MS} AS INTEGER) AS d, COUNT(*) AS n
+         FROM tracker WHERE applied_at >= ? GROUP BY d`,
+        since,
+        offset,
+      );
+      const replies = perDay(
+        `SELECT CAST((at + ?) / ${DAY_MS} AS INTEGER) AS d, COUNT(*) AS n
+         FROM tracker_events WHERE kind = 'reply' AND at >= ? GROUP BY d`,
+        since,
+        offset,
+      );
+      const days: HomeActivityDay[] = [];
+      for (let day = firstDay; day <= today; day += 1)
+        days.push({
+          day: new Date(day * DAY_MS).toISOString().slice(0, 10),
+          sent: sent.get(day) ?? 0,
+          replies: replies.get(day) ?? 0,
+        });
+
+      const recent = Object.fromEntries(
+        trackerStatusValues.map((status) => [status, 0]),
+      ) as Record<TrackerStatus, number>;
+      for (const row of sql(
+        `SELECT status, COUNT(*) AS n FROM tracker
+         WHERE applied_at >= ? GROUP BY status`,
+      ).all(now - HOME_RECENT_DAYS * DAY_MS) as {
+        status: TrackerStatus;
+        n: number;
+      }[])
+        recent[row.status] = row.n;
+
+      const resumes = { writing: 0, toReview: 0, failed: 0 };
+      let withResume = 0;
+      for (const row of sql(
+        `SELECT r.state AS state, r.approved_at IS NULL AS open, COUNT(*) AS n
+         FROM jobs j JOIN resumes r ON r.job_id = j.id
+         WHERE j.stage = 'shortlisted' GROUP BY state, open`,
+      ).all() as { state: string; open: number; n: number }[]) {
+        withResume += row.n;
+        if (row.state === "ready" && row.open) resumes.toReview += row.n;
+        else if (row.state === "failed") resumes.failed += row.n;
+        else if (row.state !== "ready") resumes.writing += row.n;
+      }
+      const jobs = store.stageCounts();
+      // Shortlisted with no resume row yet are waiting for their listing read.
+      resumes.writing += Math.max(0, jobs.shortlisted - withResume);
+
+      const count = (query: string, ...params: number[]) =>
+        (sql(query).get(...params) as { n: number }).n;
+
+      const upcoming = (
+        sql(
+          `SELECT t.job_id AS jobId, j.company, j.title, t.next_at AS at, t.next_title AS what,
+             (SELECT e.kind FROM tracker_events e
+              WHERE e.job_id = t.job_id AND e.due_at = t.next_at AND e.done_at IS NULL
+              ORDER BY e.id LIMIT 1) AS kind,
+             (SELECT e.place FROM tracker_events e
+              WHERE e.job_id = t.job_id AND e.due_at = t.next_at AND e.done_at IS NULL
+              ORDER BY e.id LIMIT 1) AS place
+           FROM tracker t JOIN jobs j ON j.id = t.job_id
+           WHERE t.next_at IS NOT NULL AND t.next_at <= ?
+           ORDER BY t.next_at, t.job_id LIMIT ${UPCOMING_LIMIT}`,
+        ).all(now + UPCOMING_MS) as {
+          jobId: number;
+          company: string;
+          title: string;
+          at: number;
+          what: string;
+          kind: string | null;
+          place: string | null;
+        }[]
+      ).map(
+        (row): HomeUpcoming => ({
+          jobId: row.jobId,
+          company: row.company,
+          title: row.title,
+          kind: row.kind === "interview" ? "interview" : "reminder",
+          what: row.what,
+          at: toIso(row.at),
+          place: row.place,
+        }),
+      );
+
+      return {
+        jobs,
+        tracker: tracker.counts(),
+        resumes,
+        readyToApply: count(
+          `SELECT COUNT(*) AS n FROM jobs j WHERE j.stage = 'resume'
+           AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)`,
+        ),
+        needsYou: count(
+          `SELECT COUNT(*) AS n FROM needs_you WHERE resolved_at IS NULL`,
+        ),
+        followUpsDue: count(
+          `SELECT COUNT(*) AS n FROM tracker WHERE next_at IS NOT NULL AND next_at <= ?`,
+          now,
+        ),
+        foundToday: count(
+          `SELECT COUNT(*) AS n FROM jobs WHERE stage = 'found' AND found_at >= ?`,
+          today * DAY_MS - offset,
+        ),
+        days,
+        recent,
+        upcoming,
+      };
+    },
+  };
+}
+
+export type HomeStore = ReturnType<typeof createHomeStore>;

@@ -41,7 +41,11 @@ const FILTER_ID = "shortlisted-filter";
  */
 export function ShortlistedScreen() {
   const { showToast } = useToast();
-  const [tab, setTab] = useState<Tab>("shortlisted");
+  const [searchParams] = useSearchParams();
+  // `?tab=approved` opens the Approved list (Home's "Apply to approved jobs").
+  const [tab, setTab] = useState<Tab>(() =>
+    searchParams.get("tab") === "approved" ? "resume" : "shortlisted",
+  );
   const [text, setText] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
@@ -63,7 +67,6 @@ export function ShortlistedScreen() {
   const selectedCount = countSelected(selection, list.total);
 
   // A job asked for by link (`?jobId=`) stays open in its own tab.
-  const [searchParams] = useSearchParams();
   const navigationKey = useLocation().key;
 
   const linkedJob = Number(searchParams.get("jobId") ?? "");

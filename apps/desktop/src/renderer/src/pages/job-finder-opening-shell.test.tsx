@@ -73,6 +73,7 @@ function renderOpeningShell(
     configurable: true,
     value: {
       jobs: jobsBridgeStub(),
+      home: { summary: () => new Promise(() => undefined) },
       ping: vi.fn().mockResolvedValue({ ok: true, platform }),
       window: windowBridge,
     },
@@ -87,7 +88,7 @@ function renderOpeningShell(
 
 describe("JobFinderOpeningShell platform geometry", () => {
   it("reserves the loaded shell frame instead of swapping from a centered loading card", () => {
-    renderOpeningShell("darwin", "/job-finder");
+    renderOpeningShell("darwin", "/job-finder/settings");
 
     const header = document.querySelector<HTMLElement>(
       "[data-job-finder-shell-header]",
@@ -116,7 +117,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
       "min-[1440px]:pl-(--job-finder-side-width)",
     );
     expect(screen.getByRole("status").textContent).toContain(
-      "HomeSee progress, open tasks, and the best next step.",
+      "Opening your saved settings workspace.",
     );
     expect(screen.queryByText("Loading Job Finder")).toBeNull();
     expect(
@@ -125,7 +126,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
     expect(
       document.querySelector('[data-job-finder-sidebar] [aria-current="page"]')
         ?.textContent,
-    ).toContain("Home");
+    ).toContain("Settings");
   });
 
   it("paints both module names in full in the opening brand lockup", () => {
@@ -321,6 +322,7 @@ function renderLoadedShell(initialEntry = "/job-finder/home") {
     configurable: true,
     value: {
       jobs: jobsBridgeStub(),
+      home: { summary: () => new Promise(() => undefined) },
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
       window: {
         close: vi.fn().mockResolvedValue(undefined),
@@ -368,6 +370,7 @@ function renderOpeningShellContainer(initialEntry = "/job-finder/home") {
     configurable: true,
     value: {
       jobs: jobsBridgeStub(),
+      home: { summary: () => new Promise(() => undefined) },
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
       window: {
         close: vi.fn().mockResolvedValue(undefined),
@@ -772,57 +775,5 @@ describe("JobFinderOpeningShell parity with the loaded shell", () => {
       scrolling.querySelector("[data-locked-screen-top-content]"),
     ).toBeNull();
     expect(titleTopPaddingTokens(scrolling)).toEqual(["pt-3"]);
-  });
-
-  it("keeps the Home-shaped skeleton off every other route", () => {
-    const openingBlocks = (root: ParentNode) =>
-      Array.from(
-        root.querySelectorAll<HTMLElement>("[data-job-finder-opening-block]"),
-      ).map((node) => node.getAttribute("data-job-finder-opening-block"));
-
-    // The primary-tinted recommended-next card is Home's, and it used to paint
-    // on every route: cold-starting on Settings briefly showed a Home-shaped
-    // card.
-    expect(openingBlocks(renderOpeningShellContainer())).toEqual([
-      "status",
-      "recommended-next",
-      "search",
-      "notifications",
-    ]);
-    cleanup();
-    expect(
-      openingBlocks(renderOpeningShellContainer("/job-finder/settings")),
-    ).toEqual(["status", "route-placeholder"]);
-    cleanup();
-    expect(
-      openingBlocks(renderOpeningShellContainer("/job-finder/applications")),
-    ).toEqual(["status", "route-placeholder"]);
-  });
-
-  it("stacks the Home skeleton in one column in the loaded block order", () => {
-    const opening = renderOpeningShellContainer();
-    const placeholder = opening.querySelector<HTMLElement>(
-      "[data-job-finder-opening-placeholder]",
-    );
-
-    expect(
-      Array.from(
-        opening.querySelectorAll<HTMLElement>(
-          "[data-page-header], [data-job-finder-opening-block]",
-        ),
-      ).map(
-        (node) =>
-          node.getAttribute("data-job-finder-opening-block") ?? "page-header",
-      ),
-    ).toEqual([
-      "page-header",
-      "status",
-      "recommended-next",
-      "search",
-      "notifications",
-    ]);
-    // The loaded Home is a single-column stack; the skeleton used to open as a
-    // two-column grid that collapsed the moment the workspace resolved.
-    expect(placeholder?.className).not.toMatch(/(sm|md|lg|xl):grid-cols-/u);
   });
 });

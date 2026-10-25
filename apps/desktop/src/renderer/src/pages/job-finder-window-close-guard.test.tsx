@@ -57,6 +57,7 @@ function installCloseBridgeMock(): CloseBridgeMock {
         run: vi.fn(() => new Promise(() => undefined)),
         onChange: () => () => undefined,
       },
+      home: { summary: () => new Promise(() => undefined) },
       jobFinder: {},
       window: {
         setCloseGuardState: (input: { blocked: boolean }) => {
