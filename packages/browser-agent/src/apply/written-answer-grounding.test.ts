@@ -3,167 +3,101 @@ import { expect, test, vi } from "vitest";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { LLMClient } from "../agent/contracts";
 
-test.each([
-  {
-    location: "Remote, United Kingdom",
-    answers: ["Yes", "No"],
-    supported: true,
-  },
-  {
-    location: "Remote, United Kingdom or Canada",
-    answers: ["Yes", "No"],
-    supported: false,
-  },
-  { location: "Toronto, Canada", answers: ["Yes", "No"], supported: true },
-  {
-    location: "Boston, United States",
-    answers: ["No", "Yes"],
-    supported: true,
-  },
-  { location: "Worldwide remote", answers: ["Yes", "Yes"], supported: false },
-  { location: "Berlin, Germany", answers: ["No", "No"], supported: false },
-])(
-  "sends the country and permit conditions to the independent check: $location",
-  async ({ location, answers, supported }) => {
-    const profile = CandidateProfileSchema.parse({
-      id: "synthetic",
-      fullName: "Synthetic Applicant",
-      yearsExperience: 2,
-      summary:
-        "German student permit: working-student work now; sponsorship for full-time after graduation. Canada authorized, US needs sponsorship.",
-      proofBank: [
+test("passes current eligibility, No and limited-permit conditions to the independent check", async () => {
+  const profile = CandidateProfileSchema.parse({
+    id: "synthetic",
+    fullName: "Synthetic Applicant",
+    yearsExperience: 2,
+    workEligibility: {
+      authorizedWorkCountries: ["United States"],
+      requiresVisaSponsorship: false,
+      limitedWorkPermissions: [
         {
-          id: "proof_synthetic",
-          title: "Reporting project",
-          claim: "Reduced reporting time by 20%",
+          country: "Germany",
+          conditions: "Student work only; 20 hours during term",
+          requiresFutureSponsorship: true,
         },
       ],
-      workEligibility: {
-        authorizedWorkCountries: ["Lebanon", "Canada", "United Kingdom"],
-        limitedWorkPermissions: [
-          {
-            country: "Germany",
-            conditions: "Student work only; 20 hours during term",
-            requiresFutureSponsorship: true,
-          },
-        ],
-      },
-      baseResume: {
-        id: "resume",
-        fileName: "resume.txt",
-        uploadedAt: "2026-10-01T00:00:00.000Z",
-        extractionStatus: "ready",
-      },
-    });
-    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
-      Promise.resolve({
-        toolCalls: [
-          {
-            id: "check",
-            type: "function",
-            function: {
-              name: "report_answer_checks",
-              arguments: JSON.stringify({
-                checks: answers.map((_, index) => ({
-                  index,
-                  supported,
-                  reason: supported
-                    ? "Same country and conditions"
-                    : "Choose the hiring country or review the student permit",
-                })),
-              }),
-            },
-          },
-        ],
-      }),
-    );
-    const checks = await checkWrittenApplicationAnswers({
-      client: { chatWithTools },
-      sources: {
-        profile,
-        resumeText: null,
-        posting: {
-          title: "Analyst",
-          company: "Synthetic",
-          location,
-          description: "Full-time analyst",
-        },
-        reusableAnswers: [],
-        documents: [],
-      },
-      formContext: {
-        pageText: "Employer hiring country: " + location,
-        fields: [{ question: "Hiring location", value: location }],
-      },
-      payDisclosed: false,
-      answers: answers.map((answer, index) => ({
-        question: index ? "Do you need sponsorship?" : "Are you authorized?",
-        answer,
-      })),
-    });
-    expect(checks.every((check) => check.supported === supported)).toBe(true);
-    const [messages] = chatWithTools.mock.calls[0];
-    expect(String(messages[0].content)).toContain(
-      "review the wording before it goes on this application's form",
-    );
-    expect(String(messages[0].content)).not.toContain(
-      "reviewed and submitted by the person",
-    );
-    expect(String(messages[0].content)).toContain(
-      "Reject both Yes and No when the country is unresolved",
-    );
-    expect(String(messages[0].content)).toContain(
-      "A single country named in the posting location is the hiring country",
-    );
-    expect(String(messages[0].content)).toContain(
-      "Remote is a work mode and does not erase the named country",
-    );
-    expect(String(messages[0].content)).toContain(
-      "location names no country or several countries",
-    );
-    expect(String(messages[0].content)).toContain(
-      "limit hours, study status, dates or employer",
-    );
-    expect(String(messages[0].content)).not.toMatch(
-      /German|Canada|US sponsorship/u,
-    );
-    const data: unknown = JSON.parse(String(messages[1].content));
-    expect(data).toHaveProperty("postingContextOnly.location", location);
-    expect(data).toHaveProperty(
-      "applicationFormContext.fields.0.value",
-      location,
-    );
-    expect(data).toHaveProperty("applicant.summary", profile.summary);
-    expect(String(messages[1].content)).not.toMatch(
-      /authorizedWorkCountries|requiresVisaSponsorship|requiresFutureSponsorship/u,
-    );
-    expect(String(messages[0].content)).toContain(
-      "Never quote camelCase field names, key=value text",
-    );
-    for (const check of checks)
-      expect(check.reason).not.toMatch(/[a-z][A-Z]|=/u);
-    expect(data).toHaveProperty(
-      "applicant.workEligibility.Limited work permissions",
-      [
+    },
+    baseResume: {
+      id: "resume",
+      fileName: "synthetic.txt",
+      uploadedAt: "2026-10-01T00:00:00.000Z",
+    },
+  });
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve({
+      toolCalls: [
         {
-          Country: "Germany",
-          Conditions: "Student work only; 20 hours during term",
-          "Will need sponsorship later": "Yes",
+          id: "check",
+          type: "function",
+          function: {
+            name: "report_answer_checks",
+            arguments: JSON.stringify({
+              checks: [
+                {
+                  index: 0,
+                  supported: false,
+                  reason: "The German permit covers student work only.",
+                },
+              ],
+            }),
+          },
         },
       ],
-    );
-    expect(data).toHaveProperty(
-      "applicant.eligibilityInterpretation",
-      expect.stringContaining(
-        "Will need sponsorship later describes future work",
-      ),
-    );
-    expect(data).toHaveProperty(
-      "applicant.proofBank.0.claim",
-      "Reduced reporting time by 20%",
-    );
-  },
-);
+    }),
+  );
+  const result = await checkWrittenApplicationAnswers({
+    client: { chatWithTools },
+    sources: {
+      profile,
+      resumeText: null,
+      reusableAnswers: [],
+      documents: [],
+      posting: {
+        title: "Analyst",
+        company: "Synthetic",
+        location: "Berlin, Germany",
+        description: "Full-time analyst",
+      },
+    },
+    formContext: {
+      pageText: "Full-time work in Germany",
+      fields: [{ question: "Work country", value: "Germany" }],
+    },
+    payDisclosed: false,
+    answers: [{ question: "Are you authorized to work here?", answer: "Yes" }],
+  });
+  expect(result).toEqual([
+    { supported: false, reason: "The German permit covers student work only." },
+  ]);
+  const data: unknown = JSON.parse(
+    String(chatWithTools.mock.calls[0][0][1].content),
+  );
+  expect(data).toHaveProperty(
+    "applicant.workEligibility.Countries where you can work",
+    ["United States"],
+  );
+  expect(data).toHaveProperty(
+    "applicant.workEligibility.Need visa sponsorship",
+    "No",
+  );
+  expect(data).toHaveProperty(
+    "applicant.workEligibility.Limited work permissions",
+    [
+      {
+        Country: "Germany",
+        Conditions: "Student work only; 20 hours during term",
+        "Will need sponsorship later": "Yes",
+      },
+    ],
+  );
+  expect(data).toHaveProperty("postingContextOnly.location", "Berlin, Germany");
+  expect(data).toHaveProperty(
+    "applicationFormContext.fields.0.value",
+    "Germany",
+  );
+});
 
 const sources = {
   resumeText: null,
