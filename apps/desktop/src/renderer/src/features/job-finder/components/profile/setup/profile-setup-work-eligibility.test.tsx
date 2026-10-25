@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +17,10 @@ import {
   ProfileSetupTargetingStep,
   parseWorkCountriesDraft,
 } from "./profile-setup-step-sections";
+
+vi.mock("@renderer/features/job-lists/setup-sites", () => ({
+  SetupSites: () => null,
+}));
 
 const profile = CandidateProfileSchema.parse({
   id: "candidate_setup_eligibility",
@@ -45,8 +49,6 @@ const preferences = JobSearchPreferencesSchema.parse({
 });
 
 let latestProfileValues: ProfileEditorValues | null = null;
-let latestPreferencesValues: SearchPreferencesEditorValues | null = null;
-let registeredFlush: (() => void) | null = null;
 
 function Harness() {
   const profileForm = useForm<ProfileEditorValues>({
@@ -56,7 +58,6 @@ function Harness() {
     defaultValues: createSearchPreferencesEditorValues(preferences),
   });
   latestProfileValues = profileForm.watch();
-  latestPreferencesValues = preferencesForm.watch();
 
   return (
     <ProfileSetupTargetingStep
@@ -64,9 +65,6 @@ function Harness() {
       onSaveAndGoToStep={() => undefined}
       preferencesForm={preferencesForm}
       profileForm={profileForm}
-      registerPendingSourceFlush={(flush) => {
-        registeredFlush = flush;
-      }}
       renderFooter={() => null}
       suggestedWorkCountry="Germany"
     />
@@ -84,8 +82,6 @@ describe("Job targets asks the two questions every application form asks", () =>
   afterEach(() => {
     document.body.innerHTML = "";
     latestProfileValues = null;
-    latestPreferencesValues = null;
-    registeredFlush = null;
   });
 
   it("answers both with one press each", () => {
@@ -108,25 +104,6 @@ describe("Job targets asks the two questions every application form asks", () =>
     expect(
       screen.getByRole("button", { name: "No" }).getAttribute("aria-pressed"),
     ).toBe("true");
-  });
-
-  it("adds an address typed into the source form when the footer saves", () => {
-    render(<Harness />);
-
-    fireEvent.change(screen.getByLabelText("Careers or job-board URLs"), {
-      target: { value: "http://127.0.0.1:47950/greenhouse/" },
-    });
-    expect(latestPreferencesValues?.discoveryTargets).toHaveLength(0);
-
-    // Finish or Save used to drop a pasted address nobody pressed Add for.
-    act(() => registeredFlush?.());
-
-    expect(latestPreferencesValues?.discoveryTargets).toMatchObject([
-      {
-        startingUrl: "http://127.0.0.1:47950/greenhouse/",
-        enabled: true,
-      },
-    ]);
   });
 
   it("reads several countries from one entry", () => {

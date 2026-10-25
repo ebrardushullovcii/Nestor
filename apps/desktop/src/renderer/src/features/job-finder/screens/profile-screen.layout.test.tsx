@@ -19,6 +19,24 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileScreen } from "./profile-screen";
 
+vi.mock("@renderer/features/job-lists/use-site-page", () => {
+  const page = {
+    rows: [],
+    total: 0,
+    selected: 0,
+    enabledTotal: 0,
+    nextCursor: null,
+    counts: { all: 0, enabled: 0, disabled: 0, needs_attention: 0 },
+    loading: false,
+    error: null,
+    pageIndex: 0,
+    refresh: () => {},
+    previous: () => {},
+    next: () => {},
+  };
+  return { useSitePage: () => page };
+});
+
 const profile = CandidateProfileSchema.parse({
   id: "candidate_ready",
   firstName: "Ready",
@@ -1056,36 +1074,5 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
       screen.getByRole<HTMLButtonElement>("button", { name: "Save changes" })
         .disabled,
     ).toBe(true);
-  });
-
-  it("carries the Job sources section through its save so the notice names it", () => {
-    const onSaveAll = vi.fn();
-    renderProfileScreen({
-      initialEntry: "/job-finder/profile?section=sources&focus=job-sources",
-      onSaveAll,
-      searchPreferences: JobSearchPreferencesSchema.parse({
-        ...searchPreferences,
-        discovery: {
-          ...searchPreferences.discovery,
-          targets: [
-            {
-              id: "synthetic-source",
-              label: "Example careers",
-              startingUrl: "https://careers.example.com",
-              enabled: true,
-            },
-          ],
-        },
-      }),
-    });
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: /Include .* in searches/ }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(onSaveAll).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      "sources",
-    );
   });
 });

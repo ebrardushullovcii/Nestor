@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness as createWorkspaceServiceHarness } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -6,7 +7,6 @@ import {
   createAgentBrowserRuntime,
   createSeed,
   createStrongSourceDebugFindingsByPhase,
-  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
 afterEach(() => {
@@ -18,7 +18,7 @@ describe("public provider source check fallback", () => {
     const seed = createSeed();
     seed.searchPreferences.discovery.targets = [
       {
-        id: "target_public_provider_fallback",
+        id: "1",
         label: "Public provider fallback",
         startingUrl: "https://job-boards.greenhouse.io/fallback-board",
         enabled: true,
@@ -81,9 +81,7 @@ describe("public provider source check fallback", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_public_provider_fallback",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
 
     expect(openSessionCalls).toBe(1);
     expect(

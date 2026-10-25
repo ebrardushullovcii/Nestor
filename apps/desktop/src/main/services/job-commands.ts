@@ -3,7 +3,6 @@ import {
   JOBS_RUN_CHANNEL,
   JOBS_SEARCH_STATUS_CHANNEL,
   JOBS_SUBSCRIBE_CHANNEL,
-  isRunnableJobDiscoveryTarget,
   type JobCommandName,
   type JobSearchStatus,
 } from "@nestor/contracts";
@@ -76,23 +75,6 @@ function scoreUnscoredJobs(): void {
     });
 }
 
-/** The job sites turned on in Profile; they live in the workspace for now. */
-async function listSites() {
-  const services = await import("./job-finder");
-  const service = await services.getJobFinderWorkspaceService();
-  const repository =
-    services.getJobFinderRepositoryForWorkspaceService(service);
-  if (!repository) return [];
-  const { discovery } = await repository.getSearchPreferences();
-  return discovery.targets
-    .filter(isRunnableJobDiscoveryTarget)
-    .map((target) => ({
-      id: target.id,
-      label: target.label,
-      url: target.startingUrl,
-    }));
-}
-
 let runner: RunJobCommand | null = null;
 
 /** The same commands the screens use; the Assistant calls this directly. */
@@ -104,7 +86,6 @@ export function runJobCommand<K extends JobCommandName>(
     store: getJobStore(),
     search: getSearchService,
     currentSearch: () => searchService,
-    listSites,
   });
   return runner(name, input);
 }

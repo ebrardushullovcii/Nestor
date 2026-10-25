@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness as createWorkspaceServiceHarness } from "./source-debug.test-support";
 import {
   createCatalogBrowserSessionRuntime,
   type BrowserSessionRuntime,
@@ -14,7 +15,6 @@ import {
   createAgentBrowserRuntime,
   createSeed,
   createStrongSourceDebugFindingsByPhase,
-  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
 function createDiscoveryRunResult(input: DiscoveryRunResultInput) {
@@ -64,15 +64,14 @@ describe("createJobFinderWorkspaceService", () => {
         );
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed: createSeed(),
-      browserRuntime,
-      aiClient: createAgentAiClient(),
-    });
+    const { repository, workspaceService, jobSites } =
+      createWorkspaceServiceHarness({
+        seed: createSeed(),
+        browserRuntime,
+        aiClient: createAgentAiClient(),
+      });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const attempts = await repository.listSourceDebugAttempts();
 
     expect(snapshot.activeSourceDebugRun?.state).toBe("paused_manual");
@@ -82,9 +81,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("paused_manual");
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.outcome).toBe("blocked_auth");
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.instructionStatus,
-    ).toBe("missing");
+    expect(jobSites.get(1)?.instructionStatus).toBe("missing");
   });
 
   test("keeps the browser session open when source debug pauses for a manual prerequisite", async () => {
@@ -160,9 +157,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
 
     expect(snapshot.activeSourceDebugRun?.state).toBe("paused_manual");
     expect(openSessionCalls).toBe(1);
@@ -239,22 +234,21 @@ describe("createJobFinderWorkspaceService", () => {
         );
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed: {
-        ...createSeed(),
-        savedJobs: [],
-        tailoredAssets: [],
-      },
-      browserRuntime,
-      aiClient: createAgentAiClient(),
-    });
+    const { repository, workspaceService, jobSites } =
+      createWorkspaceServiceHarness({
+        seed: {
+          ...createSeed(),
+          savedJobs: [],
+          tailoredAssets: [],
+        },
+        browserRuntime,
+        aiClient: createAgentAiClient(),
+      });
 
     const artifactCountBefore = (
       await repository.listSourceInstructionArtifacts()
     ).length;
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const artifactsAfter = await repository.listSourceInstructionArtifacts();
     const latestArtifact = artifactsAfter.at(-1);
     const learnedLines = [
@@ -271,11 +265,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(skipSessionValidationFlags.every(Boolean)).toBe(true);
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("failed");
     expect(artifactsAfter).toHaveLength(artifactCountBefore);
-    expect(
-      snapshot.searchPreferences.discovery.targets.find(
-        (target) => target.id === "target_linkedin_default",
-      ),
-    ).toMatchObject({
+    expect(jobSites.get(1)).toMatchObject({
       lastVerifiedAt: null,
       validatedInstructionId: null,
       draftInstructionId: null,
@@ -350,9 +340,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
 
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("completed");
     expect(openSessionCalls).toBe(1);
@@ -423,9 +411,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
 
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("completed");
     expect(openSessionCalls).toBe(1);
@@ -488,7 +474,7 @@ describe("createJobFinderWorkspaceService", () => {
     const streamedEvents: SourceDebugProgressEvent[] = [];
 
     const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
+      "1",
       undefined,
       (event) => {
         streamedEvents.push(event);
@@ -640,9 +626,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const latestRunId = snapshot.recentSourceDebugRuns[0]?.id;
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
@@ -759,9 +743,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const latestRunId = snapshot.recentSourceDebugRuns[0]?.id;
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
@@ -978,9 +960,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const latestRunId = snapshot.recentSourceDebugRuns[0]?.id;
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
@@ -1056,14 +1036,12 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    const firstRunPromise = workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const firstRunPromise = workspaceService.runSourceDebug("1");
     await Promise.resolve();
 
-    await expect(
-      workspaceService.runSourceDebug("target_linkedin_default"),
-    ).rejects.toThrow(/already in progress/i);
+    await expect(workspaceService.runSourceDebug("1")).rejects.toThrow(
+      /already in progress/i,
+    );
 
     releaseFirstRun();
     const snapshot = await firstRunPromise;
@@ -1078,7 +1056,7 @@ test("cancellation with an ordinary runtime error does not mark a healthy source
     sessions: [],
     catalog: [],
   });
-  const { workspaceService } = createWorkspaceServiceHarness({
+  const { workspaceService, jobSites } = createWorkspaceServiceHarness({
     seed: createSeed(),
     aiClient: createAgentAiClient(),
     browserRuntime: {
@@ -1090,11 +1068,9 @@ test("cancellation with an ordinary runtime error does not mark a healthy source
     },
   });
   const snapshot = await workspaceService.runSourceDebug(
-    "target_linkedin_default",
+    "1",
     controller.signal,
   );
   expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("cancelled");
-  expect(
-    snapshot.searchPreferences.discovery.targets[0]?.staleReason,
-  ).toBeNull();
+  expect(jobSites.get(1)?.staleReason).toBeNull();
 });

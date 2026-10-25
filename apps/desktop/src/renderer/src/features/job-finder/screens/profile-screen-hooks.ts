@@ -1,3 +1,4 @@
+import { useSitePage } from "@renderer/features/job-lists/use-site-page";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import type {
@@ -383,7 +384,9 @@ export function useProfileScreenForms(input: {
   // and searchPreferences with a new object identity even when nothing in
   // them changed; content fingerprints, not identity, decide when a form may
   // be reseeded so unrelated commits cannot erase dirty drafts.
-  const loadedProfileContentFingerprintRef = useRef(initialFingerprints.profile);
+  const loadedProfileContentFingerprintRef = useRef(
+    initialFingerprints.profile,
+  );
   const loadedReviewCandidatesContentFingerprintRef = useRef(
     initialFingerprints.reviewCandidates,
   );
@@ -861,7 +864,10 @@ export function useProfileScreenForms(input: {
     const draftPreferencesValues = preferencesForm.getValues();
     const isSavedPreferencesDraftEcho =
       preferencesForm.formState.isDirty &&
-      [latestSearchPreferencesRef.current, pendingCanonicalSearchPreferencesRef.current]
+      [
+        latestSearchPreferencesRef.current,
+        pendingCanonicalSearchPreferencesRef.current,
+      ]
         .map(
           (preferences) =>
             buildSearchPreferencesPayload(preferences, draftPreferencesValues)
@@ -1001,6 +1007,7 @@ export function useProfileScreenForms(input: {
     proofBankArray: wrapUserFieldArray(proofBankArray),
     projectArray: wrapUserFieldArray(projectArray),
   };
+  const siteCounts = useSitePage({ limit: 1 }).counts;
   const { overviewProfile, sections } = useMemo(
     () =>
       buildProfileScreenViewModel({
@@ -1009,7 +1016,7 @@ export function useProfileScreenForms(input: {
         certificationValues,
         companyBlacklist,
         companyWhitelist,
-        discoveryTargets,
+        siteCounts,
         educationValues,
         eligibilityValues,
         employmentTypes,
@@ -1042,7 +1049,7 @@ export function useProfileScreenForms(input: {
       certificationValues,
       companyBlacklist,
       companyWhitelist,
-      discoveryTargets,
+      siteCounts,
       educationValues,
       eligibilityValues,
       employmentTypes,

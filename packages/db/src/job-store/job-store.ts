@@ -32,6 +32,7 @@ import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
+export { createJobSitesStore, type JobSitesStore } from "./job-sites";
 export { createTrackerStore, type TrackerStore } from "./tracker";
 export {
   createResumeStore,
@@ -147,7 +148,7 @@ export function openJobStore(filePath: string): JobStore {
   let pending: JobChange[] = [];
 
   const notify = (change: JobChange) => {
-    if (change.stages.length === 0) return;
+    if (change.stages.length === 0 && change.cause !== "sites") return;
     if (depth > 0) {
       pending.push(change);
       return;

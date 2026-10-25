@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import {
   SourceDebugRunDetailsSchema,
   SourceDebugRunRecordSchema,
@@ -6,7 +7,9 @@ import {
 } from "@nestor/contracts";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
-export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceContext) {
+export function createWorkspaceSourceDebugStoreMethods(
+  ctx: WorkspaceServiceContext,
+) {
   return {
     async getSourceDebugRun(runId: string) {
       const run = (await ctx.repository.listSourceDebugRuns()).find(
@@ -69,10 +72,8 @@ export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceCont
       targetId: string,
       artifact: EditableSourceInstructionArtifact,
     ) {
-      const searchPreferences = await ctx.repository.getSearchPreferences();
-      const target = searchPreferences.discovery.targets.find(
-        (entry) => entry.id === targetId,
-      );
+      const site = ctx.jobSites?.get(Number(targetId));
+      const target = site ? jobSiteTarget(site) : null;
 
       if (!target) {
         throw new Error(`Unknown discovery target '${targetId}'.`);
@@ -80,7 +81,9 @@ export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceCont
 
       const existingArtifact = (
         await ctx.repository.listSourceInstructionArtifacts()
-      ).find((entry) => entry.id === artifact.id && entry.targetId === targetId);
+      ).find(
+        (entry) => entry.id === artifact.id && entry.targetId === targetId,
+      );
 
       if (!existingArtifact) {
         throw new Error(`Unknown source instruction '${artifact.id}'.`);
@@ -106,8 +109,13 @@ export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceCont
       await ctx.repository.upsertSourceInstructionArtifact(normalizedArtifact);
       return ctx.getWorkspaceSnapshot();
     },
-    async acceptSourceInstructionDraft(targetId: string, instructionId: string) {
-      const artifact = (await ctx.repository.listSourceInstructionArtifacts()).find(
+    async acceptSourceInstructionDraft(
+      targetId: string,
+      instructionId: string,
+    ) {
+      const artifact = (
+        await ctx.repository.listSourceInstructionArtifacts()
+      ).find(
         (entry) => entry.id === instructionId && entry.targetId === targetId,
       );
 
@@ -121,7 +129,7 @@ export function createWorkspaceSourceDebugStoreMethods(ctx: WorkspaceServiceCont
         acceptedAt: new Date().toISOString(),
       });
       await ctx.repository.upsertSourceInstructionArtifact(acceptedArtifact);
-      await ctx.saveDiscoveryTargetUpdate(targetId, (target) => ({
+      await ctx.saveJobSiteMetadata(targetId, (target) => ({
         ...target,
         draftInstructionId: acceptedArtifact.id,
         instructionStatus: acceptedArtifact.status,

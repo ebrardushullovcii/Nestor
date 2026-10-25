@@ -1,3 +1,4 @@
+import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
@@ -22,6 +23,7 @@ import {
 export function createWorkspaceServiceHarness(
   options: {
     seed?: JobFinderRepositorySeed;
+    jobSites?: JobSitesStore;
     browserRuntime?: BrowserSessionRuntime;
     aiClient?: JobFinderAiClient;
     visionProvider?: ResumeVisionProvider;
@@ -49,6 +51,7 @@ export function createWorkspaceServiceHarness(
   const researchAdapter = options.researchAdapter ?? createResearchAdapter();
   const workspaceService = createJobFinderWorkspaceService({
     repository,
+    ...(options.jobSites ? { jobSites: options.jobSites } : {}),
     ...(options.onResumeEvidenceFinished
       ? { onResumeEvidenceFinished: options.onResumeEvidenceFinished }
       : {}),

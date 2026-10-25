@@ -1,29 +1,8 @@
-import {
-  useDeferredValue,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  filterProfileSetupSources,
-  formatProfileSetupReviewValue,
-  getProfileSetupSourceGuidance,
-  getProfileSetupSourceHost,
-  getProfileSetupStarterAccessNote,
-  isValidProfileSetupSourceUrl,
-  PROFILE_SETUP_SOURCE_PAGE_SIZE,
-} from "./profile-setup-screen-helpers";
-import {
-  canonicalSourceUrl,
-  parseJobSourceUrls,
-} from "../profile-job-sources-tab";
-import { deriveJobSourceLabel } from "../../../lib/job-source-display-name";
+import { SetupSites } from "@renderer/features/job-lists/setup-sites";
+import { useId, useRef, type ReactNode } from "react";
+import { formatProfileSetupReviewValue } from "./profile-setup-screen-helpers";
 import {
   type CandidateProfile,
-  type JobDiscoveryTarget,
   type ProfileSetupStep,
   type ResumeApplicationMode,
   type ResumeImportFieldCandidateSummary,
@@ -35,10 +14,9 @@ import {
 import { getResumeImportStageFallbackNotes } from "../profile-resume-panel";
 import { getResumeImportStageFallbackSummary } from "../resume-import-quality-note";
 import type { UseFormReturn } from "react-hook-form";
-import { Controller, useController } from "react-hook-form";
+import { Controller } from "react-hook-form";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
-import { Checkbox } from "@renderer/components/ui/checkbox";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import {
   Card,
@@ -61,7 +39,6 @@ import type {
   SearchPreferencesEditorValues,
 } from "../../../lib/profile-editor";
 import {
-  ProfileInput,
   ProfileTextarea,
   profileSelectTriggerClassName,
 } from "../profile-form-primitives";
@@ -156,7 +133,7 @@ function SetupBooleanField(props: {
 
 interface FooterOptions {
   nextLabel?: string;
-  onPrimary?: (() => void) | null;
+  onPrimary?: (() => void | Promise<void>) | null;
   primaryDisabled?: boolean;
   primaryLabel?: string;
 }
@@ -503,7 +480,6 @@ export function parseWorkCountriesDraft(value: string): string[] {
 }
 
 /** Past this many sites the setup list gets its finder and count. */
-const SETUP_SOURCE_FINDER_MIN_COUNT = 5;
 
 const SPONSORSHIP_OPTIONS = [
   { value: "no", label: "No" },
@@ -636,9 +612,8 @@ export function ProfileSetupTargetingStep(props: {
    * Lets the screen add a complete address typed into the source form when
    * the person saves or finishes from the footer, instead of dropping it.
    */
-  registerPendingSourceFlush?: (flush: (() => void) | null) => void;
+  registerPendingSourceFlush?: (flush: (() => Promise<void>) | null) => void;
   renderFooter: RenderFooter;
-  savedDiscoveryTargets?: readonly JobDiscoveryTarget[];
   suggestedWorkCountry?: string | null;
 }) {
   const locationPreferencesId = useId();
@@ -656,197 +631,11 @@ export function ProfileSetupTargetingStep(props: {
     shouldTouch: true,
     shouldValidate: true,
   } as const;
-  const discoveryTargetsField = useController({
-    control: props.preferencesForm.control,
-    name: "discoveryTargets",
-  });
-  const discoveryTargets = discoveryTargetsField.field.value ?? [];
-  const sourceSearchInputId = useId();
-  const [sourceQuery, setSourceQuery] = useState("");
-  const deferredSourceQuery = useDeferredValue(sourceQuery);
-  const [sourcePage, setSourcePage] = useState(0);
-  const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
-  // With no saved sources, adding one is the whole step, so the form is open.
-  const [isManualSourceOpen, setIsManualSourceOpen] = useState(
-    () => discoveryTargets.length === 0,
-  );
-  const [manualSourceLabel, setManualSourceLabel] = useState("");
-  const [manualSourceUrl, setManualSourceUrl] = useState("");
-  const [lastAddedSources, setLastAddedSources] = useState<{
-    count: number;
-    label: string;
-    duplicates: number;
-  } | null>(null);
-  const manualSourceLabelId = "profile-setup-field-manual-source-label";
-  const manualSourceUrlId = "profile-setup-field-manual-source-url";
-  const manualSourceUrlErrorId = "profile-setup-field-manual-source-url-error";
-
-  const updateDiscoveryTargets = (
-    nextTargets: SearchPreferencesEditorValues["discoveryTargets"],
-  ) => {
-    // Single write path: dual onChange + setValue re-entered watchers twice per
-    // Enable click and could leave sibling fields undefined mid-render.
-    props.preferencesForm.setValue(
-      "discoveryTargets",
-      nextTargets,
-      listFieldOptions,
-    );
+  const pendingSiteFlush = useRef<(() => Promise<void>) | null>(null);
+  const registerSiteFlush = (flush: (() => Promise<void>) | null) => {
+    pendingSiteFlush.current = flush;
+    props.registerPendingSourceFlush?.(flush);
   };
-
-  const createDiscoveryTargetId = () =>
-    `target_${typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`}`;
-  const filteredSources = useMemo(
-    () => filterProfileSetupSources(discoveryTargets, deferredSourceQuery),
-    [deferredSourceQuery, discoveryTargets],
-  );
-  const sourcePageCount = Math.max(
-    1,
-    Math.ceil(filteredSources.length / PROFILE_SETUP_SOURCE_PAGE_SIZE),
-  );
-  const currentSourcePage = Math.min(sourcePage, sourcePageCount - 1);
-  const visibleSources = filteredSources.slice(
-    currentSourcePage * PROFILE_SETUP_SOURCE_PAGE_SIZE,
-    (currentSourcePage + 1) * PROFILE_SETUP_SOURCE_PAGE_SIZE,
-  );
-  const firstVisibleSourceNumber =
-    filteredSources.length === 0
-      ? 0
-      : currentSourcePage * PROFILE_SETUP_SOURCE_PAGE_SIZE + 1;
-  const lastVisibleSourceNumber = Math.min(
-    filteredSources.length,
-    firstVisibleSourceNumber + visibleSources.length - 1,
-  );
-  const enabledSourceCount = discoveryTargets.filter(
-    (target) => target.enabled,
-  ).length;
-  // The address is enough; a name is derived from the site when none is
-  // typed, the same as the paste box on Profile › Job sources.
-  const parsedManualSources = parseJobSourceUrls(manualSourceUrl);
-  const isManualSourceComplete =
-    parsedManualSources.urls.length > 0 &&
-    parsedManualSources.invalid.length === 0 &&
-    manualSourceUrl
-      .split(/[\s,]+/u)
-      .filter(Boolean)
-      .every(isValidProfileSetupSourceUrl);
-  const isManualSourceUrlInvalid =
-    manualSourceUrl.trim().length > 0 && !isManualSourceComplete;
-
-  const setSourceLibraryView = (nextQuery: string) => {
-    setSourceQuery(nextQuery);
-    setSourcePage(0);
-  };
-
-  const moveToSourcePage = (nextPage: number) => {
-    const boundedPage = Math.min(Math.max(nextPage, 0), sourcePageCount - 1);
-    setSourcePage(boundedPage);
-    const revealSourceList = () => {
-      const listHeading = document.getElementById(
-        "profile-setup-job-sources-list-heading",
-      );
-      if (!listHeading) {
-        return;
-      }
-      // Scroll with the full responsive header margins first (the heading
-      // carries the shared scroll-margin trio), then claim focus with
-      // preventScroll so the browser never lands it beneath the fixed shell
-      // header or performs an uncontrolled ancestor jump.
-      listHeading.scrollIntoView?.({ behavior: "auto", block: "start" });
-      listHeading.focus({ preventScroll: true });
-    };
-    if (typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(revealSourceList);
-    } else {
-      revealSourceList();
-    }
-  };
-
-  // Every enablement is an explicit user action; searching or paging never
-  // flips a source on.
-  const setTargetEnabled = (targetId: string, enabled: boolean) => {
-    updateDiscoveryTargets(
-      discoveryTargets.map((entry) =>
-        entry.id === targetId ? { ...entry, enabled } : entry,
-      ),
-    );
-  };
-
-  const addManualDiscoveryTarget = () => {
-    if (!isManualSourceComplete) {
-      return;
-    }
-
-    // Canonical compare, like Profile › Job sources: an address saved with
-    // a trailing slash or different host casing is the same site. The Set
-    // also keeps a 900-line paste from scanning the whole list per line.
-    const existingUrls = new Set(
-      discoveryTargets
-        .map((target) => canonicalSourceUrl(target.startingUrl))
-        .filter((value): value is string => Boolean(value)),
-    );
-    const addedUrls = parsedManualSources.urls.filter(
-      (url) => !existingUrls.has(url),
-    );
-    const duplicateCount = parsedManualSources.urls.length - addedUrls.length;
-    const nextTargets: SearchPreferencesEditorValues["discoveryTargets"] = [
-      ...discoveryTargets,
-      ...addedUrls.map((url) => ({
-        id: createDiscoveryTargetId(),
-        label:
-          addedUrls.length === 1
-            ? manualSourceLabel.trim() || deriveJobSourceLabel(url)
-            : deriveJobSourceLabel(url),
-        startingUrl: url,
-        // Adding a site is already the act of choosing it: saving it switched
-        // off left people with "All 1 saved sources are turned off" and no
-        // way to search. The row keeps its Include toggle, so turning it back
-        // off stays one click away.
-        enabled: true,
-        adapterKind: "auto" as const,
-        customInstructions: "",
-        instructionStatus: "missing" as const,
-        validatedInstructionId: null,
-        draftInstructionId: null,
-        lastDebugRunId: null,
-        lastVerifiedAt: null,
-        staleReason: null,
-      })),
-    ];
-    updateDiscoveryTargets(nextTargets);
-    setManualSourceLabel("");
-    setManualSourceUrl("");
-    // The form stays open with the cursor in the address field: adding a
-    // second site used to take a press on "Add a source URL manually" first.
-    setIsManualSourceOpen(true);
-    setLastAddedSources({
-      count: addedUrls.length,
-      duplicates: duplicateCount,
-      label:
-        addedUrls.length === 1
-          ? manualSourceLabel.trim() || deriveJobSourceLabel(addedUrls[0] ?? "")
-          : "",
-    });
-    setEditingTargetId(null);
-    setSourceLibraryView("");
-    setSourcePage(
-      Math.floor(discoveryTargets.length / PROFILE_SETUP_SOURCE_PAGE_SIZE),
-    );
-    window.requestAnimationFrame(() => {
-      document
-        .getElementById(manualSourceUrlId)
-        ?.focus({ preventScroll: true });
-    });
-  };
-  const addManualDiscoveryTargetRef = useRef(addManualDiscoveryTarget);
-  addManualDiscoveryTargetRef.current = addManualDiscoveryTarget;
-  const registerPendingSourceFlush = props.registerPendingSourceFlush;
-  useEffect(() => {
-    if (!registerPendingSourceFlush) {
-      return;
-    }
-    registerPendingSourceFlush(() => addManualDiscoveryTargetRef.current());
-    return () => registerPendingSourceFlush(null);
-  }, [registerPendingSourceFlush]);
 
   return (
     <Card className="rounded-(--radius-panel) border-border/40">
@@ -858,42 +647,6 @@ export function ProfileSetupTargetingStep(props: {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 pt-6">
-        {discoveryTargets.length > 0 && enabledSourceCount === 0 ? (
-          <div
-            className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) p-3 text-sm leading-6 text-(--warning-text)"
-            role="status"
-          >
-            <p className="min-w-0 flex-1">
-              Saved job sources are still off. Enable at least one before Search
-              can run — jump to the source list below.
-            </p>
-            <Button
-              aria-label="Show job sources to enable"
-              data-profile-setup-jump-to-sources
-              onClick={() => {
-                const firstUsableSourceToggle =
-                  document.querySelector<HTMLElement>(
-                    "[data-profile-setup-source-enable]:not(:disabled)",
-                  );
-                const heading = document.getElementById(
-                  "profile-setup-job-sources-heading",
-                );
-                const target = firstUsableSourceToggle ?? heading;
-
-                // Land on the action the call-to-action promises, centered
-                // clear of the shell header and pinned setup footer. Instant
-                // scroll avoids racing a second click against an animation.
-                target?.scrollIntoView({ behavior: "auto", block: "center" });
-                target?.focus({ preventScroll: true });
-              }}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Show job sources
-            </Button>
-          </div>
-        ) : null}
         <ProfileListEditor
           inputId={targetRolesId}
           label="Target roles"
@@ -950,497 +703,7 @@ export function ProfileSetupTargetingStep(props: {
             </p>
           </div>
         </div>
-        {/* Where to search is required, so it sits with roles and places
-            instead of after the optional work details (N-001). */}
-        <section
-          aria-labelledby="profile-setup-job-sources-heading"
-          className="grid gap-4 rounded-(--radius-field) border border-border/35 bg-background/45 p-4"
-        >
-          <div className="grid gap-1">
-            <h3
-              className="scroll-mt-4 text-sm font-semibold text-foreground outline-none sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
-              id="profile-setup-job-sources-heading"
-              tabIndex={-1}
-            >
-              Job sources
-            </h3>
-            <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
-              Paste a careers page or job board you already browse. A site you
-              add is turned on for search right away; turn one off in its row to
-              leave it out.
-            </p>
-          </div>
-
-          {discoveryTargets.length === 0 ? (
-            <div
-              className="rounded-(--radius-field) border border-dashed border-(--surface-panel-border) p-3 text-sm leading-6 text-foreground-soft"
-              role="status"
-            >
-              Add an employer’s careers page or a job board you already use. Job
-              Finder searches only the sites you add.
-            </div>
-          ) : (
-            <>
-              {/* "Saved job sources are still off" already heads this step
-                  with a jump to this list; a second box here said it twice.
-                  A finder, counts and a page range are for long lists: with
-                  one or two sites they were four header rows over one row. */}
-              {discoveryTargets.length > SETUP_SOURCE_FINDER_MIN_COUNT ||
-              sourceQuery ? (
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                  <div className="grid gap-(--gap-field)">
-                    <FieldLabel htmlFor={sourceSearchInputId}>
-                      Find a source
-                    </FieldLabel>
-                    <ProfileInput
-                      autoComplete="off"
-                      id={sourceSearchInputId}
-                      onChange={(event) =>
-                        setSourceLibraryView(event.target.value)
-                      }
-                      placeholder="Search by source name or URL"
-                      type="search"
-                      value={sourceQuery}
-                    />
-                  </div>
-                  <p
-                    aria-atomic="true"
-                    aria-live="polite"
-                    className="text-sm text-foreground-muted"
-                    role="status"
-                  >
-                    {filteredSources.length === discoveryTargets.length
-                      ? `${discoveryTargets.length} sources`
-                      : `${filteredSources.length} of ${discoveryTargets.length} sources`}
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/30 pt-3">
-                <h4
-                  className="scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem] text-sm font-semibold text-foreground outline-none"
-                  id="profile-setup-job-sources-list-heading"
-                  tabIndex={-1}
-                >
-                  Your job sites
-                </h4>
-                {filteredSources.length > visibleSources.length ? (
-                  <p className="text-xs text-foreground-muted">
-                    {firstVisibleSourceNumber}–{lastVisibleSourceNumber} of{" "}
-                    {filteredSources.length}
-                  </p>
-                ) : null}
-              </div>
-              {enabledSourceCount < discoveryTargets.length ? (
-                <p
-                  aria-atomic="true"
-                  aria-live="polite"
-                  className="-mt-2 text-(length:--text-body) leading-6 text-foreground-soft"
-                  role="status"
-                >
-                  {enabledSourceCount} of {discoveryTargets.length} sources
-                  enabled for search
-                </p>
-              ) : null}
-
-              {filteredSources.length === 0 ? (
-                <div className="rounded-(--radius-field) border border-border/30 px-4 py-5 text-center">
-                  <p className="font-medium text-foreground">
-                    No sources match this search
-                  </p>
-                  {/* The sentence that used to sit here told the reader to
-                      clear the search; the button below it is that action. */}
-                  <Button
-                    className="mt-3"
-                    onClick={() => setSourceLibraryView("")}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Show all sources
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="grid gap-2" data-profile-setup-source-page>
-                    {visibleSources.map(({ target, index }) => {
-                      const validUrl = isValidProfileSetupSourceUrl(
-                        target.startingUrl,
-                      );
-                      const sourceUrlInvalid =
-                        target.startingUrl.trim().length > 0 && !validUrl;
-                      const sourceUrlErrorId = `profile-setup-source-url-error-${target.id}`;
-                      const isEditing = editingTargetId === target.id;
-                      const guidance = getProfileSetupSourceGuidance(target);
-                      const starterAccessNote =
-                        getProfileSetupStarterAccessNote(target.startingUrl);
-                      const sourceLabel =
-                        target.label.trim() || `Source ${index + 1}`;
-
-                      return (
-                        <div className="grid gap-2" key={target.id}>
-                          <article
-                            className="grid gap-3 rounded-(--radius-field) border border-border/30 bg-background/65 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
-                            data-profile-setup-source-card={target.id}
-                          >
-                            <div className="min-w-0">
-                              {/* No Enabled/Disabled badge: the "Include in
-                                  search" checkbox beside this row already
-                                  states the source's state. */}
-                              <p
-                                className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground"
-                                title={sourceLabel}
-                              >
-                                {sourceLabel}
-                              </p>
-                              {/* A site added without a name is named by its
-                                  address; saying it twice read as two things. */}
-                              {getProfileSetupSourceHost(target.startingUrl) !==
-                              sourceLabel ? (
-                                <p
-                                  className="mt-1 truncate text-sm text-foreground-muted"
-                                  title={target.startingUrl}
-                                >
-                                  {getProfileSetupSourceHost(
-                                    target.startingUrl,
-                                  )}
-                                </p>
-                              ) : null}
-                              {guidance.label ? (
-                                <p className="mt-1 text-(length:--text-body) leading-6 text-foreground-soft">
-                                  {guidance.label}
-                                </p>
-                              ) : null}
-                              {guidance.detail ? (
-                                <p className="text-(length:--text-body) leading-6 text-foreground-soft">
-                                  {guidance.detail}
-                                </p>
-                              ) : null}
-                              {starterAccessNote ? (
-                                <p className="text-(length:--text-body) leading-6 text-foreground-soft">
-                                  {starterAccessNote}
-                                </p>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                              {/* Same control as Profile › Job sources: one
-                                  checkbox for the identical action, instead of
-                                  an Enable button here and a checkbox there. */}
-                              <label className="flex min-h-9 items-center gap-2 rounded-(--radius-button) border border-(--surface-panel-border) px-3 text-sm text-foreground-soft">
-                                <Checkbox
-                                  aria-label={`Include ${sourceLabel} in searches`}
-                                  checked={target.enabled}
-                                  data-profile-setup-source-enable={target.id}
-                                  disabled={!validUrl && !target.enabled}
-                                  onCheckedChange={(checked) =>
-                                    setTargetEnabled(
-                                      target.id,
-                                      checked === true,
-                                    )
-                                  }
-                                />
-                                Include in search
-                              </label>
-                              <Button
-                                aria-expanded={isEditing}
-                                aria-label={
-                                  isEditing
-                                    ? `Close editor for ${sourceLabel}`
-                                    : `Edit ${sourceLabel}`
-                                }
-                                onClick={() =>
-                                  setEditingTargetId(
-                                    isEditing ? null : target.id,
-                                  )
-                                }
-                                size="sm"
-                                type="button"
-                                variant="outline"
-                              >
-                                Edit source
-                              </Button>
-                            </div>
-                          </article>
-                          {sourceUrlInvalid && !isEditing ? (
-                            <p
-                              className="text-sm leading-6 text-(--warning-text)"
-                              id={sourceUrlErrorId}
-                              role="status"
-                            >
-                              This source needs a complete http or https URL.
-                              Choose Edit to fix it before enabling it.
-                            </p>
-                          ) : null}
-                          {isEditing ? (
-                            <div className="grid gap-3 rounded-(--radius-field) border border-dashed border-border/40 bg-background/70 p-4">
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <div className="grid gap-(--gap-field)">
-                                  <FieldLabel
-                                    htmlFor={`profile-setup-source-label-${target.id}`}
-                                  >
-                                    Source name
-                                  </FieldLabel>
-                                  <ProfileInput
-                                    id={`profile-setup-source-label-${target.id}`}
-                                    onChange={(event) =>
-                                      updateDiscoveryTargets(
-                                        discoveryTargets.map((entry) =>
-                                          entry.id === target.id
-                                            ? {
-                                                ...entry,
-                                                label: event.target.value,
-                                              }
-                                            : entry,
-                                        ),
-                                      )
-                                    }
-                                    placeholder="Example: City Hospital careers"
-                                    value={target.label}
-                                  />
-                                </div>
-                                <div className="grid gap-(--gap-field)">
-                                  <FieldLabel
-                                    htmlFor={`profile-setup-source-url-${target.id}`}
-                                  >
-                                    Careers or job-board URL
-                                  </FieldLabel>
-                                  <ProfileInput
-                                    aria-describedby={
-                                      sourceUrlInvalid
-                                        ? sourceUrlErrorId
-                                        : undefined
-                                    }
-                                    aria-invalid={sourceUrlInvalid}
-                                    id={`profile-setup-source-url-${target.id}`}
-                                    onChange={(event) =>
-                                      updateDiscoveryTargets(
-                                        discoveryTargets.map((entry) =>
-                                          entry.id === target.id
-                                            ? {
-                                                ...entry,
-                                                startingUrl: event.target.value,
-                                                instructionStatus: "missing",
-                                                validatedInstructionId: null,
-                                                draftInstructionId: null,
-                                                lastDebugRunId: null,
-                                                lastVerifiedAt: null,
-                                                staleReason: null,
-                                              }
-                                            : entry,
-                                        ),
-                                      )
-                                    }
-                                    placeholder="https://company.example/careers"
-                                    type="url"
-                                    value={target.startingUrl}
-                                  />
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                {sourceUrlInvalid ? (
-                                  <p
-                                    className="text-sm leading-6 text-(--warning-text)"
-                                    id={sourceUrlErrorId}
-                                    role="status"
-                                  >
-                                    Enter a complete http or https URL before
-                                    this source can be used.
-                                  </p>
-                                ) : (
-                                  <span />
-                                )}
-                                <Button
-                                  aria-label={`Remove ${sourceLabel}`}
-                                  onClick={() => {
-                                    updateDiscoveryTargets(
-                                      discoveryTargets.filter(
-                                        (entry) => entry.id !== target.id,
-                                      ),
-                                    );
-                                    setEditingTargetId(null);
-                                  }}
-                                  size="sm"
-                                  type="button"
-                                  variant="ghost"
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {sourcePageCount > 1 ? (
-                    <nav
-                      aria-label="Profile setup job source pages"
-                      className="flex items-center justify-between gap-3 border-t border-border/30 pt-3"
-                    >
-                      <Button
-                        disabled={currentSourcePage === 0}
-                        onClick={() => moveToSourcePage(currentSourcePage - 1)}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Previous
-                      </Button>
-                      <span
-                        aria-current="page"
-                        className="text-center text-xs text-foreground-muted"
-                      >
-                        Page {currentSourcePage + 1} of {sourcePageCount}
-                      </span>
-                      <Button
-                        disabled={currentSourcePage >= sourcePageCount - 1}
-                        onClick={() => moveToSourcePage(currentSourcePage + 1)}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Next
-                      </Button>
-                    </nav>
-                  ) : null}
-                </>
-              )}
-            </>
-          )}
-
-          <div className="grid gap-3 border-t border-border/30 pt-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {/* The line under this heading restated the heading and the two
-                  labelled fields it opens ("Source name", "Careers or
-                  job-board URL"), so the heading stands on its own. */}
-              <p className="text-sm font-semibold text-foreground">
-                {discoveryTargets.length === 0
-                  ? "Add a job site"
-                  : isManualSourceOpen
-                    ? "Add another job site"
-                    : "Know the exact web address?"}
-              </p>
-              {isManualSourceOpen ? null : (
-                <Button
-                  aria-expanded={false}
-                  onClick={() => setIsManualSourceOpen(true)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Add a source URL manually
-                </Button>
-              )}
-            </div>
-            {lastAddedSources !== null &&
-            isManualSourceOpen &&
-            !isManualSourceUrlInvalid ? (
-              <p
-                aria-live="polite"
-                className="text-sm leading-6 text-foreground-soft"
-                data-profile-setup-source-added
-                role="status"
-              >
-                {lastAddedSources.count === 0
-                  ? "Those sites are already in your list."
-                  : lastAddedSources.count === 1
-                    ? `Added ${lastAddedSources.label} and turned it on.`
-                    : `Added ${lastAddedSources.count} sources and turned them on.`}
-                {lastAddedSources.count > 0 && lastAddedSources.duplicates > 0
-                  ? ` ${lastAddedSources.duplicates} ${lastAddedSources.duplicates === 1 ? "was" : "were"} already in your list.`
-                  : ""}{" "}
-                Paste more addresses to add more.
-              </p>
-            ) : null}
-            {isManualSourceOpen ? (
-              <form
-                className="grid gap-3 rounded-(--radius-field) border border-border/30 bg-background/65 p-4"
-                data-profile-setup-manual-source-form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  addManualDiscoveryTarget();
-                }}
-              >
-                <div className="grid gap-3">
-                  <div className="grid gap-(--gap-field) md:max-w-100">
-                    <FieldLabel htmlFor={manualSourceLabelId}>
-                      Source name (optional, for one site)
-                    </FieldLabel>
-                    <ProfileInput
-                      id={manualSourceLabelId}
-                      onChange={(event) =>
-                        setManualSourceLabel(event.target.value)
-                      }
-                      placeholder="Example: City Hospital careers"
-                      value={manualSourceLabel}
-                    />
-                  </div>
-                  <div className="grid gap-(--gap-field)">
-                    <FieldLabel htmlFor={manualSourceUrlId}>
-                      Careers or job-board URLs
-                    </FieldLabel>
-                    <ProfileTextarea
-                      aria-describedby={
-                        isManualSourceUrlInvalid
-                          ? manualSourceUrlErrorId
-                          : undefined
-                      }
-                      aria-invalid={isManualSourceUrlInvalid}
-                      id={manualSourceUrlId}
-                      onChange={(event) =>
-                        setManualSourceUrl(event.target.value)
-                      }
-                      placeholder={
-                        "https://company.example/careers\nhttps://jobs.example/your-team"
-                      }
-                      rows={4}
-                      value={manualSourceUrl}
-                    />
-                    <p className="text-(length:--text-body) leading-6 text-foreground-soft">
-                      One per line — paste as many as you have. Names come from
-                      each site when you add several at once.
-                    </p>
-                  </div>
-                </div>
-                {isManualSourceUrlInvalid ? (
-                  <p
-                    className="text-sm leading-6 text-(--warning-text)"
-                    id={manualSourceUrlErrorId}
-                    role="status"
-                  >
-                    {parsedManualSources.invalid[0]
-                      ? `“${parsedManualSources.invalid[0]}” is not a web address. Use complete http or https URLs, separated by spaces or new lines.`
-                      : "Enter a complete http or https URL."}
-                  </p>
-                ) : null}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button disabled={!isManualSourceComplete} type="submit">
-                    Add and turn on
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setIsManualSourceOpen(false);
-                      setManualSourceLabel("");
-                      setManualSourceUrl("");
-                      setLastAddedSources(null);
-                    }}
-                    type="button"
-                    variant="ghost"
-                  >
-                    {lastAddedSources ? "Done adding" : "Cancel"}
-                  </Button>
-                  {!isManualSourceComplete && !isManualSourceUrlInvalid ? (
-                    <p className="text-(length:--text-body) leading-6 text-foreground-soft">
-                      Paste a complete http or https address; the name is
-                      optional.
-                    </p>
-                  ) : null}
-                </div>
-              </form>
-            ) : null}
-          </div>
-        </section>
+        <SetupSites registerFlush={registerSiteFlush} />
 
         {/* The resume level is chosen per job on Shortlisted (Original, Light,
             Tailored, Aggressive), so setup no longer asks for a default. */}
@@ -1625,13 +888,13 @@ export function ProfileSetupTargetingStep(props: {
 
         {props.renderFooter({
           nextLabel: "Save and continue to Extras",
-          onPrimary: () => {
-            // A name and a complete URL typed into the add form are a source
-            // the person meant to keep. Leaving the step used to drop them
-            // without a word; a form that is not complete is still left
-            // alone, so nothing is ever invented.
-            addManualDiscoveryTarget();
-            props.onSaveAndGoToStep(props.nextStep ?? "extras");
+          onPrimary: async () => {
+            try {
+              await pendingSiteFlush.current?.();
+              props.onSaveAndGoToStep(props.nextStep ?? "extras");
+            } catch {
+              /* The add-source form keeps the correction visible. */
+            }
           },
         })}
       </CardContent>

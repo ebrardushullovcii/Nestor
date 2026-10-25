@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import {
   SharedAgentCompactionPolicySchema,
   SourceDebugCompactionStateSchema,
@@ -216,9 +217,8 @@ export async function runSourceDebugWorkflow(
     clearActiveController();
     throw error;
   });
-  const target = searchPreferences.discovery.targets.find(
-    (entry) => entry.id === targetId,
-  );
+  const site = ctx.jobSites?.get(Number(targetId));
+  const target = site ? jobSiteTarget(site) : null;
   const sourceDebugCompactionPolicy = buildSourceDebugCompactionPolicy(
     modelContextWindowTokensSnapshot,
   );
@@ -288,7 +288,7 @@ export async function runSourceDebugWorkflow(
         throw error;
       });
     await ctx
-      .saveDiscoveryTargetUpdate(target.id, (currentTarget) => ({
+      .saveJobSiteMetadata(target.id, (currentTarget) => ({
         ...currentTarget,
         instructionStatus: "missing",
         validatedInstructionId: null,
@@ -353,7 +353,7 @@ export async function runSourceDebugWorkflow(
     throw error;
   });
   await ctx
-    .saveDiscoveryTargetUpdate(normalizedTarget.id, (currentTarget) => ({
+    .saveJobSiteMetadata(normalizedTarget.id, (currentTarget) => ({
       ...currentTarget,
       lastDebugRunId: run.id,
     }))
@@ -442,27 +442,24 @@ export async function runSourceDebugWorkflow(
         );
         await ctx.repository.upsertSourceDebugAttempt(attempt);
         await ctx.repository.upsertSourceInstructionArtifact(instruction);
-        await ctx.saveDiscoveryTargetUpdate(
-          normalizedTarget.id,
-          (currentTarget) => ({
-            ...currentTarget,
-            instructionStatus:
-              instruction.status === "validated"
+        await ctx.saveJobSiteMetadata(normalizedTarget.id, (currentTarget) => ({
+          ...currentTarget,
+          instructionStatus:
+            instruction.status === "validated"
+              ? "validated"
+              : currentTarget.validatedInstructionId
                 ? "validated"
-                : currentTarget.validatedInstructionId
-                  ? "validated"
-                  : instruction.status,
-            draftInstructionId:
-              instruction.status === "validated" ? null : instruction.id,
-            validatedInstructionId:
-              instruction.status === "validated"
-                ? instruction.id
-                : currentTarget.validatedInstructionId,
-            lastDebugRunId: run.id,
-            lastVerifiedAt: instruction.verification?.verifiedAt ?? null,
-            staleReason: null,
-          }),
-        );
+                : instruction.status,
+          draftInstructionId:
+            instruction.status === "validated" ? null : instruction.id,
+          validatedInstructionId:
+            instruction.status === "validated"
+              ? instruction.id
+              : currentTarget.validatedInstructionId,
+          lastDebugRunId: run.id,
+          lastVerifiedAt: instruction.verification?.verifiedAt ?? null,
+          staleReason: null,
+        }));
         finalizationMs = Date.now() - finalizationStartedAtMs;
         const completedAt = new Date().toISOString();
         run = SourceDebugRunRecordSchema.parse({
@@ -948,7 +945,7 @@ export async function runSourceDebugWorkflow(
             }),
           });
           await ctx.persistSourceDebugRun(run);
-          await ctx.saveDiscoveryTargetUpdate(
+          await ctx.saveJobSiteMetadata(
             normalizedTarget.id,
             (currentTarget) => ({
               ...currentTarget,
@@ -992,7 +989,7 @@ export async function runSourceDebugWorkflow(
             await ctx.repository.upsertSourceInstructionArtifact(
               nextSynthesizedInstruction,
             );
-            await ctx.saveDiscoveryTargetUpdate(
+            await ctx.saveJobSiteMetadata(
               normalizedTarget.id,
               (currentTarget) => ({
                 ...currentTarget,
@@ -1041,13 +1038,10 @@ export async function runSourceDebugWorkflow(
         }),
       });
       await ctx.persistSourceDebugRun(run);
-      await ctx.saveDiscoveryTargetUpdate(
-        normalizedTarget.id,
-        (currentTarget) => ({
-          ...currentTarget,
-          lastDebugRunId: run.id,
-        }),
-      );
+      await ctx.saveJobSiteMetadata(normalizedTarget.id, (currentTarget) => ({
+        ...currentTarget,
+        lastDebugRunId: run.id,
+      }));
       return ctx.getWorkspaceSnapshot();
     }
 
@@ -1172,30 +1166,27 @@ export async function runSourceDebugWorkflow(
     executionSignal.throwIfAborted();
     const finalizationStartedAtMs = Date.now();
     await ctx.repository.upsertSourceInstructionArtifact(instructionToPersist);
-    await ctx.saveDiscoveryTargetUpdate(
-      normalizedTarget.id,
-      (currentTarget) => ({
-        ...currentTarget,
-        instructionStatus: preserveExistingValidatedInstruction
-          ? currentTarget.validatedInstructionId
-            ? "validated"
-            : instructionToPersist.status
-          : instructionToPersist.status,
-        draftInstructionId:
-          preserveExistingValidatedInstruction ||
-          instructionToPersist.status !== "validated"
-            ? instructionToPersist.id
-            : null,
-        validatedInstructionId:
-          instructionToPersist.status === "validated"
-            ? instructionToPersist.id
-            : currentTarget.validatedInstructionId,
-        lastDebugRunId: run.id,
-        lastVerifiedAt: verification.verifiedAt,
-        staleReason:
-          verification.outcome === "passed" ? null : verification.reason,
-      }),
-    );
+    await ctx.saveJobSiteMetadata(normalizedTarget.id, (currentTarget) => ({
+      ...currentTarget,
+      instructionStatus: preserveExistingValidatedInstruction
+        ? currentTarget.validatedInstructionId
+          ? "validated"
+          : instructionToPersist.status
+        : instructionToPersist.status,
+      draftInstructionId:
+        preserveExistingValidatedInstruction ||
+        instructionToPersist.status !== "validated"
+          ? instructionToPersist.id
+          : null,
+      validatedInstructionId:
+        instructionToPersist.status === "validated"
+          ? instructionToPersist.id
+          : currentTarget.validatedInstructionId,
+      lastDebugRunId: run.id,
+      lastVerifiedAt: verification.verifiedAt,
+      staleReason:
+        verification.outcome === "passed" ? null : verification.reason,
+    }));
     finalizationMs = Date.now() - finalizationStartedAtMs;
     const completedAt = new Date().toISOString();
     run = SourceDebugRunRecordSchema.parse({

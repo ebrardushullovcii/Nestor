@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  openJobStore,
+  createJobSitesStore,
+  type JobStore,
+} from "@nestor/db/job-store";
+import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { takeFirstSearchRequest } from "@renderer/features/find-jobs/first-search";
 import type { SetStateAction } from "react";
 import {
@@ -541,6 +547,21 @@ describe("createDiscoveryWorkspaceRefreshCoordinator", () => {
 });
 
 describe("createPrimaryPageActions", () => {
+  let setupStore: JobStore;
+  beforeEach(() => {
+    setupStore = openJobStore(":memory:");
+    createJobSitesStore(setupStore).add({
+      text: "https://signal.example/careers",
+    });
+    vi.stubGlobal("window", {
+      nestor: { jobs: { run: createJobCommandRunner({ store: setupStore }) } },
+    });
+  });
+  afterEach(() => {
+    setupStore.close();
+    vi.unstubAllGlobals();
+  });
+
   const completeSetupProfile = CandidateProfileSchema.parse({
     id: "candidate_setup_ready",
     firstName: "Alex",
@@ -582,26 +603,21 @@ describe("createPrimaryPageActions", () => {
     minimumSalaryUsd: null,
     approvalMode: "review_before_submit",
     tailoringMode: "balanced",
-    discovery: {
-      targets: [
-        {
-          id: "source_setup_ready",
-          label: "Signal Systems careers",
-          startingUrl: "https://signal.example/careers",
-          enabled: true,
-        },
-      ],
-    },
+    discovery: { targets: [] },
   });
 
   function createSetupActions(
     input: {
       profile?: typeof completeSetupProfile;
       preferences?: typeof completeSetupPreferences;
+      sites?: "none" | "disabled";
       reviewItems?: JobFinderRendererWorkspaceSnapshot["profileSetupState"]["reviewItems"];
       locationPathname?: string;
     } = {},
   ) {
+    if (input.sites === "none") createJobSitesStore(setupStore).remove(1);
+    if (input.sites === "disabled")
+      createJobSitesStore(setupStore).update({ id: 1, enabled: false });
     const profile = input.profile ?? completeSetupProfile;
     const searchPreferences = input.preferences ?? completeSetupPreferences;
     const profileSetupState: JobFinderRendererWorkspaceSnapshot["profileSetupState"] =
@@ -725,8 +741,9 @@ describe("createPrimaryPageActions", () => {
 
   it("starts the first search when the source was added on the finishing step", async () => {
     takeFirstSearchRequest();
-    // The workspace the handler closed over predates the source the person
-    // just added on this step; only the saved snapshot has it.
+    // The source is added independently of the profile save; both snapshots
+    // keep their legacy targets empty.
+    createJobSitesStore(setupStore).remove(1);
     const staleWorkspace = {
       activeCampaignId: "setup_plan",
       profile: completeSetupProfile,
@@ -777,6 +794,9 @@ describe("createPrimaryPageActions", () => {
       workspace: staleWorkspace,
     } as unknown as PrimaryPageActionArgs);
 
+    createJobSitesStore(setupStore).add({
+      text: "https://new-site.example/jobs",
+    });
     pageActions.onSaveSetupStep(
       completeSetupProfile,
       completeSetupPreferences,
@@ -791,7 +811,7 @@ describe("createPrimaryPageActions", () => {
     expect(takeFirstSearchRequest()).toBe(true);
   });
 
-  it("hands off to Find jobs before the completed setup state is persisted", async () => {
+  it("hands off to Find jobs after the completed setup state is persisted", async () => {
     let releaseSave!: () => void;
     const saveGate = new Promise<void>((resolve) => {
       releaseSave = resolve;
@@ -950,45 +970,30 @@ describe("createPrimaryPageActions", () => {
   });
 
   it.each([
-    [
-      "source",
-      completeSetupProfile,
-      {
-        ...completeSetupPreferences,
-        discovery: { ...completeSetupPreferences.discovery, targets: [] },
-      },
-    ],
-    [
-      "enabled source",
-      completeSetupProfile,
-      {
-        ...completeSetupPreferences,
-        discovery: {
-          ...completeSetupPreferences.discovery,
-          targets: completeSetupPreferences.discovery.targets.map((target) => ({
-            ...target,
-            enabled: false,
-          })),
-        },
-      },
-    ],
-    // Work mode and work history are hints now, not gates; only the name,
-    // a contact and a job source block Finish.
-    [
-      "contact",
-      { ...completeSetupProfile, email: null, phone: null },
-      completeSetupPreferences,
-    ],
+    { label: "source", profile: completeSetupProfile, sites: "none" as const },
+    {
+      label: "enabled source",
+      profile: completeSetupProfile,
+      sites: "disabled" as const,
+    },
+    {
+      label: "contact",
+      profile: { ...completeSetupProfile, email: null, phone: null },
+      sites: undefined,
+    },
   ])(
-    "blocks an explicit finish when canonical readiness is missing %s",
-    async (_label, profile, preferences) => {
-      const setup = createSetupActions({ profile, preferences });
-
-      setup.pageActions.onSaveSetupStep(profile, preferences, "ready_check", {
-        finishSetup: true,
-        openProfile: true,
+    "blocks an explicit finish when canonical readiness is missing $label",
+    async ({ profile, sites }) => {
+      const setup = createSetupActions({
+        profile,
+        ...(sites ? { sites } : {}),
       });
-
+      setup.pageActions.onSaveSetupStep(
+        profile,
+        completeSetupPreferences,
+        "ready_check",
+        { finishSetup: true, openProfile: true },
+      );
       await vi.waitFor(() =>
         expect(setup.saveProfileSetupState).toHaveBeenCalledOnce(),
       );
@@ -1188,6 +1193,7 @@ describe("createPrimaryPageActions", () => {
   });
 
   it("persists a fresh setup journey without bypassing source enablement or the explicit ready-check finish", async () => {
+    createJobSitesStore(setupStore).update({ id: 1, enabled: false });
     const disabledPreferences = JobSearchPreferencesSchema.parse({
       ...completeSetupPreferences,
       discovery: {
@@ -1329,15 +1335,15 @@ describe("createPrimaryPageActions", () => {
     });
     expect(navigate).not.toHaveBeenCalled();
 
+    createJobSitesStore(setupStore).update({ id: 1, enabled: true });
     pageActions.onSaveSetupStep(
       completeSetupProfile,
       completeSetupPreferences,
       "targeting",
     );
     await vi.waitFor(() => expect(persistedSetupStates).toHaveLength(3));
-    expect(
-      persistedSnapshot.searchPreferences.discovery.targets[0],
-    ).toMatchObject({ enabled: true });
+    expect(createJobSitesStore(setupStore).get(1)?.enabled).toBe(true);
+    expect(persistedSnapshot.searchPreferences.discovery.targets).toEqual([]);
     expect(persistedSetupStates.at(-1)).toMatchObject({
       status: "in_progress",
       currentStep: "targeting",

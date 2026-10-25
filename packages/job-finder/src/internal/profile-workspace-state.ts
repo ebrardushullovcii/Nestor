@@ -129,8 +129,11 @@ export async function deriveAndPersistProfileSetupState(
   // Completed or incomplete setups derive the same result without that read.
   const hasRunSearch =
     nextState.status === "in_progress" &&
-    evaluateProfileSetupReadiness(input.profile, input.searchPreferences)
-      .materiallyComplete &&
+    evaluateProfileSetupReadiness(
+      input.profile,
+      input.searchPreferences,
+      ctx.jobSites?.counts().enabled,
+    ).materiallyComplete &&
     (await ctx.repository.readDiscoveryRunStates()).some(
       (run) => !run.isActive,
     );
@@ -138,6 +141,9 @@ export async function deriveAndPersistProfileSetupState(
     input.profile,
     input.searchPreferences,
     {
+      ...(ctx.jobSites
+        ? { enabledSiteCount: ctx.jobSites.counts().enabled }
+        : {}),
       currentState: nextState,
       hasRunSearch,
       now,
@@ -185,6 +191,7 @@ export async function landProfileSetupAfterImport(
   const readiness = evaluateProfileSetupReadiness(
     profile,
     rawSearchPreferences,
+    ctx.jobSites?.counts().enabled,
   );
   if (!readiness.hasResumeText) {
     return;

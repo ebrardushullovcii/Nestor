@@ -10,7 +10,6 @@ import type { JobFinderActionFailureReporting } from "./job-finder-page-context"
 import {
   evaluateProfileSetupReadiness,
   getProfileSetupReadinessBlockers,
-  isRunnableJobDiscoveryTarget,
 } from "@nestor/contracts";
 import type {
   AppearanceTheme,
@@ -234,26 +233,6 @@ export function clearProfileSetupJustFinished(): void {
 
 export function isProfileSetupJustFinished(): boolean {
   return profileSetupJustFinished;
-}
-
-/**
- * Finishing guided setup starts the first search itself, but only when no
- * search has ever run and at least one source can be searched.
- */
-export function shouldStartFirstSearchAfterSetup(
-  workspace: Pick<
-    JobFinderRendererWorkspaceSnapshot,
-    "activeDiscoveryRun" | "recentDiscoveryRuns" | "searchPreferences"
-  >,
-): boolean {
-  // Read defensively: a partial snapshot must never stop the hand-off.
-  return (
-    !workspace.activeDiscoveryRun &&
-    (workspace.recentDiscoveryRuns?.length ?? 0) === 0 &&
-    (workspace.searchPreferences?.discovery?.targets ?? []).some(
-      isRunnableJobDiscoveryTarget,
-    )
-  );
 }
 
 export function clearJobFinderNavigationHint(): void {
@@ -1776,7 +1755,7 @@ export function createPrimaryPageActions(
     onRunAgentDiscovery: (searchRequest?: JobFinderSearchRequest) =>
       startJobSearch({ note: searchRequest?.intent ?? "" }),
     onRunDiscoveryForTarget: (targetId: string) =>
-      startJobSearch({ sourceIds: [targetId] }),
+      startJobSearch({ sites: { ids: [Number(targetId)] } }),
     onCancelDiscovery: async (runId: string) => {
       try {
         const nextWorkspace = await actions.cancelAgentDiscovery({ runId });
@@ -1950,10 +1929,15 @@ export function createPrimaryPageActions(
         failedFallback:
           "This setup step was not saved. Retry before leaving setup.",
         label: nextStep === "extras" ? "Saved answers" : "Profile setup",
-        onSuccess: (snapshot) => {
+        onSuccess: async (snapshot) => {
+          const [sites, searchStatus] = await Promise.all([
+            window.nestor.jobs.run("list_sites", { limit: 1 }),
+            window.nestor.jobs.run("search_status", {}),
+          ]);
           const readiness = evaluateProfileSetupReadiness(
             snapshot.profile,
             snapshot.searchPreferences,
+            sites.enabledTotal,
           );
           const resolvedAt = new Date().toISOString();
           const resolvedById = new Map(
@@ -1989,10 +1973,7 @@ export function createPrimaryPageActions(
           handOffToFindJobs = nextStatus === "completed";
           if (handOffToFindJobs) {
             markProfileSetupJustFinished();
-            // Read from the snapshot this save returned: the source added on
-            // this same step is not in the workspace the handler closed over,
-            // so the first search was never requested.
-            startFirstSearch = shouldStartFirstSearchAfterSetup(snapshot);
+            startFirstSearch = sites.enabledTotal > 0 && !searchStatus.search;
           }
 
           return actions

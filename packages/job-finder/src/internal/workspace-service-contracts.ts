@@ -1,3 +1,4 @@
+import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
@@ -803,6 +804,7 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  jobSites?: JobSitesStore;
   /** Host acknowledgement that the first display transfer has finished. */
   backgroundWorkReady?: PromiseLike<void>;
   resumeDraftProcessor?: ResumeDraftProcessor;

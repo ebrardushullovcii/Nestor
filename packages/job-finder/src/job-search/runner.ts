@@ -1,3 +1,4 @@
+import { createJobSitesStore } from "@nestor/db/job-store";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import {
   isRunnableJobDiscoveryTarget,
@@ -28,6 +29,7 @@ interface ActiveSearch {
 export function createJobSearchRunner(
   deps: JobSearchRunnerDeps,
 ): JobSearchRunner {
+  const siteRows = createJobSitesStore(deps.store);
   let search = deps.store.searches.latest();
   let sources: JobSearchSourceState[] = [];
   let active: ActiveSearch | null = null;
@@ -133,12 +135,31 @@ export function createJobSearchRunner(
               signal,
             );
             inventories.set(target.id, inventory);
+            siteRows.record(Number(target.id), {
+              lastSearchedAt: new Date().toISOString(),
+              health: inventory.needsYou
+                ? "needs_sign_in"
+                : inventory.complete
+                  ? "healthy"
+                  : "failed",
+              signInState: inventory.needsYou
+                ? "required"
+                : inventory.complete
+                  ? "not_required"
+                  : "unknown",
+              ...(inventory.lane ? { lane: inventory.lane } : {}),
+              ...(inventory.provider ? { provider: inventory.provider } : {}),
+            });
             source.message = `${inventory.cards.length} listings collected. Checking roles.`;
             if (inventory.needsYou) source.state = "needs_you";
           } catch (error) {
             if (signal.aborted) return;
             source.state = "failed";
             source.message = errorMessage(error);
+            siteRows.record(Number(target.id), {
+              lastSearchedAt: new Date().toISOString(),
+              health: "failed",
+            });
           }
           notify();
         },
@@ -296,15 +317,21 @@ export function createJobSearchRunner(
             deps.readContext(),
             run.controller.signal,
           );
-          const selected =
-            settings.sourceIds === "all" ? null : new Set(settings.sourceIds);
+          const selected = new Set(
+            ("all" in settings.sites
+              ? settings.sites.except
+              : settings.sites.ids
+            ).map(String),
+          );
           const targets = [
             ...new Map(
               context.sources
                 .filter(
                   (target) =>
                     isRunnableJobDiscoveryTarget(target) &&
-                    (!selected || selected.has(target.id)),
+                    ("all" in settings.sites
+                      ? !selected.has(target.id)
+                      : selected.has(target.id)),
                 )
                 .map((target) => [target.id, target]),
             ).values(),

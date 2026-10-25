@@ -221,8 +221,8 @@ export function SearchPanel(props: {
           />
           <Choice label="Search">
             <SitePicker
-              onChange={(value) => set("sourceIds", value)}
-              value={settings.sourceIds}
+              onChange={(value) => set("sites", value)}
+              value={settings.sites}
             />
             <SegmentedControl
               label="How to search"
@@ -250,7 +250,7 @@ export function SearchPanel(props: {
           <Button
             className="ml-auto"
             disabled={
-              settings.sourceIds !== "all" && settings.sourceIds.length === 0
+              "ids" in settings.sites && settings.sites.ids.length === 0
             }
             pending={props.starting}
             size="sm"

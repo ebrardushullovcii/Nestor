@@ -1,33 +1,30 @@
 # Job sources
 
-Job Finder searches only the sites the person adds: an employer's careers page or a job board they already use. A site added is turned on for search straight away; each row can be turned off, edited or found by search. Sources are source-generic by design (ADR 0007): no per-board logic, so any replica board is a fair stand-in for a real one.
+Job Finder searches the sites the person adds. Sites live in the indexed `job_sites` table, independently of Profile fields. Adding, editing, switching and removing a site writes only the affected rows. Profile, setup and the Find jobs picker request pages of 25 sites.
 
-## Sub-features
+## Entry points
 
-- `sources-add-setup`: Guided setup › Job targets › "Job sources": "Source name (optional)", "Careers or job-board URL", "Add and turn on", "Done adding".
-- `sources-add-profile`: Profile › Job sources: a textarea labelled ADD SOURCES plus "Add N sources" (several at once).
-- `sources-toggle`: checkbox "Include <name> in searches" per row.
-- `sources-edit`: "Edit <name>" per row.
-- `sources-find`: searchbox "Find a source" once there are sources.
-- `sources-sign-in`: sites that need a sign-in prompt for it (`ui:source-sign-in-prompts` covers the screens).
-
-## How to get to it (user POV)
-
-- During setup, the Job targets step.
-- Later, Profile › Job sources.
-- Find jobs › "Roles, places & sources".
+- Guided setup > Job targets > Job sources: the `Job site URLs` textarea accepts several addresses. `Add and turn on` saves them and explains duplicates or invalid entries. Save, Continue and Finish also flush a pending textarea before leaving the step.
+- Profile > Job sources: `Add sources` opens the same textarea. The shared list/detail layout has `Find a source`, All/Enabled/Disabled/Needs attention, selection and Turn on/Turn off. `Previous sources` and `Next sources` page the list. Select a row to edit Source name, Starting page URL and Source notes; edits save on blur. `Include this source in searches` switches just that row. `Remove` removes the site and keeps its saved jobs.
+- Find jobs > the sites button opens `Sites to search`. Only enabled sites appear. All/None, `Find a site`, per-site checkboxes and Previous/Next work across pages. Selecting all except one keeps a compact exclusion, rather than downloading or sending every id.
+- `Open site`, `Check source` and the learned-guidance review remain in the Profile detail pane. Source-debug updates guidance pointers on the site row.
 
 ## Driving it with verify-nestor
 
-Preconditions: baseline. Use only this instance's replica URLs (`sites` in journeys, or the URL `up` printed).
+Use this instance's replica URLs only. A synthetic profile may be seeded when import is not the feature under test; say so in the result.
 
-- **Add in setup.** `$V/drive fill "Source name (optional)" "Replica board"`, `$V/drive fill "Careers or job-board URL" "<sites>/board/"`, `$V/drive click "Add and turn on"`, `$V/drive wait "/^Added Replica board/"`. Proof: a row "Replica board" with "127.0.0.1:<port>/board" and a checked "Include Replica board in searches".
-- **Several boards.** Add `/lever/`, `/greenhouse/` and so on the same way; each new site in `test-fixtures/job-sites/README.md` exercises a different listing shape (pagination, load more, filters, 429s, iframes).
-- **Toggle.** `$V/drive click "Include Replica board in searches" --role checkbox`, then search: the source is skipped.
-- **Profile › Job sources** has not been run through this skill yet: open Profile, read `drive see` for the section, add with the textarea and "Add N sources", then search.
+- In setup, fill `Job site URLs` with `<sites>/board/` twice and press Save and continue. Assert one enabled `job_sites` row. Return to Job targets, then Finish: setup completes and the first search starts using the site row even when the legacy profile targets list is empty.
+- In Profile, bulk-add replica addresses, including an existing address and an invalid one. Keep the duplicate/invalid feedback, then correct the remaining input. Assert no `searchPreferences.discovery.targets` write.
+- For a large list, add 900 distinct replica paths without searching them. Assert only 25 list rows and a 25-row `list_sites` response, page forward, find the last URL, rename it, switch it off/on and inspect that row in `job_sites`.
+- In the picker, assert 25 checkboxes, find the last URL, exclude it and check the count; then None and select board/lever/greenhouse. Run a live search and repeat. Assert only those three site rows receive last-searched/health/lane metadata, descriptions remain full text, and the repeat makes no AI calls.
+- A 900-row UI check does not prove a 900-source search. Measure the scheduler separately.
+
+## Counts
+
+Per-source inventory notes report listings observed on the site. The old source-health result is a retained count and says `jobs kept`; it must not claim that is the board's total listing count.
 
 ## Gotchas
 
-- `--net replica` (default) refuses every non-loopback request from the app, so a real board added as a source fails to load. Use `--net web` only for read-only checks of a real board, and never apply there.
-- The replica sites' job dates are relative to the server's start day, and job identities are fixed by seed, so results are stable across runs.
-- A source URL must be a full http(s) address; "Add and turn on" stays disabled otherwise.
+- The default `--net replica` refuses requests outside loopback. Use `--net web` only for authorized read-only checks and never send a real application.
+- A restarted verify instance may get a different replica port. Update stored site URLs before another search.
+- The legacy discovery/Assistant targets field remains temporarily until the pipeline-deletion change lands. Active site screens and the new runner do not use it.

@@ -1,4 +1,4 @@
-import type { CandidateProfile } from "@nestor/contracts";
+import type { CandidateProfile, JobSiteCounts } from "@nestor/contracts";
 import type {
   ProfileEditorValues,
   SearchPreferencesEditorValues,
@@ -23,7 +23,7 @@ interface BuildProfileScreenViewModelInput {
   companyBlacklist: SearchPreferencesEditorValues["companyBlacklist"];
   companyWhitelist: SearchPreferencesEditorValues["companyWhitelist"];
   educationValues: ProfileEditorValues["records"]["education"] | undefined;
-  discoveryTargets: SearchPreferencesEditorValues["discoveryTargets"];
+  siteCounts: Pick<JobSiteCounts, "all" | "enabled">;
   eligibilityValues: ProfileEditorValues["eligibility"] | undefined;
   employmentTypes: SearchPreferencesEditorValues["employmentTypes"];
   excludedLocations: SearchPreferencesEditorValues["excludedLocations"];
@@ -51,15 +51,10 @@ interface BuildProfileScreenViewModelInput {
 }
 
 export function buildJobSourceProgress(
-  targets: SearchPreferencesEditorValues["discoveryTargets"],
+  counts: Pick<JobSiteCounts, "all" | "enabled">,
 ): SectionProgress {
-  const total = targets.length;
-  const filled = targets.filter(
-    (target) =>
-      target.enabled &&
-      target.label.trim().length > 0 &&
-      /^https?:\/\//i.test(target.startingUrl.trim()),
-  ).length;
+  const total = counts.all,
+    filled = counts.enabled;
 
   return {
     filled,
@@ -309,7 +304,7 @@ function buildProfileSectionProgress(
     preferencesRequired,
   );
 
-  const sources = buildJobSourceProgress(input.discoveryTargets);
+  const sources = buildJobSourceProgress(input.siteCounts);
 
   // Files are never required and never counted: a portfolio is not progress.
   const files = { filled: 0, percent: 0, total: 0 };

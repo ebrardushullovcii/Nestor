@@ -74,19 +74,12 @@ interface ProfileActiveSectionContentProps {
 export function ProfileActiveSectionContent({
   activeSection,
   backgroundArrays,
-  activeDiscoveryRun = null,
-  discoveryRuns = [],
   experienceArray,
-  isBrowserSessionPending,
   isProfileMutationPending,
   isSourceDebugPending,
   isSourceInstructionPending,
   isSourceInstructionVerifyPending,
-  isTargetDiscoveryPending,
   onGetSourceDebugRunDetails,
-  onOpenBrowserSessionForTarget,
-  onRunDiscoveryForTarget,
-  onSaveNow,
   onRunSourceDebug,
   onSaveSourceInstructionArtifact,
   onVerifySourceInstructions,
@@ -97,7 +90,6 @@ export function ProfileActiveSectionContent({
   requestedFileKind = null,
   resumeApplicationMode,
   requestedSourceFilter = null,
-  sourceAccessPrompts,
   sourceInstructionArtifacts,
 }: ProfileActiveSectionContentProps) {
   const content: Record<ProfileSection, ReactNode> = {
@@ -129,23 +121,14 @@ export function ProfileActiveSectionContent({
     sources: (
       <ProfileJobSourcesTab
         requestedFilter={requestedSourceFilter}
-        activeDiscoveryRun={activeDiscoveryRun}
-        discoveryRuns={discoveryRuns}
-        isBrowserSessionPending={isBrowserSessionPending}
         isSourceDebugPending={isSourceDebugPending}
         isSourceInstructionPending={isSourceInstructionPending}
         isSourceInstructionVerifyPending={isSourceInstructionVerifyPending}
-        isTargetDiscoveryPending={isTargetDiscoveryPending}
         onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
-        onOpenBrowserSessionForTarget={onOpenBrowserSessionForTarget}
-        {...(onRunDiscoveryForTarget ? { onRunDiscoveryForTarget } : {})}
-        {...(onSaveNow ? { onSaveNow } : {})}
         onRunSourceDebug={onRunSourceDebug}
         onSaveSourceInstructionArtifact={onSaveSourceInstructionArtifact}
         onVerifySourceInstructions={onVerifySourceInstructions}
-        preferencesForm={preferencesForm}
         recentSourceDebugRuns={recentSourceDebugRuns}
-        sourceAccessPrompts={sourceAccessPrompts}
         sourceInstructionArtifacts={sourceInstructionArtifacts}
       />
     ),

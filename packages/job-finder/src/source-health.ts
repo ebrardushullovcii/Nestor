@@ -381,8 +381,8 @@ export function describeEnabledSourceHealth(
         : latest.jobsFound === 0 && alreadySavedCount > 0
           ? `Completed, ${alreadySavedCount} ${alreadySavedCount === 1 ? "listing" : "listings"} found; ${alreadySavedCount === 1 ? "it was" : "all were"} already saved.`
           : latest.jobsFound === 0
-            ? "Completed, 0 jobs found."
-            : `Readable · ${latest.jobsFound} job ${latest.jobsFound === 1 ? "card" : "cards"} found.`
+            ? "Completed, no jobs kept."
+            : `Readable · ${latest.jobsFound} ${latest.jobsFound === 1 ? "job" : "jobs"} kept.`
       : latest?.state === "failed"
         ? describeFailedSearch(latest.warning ?? null)
         : latest?.state === "cancelled"

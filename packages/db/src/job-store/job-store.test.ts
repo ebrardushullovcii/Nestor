@@ -269,7 +269,7 @@ describe("job store", () => {
       const search = store.searches.start(
         {
           depth: "quick",
-          sourceIds: "all",
+          sites: { all: true, except: [] },
           picky: "balanced",
           postedWithin: "month",
           note: "",

@@ -1,3 +1,4 @@
+import { createTestJobSites } from "./source-debug.test-support";
 import { describe, expect, test } from "vitest";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { createJobFinderWorkspaceService } from "./index";
@@ -67,14 +68,18 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient: createAgentAiClient(),
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
     ).at(-1);
@@ -148,14 +153,18 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient: createAgentAiClient(),
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
     ).at(-1);
@@ -171,5 +180,4 @@ describe("createJobFinderWorkspaceService", () => {
       ),
     ).toBe(false);
   });
-
 });

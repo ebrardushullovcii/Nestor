@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { describe, expect, test } from "vitest";
 import {
@@ -25,7 +26,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_linkedin_template_routes",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -53,7 +54,10 @@ describe("createJobFinderWorkspaceService", () => {
         },
         verification: null,
         intelligence: learnedRoutesIntelligence([
-          ["https://www.linkedin.com/jobs/collections/recommended/", "collection"],
+          [
+            "https://www.linkedin.com/jobs/collections/recommended/",
+            "collection",
+          ],
           ["https://www.linkedin.com/jobs/:jobId", "listing"],
           [
             "https://www.linkedin.com/jobs/search/?keywords=:keyword&location=:location",
@@ -73,7 +77,8 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_template_routes",
           discoveryMethod: "catalog_seed",
-          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_template_routes",
+          canonicalUrl:
+            "https://www.linkedin.com/jobs/view/linkedin_template_routes",
           title: "Senior Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -95,14 +100,17 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
-          startingUrls: [...options.startingUrls],
-          maxSteps: options.maxSteps,
-        });
+        capturedPhaseInputs.set(
+          options.taskPacket?.strategyLabel ?? options.siteLabel,
+          {
+            startingUrls: [...options.startingUrls],
+            maxSteps: options.maxSteps,
+          },
+        );
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -112,7 +120,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [
@@ -135,7 +143,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_linkedin_unstable_job_route",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -182,7 +190,8 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_unstable_job_route",
           discoveryMethod: "catalog_seed",
-          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_unstable_job_route",
+          canonicalUrl:
+            "https://www.linkedin.com/jobs/view/linkedin_unstable_job_route",
           title: "Senior Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -204,14 +213,17 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
-          startingUrls: [...options.startingUrls],
-          maxSteps: options.maxSteps,
-        });
+        capturedPhaseInputs.set(
+          options.taskPacket?.strategyLabel ?? options.siteLabel,
+          {
+            startingUrls: [...options.startingUrls],
+            maxSteps: options.maxSteps,
+          },
+        );
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -221,7 +233,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [
@@ -245,7 +257,7 @@ describe("createJobFinderWorkspaceService", () => {
     const seed = createSeed();
     seed.searchPreferences.discovery.targets[0] = {
       ...seed.searchPreferences.discovery.targets[0]!,
-      id: "target_example_query_detail",
+      id: "1",
       label: "Example Careers",
       startingUrl: "https://example.com/careers/",
       instructionStatus: "draft",
@@ -255,14 +267,15 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_example_query_detail",
-        targetId: "target_example_query_detail",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
         acceptedAt: null,
         basedOnRunId: "debug_run_example_query_detail",
         basedOnAttemptIds: ["debug_attempt_example_query_detail"],
-        notes: "Detail route includes query params but should not become the search starting point.",
+        notes:
+          "Detail route includes query params but should not become the search starting point.",
         navigationGuidance: [
           "Start at https://example.com/careers/open-roles/.",
         ],
@@ -324,14 +337,17 @@ describe("createJobFinderWorkspaceService", () => {
     const browserRuntime: BrowserSessionRuntime = {
       ...baseRuntime,
       runAgentDiscovery(source, options) {
-        capturedPhaseInputs.set(options.taskPacket?.strategyLabel ?? options.siteLabel, {
-          startingUrls: [...options.startingUrls],
-          maxSteps: options.maxSteps,
-        });
+        capturedPhaseInputs.set(
+          options.taskPacket?.strategyLabel ?? options.siteLabel,
+          {
+            startingUrls: [...options.startingUrls],
+            maxSteps: options.maxSteps,
+          },
+        );
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -341,7 +357,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_example_query_detail");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [
@@ -366,7 +382,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_linkedin_draft_editable",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -389,16 +405,14 @@ describe("createJobFinderWorkspaceService", () => {
       }),
     ];
 
-    const { workspaceService } = createWorkspaceServiceHarness({ seed });
+    const { workspaceService } = createSourceDebugServiceHarness({ seed });
     const originalArtifact = seed.sourceInstructionArtifacts[0]!;
 
-    const updatedSnapshot = await workspaceService.saveSourceInstructionArtifact(
-      "target_linkedin_default",
-      {
+    const updatedSnapshot =
+      await workspaceService.saveSourceInstructionArtifact("1", {
         ...toEditableSourceInstructionArtifactInput(originalArtifact),
         searchGuidance: ["Use the edited search guidance instead."],
-      },
-    );
+      });
     const updatedArtifact = updatedSnapshot.sourceInstructionArtifacts.find(
       (artifact) => artifact.id === originalArtifact.id,
     );
@@ -410,7 +424,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(updatedArtifact?.basedOnRunId).toBe("debug_run_editable");
 
     await expect(
-      workspaceService.saveSourceInstructionArtifact("target_linkedin_default", {
+      workspaceService.saveSourceInstructionArtifact("1", {
         ...toEditableSourceInstructionArtifactInput(originalArtifact),
         id: "instruction_not_bound_to_target",
       }),

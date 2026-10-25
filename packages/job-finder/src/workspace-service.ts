@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -7,10 +8,10 @@ import type {
   ApplyJobResult,
   ApplyRun,
   FitJudgmentProgress,
-  JobDiscoveryTarget,
   JobFinderDiscoveryCancellationReply,
   JobFinderDiscoveryCommandReply,
   JobFinderDiscoveryState,
+  JobDiscoveryTarget,
   JobFinderWorkspaceSnapshot,
   JobSearchCampaign,
   JobSearchPreferences,
@@ -422,6 +423,7 @@ export function createJobFinderWorkspaceService(
   }
 
   const context: WorkspaceServiceContext = {
+    ...(options.jobSites ? { jobSites: options.jobSites } : {}),
     ...(backgroundWorkReady ? { backgroundWorkReady } : {}),
     ...(resumeDraftProcessor ? { resumeDraftProcessor } : {}),
     aiClient,
@@ -566,14 +568,8 @@ export function createJobFinderWorkspaceService(
       targetId: string,
       updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
     ): Promise<JobSearchPreferences> {
-      // Source-debug target metadata (validated-guidance pointers and run/verify
-      // stamps) must stay visible to the active campaign's runs and survive
-      // plan switches, so the update is applied inside one serialized atomic
-      // commit that mirrors the changed target into both the global search
-      // preferences and the active campaign's stored preferences. Plan
-      // selects/saves serialize on the same campaign transition, so neither
-      // side can clobber the other or leave the active pointer paired with
-      // preferences that miss this update.
+      // Kept for the legacy discovery caller until pipeline deletion.
+      // Source-debug writes the site row through saveJobSiteMetadata below.
       return context.withCampaignTransition(async () => {
         const campaignState = await repository.getCampaignState();
         if (!campaignState) {
@@ -624,6 +620,23 @@ export function createJobFinderWorkspaceService(
             searchPreferences: nextSearchPreferences,
           };
         });
+      });
+    },
+    saveJobSiteMetadata(targetId, updater) {
+      return Promise.resolve().then(() => {
+        const site = options.jobSites?.get(Number(targetId));
+        if (!site || !options.jobSites)
+          throw new Error(`Unknown job site '${targetId}'.`);
+        const next = updater(jobSiteTarget(site));
+        const saved = options.jobSites.record(site.id, {
+          instructionStatus: next.instructionStatus,
+          validatedInstructionId: next.validatedInstructionId,
+          draftInstructionId: next.draftInstructionId,
+          lastDebugRunId: next.lastDebugRunId,
+          lastVerifiedAt: next.lastVerifiedAt,
+          staleReason: next.staleReason,
+        });
+        return jobSiteTarget(saved!);
       });
     },
     async persistSourceDebugRun(run: SourceDebugRunRecord): Promise<void> {

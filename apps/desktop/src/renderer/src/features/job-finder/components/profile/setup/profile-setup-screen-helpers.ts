@@ -1,6 +1,4 @@
-import type { DiscoveryTargetEditorValue } from "../../../lib/job-finder-types";
 import {
-  findStarterJobSourceByStartingUrl,
   normalizeProfileSetupStep,
   getProfileSetupReadinessBlockers,
   hasProfileSetupPlaceholderValue,
@@ -14,95 +12,10 @@ import {
   type ProfileSetupStep,
 } from "@nestor/contracts";
 import { profileSetupStepDefinitions } from "./profile-setup-steps";
-import { deriveJobSourceLabel } from "../../../lib/job-source-display-name";
-
-/** Keep setup source editing bounded while leaving the complete catalog searchable. */
-export const PROFILE_SETUP_SOURCE_PAGE_SIZE = 25;
 
 /** Stable id of the single canonical setup validation alert element. */
 export const PROFILE_SETUP_VALIDATION_ALERT_ID =
   "profile-setup-validation-alert";
-
-export function filterProfileSetupSources(
-  targets: readonly DiscoveryTargetEditorValue[],
-  query: string,
-): Array<{ index: number; target: DiscoveryTargetEditorValue }> {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-
-  return targets.flatMap((target, index) => {
-    const matchesQuery =
-      normalizedQuery.length === 0 ||
-      target.label.toLocaleLowerCase().includes(normalizedQuery) ||
-      target.startingUrl.toLocaleLowerCase().includes(normalizedQuery);
-
-    return matchesQuery ? [{ index, target }] : [];
-  });
-}
-
-export function isValidProfileSetupSourceUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-export function getProfileSetupSourceHost(startingUrl: string): string {
-  return deriveJobSourceLabel(startingUrl);
-}
-
-/** Hedged sign-in/public access expectation for known starter sources. */
-export function getProfileSetupStarterAccessNote(
-  startingUrl: string,
-): string | null {
-  return findStarterJobSourceByStartingUrl(startingUrl)?.accessNote ?? null;
-}
-
-export type ProfileSetupSourceGuidance = {
-  detail: string | null;
-  /** Null when there is nothing worth saying about this source yet. */
-  label: string | null;
-};
-
-/**
- * Predicted access/method copy derived only from data already saved on the
- * target. Setup performs no live checks and never promises one.
- */
-export function getProfileSetupSourceGuidance(
-  target: Pick<DiscoveryTargetEditorValue, "instructionStatus">,
-): ProfileSetupSourceGuidance {
-  switch (target.instructionStatus) {
-    case "validated":
-      return {
-        label: "Guidance ready",
-        detail: "Can run with guidance saved from an earlier check.",
-      };
-    case "draft":
-      return {
-        label: "Draft guidance",
-        detail: "A recent check saved draft guidance for this source.",
-      };
-    case "stale":
-      return {
-        label: "Guidance needs review",
-        detail: "The saved guidance no longer matches this page.",
-      };
-    case "unsupported":
-      return {
-        label: "Unsupported for checks",
-        detail: "Automated checks could not read this site reliably yet.",
-      };
-    default:
-      // A source nobody has checked yet has nothing to report. "Not checked
-      // yet" was a third voice on a row whose checkbox and description
-      // already say everything the user can act on.
-      return {
-        label: null,
-        detail: null,
-      };
-  }
-}
 
 export type ProfileSetupReviewItem = ProfileSetupState["reviewItems"][number];
 export type ProfileSetupReviewItemDisplay = ProfileSetupReviewItem & {

@@ -1,3 +1,4 @@
+import { createTestJobSites } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -8,8 +9,14 @@ import {
   createAiClient,
   createBrowserRuntime,
   createDocumentManager,
-  createSeed,
+  createSeed as createBaseSeed,
 } from "./workspace-service.test-support";
+
+function createSeed() {
+  const seed = createBaseSeed();
+  seed.searchPreferences.discovery.targets[0]!.id = "1";
+  return seed;
+}
 
 type Repository = ReturnType<typeof createInMemoryJobFinderRepository>;
 type WorkspaceService = ReturnType<typeof createJobFinderWorkspaceService>;
@@ -23,6 +30,9 @@ function createService(
   browserRuntime: BrowserSessionRuntime = createBrowserRuntime(),
 ): WorkspaceService {
   return createJobFinderWorkspaceService({
+    jobSites: createTestJobSites(
+      createSeed().searchPreferences.discovery.targets,
+    ),
     repository,
     browserRuntime,
     aiClient: createAiClient(),
@@ -104,9 +114,7 @@ describe("workspace service automatic safeguard persistence", () => {
     );
     const saveIntelligenceState = vi.spyOn(repository, "saveIntelligenceState");
 
-    const sourceResult = await service.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const sourceResult = await service.runSourceDebug("1");
     expect(sourceResult.recentSourceDebugRuns[0]?.state).toBe("failed");
 
     const firstSnapshot = await service.getWorkspaceSnapshot();
@@ -153,7 +161,7 @@ describe("workspace service automatic safeguard persistence", () => {
       new Error("synthetic safeguard write failed"),
     );
 
-    const result = await service.runSourceDebug("target_linkedin_default");
+    const result = await service.runSourceDebug("1");
     const run = result.recentSourceDebugRuns[0];
 
     expect(run?.state).toBe("failed");

@@ -21,6 +21,10 @@ import { ProfileSetupPathCard } from "./profile-setup-screen-sections";
 import { ProfileSetupExtrasStep } from "./profile-setup-step-sections-extra";
 import { ProfileSetupTargetingStep } from "./profile-setup-step-sections";
 
+vi.mock("@renderer/features/job-lists/setup-sites", () => ({
+  SetupSites: () => null,
+}));
+
 const profile = CandidateProfileSchema.parse({
   id: "candidate_quality",
   firstName: "Alex",
