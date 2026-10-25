@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./job-store": "./src/job-store/job-store.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

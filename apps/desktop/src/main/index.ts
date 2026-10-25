@@ -17,6 +17,7 @@ import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-insta
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
+import { closeJobStore, getJobStore } from "./services/job-store";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -279,9 +280,14 @@ void app
     }
     recordStartupDiagnostic("main window created");
     // Service initialization shares main's thread with the window's load.
-    mainWindow.webContents.once("did-finish-load", () =>
-      deferredBackgroundInit.schedule(),
-    );
+    mainWindow.webContents.once("did-finish-load", () => {
+      try {
+        getJobStore();
+      } catch (error) {
+        console.error("[Desktop] The Job Finder store failed to open.", error);
+      }
+      deferredBackgroundInit.schedule();
+    });
     mainWindow.on("closed", () => {
       deferredBackgroundInit.cancelScheduled();
       closeInterviewOverlayWindows();
@@ -447,5 +453,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  closeJobStore();
   disposeInterviewSessionControls();
 });

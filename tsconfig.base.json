@@ -27,6 +27,7 @@
       "@nestor/contracts": ["packages/contracts/src/index.ts"],
       "@nestor/core": ["packages/core/src/index.ts"],
       "@nestor/db": ["packages/db/src/index.ts"],
+      "@nestor/db/job-store": ["packages/db/src/job-store/job-store.ts"],
       "@nestor/job-list-policy": ["packages/job-list-policy/src/index.ts"],
       "@nestor/job-list-policy/identity": [
         "packages/job-list-policy/src/job-identity.ts"

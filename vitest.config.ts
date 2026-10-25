@@ -48,6 +48,10 @@ export default defineConfig({
         currentDir,
         "packages/contracts/src/index.ts",
       ),
+      "@nestor/db/job-store": path.resolve(
+        currentDir,
+        "packages/db/src/job-store/job-store.ts",
+      ),
       "@nestor/db": path.resolve(currentDir, "packages/db/src/index.ts"),
       "@nestor/job-finder/assistant-attention": path.resolve(
         currentDir,

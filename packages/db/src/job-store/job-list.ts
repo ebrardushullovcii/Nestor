@@ -1,0 +1,270 @@
+import {
+  JOB_TOTAL_CAP,
+  JobListingFactsSchema,
+  type JobDetail,
+  type JobFilter,
+  type JobFit,
+  type JobListPage,
+  type JobListQuery,
+  type JobRow,
+  type JobSort,
+  type JobStage,
+  type JobStageCounts,
+  type WorkMode,
+} from "@nestor/contracts";
+import type { SQLInputValue } from "node:sqlite";
+
+import type { Statements } from "./statements";
+
+const WORK_MODE_BITS: Record<WorkMode, number> = {
+  remote: 1,
+  hybrid: 2,
+  onsite: 4,
+  flexible: 8,
+};
+
+export function toWorkModeMask(modes: readonly WorkMode[]): number {
+  return modes.reduce((mask, mode) => mask | WORK_MODE_BITS[mode], 0);
+}
+
+function fromWorkModeMask(mask: number): WorkMode[] {
+  return (Object.keys(WORK_MODE_BITS) as WorkMode[]).filter(
+    (mode) => (mask & WORK_MODE_BITS[mode]) !== 0,
+  );
+}
+
+export function toIso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+/** Each word must start a word in the title, company or location. */
+function toTextMatch(text: string): string | null {
+  const words = text
+    .split(/\s+/u)
+    .map((word) => word.replace(/"/gu, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return words.length > 0 ? words.map((word) => `"${word}"*`).join(" ") : null;
+}
+
+export interface FilterSql {
+  where: string;
+  params: SQLInputValue[];
+  /** True when the filter is only a stage, so its count is the stage count. */
+  stageOnly: boolean;
+}
+
+export function toFilterSql(filter: JobFilter): FilterSql {
+  const clauses = ["j.stage = ?"];
+  const params: SQLInputValue[] = [filter.stage];
+  if (filter.searchId) {
+    clauses.push("j.found_by = ?");
+    params.push(filter.searchId);
+  }
+  if (filter.minFit !== null) {
+    clauses.push("j.fit_score >= ?");
+    params.push(filter.minFit);
+  }
+  if (filter.workModes.length > 0) {
+    clauses.push("(j.work_modes & ?) <> 0");
+    params.push(toWorkModeMask(filter.workModes));
+  }
+  const match = toTextMatch(filter.text);
+  if (match) {
+    clauses.push(
+      "j.rowid IN (SELECT rowid FROM jobs_text WHERE jobs_text MATCH ?)",
+    );
+    params.push(match);
+  }
+  return {
+    where: clauses.join(" AND "),
+    params,
+    stageOnly: clauses.length === 1,
+  };
+}
+
+/** Every order ends in `id`, so a page position is exact. All descending. */
+const SORT_COLUMNS: Record<JobSort, readonly string[]> = {
+  best_fit: ["fit_score", "found_at", "id"],
+  newest: ["found_at", "id"],
+  posted: ["posted_at", "found_at", "id"],
+  recent: ["stage_at", "id"],
+};
+
+const ROW_COLUMNS = `j.id, j.stage, j.stage_at, j.title, j.company, j.location,
+  j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.posted_at,
+  j.found_at, j.found_by, j.source_label, j.source_count`;
+
+type RowRecord = {
+  id: number;
+  stage: JobStage;
+  stage_at: number;
+  title: string;
+  company: string;
+  location: string;
+  work_modes: number;
+  salary_text: string | null;
+  fit_score: number;
+  fit_summary: string | null;
+  posted_at: number;
+  found_at: number;
+  found_by: string | null;
+  source_label: string;
+  source_count: number;
+};
+
+function toRow(record: RowRecord): JobRow {
+  return {
+    id: record.id,
+    stage: record.stage,
+    stageChangedAt: toIso(record.stage_at),
+    title: record.title,
+    company: record.company,
+    location: record.location,
+    workModes: fromWorkModeMask(record.work_modes),
+    salaryText: record.salary_text,
+    fitScore: record.fit_score >= 0 ? record.fit_score : null,
+    fitSummary: record.fit_summary,
+    postedAt: record.posted_at > 0 ? toIso(record.posted_at) : null,
+    foundAt: toIso(record.found_at),
+    searchId: record.found_by,
+    sourceLabel: record.source_label,
+    sourceCount: record.source_count,
+  };
+}
+
+function readCursor(
+  cursor: string | null,
+  length: number,
+): (string | number)[] | null {
+  if (!cursor) return null;
+  try {
+    const values: unknown = JSON.parse(cursor);
+    if (
+      Array.isArray(values) &&
+      values.length === length &&
+      values.every((v) => typeof v === "string" || typeof v === "number")
+    ) {
+      return values;
+    }
+  } catch {
+    // A cursor from an older build starts the list over.
+  }
+  return null;
+}
+
+export function readStageCounts(sql: Statements): JobStageCounts {
+  const counts: JobStageCounts = {
+    found: 0,
+    hidden: 0,
+    shortlisted: 0,
+    resume: 0,
+    applied: 0,
+  };
+  for (const row of sql("SELECT stage, n FROM job_stage_counts").all() as {
+    stage: JobStage;
+    n: number;
+  }[]) {
+    counts[row.stage] = row.n;
+  }
+  return counts;
+}
+
+export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
+  const filter = toFilterSql(query);
+  const columns = SORT_COLUMNS[query.sort];
+  const after = readCursor(query.cursor, columns.length);
+  const where = after
+    ? `${filter.where} AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
+    : filter.where;
+  const order = columns.map((c) => `j.${c} DESC`).join(", ");
+  const records = sql(
+    `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${where} ORDER BY ${order} LIMIT ?`,
+  ).all(...filter.params, ...(after ?? []), query.limit + 1) as RowRecord[];
+  const hasMore = records.length > query.limit;
+  const page = hasMore ? records.slice(0, query.limit) : records;
+  const last = page.at(-1);
+  const counts = readStageCounts(sql);
+  const total = filter.stageOnly
+    ? counts[query.stage]
+    : (
+        sql(
+          `SELECT count(*) AS n FROM (SELECT 1 FROM jobs j WHERE ${filter.where} LIMIT ${JOB_TOTAL_CAP + 1})`,
+        ).get(...filter.params) as { n: number }
+      ).n;
+  return {
+    rows: page.map(toRow),
+    nextCursor:
+      hasMore && last
+        ? JSON.stringify(columns.map((c) => last[c as keyof RowRecord]))
+        : null,
+    total: Math.min(total, JOB_TOTAL_CAP),
+    totalCapped: total > JOB_TOTAL_CAP,
+    counts,
+  };
+}
+
+type DetailRecord = RowRecord & {
+  url: string;
+  apply_url: string | null;
+  seen_at: number;
+  description: string;
+  summary: string | null;
+  seniority: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  facts_json: string;
+  fit_json: string | null;
+};
+
+export function getJob(sql: Statements, id: number): JobDetail | null {
+  const record = sql(
+    `SELECT ${ROW_COLUMNS}, j.url, j.apply_url, j.seen_at, d.description, d.summary,
+       d.seniority, d.employment_type, d.salary_min, d.salary_max,
+       d.salary_currency, d.facts_json, d.fit_json
+     FROM jobs j JOIN job_details d ON d.job_id = j.id WHERE j.id = ?`,
+  ).get(id) as DetailRecord | undefined;
+  if (!record) return null;
+  const sightings = sql(
+    `SELECT source_id, source_label, url, apply_url, seen_at FROM job_sightings
+     WHERE job_id = ? ORDER BY seen_at`,
+  ).all(id) as {
+    source_id: string;
+    source_label: string;
+    url: string;
+    apply_url: string | null;
+    seen_at: number;
+  }[];
+  const hasSalary =
+    record.salary_min !== null ||
+    record.salary_max !== null ||
+    record.salary_currency !== null;
+  return {
+    ...toRow(record),
+    url: record.url,
+    applyUrl: record.apply_url,
+    seenAt: toIso(record.seen_at),
+    description: record.description,
+    summary: record.summary,
+    seniority: record.seniority,
+    employmentType: record.employment_type,
+    salary: hasSalary
+      ? {
+          min: record.salary_min,
+          max: record.salary_max,
+          currency: record.salary_currency,
+        }
+      : null,
+    facts: JobListingFactsSchema.parse(JSON.parse(record.facts_json)),
+    fit: record.fit_json ? (JSON.parse(record.fit_json) as JobFit) : null,
+    sightings: sightings.map((s) => ({
+      sourceId: s.source_id,
+      sourceLabel: s.source_label,
+      url: s.url,
+      applyUrl: s.apply_url,
+      seenAt: toIso(s.seen_at),
+    })),
+  };
+}
