@@ -20,6 +20,7 @@ import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
 import { closeJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
+import { registerHomeRoutes } from "./routes/home";
 import { registerTrackerRoutes } from "./routes/tracker";
 import { stopResumeService } from "./services/resumes";
 import { stopApplicationService } from "./services/applications";
@@ -240,6 +241,7 @@ if (hasSingleInstanceLock) {
   }
   registerResumeRoutes(ipcMain);
   registerTrackerRoutes(ipcMain);
+  registerHomeRoutes(ipcMain);
 }
 
 recordStartupDiagnostic("main module loaded");

@@ -2,16 +2,14 @@
 
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { JobSearchCampaignSchema } from "@nestor/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Suspense } from "react";
 import type { ReactElement } from "react";
-import { createDiscoveryRunInterruptedFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import type * as LaunchReadsModule from "@renderer/features/job-finder/lib/launch-reads";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
-  JobFinderHomeRoute,
   JobFinderProfileRoute,
 } from "./job-finder-page-routes";
 
@@ -389,51 +387,6 @@ describe("canonical route first paint", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     launch.reads = { counts: null, home: null, context: null };
-  });
-
-  it("opens a browser session from Home without forwarding the React click event", async () => {
-    const context = createContext();
-    context.workspace = {
-      ...context.workspace,
-      campaigns: context.workspace.campaigns.map((plan) => ({
-        ...plan,
-        searchPreferences: {
-          ...plan.searchPreferences,
-          discovery: context.workspace.searchPreferences.discovery,
-        },
-        sourceTargetIds: ["source_1"],
-      })),
-    };
-    const onOpenBrowserSession = vi.fn();
-    context.onOpenBrowserSession = onOpenBrowserSession;
-    context.discoveryRunFeedback = createDiscoveryRunInterruptedFeedback({
-      detail: "The dedicated browser could not start.",
-    });
-    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Open the Job Finder browser",
-      }),
-    );
-
-    expect(onOpenBrowserSession).toHaveBeenCalledTimes(1);
-    expect(onOpenBrowserSession.mock.calls[0]).toEqual([]);
-  });
-
-  it("does not tell a workspace still loading its saved jobs to run a first search", () => {
-    const context = createContext();
-    context.workspace = {
-      ...context.workspace,
-      hydration: {
-        phase: "bootstrap",
-        deferredCollections: ["discovery_jobs", "applications"],
-      },
-    };
-    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
-
-    expect(screen.getByText("Loading your workspace")).toBeTruthy();
-    expect(screen.queryByText("Run your first search")).toBeNull();
   });
 
   it("mounts the real Your profile heading immediately without a suspense fallback or deferred surface timer", () => {

@@ -29,6 +29,7 @@ export * from "./discovery";
 export * from "./jobs";
 export * from "./applications";
 export * from "./tracker";
+export * from "./home";
 export * from "./job-commands";
 export * from "./resumes";
 export * from "./resume-commands";

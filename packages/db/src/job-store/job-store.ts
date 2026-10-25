@@ -33,6 +33,7 @@ import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
 export { createTrackerStore, type TrackerStore } from "./tracker";
+export { createHomeStore, type HomeStore } from "./home";
 export {
   createResumeStore,
   ResumeChangedError,

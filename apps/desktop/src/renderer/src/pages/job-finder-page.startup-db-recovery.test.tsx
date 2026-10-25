@@ -21,6 +21,7 @@ function configureWindowNestor(input: {
         run: vi.fn(() => new Promise(() => undefined)),
         onChange: () => () => undefined,
       },
+      home: { summary: () => new Promise(() => undefined) },
       jobFinder: {
         getWorkspaceBootstrap: vi.fn(() =>
           Promise.reject(input.getWorkspaceBootstrapError),

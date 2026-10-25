@@ -29,7 +29,7 @@ import {
   startLaunchReads,
   useLaunchReads,
 } from "@renderer/features/job-finder/lib/launch-reads";
-import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
+import { HomeScreen } from "@renderer/features/home/home-screen";
 import { FindJobsScreen } from "@renderer/features/find-jobs/find-jobs-screen";
 import { JobFinderShellBrand } from "@renderer/features/job-finder/components/job-finder-shell-brand";
 import { SourceCheckQueueRunner } from "@renderer/features/job-finder/lib/source-check-queue-runner";
@@ -460,11 +460,7 @@ function JobFinderOpeningShell() {
       role="status"
     >
       <PageHeader
-        description={
-          isOpeningHomeRoute
-            ? "See progress, open tasks, and the best next step."
-            : `Opening your saved ${openingRouteLabel.toLowerCase()} workspace.`
-        }
+        description={`Opening your saved ${openingRouteLabel.toLowerCase()} workspace.`}
         title={getOpeningRouteTitle(location.pathname, openingRouteLabel)}
       />
       <div
@@ -485,49 +481,17 @@ function JobFinderOpeningShell() {
       )}
       data-job-finder-opening-placeholder
     >
-      {isOpeningHomeRoute ? (
-        <>
-          <div
-            className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-primary/40 bg-primary/10 p-5"
-            data-job-finder-opening-block="recommended-next"
-          >
-            <div className="h-3 w-32 rounded bg-(--surface-panel-raised)" />
-            <div className="h-5 w-72 max-w-full rounded bg-(--surface-panel-raised)" />
-            <div className="h-4 w-full max-w-[52ch] rounded bg-(--surface-panel-raised)" />
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <div className="h-11 w-40 rounded-(--radius-button) bg-(--surface-panel-raised)" />
-            </div>
-          </div>
-          <div
-            className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
-            data-job-finder-opening-block="search"
-          >
-            <div className="h-9 w-full rounded-(--radius-field) bg-(--surface-panel-raised)" />
-          </div>
-          <div
-            className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
-            data-job-finder-opening-block="notifications"
-          >
-            <div className="h-5 w-36 rounded bg-(--surface-panel-raised)" />
-            <div className="h-4 w-64 max-w-full rounded bg-(--surface-panel-raised)" />
-          </div>
-        </>
-      ) : (
-        // Only Home has a primary-tinted recommended-next card. On every other
-        // route that shape was a lie the user saw for a frame, so the rest of
-        // the app opens on one neutral panel that fills the pane it reserves.
-        <div
-          className={cn(
-            "surface-panel-shell grid min-w-0 content-start gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5",
-            isLockedOpeningRoute ? "h-full min-h-0" : "min-h-56",
-          )}
-          data-job-finder-opening-block="route-placeholder"
-        >
-          <div className="h-4 w-36 rounded bg-(--surface-panel-raised)" />
-          <div className="h-4 w-full max-w-[52ch] rounded bg-(--surface-panel-raised)" />
-          <div className="h-4 w-64 max-w-full rounded bg-(--surface-panel-raised)" />
-        </div>
-      )}
+      <div
+        className={cn(
+          "surface-panel-shell grid min-w-0 content-start gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5",
+          isLockedOpeningRoute ? "h-full min-h-0" : "min-h-56",
+        )}
+        data-job-finder-opening-block="route-placeholder"
+      >
+        <div className="h-4 w-36 rounded bg-(--surface-panel-raised)" />
+        <div className="h-4 w-full max-w-[52ch] rounded bg-(--surface-panel-raised)" />
+        <div className="h-4 w-64 max-w-full rounded bg-(--surface-panel-raised)" />
+      </div>
     </div>
   );
 
@@ -889,13 +853,8 @@ function JobFinderOpeningShell() {
               >
                 {openingPlaceholderBlock}
               </LockedScreenLayout>
-            ) : isOpeningHomeRoute && launchReads.counts ? (
-              <JobSearchHomeLaunch
-                counts={launchReads.counts}
-                onNavigate={(route) => {
-                  void navigate(route);
-                }}
-              />
+            ) : isOpeningHomeRoute ? (
+              <HomeScreen />
             ) : (
               <section className="grid min-w-0 gap-5 pb-8">
                 {openingHeaderBlock}
