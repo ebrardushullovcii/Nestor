@@ -634,7 +634,9 @@ export function SettingsAiBehaviorSection({
             hint={
               writeOnShortlistFailed
                 ? "This was not saved. Try the switch again."
-                : "Off: create resumes yourself from Shortlisted."
+                : writeOnShortlist
+                  ? "On: resumes start when you shortlist a job."
+                  : "Off: create resumes yourself from Shortlisted."
             }
             label="Write resumes when I shortlist"
             onCheckedChange={updateWriteOnShortlist}
