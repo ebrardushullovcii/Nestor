@@ -276,3 +276,44 @@ it("saves numeric answers before Apply and reuses the same facts in number or te
   ).toEqual({ status: "answered", answer: "5" });
   expect(applications.needsYou.list().rows).toEqual([]);
 });
+
+it("updates tab counts while a saved answer is being edited, without moving the editor", async () => {
+  applications.needsYou.remember({
+    key: "notice",
+    prompt: "What is your notice period?",
+    answer: "Four weeks",
+    scope: { country: "", siteOrigin: "" },
+    input: "text",
+    options: [],
+  });
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Saved answers 1" }),
+  );
+  const answer = await screen.findByRole("textbox", {
+    name: "What is your notice period?",
+  });
+  fireEvent.change(answer, { target: { value: "Six weeks" } });
+  let task: ReturnType<typeof ask>;
+  act(() => {
+    task = ask(0, "travel", "Can you travel?", "boolean");
+  });
+  await screen.findByRole("button", { name: "Needs you 1" });
+  act(() => {
+    expect(ask(1, "travel", "Can you travel?", "boolean").id).toBe(task.id);
+  });
+  expect(screen.getByRole("button", { name: "Needs you 1" })).toBeTruthy();
+  expect(
+    screen.getByRole("textbox", { name: "What is your notice period?" }),
+  ).toBe(answer);
+  expect(answer).toHaveProperty("value", "Six weeks");
+  act(() => {
+    applications.needsYou.answer({
+      id: task.id,
+      answer: "Yes",
+      remember: false,
+    });
+  });
+  await screen.findByRole("button", { name: "Needs you 0" });
+  expect(answer).toHaveProperty("value", "Six weeks");
+});
