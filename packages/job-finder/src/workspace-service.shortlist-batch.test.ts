@@ -191,22 +191,6 @@ test("unknown rows refuse the batch before changing any valid row", async () => 
   );
 });
 
-test("changing one job's resume mode limits the transaction to that job", async () => {
-  const { repository, workspaceService } = createWorkspaceServiceHarness({
-    seed: batchSeed(),
-  });
-  const commit = vi.spyOn(repository, "commitSavedJobDelta");
-  await workspaceService.setJobResumeApplicationMode(
-    "batch_0",
-    "original_resume",
-  );
-  expect(commit.mock.calls[0]?.[0].updateJobIds).toEqual(["batch_0"]);
-  expect(
-    (await repository.listSavedJobsByIds(["batch_0"]))[0]
-      ?.resumeApplicationMode,
-  ).toBe("original_resume");
-});
-
 test("deduplicates requests, promotes pending rows atomically, and preserves other pending rows", async () => {
   const seed = batchSeed(3);
   seed.discovery.pendingDiscoveryJobs = seed.savedJobs.slice(1);

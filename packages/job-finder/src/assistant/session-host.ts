@@ -1,6 +1,5 @@
 import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
 import { connectAssistantMcp } from "./mcp";
-import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
 import { buildChangePreview } from "./change-diff";
@@ -48,7 +47,6 @@ import {
   type AssistantUndoChangeResult,
   type JobFinderWorkspaceSnapshot,
   type ProfileCopilotPatchOperation,
-  type ResumeDraftPatch,
 } from "@nestor/contracts";
 import type { AssistantRepository } from "@nestor/db";
 
@@ -75,8 +73,6 @@ import {
 } from "./tool-kit";
 import {
   buildAssistantToolCatalog,
-  cancelBackgroundBatch,
-  readBackgroundBatch,
   undoReceipt,
   type AssistantCatalogMode,
 } from "./tools";
@@ -254,7 +250,6 @@ export class AssistantSessionHost {
   private readonly live = new Map<string, LiveTurn>();
   private readonly watches = new Map<string, RunWatch>();
   private watchCheckInFlight: Promise<void> | null = null;
-  private readonly backgroundActivityLabels = new Map<string, string | null>();
   private readonly handles = new Map<string, AssistantHandleStore>();
   private readonly calibrators = new Map<string, TokenCalibrator>();
   private readonly profileReadDone = new Set<string>();
@@ -269,14 +264,6 @@ export class AssistantSessionHost {
     { conversationId: string; questionId: string; requestId: string }
   >();
   private questionSyncPending = false;
-  /**
-   * Restart notices about an unfinished resume batch can only resolve while
-   * one may still be open; checking needs a full snapshot, so it is skipped
-   * once none is left and runs at most every 10 s otherwise.
-   */
-  private resumeNoticeCheckDue = true;
-  private resumeNoticeCheckPending = false;
-  private resumeNoticeCheckedAt = 0;
   /** Notes for the model's next turn about questions settled elsewhere. */
   private readonly answeredElsewhere = new Map<string, string[]>();
   private closed = false;
@@ -369,9 +356,7 @@ export class AssistantSessionHost {
       messages: page.messages,
       hasOlderMessages: page.hasOlder,
       activeTurn: live?.turn ?? null,
-      activity: live
-        ? live.activity
-        : this.resumeBatchActivity(input.conversationId),
+      activity: live ? live.activity : null,
       draftText: live?.draftText || null,
       plans: await this.repository.listPlans({
         conversationId: input.conversationId,
@@ -600,9 +585,7 @@ export class AssistantSessionHost {
     }
     for (const [key, run] of runs) {
       await this.cancelRun(run);
-      // Resume Stop lets the active drafts finish. Keep observing them so
-      // the sidebar names what is still running, without starting a continuation.
-      if (run.kind !== "resume_generation") this.watches.delete(key);
+      this.watches.delete(key);
     }
     for (const operation of await this.repository.listOperations(
       conversationId,
@@ -616,34 +599,14 @@ export class AssistantSessionHost {
         endedAt: this.now(),
       });
     }
-    await this.publishResumeBatchActivity(conversationId, true);
+    await this.clearIdleActivity(conversationId);
   }
 
-  /** Stop dispatching from either batch entry point; active drafts can finish. */
   private readWorkspaceSnapshot(): Promise<JobFinderWorkspaceSnapshot> {
     return (
       this.service.getWorkspaceProjection?.() ??
       this.service.getWorkspaceSnapshot()
     );
-  }
-
-  async stopResumeBatches(): Promise<void> {
-    this.ports.stopResumeBatch?.();
-    const snapshot = await this.readWorkspaceSnapshot();
-    const checkpoints =
-      snapshot.intelligence.resumeBatchCheckpoints ??
-      (snapshot.intelligence.resumeBatchCheckpoint
-        ? [snapshot.intelligence.resumeBatchCheckpoint]
-        : []);
-    for (const batch of checkpoints) {
-      if (!batch.running || batch.done) continue;
-      cancelBackgroundBatch(batch.id);
-      await this.service.saveResumeBatchCheckpoint({
-        ...batch,
-        stopRequested: true,
-      });
-    }
-    this.ports.publishWorkspaceUpdate();
   }
 
   private async cancelRun(run: AssistantRunRef): Promise<void> {
@@ -659,8 +622,7 @@ export class AssistantSessionHost {
         });
       } else if (run.kind === "source_check") {
         await this.service.cancelSourceDebug(run.id);
-      } else if (run.kind === "resume_generation")
-        cancelBackgroundBatch(run.id);
+      }
     } catch (error) {
       this.log("Could not cancel a run on stop", error);
     }
@@ -1269,7 +1231,7 @@ export class AssistantSessionHost {
     });
     if (this.live.get(conversationId) === live)
       this.live.delete(conversationId);
-    await this.publishResumeBatchActivity(conversationId, true);
+    await this.clearIdleActivity(conversationId);
     await this.repository.pruneEvents(conversationId, EVENT_KEEP_LAST);
     this.ports.publishWorkspaceUpdate();
     // Messages that arrived after the last tool boundary start the next turn.
@@ -1953,65 +1915,10 @@ export class AssistantSessionHost {
     }, this.options.watchIntervalMs ?? 4_000);
   }
 
-  /** Uses the existing typed activity event; no model turn is fabricated. */
-  private resumeBatchActivity(
-    conversationId: string,
-  ): AssistantActivity | null {
-    const batches = [...this.watches.values()]
-      .filter(
-        (watch) =>
-          watch.conversationId === conversationId &&
-          watch.run.kind === "resume_generation",
-      )
-      .flatMap((watch) => {
-        const batch = readBackgroundBatch(watch.run.id);
-        return batch && !batch.done ? [batch] : [];
-      });
-    if (batches.length === 0) return null;
-    const total = batches.reduce(
-      (count, batch) => count + batch.jobIds.length,
-      0,
-    );
-    const settled = batches.reduce(
-      (count, batch) =>
-        count +
-        batch.completedJobIds.length +
-        batch.failures.length +
-        batch.skipped.length,
-      0,
-    );
-    const active = batches.reduce(
-      (count, batch) => count + batch.activeJobIds.length,
-      0,
-    );
-    const failed = batches.reduce(
-      (count, batch) => count + batch.failures.length,
-      0,
-    );
-    const minutesLeft = estimateResumeBatchMinutesLeft(
-      batches.flatMap((batch) => batch.durationsMs),
-      total - settled,
-    );
-    return {
-      label: batches.every((batch) => batch.cancelled)
-        ? `Finishing ${active} active resume${active === 1 ? "" : "s"}; queued jobs stopped`
-        : `Writing resumes: ${settled} of ${total} finished${failed ? `; ${failed} failed` : ""}${minutesLeft === null ? "" : ` · about ${minutesLeft} min left`}`,
-      toolName: "generate_resumes",
-      startedAt: batches.map((batch) => batch.startedAt).sort()[0]!,
-    };
-  }
-
-  private async publishResumeBatchActivity(
-    conversationId: string,
-    force = false,
-  ): Promise<void> {
+  /** Clears the activity line once nothing runs in this conversation. */
+  private async clearIdleActivity(conversationId: string): Promise<void> {
     if (this.live.has(conversationId) || this.closed) return;
-    const activity = this.resumeBatchActivity(conversationId);
-    const label = activity?.label ?? null;
-    if (!force && this.backgroundActivityLabels.get(conversationId) === label)
-      return;
-    this.backgroundActivityLabels.set(conversationId, label);
-    await this.emit(conversationId, null, { type: "activity", activity });
+    await this.emit(conversationId, null, { type: "activity", activity: null });
   }
 
   /** Called by the host whenever the workspace changed. */
@@ -2023,23 +1930,6 @@ export class AssistantSessionHost {
         void this.closeQuestionsAnsweredElsewhere();
       }, 300);
     }
-    if (
-      this.resumeNoticeCheckDue &&
-      !this.resumeNoticeCheckPending &&
-      Date.now() - this.resumeNoticeCheckedAt >= 10_000
-    ) {
-      this.resumeNoticeCheckPending = true;
-      setTimeout(() => {
-        this.resumeNoticeCheckedAt = Date.now();
-        void this.refreshFinishedResumeBatchNotices()
-          .catch((error: unknown) =>
-            this.log("Could not update a resume batch notice", error),
-          )
-          .finally(() => {
-            this.resumeNoticeCheckPending = false;
-          });
-      }, 300);
-    }
     if (this.watches.size === 0 || this.watchCheckPending) return;
     this.watchCheckPending = true;
     setTimeout(
@@ -2049,68 +1939,6 @@ export class AssistantSessionHost {
       },
       Math.max(750, this.watchCheckRestUntil - Date.now()),
     );
-  }
-
-  /** A queue continued in Shortlisted closes the assistant's restart notice too. */
-  async refreshFinishedResumeBatchNotices(): Promise<void> {
-    const snapshot = await this.readWorkspaceSnapshot();
-    const checkpoints =
-      snapshot.intelligence.resumeBatchCheckpoints ??
-      (snapshot.intelligence.resumeBatchCheckpoint
-        ? [snapshot.intelligence.resumeBatchCheckpoint]
-        : []);
-    const completedIds = new Set(
-      checkpoints
-        .filter((batch) => batch.done)
-        .flatMap((batch) => [batch.id, ...(batch.resumedBatchIds ?? [])]),
-    );
-    let unresolved = false;
-    for (const conversation of await this.repository.listConversations()) {
-      const interrupted = (
-        await this.repository.listOperations(conversation.id, { runOnly: true })
-      ).filter(
-        (operation) =>
-          operation.run?.kind === "resume_generation" &&
-          operation.resultSummary ===
-            "The app closed while writing resumes. Saved drafts are kept; queued jobs were not restarted.",
-      );
-      if (interrupted.length === 0) continue;
-      if (
-        interrupted.some((operation) => !completedIds.has(operation.run!.id))
-      ) {
-        unresolved = true;
-        continue;
-      }
-      const page = await this.repository.listMessages(conversation.id, {
-        limit: 100,
-      });
-      for (const message of page.messages) {
-        let changed = false;
-        const parts = message.parts.map((part) => {
-          if (
-            part.type !== "notice" ||
-            part.kind !== "interrupted" ||
-            part.text !==
-              "The app closed while writing resumes. Saved drafts are kept; ask again to write the remaining resumes."
-          )
-            return part;
-          changed = true;
-          return {
-            ...part,
-            kind: "continued" as const,
-            text: "Resume batch finished. Review the results in Shortlisted.",
-          };
-        });
-        if (!changed) continue;
-        const updated = { ...message, parts, updatedAt: this.now() };
-        await this.repository.upsertMessage(updated);
-        await this.emit(conversation.id, null, {
-          type: "message_updated",
-          message: updated,
-        });
-      }
-    }
-    this.resumeNoticeCheckDue = unresolved;
   }
 
   /**
@@ -2209,7 +2037,6 @@ export class AssistantSessionHost {
       if (!status.done) {
         if (watch.resumedAt !== undefined || watch.reportedHandoff)
           watch.seenWorking = true;
-        await this.publishResumeBatchActivity(watch.conversationId);
         continue;
       }
       if (
@@ -2243,19 +2070,14 @@ export class AssistantSessionHost {
       }
       this.watches.delete(key);
       const operation = await this.repository.getOperation(watch.operationId);
-      const cancelled =
-        watch.run.kind === "resume_generation" &&
-        readBackgroundBatch(watch.run.id)?.cancelled;
       if (operation) {
         await this.repository.upsertOperation({
           ...operation,
-          status: cancelled ? "cancelled" : "committed",
+          status: "committed",
           resultSummary: status.summary.slice(0, 2_000),
           endedAt: this.now(),
         });
       }
-      await this.publishResumeBatchActivity(watch.conversationId);
-      if (cancelled) continue;
       await this.continueAfterRun(watch, status.summary, status.details);
     }
   }
@@ -2385,17 +2207,6 @@ export class AssistantSessionHost {
         for (const groupId of part.source.patchGroupIds) {
           await this.service.rejectProfileCopilotPatchGroup(groupId);
         }
-      } else if (
-        part.source.store === "resume_assistant" &&
-        part.targetId &&
-        part.source.legacyMessageId
-      ) {
-        await this.service.resolveResumeAssistantProposal(
-          part.targetId,
-          part.source.legacyMessageId,
-          "reject",
-          [],
-        );
       } else {
         const proposal = await this.repository.getProposal(part.proposalId);
         if (proposal) {
@@ -2410,17 +2221,6 @@ export class AssistantSessionHost {
       for (const groupId of part.source.patchGroupIds) {
         await this.service.applyProfileCopilotPatchGroup(groupId);
       }
-    } else if (
-      part.source.store === "resume_assistant" &&
-      part.targetId &&
-      part.source.legacyMessageId
-    ) {
-      await this.service.resolveResumeAssistantProposal(
-        part.targetId,
-        part.source.legacyMessageId,
-        "accept",
-        input.itemIds ?? part.items.map((item) => item.id),
-      );
     } else {
       const proposal = await this.repository.getProposal(part.proposalId);
       if (!proposal) throw new Error("That proposal is gone.");
@@ -2472,38 +2272,6 @@ export class AssistantSessionHost {
             targetId: null,
             summary: proposal.summary,
             entries,
-          });
-          extraParts.push(recorded.part);
-        }
-      } else {
-        const result = await this.service.applyAssistantResumePatches({
-          jobId: proposal.targetId ?? "",
-          patches: chosen.map((item) => {
-            const patch = item.payload as Partial<ResumeDraftPatch>;
-            return {
-              operation: patch.operation!,
-              targetSectionId: patch.targetSectionId!,
-              targetEntryId: patch.targetEntryId ?? null,
-              anchorEntryId: patch.anchorEntryId ?? null,
-              targetBulletId: patch.targetBulletId ?? null,
-              anchorBulletId: patch.anchorBulletId ?? null,
-              position: patch.position ?? null,
-              newText: patch.newText ?? null,
-              newIncluded: patch.newIncluded ?? null,
-              newLocked: patch.newLocked ?? null,
-              newBullets: patch.newBullets ?? null,
-              conflictReason: null,
-            };
-          }),
-          expectedDraftUpdatedAt: null,
-          summary: proposal.summary,
-        });
-        for (const change of result.changes) {
-          const recorded = await session.recordChange({
-            target: change.target,
-            targetId: change.targetId,
-            summary: proposal.summary,
-            entries: change.entries,
           });
           extraParts.push(recorded.part);
         }
@@ -2855,24 +2623,6 @@ export class AssistantSessionHost {
         left.startedAt.localeCompare(right.startedAt),
       )) {
         if (operation.status !== "started" || !operation.run) continue;
-        if (operation.run.kind === "resume_generation") {
-          cancelBackgroundBatch(operation.run.id);
-          await this.repository.upsertOperation({
-            ...operation,
-            status: "cancelled",
-            resultSummary:
-              "The app closed while writing resumes. Saved drafts are kept; queued jobs were not restarted.",
-            endedAt: this.now(),
-          });
-          await this.appendNotice(
-            conversation.id,
-            null,
-            "interrupted",
-            "The app closed while writing resumes. Saved drafts are kept; ask again to write the remaining resumes.",
-          );
-          this.resumeNoticeCheckDue = true;
-          continue;
-        }
         const run = { ...operation.run, jobIds: [] };
         const key = runWatchKey(conversation.id, run);
         if (
@@ -2930,10 +2680,6 @@ export class AssistantSessionHost {
 
   async shutdown(): Promise<void> {
     this.closed = true;
-    for (const watch of this.watches.values()) {
-      if (watch.run.kind === "resume_generation")
-        cancelBackgroundBatch(watch.run.id);
-    }
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = null;
     for (const [conversationId, live] of this.live) {

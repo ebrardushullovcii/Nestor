@@ -30,23 +30,6 @@ describe("workspace delta contracts", () => {
   });
   it("parses the bounded entity mutation commands with their base revision", () => {
     expect(
-      JobFinderWorkspaceEntityMutationInputSchema.parse({
-        baseRevision: 4,
-        mutation: {
-          type: "set_job_resume_application_mode",
-          jobId: "job-1",
-          resumeApplicationMode: "original_resume",
-        },
-      }),
-    ).toEqual({
-      baseRevision: 4,
-      mutation: {
-        type: "set_job_resume_application_mode",
-        jobId: "job-1",
-        resumeApplicationMode: "original_resume",
-      },
-    });
-
   });
 
   it("carries current selection IDs in every schema-validated delta", () => {

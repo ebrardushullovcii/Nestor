@@ -6,14 +6,11 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   ApplicationCrmBulkStageMutationInput,
   ApplyGroupedManualAnswerInput,
-  JobFinderResumeWorkspace,
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
   ResumeImportProgressEvent,
-  ResumeAssistantMessage,
-  ResumeDraft,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
 } from "@nestor/contracts";
@@ -41,20 +38,11 @@ import type {
 type BuildJobFinderPageContextArgs = {
   actionState: ActionState;
   actions: JobFinderShellActions;
-  activeRouteResumeAssistantMessages: readonly ResumeAssistantMessage[];
-  activeRouteResumeAssistantPending: boolean;
-  activeRouteResumeWorkspace: JobFinderResumeWorkspace | null;
   canImportResume: boolean;
-  confirmLeaveDirtyResumeWorkspace: (pendingAction: string) => Promise<boolean>;
   importResumeGuardMessage: string | null;
   resumeOperationStarts?: Readonly<Record<string, number>>;
   isAnyPendingAction: (scopes: readonly PendingActionScope[]) => boolean;
   isPendingAction: (scope: PendingActionScope) => boolean;
-  isCurrentResumeAssistantRequest: (
-    jobId: string,
-    requestToken: number,
-  ) => boolean;
-  isCurrentResumeWorkspaceJob: (jobId: string) => boolean;
   latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
   getLocationPathname: () => string;
   navigate: (
@@ -83,14 +71,6 @@ type BuildJobFinderPageContextArgs = {
   profileSetupState: ProfileSetupState | null;
   saveCoordinator: JobFinderSaveCoordinator;
   saveState: JobFinderSaveState;
-  refreshResumeWorkspace: (
-    jobId: string,
-    options?: {
-      updateAssistantMessages?: boolean;
-    },
-  ) => Promise<boolean>;
-  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
-  resumeAssistantRequestTokenRef: MutableRefObject<number>;
   selectedApplicationAttempt: JobFinderPageContext["selectedApplicationAttempt"];
   selectedApplicationRecord: JobFinderPageContext["selectedApplicationRecord"];
   selectedDiscoveryJob: JobFinderPageContext["selectedDiscoveryJob"];
@@ -105,20 +85,11 @@ type BuildJobFinderPageContextArgs = {
   setProfileCopilotBusy: Dispatch<SetStateAction<boolean>>;
   setProfileCopilotPendingContextKey: Dispatch<SetStateAction<string | null>>;
   setProfileSurfaceDirty: Dispatch<SetStateAction<boolean>>;
-  setResumeAssistantMessages: Dispatch<
-    SetStateAction<readonly ResumeAssistantMessage[]>
-  >;
-  setResumeAssistantPending: Dispatch<SetStateAction<boolean>>;
-  setResumeWorkspace: Dispatch<SetStateAction<JobFinderResumeWorkspace | null>>;
-  clearResumeWorkspaceState: () => void;
-  setResumeWorkspaceDirty: Dispatch<SetStateAction<boolean>>;
   /** Notifies the save coordinator that a staged settings draft changed. */
   onSettingsDraftEdited: () => void;
   /** Notifies the save coordinator that a profile/setup draft was edited. */
   onProfileSurfaceDraftEdited: () => void;
   onCancelImportResume: () => void;
-  /** Notifies the save coordinator that a Resume Studio draft was edited. */
-  onResumeWorkspaceDraftEdited: () => void;
   setSelectedApplicationRecordId: (recordId: string) => void;
   setSelectedDiscoveryJobId: (jobId: string) => void;
   setSelectedReviewJobId: (jobId: string) => void;
@@ -132,15 +103,11 @@ export function buildJobFinderPageContext(
   const {
     actionState,
     actions,
-    activeRouteResumeWorkspace,
     canImportResume,
-    confirmLeaveDirtyResumeWorkspace,
     importResumeGuardMessage,
     resumeOperationStarts,
     isAnyPendingAction,
     isPendingAction,
-    isCurrentResumeAssistantRequest,
-    isCurrentResumeWorkspaceJob,
     latestWorkspaceRef,
     getLocationPathname,
     navigate,
@@ -153,9 +120,6 @@ export function buildJobFinderPageContext(
     profileSetupState,
     saveCoordinator,
     saveState,
-    refreshResumeWorkspace,
-    adoptAutosavedResumeDraft,
-    resumeAssistantRequestTokenRef,
     selectedApplicationAttempt,
     selectedApplicationRecord,
     selectedDiscoveryJob,
@@ -168,11 +132,6 @@ export function buildJobFinderPageContext(
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
     setProfileSurfaceDirty,
-    setResumeAssistantMessages,
-    setResumeAssistantPending,
-    setResumeWorkspace,
-    clearResumeWorkspaceState,
-    setResumeWorkspaceDirty,
     onSettingsDraftEdited,
     onProfileSurfaceDraftEdited,
     onCancelImportResume,
@@ -191,20 +150,13 @@ export function buildJobFinderPageContext(
 
   const primaryActions = createPrimaryPageActions({
     actions,
-    activeRouteResumeWorkspace,
     canImportResume,
-    confirmLeaveDirtyResumeWorkspace,
     importResumeGuardMessage,
-    isCurrentResumeAssistantRequest,
-    isCurrentResumeWorkspaceJob,
     getLocationPathname,
     navigate,
     profileSetupState,
     profileCopilotRequestTokenRef,
     requestApplyCopilotVisualCheckpoints,
-    refreshResumeWorkspace,
-    adoptAutosavedResumeDraft,
-    resumeAssistantRequestTokenRef,
     runAction,
     runSaveAction,
     saveCoordinator,
@@ -214,11 +166,6 @@ export function buildJobFinderPageContext(
     setOptimisticProfileCopilotMessages,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
-    setResumeAssistantMessages,
-    setResumeAssistantPending,
-    setResumeWorkspace,
-    clearResumeWorkspaceState,
-    setResumeWorkspaceDirty,
     setSelectedReviewJobId,
     sourceDebugRunIdRef,
     latestWorkspaceRef,
@@ -483,35 +430,23 @@ export function buildJobFinderPageContext(
       ),
     onResetBrowser: () =>
       runAction(actions.resetBrowser, () => undefined, null),
-    onResetWorkspace: () => {
-      // Stay resolves false: take no action and keep every draft. Leave
-      // resolves true after the controller discarded only the named draft
-      // state, so the reset — and its success navigation — runs exactly once.
-      return confirmLeaveDirtyResumeWorkspace("reset the workspace").then(
-        (mayLeave) => {
-          if (!mayLeave) {
-            return;
-          }
-
-          return runAction(
-            actions.resetWorkspace,
-            (snapshot) => {
-              saveCoordinator.clearReceipt();
-              navigate(
-                snapshot.profileSetupState.status === "not_started"
-                  ? "/job-finder/profile/setup"
-                  : "/job-finder/profile",
-              );
-            },
-            "Workspace reset. Your profile, resume, jobs, and browser session were cleared on this device.",
-            {
-              scope: jobFinderPendingActions.workspaceReset(),
-              rethrowError: true,
-            },
+    onResetWorkspace: () =>
+      runAction(
+        actions.resetWorkspace,
+        (snapshot) => {
+          saveCoordinator.clearReceipt();
+          navigate(
+            snapshot.profileSetupState.status === "not_started"
+              ? "/job-finder/profile/setup"
+              : "/job-finder/profile",
           );
         },
-      );
-    },
+        "Workspace reset. Your profile, resume, jobs, and browser session were cleared on this device.",
+        {
+          scope: jobFinderPendingActions.workspaceReset(),
+          rethrowError: true,
+        },
+      ),
     onSelectApplicationRecord: setSelectedApplicationRecordId,
     onSelectDiscoveryJob: setSelectedDiscoveryJobId,
     onSelectReviewItem: setSelectedReviewJobId,

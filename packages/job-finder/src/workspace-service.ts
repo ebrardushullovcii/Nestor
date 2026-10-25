@@ -68,7 +68,6 @@ import {
   extractJobsFromPageText,
   saveJobsFromPage,
 } from "./internal/workspace-assistant-page-jobs";
-import { runResumeRevisionSpecialist } from "./internal/workspace-assistant-resume-specialist";
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
 import { recordCampaignDiscoveryResult } from "./internal/workspace-campaign-methods";
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
@@ -1376,7 +1375,6 @@ export function createJobFinderWorkspaceService(
     });
     await repository.saveActivityControl(control);
     await onActivityControlChanged?.(control);
-    applicationMethods.resumeOnShortlistPauseChanged(control.paused);
     // Home's Pause new work lets the current application reach a safe
     // boundary. The queue waits between jobs and Resume continues that same
     // run. Browser takeover and shutdown still abort immediately.
@@ -1770,10 +1768,6 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("restoring hidden jobs", () =>
         applicationMethods.restoreDismissedDiscoveryJobs!(jobIds, options),
       ),
-    getResumeWorkspace: (jobId) =>
-      trackWorkspaceOperation("resume workspace", () =>
-        applicationMethods.getResumeWorkspace(jobId),
-      ),
     queueJobForReview: (jobId) =>
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobForReview(jobId),
@@ -1782,8 +1776,6 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobsForReview!(jobIds),
       ),
-    continueResumesOnShortlist: () =>
-      applicationMethods.continueResumesOnShortlist(),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
     judgeUnjudgedJobs: () => {
@@ -1831,31 +1823,6 @@ export function createJobFinderWorkspaceService(
       });
       return unjudgedJobsJudging;
     },
-    generateResume: (jobId, options) =>
-      trackWorkspaceOperation("resume generation", () =>
-        applicationMethods.generateResume(jobId, options),
-      ),
-    regenerateResumeDraft: (jobId, options) =>
-      trackWorkspaceOperation("resume generation", () =>
-        applicationMethods.regenerateResumeDraft(jobId, options),
-      ),
-    regenerateResumeSection: (jobId, sectionId) =>
-      trackWorkspaceOperation("resume generation", () =>
-        applicationMethods.regenerateResumeSection(jobId, sectionId),
-      ),
-    sendResumeAssistantMessage: (jobId, content) =>
-      trackWorkspaceOperation("resume proposal", () =>
-        applicationMethods.sendResumeAssistantMessage(jobId, content),
-      ),
-    resolveResumeAssistantProposal: (jobId, proposalId, action, patchIds) =>
-      trackWorkspaceOperation("resume proposal", () =>
-        applicationMethods.resolveResumeAssistantProposal(
-          jobId,
-          proposalId,
-          action,
-          patchIds,
-        ),
-      ),
     startApplyCopilotRun: (jobId, options, applicationRecordId) =>
       trackWorkspaceOperation("application preparation", async () => {
         return withApplicationPreparationReservation(
@@ -1987,10 +1954,6 @@ export function createJobFinderWorkspaceService(
       ),
     undoAssistantSettingsChange:
       assistantEditMethods.undoAssistantSettingsChange,
-    applyAssistantResumePatches:
-      assistantEditMethods.applyAssistantResumePatches,
-    applyAssistantResumeRevision:
-      assistantEditMethods.applyAssistantResumeRevision,
     undoAssistantResumeChange: assistantEditMethods.undoAssistantResumeChange,
     addJobFromBrowserPage: (input) =>
       trackWorkspaceOperation("discovery", () =>
@@ -2000,10 +1963,6 @@ export function createJobFinderWorkspaceService(
     saveJobsFromPage: (input) =>
       trackWorkspaceOperation("discovery", () =>
         saveJobsFromPage(context, input),
-      ),
-    runResumeRevisionSpecialist: (input) =>
-      trackWorkspaceOperation("resume edit", () =>
-        runResumeRevisionSpecialist(context, input),
       ),
   };
 }

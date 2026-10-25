@@ -93,29 +93,6 @@ async function waitForPrimaryNavigation(window) {
   ]);
 }
 
-async function loadDemoDataForScreen(window, screen) {
-  if (!window || !screen) {
-    return;
-  }
-
-  if (
-    screen.fileName === "settings.png" ||
-    screen.fileName === "discovery.png" ||
-    screen.fileName === "review-queue.png"
-  ) {
-    await window.evaluate(async () => {
-      if (!window.nestor?.jobFinder?.test) {
-        throw new Error("Desktop test API is unavailable in the renderer.");
-      }
-
-      await window.nestor.jobFinder.test.loadResumeWorkspaceDemo();
-    });
-    await window.reload();
-    await window.waitForLoadState("domcontentloaded");
-    await waitForPrimaryNavigation(window);
-    await window.setViewportSize({ width, height });
-  }
-}
 
 async function captureScreens() {
   await mkdir(outputDir, { recursive: true });
@@ -167,7 +144,6 @@ async function captureScreens() {
     }
 
     for (const screen of screens) {
-      await loadDemoDataForScreen(window, screen);
       await clickNavigationControl(window, screen.buttonName);
       if (screen.heading === "Your profile") {
         await waitForProfileOrSetupHeading(window);

@@ -42,7 +42,6 @@ vi.mock("../job-finder/import-resume", () => ({
 vi.mock("../job-finder/paths", () => ({
   getJobFinderUserDataDirectory: () => path.resolve(".tmp"),
 }));
-vi.mock("../job-finder/start-apply-batch", () => ({}));
 vi.mock("../job-finder/test-api", () => ({
   isDesktopTestApiEnabled: () => false,
 }));

@@ -1,10 +1,8 @@
 import {
   TRACKER_EXPORT_CHANNEL,
   TRACKER_RUN_CHANNEL,
-  TRACKER_STATUS_LABEL,
   TrackerExportInputSchema,
   type TrackerCommandName,
-  type TrackerRow,
 } from "@nestor/contracts";
 import { createTrackerStore } from "@nestor/db/job-store";
 import {
@@ -23,6 +21,7 @@ import {
 } from "../services/tracker-commands";
 import { getRegisteredMainWindow } from "../setup/finished-work-notifier-instance";
 import { chooseSavePath } from "./resume-export-path";
+import { trackerCsv } from "./tracker-csv";
 
 let runner: RunTrackerCommand | null = null;
 
@@ -40,23 +39,6 @@ export function runTrackerCommand<K extends TrackerCommandName>(
 function fromMainFrame(event: IpcMainInvokeEvent): boolean {
   return event.senderFrame === event.sender.mainFrame;
 }
-
-function csvCell(value: string | null): string {
-  const text = value ?? "";
-  return /[",\n\r]/u.test(text) ? `"${text.replace(/"/gu, '""')}"` : text;
-}
-
-const CSV_COLUMNS: readonly [string, (row: TrackerRow) => string | null][] = [
-  ["Company", (row) => row.company],
-  ["Job", (row) => row.title],
-  ["Location", (row) => row.location],
-  ["Status", (row) => TRACKER_STATUS_LABEL[row.status]],
-  ["Status since", (row) => row.statusAt.slice(0, 10)],
-  ["Applied", (row) => row.appliedAt?.slice(0, 10) ?? null],
-  ["Next", (row) => row.nextTitle],
-  ["Next on", (row) => row.nextAt?.slice(0, 16).replace("T", " ") ?? null],
-  ["Tags", (row) => row.tags.join("; ")],
-];
 
 export function registerTrackerRoutes(ipcMain: IpcMain): void {
   ipcMain.handle(TRACKER_RUN_CHANNEL, (event, request: unknown) => {
@@ -86,9 +68,7 @@ export async function exportTrackerCsv(
     { name: "CSV", extension: "csv", title: "Export applications" },
   );
   if (!target) return { outputPath: null, rows: 0 };
-  const lines = [CSV_COLUMNS.map(([header]) => header).join(",")];
-  for (const row of createTrackerStore(getJobStore()).each(filter))
-    lines.push(CSV_COLUMNS.map(([, read]) => csvCell(read(row))).join(","));
-  await writeFile(target, `${lines.join("\r\n")}\r\n`, "utf8");
-  return { outputPath: target, rows: lines.length - 1 };
+  const rows = [...createTrackerStore(getJobStore()).each(filter)];
+  await writeFile(target, trackerCsv(rows), "utf8");
+  return { outputPath: target, rows: rows.length };
 }

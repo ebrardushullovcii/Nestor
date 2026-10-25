@@ -1,8 +1,9 @@
 import {
-  NEEDS_YOU_COMMANDS,
-  TRACKER_COMMANDS,
   APPLICATION_COMMANDS,
   JOB_COMMANDS,
+  NEEDS_YOU_COMMANDS,
+  RESUME_COMMANDS,
+  TRACKER_COMMANDS,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -75,6 +76,7 @@ describe("assistant action inventory", () => {
       ...Object.keys(TRACKER_COMMANDS),
       ...Object.keys(APPLICATION_COMMANDS),
       ...Object.keys(JOB_COMMANDS),
+      ...Object.keys(RESUME_COMMANDS),
     ]);
     const missing = ACTION_INVENTORY.flatMap((entry) =>
       entry.coverage.kind === "tools"

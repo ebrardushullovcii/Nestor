@@ -777,11 +777,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       : {}),
   });
   repositoryByWorkspaceService.set(workspaceService, jobFinderRepository);
-  // Resumes a shortlist asked for carry on after a restart (ADR 0076), once
-  // the window has had its first reads.
-  setTimeout(() => {
-    void workspaceService.continueResumesOnShortlist?.().catch(() => undefined);
-  }, 5_000).unref?.();
   pageAccessByWorkspaceService.set(
     workspaceService,
     createApplicationPageAccess(jobFinderRepository, browserRuntime),

@@ -35,12 +35,6 @@ import {
   type ApplicationPageReopenProgress,
 } from "@nestor/contracts";
 import {
-  ResumeBatchGenerationResultSchema,
-  ResumeBatchGenerationProgressSchema,
-  type ResumeBatchGenerationInput,
-  type ResumeBatchGenerationProgress,
-} from "@nestor/contracts";
-import {
   contextBridge,
   ipcRenderer as nativeIpcRenderer,
   webUtils,
@@ -115,28 +109,19 @@ import type {
   UpdateInterviewOverlayPreferenceInput,
   JobFinderApplicationPacketExportResult,
   JobFinderDiagnosticExportResult,
-  JobFinderApplyCopilotActionInput,
-  JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderRemoveFromApplyQueueInput,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderApproveResumesInput,
-  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
   JobFinderOpenBrowserSessionInput,
-  JobFinderSetResumeClaimConfirmationInput,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProposeApplicationDocumentInput,
   JobFinderPerformanceSnapshot,
-  JobFinderResumePreview,
-  ResumeQualityBenchmarkReport,
-  ResumeQualityBenchmarkRequest,
   SaveApplicationAnswerCommandInput,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkCase,
@@ -144,25 +129,16 @@ import type {
   ResumeImportFieldCandidate,
   ResumeImportProgressEvent,
   ResumeImportRun,
-  ResumeApplicationMode,
-  TailoringMode,
-  JobFinderResumePdfExportReply,
   RevealSavedFileResult,
-  ResumePdfExportIntent,
   RevokeApplicationAuthorityEnvelopeInput,
   ResolveSubmissionOutcomeInput,
   ResumeTimelineRepairAction,
   ResumeDocumentBundle,
-  JobFinderResumeWorkspace,
   JobFinderRepositoryState,
   JobFinderTestSaveSurface,
   JobFinderSettings,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
-  ResumeAssistantMessage,
-  ResumeDraft,
-  TailoredAsset,
-  ResumeDraftPatch,
   SourceDebugProgressEvent,
   SourceDebugRunRecord,
   SourceDebugRunDetails,
@@ -187,8 +163,6 @@ import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
 import {
   ApplicationAuthorityEnvelopeMutationResultSchema,
   ApplicationAuthorityReadinessSchema,
-  JobFinderTailoredAssetQuerySchema,
-  JobFinderTailoredAssetDetailSchema,
   ApproveCurrentApplicationAnswersInputSchema,
   ApproveCurrentApplicationAnswersResultSchema,
   CreateApplicationAuthorityEnvelopeInputSchema,
@@ -642,13 +616,6 @@ const desktopApi = {
         ipcRenderer.removeListener("job-finder:applications-changed", handler);
     },
     queries: createWorkspaceQueryBridge(),
-    getTailoredAsset: (assetId: string): Promise<TailoredAsset | null> =>
-      ipcRenderer
-        .invoke(
-          "job-finder:get-tailored-asset",
-          JobFinderTailoredAssetQuerySchema.parse({ assetId }),
-        )
-        .then((result) => JobFinderTailoredAssetDetailSchema.parse(result)),
     getJobDetail: (jobId: string, planId: string | null) =>
       ipcRenderer.invoke("job-finder:get-job-detail", {
         jobId,
@@ -1192,61 +1159,10 @@ const desktopApi = {
       ipcRenderer.invoke("job-finder:queue-job-for-review", {
         jobId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    setJobResumeApplicationMode: (
-      jobId: string,
-      resumeApplicationMode: ResumeApplicationMode,
-      resumeTailoringMode?: TailoringMode | null,
-    ) =>
-      ipcRenderer.invoke("job-finder:set-job-resume-application-mode", {
-        jobId,
-        resumeApplicationMode,
-        ...(resumeTailoringMode === undefined ? {} : { resumeTailoringMode }),
-      }) as Promise<JobFinderWorkspaceSyncResult>,
     removeJobFromReview: (jobId: string) =>
       ipcRenderer.invoke("job-finder:remove-job-from-review", {
         jobId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    getResumeWorkspace: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:get-resume-workspace", {
-        jobId,
-      }) as Promise<JobFinderResumeWorkspace>,
-    previewResumeDraft: (draft: ResumeDraft, requestId?: string) =>
-      ipcRenderer.invoke("job-finder:preview-resume-draft", {
-        draft,
-        requestId,
-      }) as Promise<JobFinderResumePreview>,
-    saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
-      ipcRenderer.invoke("job-finder:save-resume-draft", {
-        draft,
-        autosaveSessionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    restoreResumeDraftRevision: (jobId: string, revisionId: string) =>
-      ipcRenderer.invoke("job-finder:restore-resume-draft-revision", {
-        jobId,
-        revisionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    undoResumeAssistantEdit: (jobId: string, revisionId: string) =>
-      ipcRenderer.invoke("job-finder:undo-resume-assistant-edit", {
-        jobId,
-        revisionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    regenerateResumeDraft: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:regenerate-resume-draft", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    regenerateResumeSection: (jobId: string, sectionId: string) =>
-      ipcRenderer.invoke("job-finder:regenerate-resume-section", {
-        jobId,
-        sectionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    exportResumePdf: (
-      jobId: string,
-      intent: ResumePdfExportIntent = "download",
-    ) =>
-      ipcRenderer.invoke("job-finder:export-resume-pdf", {
-        intent,
-        jobId,
-      }) as Promise<JobFinderResumePdfExportReply>,
     // Shows a file the app wrote in the OS file manager. It never opens or
     // runs the file, and the renderer keeps no filesystem access of its own.
     revealSavedFile: (path: string) =>
@@ -1257,62 +1173,6 @@ const desktopApi = {
       ipcRenderer.invoke("job-finder:write-clipboard-text", {
         text,
       }) as Promise<WriteClipboardTextResult>,
-    approveResume: (jobId: string, exportId: string) =>
-      ipcRenderer.invoke("job-finder:approve-resume", {
-        jobId,
-        exportId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    clearResumeApproval: (
-      jobId: string,
-      restoreStatus?: "draft" | "needs_review",
-    ) =>
-      ipcRenderer.invoke("job-finder:clear-resume-approval", {
-        jobId,
-        ...(restoreStatus ? { restoreStatus } : {}),
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    setWorkHistoryReviewAcknowledgment: (
-      input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:set-work-history-review-acknowledgment",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    setResumeClaimConfirmation: (
-      input: JobFinderSetResumeClaimConfirmationInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:set-resume-claim-confirmation",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    applyResumePatch: (
-      patch: ResumeDraftPatch,
-      revisionReason?: string | null,
-    ) =>
-      ipcRenderer.invoke("job-finder:apply-resume-patch", {
-        patch,
-        revisionReason: revisionReason ?? null,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    getResumeAssistantMessages: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:get-resume-assistant-messages", {
-        jobId,
-      }) as Promise<readonly ResumeAssistantMessage[]>,
-    sendResumeAssistantMessage: (jobId: string, content: string) =>
-      ipcRenderer.invoke("job-finder:send-resume-assistant-message", {
-        jobId,
-        content,
-      }) as Promise<readonly ResumeAssistantMessage[]>,
-    resolveResumeAssistantProposal: (
-      jobId: string,
-      proposalId: string,
-      action: "accept" | "reject",
-      patchIds: readonly string[],
-    ) =>
-      ipcRenderer.invoke("job-finder:resolve-resume-assistant-proposal", {
-        jobId,
-        proposalId,
-        action,
-        patchIds,
-      }) as Promise<readonly ResumeAssistantMessage[]>,
     getApplicationPageStates: async (resultIds: string[]) =>
       ApplicationPageStatesSchema.parse(
         await ipcRenderer.invoke(
@@ -1344,29 +1204,6 @@ const desktopApi = {
         ipcRenderer.off(channel, handler);
       }
     },
-    generateResumeForBatch: async (input: ResumeBatchGenerationInput) =>
-      ResumeBatchGenerationResultSchema.parse(
-        await ipcRenderer.invoke("job-finder:generate-resume-for-batch", input),
-      ),
-    onResumeBatchProgress: (
-      listener: (progress: ResumeBatchGenerationProgress) => void,
-    ) => {
-      const handle = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-        const parsed = ResumeBatchGenerationProgressSchema.safeParse(payload);
-        if (parsed.success) listener(parsed.data);
-      };
-      ipcRenderer.on("job-finder:resume-batch-progress", handle);
-      return () => ipcRenderer.off("job-finder:resume-batch-progress", handle);
-    },
-    generateResume: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:generate-resume", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    startApplyCopilotRun: (input: JobFinderApplyCopilotActionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:start-apply-copilot-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     startAutoApplyRun: (input: JobFinderApplicationStartTarget) =>
       ipcRenderer.invoke(
         "job-finder:start-auto-apply-run",
@@ -1380,16 +1217,6 @@ const desktopApi = {
         jobIds,
         ...(applicationAutomationMode ? { applicationAutomationMode } : {}),
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
-      ipcRenderer.invoke(
-        "job-finder:start-apply-queue",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    approveResumes: (input: JobFinderApproveResumesInput) =>
-      ipcRenderer.invoke(
-        "job-finder:approve-resumes",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
       ipcRenderer.invoke(
         "job-finder:control-apply-queue",
@@ -1419,11 +1246,6 @@ const desktopApi = {
     cancelApplyRun: (input: JobFinderApplyRunActionInput) =>
       ipcRenderer.invoke(
         "job-finder:cancel-apply-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    resolveApplyConsentRequest: (input: JobFinderApplyConsentActionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:resolve-apply-consent-request",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
     revokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
@@ -1496,15 +1318,6 @@ const desktopApi = {
                 applySystemThemeOverride(theme);
                 return { ok: true as const };
               }),
-            setResumePreviewMode: (mode: "ok" | "fail_once") =>
-              ipcRenderer.invoke(
-                "job-finder:test-set-resume-preview-mode",
-                mode,
-              ) as Promise<{ ok: true }>,
-            loadResumeWorkspaceDemo: () =>
-              ipcRenderer.invoke(
-                "job-finder:test-load-resume-workspace-demo",
-              ) as Promise<JobFinderRendererWorkspaceSnapshot>,
             loadApplyQueueDemo: () =>
               ipcRenderer.invoke(
                 "job-finder:test-load-apply-queue-demo",
@@ -1562,13 +1375,6 @@ const desktopApi = {
                 resumeImportDocumentBundles: readonly ResumeDocumentBundle[];
                 resumeImportFieldCandidates: readonly ResumeImportFieldCandidate[];
               }>,
-            runResumeQualityBenchmark: (
-              input?: Partial<ResumeQualityBenchmarkRequest>,
-            ) =>
-              ipcRenderer.invoke(
-                "job-finder:test-run-resume-quality-benchmark",
-                input ?? {},
-              ) as Promise<ResumeQualityBenchmarkReport>,
             importResumeFromPath: (
               sourcePath: string | { sourcePath: string; useVision?: boolean },
             ) =>

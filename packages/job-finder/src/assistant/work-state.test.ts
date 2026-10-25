@@ -1,12 +1,10 @@
 import {
-  AssistantContextReferenceSchema,
   ResumeImportRunSchema,
 } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import type { AssistantHostPorts } from "./ports";
-import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
-import { readRunStatus } from "./run-watch";
+import { ASSISTANT_SYSTEM_PROMPT } from "./prompt";
 import type { AssistantTurnSession } from "./tool-kit";
 import {
   getWorkspaceSummaryTool,
@@ -71,34 +69,6 @@ it("reports a UI import even before the new import has a stored run and only off
   );
 });
 
-it("shows current approval and saved level, instead of an earlier approval claim", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
-  const workspace = await workspaceService.getResumeWorkspace(
-    snapshot.reviewQueue[0]!.jobId,
-  );
-  snapshot.resumeDrafts = [
-    { ...workspace.draft, status: "draft", approvedExportId: null },
-  ];
-  snapshot.reviewQueue[0]!.resumeTailoringMode = "aggressive";
-  const block = buildContextBlock({
-    context: AssistantContextReferenceSchema.parse({
-      screen: "resume_studio",
-      focus: { kind: "job", id: workspace.job.id },
-      capturedAt: snapshot.generatedAt,
-    }),
-    resultSets: [],
-    snapshot,
-    plan: null,
-    grants: [],
-    pendingQuestions: [],
-    now: snapshot.generatedAt,
-  });
-  expect(block).toContain('"level":"aggressive"');
-  expect(block).toContain('"approved":false');
-  expect(block).toContain(workspace.draft.updatedAt);
-});
-
 it("reports file reading in read_profile before a new import run exists", async () => {
   const { workspaceService } = createWorkspaceServiceHarness();
   const result = await readProfileTool.execute(
@@ -111,42 +81,6 @@ it("reports file reading in read_profile before a new import run exists", async 
   );
   expect(result.data).toMatchObject({
     resumeImport: { active: true, actions: ["wait", "open_profile"] },
-  });
-});
-
-it("reports the current revision after resume writing and keeps an old approval separate from Original", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
-  const workspace = await workspaceService.getResumeWorkspace(
-    snapshot.reviewQueue[0]!.jobId,
-  );
-  const item = snapshot.reviewQueue.find(
-    (entry) => entry.jobId === workspace.job.id,
-  )!;
-  snapshot.resumeDrafts = [
-    { ...workspace.draft, status: "draft", approvedExportId: null },
-  ];
-  snapshot.tailoredAssets = [];
-  item.resumeApplicationMode = "tailored_per_job";
-  item.resumeTailoringMode = "aggressive";
-  const run = {
-    kind: "resume_generation" as const,
-    id: "finished_batch",
-    jobIds: [workspace.job.id],
-  };
-  expect(readRunStatus(snapshot, run).details).toMatchObject({
-    resumes: [
-      {
-        level: "aggressive",
-        revision: workspace.draft.updatedAt,
-        approved: false,
-      },
-    ],
-  });
-  snapshot.resumeDrafts[0]!.status = "approved";
-  item.resumeApplicationMode = "original_resume";
-  expect(readRunStatus(snapshot, run).details).toMatchObject({
-    resumes: [{ mode: "original_resume", level: "original", approved: false }],
   });
 });
 

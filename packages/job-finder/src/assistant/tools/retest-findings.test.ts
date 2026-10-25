@@ -9,7 +9,6 @@ import {
 } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { listDocumentsTool } from "./profile-tools";
-import { setResumeTemplateTool } from "./resume-tools";
 
 const session = {
   assertCurrent: () => undefined,
@@ -18,35 +17,6 @@ const session = {
   watchRun: () => Promise.resolve(),
   grants: { list: () => Promise.resolve([]) },
 } as unknown as AssistantTurnSession;
-
-describe("a template change on an approved resume (R3)", () => {
-  it("says in the same result that approval was cleared", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    await workspaceService.generateResume("job_ready");
-    const exported = await workspaceService.exportResumePdf("job_ready");
-    const artifact = exported.resumeExportArtifacts.find(
-      (entry) => entry.jobId === "job_ready",
-    )!;
-    await workspaceService.approveResume("job_ready", artifact.id);
-    const before = await workspaceService.getResumeWorkspace("job_ready");
-    expect(before.draft.status).toBe("approved");
-    const other =
-      before.draft.templateId === "modern_split"
-        ? "classic_ats"
-        : "modern_split";
-
-    const outcome = await setResumeTemplateTool.execute(
-      { jobId: "job_ready", templateId: other },
-      {
-        service: workspaceService,
-        session,
-        ports: { publishWorkspaceUpdate: () => undefined } as never,
-      },
-    );
-    expect(outcome.summary).toContain("cleared the resume's approval");
-    expect(outcome.data).toMatchObject({ approvalCleared: true });
-  });
-});
 
 describe("what the model is told (R1, R4, R5)", () => {
   it("knows attached files are used for applications", async () => {

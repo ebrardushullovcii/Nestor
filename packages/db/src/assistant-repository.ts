@@ -70,7 +70,7 @@ export interface AssistantRepository {
     clientMessageId: string,
   ): Promise<AssistantMessage | null>;
   findMigratedMessage(
-    source: "profile_copilot" | "resume_assistant",
+    source: "profile_copilot",
     legacyId: string,
   ): Promise<AssistantMessage | null>;
   upsertMessage(message: AssistantMessage): Promise<void>;

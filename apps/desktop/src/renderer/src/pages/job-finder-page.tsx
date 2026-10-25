@@ -1132,11 +1132,9 @@ export function JobFinderPage() {
     dismissSavedStatus,
     navigateFromShell,
     platform,
-    resolveResumeWorkspaceLeaveRequest,
     resolveUnsavedChangesLeave,
     resolveUnsavedChangesStay,
     retryLastSave,
-    resumeWorkspaceLeaveConfirmation,
     saveState,
     resolveApplyCopilotVisualCheckpointRequest,
     unsavedChangesConfirmation,
@@ -1183,11 +1181,6 @@ export function JobFinderPage() {
       applicationRecordId: assignedResult.applicationRecordId,
     });
   }, []);
-  const onPrepareRemainingJobs = useCallback(
-    (jobIds: readonly string[]) =>
-      latestShellState.current.context?.onStartAutoApplyQueue([...jobIds]),
-    [],
-  );
   const onUndoRecentChange = useCallback(
     (change: RecentChange) =>
       latestShellState.current.context?.onUndoRecentChange(change) ??
@@ -1284,7 +1277,6 @@ export function JobFinderPage() {
             onCancelApplyRun={onCancelApplyRun}
             onDismissSavedStatus={dismissSavedStatus}
             onNavigate={navigateFromShell}
-            onPrepareRemainingJobs={onPrepareRemainingJobs}
             onUndoRecentChange={onUndoRecentChange}
             onRetrySave={retryLastSave}
             platform={platform}
@@ -1307,14 +1299,6 @@ export function JobFinderPage() {
         confirmation={unsavedChangesConfirmation}
         onLeaveWithoutSaving={resolveUnsavedChangesLeave}
         onStay={resolveUnsavedChangesStay}
-      />
-      {/* Same branded dialog, second parked decision: actions that leave
-          dirty Resume Studio work ask it through the controller's async
-          request instead of a native window.confirm. */}
-      <JobFinderUnsavedChangesDialog
-        confirmation={resumeWorkspaceLeaveConfirmation}
-        onLeaveWithoutSaving={() => resolveResumeWorkspaceLeaveRequest(true)}
-        onStay={() => resolveResumeWorkspaceLeaveRequest(false)}
       />
       {/* The window-close responder is mounted once by
           withJobFinderWindowCloseGuard above this tree so it also answers on

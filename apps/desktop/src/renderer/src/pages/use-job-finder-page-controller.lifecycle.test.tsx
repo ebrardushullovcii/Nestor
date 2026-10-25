@@ -14,7 +14,6 @@ import {
   it,
   vi,
 } from "vitest";
-import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
 import { useJobFinderPageController } from "./use-job-finder-page-controller";
 
 function createReviewQueueItem(jobId: string) {
@@ -114,7 +113,6 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
       currentRevision: number;
       snapshot: JobFinderRendererWorkspaceSnapshot;
     }>;
-    startApplyCopilotRun?: JobFinderShellActions["startApplyCopilotRun"];
   }) {
     const workspace = createBatchWorkspace();
     const mutateWorkspaceEntities = vi.fn(
@@ -130,15 +128,9 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "darwin" as const })),
-        assistant: {
-          syncResumeBatch: (state: unknown) => Promise.resolve(state),
-          onResumeBatchStop: () => () => undefined,
-        },
         jobFinder: {
           getWorkspaceBootstrap: vi.fn(() => Promise.resolve(workspace)),
           mutateWorkspaceEntities,
-          startApplyCopilotRun:
-            options.startApplyCopilotRun ?? (() => Promise.resolve(workspace)),
           setActivityControl: vi.fn(() => Promise.resolve(workspace)),
         },
       } as unknown as Window["nestor"],
@@ -203,33 +195,5 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     expect(screen.getAllByText("Activity resumed.")).toHaveLength(1);
   });
 
-  it("carries an action's completion status to the route it navigates to", async () => {
-    const startApplyCopilotRun = vi
-      .fn<JobFinderShellActions["startApplyCopilotRun"]>()
-      .mockResolvedValue(createBatchWorkspace());
-    const harness = mountStatusHarness({
-      initialEntry: "/job-finder/review-queue",
-      startApplyCopilotRun,
-    });
-    await waitForReady(harness);
-
-    act(() => {
-      harness.current?.context?.onApproveApply("job_review_approve");
-    });
-    await waitFor(() => {
-      expect(harness.router.state.location.pathname).toBe(
-        "/job-finder/applications",
-      );
-    });
-    // The finished action is reported once, as a toast, on the screen it
-    // led to; no route status is left above the Applications list.
-    expect(
-      await screen.findByText(
-        "Applications updated. Check the latest attempt and next step there.",
-      ),
-    ).toBeTruthy();
-    expect(harness.current?.context?.actionState.message ?? "").not.toContain(
-      "Applications updated",
-    );
   });
 });

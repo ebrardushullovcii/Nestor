@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   AssistantMessagePartSchema,
   AssistantProposalSchema,
-  AssistantResumeBatchStateSchema,
 } from "./assistant";
 
 describe("assistant change preview", () => {
@@ -56,35 +55,4 @@ it("keeps exact proposal wording beyond two thousand characters in storage and t
     source: { store: "assistant" },
   });
   expect(part.type === "proposal" && part.items[0]!.detail).toBe(detail);
-});
-
-it("validates UI resume queue state at the typed bridge", () => {
-  expect(() =>
-    AssistantResumeBatchStateSchema.parse({
-      id: "queue",
-      jobIds: ["job_1"],
-      activeJobIds: ["job_1", "job_2", "job_3"],
-      completedJobIds: [],
-      done: false,
-      stopRequested: false,
-    }),
-  ).toThrow();
-});
-
-it("keeps a 33-job resume queue within bounded pipeline admission", () => {
-  const state = {
-    id: "batch",
-    jobIds: Array.from({ length: 33 }, (_, i) => `job_${i}`),
-    activeJobIds: ["job_0", "job_1"],
-    completedJobIds: [],
-    done: false,
-    stopRequested: false,
-  };
-  expect(AssistantResumeBatchStateSchema.parse(state).jobIds).toHaveLength(33);
-  expect(
-    AssistantResumeBatchStateSchema.safeParse({
-      ...state,
-      activeJobIds: ["job_0", "job_1", "job_2"],
-    }).success,
-  ).toBe(true);
 });

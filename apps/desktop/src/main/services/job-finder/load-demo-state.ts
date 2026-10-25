@@ -4,7 +4,6 @@ import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import {
   createApplyQueueDemoState,
   createAgentOwnedBrowserDriveState,
-  createResumeWorkspaceDemoState,
   createWorkHistoryReviewDriveState,
 } from "../../adapters/job-finder-demo-state";
 import {
@@ -36,18 +35,6 @@ export async function ensureDemoResumeFiles(
       writeDemoFile(filePath, JOB_FINDER_DEMO_EXPORT_RESUME_CONTENT),
     ),
   ]);
-}
-
-export async function loadResumeWorkspaceDemoState() {
-  const state = createResumeWorkspaceDemoState();
-  await ensureDemoResumeFiles(
-    state.profile.baseResume.storagePath,
-    state.resumeExportArtifacts.map((artifact) => artifact.filePath),
-  );
-  const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-  const snapshot = await jobFinderWorkspaceService.resetWorkspace(state);
-
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
 }
 
 export async function loadApplyQueueDemoState() {

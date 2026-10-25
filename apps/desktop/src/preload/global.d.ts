@@ -21,9 +21,6 @@ import type {
   ApplicationPageState,
   ApplicationPageReopenProgress,
   ReopenApplicationPageInput,
-  ResumeBatchGenerationInput,
-  ResumeBatchGenerationResult,
-  ResumeBatchGenerationProgress,
 } from "@nestor/contracts";
 import type {
   DesktopAssistantBridge,
@@ -97,13 +94,10 @@ import type {
   JobChange,
   JobFinderApplicationPacketExportResult,
   JobFinderApplicationStartTarget,
-  JobFinderApplyConsentActionInput,
-  JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
-  JobFinderApproveResumesInput,
   JobFinderDiagnosticExportResult,
   JobFinderInterviewFollowUpInput,
   JobFinderJobDetail,
@@ -113,14 +107,8 @@ import type {
   JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderRepositoryState,
-  JobFinderResumePdfExportReply,
-  JobFinderResumePreview,
-  JobFinderResumeWorkspace,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  JobFinderStartApplyQueueInput,
   JobFinderStartupDatabaseRecoveryFact,
   JobFinderStartupResetRecoveryFact,
   JobFinderTestSaveSurface,
@@ -140,23 +128,13 @@ import type {
   ReopenApplicationPageInput,
   ResolveSubmissionOutcomeInput,
   ResolveSubmissionOutcomeResult,
-  ResumeApplicationMode,
-  ResumeAssistantMessage,
-  ResumeBatchGenerationInput,
-  ResumeBatchGenerationProgress,
-  ResumeBatchGenerationResult,
   ResumeDocumentBundle,
-  ResumeDraft,
-  ResumeDraftPatch,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkRequest,
   ResumeImportFieldCandidate,
   ResumeImportProgressEvent,
   ResumeImportRun,
-  ResumePdfExportIntent,
-  ResumeQualityBenchmarkReport,
-  ResumeQualityBenchmarkRequest,
   ResumeTimelineRepairAction,
   RevealSavedFileResult,
   RevokeApplicationAuthorityEnvelopeInput,
@@ -170,8 +148,6 @@ import type {
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-  TailoredAsset,
-  TailoringMode,
   UpdateAiBehaviorInput,
   UpdateApplicationAuthorityEnvelopeInput,
   UpdateApplicationDefaultsInput,
@@ -347,7 +323,6 @@ declare global {
           input: CandidateAssetRestoreInput,
         ) => Promise<CandidateAssetRestoreResult>;
         getWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-        getTailoredAsset: (assetId: string) => Promise<TailoredAsset | null>;
         getJobDetail: (
           jobId: string,
           planId: string | null,
@@ -510,77 +485,11 @@ declare global {
         queueJobForReview: (
           jobId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
-        setJobResumeApplicationMode: (
-          jobId: string,
-          resumeApplicationMode: ResumeApplicationMode,
-          resumeTailoringMode?: TailoringMode | null,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         removeJobFromReview: (
           jobId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
-        getResumeWorkspace: (
-          jobId: string,
-        ) => Promise<JobFinderResumeWorkspace>;
-        previewResumeDraft: (
-          draft: ResumeDraft,
-          requestId?: string,
-        ) => Promise<JobFinderResumePreview>;
-        saveResumeDraft: (
-          draft: ResumeDraft,
-          autosaveSessionId?: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        restoreResumeDraftRevision: (
-          jobId: string,
-          revisionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        undoResumeAssistantEdit: (
-          jobId: string,
-          revisionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        regenerateResumeDraft: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        regenerateResumeSection: (
-          jobId: string,
-          sectionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        exportResumePdf: (
-          jobId: string,
-          intent?: ResumePdfExportIntent,
-        ) => Promise<JobFinderResumePdfExportReply>;
         revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
         writeClipboardText: (text: string) => Promise<WriteClipboardTextResult>;
-        approveResume: (
-          jobId: string,
-          exportId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        clearResumeApproval: (
-          jobId: string,
-          restoreStatus?: "draft" | "needs_review",
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        setWorkHistoryReviewAcknowledgment: (
-          input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        setResumeClaimConfirmation: (
-          input: JobFinderSetResumeClaimConfirmationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        applyResumePatch: (
-          patch: ResumeDraftPatch,
-          revisionReason?: string | null,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        getResumeAssistantMessages: (
-          jobId: string,
-        ) => Promise<readonly ResumeAssistantMessage[]>;
-        sendResumeAssistantMessage: (
-          jobId: string,
-          content: string,
-        ) => Promise<readonly ResumeAssistantMessage[]>;
-        resolveResumeAssistantProposal: (
-          jobId: string,
-          proposalId: string,
-          action: "accept" | "reject",
-          patchIds: readonly string[],
-        ) => Promise<readonly ResumeAssistantMessage[]>;
         getApplicationPageStates: (
           resultIds: string[],
         ) => Promise<ApplicationPageState[]>;
@@ -588,30 +497,12 @@ declare global {
           input: ReopenApplicationPageInput,
           onProgress?: (progress: ApplicationPageReopenProgress) => void,
         ) => Promise<ApplicationPageState>;
-        generateResumeForBatch: (
-          input: ResumeBatchGenerationInput,
-        ) => Promise<ResumeBatchGenerationResult>;
-        onResumeBatchProgress: (
-          listener: (progress: ResumeBatchGenerationProgress) => void,
-        ) => () => void;
-        generateResume: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        startApplyCopilotRun: (
-          input: JobFinderApplyCopilotActionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         startAutoApplyRun: (
           input: JobFinderApplicationStartTarget,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         startAutoApplyQueueRun: (
           jobIds: JobFinderApplyQueueActionInput["jobIds"],
           applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        startApplyQueue: (
-          input: JobFinderStartApplyQueueInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        approveResumes: (
-          input: JobFinderApproveResumesInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         controlApplyQueue: (
           input: JobFinderApplyQueueControlInput,
@@ -630,9 +521,6 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         cancelApplyRun: (
           input: JobFinderApplyRunActionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        resolveApplyConsentRequest: (
-          input: JobFinderApplyConsentActionInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         revokeApplyRunApproval: (
           input: JobFinderApplyRunActionInput,
@@ -670,10 +558,6 @@ declare global {
           setSystemThemeOverride: (
             theme: "dark" | "light" | null,
           ) => Promise<{ ok: true }>;
-          setResumePreviewMode: (
-            mode: "ok" | "fail_once",
-          ) => Promise<{ ok: true }>;
-          loadResumeWorkspaceDemo: () => Promise<JobFinderRendererWorkspaceSnapshot>;
           loadApplyQueueDemo: () => Promise<JobFinderRendererWorkspaceSnapshot>;
           loadWorkHistoryReviewDemo: () => Promise<JobFinderRendererWorkspaceSnapshot>;
           loadAgentOwnedBrowserDemo: (input: {
@@ -710,9 +594,6 @@ declare global {
             resumeImportDocumentBundles: readonly ResumeDocumentBundle[];
             resumeImportFieldCandidates: readonly ResumeImportFieldCandidate[];
           }>;
-          runResumeQualityBenchmark: (
-            input?: Partial<ResumeQualityBenchmarkRequest>,
-          ) => Promise<ResumeQualityBenchmarkReport>;
           importResumeFromPath: (
             sourcePath: string | { sourcePath: string; useVision?: boolean },
           ) => Promise<JobFinderRendererWorkspaceSnapshot>;

@@ -33,12 +33,6 @@ const JOB_FINDER_TEST_SAVE_SURFACE_CHANNELS = {
     "job-finder:update-ai-behavior",
     "job-finder:update-appearance-theme",
   ],
-  resume: [
-    "job-finder:save-resume-draft",
-    "job-finder:restore-resume-draft-revision",
-    "job-finder:undo-resume-assistant-edit",
-    "job-finder:apply-resume-patch",
-  ],
 } as const satisfies Record<JobFinderTestSaveSurface, readonly string[]>;
 
 export type JobFinderSaveChannel =

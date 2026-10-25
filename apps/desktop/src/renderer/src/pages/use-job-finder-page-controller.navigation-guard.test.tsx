@@ -29,12 +29,8 @@ import {
   it,
   vi,
 } from "vitest";
-import type { JobFinderSaveState } from "./job-finder-save-state";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
-import {
-  composeLeaveConfirmation,
-  useJobFinderPageController,
-} from "./use-job-finder-page-controller";
+import { useJobFinderPageController } from "./use-job-finder-page-controller";
 
 // The data router constructs a real fetch Request for every navigation.
 // jsdom's AbortSignal fails Node's brand check inside the Request constructor,
@@ -250,62 +246,6 @@ async function leaveWithoutSaving() {
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, "nestor");
-});
-
-describe("composeLeaveConfirmation", () => {
-  const idleSaveState: JobFinderSaveState = { state: "idle", version: 0 };
-
-  it("returns null when nothing needs protecting", () => {
-    expect(
-      composeLeaveConfirmation({
-        profileSurfaceDirty: false,
-        resumeWorkspaceDirty: false,
-        saveState: idleSaveState,
-      }),
-    ).toBeNull();
-  });
-
-  it("composes one confirmation naming every unsaved scope together", () => {
-    const confirmation = composeLeaveConfirmation({
-      profileSurfaceDirty: true,
-      resumeWorkspaceDirty: true,
-      saveState: {
-        state: "saving",
-        version: 1,
-        attempt: 1,
-        surface: "profile",
-        label: "Profile",
-        message: "Saving profile…",
-        canRetry: false,
-      },
-    });
-
-    expect(confirmation?.title).toContain("Leave this page?");
-    expect(confirmation?.description).toContain(
-      "Your unsaved changes will be lost.",
-    );
-    expect(confirmation?.reasons).toContain("Unsaved resume edits");
-    expect(confirmation?.reasons).toContain("Unsaved profile or setup changes");
-    expect(confirmation?.reasons).toContain("Profile is still saving");
-  });
-
-  it("names a failed save so the user can decide to retry first", () => {
-    const confirmation = composeLeaveConfirmation({
-      profileSurfaceDirty: false,
-      resumeWorkspaceDirty: false,
-      saveState: {
-        state: "failed",
-        version: 2,
-        attempt: 1,
-        surface: "resume",
-        label: "Resume",
-        message: "Saving resume…",
-        canRetry: true,
-      },
-    });
-
-    expect(confirmation?.reasons[0]).toContain("The last save failed");
-  });
 });
 
 describe("useJobFinderPageController failed-save acknowledgement", () => {

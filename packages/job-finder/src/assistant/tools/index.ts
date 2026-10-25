@@ -11,12 +11,10 @@ import { browserTools } from "./browser-tools";
 import { jobsTools } from "./jobs-tools";
 import { fileTools, profileTools } from "./profile-tools";
 import { registeredActionTools } from "./registered-action-tools";
-import { resumeTools } from "./resume-tools";
 import { settingsTools } from "./settings-tools";
 import { workspaceTools } from "./workspace-tools";
 
 export { undoReceipt } from "./profile-tools";
-export { cancelBackgroundBatch, readBackgroundBatch } from "./resume-tools";
 
 /**
  * The tool catalog (plan §6). Every group is present in a fixed order so the
@@ -31,7 +29,7 @@ export const ASSISTANT_TOOL_GROUPS: Record<
   workspace: workspaceTools,
   profile: profileTools,
   files: fileTools,
-  resume: resumeTools,
+  resume: [],
   jobs: jobsTools,
   applications: applicationTools,
   tracking: [],

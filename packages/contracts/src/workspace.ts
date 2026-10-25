@@ -396,7 +396,6 @@ export const jobFinderTestSaveSurfaceValues = [
   "profile",
   "answers",
   "settings",
-  "resume",
 ] as const;
 export const JobFinderTestSaveSurfaceSchema = z.enum(
   jobFinderTestSaveSurfaceValues,
@@ -1588,14 +1587,6 @@ export const JobFinderWorkspaceEntityMutationSchema = z.discriminatedUnion(
       .object({
         type: z.literal("queue_jobs_for_review"),
         jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
-      })
-      .strict(),
-    z
-      .object({
-        type: z.literal("set_job_resume_application_mode"),
-        jobId: NonEmptyStringSchema,
-        resumeApplicationMode: ResumeApplicationModeSchema,
-        resumeTailoringMode: TailoringModeSchema.nullable().optional(),
       })
       .strict(),
     z

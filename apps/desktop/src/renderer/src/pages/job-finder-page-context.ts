@@ -8,8 +8,6 @@ import type {
   ClearApplicationAnswerCommandInput,
   CandidateProfile,
   EditableSourceInstructionArtifact,
-  JobFinderApplyConsentActionInput,
-  JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
@@ -36,7 +34,6 @@ import type {
 import type { PendingActionScope } from "./job-finder-pending-actions";
 import type {
   ActionState,
-  JobFinderAutoApplyQueueStartOutcome,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { JobFinderSaveState } from "./job-finder-save-state";
 import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
@@ -71,21 +68,11 @@ export interface JobFinderPageContext {
   onAnalyzeProfileFromResume: () => void;
   onApplyGroupedManualAnswer: (input: ApplyGroupedManualAnswerInput) => void;
   onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
-  onApproveApply: (jobId: string) => void;
   onCancelApplyRun: (input: JobFinderApplyRunActionInput) => Promise<boolean>;
   onRevokeApplyRunApproval: (input: JobFinderApplyRunActionInput) => void;
-  onResolveApplyConsentRequest: (
-    input: JobFinderApplyConsentActionInput,
-  ) => void;
   onStartAutoApply: (input: JobFinderApplicationStartTarget) => void;
-  onStartAutoApplyQueue: (
-    jobIds: JobFinderApplyQueueActionInput["jobIds"],
-    applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-    options?: { stayOnCurrentPage?: boolean },
-  ) => Promise<JobFinderAutoApplyQueueStartOutcome>;
   /** Pause, Continue, Stop or Dismiss the Apply queue (ADR 0058). */
   onControlApplyQueue: (action: ApplyQueueControlAction) => void;
-  onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => void;
   /** Sends one finished application after the person presses Send. */
   onSubmitPreparedApplication: (jobId: string) => Promise<void>;
   /**

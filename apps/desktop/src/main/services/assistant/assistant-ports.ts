@@ -10,7 +10,6 @@ import {
   type AssistantHostPorts,
   type JobFinderWorkspaceService,
 } from "@nestor/job-finder";
-import { BrowserWindow } from "electron";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -30,7 +29,6 @@ import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { assistantAppCommands } from "./app-commands";
-import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
 
 /**
  * The assistant's host ports, implemented with the exact functions the IPC
@@ -233,21 +231,6 @@ export function createAssistantHostPorts(input: {
       if (input.browserHost === "embedded") {
         await getEmbeddedBrowser().command({ type: "minimize" });
       }
-    },
-    readResumeBatch: readUiResumeBatch,
-    stopResumeBatch: () => {
-      const batch = stopUiResumeBatch();
-      if (batch) {
-        for (const window of BrowserWindow.getAllWindows()) {
-          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-            window.webContents.send(
-              "job-finder:assistant:resume-batch-stop",
-              batch.id,
-            );
-          }
-        }
-      }
-      return batch;
     },
     resolveApprovedJobs: (selection) =>
       Promise.resolve(getApplicationStore().selectedJobIds(selection)),

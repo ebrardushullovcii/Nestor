@@ -100,9 +100,6 @@ interface JobFinderShellProps {
   onCancelApplyRun?: (runId: string) => Promise<boolean>;
   onDismissSavedStatus?: () => void;
   onNavigate?: (path: string) => void;
-  onPrepareRemainingJobs?: (
-    jobIds: readonly string[],
-  ) => void | Promise<unknown>;
   onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
   platform: "darwin" | "linux" | "win32";
@@ -477,7 +474,6 @@ export function JobFinderShell({
   onCancelApplyRun,
   onDismissSavedStatus,
   onNavigate,
-  onPrepareRemainingJobs,
   onUndoRecentChange,
   onRetrySave,
   platform,
@@ -1731,7 +1727,6 @@ export function JobFinderShell({
                   void navigate(path);
                 }
               }}
-              onPrepareRemainingJobs={onPrepareRemainingJobs}
               onUndoRecentChange={onUndoRecentChange}
               resumeImportProgress={resumeImportProgress}
               workspace={workspace}
