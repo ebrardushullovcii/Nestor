@@ -41,7 +41,7 @@ export function ListDetailLayout(props: {
       data-application-list-state={props.applicationState ? JSON.stringify(props.applicationState) : undefined}
       data-job-list-state={props.state ? JSON.stringify(props.state) : undefined}
       className={cn(
-        "grid min-h-0 flex-1 gap-4 xl:grid-rows-[minmax(0,1fr)]",
+        "grid min-h-0 flex-1 gap-4 xl:h-full xl:grid-rows-[minmax(0,1fr)]",
         props.table ? TABLE_DETAIL_COLUMNS_CLASS : LIST_DETAIL_COLUMNS_CLASS,
       )}
     >

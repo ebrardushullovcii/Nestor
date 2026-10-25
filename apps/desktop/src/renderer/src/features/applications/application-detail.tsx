@@ -28,6 +28,7 @@ import {
   OPEN_STATUSES,
   WORK_HINT,
 } from "./tracker-format";
+import { ApplicationWork } from "./application-work";
 import { describeError, useApplication } from "./use-application";
 
 type AddKind = "reply" | "interview" | "reminder" | "note";
@@ -217,7 +218,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
 
       {row.status === "applying" ? (
         <div className="grid gap-1">
-          <StatusBadge className="self-start" tone={status.tone}>
+          <StatusBadge className="justify-self-start" tone={status.tone}>
             {status.label}
           </StatusBadge>
           <p className="text-sm text-foreground-soft">
@@ -266,6 +267,8 @@ export function ApplicationDetail(props: { jobId: number | null }) {
           )}
         </div>
       )}
+
+      <ApplicationWork jobId={job.id} />
 
       {row.nextAt ? (
         <p className="rounded-(--radius-field) border border-(--surface-panel-border) px-3 py-2 text-sm">
