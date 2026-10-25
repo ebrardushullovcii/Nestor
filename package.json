@@ -31,9 +31,7 @@
     "test:smoke": "vitest run --dir packages/contracts/src",
     "test:correctness": "vitest run --maxWorkers=4 --minWorkers=4 --exclude packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts --exclude packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts",
     "test:performance": "vitest run packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts --maxWorkers=1 --minWorkers=1",
-    "test:coverage": "vitest run --coverage --maxWorkers=4 --minWorkers=4 --exclude packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts --exclude packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts",
-    "test:evidence": "node scripts/collect-release-evidence.mjs",
-    "verify": "node scripts/check-source-generic-discovery.mjs && node scripts/check-structure.mjs && node scripts/run-turbo.mjs lint && node scripts/run-turbo.mjs typecheck && pnpm test"
+    "test:coverage": "vitest run --coverage --maxWorkers=4 --minWorkers=4 --exclude packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts --exclude packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
@@ -17,8 +16,6 @@ type WrapperName = keyof typeof WRAPPERS;
 
 const OPT_IN_ENV = "JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC";
 const AUTHORIZE_ENV = "JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES";
-const MANIFEST_ENV = "JOB_FINDER_ACCEPTANCE_MANIFEST";
-const RUN_DIR_ENV = "JOB_FINDER_ACCEPTANCE_RUN_DIR";
 
 const POLICY_START = "const authorizedWriteDiagnostic";
 const POLICY_END =
@@ -38,7 +35,7 @@ async function readWrapper(name: WrapperName): Promise<string> {
 }
 
 // The smoke auto-runs on import unless this variable is set; validation
-// tooling uses the exported binding helpers without launching Electron.
+// tooling uses the exported safety helpers without launching Electron.
 async function loadSmokeModule() {
   process.env.JOB_FINDER_PREPARE_ONLY_SKIP_SMOKE_RUN = "1";
   try {
@@ -83,14 +80,11 @@ describe.each(Object.keys(WRAPPERS) as WrapperName[])(
       const { env, stdout } = applyPolicy(source, {
         [AUTHORIZE_ENV]: "1",
         JOB_FINDER_PREPARE_ONLY_LABEL: "custom-label",
-        [MANIFEST_ENV]: "/tmp/run/build-manifest.json",
-        [RUN_DIR_ENV]: "/tmp/run",
       });
 
       expect(env[AUTHORIZE_ENV]).toBe("0");
       expect(env.JOB_FINDER_PREPARE_ONLY_LABEL).toBe("custom-label");
-      expect(env[MANIFEST_ENV]).toBe("/tmp/run/build-manifest.json");
-      expect(env[RUN_DIR_ENV]).toBe("/tmp/run");
+
       expect(stdout).toContain(LIMITATION_PHRASE);
     });
 
@@ -100,13 +94,11 @@ describe.each(Object.keys(WRAPPERS) as WrapperName[])(
 
       const { env } = applyPolicy(source, {
         [OPT_IN_ENV]: "1",
-        [MANIFEST_ENV]: "/tmp/run/build-manifest.json",
-        [RUN_DIR_ENV]: "/tmp/run",
       });
       expect(env[AUTHORIZE_ENV]).toBe("1");
     });
 
-    it("labels authorized-write diagnostics as diagnostic_only and strips release-acceptance binding", async () => {
+    it("labels authorized-write diagnostics as diagnostic_only", async () => {
       const source = await readWrapper(name);
       const defaultLabel = source.match(
         /\?\?\s*"(complete-flow-current-[a-z]+)"/u,
@@ -115,14 +107,10 @@ describe.each(Object.keys(WRAPPERS) as WrapperName[])(
 
       const { env } = applyPolicy(source, {
         [OPT_IN_ENV]: "1",
-        [MANIFEST_ENV]: "/tmp/run/build-manifest.json",
-        [RUN_DIR_ENV]: "/tmp/run",
       });
       expect(env.JOB_FINDER_PREPARE_ONLY_LABEL).toBe(
         `${defaultLabel}-diagnostic-only`,
       );
-      expect(env[MANIFEST_ENV]).toBeUndefined();
-      expect(env[RUN_DIR_ENV]).toBeUndefined();
     });
 
     it("never double-suffixes an already diagnostic_only label", async () => {
@@ -188,19 +176,6 @@ describe("ATS wrapper strictness expectations", () => {
 });
 
 describe("prepare-only smoke strict outcome contract", () => {
-  it("binds exact-build evidence to the manifest's captured live-worktree inventory", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain(
-      'const BOUND_SOURCE_SUBJECT = "manifest.source.capturedWorktree";',
-    );
-    expect(source).toContain(
-      '"stable-json-lines:path-kind-mode-bytes-sha256-or-link-target"',
-    );
-    // Snapshot inventories (beforeBuild/afterBuild) must never be bound again.
-    expect(source).not.toContain("source.afterBuild");
-    expect(source).not.toContain("source.beforeBuild");
-  });
-
   it("accepts exactly two safe outcomes for require-final-checkpoint runs", async () => {
     const source = await readSmokeSource();
     expect(source).toContain(
@@ -252,53 +227,7 @@ describe("prepare-only smoke strict outcome contract", () => {
   });
 });
 
-describe("prepare-only smoke sealed accepted-app launch contract", () => {
-  it("requires the externally custodied seal variable for bound runs", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain("JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256");
-    expect(source).toContain("acceptance_seal_required");
-    expect(source).toContain("verifySealedAcceptanceBootstrap");
-    expect(source).toContain("sealedReport.pass !== true");
-  });
-
-  it("derives the launch entirely from the sealed report and seal", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain('kind: "sealed_accepted_app"');
-    expect(source).toContain("launchOrigin: launchPlan.kind");
-    expect(source).toContain("await loadSealedAcceptanceRun(");
-    expect(source).toContain("assertSealedManifestIdentity({");
-    expect(source).toContain("planSealedAcceptedAppLaunch({");
-    expect(source).toContain("await verifySealedAcceptedAppReady(");
-    expect(source).toContain("await verifySealedRunIntegrityAfterRun(");
-    // The launcher must consume the plan's executable/args/cwd verbatim.
-    expect(source).toContain("executablePath: sealedLaunchPlan.executablePath");
-    expect(source).toContain("args: sealedLaunchPlan.args");
-    expect(source).toContain("cwd: sealedLaunchPlan.cwd");
-    expect(source).toMatch(/launch args must be exactly \['\.'\]/u);
-  });
-
-  it("keeps worktree build artifacts out of the bound launch authority", async () => {
-    const source = await readSmokeSource();
-    // The stale-out trap: no worktree artifact fingerprint may gate or
-    // describe the launched runtime in any mode.
-    expect(source).not.toContain("artifactFingerprint");
-    // Unbound strict/diagnostic runs still launch the worktree output.
-    expect(source).toContain("cwd: desktopDir");
-    expect(source).toContain("releaseEvidence: false");
-  });
-
-  it("forces intermediate writes off in bound sealed mode", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain("requestedWriteAuthorization =");
-    expect(source).toContain("!boundSealedMode &&");
-    expect(source).toContain(
-      "intermediateWritesAuthorized: requestedWriteAuthorization",
-    );
-    expect(source).toContain(
-      "intermediateAtsWritesAuthorized: launchAuthorities[0] === true",
-    );
-  });
-
+describe("prepare-only smoke launch safety", () => {
   it("sanitizes the child environment through one pure builder", async () => {
     const source = await readSmokeSource();
     expect(source).toContain("export function buildChildLaunchEnv(");
@@ -321,57 +250,26 @@ describe("prepare-only smoke sealed accepted-app launch contract", () => {
       /launchAuthorities = \[[^\]]*\]\.map\(\s*childEnvAuthorizesIntermediateWrites,/u,
     );
     // Both launches consume prebuilt sanitized environments.
-    expect(source).toContain("launchApp(initialLaunchEnv, sealedLaunchPlan)");
-    expect(source).toContain("launchApp(relaunchEnv, sealedLaunchPlan)");
+    expect(source).toContain("launchApp(initialLaunchEnv)");
+    expect(source).toContain("launchApp(relaunchEnv)");
   });
 
-  it("treats acceptance variables as all-or-nothing intent", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain('"acceptance_env_partial"');
-    expect(source).toContain("all-or-nothing");
-    expect(source).toMatch(
-      /acceptanceInputError\) \{\s*throw acceptanceInputError;/u,
-    );
-  });
-
-  it("persists strict-gate refusals and orders evidence after the gate", async () => {
+  it("persists strict-gate refusals", async () => {
     const source = await readSmokeSource();
     expect(source).toContain("acceptanceViolations: []");
     expect(source).toContain("report.strictGate = {");
     expect(source).toContain("collectStrictAcceptanceViolations({");
-    expect(source).toContain("decideReleaseEvidence({");
     expect(source).toContain('outcome = "failed_strict_gate";');
-    // The safety/cleanup gate must run before the binding stamp finalization.
-    const gateIndex = source.indexOf("collectStrictAcceptanceViolations({");
-    const finalizeCallIndex = source.indexOf(
-      "await finalizeAcceptanceBinding();",
-      gateIndex,
-    );
-    expect(gateIndex).toBeGreaterThan(-1);
-    expect(finalizeCallIndex).toBeGreaterThan(gateIndex);
   });
 
   it("reserves passed_ for classified outcomes only", async () => {
     const source = await readSmokeSource();
     expect(source).toContain('"stopped_unclassified_without_submit"');
-    expect(source).toContain("requiresNonzeroExitForStop(report)");
     expect(source).not.toContain('? "passed_safe_blocker_without_submit"');
-  });
-
-  it("defends the seal/report pair before launch and mid-relaunch", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain("no well-formed initialManifestSha256");
-    expect(source).toContain("differs between seal (");
-    expect(source).toContain("verify_sealed_runtime_before_relaunch");
-    expect(source).toContain("verifySealedElectronIdentity(sealedRun.seal)");
   });
 
   it("keeps absolute local paths out of portable report fields", async () => {
     const source = await readSmokeSource();
-    // Stamp carries run-relative subjects, not absolute paths.
-    expect(source).toContain("runId: path.basename(context.runDir)");
-    expect(source).toContain('manifestSubject: "build-manifest.json"');
-    expect(source).toMatch(/portable evidence/u);
     // Retained profile path is redacted to a basename.
     expect(source).toContain("path.basename(userDataDirectory)");
     // Resume evidence uses the id/name/digest summary without storagePath.
@@ -380,98 +278,9 @@ describe("prepare-only smoke sealed accepted-app launch contract", () => {
     );
     expect(source).not.toContain("baseResume.storagePath");
   });
-
-  it("records the sealed identities in the acceptance stamp", async () => {
-    const source = await readSmokeSource();
-    expect(source).toContain("acceptedAppDigest:");
-    expect(source).toContain("acceptedAppFileCount:");
-    expect(source).toContain("sealSha256: expectedSealSha256");
-    expect(source).toContain("electronSha256:");
-    expect(source).toContain("electronPackageVersion:");
-    expect(source).toContain("acceptedAppUnchangedAfterRun:");
-    expect(source).toContain("electronIdentityUnchangedAfterRun:");
-  });
-
-  it("pins that only :built wrapper commands are suitable post-seal", async () => {
-    const source = await readSmokeSource();
-    expect(countOccurrences(source, ":built")).toBeGreaterThanOrEqual(2);
-    expect(source).toContain("non-`:built` variants run `pnpm build` first");
-    // Prettier wraps the comment, so allow line breaks inside the phrase.
-    expect(source).toMatch(
-      /docs and CI\s*\/\/\s*citations must use only the `:built` commands/u,
-    );
-  });
 });
 
-const BINDING_VAR_SET = {
-  JOB_FINDER_ACCEPTANCE_RUN_DIR: "/tmp/run",
-  JOB_FINDER_ACCEPTANCE_MANIFEST: "/tmp/run/build-manifest.json",
-  JOB_FINDER_ACCEPTANCE_MANIFEST_SHA256: "a".repeat(64),
-  JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256: "b".repeat(64),
-} as const;
-
-describe.each(Object.keys(WRAPPERS) as WrapperName[])(
-  "%s binding-variable hygiene",
-  (name) => {
-    it("diagnostic mode deletes every binding variable", async () => {
-      const source = await readWrapper(name);
-      const { env } = applyPolicy(source, {
-        [OPT_IN_ENV]: "1",
-        JOB_FINDER_PREPARE_ONLY_LABEL: "nightly",
-        ...BINDING_VAR_SET,
-      });
-      for (const varName of Object.keys(BINDING_VAR_SET)) {
-        expect(env[varName]).toBeUndefined();
-      }
-      expect(env[AUTHORIZE_ENV]).toBe("1");
-      expect(env.JOB_FINDER_PREPARE_ONLY_LABEL).toBe("nightly-diagnostic-only");
-    });
-
-    it("strict mode passes every binding variable through untouched", async () => {
-      const source = await readWrapper(name);
-      const { env } = applyPolicy(source, { ...BINDING_VAR_SET });
-      for (const [varName, value] of Object.entries(BINDING_VAR_SET)) {
-        expect(env[varName]).toBe(value);
-      }
-      expect(env[AUTHORIZE_ENV]).toBe("0");
-      expect(env.JOB_FINDER_PREPARE_ONLY_LABEL).toMatch(
-        /complete-flow-current-(greenhouse|ashby|workday)/u,
-      );
-    });
-
-    it("diagnostic mode deletes partial binding sets too", async () => {
-      const source = await readWrapper(name);
-      const { env } = applyPolicy(source, {
-        [OPT_IN_ENV]: "1",
-        JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256:
-          BINDING_VAR_SET.JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256,
-      });
-      expect(env.JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256).toBeUndefined();
-      expect(env[AUTHORIZE_ENV]).toBe("1");
-    });
-  },
-);
-
-describe("binding-variable handoff to the prepare-only smoke", () => {
-  it("initializes every lexical binding before capturing ambient acceptance intent", async () => {
-    const source = await readSmokeSource();
-    const captureIndex = source.indexOf(
-      "acceptanceInput = resolveAcceptanceInput(process.env);",
-    );
-
-    expect(captureIndex).toBeGreaterThan(-1);
-    for (const dependency of [
-      "class AcceptanceBindingError",
-      "const ACCEPTANCE_INTENT_ENV_VARS",
-      "const SHA256_DIGEST_PATTERN",
-      "export function resolveAcceptanceInput",
-    ]) {
-      const dependencyIndex = source.indexOf(dependency);
-      expect(dependencyIndex, dependency).toBeGreaterThan(-1);
-      expect(dependencyIndex, dependency).toBeLessThan(captureIndex);
-    }
-  });
-
+describe("typed preload calls in the prepare-only smoke", () => {
   it("unwraps the typed discovery result before reading workspace state", async () => {
     const source = await readSmokeSource();
     const runIndex = source.indexOf(
@@ -501,69 +310,9 @@ describe("binding-variable handoff to the prepare-only smoke", () => {
       "window.nestor.jobFinder.startApplyCopilotRun(jobId,",
     );
   });
-
-  it("executes the wrappers' contract against the real acceptance-env rules", async () => {
-    const smoke = await loadSmokeModule();
-
-    // A complete ambient set keeps the run bound.
-    const resolved = smoke.resolveAcceptanceInput({ ...BINDING_VAR_SET });
-    expect(resolved).not.toBeNull();
-    expect(resolved?.manifestSha256).toBe(
-      BINDING_VAR_SET.JOB_FINDER_ACCEPTANCE_MANIFEST_SHA256,
-    );
-    expect(resolved?.expectedSealSha256).toBe(
-      BINDING_VAR_SET.JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256,
-    );
-
-    // The partial set strict wrappers pass through is refused fail-closed.
-    let thrown: unknown = null;
-    try {
-      smoke.resolveAcceptanceInput({
-        JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256:
-          BINDING_VAR_SET.JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256,
-        JOB_FINDER_ACCEPTANCE_RUN_DIR:
-          BINDING_VAR_SET.JOB_FINDER_ACCEPTANCE_RUN_DIR,
-      });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toMatch(/all-or-nothing/u);
-
-    // The diagnostic-cleaned environment is unbound cleanly.
-    expect(smoke.resolveAcceptanceInput({})).toBeNull();
-  });
 });
 
-describe("ATS wrappers validate local binding before the live fetch", () => {
-  it.each(Object.keys(WRAPPERS) as WrapperName[])(
-    "%s loads the no-launch preflight module before the board fetch",
-    async (name) => {
-      const source = await readWrapper(name);
-      const skipSetIndex = source.indexOf(
-        'process.env.JOB_FINDER_PREPARE_ONLY_SKIP_SMOKE_RUN = "1";',
-      );
-      const preflightImportIndex = source.indexOf(
-        "test-job-finder-prepare-only.mjs?preflight",
-      );
-      const skipDeleteIndex = source.indexOf(
-        "delete process.env.JOB_FINDER_PREPARE_ONLY_SKIP_SMOKE_RUN;",
-      );
-      const gateCallIndex = source.indexOf(
-        "await smokePreflight.preflightBoundAtsRun(process.env);",
-      );
-      const fetchIndex = source.indexOf("await fetch(");
-      expect(skipSetIndex).toBeGreaterThan(-1);
-      expect(preflightImportIndex).toBeGreaterThan(skipSetIndex);
-      expect(skipDeleteIndex).toBeGreaterThan(preflightImportIndex);
-      // The local custody gate must execute before the live board fetch.
-      expect(gateCallIndex).toBeGreaterThan(-1);
-      expect(gateCallIndex).toBeGreaterThan(preflightImportIndex);
-      expect(gateCallIndex).toBeLessThan(fetchIndex);
-      expect(fetchIndex).toBeGreaterThan(-1);
-    },
-  );
-
+describe("ATS wrappers validate board inputs before the live fetch", () => {
   it.each(Object.keys(WRAPPERS) as WrapperName[])(
     "%s keeps the extracted policy block pure env/stdout code",
     async (name) => {
@@ -604,79 +353,6 @@ describe("ATS wrappers validate local binding before the live fetch", () => {
 });
 
 describe("ATS flow preflight runtime guards", () => {
-  async function withFetchGuard(run: () => Promise<unknown>) {
-    let fetchCalls = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = () => {
-      fetchCalls += 1;
-      return Promise.reject(new Error("live fetch must not be reached"));
-    };
-    try {
-      await run();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-    return fetchCalls;
-  }
-
-  it("rejects an invalid acceptance/custody binding locally without any fetch", async () => {
-    const smoke = await loadSmokeModule();
-    const missingRunDir = path.join(
-      os.tmpdir(),
-      `ats-flow-preflight-missing-${Date.now()}`,
-    );
-    const fetchCalls = await withFetchGuard(async () => {
-      await expect(
-        smoke.preflightBoundAtsRun({
-          JOB_FINDER_ACCEPTANCE_RUN_DIR: missingRunDir,
-          JOB_FINDER_ACCEPTANCE_MANIFEST: path.join(
-            missingRunDir,
-            "build-manifest.json",
-          ),
-          JOB_FINDER_ACCEPTANCE_MANIFEST_SHA256: "a".repeat(64),
-          JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256: "b".repeat(64),
-        }),
-      ).rejects.toThrow();
-    });
-    expect(fetchCalls).toBe(0);
-  });
-
-  it("fails closed without fetch on a partial or malformed binding env", async () => {
-    const smoke = await loadSmokeModule();
-    const fetchCalls = await withFetchGuard(async () => {
-      await expect(
-        smoke.preflightBoundAtsRun({
-          JOB_FINDER_ACCEPTANCE_RUN_DIR: "/tmp/run",
-          JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256: "b".repeat(64),
-        }),
-      ).rejects.toThrow(/all-or-nothing/u);
-      await expect(
-        smoke.preflightBoundAtsRun({
-          JOB_FINDER_ACCEPTANCE_RUN_DIR: "/tmp/run",
-          JOB_FINDER_ACCEPTANCE_MANIFEST: "/tmp/run/build-manifest.json",
-          JOB_FINDER_ACCEPTANCE_MANIFEST_SHA256: "not-a-digest",
-          JOB_FINDER_ACCEPTANCE_EXPECTED_SEAL_SHA256: "b".repeat(64),
-        }),
-      ).rejects.toThrow(/well-formed/u);
-    });
-    expect(fetchCalls).toBe(0);
-  });
-
-  it("keeps unbound and diagnostic-authorized runs preflight-free", async () => {
-    const smoke = await loadSmokeModule();
-    const fetchCalls = await withFetchGuard(async () => {
-      await expect(
-        smoke.preflightBoundAtsRun({
-          JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC: "1",
-          ...BINDING_VAR_SET,
-        }),
-      ).resolves.toBeNull();
-      // An unbound strict run resolves to null without touching the binding.
-      await expect(smoke.preflightBoundAtsRun({})).resolves.toBeNull();
-    });
-    expect(fetchCalls).toBe(0);
-  });
-
   it("rejects unsafe Workday host/tenant/site/locale values locally", async () => {
     const smoke = await loadSmokeModule();
     const unsafeEnv: Record<string, string>[] = [

@@ -1,6 +1,5 @@
 // Shared, shell-free pnpm entry resolution for repository launchers
-// (run-turbo.mjs, validate-package.mjs) and the release evidence collector
-// (collect-release-evidence.mjs).
+// (run-turbo.mjs, validate-package.mjs).
 //
 // Corepack stopped shipping beside Node.js in Node >= 25, and Unix layouts
 // differ between bundled prefixes, Homebrew Cellar paths, and version

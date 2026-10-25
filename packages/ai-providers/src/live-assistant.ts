@@ -1210,10 +1210,8 @@ export function createDeterministicInterviewCueCardProvider(
 // Desktop test API runs must never reach live Live Assistant providers
 // through ambient credentials. Live AI during a test-API run requires this
 // explicit, narrowly named opt-in; production runs with the test API absent
-// keep configured behavior unchanged. Capture and acceptance harnesses pin the
-// same literal, so keep the three copies in sync
-// (apps/desktop/scripts/capture-live-assistant.mjs and
-// apps/desktop/scripts/release-acceptance-harness.mjs).
+// keep configured behavior unchanged. The capture harness pins the same literal
+// (apps/desktop/scripts/capture-live-assistant.mjs).
 export const DESKTOP_TEST_API_ENV = "NESTOR_ENABLE_TEST_API";
 export const LIVE_ASSISTANT_TEST_LIVE_AI_OPT_IN_ENV =
   "NESTOR_INTERVIEW_TEST_USE_LIVE_AI";

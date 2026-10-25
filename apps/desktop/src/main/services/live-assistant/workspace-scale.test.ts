@@ -132,7 +132,6 @@ test("100 capture updates touch only the active body with 3,000 retained session
     const canonicalParse = vi.spyOn(InterviewWorkspaceSnapshotSchema, "parse");
     const sessionParse = vi.spyOn(InterviewLiveSessionSchema, "parse");
     let latest = active;
-    const began = performance.now();
     for (let index = 0; index < 100; index += 1) {
       latest = await service.addTranscriptSegment({
         sessionId: activeId,
@@ -142,7 +141,6 @@ test("100 capture updates touch only the active body with 3,000 retained session
       });
       expect(latest.recentSessions).toBe(archiveIndex);
     }
-    const elapsedMs = performance.now() - began;
     expect(latest.activeSession?.transcriptSegments).toHaveLength(100);
     expect(canonicalLoad).not.toHaveBeenCalled();
     expect(canonicalSave).not.toHaveBeenCalled();
@@ -175,7 +173,6 @@ test("100 capture updates touch only the active body with 3,000 retained session
     console.info("Live Assistant synthetic archive scale", {
       archivedSessions: 3000,
       activeSegments: 100,
-      elapsedMs: Math.round(elapsedMs),
       archiveBodyWrites: 0,
       activeBodyWrites: writes[0]?.writes,
       totalActiveBytesWritten: writes[0]?.bytes,
