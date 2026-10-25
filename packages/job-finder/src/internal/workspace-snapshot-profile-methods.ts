@@ -1394,7 +1394,7 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   async function recoverInterruptedSourceDebugOnLoad(
-    discoveryState: JobFinderDiscoveryState,
+    discoveryState: Pick<JobFinderDiscoveryState, "activeSourceDebugRun">,
   ): Promise<void> {
     if (ctx.activeSourceDebugExecutionIdRef.current) return;
     const activeSourceDebugRun = discoveryState.activeSourceDebugRun;

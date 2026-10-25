@@ -12,7 +12,7 @@ import {
 vi.mock("./workspace-service", () => ({
   getJobFinderWorkspaceService: vi.fn(),
 }));
-vi.mock("./workspace-updates", async () => {
+vi.mock("./workspace-updates", () => {
   const publishJobFinderWorkspaceUpdate = vi.fn();
   // A search announces its first event to windows; later events go to the
   // change feed (ADR 0075).
