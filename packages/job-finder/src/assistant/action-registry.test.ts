@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import type { JobFinderActionId } from "./action-registry";
 import { executeJobFinderAction, JOB_FINDER_ACTIONS } from "./action-registry";
 import type { AssistantHostPorts } from "./ports";
@@ -117,19 +116,6 @@ describe("registered user actions", () => {
       "candidate-assets:restore",
       { assetId: "file", retention: "until_deleted" },
     ],
-    ["get-application-page-states", { resultIds: ["r"] }],
-    ["reopen-application-page", { resultId: "r" }],
-    ["list-application-documents", { jobId: "j", applicationRecordId: "a" }],
-    [
-      "propose-application-document",
-      { kind: "cover_letter", jobId: "j", applicationRecordId: "a" },
-    ],
-    [
-      "edit-application-document",
-      { documentId: "d", expectedRevision: 2, content: "Revised text" },
-    ],
-    ["approve-application-document", { documentId: "d", expectedRevision: 2 }],
-    ["export-application-document", { documentId: "d", expectedRevision: 2 }],
   ] satisfies [JobFinderActionId, unknown][])(
     "%s uses the shared desktop operation",
     async (name, input) => {
@@ -144,60 +130,6 @@ describe("registered user actions", () => {
       );
     },
   );
-
-  it("edits and removes only the named source, retaining unrelated preferences", async () => {
-    const { workspaceService: service } = createWorkspaceServiceHarness();
-    const before = await service.getWorkspaceSnapshot();
-    const source = before.searchPreferences.discovery.targets[0]!;
-    await executeJobFinderAction(
-      "edit-source",
-      {
-        sourceId: source.id,
-        changes: { label: "Renamed source", enabled: false },
-      },
-      { service },
-    );
-    const after = await service.getWorkspaceSnapshot();
-    expect(after.searchPreferences.discovery.targets[0]).toMatchObject({
-      id: source.id,
-      label: "Renamed source",
-      enabled: false,
-      startingUrl: source.startingUrl,
-    });
-    expect(after.searchPreferences.targetRoles).toEqual(
-      before.searchPreferences.targetRoles,
-    );
-    await executeJobFinderAction(
-      "remove-source",
-      { sourceId: source.id },
-      { service },
-    );
-    expect(
-      (
-        await service.getWorkspaceSnapshot()
-      ).searchPreferences.discovery.targets.some(
-        (entry) => entry.id === source.id,
-      ),
-    ).toBe(false);
-  });
-
-  it("stops an explicitly selected application without another confirmation", async () => {
-    const executeAction = vi.fn().mockResolvedValue(true);
-    const createProposal = vi.fn();
-    const context = {
-      service: {},
-      ports: { executeAction, publishWorkspaceUpdate: vi.fn() },
-      session: { assertCurrent: vi.fn(), createProposal },
-    } as unknown as AssistantToolContext;
-    await executeRegisteredAssistantAction(
-      { actionId: "stop-application", input: { id: 1 } },
-      context,
-    );
-    expect(executeAction).toHaveBeenCalledExactlyOnceWith("stop-application", {
-      id: 1,
-    });
-    expect(createProposal).not.toHaveBeenCalled();
-  });
 
   it("proposes deletion, revalidates on acceptance and never opens an application bypass", async () => {
     const createProposal = vi

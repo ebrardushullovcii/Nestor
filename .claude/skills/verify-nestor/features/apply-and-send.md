@@ -1,40 +1,36 @@
 # Apply and send
 
-"Apply" queues jobs with an approved resume. The two-way setting lives in Settings: "Fill in for me" (the default) fills the form, attaches the resume and leaves Send to the person; "Send for me" allows Job Finder to send. Ordinary form saves remain inside the application's scoped permission. The engine's lower-authority prepare-only capability is not a third setting. A queued application retains the mode chosen when Apply was pressed; a later setting change must not upgrade it. Final submission stays the person's unless they authorize it (ADR 0012, 0024, 0027).
+Apply queues approved resumes in the applications store. Settings offers Fill in for me (fills the form and leaves Send to the person) and Send for me (allows automatic sending through the send guards). Each queued application retains its mode; a later setting change cannot upgrade it. Test sends go only to the isolated instance's replica sites.
 
 ## Sub-features
 
-- `apply-start`: "Apply" on a ready Shortlisted job; lands on Applications with "Job Finder is filling in the form".
-- `apply-ready`: "Ready to send", "Ready for you to read over and send", the region "Review before sending" listing every answer going out and where it came from.
-- `apply-browser`: "Open the Job Finder browser" / "Reopen the Job Finder browser"; the browser peek modal over the app.
-- `apply-person-send`: the person presses the site's own Submit; the app records "You sent this application yourself on the site." and "Submitted (verified)" with the site's receipt.
-- `apply-send-for-me`: Settings application mode "Send for me"; Job Finder presses send itself when the application and its guards permit it.
-- `apply-documents`: "Draft a cover letter" / short response document for an attachment question.
-- `applications-tracking`: filters (All, Waiting on you, In progress), "Hiring stage", "Open tracker", "Prepare interview" (links to Live Assistant).
-- `apply-recovery`: "Could not apply" and recovery actions.
-- `apply-pacing`: a site's HTTP 429 or 503 with Retry-After waits automatically, without a Needs-you question. Rejected main-page GETs reload after the wait; writes and sends are never replayed. Other sites can use the released worker slot. Sites that respond normally have no added delay.
+- Shortlisted: Apply one, selected jobs, the current page or every approved matching job. Work runs in bounded background tabs.
+- Applications: Open application opens the exact filled form; Stop closes its tab and stops unsent work. What Apply filled in / What was sent shows the recorded answers, attachments and receipt.
+- Sidebar: record the person's instruction, then apply_to_jobs with an ids selection or an Approved (stage=resume) filter and exclusions. The instruction freezes matching jobs once; later arrivals stay out. applications_for_jobs maps job ids to work ids; list_application_work and get_application_details read the store. open_application, stop_application and send_application use work ids.
+- A plain Apply follows the saved mode. An explicit fill-only instruction stays fill-only even with Send for me saved. An explicit send instruction can authorize the ready-form send command without changing the default setting.
+- Needs-you answers through the sidebar await the rebuilt inbox's command cutover. The retired Application documents editor is not an available fallback.
 
 ## How to get to it (user POV)
 
-- Shortlisted › job › "Apply".
-- Sidebar › Applications.
-- Settings › application mode for Send for me.
+- Shortlisted > Approved > Apply, or open a job and Apply.
+- Applications > a job > Open application / Stop / What was sent.
+- Settings > Applying > Fill in for me or Send for me.
+- Open the Assistant and ask to apply to this job, the selection, the page or all approved jobs; ask to open or stop a named application's form.
 
 ## Driving it with verify-nestor
 
-Preconditions: a ready resume on `up --ai live`; the job comes from this instance's replica sites. Never apply to anything else.
+Use live AI, synthetic profile/resume data and this instance's replica URLs. Seed only preconditions that are not being proved, and report them.
 
-- **Prepare.** `$V/drive click Apply --role button`, `$V/drive wait "Ready for you to read over and send" 900 --role heading`. Measured: 20 s on `/board/`. Proof: shot, the "Review before sending" region in `see`, `$V/db application_records 1` with status `ready_for_review` and no replica receipt yet.
-- **Send it yourself.** `$V/drive click "Open the Job Finder browser"`; `$V/drive shot form --target browser --url /apply/`; check the page's origin is the instance's replica (`sites.url`); `$V/drive click Submit --page browser --url /apply/`; `$V/drive press Escape`; `$V/drive wait "Application submitted" 60`. The finished application tab closes after its receipt is recorded. Proof: one new line in `submissions.jsonl` with the fields and the tailored PDF's name, `$V/db application_records 1` with `status: "submitted"` and `personSendReceipt`, and no remaining tab for that application.
-- Whole flow: `journeys/job-finder-replica.mjs apply`, then `send`. The journey refuses to press Submit unless the page's origin is the instance's replica server.
-- **Other forms.** Point the source at `/lever/` (CAPTCHA, background-check consent), `/greenhouse/` (drop zone, EEO), `/workday/` (account wall, four steps), `/gatekeeper/` (overlay, interstitial, new tab) or the larger sites. Not run through this skill yet.
-- **Setting.** Settings › Applying has exactly two choices, "Fill in for me" and "Send for me". Picking either saves it immediately; navigate away and restart to check persistence. An unrelated settings save must retain it. Queue jobs with each mode and inspect `applications.mode`; changing Settings and pressing Apply again for an active job must not upgrade that row.
-- **Send for me.** Settings › Applying › "Send for me", then Apply; the proof is a replica receipt with no person click and authority naming the replica origin. A setting save alone must not grant sending permission. Recheck through the store runner after its cutover; the setting/store admission check alone does not prove sending.
+- Queue one job through chat in Fill mode. Inspect applications.mode/state and the screen. Wait outside the chat for ready; there must be no replica submission.
+- Change the saved mode to Send for me, ask Apply again for the active job, and prove its mode and attempt did not change.
+- Ask chat to open that application. Capture the retained browser form; inspect its answers and attached file. Ask Stop; inspect the stopped row and closed binding.
+- Select several approved jobs and ask chat to apply to the selection. Check only those rows were queued. For all approved jobs use the compact filter; exclusions and later arrivals must stay out. A store-level test must also cover more than one page.
+- In Send mode queue approved work through chat. Prove the site's receipt, a submitted application row, and the screen's What was sent. An unconfirmed send is not retried.
+- For a ready Fill form, ask chat explicitly to send it. Prove the receipt and unchanged default setting. A preparation instruction or saved Fill mode alone must not authorize send_application.
 
 ## Gotchas
 
-- The browser peek is modal: press Escape before clicking the app again.
-- A restart or `down` while an application is "Ready to send" loses the prepared page; it becomes "Could not apply". Send first.
-- `drive shot --target browser` captures the page itself; app chrome never paints above a WebContentsView, so a main-window shot shows the app without the page.
-- The send guard blocks the app from posting to any non-loopback host. If a real site appears in `blocked-requests.jsonl`, something tried to leave the replica: report it.
-- Replica Workday accounts and saved steps live in the replica server's memory and vanish on `down`.
+- The browser peek covers the app. Escape closes it; an unfocused instance may park pages in a hidden browser window, so use shot --target browser.
+- A restart loses prepared browser pages. Finish or stop ready forms before restarting; new work and instructions remain in storage.
+- Queued, ready and submitted are different states. A tracker status or a tool-list assertion is not proof of an application send.
+- Never send to a non-loopback site. The verify-nestor send guard and submissions.jsonl prove where writes went.

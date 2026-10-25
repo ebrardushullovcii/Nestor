@@ -17,9 +17,11 @@ import {
   type UpdateJobSiteInput,
 } from "@nestor/contracts";
 import type { SQLInputValue } from "node:sqlite";
+import { createRowUndo } from "./row-undo";
 import type { JobStore } from "./job-store";
 
 export const JOB_SITES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS job_site_undo (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, items_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS job_sites (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   label TEXT NOT NULL COLLATE NOCASE,
@@ -73,6 +75,11 @@ const toSite = (row: SiteRow): JobSite => ({
 
 export function createJobSitesStore(store: JobStore) {
   const { sql } = store;
+  const undo = createRowUndo(store, {
+    journal: "job_site_undo",
+    cause: "sites",
+  });
+  let lastChange = { undoId: null as number | null, undoCount: 0 };
   const changed = () =>
     store.notify({ cause: "sites", stages: [], ids: [], searchId: null });
   const get = (id: number): JobSite | null => {
@@ -83,6 +90,12 @@ export function createJobSitesStore(store: JobStore) {
   };
   return {
     get,
+    takeUndo() {
+      const value = lastChange;
+      lastChange = { undoId: null, undoCount: 0 };
+      return value;
+    },
+    undo: (undoId: number) => undo.undo(undoId),
     list(input: JobSiteListQuery = {}): JobSitePage {
       const query = JobSiteListQuerySchema.parse(input);
       const values: SQLInputValue[] = [];
@@ -179,6 +192,7 @@ export function createJobSitesStore(store: JobStore) {
     add(input: AddJobSitesInput): AddJobSitesResult {
       const parsed = parseJobSiteUrls(AddJobSitesInputSchema.parse(input).text);
       return store.transaction(() => {
+        const change = undo.begin();
         let added = 0,
           duplicates = parsed.duplicates;
         let firstAddedId: number | null = null;
@@ -193,10 +207,12 @@ export function createJobSitesStore(store: JobStore) {
           const label = jobSiteLabel(url);
           const inserted = insert.get(label, url) as { id: number } | undefined;
           if (inserted) {
+            change.capture({ table: "job_sites", id: inserted.id }, null);
             added++;
             firstAddedId ??= inserted.id;
           } else duplicates++;
         }
+        lastChange = change.finish();
         if (added) changed();
         return { added, duplicates, invalid: parsed.invalid, firstAddedId };
       });
@@ -205,7 +221,10 @@ export function createJobSitesStore(store: JobStore) {
       const value = UpdateJobSiteInputSchema.parse(input);
       return store.transaction(() => {
         const before = get(value.id);
+        lastChange = { undoId: null, undoCount: 0 };
         if (!before) return null;
+        const change = undo.begin();
+        change.capture({ table: "job_sites", id: value.id });
         const columns: string[] = [];
         const values: SQLInputValue[] = [];
         const keys = {
@@ -260,6 +279,7 @@ export function createJobSitesStore(store: JobStore) {
           );
           changed();
         }
+        lastChange = change.finish();
         return get(value.id);
       });
     },
@@ -325,6 +345,17 @@ export function createJobSitesStore(store: JobStore) {
               : value.filter === "needs_attention"
                 ? "attention = 1"
                 : "1";
+        const change = undo.begin();
+        const selected =
+          sql(`SELECT id FROM job_sites WHERE enabled <> ? AND ${selection} AND ${filter}
+          AND (instr(lower(label), ?) > 0 OR instr(lower(url), ?) > 0)`).all(
+            Number(value.enabled),
+            JSON.stringify(ids),
+            text,
+            text,
+          ) as { id: number }[];
+        for (const row of selected)
+          change.capture({ table: "job_sites", id: row.id });
         const result = sql(
           `UPDATE job_sites SET enabled = ? WHERE enabled <> ? AND ${selection} AND ${filter} AND (instr(lower(label), ?) > 0 OR instr(lower(url), ?) > 0)`,
         ).run(
@@ -334,15 +365,19 @@ export function createJobSitesStore(store: JobStore) {
           text,
           text,
         );
+        lastChange = change.finish();
         if (result.changes) changed();
         return Number(result.changes);
       });
     },
     remove(id: number): boolean {
       return store.transaction(() => {
+        const change = undo.begin();
+        change.capture({ table: "job_sites", id });
         const removed = Boolean(
           sql("DELETE FROM job_sites WHERE id = ?").run(id).changes,
         );
+        lastChange = change.finish();
         if (removed) changed();
         return removed;
       });

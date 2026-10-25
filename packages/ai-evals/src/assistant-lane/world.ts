@@ -238,21 +238,6 @@ function recordingPorts(recorder: AssistantLaneRecorder): AssistantHostPorts {
       });
     },
     cancelSearch: () => Promise.resolve(),
-    startApplications: (input) => {
-      recorder.applications.push({
-        jobIds: [...input.jobIds],
-        mode: input.mode,
-      });
-      return Promise.resolve({
-        startedJobIds: [...input.jobIds],
-        heldBack: [],
-        runId: null,
-      });
-    },
-    sendPreparedApplications: (input) => {
-      recorder.sends.push([...input.jobIds]);
-      return Promise.resolve({ sentJobIds: [...input.jobIds], failed: [] });
-    },
     checkSource: () => Promise.resolve(),
     listDocuments: () => Promise.resolve([]),
     readDocumentText: () => Promise.resolve(null),

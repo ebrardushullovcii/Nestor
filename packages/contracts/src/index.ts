@@ -28,6 +28,7 @@ export * from "./source-debug";
 export * from "./discovery";
 export * from "./jobs";
 export * from "./applications";
+export * from "./application-commands";
 export * from "./tracker";
 export * from "./home";
 export * from "./job-commands";

@@ -58,7 +58,10 @@ describe("sidebar search readiness", () => {
       },
     });
     expect(buildProfileDigest(snapshot)).toContain(
-      "Enabled valid job sources: 0",
+      "Use list_sites for current source IDs",
+    );
+    expect(buildProfileDigest(snapshot)).not.toContain(
+      "Enabled valid job sources:",
     );
     const context = buildContextBlock({
       context: null,
@@ -112,9 +115,8 @@ describe("sidebar search readiness", () => {
       },
     });
     const digest = buildProfileDigest(snapshot);
-    expect(digest).toContain(
-      "Public Board (on): https://jobs.example.test/board",
-    );
+    expect(digest).toContain("Job sites are stored separately from Profile");
+    expect(digest).not.toContain("Public Board");
     expect(digest).not.toContain("https://jobs.example.test/off");
     expect(digest).not.toContain("file:///resume.pdf");
   });

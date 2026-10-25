@@ -49,19 +49,60 @@ for (const tool of registeredActionTools) {
 export type AssistantCatalogMode = "flat" | "grouped";
 
 const COMMON_TOOLS = [
-  "open_in_app", "read_result", "ask_person", "list_needs_you", "undo_change",
-  "get_application", "get_application_run", "answer_application_question", "read_profile", "get_job",
-  "list_jobs", "set_default_resume_level",
+  "open_in_app",
+  "read_result",
+  "ask_person",
+  "list_needs_you",
+  "undo_change",
+  "get_application",
+  "get_application_details",
+  "applications_for_jobs",
+  "answer_application_question",
+  "read_profile",
+  "get_job",
+  "list_jobs",
+  "set_default_resume_level",
 ];
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
-  profile: ["edit_profile", "finish_profile_setup", "list_documents", "import_resume", "resolve_import_suggestion",
+  profile: [
+    "edit_profile",
+    "finish_profile_setup",
+    "list_documents",
+    "import_resume",
+    "resolve_import_suggestion",
   ],
-  setup: ["edit_profile", "finish_profile_setup", "list_documents", "import_resume", "resolve_import_suggestion",
+  setup: [
+    "edit_profile",
+    "finish_profile_setup",
+    "list_documents",
+    "import_resume",
+    "resolve_import_suggestion",
   ],
-  discovery: ["list_sites", "start_search", "stop_search", "search_status", "move_jobs", "undo_move",
+  discovery: [
+    "list_sites",
+    "get_site",
+    "add_sites",
+    "update_site",
+    "remove_site",
+    "set_sites_enabled",
+    "undo_site_change",
+    "start_search",
+    "stop_search",
+    "search_status",
+    "move_jobs",
+    "undo_move",
   ],
-  review_queue: ["list_shortlisted", "get_resume", "save_resume", "set_resume_level", "undo_resume_level", "rewrite_resume", "approve_resume", "record_instruction", "apply_to_jobs",
+  review_queue: [
+    "list_shortlisted",
+    "get_resume",
+    "save_resume",
+    "set_resume_level",
+    "undo_resume_level",
+    "rewrite_resume",
+    "approve_resume",
+    "record_instruction",
+    "apply_to_jobs",
   ],
   resume_studio: [
     "read_resume",
@@ -72,7 +113,21 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "set_resume_template",
     "restore_resume_version",
   ],
-  applications: ["list_applications", "get_application", "set_status", "add_event", "undo_tracker_change", "get_application_run", "record_instruction", "apply_to_jobs", "send_applications", "continue_application", "answer_application_question", "cancel_applications", "action_return_application_to_shortlist", "action_control_apply_queue",
+  applications: [
+    "list_applications",
+    "get_application",
+    "set_status",
+    "add_event",
+    "undo_tracker_change",
+    "record_instruction",
+    "apply_to_jobs",
+    "send_application",
+    "open_application",
+    "stop_application",
+    "list_application_work",
+    "get_application_details",
+    "applications_for_jobs",
+    "answer_application_question",
   ],
   actions: ["list_needs_you", "resolve_needs_you"],
   settings: [
@@ -132,17 +187,19 @@ export function buildAssistantToolCatalog(options: {
   onLoadToolNames?: (names: readonly string[]) => void;
 }): AssistantToolDefinition[] {
   const commands = options.commands ?? [];
-  const commandNames = new Set(commands.flatMap((tool) => [tool.name, ...(tool.replaces ?? [])]));
+  const commandNames = new Set(
+    commands.flatMap((tool) => [tool.name, ...(tool.replaces ?? [])]),
+  );
   const groupTools = (group: AssistantToolGroup) => [
-    ...ASSISTANT_TOOL_GROUPS[group].filter((tool) => !commandNames.has(tool.name)),
+    ...ASSISTANT_TOOL_GROUPS[group].filter(
+      (tool) => !commandNames.has(tool.name),
+    ),
     ...commands.filter((tool) => tool.group === group),
   ];
   const include = (group: AssistantToolGroup) =>
     group !== "browser" || options.browserAvailable;
   if (options.mode === "flat") {
-    return assistantToolGroupValues
-      .filter(include)
-      .flatMap(groupTools);
+    return assistantToolGroupValues.filter(include).flatMap(groupTools);
   }
   const groups = new Set(options.loadedGroups ?? []);
   if (options.screen === "browser") groups.add("browser");
@@ -166,14 +223,25 @@ export function buildAssistantToolCatalog(options: {
         input: z.infer<typeof loadToolsTool.input>,
         context: AssistantToolContext,
       ) {
-        const available = new Set(assistantToolGroupValues.filter(include).flatMap(groupTools).map((tool) => tool.name));
-        const unknown = (input.names ?? []).filter((name) => !available.has(name));
+        const available = new Set(
+          assistantToolGroupValues
+            .filter(include)
+            .flatMap(groupTools)
+            .map((tool) => tool.name),
+        );
+        const unknown = (input.names ?? []).filter(
+          (name) => !available.has(name),
+        );
         if (unknown.length)
           throw new Error(`Unknown tools: ${unknown.join(", ")}`);
-        const names = [...new Set([
-          ...(input.names ?? []),
-          ...input.groups.flatMap((group) => groupTools(group).map((tool) => tool.name)),
-        ])];
+        const names = [
+          ...new Set([
+            ...(input.names ?? []),
+            ...input.groups.flatMap((group) =>
+              groupTools(group).map((tool) => tool.name),
+            ),
+          ]),
+        ];
         options.onLoadGroups?.(input.groups);
         options.onLoadToolNames?.(names);
         return loadToolsTool.execute({ groups: [], names }, context);

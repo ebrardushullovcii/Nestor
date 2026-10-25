@@ -6,17 +6,28 @@ type Target =
   | { table: "tracker"; job_id: number }
   | { table: "tracker_events"; id: number }
   | { table: "tracker_tags"; job_id: number; tag: string }
-  | { table: "tracker_views"; id: number };
+  | { table: "tracker_views"; id: number }
+  | { table: "job_sites"; id: number };
 type Row = Record<string, SQLInputValue>;
 type Change = { target: Target; before: Row | null; after: Row | null };
 
 /** Row comparisons keep an old Undo from overwriting later work. Derived
  * counts and next dates are maintained by the same triggers as normal edits. */
-export function createTrackerUndo(store: JobStore) {
+export function createRowUndo(
+  store: JobStore,
+  options: {
+    journal: "tracker_undo" | "job_site_undo";
+    cause: "tracker" | "sites";
+  },
+) {
   const read = (target: Target): Row | null => {
     const { table, ...key } = target;
     const columns =
-      table === "tracker" ? "job_id, status, status_at, status_change_id" : "*";
+      table === "tracker"
+        ? "job_id, status, status_at, status_change_id"
+        : table === "job_sites"
+          ? "id, label, url, enabled, provider, lane, health, last_searched_at, sign_in_state, custom_instructions, instruction_status, validated_instruction_id, draft_instruction_id, last_debug_run_id, last_verified_at, stale_reason"
+          : "*";
     return (
       (store
         .sql(
@@ -47,7 +58,9 @@ export function createTrackerUndo(store: JobStore) {
           if (!items.length) return { undoId: null, undoCount: 0 };
           const undoId = Number(
             store
-              .sql("INSERT INTO tracker_undo (at, items_json) VALUES (?, ?)")
+              .sql(
+                `INSERT INTO ${options.journal} (at, items_json) VALUES (?, ?)`,
+              )
               .run(Date.now(), JSON.stringify(items)).lastInsertRowid,
           );
           return { undoId, undoCount: items.length };
@@ -57,7 +70,7 @@ export function createTrackerUndo(store: JobStore) {
     undo(undoId: number) {
       return store.transaction(() => {
         const saved = store
-          .sql("SELECT items_json FROM tracker_undo WHERE id = ?")
+          .sql(`SELECT items_json FROM ${options.journal} WHERE id = ?`)
           .get(undoId) as { items_json: string } | undefined;
         if (!saved) return { changed: 0, skipped: 0 };
         const items = JSON.parse(saved.items_json) as Change[];
@@ -65,7 +78,21 @@ export function createTrackerUndo(store: JobStore) {
         let changed = 0;
         let skipped = 0;
         for (const item of [...items].reverse()) {
-          if (!same(read(item.target), item.after)) {
+          const current = read(item.target);
+          const siteColumns =
+            item.target.table === "job_sites" && item.before && item.after
+              ? Object.keys(item.before).filter(
+                  (column) => item.before![column] !== item.after![column],
+                )
+              : null;
+          if (
+            siteColumns
+              ? !current ||
+                siteColumns.some(
+                  (column) => current[column] !== item.after![column],
+                )
+              : !same(current, item.after)
+          ) {
             skipped++;
             continue;
           }
@@ -80,18 +107,34 @@ export function createTrackerUndo(store: JobStore) {
             continue;
           }
           if (
-            table === "tracker_views" &&
+            (table === "tracker_views" ||
+              (table === "job_sites" &&
+                (!siteColumns || siteColumns.includes("url")))) &&
             item.before &&
             store
-              .sql("SELECT id FROM tracker_views WHERE name = ? AND id <> ?")
-              .get(item.before.name!, item.before.id!)
+              .sql(
+                `SELECT id FROM ${table} WHERE ${table === "job_sites" ? "url" : "name"} = ? AND id <> ?`,
+              )
+              .get(
+                table === "job_sites" ? item.before.url! : item.before.name!,
+                item.before.id!,
+              )
           ) {
             skipped++;
             continue;
           }
           const jobId = item.before?.job_id ?? item.after?.job_id;
           if (typeof jobId === "number") ids.add(jobId);
-          if (item.before === null) {
+          if (siteColumns && item.before) {
+            store
+              .sql(
+                `UPDATE job_sites SET ${siteColumns.map((column) => `${column} = ?`).join(", ")} WHERE id = ?`,
+              )
+              .run(
+                ...siteColumns.map((column) => item.before![column]!),
+                item.before.id!,
+              );
+          } else if (item.before === null) {
             store
               .sql(
                 `DELETE FROM ${table} WHERE ${Object.keys(key)
@@ -110,11 +153,11 @@ export function createTrackerUndo(store: JobStore) {
           }
           changed++;
         }
-        store.sql("DELETE FROM tracker_undo WHERE id = ?").run(undoId);
+        store.sql(`DELETE FROM ${options.journal} WHERE id = ?`).run(undoId);
         if (changed)
           store.notify({
-            cause: "tracker",
-            stages: ["resume", "applied"],
+            cause: options.cause,
+            stages: options.cause === "sites" ? [] : ["resume", "applied"],
             ids: ids.size <= 200 ? [...ids] : null,
             searchId: null,
           });

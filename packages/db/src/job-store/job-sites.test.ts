@@ -78,3 +78,37 @@ test("900 sites are read one indexed page at a time without loading a profile", 
     store.close();
   }
 });
+
+test("each site edit has its own persisted Undo, with later edits and reused URLs protected", () => {
+  const store = openJobStore(":memory:");
+  try {
+    const sites = createJobSitesStore(store);
+    sites.add({ text: "http://127.0.0.1/board/\nhttp://127.0.0.1/lever/" });
+    const addition = sites.takeUndo();
+    const [first, second] = sites.list().rows;
+    sites.setEnabled({ selection: { all: true, except: [] }, enabled: false });
+    const switching = sites.takeUndo();
+    sites.update({ id: first!.id, label: "Later name" });
+    const rename = sites.takeUndo();
+    // A newly created store instance reads the same persisted journal.
+    const reopened = createJobSitesStore(store);
+    expect(reopened.undo(switching.undoId!)).toEqual({
+      changed: 2,
+      skipped: 0,
+    });
+    expect(sites.get(first!.id)).toMatchObject({
+      enabled: true,
+      label: "Later name",
+    });
+    expect(sites.get(second!.id)?.enabled).toBe(true);
+    sites.remove(second!.id);
+    const removal = sites.takeUndo();
+    sites.add({ text: second!.url });
+    expect(reopened.undo(removal.undoId!)).toEqual({ changed: 0, skipped: 1 });
+    expect(reopened.undo(addition.undoId!)).toEqual({ changed: 0, skipped: 2 });
+    expect(reopened.undo(rename.undoId!)).toEqual({ changed: 1, skipped: 0 });
+    expect(sites.list().total).toBe(2);
+  } finally {
+    store.close();
+  }
+});

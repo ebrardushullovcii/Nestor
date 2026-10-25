@@ -24,7 +24,12 @@ export {
   type AssistantCatalogMode,
 } from "./tools";
 export { decideUnderGrants, checkGrantTargets, narrowGrant } from "./grants";
-export { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId } from "./action-registry";
+export {
+  JOB_FINDER_ACTIONS,
+  executeJobFinderAction,
+  type JobFinderActionId,
+} from "./action-registry";
 export { diffValues, undoChangeEntries } from "./change-diff";
 export { assistantCommandTools } from "./command-tools";
+export { AssistantToolError } from "./tool-kit";
 export type { AssistantToolDefinition, AssistantToolContext } from "./tool-kit";

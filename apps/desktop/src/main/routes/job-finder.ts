@@ -2,7 +2,10 @@ import { JobFinderDiscoveryCancellationInputSchema } from "@nestor/contracts";
 import { holdDiscoveryWorkspaceUpdates } from "../services/job-finder/workspace-updates";
 import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-exports";
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
-import { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId,
+import {
+  JOB_FINDER_ACTIONS,
+  executeJobFinderAction,
+  type JobFinderActionId,
 } from "@nestor/job-finder";
 import {
   ApplicationPageStatesInputSchema,
@@ -150,9 +153,7 @@ import {
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
 import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
-import {
-  searchFinishedNotice,
-} from "../setup/finished-work-notices";
+import { searchFinishedNotice } from "../setup/finished-work-notices";
 import {
   listJobsNotInProgress,
   startApplyBatch,
@@ -222,7 +223,9 @@ export async function syncApplicationAuthorityForSavedMode(
 
   const settings = await repository.getSettings();
   const mode =
-    modeOverride ?? settings.applicationAutomationMode ?? "confirm_before_submit";
+    modeOverride ??
+    settings.applicationAutomationMode ??
+    "confirm_before_submit";
   const authorityService = getJobFinderApplicationAuthorityService();
   const active = (await authorityService.list({ status: "active" }))[0] ?? null;
 
@@ -457,7 +460,8 @@ export async function syncApplicationAuthorityForSavedMode(
       // one transition, without leaving a gap between revoking and creating.
       const currentSettings = await repository.getSettings();
       if (
-        (currentSettings.applicationAutomationMode ?? "confirm_before_submit") !==
+        (currentSettings.applicationAutomationMode ??
+          "confirm_before_submit") !==
         (settings.applicationAutomationMode ?? "confirm_before_submit")
       )
         return;
@@ -1139,7 +1143,6 @@ export function registerJobFinderRouteHandlers(
     "remove-employer-exclusion",
     "dismiss-discovery-job",
     "restore-dismissed-discovery-job",
-    "get-apply-run-details",
     "clear-application-answer",
     "snooze-grouped-decision",
     "get-resume-workspace",
@@ -1155,6 +1158,20 @@ export function registerJobFinderRouteHandlers(
       runRegisteredAction(name, event, payload),
     );
   }
+
+  // The current Needs you editor still reads question revisions here until
+  // its store cutover. The Assistant's retired form-read tool is not exposed.
+  ipcMain.handle(
+    "job-finder:get-apply-run-details",
+    async (_event, payload: unknown) => {
+      const input = JobFinderApplyRunDetailsQuerySchema.parse(payload);
+      return (await getJobFinderWorkspaceService()).getApplyRunDetails(
+        input.runId,
+        input.jobId,
+        input.applicationRecordId,
+      );
+    },
+  );
 
   ipcMain.handle(
     "job-finder:sync-workspace",

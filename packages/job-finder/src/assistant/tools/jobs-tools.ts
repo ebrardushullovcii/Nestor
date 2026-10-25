@@ -1,8 +1,6 @@
 import {
   DiscoveryFeedbackReasonSchema,
-  JobDiscoveryTargetSchema,
   JobFinderAssistantSearchInputSchema,
-  JobFinderSourceQueryInputSchema,
   NonEmptyStringSchema,
   discoveryFeedbackReasonValues,
   normalizeCompanyName,
@@ -11,7 +9,6 @@ import {
 } from "@nestor/contracts";
 import { z } from "zod";
 import { executeJobFinderAction } from "../action-registry";
-import { diffValues } from "../change-diff";
 import {
   AssistantToolError,
   defineTool,
@@ -980,296 +977,6 @@ export const searchForJobsTool = defineTool({
   },
 });
 
-export const listSourcesTool = defineTool({
-  name: "list_sources",
-  group: "jobs",
-  description:
-    "Lists job sources with ids, addresses, enabled state and last check. Use query to match words in a source's name or address; cursor and limit page the matches. For a simple switch by name, update_sources enableMatching/disableMatching does the lookup and change in one action.",
-  parameters: json.object({
-    query: json.string(),
-    cursor: json.number(),
-    limit: json.number(),
-  }),
-  input: JobFinderSourceQueryInputSchema,
-  label: () => "Reading your job sources",
-  effect: "read",
-  async execute(input, { service }) {
-    const snapshot = await readAssistantWorkspace(service);
-    const targets = snapshot.searchPreferences.discovery.targets.filter(
-      (target) => !input.query || sourceMatches(target, input.query),
-    );
-    const shown = targets
-      .slice(input.cursor ?? 0, (input.cursor ?? 0) + (input.limit ?? 200))
-      .map((target) => ({
-        id: target.id,
-        label: target.label,
-        url: target.startingUrl,
-        enabled: target.enabled,
-        instructions: target.instructionStatus,
-        lastVerifiedAt: target.lastVerifiedAt,
-        staleReason: target.staleReason,
-      }));
-    return {
-      summary: `${plural(targets.length, "source")}, ${targets.filter((target) => target.enabled).length} on.`,
-      data:
-        input.query || input.cursor !== undefined || input.limit !== undefined
-          ? {
-              sources: shown,
-              total: targets.length,
-              next:
-                (input.cursor ?? 0) + shown.length < targets.length
-                  ? (input.cursor ?? 0) + shown.length
-                  : null,
-            }
-          : shown,
-    };
-  },
-});
-
-function sourceMatches(
-  source: { label: string; startingUrl: string },
-  query: string,
-): boolean {
-  const text = `${source.label} ${source.startingUrl}`.toLowerCase();
-  return query
-    .toLowerCase()
-    .split(/\s+/u)
-    .filter(Boolean)
-    .every((word) => text.includes(word));
-}
-
-function sourceLabel(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.replace(/^www\./u, "");
-    const first = parsed.pathname.split("/").filter(Boolean)[0];
-    return ["localhost", "127.0.0.1", "[::1]"].includes(host) && first
-      ? `${parsed.host}/${first}`
-      : host;
-  } catch {
-    return url;
-  }
-}
-
-export const updateSourcesTool = defineTool({
-  name: "update_sources",
-  group: "jobs",
-  description:
-    "Adds job sources by address, with optional custom names through namedSources, renames saved sources through renameSources, or turns sources on or off by id. Source names are supported (Profile > Job sources > Source name). Added sources are on and ready for searching; a check is optional.",
-  parameters: json.object({
-    addUrls: json.ids("Addresses to add."),
-    namedSources: json.array(
-      json.object(
-        {
-          url: json.string(),
-          label: json.string("The person's source name, such as the employer."),
-        },
-        ["url", "label"],
-      ),
-    ),
-    renameSources: json.array(
-      json.object({ sourceId: json.string(), label: json.string() }, [
-        "sourceId",
-        "label",
-      ]),
-    ),
-    enableIds: json.ids(),
-    disableIds: json.ids(),
-    enableMatching: json.string(
-      "Turn on sources whose names or addresses match these words.",
-    ),
-    disableMatching: json.string(
-      "Turn off sources whose names or addresses match these words.",
-    ),
-  }),
-  input: z.object({
-    addUrls: z.array(z.string().trim().url()).max(200).default([]),
-    namedSources: z
-      .array(
-        z.object({
-          url: z.string().trim().url(),
-          label: z.string().trim().min(1).max(200),
-        }),
-      )
-      .max(200)
-      .optional(),
-    renameSources: z
-      .array(
-        z.object({ sourceId: Id, label: z.string().trim().min(1).max(200) }),
-      )
-      .max(500)
-      .optional(),
-    enableIds: z.array(Id).max(500).default([]),
-    disableIds: z.array(Id).max(500).default([]),
-    enableMatching: z.string().trim().min(1).max(200).optional(),
-    disableMatching: z.string().trim().min(1).max(200).optional(),
-  }),
-  label: () => "Updating your job sources",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    const snapshot = await readAssistantWorkspace(service);
-    const preferences = snapshot.searchPreferences;
-    const existing = new Set(
-      preferences.discovery.targets.map((target) =>
-        target.startingUrl.replace(/\/+$/u, ""),
-      ),
-    );
-    const renames = new Map(
-      (input.renameSources ?? []).map((source) => [
-        source.sourceId,
-        source.label,
-      ]),
-    );
-    for (const id of renames.keys()) {
-      if (!preferences.discovery.targets.some((target) => target.id === id))
-        throw new AssistantToolError(
-          "not_found",
-          "One of the sources to rename is no longer saved. Nothing changed.",
-        );
-    }
-    const named = new Map(
-      (input.namedSources ?? []).map((source) => [
-        source.url.replace(/\/+$/u, ""),
-        source.label,
-      ]),
-    );
-    const additions = [
-      ...input.addUrls,
-      ...(input.namedSources ?? []).map((source) => source.url),
-    ].flatMap((url) => {
-      const key = url.replace(/\/+$/u, "");
-      if (existing.has(key)) return [];
-      existing.add(key);
-      return [
-        JobDiscoveryTargetSchema.parse({
-          id: session.createId("target"),
-          label: named.get(key) ?? sourceLabel(url),
-          startingUrl: url,
-          enabled: true,
-          adapterKind: "auto",
-        }),
-      ];
-    });
-    const targets = [
-      ...preferences.discovery.targets.map((target) => ({
-        ...target,
-        label:
-          renames.get(target.id) ??
-          named.get(target.startingUrl.replace(/\/+$/u, "")) ??
-          target.label,
-        enabled:
-          input.enableIds.includes(target.id) ||
-          (input.enableMatching && sourceMatches(target, input.enableMatching))
-            ? true
-            : input.disableIds.includes(target.id) ||
-                (input.disableMatching &&
-                  sourceMatches(target, input.disableMatching))
-              ? false
-              : target.enabled,
-      })),
-      ...additions,
-    ];
-    session.assertCurrent();
-    const savedSnapshot = await service.saveSearchPreferences({
-      ...preferences,
-      discovery: { ...preferences.discovery, targets },
-    });
-    const savedTargets = savedSnapshot.searchPreferences.discovery.targets;
-    const enabledCount = savedTargets.filter(
-      (target) =>
-        target.enabled &&
-        preferences.discovery.targets.some(
-          (before) => before.id === target.id && !before.enabled,
-        ),
-    ).length;
-    const disabledCount = savedTargets.filter(
-      (target) =>
-        !target.enabled &&
-        preferences.discovery.targets.some(
-          (before) => before.id === target.id && before.enabled,
-        ),
-    ).length;
-    const changes = diffValues(preferences.discovery.targets, savedTargets).map(
-      (entry) => ({
-        ...entry,
-        path: ["search_preferences", "discovery", "targets", ...entry.path],
-      }),
-    );
-    const sourceParts = [];
-    if (changes.length && session.recordChange) {
-      for (let cursor = 0; cursor < changes.length; cursor += 600) {
-        sourceParts.push(
-          (
-            await session.recordChange({
-              target: "search_preferences",
-              targetId: null,
-              summary: "Updated job sources",
-              entries: changes.slice(cursor, cursor + 600),
-            })
-          ).part,
-        );
-      }
-    }
-    ports.publishWorkspaceUpdate();
-    return {
-      parts: sourceParts,
-      canFinish:
-        additions.length + enabledCount + disabledCount > 0 &&
-        [...input.enableIds, ...input.disableIds].every((id) =>
-          preferences.discovery.targets.some((target) => target.id === id),
-        ),
-      summary: `Added ${plural(additions.length, "source")}; ${enabledCount} turned on, ${disabledCount} turned off.${targets.some((target) => preferences.discovery.targets.some((before) => before.id === target.id && before.label !== target.label)) ? " Updated source names." : ""}`,
-      data: {
-        sources: savedTargets
-          .filter(
-            (target) =>
-              (!input.enableMatching && !input.disableMatching) ||
-              Boolean(
-                input.enableMatching &&
-                sourceMatches(target, input.enableMatching),
-              ) ||
-              Boolean(
-                input.disableMatching &&
-                sourceMatches(target, input.disableMatching),
-              ),
-          )
-          .slice(
-            0,
-            input.enableMatching || input.disableMatching
-              ? 25
-              : savedTargets.length,
-          )
-          .map((target) => ({
-            id: target.id,
-            label: target.label,
-            enabled: target.enabled,
-          })),
-        resultsPlanName:
-          savedSnapshot.campaigns.find(
-            (plan) => plan.id === savedSnapshot.activeCampaignId,
-          )?.name ?? null,
-        added: additions.map((target) => ({
-          id: target.id,
-          url: target.startingUrl,
-          label: target.label,
-        })),
-        renamed: targets
-          .filter((target) =>
-            preferences.discovery.targets.some(
-              (before) =>
-                before.id === target.id && before.label !== target.label,
-            ),
-          )
-          .map((target) => ({
-            id: target.id,
-            label: target.label,
-            url: target.startingUrl,
-          })),
-      },
-    };
-  },
-});
-
 export const checkSourceTool = defineTool({
   name: "check_source",
   group: "jobs",
@@ -1283,7 +990,7 @@ export const checkSourceTool = defineTool({
     session.assertCurrent();
     await ports.checkSource(input.sourceId, { signal: session.signal });
     return {
-      summary: "The source check finished; list_sources shows its result.",
+      summary: "The source check finished; get_site shows its result.",
     };
   },
 });
@@ -1302,8 +1009,6 @@ export const jobsTools = [
   excludeEmployerTool,
   includeEmployerTool,
   searchForJobsTool,
-  listSourcesTool,
-  updateSourcesTool,
   checkSourceTool,
 ];
 

@@ -69,18 +69,6 @@ function createPorts(): AssistantHostPorts & {
     startSearch: () =>
       Promise.resolve({ runId: "run_search_1", message: "started" }),
     cancelSearch: () => Promise.resolve(),
-    startApplications: (input) => {
-      started.push({ jobIds: input.jobIds, mode: input.mode });
-      return Promise.resolve({
-        startedJobIds: [...input.jobIds],
-        heldBack: [],
-        runId: null,
-      });
-    },
-    sendPreparedApplications: (input) => {
-      sent.push([...input.jobIds]);
-      return Promise.resolve({ sentJobIds: [...input.jobIds], failed: [] });
-    },
     checkSource: () => Promise.resolve(),
     listDocuments: () => Promise.resolve([]),
     readDocumentText: () => Promise.resolve(null),
@@ -477,31 +465,84 @@ describe("assistant session host", () => {
     ).not.toBe("Synthetic engineer");
   });
 
-  it.each(["candidate-assets:delete", "reset-workspace"])("accepts %s once, with confirmation saved before a workspace replacement", async (actionId) => {
-    const { host, repository, ports } = setup();
-    const conversation = await host.createConversation();
-    const proposal = AssistantProposalSchema.parse({ id: "proposal", conversationId: conversation.id, messageId: "proposal_message", kind: "job_finder_action", summary: "Confirm action", items: [{ id: "item", label: "Confirm action", payload: { actionId, input: actionId === "reset-workspace" ? {} : { assetId: "asset" } } }], createdAt: new Date().toISOString() });
-    await repository.upsertProposal(proposal);
-    await repository.upsertMessage(AssistantMessageSchema.parse({ id: "proposal_message", conversationId: conversation.id, role: "assistant", origin: "sidebar", parts: [{ type: "proposal", proposalId: proposal.id, kind: proposal.kind, summary: proposal.summary, status: "pending", source: { store: "assistant" } }], createdAt: new Date().toISOString() }));
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const execute = vi.fn(async () => {
-      if (actionId === "reset-workspace") expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
-      await gate;
-      return true;
-    });
-    ports.executeAction = execute;
-    const input = { conversationId: conversation.id, messageId: "proposal_message", proposalId: proposal.id, action: "accept" as const };
-    const first = host.resolveProposal(input);
-    const second = host.resolveProposal(input);
-    await waitFor(() => execute.mock.calls.length, (count) => count === 1);
-    release();
-    await Promise.all([first, second]);
-    expect(execute).toHaveBeenCalledTimes(1);
-    await host.resolveProposal(input);
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
-  });
+  it.each(["candidate-assets:delete", "reset-workspace"])(
+    "accepts %s once, with confirmation saved before a workspace replacement",
+    async (actionId) => {
+      const { host, repository, ports } = setup();
+      const conversation = await host.createConversation();
+      const proposal = AssistantProposalSchema.parse({
+        id: "proposal",
+        conversationId: conversation.id,
+        messageId: "proposal_message",
+        kind: "job_finder_action",
+        summary: "Confirm action",
+        items: [
+          {
+            id: "item",
+            label: "Confirm action",
+            payload: {
+              actionId,
+              input: actionId === "reset-workspace" ? {} : { assetId: "asset" },
+            },
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      });
+      await repository.upsertProposal(proposal);
+      await repository.upsertMessage(
+        AssistantMessageSchema.parse({
+          id: "proposal_message",
+          conversationId: conversation.id,
+          role: "assistant",
+          origin: "sidebar",
+          parts: [
+            {
+              type: "proposal",
+              proposalId: proposal.id,
+              kind: proposal.kind,
+              summary: proposal.summary,
+              status: "pending",
+              source: { store: "assistant" },
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const execute = vi.fn(async () => {
+        if (actionId === "reset-workspace")
+          expect((await repository.getProposal(proposal.id))?.status).toBe(
+            "applied",
+          );
+        await gate;
+        return true;
+      });
+      ports.executeAction = execute;
+      const input = {
+        conversationId: conversation.id,
+        messageId: "proposal_message",
+        proposalId: proposal.id,
+        action: "accept" as const,
+      };
+      const first = host.resolveProposal(input);
+      const second = host.resolveProposal(input);
+      await waitFor(
+        () => execute.mock.calls.length,
+        (count) => count === 1,
+      );
+      release();
+      await Promise.all([first, second]);
+      expect(execute).toHaveBeenCalledTimes(1);
+      await host.resolveProposal(input);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect((await repository.getProposal(proposal.id))?.status).toBe(
+        "applied",
+      );
+    },
+  );
 
   it("persists the exact proposed summary on its review card", async () => {
     let calls = 0;
@@ -1685,98 +1726,6 @@ describe("assistant session host", () => {
       (await repository.listOperations(conversation.id, { runOnly: true }))[0]
         ?.status,
     ).toBe("committed");
-  });
-
-  it("continues an authorized send by itself when the batch ends, citing the instruction", async () => {
-    const { host, ports, repository } = setup();
-    ports.startApplications = (input) => {
-      ports.started.push({ jobIds: input.jobIds, mode: input.mode });
-      return Promise.resolve({
-        startedJobIds: [...input.jobIds],
-        heldBack: [],
-        runId: "run_apply_missing",
-      });
-    };
-    const { conversationId } = await sendAndWait(
-      host,
-      "Apply to these and send them",
-      context({
-        screen: "review_queue",
-        route: "/job-finder/review-queue",
-        list: {
-          listKind: "shortlist",
-          selectedIds: ["job_ready"],
-          displayedIds: ["job_ready"],
-          filteredIds: ["job_ready"],
-          totalFilteredCount: 1,
-          filterSummary: null,
-          campaignId: null,
-        },
-      }),
-    );
-    const continuation = await waitFor(
-      async () =>
-        (
-          await repository.listMessages(conversationId, { limit: 200 })
-        ).messages.find(
-          (message) =>
-            message.origin === "host" &&
-            message.parts.some(
-              (part) =>
-                part.type === "text" && part.text.startsWith("Applying to"),
-            ),
-        ) ?? null,
-      (message) => message !== null,
-    );
-    const text =
-      continuation?.parts[0]?.type === "text" ? continuation.parts[0].text : "";
-    expect(text).toContain("recorded instructions still in force");
-    expect(text).toContain("prepare and send for job_ready");
-    expect(text).not.toContain(
-      "Tell the person what came of it in a few words.",
-    );
-  });
-
-  it("records a written instruction and applies only to the jobs it names, in the mode it allows", async () => {
-    const { host, ports } = setup();
-    const selected = context({
-      screen: "review_queue",
-      route: "/job-finder/review-queue",
-      list: {
-        listKind: "shortlist",
-        selectedIds: ["job_ready"],
-        displayedIds: ["job_ready", "job_generating"],
-        filteredIds: ["job_ready", "job_generating"],
-        totalFilteredCount: 2,
-        filterSummary: null,
-        campaignId: null,
-      },
-    });
-    const { conversationId } = await sendAndWait(
-      host,
-      "Apply to these and send them",
-      selected,
-    );
-    expect(ports.started).toEqual([
-      { jobIds: ["job_ready"], mode: "autonomous_submit" },
-    ]);
-    const grants = (await host.readConversation({ conversationId }))
-      .conversation.id;
-    expect(grants).toBe(conversationId);
-
-    await sendAndWait(
-      host,
-      "Apply to these but I'll send them myself",
-      selected,
-      conversationId,
-    );
-    expect(ports.started.at(-1)).toEqual({
-      jobIds: ["job_ready"],
-      mode: "prepare_only",
-    });
-    // The newer prepare-only instruction blocks sending those jobs.
-    await sendAndWait(host, "send them", selected, conversationId);
-    expect(ports.sent).toEqual([]);
   });
 
   it("never lets a note from Job Finder authorize applications", async () => {

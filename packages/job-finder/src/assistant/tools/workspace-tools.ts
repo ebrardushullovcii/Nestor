@@ -42,7 +42,7 @@ export const getWorkspaceSummaryTool = defineTool({
   name: "get_workspace_summary",
   group: "workspace",
   description:
-    "Where the job search stands: enabled job-source IDs and URLs, whether a search can start and its missing requirements, profile readiness, jobs found and shortlisted, applications and their states, running work, Needs you count, the sources of the running search and the saved apply mode. A resume is not required for searching.",
+    "Where the job search stands: job and application counts, search progress, profile readiness and saved Apply mode. Read list_sites for current site IDs, addresses and enabled counts. A resume is not required for searching.",
   parameters: json.object({}),
   input: z.object({}).passthrough(),
   label: () => "Reading your workspace",

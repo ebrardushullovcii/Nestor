@@ -25,7 +25,7 @@ import type { SQLInputValue } from "node:sqlite";
 
 import type { JobStore } from "./job-store";
 import { toIso, toTextMatch } from "./job-list";
-import { createTrackerUndo } from "./tracker-undo";
+import { createRowUndo } from "./row-undo";
 
 const DAY_MS = 86_400_000;
 const TOTAL_CAP = 1000;
@@ -120,7 +120,10 @@ export type TrackerStore = ReturnType<typeof createTrackerStore>;
 /** The Applications tracker. Every list, filter and count reads an index. */
 export function createTrackerStore(store: JobStore) {
   const { sql } = store;
-  const undo = createTrackerUndo(store);
+  const undo = createRowUndo(store, {
+    journal: "tracker_undo",
+    cause: "tracker",
+  });
   const changed = (ids: number[] | null) =>
     store.notify({
       cause: "tracker",

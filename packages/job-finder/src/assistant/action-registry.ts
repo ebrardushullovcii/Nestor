@@ -269,74 +269,6 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.applyGroupedManualAnswer(i),
     { name: "resolve_needs_you", custom: true },
   ),
-  "cancel-apply-run": action(
-    C.JobFinderApplyRunActionInputSchema,
-    "applications",
-    "local",
-    "Stop one application run.",
-    (i, c) => c.service.cancelApplyRun(i.runId),
-    { name: "cancel_applications", custom: true },
-  ),
-  "revoke-apply-run-approval": action(
-    C.JobFinderApplyRunActionInputSchema,
-    "applications",
-    "local",
-    "Withdraw an application run's approval.",
-    (i, c) => c.service.revokeApplyRunApproval(i.runId),
-  ),
-  "approve-apply-run": action(
-    C.JobFinderApplyRunActionInputSchema,
-    "applications",
-    "confirm",
-    "Approve a waiting application run under the saved sending policy.",
-    async (i, c) => {
-      await c.service.getApplyRunDetails(
-        i.runId,
-        i.jobId,
-        i.applicationRecordId,
-      );
-      return c.service.approveApplyRun(i.runId);
-    },
-  ),
-  "resolve-apply-consent-request": action(
-    C.JobFinderApplyConsentActionInputSchema,
-    "applications",
-    "confirm",
-    "Approve or decline a waiting application consent request.",
-    async (i, c) => {
-      await c.service.getApplyRunDetails(
-        i.runId,
-        i.jobId,
-        i.applicationRecordId,
-      );
-      return c.service.resolveApplyConsentRequest(i.requestId, i.action);
-    },
-  ),
-  "focus-prepared-application-page": action(
-    C.JobFinderPreparedApplicationPageInputSchema,
-    "applications",
-    "local",
-    "Open the exact retained application form.",
-    (i, c) => c.service.focusPreparedApplicationPage(i),
-    { name: "continue_application", custom: true },
-  ),
-  "submit-prepared-application": action(
-    job,
-    "applications",
-    "application",
-    "Send a filled form after the person's scoped instruction.",
-    (i, c) => c.service.submitPreparedApplication(i.jobId),
-    { name: "send_applications", custom: true },
-  ),
-  "start-auto-apply-queue-run": action(
-    C.JobFinderApplyQueueActionInputSchema,
-    "applications",
-    "application",
-    "Start a bounded application run using the saved authority.",
-    (i, c) =>
-      c.service.startAutoApplyQueueRun(i.jobIds, i.applicationAutomationMode),
-    { name: "apply_to_jobs", custom: true },
-  ),
   "reset-workspace": desktopAction(
     "reset-workspace",
     empty,
@@ -371,13 +303,6 @@ export const JOB_FINDER_ACTIONS = {
     "files",
     "local",
     "Save diagnostics to a file.",
-  ),
-  "export-application-packet": desktopAction(
-    "export-application-packet",
-    C.JobFinderApplyRunDetailsQuerySchema,
-    "applications",
-    "local",
-    "Save the selected application's packet as JSON.",
   ),
   "get-performance-snapshot": desktopAction(
     "get-performance-snapshot",
@@ -431,145 +356,6 @@ export const JOB_FINDER_ACTIONS = {
         next: i.cursor + i.limit < filtered.length ? i.cursor + i.limit : null,
       };
     },
-  ),
-  "edit-source": action(
-    C.JobFinderEditSourceInputSchema,
-    "jobs",
-    "local",
-    "Edit a source's name, address, provider type or enabled state.",
-    async (i, c) => {
-      const snapshot = await (c.service.getWorkspaceProjection?.() ??
-        c.service.getWorkspaceSnapshot());
-      const preferences = snapshot.searchPreferences;
-      if (
-        !preferences.discovery.targets.some(
-          (target) => target.id === i.sourceId,
-        )
-      )
-        throw new Error("That source no longer exists.");
-      return c.service.saveSearchPreferences({
-        ...preferences,
-        discovery: {
-          ...preferences.discovery,
-          targets: preferences.discovery.targets.map((target) =>
-            target.id === i.sourceId
-              ? C.JobDiscoveryTargetSchema.parse({ ...target, ...i.changes })
-              : target,
-          ),
-        },
-      });
-    },
-  ),
-  "remove-source": action(
-    C.JobFinderRemoveSourceInputSchema,
-    "jobs",
-    "confirm",
-    "Remove a job source from the saved preferences.",
-    async (i, c) => {
-      const snapshot = await (c.service.getWorkspaceProjection?.() ??
-        c.service.getWorkspaceSnapshot());
-      const preferences = snapshot.searchPreferences;
-      if (
-        !preferences.discovery.targets.some(
-          (target) => target.id === i.sourceId,
-        )
-      )
-        throw new Error("That source no longer exists.");
-      return c.service.saveSearchPreferences({
-        ...preferences,
-        discovery: {
-          ...preferences.discovery,
-          targets: preferences.discovery.targets.filter(
-            (target) => target.id !== i.sourceId,
-          ),
-        },
-      });
-    },
-  ),
-  "apply-jobs": desktopAction(
-    "apply-jobs",
-    C.ApplyJobsInputSchema,
-    "applications",
-    "application",
-    "Apply to approved jobs selected by ids or a filter.",
-    { name: "apply_to_jobs", custom: true },
-  ),
-  "list-applications": desktopAction(
-    "list-applications",
-    C.ApplicationListQuerySchema,
-    "applications",
-    "read",
-    "Read one page of application work states.",
-  ),
-  "get-application-details": desktopAction(
-    "get-application-details",
-    C.ApplicationTargetSchema,
-    "applications",
-    "read",
-    "Read the selected application's progress and answer review.",
-  ),
-  "open-application": desktopAction(
-    "open-application",
-    C.ApplicationTargetSchema,
-    "applications",
-    "local",
-    "Open the exact prepared form in the app browser.",
-  ),
-  "stop-application": desktopAction(
-    "stop-application",
-    C.ApplicationTargetSchema,
-    "applications",
-    "local",
-    "Stop one application and close its tab.",
-  ),
-  "get-application-page-states": desktopAction(
-    "get-application-page-states",
-    C.ApplicationPageStatesInputSchema,
-    "applications",
-    "read",
-    "Read whether application pages are open, kept or closed.",
-  ),
-  "reopen-application-page": desktopAction(
-    "reopen-application-page",
-    C.ReopenApplicationPageInputSchema,
-    "applications",
-    "local",
-    "Reopen a saved application page without sending it.",
-  ),
-  "list-application-documents": desktopAction(
-    "list-application-documents",
-    C.ListApplicationDocumentsInputSchema,
-    "applications",
-    "read",
-    "Read a job's cover letters and written answers, including approved revisions.",
-  ),
-  "propose-application-document": desktopAction(
-    "propose-application-document",
-    C.ProposeApplicationDocumentInputSchema,
-    "applications",
-    "local",
-    "Write a grounded cover letter or short application answer as a draft.",
-  ),
-  "edit-application-document": desktopAction(
-    "edit-application-document",
-    C.EditApplicationDocumentInputSchema,
-    "applications",
-    "local",
-    "Edit an application document at its current revision.",
-  ),
-  "approve-application-document": desktopAction(
-    "approve-application-document",
-    C.ApproveApplicationDocumentInputSchema,
-    "applications",
-    "confirm",
-    "Approve an exact application document revision.",
-  ),
-  "export-application-document": desktopAction(
-    "export-application-document",
-    C.ExportApplicationDocumentInputSchema,
-    "applications",
-    "local",
-    "Save an approved application document to the export folder.",
   ),
   "candidate-assets:import": desktopAction(
     "candidate-assets:import",
@@ -939,15 +725,6 @@ export const JOB_FINDER_ACTIONS = {
     "Edit one resume section, entry or bullet.",
     (i, c) => c.service.applyResumePatch(i.patch, i.revisionReason),
     { name: "edit_resume", custom: true },
-  ),
-  "get-apply-run-details": action(
-    C.JobFinderApplyRunDetailsQuerySchema,
-    "applications",
-    "read",
-    "Read an application's state, questions and receipts.",
-    (i, c) =>
-      c.service.getApplyRunDetails(i.runId, i.jobId, i.applicationRecordId),
-    { name: "get_application_run", custom: true },
   ),
   "clear-application-answer": action(
     C.ClearApplicationAnswerCommandSchema,

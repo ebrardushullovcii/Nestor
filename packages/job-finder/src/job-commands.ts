@@ -85,10 +85,21 @@ export function createJobCommandRunner(deps: {
     undo_move: ({ moveId }) => store.undoMove(moveId),
     list_sites: (input) => sites.list(input),
     get_site: ({ id }) => sites.get(id),
-    add_sites: (input) => sites.add(input),
-    update_site: (input) => sites.update(input),
-    remove_site: ({ id }) => ({ removed: sites.remove(id) }),
-    set_sites_enabled: (input) => ({ changed: sites.setEnabled(input) }),
+    add_sites: (input) => ({ ...sites.add(input), ...sites.takeUndo() }),
+    update_site: (input) => {
+      const site = sites.update(input);
+      const undo = sites.takeUndo();
+      return site ? { ...site, ...undo } : null;
+    },
+    remove_site: ({ id }) => ({
+      removed: sites.remove(id),
+      ...sites.takeUndo(),
+    }),
+    set_sites_enabled: (input) => ({
+      changed: sites.setEnabled(input),
+      ...sites.takeUndo(),
+    }),
+    undo_site_change: ({ undoId }) => sites.undo(undoId),
     start_search: async (settings) => {
       const runner = await search();
       await runner.start(settings);
