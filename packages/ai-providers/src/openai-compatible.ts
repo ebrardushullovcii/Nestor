@@ -867,10 +867,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
             model: validatedOptions.model,
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
             reasoningSummary: streamingEnabled,
-            // Usage for the context budget; only asked for where the caller
-            // listens to the stream, so older callers send the same body.
             includeStreamUsage:
-              streamingEnabled && options?.onStreamEvent !== undefined,
+              streamingEnabled &&
+              (options?.includeUsage === true ||
+                options?.onStreamEvent !== undefined),
             messages: messages.map((msg) => {
               const base = { role: msg.role, content: msg.content };
               if (msg.role === "assistant" && msg.toolCalls) {

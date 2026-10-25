@@ -85,12 +85,6 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
 
 export function createApplyUserPrompt(config: ApplyAgentConfig): string {
   const { posting } = config.sources;
-  const documents = config.sources.documents
-    .map(
-      (document) =>
-        `- ${document.id}: ${document.label} (${document.fileName})`,
-    )
-    .join("\n");
 
   return [
     config.application.continuation
@@ -101,10 +95,6 @@ export function createApplyUserPrompt(config: ApplyAgentConfig): string {
       ? `The exact live form is already open at ${config.application.startingUrl}. Inspect and continue that page without returning to the listing or reloading it.`
       : `The form is open at ${config.application.startingUrl}.`,
     "",
-    documents.length > 0
-      ? `Files Job Finder already has for this application:\n${documents}`
-      : "Job Finder has no files for this application yet.",
-    "",
     config.sources.approvedLetterText !== undefined
       ? `The person already approved this application's letter (JSON text): ${JSON.stringify(config.sources.approvedLetterText)}. Use these exact words for every letter text field and file field, even when an earlier letter is already present. Replace the earlier letter; do not rewrite it or ask for approval again. This approved letter takes precedence over other letter files and writing preferences. For a file field, upload invokes the approved-text renderer; any available letter document id can identify the upload request.`
       : null,
@@ -113,7 +103,7 @@ export function createApplyUserPrompt(config: ApplyAgentConfig): string {
       : null,
     "",
     "The first page view is already included. Read it and start filling this step; no observe call is needed unless that view failed or you need new page facts. Move between steps when the form has several, and finish when there is nothing left to fill in.",
-    "Each turn costs time: from the FIRST step use ONE fill_fields call for all answerable fields, approved declaration boxes, and requested available documents (tool: upload with ref and documentId). The first page view lists the files you can attach; do not call list_application_documents for files already shown. Include small page chores as tool: click entries in the order needed. When confident every required field is answered, include thenContinue with the visible Continue or Next ref to fill and advance in one call; otherwise omit it. Read the returned page, fix any validation errors or unchanged step, then handle newly revealed fields or questions for the person. On the final page, include finishWhenReady: true in fill_fields when the batch completes the form; it runs the ordinary finish checks without another turn and does not press Send. Never combine it with thenContinue. Never use thenContinue for final submit. If this step has questions for the person, fill and attach everything else without Continue, then call finish once with needsPerson: true to hand back all the questions. A field that already shows the right value is done; do not type it again.",
+    "From the FIRST step, batch all answerable fields and available uploads in fill_fields as instructed above. The page view includes the document ids. A field that already shows the right value is done; do not type it again.",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

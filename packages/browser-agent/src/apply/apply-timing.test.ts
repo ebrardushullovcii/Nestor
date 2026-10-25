@@ -6,6 +6,38 @@ import { buildApplyFormObservation } from "./page-hands";
 import recordedPage from "./synthetic-page.snapshot.json";
 import { createApplyTiming } from "./apply-timing";
 
+test("counts provider tokens for filling and checks, and exposes calls without usage", async () => {
+  const timing = createApplyTiming(() => new Date(0));
+  let call = 0;
+  const client = timing.model({
+    chatWithTools: (_messages, _tools, options) => {
+      expect(options?.includeUsage).toBe(true);
+      if (++call === 3) return Promise.resolve({});
+      return Promise.resolve({
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cachedInputTokens: 60,
+          reasoningTokens: 5,
+        },
+      });
+    },
+  });
+  await client.chatWithTools([], [], { parallelToolCalls: true });
+  const first = timing.snapshot();
+  await client.chatWithTools([], []);
+  await client.chatWithTools([], []);
+  expect(first.tokenUsage?.inputTokens).toBe(100);
+  expect(ApplyAgentTimingSchema.parse(timing.snapshot()).tokenUsage).toEqual({
+    reportedCalls: 2,
+    unreportedCalls: 1,
+    inputTokens: 200,
+    outputTokens: 40,
+    cachedInputTokens: 120,
+    reasoningTokens: 10,
+  });
+});
+
 test("measures decisions, auxiliary checks, reads, writes, uploads and longest steps without storing content", async () => {
   let ms = 0;
   const timing = createApplyTiming(() => new Date(ms));

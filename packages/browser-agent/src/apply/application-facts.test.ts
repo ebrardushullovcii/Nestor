@@ -1,7 +1,33 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
-import { storedFactFor, storedFacts } from "./application-facts";
+import {
+  serializeApplicationData,
+  storedFactFor,
+  storedFacts,
+} from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+
+test("prompt data keeps unknown, No, zero and scoped facts without empty strings or lists", () => {
+  const facts = {
+    missing: null,
+    blank: "",
+    empty: [],
+    unknown: undefined,
+    answers: { sponsorship: false, years: 0, notice: "No", country: "Germany" },
+    saved: [
+      {
+        question: "Available hours?",
+        answer: "0",
+        applicationScope: { hiringCountry: "Germany" },
+      },
+    ],
+  };
+  expect(JSON.parse(serializeApplicationData(facts))).toEqual({
+    missing: null,
+    answers: facts.answers,
+    saved: facts.saved,
+  });
+});
 
 const sources: ApplyAnswerSources = {
   profile: CandidateProfileSchema.parse({

@@ -13,6 +13,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("application callers can request actual token usage without a stream listener", async () => {
+  const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(
+      typeof init?.body === "string" ? init.body : "{}",
+    ) as { stream_options?: unknown };
+    expect(body.stream_options).toEqual({ include_usage: true });
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Done" }, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 1200,
+            completion_tokens: 30,
+            prompt_tokens_details: { cached_tokens: 1000 },
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  const client = createJobFinderAiClientFromEnvironment(createEnvironment());
+  const result = await client.chatWithTools!([], [], { includeUsage: true });
+  expect(result.usage).toEqual({
+    inputTokens: 1200,
+    outputTokens: 30,
+    cachedInputTokens: 1000,
+    reasoningTokens: 0,
+  });
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
 /** Records the effort each request asked for; answers every call with `{}`-ish JSON. */
 function captureEfforts(): Array<{ model: string; effort: string | null }> {
   const requests: Array<{ model: string; effort: string | null }> = [];

@@ -1,4 +1,4 @@
-import type { JobPosting } from '@nestor/contracts'
+import type { JobPosting, ModelTokenUsage } from '@nestor/contracts'
 import type { AgentLoopToolDefinition } from '@nestor/agent-runtime'
 import type { AgentMessage, ToolCall } from '../types'
 
@@ -24,11 +24,13 @@ export interface LLMClient {
       parallelToolCalls?: boolean
       maxOutputTokens?: number
       reasoningTask?: BrowserAgentReasoningTask
+      includeUsage?: boolean
     }
   ) => Promise<{
     content?: string
     toolCalls?: ToolCall[]
     reasoning?: string
+    usage?: ModelTokenUsage
   }>
 }
 
