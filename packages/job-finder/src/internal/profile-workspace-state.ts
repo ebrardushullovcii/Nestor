@@ -122,10 +122,12 @@ export async function deriveAndPersistProfileSetupState(
       searchPreferences: input.searchPreferences,
     }),
   });
-  // Explicit completion already supplies this evidence to the derivation.
-  // Reading past searches cannot change that result on an unchanged view.
+  // Search history can complete only an in-progress, otherwise ready setup.
+  // Completed or incomplete setups derive the same result without that read.
   const hasRunSearch =
-    nextState.status !== "completed" &&
+    nextState.status === "in_progress" &&
+    evaluateProfileSetupReadiness(input.profile, input.searchPreferences)
+      .materiallyComplete &&
     (await ctx.repository.readDiscoveryRunStates()).some(
       (run) => !run.isActive,
     );
