@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { JobPostingSchema } from "@nestor/contracts";
 
-import { stripPictographGlyphs } from "./listing-detail-extraction";
+import { stripPictographGlyphs } from "@nestor/browser-agent/listing-detail-extraction";
 import {
   normalizeListingText,
   resolveListingEmployer,

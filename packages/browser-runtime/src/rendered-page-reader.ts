@@ -7,6 +7,7 @@ export async function readRenderedPageHtml(
   options: {
     signal?: AbortSignal;
     onPage?: (page: Page) => void | Promise<void>;
+    ready?: (html: string) => boolean;
   } = {},
 ): Promise<{ html: string; finalUrl: string }> {
   const address = new URL(url);
@@ -31,7 +32,14 @@ export async function readRenderedPageHtml(
       .waitForLoadState("networkidle", { timeout: 8_000 })
       .catch(() => undefined);
     options.signal?.throwIfAborted();
-    return { html: await page.content(), finalUrl: page.url() };
+    let html = await page.content();
+    const deadline = Date.now() + 12_000;
+    while (options.ready && !options.ready(html) && Date.now() < deadline) {
+      options.signal?.throwIfAborted();
+      await page.waitForTimeout(200);
+      html = await page.content().catch(() => html);
+    }
+    return { html, finalUrl: page.url() };
   } finally {
     options.signal?.removeEventListener("abort", abort);
     await page.close().catch(() => undefined);

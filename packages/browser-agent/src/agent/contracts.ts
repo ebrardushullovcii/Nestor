@@ -92,6 +92,7 @@ export interface JobExtractor {
         | 'employerDomain'
         | 'benefits'
         | 'searchRejection'
+        | 'needsRenderedPage'
       >
     >
   >>
