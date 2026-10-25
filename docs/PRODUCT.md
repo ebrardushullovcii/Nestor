@@ -38,6 +38,8 @@ Quick review, Safeguards, the daily limit, the Search plans screen, Companies, O
 
 One clear main action per screen. The same list/detail layout and selection everywhere. Every action shows what happened at once. No dead ends. No one-option dropdowns. The design language stays as it is.
 
+Use AI judgment where rigid rules break, and spend AI only where it's needed. Sweat the small quality-of-life touches, and don't regress anything the person actually uses.
+
 ## Speed
 
 Launch under a second. Navigation, scrolling and clicks instant, with no stutter. The work a screen does must not grow with how many jobs there are, and a screen loads only what it shows.

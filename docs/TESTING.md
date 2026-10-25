@@ -9,6 +9,7 @@
 | discovery or source-debug                          | `pnpm source-generic:check` plus focused package tests                                                     |
 | desktop UI                                         | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
 | broad cross-package behavior                       | `pnpm verify:affected`                                                                                     |
+| release candidate, only when the user declares one | `pnpm verify`, then `pnpm test:evidence` (ADR 0014)                                                        |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no coverage, by design), `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
