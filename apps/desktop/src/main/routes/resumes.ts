@@ -87,7 +87,7 @@ export function registerResumeRoutes(ipcMain: IpcMain): void {
       const service = await resumeService();
       const { job, resume } = service.get(jobId);
       const level = resume?.level ?? "tailored";
-      const chosen = await chooseResumeExportPath(
+      const target = await chooseResumeExportPath(
         event.sender,
         buildResumeExportDefaultPath(
           level === "original" ? "Resume" : "Tailored Resume",
@@ -95,10 +95,7 @@ export function registerResumeRoutes(ipcMain: IpcMain): void {
           job.company,
         ),
       );
-      if (chosen.canceled || !chosen.filePath) return { outputPath: null };
-      const target = chosen.filePath.toLowerCase().endsWith(".pdf")
-        ? chosen.filePath
-        : `${chosen.filePath}.pdf`;
+      if (!target) return { outputPath: null };
       return { outputPath: await service.exportPdf(jobId, target) };
     },
   );
