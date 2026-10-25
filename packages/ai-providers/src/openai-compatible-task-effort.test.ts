@@ -1,6 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
-import type { ModelReasoningTask } from "./openai-compatible-transport";
+import {
+  DEFAULT_OPENCODE_GO_BASE_URL,
+  DEFAULT_TEXT_MODEL,
+  type ModelReasoningTask,
+} from "./openai-compatible-transport";
 import {
   createEnvironment,
   createJobPosting,
@@ -11,6 +15,90 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+test("batch callers can require valid JSON from the provider", async () => {
+  const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(
+      typeof init?.body === "string" ? init.body : "{}",
+    ) as { response_format?: unknown };
+    expect(body.response_format).toEqual({ type: "json_object" });
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: '{"fits":[]}' }, finish_reason: "stop" },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  const client = createJobFinderAiClientFromEnvironment(createEnvironment());
+  expect(
+    (
+      await client.chatWithTools!([], [], {
+        jsonOutput: true,
+        jsonSchema: { name: "fits", schema: { type: "object" } },
+      })
+    ).content,
+  ).toBe('{"fits":[]}');
+});
+
+test("batch callers use strict response schemas only on the verified route", async () => {
+  const schema = {
+    name: "fits",
+    schema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+      required: [],
+    },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as { text: { format: unknown } };
+      expect(body.text.format).toEqual({
+        type: "json_schema",
+        strict: true,
+        ...schema,
+      });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: "completed",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "{}" }],
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    }),
+  );
+  const client = createJobFinderAiClientFromEnvironment(
+    createEnvironment({
+      NESTOR_AI_BASE_URL: DEFAULT_OPENCODE_GO_BASE_URL,
+      NESTOR_AI_MODEL: DEFAULT_TEXT_MODEL,
+      NESTOR_AI_API_MODE: "responses",
+    }),
+  );
+  expect(
+    (
+      await client.chatWithTools!([], [], {
+        jsonOutput: true,
+        jsonSchema: schema,
+      })
+    ).content,
+  ).toBe("{}");
 });
 
 test("application callers can request actual token usage without a stream listener", async () => {

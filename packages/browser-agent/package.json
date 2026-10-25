@@ -21,6 +21,7 @@
   "dependencies": {
     "@nestor/agent-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "parse5": "^7.3.0",
     "playwright": "^1.63.0",
     "zod": "^3.23.8"
   },

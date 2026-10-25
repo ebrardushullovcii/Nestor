@@ -857,6 +857,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
             apiMode,
             model: validatedOptions.model,
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
+            ...(options?.jsonOutput ? { jsonOutput: true } : {}),
+            ...(options?.jsonSchema &&
+            isStableFitRoute({ ...validatedOptions, apiMode })
+              ? { jsonSchema: options.jsonSchema }
+              : {}),
             reasoningSummary: streamingEnabled,
             includeStreamUsage:
               streamingEnabled &&

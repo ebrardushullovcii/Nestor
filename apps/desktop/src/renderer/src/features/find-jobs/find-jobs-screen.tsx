@@ -443,7 +443,9 @@ export function FindJobsScreen() {
                 onToggleFloor={() => {
                   setFloorTouched(true);
                   setFitFloor(
-                    floor === null ? (PICKY_MIN_FIT[lastPicky] ?? 50) : null,
+                    floor === null
+                      ? (PICKY_MIN_FIT[lastPicky] ?? PICKY_MIN_FIT.balanced)
+                      : null,
                   );
                 }}
                 sort={sort}

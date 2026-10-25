@@ -145,6 +145,22 @@ export function JobDetailPane(props: {
             <FactList items={job.fit?.reasons ?? []} title="Why it fits" />
             <FactList items={job.fit?.gaps ?? []} title="What's missing" />
           </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FactList
+              items={job.fit?.role ? [job.fit.role.explanation] : []}
+              title="Role"
+            />
+            <FactList
+              items={
+                job.fit?.preferences ? [job.fit.preferences.explanation] : []
+              }
+              title="Preferences"
+            />
+            <FactList
+              items={job.fit?.coverage ? [job.fit.coverage.explanation] : []}
+              title="Coverage"
+            />
+          </div>
         </div>
         {job.sightings.length > 1 ? (
           <div className="grid gap-1.5">

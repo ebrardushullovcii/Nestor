@@ -2,7 +2,6 @@ import { setImmediate as yieldTurn } from "node:timers/promises";
 import {
   isRunnableJobDiscoveryTarget,
   JobSearchSettingsSchema,
-  type FoundJob,
   type JobDiscoveryTarget,
   type JobSearchRecord,
   type JobSearchSourceState,
@@ -92,97 +91,171 @@ export function createJobSearchRunner(
       deps,
       context,
       signal,
-      concurrency(deps.concurrency?.fit, 2),
+      concurrency(deps.concurrency?.fit, 6),
       (scored) => update(run, { scored }),
       (error) => {
         fitError = errorMessage(error);
       },
+      settings,
     );
     run.fits = fits;
     run.setReady(fits);
     const states = new Map(sources.map((source) => [source.sourceId, source]));
-    const feeds: JobDiscoveryTarget[] = [];
-    const browsers: JobDiscoveryTarget[] = [];
+    const inventories = new Map<
+      string,
+      Awaited<ReturnType<typeof deps.engine.collectSource>>
+    >();
     try {
-      for (const target of targets) {
-        signal.throwIfAborted();
-        try {
-          (deps.engine.lane(target, context) === "feed"
-            ? feeds
-            : browsers
-          ).push(target);
-        } catch (error) {
+      await inWorkers(
+        targets,
+        concurrency(deps.concurrency?.sources, 4),
+        signal,
+        async (target) => {
           const source = states.get(target.id)!;
-          source.state = "failed";
-          source.message = errorMessage(error);
-          update(run, { sourcesDone: 1 });
-        }
-      }
-      const work = async (target: JobDiscoveryTarget) => {
-        const source = states.get(target.id)!;
-        const seen = new Set<string>();
-        source.state = "searching";
-        notify();
-        const save = (found: readonly FoundJob[]) => {
-          if (signal.aborted) return;
-          // A site's batches repeat what it already handed over.
-          const jobs = found.filter((job) => {
-            const key = job.sourceJobId || job.url;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          if (jobs.length === 0) return;
-          const result = deps.store.saveFoundJobs({
-            searchId: run.record!.id,
-            jobs,
-          });
-          source.found += jobs.length;
-          source.added += result.added.length;
-          source.hidden += result.hidden.length;
-          update(run, {
-            found: jobs.length,
-            added: result.added.length,
-            merged: result.merged.length,
-          });
-          fits.enqueue(result.added);
-        };
-        try {
-          const result = await deps.engine.searchSite({
-            target,
-            settings,
-            context,
-            signal,
-            knownUrls: (urls) => deps.store.findKnownUrls(urls),
-            found: save,
-            message(message) {
-              if (!signal.aborted) {
-                source.message = message;
-                notify();
-              }
-            },
-          });
-          source.state = result.needsYou ? "needs_you" : "done";
-          source.message = result.message;
-        } catch (error) {
-          if (signal.aborted) return;
-          source.state = "failed";
-          source.message = errorMessage(error);
-        } finally {
-          if (!signal.aborted) {
-            update(run, { sourcesDone: 1 });
+          source.state = "searching";
+          source.message = "Collecting listings";
+          notify();
+          try {
+            const inventory = await abortable(
+              deps.engine.collectSource({
+                target,
+                context,
+                settings,
+                signal,
+                knownUrls: (urls) => deps.store.findKnownUrls(urls),
+                message: (text) => {
+                  if (!signal.aborted) {
+                    source.message = text;
+                    notify();
+                  }
+                },
+              }),
+              signal,
+            );
+            inventories.set(target.id, inventory);
+            source.message = `${inventory.cards.length} listings collected. Checking roles.`;
+            if (inventory.needsYou) source.state = "needs_you";
+          } catch (error) {
+            if (signal.aborted) return;
+            source.state = "failed";
+            source.message = errorMessage(error);
           }
-        }
-        await yieldTurn();
-      };
-      await Promise.all([
-        inWorkers(feeds, concurrency(deps.concurrency?.feeds, 4), signal, work),
-        inWorkers(
-          browsers,
-          concurrency(deps.concurrency?.browser, 2),
+          notify();
+        },
+      );
+      signal.throwIfAborted();
+      const cards = targets.flatMap(
+        (target) => inventories.get(target.id)?.cards ?? [],
+      );
+      const screened = await abortable(
+        deps.engine.screenCards({
+          cards,
+          context,
+          settings,
           signal,
-          work,
-        ),
+          knownUrls: (urls) => deps.store.findKnownUrls(urls),
+          seenCards: (cards, key) => deps.store.lookupSeenCards(cards, key),
+        }),
+        signal,
+      );
+      signal.throwIfAborted();
+      deps.store.rememberSeenCards(screened.seen);
+      for (const source of sources) {
+        if (source.state === "failed" || source.state === "needs_you") continue;
+        const count = screened.related.filter(
+          (card) => card.sourceId === source.sourceId,
+        ).length;
+        source.message = count
+          ? `Reading ${count} related listings in full`
+          : "No new related listings";
+      }
+      notify();
+      const full = await abortable(
+        deps.engine.readListings({ cards: screened.related, signal }),
+        signal,
+      );
+      signal.throwIfAborted();
+      const days =
+        settings.postedWithin === "week"
+          ? 7
+          : settings.postedWithin === "month"
+            ? 30
+            : null;
+      const cutoff = days === null ? null : Date.now() - days * 86_400_000;
+      const jobs = full.jobs.map((job) =>
+        cutoff !== null && job.postedAt && Date.parse(job.postedAt) < cutoff
+          ? {
+              ...job,
+              hiddenReason: `Posted more than ${days} days ago; this search kept newer listings. You can show it again.`,
+            }
+          : job,
+      );
+      // Merge every sighting before a fit request can start.
+      const saved = deps.store.saveFoundJobs({
+        searchId: run.record!.id,
+        jobs,
+      });
+      update(run, {
+        found: jobs.length,
+        added: saved.added.length,
+        merged: saved.merged.length,
+      });
+      const newIds = [...saved.added, ...saved.hidden];
+      const newJobs = newIds.map((id) => deps.store.getJob(id)!);
+      const sourceOfUrl = new Map(jobs.map((job) => [job.url, job.sourceId]));
+      const visible = new Set(saved.added);
+      const hidden = new Set(saved.hidden);
+      for (const source of sources) {
+        const inventory = inventories.get(source.sourceId);
+        if (inventory) {
+          const related = screened.related.filter(
+            (card) => card.sourceId === source.sourceId,
+          );
+          const urls = new Set(related.map((card) => card.url));
+          const rejected = screened.seen.filter((card) =>
+            inventory.cards.some((item) => item.url === card.url),
+          ).length;
+          const failed = full.failures.filter((failure) =>
+            urls.has(failure.url),
+          ).length;
+          if (
+            full.failures.some(
+              (failure) => urls.has(failure.url) && failure.needsYou,
+            )
+          )
+            source.state = "needs_you";
+          source.found = jobs.filter(
+            (job) => job.sourceId === source.sourceId,
+          ).length;
+          source.added = newJobs.filter(
+            (job) =>
+              visible.has(job.id) &&
+              sourceOfUrl.get(job.url) === source.sourceId,
+          ).length;
+          source.hidden = newJobs.filter(
+            (job) =>
+              hidden.has(job.id) &&
+              sourceOfUrl.get(job.url) === source.sourceId,
+          ).length;
+          source.message = [
+            `${inventory.cards.length} listings; ${related.length} new related; ${rejected} unrelated; ${inventory.cards.length - related.length - rejected} already seen.`,
+            failed
+              ? `${failed} listing reads failed and can be retried.`
+              : null,
+            source.hidden
+              ? `${source.hidden} saved hidden by your posting-age choice.`
+              : null,
+            ...inventory.notes,
+          ]
+            .filter(Boolean)
+            .join(" ");
+          if (source.state === "searching") source.state = "done";
+        }
+        update(run, { sourcesDone: 1 });
+      }
+      fits.enqueue([
+        ...newIds,
+        ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
       ]);
       await fits.drain();
       finish(run, signal.aborted ? "stopped" : "done", fitError);
@@ -317,9 +390,10 @@ export function createJobSearchRunner(
             deps,
             context,
             controller.signal,
-            concurrency(deps.concurrency?.fit, 2),
+            concurrency(deps.concurrency?.fit, 6),
             () => {},
             () => {},
+            search?.settings,
           );
           fits.enqueue(deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER));
           await fits.drain();

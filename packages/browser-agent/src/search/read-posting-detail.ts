@@ -9,22 +9,8 @@ import {
   listingPageLinks,
   listingPageText,
   LISTING_PAGE_OMISSION_MARKER,
-  htmlToPlainText,
 } from "./listing-detail-extraction";
-import { isBotCheckInterstitial } from "./bot-check";
-
-function blockedByCheck(html: string): boolean {
-  const title = htmlToPlainText(
-    html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
-  );
-  return isBotCheckInterstitial({
-    title,
-    bodyTextExcerpt: listingPageText(html),
-    headings: [],
-    controls: [],
-    links: [],
-  });
-}
+import { blockedByCheck } from "./bot-check";
 
 /** Read a new listing once before any fit judgment or persistence checkpoint. */
 export async function readPostingDetail(input: {

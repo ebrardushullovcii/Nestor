@@ -10,6 +10,7 @@
  */
 import { TRACKER_SCHEMA } from "./tracker-schema";
 import { APPLICATION_SCHEMA } from "./application-schema";
+import { SEEN_CARDS_SCHEMA } from "./seen-cards";
 
 export const JOB_STORE_VERSION = 3;
 
@@ -174,5 +175,6 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   SEARCHES,
   RESUMES,
   APPLICATION_SCHEMA,
+  SEEN_CARDS_SCHEMA,
   TRACKER_SCHEMA,
 ];

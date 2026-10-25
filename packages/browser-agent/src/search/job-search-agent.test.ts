@@ -294,6 +294,23 @@ test("search checkpoints and the final result carry the same full listing body",
   expect(readPostingPage).toHaveBeenCalledTimes(1);
 });
 
+test("browser inventory fallback collects cards without premature detail reads or fit preferences", async () => {
+  const card = posting("Senior Data Analyst", "Northwind", "inventory");
+  const readPostingPage = vi.fn(() => Promise.reject(new Error("Details belong to the next engine step")));
+  const inventory = config({ inventoryOnly: true });
+  const selection = buildExtractionSelectionContext(inventory, []);
+  expect(selection).not.toContain("workEligibility");
+  expect(selection).not.toContain("seniorityLevels");
+  expect(createJobSearchPrompts(inventory).system).toContain("Do not open details");
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }), config: inventory, readPostingPage,
+    llmClient: scripted([{ name: "extract_jobs", args: { pageType: "search_results" } }, { name: "finish", args: { reason: "Inventory collected." } }]),
+    jobExtractor: { extractJobsFromPage: () => Promise.resolve([card]) },
+  });
+  expect(result.jobs[0]?.title).toBe("Senior Data Analyst");
+  expect(readPostingPage).not.toHaveBeenCalled();
+});
+
 test.each(["same", "text", "link", "unlinked"])(
   "results section reuse across filter routes checks all page evidence (%s)",
   async (change) => {

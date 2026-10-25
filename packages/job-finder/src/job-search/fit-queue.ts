@@ -1,5 +1,6 @@
 import { abortable } from "./async";
 import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
+import type { JobSearchSettings } from "@nestor/contracts";
 
 export function createFitQueue(
   deps: JobSearchRunnerDeps,
@@ -8,6 +9,7 @@ export function createFitQueue(
   limit: number,
   onScored: (count: number) => void,
   onError: (error: unknown) => void,
+  settings?: JobSearchSettings,
 ) {
   const pending: number[] = [];
   const seen = new Set<number>();
@@ -25,15 +27,16 @@ export function createFitQueue(
   const judge = async (ids: number[]) => {
     const jobs = ids.flatMap((id) => {
       const job = deps.store.getJob(id);
-      return job &&
-        job.fitScore === null &&
-        (job.stage === "found" || job.stage === "shortlisted")
-        ? [job]
-        : [];
+      return job && job.fitScore === null ? [job] : [];
     });
     if (jobs.length === 0) return;
     const updates = await abortable(
-      deps.engine.judgeFits({ jobs, context, signal }),
+      deps.engine.fitJobs({
+        jobs,
+        context,
+        signal,
+        ...(settings?.note ? { request: settings.note } : {}),
+      }),
       signal,
     );
     if (signal.aborted) return;
@@ -52,10 +55,10 @@ export function createFitQueue(
     }
     while (
       active.size < limit &&
-      (pending.length >= 20 ||
+      (pending.length >= 24 ||
         ((drainers > 0 || flushCount > 0) && pending.length > 0))
     ) {
-      const batch = pending.splice(0, 20);
+      const batch = pending.splice(0, 24);
       flushCount = Math.max(0, flushCount - batch.length);
       const task = judge(batch)
         .catch((error: unknown) => {

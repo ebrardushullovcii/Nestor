@@ -2072,7 +2072,7 @@ export function createBrowserAgentRuntime(
     const prepared = await prepareAutomationPageForTarget(context, {
       targetUrl: navigationTarget,
       acceptTargetOriginAfterTimeout: true,
-      bringToFront: currentSessionState.status !== "ready",
+      bringToFront: !agentOptions.inventoryOnly && currentSessionState.status !== "ready",
       closeOtherPages: !agentOptions.dedicatedPage,
       ...(agentOptions.dedicatedPage ? { reuseExistingPage: false } : {}),
       ...(agentOptions.protectedPages
@@ -3379,6 +3379,7 @@ export function createBrowserAgentRuntime(
 
       const agentConfig: AgentConfig = {
         source,
+        ...(agentOptions.inventoryOnly ? { inventoryOnly: true } : {}),
         ...(agentOptions.lookupKnownUrls
           ? { lookupKnownUrls: agentOptions.lookupKnownUrls }
           : {}),

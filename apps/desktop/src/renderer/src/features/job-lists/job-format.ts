@@ -1,4 +1,9 @@
-import type { JobRow, JobStage, WorkMode } from "@nestor/contracts";
+import {
+  JOB_FIT_BANDS,
+  type JobRow,
+  type JobStage,
+  type WorkMode,
+} from "@nestor/contracts";
 
 export type FitTone = "positive" | "active" | "muted" | "neutral";
 
@@ -19,8 +24,11 @@ export function describeFit(
           : "Not scored",
       tone: "neutral",
     };
-  if (score >= 70) return { label: "Strong fit", tone: "positive" };
-  if (score >= 50) return { label: "Good fit", tone: "active" };
+  if (score >= JOB_FIT_BANDS.strong)
+    return { label: "Strong fit", tone: "positive" };
+  if (score >= JOB_FIT_BANDS.good) return { label: "Good fit", tone: "active" };
+  if (score >= JOB_FIT_BANDS.stretch)
+    return { label: "Stretch", tone: "muted" };
   return { label: "Weak fit", tone: "muted" };
 }
 

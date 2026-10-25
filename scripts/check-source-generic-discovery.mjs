@@ -52,6 +52,7 @@ export const SCANNED_SOURCE_PREFIXES = [
   "packages/job-list-policy/src/",
   "packages/browser-agent/src/",
   "packages/job-finder/src/internal/",
+  "packages/job-finder/src/job-search/",
 ];
 
 export const SOURCE_EXCLUSIONS = [
