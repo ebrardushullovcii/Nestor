@@ -1,7 +1,5 @@
 import {
-  ApplyJobResultSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationRecordSchema,
   SubmissionArmedMarkerSchema,
   SubmissionExecutionGrantSchema,
   SubmissionIdempotencyRecordSchema,
@@ -16,9 +14,6 @@ import {
   isSubmissionPreflightBoundToDecisionPolicy,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationAuthorityEnvelope,
-  type ApplicationEvent,
-  type ApplicationRecord,
-  type ApplyJobResult,
   type SubmissionArmedMarker,
   type JobFinderRepositoryState,
   type SubmissionExecutionGrant,
@@ -43,41 +38,6 @@ interface ApplicationAuthorityStateStore {
 
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-const SUBMISSION_OUTCOME_UNCERTAIN_SUMMARY =
-  "Submission outcome needs manual verification.";
-const SUBMISSION_OUTCOME_UNCERTAIN_DETAIL =
-  "The employer site did not provide enough external evidence to prove whether the final action completed. Automatic retry is blocked until a person verifies the employer-site state.";
-const SUBMISSION_OUTCOME_UNCERTAIN_NEXT_ACTION =
-  "Verify the application on the employer site before taking another submission action.";
-const SUBMISSION_NOT_SUBMITTED_SUMMARY = "Final action not submitted.";
-const SUBMISSION_NOT_SUBMITTED_RETRY_NEXT_ACTION =
-  "Review the prepared application before trying the final action again.";
-const SUBMISSION_NOT_SUBMITTED_BLOCKED_NEXT_ACTION =
-  "Review the submission blocker before taking another submission action.";
-const SUBMISSION_NOT_SUBMITTED_BLOCKED_SUMMARY =
-  "Automatic retry is blocked for this submission outcome. Review the application and authority state before taking another submission action.";
-const APPLICATION_AUTHORITY_EVENT_HISTORY_LIMIT = 100;
-
-function mergeApplicationEvents(
-  existingEvents: readonly ApplicationEvent[],
-  additionalEvents: readonly ApplicationEvent[],
-): ApplicationEvent[] {
-  const byId = new Map(existingEvents.map((event) => [event.id, event]));
-  for (const event of additionalEvents) {
-    byId.set(event.id, event);
-  }
-
-  return [...byId.values()]
-    .sort((left, right) => {
-      const atDifference =
-        new Date(right.at).getTime() - new Date(left.at).getTime();
-      return atDifference === 0
-        ? left.id.localeCompare(right.id)
-        : atDifference;
-    })
-    .slice(0, APPLICATION_AUTHORITY_EVENT_HISTORY_LIMIT);
 }
 
 function replaceById<T extends { id: string }>(values: T[], next: T): void {
@@ -439,379 +399,6 @@ function matchesOutcomeLineage(
     idempotency.authorityEnvelopeId === outcome.authorityEnvelopeId &&
     idempotency.authorityRevision === outcome.authorityRevision
   );
-}
-
-function hasDurableFinalSubmitAuthorization(
-  state: JobFinderRepositoryState,
-  outcome: SubmissionOutcomeRecord,
-): boolean {
-  const preflight =
-    state.submissionPreflights.find(
-      (value) => value.id === outcome.preflightId,
-    ) ?? null;
-  const authority =
-    state.applicationAuthorityEnvelopes.find(
-      (value) =>
-        value.id === outcome.authorityEnvelopeId &&
-        value.revision === outcome.authorityRevision,
-    ) ?? null;
-  const marker =
-    state.submissionArmedMarkers.find(
-      (value) =>
-        value.preflightId === outcome.preflightId &&
-        value.idempotencyKey === outcome.idempotencyKey,
-    ) ?? null;
-  if (
-    preflight === null ||
-    authority === null ||
-    marker === null ||
-    !matchesPreflightLineage(preflight, outcome) ||
-    !matchesMarkerLineage(marker, preflight)
-  ) {
-    return false;
-  }
-  if (authority.mode === "autonomous_submit") {
-    return true;
-  }
-  if (authority.mode !== "confirm_before_submit") {
-    return false;
-  }
-  return state.submissionExecutionGrants.some(
-    (grant) =>
-      grant.preflightId === preflight.id &&
-      grant.status === "consumed" &&
-      matchesPreflightLineage(preflight, grant),
-  );
-}
-
-/**
- * A result whose last attempt is on record as not sent can take the outcome
- * of a later attempt under a different key: the person pressed Send again
- * after nothing reached the site. A sent or uncertain outcome is never
- * replaced.
- */
-function isLaterAttemptAfterNotSubmitted(
-  previous: SubmissionOutcomeRecord,
-  outcome: SubmissionOutcomeRecord,
-): boolean {
-  return (
-    previous.outcome === "not_submitted" &&
-    previous.idempotencyKey !== outcome.idempotencyKey &&
-    previous.preflightId !== outcome.preflightId
-  );
-}
-
-interface ReconciledSubmissionOutcomeProjection {
-  applicationRecord: ApplicationRecord;
-  result: ApplyJobResult;
-}
-
-/**
- * Reconciles a terminal submission outcome into the already persisted
- * ApplyJobResult receipt and its exact ApplicationRecord. The authority
- * outcome, result receipt, and application projection are one durable fact,
- * so callers must never be able to commit only one of them. A projection is
- * accepted only when every persisted lineage field and both parent rows match
- * the outcome exactly.
- */
-function buildReconciledSubmissionOutcomeProjection(
-  state: JobFinderRepositoryState,
-  outcome: SubmissionOutcomeRecord,
-): ReconciledSubmissionOutcomeProjection | null {
-  const current =
-    state.applyJobResults.find((value) => value.id === outcome.resultId) ??
-    null;
-  if (
-    current === null ||
-    current.runId !== outcome.runId ||
-    current.jobId !== outcome.jobId ||
-    current.applicationRecordId !== outcome.applicationRecordId
-  ) {
-    return null;
-  }
-
-  const receipt = current.privacyReceipt;
-  if (
-    receipt === null ||
-    receipt.finalSubmitOccurred !== false ||
-    receipt.lineage.runId !== outcome.runId ||
-    receipt.lineage.jobId !== outcome.jobId ||
-    receipt.lineage.resultId !== outcome.resultId ||
-    receipt.lineage.applicationRecordId !== outcome.applicationRecordId
-  ) {
-    return null;
-  }
-
-  if (
-    receipt.submissionOutcome !== null &&
-    !sameValue(receipt.submissionOutcome, outcome) &&
-    !isLaterAttemptAfterNotSubmitted(receipt.submissionOutcome, outcome)
-  ) {
-    return null;
-  }
-
-  const currentApplicationRecord =
-    state.applicationRecords.find(
-      (value) => value.id === outcome.applicationRecordId,
-    ) ?? null;
-  if (
-    currentApplicationRecord === null ||
-    currentApplicationRecord.jobId !== outcome.jobId
-  ) {
-    return null;
-  }
-
-  try {
-    const finalSubmitAuthorized = hasDurableFinalSubmitAuthorization(
-      state,
-      outcome,
-    );
-    if (outcome.outcome === "submitted") {
-      const verifiedAt = outcome.verifiedAt;
-      if (verifiedAt === null) return null;
-      const applicationRecord = ApplicationRecordSchema.parse({
-        ...currentApplicationRecord,
-        status: "submitted",
-        lastActionLabel: "Application submitted",
-        nextActionLabel: null,
-        lastUpdatedAt: verifiedAt,
-        lastAttemptState: "submitted",
-        latestBlocker: null,
-        events: mergeApplicationEvents(currentApplicationRecord.events, [
-          {
-            id: `event_submission_outcome_${outcome.id}`,
-            at: verifiedAt,
-            title: "Application submitted",
-            detail:
-              "The employer site confirmed that it received the application.",
-            emphasis: "positive",
-          },
-        ]),
-      });
-      const result = ApplyJobResultSchema.parse({
-        ...current,
-        automaticSendPending: false,
-        state: "submitted",
-        summary: "Application submitted",
-        detail: "The employer site confirmed that it received the application.",
-        updatedAt: verifiedAt,
-        completedAt: verifiedAt,
-        blockerReason: null,
-        blockerSummary: null,
-        privacyReceipt: {
-          ...receipt,
-          finalSubmitAuthorized,
-          finalSubmitOccurred: true,
-          submissionOutcome: outcome,
-        },
-      });
-      return { applicationRecord, result };
-    }
-
-    const uncertain = outcome.outcome === "outcome_uncertain";
-    const applicationRecord = ApplicationRecordSchema.parse({
-      ...currentApplicationRecord,
-      lastActionLabel: uncertain
-        ? SUBMISSION_OUTCOME_UNCERTAIN_SUMMARY
-        : SUBMISSION_NOT_SUBMITTED_SUMMARY,
-      nextActionLabel: uncertain
-        ? SUBMISSION_OUTCOME_UNCERTAIN_NEXT_ACTION
-        : outcome.retry.eligible
-          ? SUBMISSION_NOT_SUBMITTED_RETRY_NEXT_ACTION
-          : SUBMISSION_NOT_SUBMITTED_BLOCKED_NEXT_ACTION,
-      lastUpdatedAt: outcome.attemptedAt,
-      lastAttemptState:
-        uncertain || !outcome.retry.eligible ? "paused" : "ready",
-      latestBlocker:
-        uncertain || !outcome.retry.eligible
-          ? {
-              code: "requires_manual_review" as const,
-              summary: uncertain
-                ? SUBMISSION_OUTCOME_UNCERTAIN_NEXT_ACTION
-                : SUBMISSION_NOT_SUBMITTED_BLOCKED_SUMMARY,
-            }
-          : null,
-      events: mergeApplicationEvents(currentApplicationRecord.events, [
-        {
-          id: `event_submission_outcome_${outcome.id}`,
-          at: outcome.attemptedAt,
-          title: uncertain
-            ? SUBMISSION_OUTCOME_UNCERTAIN_SUMMARY
-            : SUBMISSION_NOT_SUBMITTED_SUMMARY,
-          detail: uncertain
-            ? SUBMISSION_OUTCOME_UNCERTAIN_DETAIL
-            : outcome.retry.eligible
-              ? "The final action was not submitted. The prepared application remains available for review before another attempt."
-              : SUBMISSION_NOT_SUBMITTED_BLOCKED_SUMMARY,
-          emphasis:
-            uncertain || !outcome.retry.eligible ? "warning" : "neutral",
-        },
-      ]),
-    });
-    const result = ApplyJobResultSchema.parse({
-      ...current,
-      automaticSendPending: false,
-      ...(uncertain
-        ? {
-            state: "blocked" as const,
-            summary: SUBMISSION_OUTCOME_UNCERTAIN_SUMMARY,
-            detail: SUBMISSION_OUTCOME_UNCERTAIN_DETAIL,
-            updatedAt: outcome.attemptedAt,
-            completedAt: outcome.attemptedAt,
-            blockerReason: "submission_outcome_uncertain" as const,
-            blockerSummary: SUBMISSION_OUTCOME_UNCERTAIN_NEXT_ACTION,
-          }
-        : {}),
-      privacyReceipt: {
-        ...receipt,
-        finalSubmitAuthorized,
-        submissionOutcome: outcome,
-      },
-    });
-    return { applicationRecord, result };
-  } catch {
-    // An absent/cross-lineage application record or any future schema
-    // incompatibility is not safe to reconcile.
-    return null;
-  }
-}
-
-interface ResolvedSubmissionOutcomeProjection {
-  applicationRecord: ApplicationRecord;
-  result: ApplyJobResult;
-}
-
-function buildResolvedSubmissionOutcomeProjection(
-  state: JobFinderRepositoryState,
-  previousOutcome: SubmissionOutcomeRecord,
-  outcome: SubmissionOutcomeRecord,
-): ResolvedSubmissionOutcomeProjection | null {
-  const current =
-    state.applyJobResults.find((value) => value.id === outcome.resultId) ??
-    null;
-  const currentApplicationRecord =
-    state.applicationRecords.find(
-      (value) => value.id === outcome.applicationRecordId,
-    ) ?? null;
-  if (
-    current === null ||
-    current.runId !== outcome.runId ||
-    current.jobId !== outcome.jobId ||
-    current.applicationRecordId !== outcome.applicationRecordId ||
-    currentApplicationRecord === null ||
-    currentApplicationRecord.jobId !== outcome.jobId
-  ) {
-    return null;
-  }
-
-  const receipt = current.privacyReceipt;
-  if (
-    receipt === null ||
-    receipt.finalSubmitOccurred !== false ||
-    receipt.lineage.runId !== outcome.runId ||
-    receipt.lineage.jobId !== outcome.jobId ||
-    receipt.lineage.resultId !== outcome.resultId ||
-    receipt.lineage.applicationRecordId !== outcome.applicationRecordId ||
-    !sameValue(receipt.submissionOutcome, previousOutcome)
-  ) {
-    return null;
-  }
-
-  const submitted = outcome.outcome === "submitted";
-  const verificationTime = outcome.verifiedAt;
-  if (verificationTime === null) {
-    return null;
-  }
-
-  try {
-    const finalSubmitAuthorized =
-      receipt.finalSubmitAuthorized ||
-      hasDurableFinalSubmitAuthorization(state, outcome);
-    const applicationRecord = ApplicationRecordSchema.parse({
-      ...currentApplicationRecord,
-      status: submitted ? "submitted" : currentApplicationRecord.status,
-      lastActionLabel: submitted
-        ? "Application submission externally verified."
-        : SUBMISSION_NOT_SUBMITTED_SUMMARY,
-      nextActionLabel: submitted
-        ? null
-        : "Any new submission attempt requires explicit user approval.",
-      lastUpdatedAt: verificationTime,
-      lastAttemptState: submitted ? "submitted" : "paused",
-      latestBlocker: submitted
-        ? null
-        : {
-            code: "requires_manual_review" as const,
-            summary:
-              "External verification confirmed that the final action was not submitted. Automatic retry remains disabled.",
-          },
-      events: mergeApplicationEvents(currentApplicationRecord.events, [
-        {
-          id: `event_submission_outcome_resolution_${outcome.id}`,
-          at: verificationTime,
-          title: submitted
-            ? "Application submission externally verified."
-            : SUBMISSION_NOT_SUBMITTED_SUMMARY,
-          detail: submitted
-            ? "A person verified the employer-site state using external evidence."
-            : "A person verified the employer-site state. No automatic retry was enabled.",
-          emphasis: submitted ? "neutral" : "warning",
-        },
-      ]),
-    });
-    const result = ApplyJobResultSchema.parse({
-      ...current,
-      automaticSendPending: false,
-      state: submitted ? "submitted" : "blocked",
-      summary: submitted
-        ? "Application submission externally verified."
-        : SUBMISSION_NOT_SUBMITTED_SUMMARY,
-      detail: submitted
-        ? "External evidence verified that the final action completed on the employer site."
-        : "External evidence verified that the final action did not complete. Automatic retry remains disabled.",
-      updatedAt: verificationTime,
-      completedAt: verificationTime,
-      blockerReason: null,
-      blockerSummary: null,
-      privacyReceipt: {
-        ...receipt,
-        finalSubmitAuthorized,
-        finalSubmitOccurred: submitted,
-        submissionOutcome: outcome,
-      },
-    });
-    return { applicationRecord, result };
-  } catch {
-    return null;
-  }
-}
-
-function replaceApplyJobResult(
-  state: JobFinderRepositoryState,
-  result: ApplyJobResult,
-): void {
-  const index = state.applyJobResults.findIndex(
-    (value) => value.id === result.id,
-  );
-  if (index < 0) {
-    throw new Error("Apply result disappeared during outcome reconciliation.");
-  }
-  state.applyJobResults[index] = result;
-}
-
-function replaceApplicationRecord(
-  state: JobFinderRepositoryState,
-  applicationRecord: ApplicationRecord,
-): void {
-  const index = state.applicationRecords.findIndex(
-    (value) => value.id === applicationRecord.id,
-  );
-  if (index < 0) {
-    throw new Error(
-      "Application record disappeared during outcome reconciliation.",
-    );
-  }
-  state.applicationRecords[index] = applicationRecord;
 }
 
 function sortById<T extends { id: string }>(values: readonly T[]): T[] {
@@ -1591,19 +1178,6 @@ export function createApplicationAuthorityRepositoryMethods(
             };
           }
 
-          // Resolve and validate the existing result before changing any
-          // authority state. This keeps an absent, cross-lineage, or stale
-          // receipt from leaving an outcome record without its parent result.
-          const reconciledProjection =
-            buildReconciledSubmissionOutcomeProjection(state, outcome);
-          if (reconciledProjection === null) {
-            return {
-              status: "blocked" as const,
-              outcome: existing,
-              idempotency,
-            };
-          }
-
           if (existing) {
             if (!sameValue(existing, outcome)) {
               return {
@@ -1612,11 +1186,6 @@ export function createApplicationAuthorityRepositoryMethods(
                 idempotency,
               };
             }
-            replaceApplyJobResult(state, reconciledProjection.result);
-            replaceApplicationRecord(
-              state,
-              reconciledProjection.applicationRecord,
-            );
             return {
               status: "duplicate" as const,
               outcome: existing,
@@ -1646,11 +1215,6 @@ export function createApplicationAuthorityRepositoryMethods(
             outcomeId: outcome.id,
             outcome: outcome.outcome,
           });
-          replaceApplyJobResult(state, reconciledProjection.result);
-          replaceApplicationRecord(
-            state,
-            reconciledProjection.applicationRecord,
-          );
           state.submissionOutcomeRecords.push(outcome);
           replaceById(state.submissionIdempotencyRecords, resolved);
           return {
@@ -1748,20 +1312,6 @@ export function createApplicationAuthorityRepositoryMethods(
             };
           }
 
-          const projection = buildResolvedSubmissionOutcomeProjection(
-            state,
-            previousOutcome,
-            resolution.outcome,
-          );
-          if (projection === null) {
-            return {
-              status: "blocked",
-              previousOutcome,
-              outcome: null,
-              idempotency,
-            };
-          }
-
           const resolvedIdempotency = SubmissionIdempotencyRecordSchema.parse({
             ...idempotency,
             status: "resolved",
@@ -1770,8 +1320,6 @@ export function createApplicationAuthorityRepositoryMethods(
             outcomeId: resolution.outcome.id,
             outcome: resolution.outcome.outcome,
           });
-          replaceApplyJobResult(state, projection.result);
-          replaceApplicationRecord(state, projection.applicationRecord);
           state.submissionOutcomeRecords.push(resolution.outcome);
           replaceById(state.submissionIdempotencyRecords, resolvedIdempotency);
           return {
@@ -1794,9 +1342,7 @@ export function createApplicationAuthorityRepositoryMethods(
           const prepared: Array<{
             outcome: SubmissionOutcomeRecord;
             resolved: SubmissionIdempotencyRecord;
-            projection: ReconciledSubmissionOutcomeProjection | null;
           }> = [];
-          const resultIds = new Set<string>();
 
           // Build every recovery mutation first. A malformed timestamp must
           // fail before any earlier armed attempt is converted, preserving the
@@ -1819,18 +1365,6 @@ export function createApplicationAuthorityRepositoryMethods(
               evidence: [],
               retry: { eligible: false, blockReason: "outcome_uncertain" },
             });
-            const built = buildReconciledSubmissionOutcomeProjection(
-              state,
-              outcome,
-            );
-            // One attempt whose result cannot carry the outcome (the result
-            // is gone, was sent by the person meanwhile, or already holds
-            // another attempt's outcome) is closed as uncertain on its own,
-            // leaving that result as it is. It never stops the others from
-            // recovering, and it never stops the workspace from opening.
-            const projection =
-              built !== null && !resultIds.has(built.result.id) ? built : null;
-            if (projection) resultIds.add(projection.result.id);
             const resolved = SubmissionIdempotencyRecordSchema.parse({
               ...current,
               status: "outcome_uncertain",
@@ -1839,7 +1373,7 @@ export function createApplicationAuthorityRepositoryMethods(
               outcomeId: outcome.id,
               outcome: "outcome_uncertain",
             });
-            prepared.push({ outcome, resolved, projection });
+            prepared.push({ outcome, resolved });
           }
 
           const revokedGrants = state.submissionExecutionGrants.map((grant) => {
@@ -1856,17 +1390,9 @@ export function createApplicationAuthorityRepositoryMethods(
             });
           });
 
-          // All parsing and exact-lineage checks succeeded, so the durable
-          // authority records and their matching receipts can now be swapped
-          // together.
+          // Outcome records and idempotency resolve together. Applications
+          // project the durable receipt into their indexed store separately.
           for (const entry of prepared) {
-            if (entry.projection) {
-              replaceApplyJobResult(state, entry.projection.result);
-              replaceApplicationRecord(
-                state,
-                entry.projection.applicationRecord,
-              );
-            }
             state.submissionOutcomeRecords.push(entry.outcome);
             replaceById(state.submissionIdempotencyRecords, entry.resolved);
             recovered.push(entry.outcome);
