@@ -513,33 +513,28 @@ test.each([22000, 33000, 32000])(
           extractResumeImportStage: async (input) => {
             if (input.stage === "shared_memory") {
               evidenceCalls += 1;
-              await new Promise((resolve) =>
-                setTimeout(resolve, evidenceCalls === 1 ? 93000 : 1),
-              );
+              await new Promise((resolve) => setTimeout(resolve, 93000));
               return {
                 stage: input.stage,
                 analysisProviderKind: "openai_compatible",
                 analysisProviderLabel: "Test",
-                candidates:
-                  evidenceCalls === 1
-                    ? []
-                    : [
-                        createStageCandidate({
-                          target: {
-                            section: "proof_point",
-                            key: "record",
-                            recordId: "proof_delayed",
-                          },
-                          label: "Achievement",
-                          value: {
-                            title: "Delivered work",
-                            claim: "Delivered work on time",
-                          },
-                          confidence: 0.95,
-                          overall: 0.95,
-                          sourceBlockIds: [bundle.blocks[0]!.id],
-                        }),
-                      ],
+                candidates: [
+                  createStageCandidate({
+                    target: {
+                      section: "proof_point",
+                      key: "record",
+                      recordId: "proof_delayed",
+                    },
+                    label: "Achievement",
+                    value: {
+                      title: "Delivered work",
+                      claim: "Delivered work on time",
+                    },
+                    confidence: 0.95,
+                    overall: 0.95,
+                    sourceBlockIds: [bundle.blocks[0]!.id],
+                  }),
+                ],
                 notes: [],
               };
             }
@@ -599,7 +594,7 @@ test.each([22000, 33000, 32000])(
       const savedProfile = await repository.getProfile();
       await vi.advanceTimersByTimeAsync(93001 - coreMs);
       await vi.advanceTimersByTimeAsync(0);
-      expect(evidenceCalls).toBe(2);
+      expect(evidenceCalls).toBe(1);
       expect(
         (
           await repository.listResumeImportFieldCandidates({
@@ -618,7 +613,7 @@ test.each([22000, 33000, 32000])(
     }
   },
 );
-test("an empty evidence stage is retried once and then reported as failed", async () => {
+test("an empty evidence stage completes without a second read", async () => {
   const ai = createAiClient();
   let evidenceCalls = 0;
   const { workspaceService } = createWorkspaceServiceHarness({
@@ -660,12 +655,12 @@ test("an empty evidence stage is retried once and then reported as failed", asyn
     },
     documentBundle: { ...bundle, fullText: seed.profile.fullName },
   });
-  expect(evidenceCalls).toBe(2);
+  expect(evidenceCalls).toBe(1);
   expect(
     result.latestResumeImportRun?.timing?.textStages.find(
       (stage) => stage.stage === "shared_memory",
     )?.status,
-  ).toBe("failed");
+  ).toBe("completed");
 });
 
 test("evidence appears before a slow visual scan and survives its later save", async () => {

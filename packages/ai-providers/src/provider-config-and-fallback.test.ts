@@ -435,6 +435,181 @@ describe("ai provider config and fallback behavior", () => {
     }
   });
 
+  test("reads a stage in one model request without an agent tool loop", async () => {
+    const candidate = {
+      target: {
+        section: "experience",
+        key: "record",
+        recordId: "experience_1",
+      },
+      label: "Senior Frontend Engineer at Northstar Parcel Software",
+      value: {
+        companyName: "Northstar Parcel Software",
+        title: "Senior Frontend Engineer",
+        startDate: "2021-03",
+        isCurrent: true,
+      },
+      normalizedValue: null,
+      valuePreview: null,
+      evidenceText: "Senior Frontend Engineer — Northstar Parcel Software",
+      sourceBlockIds: ["fast_path_block_6"],
+      confidence: 0.9,
+      notes: [],
+      alternatives: [],
+    };
+    const bodies: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    candidates: [candidate],
+                    notes: [],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    try {
+      const client =
+        createJobFinderAiClientFromEnvironment(createEnvironment());
+      const result = await client.extractResumeImportStage({
+        stage: "experience",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle: createFastPathResumeBundle(),
+      });
+
+      expect(result.candidates).toHaveLength(1);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]).not.toContain("read_resume_document");
+      // Extraction runs at the low agent-read effort, not the main effort.
+      expect(bodies[0]).toContain('"reasoning_effort":"low"');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("escalates to the agent reader when a present experience section reads empty", async () => {
+    const candidate = {
+      target: { section: "experience", key: "record", recordId: "experience_1" },
+      label: "Senior Frontend Engineer at Northstar Parcel Software",
+      value: {
+        companyName: "Northstar Parcel Software",
+        title: "Senior Frontend Engineer",
+        startDate: "2021-03",
+        isCurrent: true,
+      },
+      normalizedValue: null,
+      valuePreview: null,
+      evidenceText: "Senior Frontend Engineer — Northstar Parcel Software",
+      sourceBlockIds: ["fast_path_block_6"],
+      confidence: 0.9,
+      notes: [],
+      alternatives: [],
+    };
+    const bodies: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      const payload =
+        bodies.length === 1
+          ? { candidates: [], notes: [] }
+          : { candidates: [candidate], notes: [] };
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(payload) } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    try {
+      const client =
+        createJobFinderAiClientFromEnvironment(createEnvironment());
+      const result = await client.extractResumeImportStage({
+        stage: "experience",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle: createFastPathResumeBundle(),
+      });
+
+      expect(result.candidates).toHaveLength(1);
+      expect(bodies.length).toBeGreaterThanOrEqual(2);
+      expect(bodies[1]).toContain("read_resume_document");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("escalates to the agent reader only when the identity read comes back empty", async () => {
+    const candidate = {
+      target: { section: "identity", key: "fullName", recordId: null },
+      label: "Full name",
+      value: "Casey Rowan",
+      normalizedValue: "Casey Rowan",
+      valuePreview: "Casey Rowan",
+      evidenceText: "CASEY ROWAN",
+      sourceBlockIds: ["fast_path_block_1"],
+      confidence: 0.95,
+      notes: [],
+      alternatives: [],
+    };
+    const bodies: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      const payload =
+        bodies.length === 1
+          ? { candidates: [], notes: [] }
+          : { candidates: [candidate], notes: [] };
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(payload) } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    try {
+      const client =
+        createJobFinderAiClientFromEnvironment(createEnvironment());
+      const result = await client.extractResumeImportStage({
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle: createFastPathResumeBundle(),
+      });
+
+      expect(result.candidates).toHaveLength(1);
+      expect(bodies.length).toBeGreaterThanOrEqual(2);
+      expect(bodies[0]).not.toContain("read_resume_document");
+      expect(bodies[1]).toContain("read_resume_document");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("bounds default remote core-stage latency and reports the section unread instead of guessing", async () => {
     vi.useFakeTimers();
     const originalFetch = globalThis.fetch;

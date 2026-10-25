@@ -317,9 +317,9 @@ export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
   apiMode: z.enum(modelApiModes).optional(),
   reasoningEffort: z.enum(modelReasoningEfforts).optional(),
   /**
-   * Effort for tool-calling work that names no task (resume import
-   * sections, the profile and resume assistants, letters). Resume writing
-   * keeps `reasoningEffort`.
+   * Effort for tool-calling work that names no task (the profile and
+   * resume assistants, letters). Resume writing keeps `reasoningEffort`;
+   * resume import has its own `resume_import` task effort.
    */
   agentReasoningEffort: z.enum(modelReasoningEfforts).optional(),
   /**
@@ -330,6 +330,7 @@ export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
   taskReasoningEfforts: z
     .object({
       resume_writer: z.enum(modelReasoningEfforts).optional(),
+      resume_import: z.enum(modelReasoningEfforts).optional(),
       listing_read: z.enum(modelReasoningEfforts).optional(),
       search: z.enum(modelReasoningEfforts).optional(),
       page_read: z.enum(modelReasoningEfforts).optional(),
