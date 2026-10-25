@@ -1,47 +1,50 @@
 # Product
 
-Nestor is one local-first desktop app. Job Finder is the product. Live Assistant is parked.
+Nestor is one local-first desktop app. Job Finder is the product. Live Assistant is parked until the owner approves Job Finder.
 
-The owner agreed this scope screen by screen on 2026-10-25. Where an older doc or ADR disagrees, this file wins.
+This is the owner's scope, in their terms (2026-10-25). Where an older doc or ADR disagrees, this file wins.
 
 ## The rule
 
-Dead simple, fast and easy: no PhD and no flight license. If finding and applying to jobs yourself is faster, the app has no point.
+Someone imports a resume, finds lots of relevant jobs, gets a good resume for each and applies — faster and easier than doing the whole hunt themselves, finding included. Otherwise there's no point. Dead simple: no PhD and flight license needed. It is a paid product, so it also works for someone who wants a few very relevant jobs or light resume changes, not just high volume.
 
 ## Job Finder screens
 
-- **Home:** a dashboard with charts that make sense: new good jobs, resumes ready, applications waiting on the person, and what was sent.
-- **Profile:** the person's details, resume and files, mostly as they are today. It holds the resume level preference.
-- **Find jobs:** before each search the person makes a few simple choices: how to search, how picky to be, and what to keep. These replace Search plans.
-- **Shortlisted:** the resume starts writing as soon as a job is shortlisted, at the Profile level. There is no level picking here. Apply works the first time.
-- **Resume editor:** edit, preview, PDF and approve. Checks run on their own and the AI fixes what they flag.
-- **Applications:** a real tracker, built for about 200 applications a week.
-- **Needs you:** the one place for what only the person can do. Form answers live here and nowhere else.
-- **Settings:** short, with one home for each setting.
-- **Assistant:** an MCP server for the app. It can do everything the user can, including navigation.
+- **Home:** a real dashboard with charts that make sense.
+- **Profile:** import once, the AI builds it, the person fixes what's wrong and adds their own job sites (about 900). It holds the resume level preference.
+- **Find jobs:** a few simple choices before each search — how to search, how picky, what to keep — replace the Search plans screen. Searches run in the background, the app stays usable, jobs show up as they're found with fit scores and duplicates merged, and a repeat search adds only new ones. Triage is fast: list and detail, keys or clicks, select some or all, shortlist, hide, Undo, and easy ways to move things back.
+- **Shortlisted:** the resume starts writing the moment a job is shortlisted, at the Profile level, many at once. The AI fixes its own flagged problems, with no chores for the person. Once approved, Apply works immediately.
+- **Resume editor:** editing, preview, PDF/export and approval.
+- **Apply:** one setting — either fill everything and leave it for the person's click, or send it for them. Apply one, the selected ones, the page or all, in background tabs, several at once but never unlimited. Only sign-in, CAPTCHA, MFA and questions it really can't answer come to the person, asked once and remembered.
+- **Needs you:** the one place for what only the person can do. Form answers live only here.
+- **Applications:** a real tracker, with statuses, replies and interviews, built for about 200 applications a week.
+- **Settings:** shorter, with one home per setting.
+- **Assistant:** the chat on the side of the app stays. Behind it goes a proper MCP for the app, so the chat can do everything the person can, navigation included, and someone could mostly run the app from the chat.
 
 ## Resume levels
 
-Original, Light, Tailored and Aggressive, exactly as they work today. Aggressive is not reworded (ADR 0018).
+Original, Light, Tailored, Aggressive, exactly as they are now. Don't reword Aggressive.
 
-## Applying
+## Applying and pacing
 
-- Three modes: Prepare for me (`prepare_only`), Ask before sending (`confirm_before_submit`) and Send for me (`autonomous_submit`). Only the last two send, and only inside the saved authority envelope (ADR 0012, ADR 0024).
-- Final submission, account creation, credentials, CAPTCHA and MFA stay the person's unless they authorize the step. Routine declarations, including background-check consent, are on by default and the person can turn any off (ADR 0027).
-- Pacing is automatic, so sites don't block the person, but never so careful that it slows them down.
+- Send for me is the person's authorization. Final submission, account creation, credentials, CAPTCHA and MFA otherwise stay the person's unless they authorize the step (ADR 0012, ADR 0024). Routine application declarations, including background-check consent, are on by default and the person can turn any off (ADR 0027).
+- Pacing is automatic, so job sites don't block the person, but never slower than needed. There is no daily-limit setting. The send guards stay.
 
 ## Cut
 
-Quick review, Safeguards, the daily limit, the Search plans screen, Companies, Outcomes (for now) and the Resume approaches screen. Don't build on them or bring them back.
+Quick review, Safeguards, the daily limit, the Search plans screen, Companies, Outcomes, the Resume approaches screen and the unused Settings section. Don't build on them or bring them back.
 
 ## Screen rules
 
-- One component per job: one tab style, one list row, one badge, one dialog.
-- Nothing shifts: panels, selection, hover, loading and toasts never move unrelated content. Floating surfaces overlay, and a skeleton is laid out like the loaded screen.
-- Everything in reach: down to 1024x720 the primary action is visible without scrolling. Popovers flip above their trigger when there is no room below, shift inside the window, take their height from the space available and scroll inside.
-- One fact, one voice: a number shown on two screens uses the same noun and the same population. No raw errors or internal words reach the person.
-- Honest loading: every wait shows elapsed and expected time or real progress, never a made-up percentage.
-- Legible in both themes: text at least 4.5:1, boundaries and states at least 3:1; disabled looks disabled.
+One clear main action per screen. The same list/detail layout and selection everywhere. Every action shows what happened at once. No dead ends. No one-option dropdowns. The design language stays as it is.
+
+## Speed
+
+Launch under a second. Navigation, scrolling and clicks instant, with no stutter. The work a screen does must not grow with how many jobs there are, and a screen loads only what it shows.
+
+## Later, not now
+
+Subscriptions and syncing across devices. Keep that path open; don't build it.
 
 ## Live Assistant (parked)
 

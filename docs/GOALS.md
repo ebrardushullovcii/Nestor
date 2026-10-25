@@ -71,8 +71,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [ADR 0007](adr/0007-source-generic-br
   certifies its own output. Exclude salary expectations and privacy-risk defaults
   such as photo, date of birth, marital status, government IDs, and salary
   history unless the user opts in.
-- Application authority is user-configured: prepare-only, confirm-before-submit,
-  and autonomous-submit. Broader modes act only inside an explicit, inspectable,
+- Applying has one user setting: fill everything and leave it for the person's
+  click, or send it for them. Sending acts only inside an explicit, inspectable,
   revocable authority envelope. CAPTCHA and anti-bot challenges are never
   bypassed; unavailable credentials or MFA, unknown eligibility facts, unseen
   material attestations, ambiguous controls, and actions outside the saved policy
