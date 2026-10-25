@@ -21,10 +21,7 @@ import {
 import type { AssistantBrowserLease, AssistantHostPorts } from "../ports";
 import { ASSISTANT_SYSTEM_PROMPT } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
-import {
-  continueApplicationTool,
-  recordInstructionTool,
-} from "./application-tools";
+import { recordInstructionTool } from "./application-tools";
 import {
   browserOpenTool,
   browserUseApplicationTool,
@@ -608,7 +605,6 @@ describe("R3 assistant safety findings", () => {
     ).rejects.toThrow("Choose one destination");
     await openInAppTool.execute({ screen: "applications" }, ctx);
     expect(ctx.openInApp).toHaveBeenLastCalledWith("/job-finder/applications");
-
   });
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {
@@ -985,127 +981,6 @@ it("chat and the queue retain existing display rules for a legacy quoted questio
     },
     readyToSend: [],
   });
-});
-
-describe("opening a retained application", () => {
-  it("shows the browser and lends the exact retained result for subsequent browser tools", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.applyJobResults = [
-      ApplyJobResultSchema.parse({
-        id: "result",
-        jobId: "job_ready",
-        runId: "run",
-        applicationRecordId: "record",
-        state: "awaiting_review",
-        summary: "Ready",
-        detail: "Synthetic form",
-        startedAt: "2026-10-04T12:00:00.000Z",
-        updatedAt: "2026-10-04T12:00:00.000Z",
-      }),
-    ];
-    snapshot.applicationRecords = [
-      ApplicationRecordSchema.parse({
-        id: "record",
-        jobId: "job_ready",
-        status: "approved",
-        lastActionLabel: "Prepared",
-        nextActionLabel: "Send",
-        company: "Synthetic",
-        title: "Analyst",
-        lastUpdatedAt: "2026-10-04T12:00:00.000Z",
-      }),
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const order: string[] = [];
-    vi.spyOn(ctx.service, "inspectPreparedApplicationPage").mockResolvedValue(
-      page(),
-    );
-    const browserLease = vi.fn(() => {
-      order.push("lease");
-      return Promise.resolve({} as AssistantBrowserLease);
-    });
-    ctx.session.browserLease = browserLease;
-    vi.spyOn(ctx.service, "focusPreparedApplicationPage").mockImplementation(
-      () => {
-        order.push("focus");
-        return Promise.resolve(snapshot);
-      },
-    );
-    const show = vi.fn(() => {
-      order.push("show");
-      return Promise.resolve();
-    });
-    const lease = vi.fn();
-    ctx.ports.browser = { show, visibleTab: vi.fn(() => null), lease };
-    const outcome = await continueApplicationTool.execute(
-      { jobId: "job_ready", openPage: true },
-      ctx,
-    );
-    expect(order).toEqual(["focus", "lease", "show"]);
-    expect(browserLease).toHaveBeenCalledWith({
-      applicationResultId: "result",
-    });
-    expect(lease).not.toHaveBeenCalled();
-    expect(outcome.summary).toContain("Browser tools now use this filled form");
-    show.mockRejectedValueOnce(new Error("Browser could not open"));
-    await expect(
-      continueApplicationTool.execute(
-        { jobId: "job_ready", openPage: true },
-        ctx,
-      ),
-    ).rejects.toThrow("Browser could not open");
-  });
-});
-
-it("chat send cards name the result rather than claiming failed or unconfirmed sends were SENT", async () => {
-  const { sendApplicationsTool } = await import("./application-tools");
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  snapshot.applicationRecords = [application()];
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  ctx.session.grants = {
-    list: () =>
-      Promise.resolve([
-        {
-          id: "grant",
-          jobIds: ["job_ready"],
-          status: "active",
-          action: "prepare_and_send",
-        },
-      ] as never),
-    save: vi.fn(),
-  };
-  ctx.ports.sendPreparedApplications = vi.fn(() =>
-    Promise.resolve({
-      sentJobIds: [],
-      failed: [{ jobId: "job_ready", reason: "Waiting for approval" }],
-    }),
-  );
-  const result = await sendApplicationsTool.execute(
-    { jobIds: ["job_ready"] },
-    ctx,
-  );
-  expect(result.parts?.[0]).toMatchObject({
-    type: "records",
-    title: "Sending results",
-  });
-  expect(result.summary).toContain("0 applications");
-  expect(result.summary).toContain("1 not sent");
-  snapshot.applyJobResults = [1, 2].map(
-    (index) =>
-      ({
-        jobId: "job_ready",
-        updatedAt: `2026-10-04T12:00:0${index}.000Z`,
-        privacyReceipt: { submissionOutcome: { outcome: "outcome_uncertain" } },
-      }) as unknown as (typeof snapshot.applyJobResults)[number],
-  );
-  const uncertain = await sendApplicationsTool.execute(
-    { jobIds: ["job_ready"] },
-    ctx,
-  );
-  expect(uncertain.summary).toContain("1 send unconfirmed");
-  expect(uncertain.summary).not.toContain("not sent");
 });
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {

@@ -14,6 +14,7 @@ import {
   NeedsYouPageSchema,
   AnswerNeedsYouInputSchema,
   AnswerNeedsYouResultSchema,
+  type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import { seedTrackerDemo } from "@nestor/db/job-store";
 import type { IpcMain } from "electron";
@@ -30,6 +31,7 @@ import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-s
 export async function executeApplicationStoreCommand(
   actionId: string,
   input: unknown,
+  instruction?: { conversationId: string; mode: ApplicationAutomationMode },
 ): Promise<unknown> {
   await getJobFinderWorkspaceService();
   const store = getApplicationStore();
@@ -41,10 +43,20 @@ export async function executeApplicationStoreCommand(
       if (!repository)
         throw new Error("Job Finder could not read the Apply setting.");
       const settings = await repository.getSettings();
+      if ((await repository.getActivityControl()).paused)
+        throw new Error(
+          "The person paused background work. Resume it before applying.",
+        );
       return ApplyJobsResultSchema.parse(
         store.applyJobs(
           value,
-          settings.applicationAutomationMode ?? DEFAULT_APPLICATION_APPLY_MODE,
+          instruction
+            ? instruction.mode === "autonomous_submit"
+              ? instruction.mode
+              : "confirm_before_submit"
+            : (settings.applicationAutomationMode ??
+                DEFAULT_APPLICATION_APPLY_MODE),
+          instruction,
         ),
       );
     }
@@ -72,6 +84,10 @@ export async function executeApplicationStoreCommand(
     }
     case "stop-application":
       return (await getApplicationService()).stopApplication(
+        ApplicationTargetSchema.parse(input).id,
+      );
+    case "send-application":
+      return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
     case "open-application": {
@@ -114,7 +130,8 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
     (_event, input: unknown) => {
       if (!isDesktopTestApiEnabled())
         throw new Error("Desktop test API is disabled.");
-      const { sourceUrl, trackApplications } = ApplicationStoreDemoInputSchema.parse(input);
+      const { sourceUrl, trackApplications } =
+        ApplicationStoreDemoInputSchema.parse(input);
       const origin = new URL(sourceUrl).origin;
       if (
         !["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname)

@@ -103,7 +103,8 @@ export function decideUnderGrants(input: {
   action: DispatchAction;
   savedMode: ApplicationAutomationMode;
 }): GrantDecision[] {
-  const live = input.grants
+  const live = [...input.grants]
+    .reverse()
     .filter(isLive)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const revoked = input.grants.filter((grant) => grant.status === "revoked");
@@ -137,7 +138,7 @@ export function decideUnderGrants(input: {
       }
       if (
         grant.action === "apply_saved_mode" &&
-        input.savedMode === "prepare_only"
+        input.savedMode !== "autonomous_submit"
       ) {
         return {
           jobId,
@@ -145,7 +146,7 @@ export function decideUnderGrants(input: {
           mode,
           grantId: grant.id,
           reason:
-            "The person did not ask to send, and the saved apply mode is Prepare for me.",
+            "The person did not ask to send, and the saved apply mode is Fill in for me.",
         };
       }
     }

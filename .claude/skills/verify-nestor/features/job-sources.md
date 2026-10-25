@@ -27,4 +27,4 @@ Per-source inventory notes report listings observed on the site. The old source-
 
 - The default `--net replica` refuses requests outside loopback. Use `--net web` only for authorized read-only checks and never send a real application.
 - A restarted verify instance may get a different replica port. Update stored site URLs before another search.
-- The legacy discovery/Assistant targets field remains temporarily until the pipeline-deletion change lands. Active site screens and the new runner do not use it.
+- The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sources after the change, then compare the screen with job_sites.

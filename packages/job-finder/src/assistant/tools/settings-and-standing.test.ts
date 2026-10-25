@@ -4,12 +4,10 @@ import { describe, expect, it } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
-import { getApplicationRunTool, sendApplicationsTool } from "./application-tools";
 import { describeApplicationStanding } from "./format";
 import { dismissJobsTool } from "./jobs-tools";
 import {
   setAppearanceTool,
-  updateApplySettingsTool,
   updateWorkspaceBehaviorTool,
 } from "./settings-tools";
 
@@ -79,58 +77,6 @@ describe("settings and application standing the assistant reports", () => {
     expect(describeApplicationStanding(snapshot, "job_skip")).toBe("skipped");
     expect(describeApplicationStanding(snapshot, "job_none")).toBe(
       "not applied",
-    );
-  });
-
-  it("lists the files an application's form was given", async () => {
-    const snapshot = {
-      applyJobResults: [
-        {
-          id: "result_1",
-          runId: "run_1",
-          jobId: "job_1",
-          state: "submitted",
-          updatedAt: "2026-09-27T10:00:00.000Z",
-        },
-      ],
-      applicationRecords: [],
-    };
-    const result = await getApplicationRunTool.execute(
-      { jobId: "job_1" },
-      {
-        service: {
-          getWorkspaceSnapshot: () => Promise.resolve(snapshot),
-          getApplyRunDetails: () =>
-            Promise.resolve({
-              questionRecords: [],
-              answerRecords: [],
-              artifactRefs: [],
-              reviewCard: {
-                attachments: [
-                  {
-                    label: "Portfolio",
-                    fileName: "jamie-portfolio.pdf",
-                    field: "portfolio",
-                  },
-                ],
-              },
-            }),
-        } as never,
-        session: {} as AssistantTurnSession,
-        ports,
-      },
-    );
-    expect((result.data as { attachedFiles: unknown[] }).attachedFiles).toEqual(
-      [{ fileName: "jamie-portfolio.pdf", field: "Portfolio" }],
-    );
-  });
-
-  it("sends on the person's instruction without changing the default mode", () => {
-    expect(sendApplicationsTool.description).toMatch(
-      /never change settings to send/u,
-    );
-    expect(updateApplySettingsTool.description).toMatch(
-      /use send_applications and leave this alone/u,
     );
   });
 

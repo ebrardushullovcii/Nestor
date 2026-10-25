@@ -331,30 +331,11 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
       const data = jsonOf(last.content);
       const jobIds = (data?.jobIds as string[] | undefined) ?? [];
       if (jobIds.length === 0) return { content: last.content.split("\n")[0]! };
-      return { toolCalls: [call("apply_to_jobs", { jobIds })] };
-    }
-    return { content: last.content.split("\n")[0]! };
-  }
-
-  if (/^send (?:them|it|those|these)/iu.test(text)) {
-    const grantJobs = /Recorded instructions: (\S+) /u.exec(context)?.[1];
-    if (!last) {
-      if (!grantJobs)
-        return { content: "There is no recorded instruction to send yet." };
-      return { toolCalls: [call("list_instructions", {})] };
-    }
-    if (last.name === "list_instructions") {
-      const grants = (() => {
-        try {
-          return JSON.parse(last.content.split("\n").slice(1).join("\n")) as {
-            jobIds: string[];
-          }[];
-        } catch {
-          return [];
-        }
-      })();
-      const ids = grants.flatMap((grant) => grant.jobIds);
-      return { toolCalls: [call("send_applications", { jobIds: ids })] };
+      return {
+        toolCalls: [
+          call("apply_to_jobs", { selection: { ids: jobIds.map(Number) } }),
+        ],
+      };
     }
     return { content: last.content.split("\n")[0]! };
   }

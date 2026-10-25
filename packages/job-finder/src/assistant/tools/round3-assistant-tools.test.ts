@@ -14,7 +14,7 @@ import {
 } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { getWorkspaceSummaryTool } from "./workspace-tools";
-import { queryJobsTool, showJobsTool, updateSourcesTool } from "./jobs-tools";
+import { queryJobsTool, showJobsTool } from "./jobs-tools";
 
 function world() {
   const { workspaceService: service } = createWorkspaceServiceHarness();
@@ -211,37 +211,6 @@ it("R3-120 tells the model that scans have no readable text and extraction can f
   expect(importResumeTool.description).toContain("success is not guaranteed");
 });
 
-it("R3-121 adds employer-labelled sources and renames an existing source", async () => {
-  const ctx = world();
-  const before = await ctx.service.getWorkspaceSnapshot();
-  const original = before.searchPreferences.discovery.targets[0]!;
-  const result = await updateSourcesTool.execute(
-    updateSourcesTool.input.parse({
-      namedSources: [
-        { url: "https://careers.example.test/jobs", label: "Paper Interfaces" },
-        {
-          url: "https://careers.example.test/jobs/",
-          label: "Paper Interfaces",
-        },
-      ],
-      renameSources: [{ sourceId: original.id, label: "Moneybox" }],
-    }),
-    ctx,
-  );
-  const after = await ctx.service.getWorkspaceSnapshot();
-  expect(
-    after.searchPreferences.discovery.targets.find(
-      (target) => target.id === original.id,
-    ),
-  ).toMatchObject({ label: "Moneybox", startingUrl: original.startingUrl });
-  expect(
-    after.searchPreferences.discovery.targets.filter(
-      (target) => target.label === "Paper Interfaces",
-    ),
-  ).toHaveLength(1);
-  expect(result.data).toMatchObject({ added: [{ label: "Paper Interfaces" }] });
-});
-
 it("R3-128 keeps a complete manual profile search-ready without an imported resume", async () => {
   const ctx = world();
   const snapshot = await ctx.service.getWorkspaceSnapshot();
@@ -382,21 +351,11 @@ it("R3-214 describes a combined Undo for edits sharing one receipt", () => {
   );
 });
 
-it("R3-200 directs a factual letter to the correct application's built-in editor and export", () => {
+it("does not direct a letter to the retired Application documents editor", () => {
+  expect(ASSISTANT_SYSTEM_PROMPT).toContain("Read get_application_details");
   expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "read get_application_run for the correct job",
+    "old Application documents editor and export flow is gone",
   );
-  for (const label of [
-    "Application documents",
-    "Exact attachment question",
-    "Edit proposed text",
-    "Save edit as new revision",
-    "Approve",
-    "Export",
-  ])
-    expect(ASSISTANT_SYSTEM_PROMPT).toContain(label);
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain("does not send the application");
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain("not an outside editor");
 });
 
 it("R3-061 exposes remote-country facts and keeps Americas separate from sponsorship", async () => {
@@ -444,25 +403,4 @@ it("requires a text answer first and supporting cards only", () => {
     "Do not reply with only a card or a question back",
   );
   expect(ASSISTANT_SYSTEM_PROMPT).toContain("finish with a text answer");
-});
-
-it("reports source switches from saved state and counts only actual switch changes", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  const source = snapshot.searchPreferences.discovery.targets[0]!;
-  await updateSourcesTool.execute(
-    updateSourcesTool.input.parse({ disableIds: [source.id] }),
-    ctx,
-  );
-  const result = await updateSourcesTool.execute(
-    updateSourcesTool.input.parse({ disableIds: [source.id] }),
-    ctx,
-  );
-  expect(result.summary).toContain("0 turned off");
-  const expectedSources: unknown = expect.arrayContaining([
-    expect.objectContaining({ id: source.id, enabled: false }),
-  ]);
-  expect(result.data).toMatchObject({
-    sources: expectedSources,
-  });
 });

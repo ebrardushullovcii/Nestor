@@ -8,6 +8,8 @@ import {
   ApplyExecutionResultSchema,
   SubmissionOutcomeRecordSchema,
   ApplyJobsInputSchema,
+  JobSelectionSchema,
+  type JobSelectionInput,
   type ApplicationListPage,
   type ApplicationListQuery,
   type ApplicationRow,
@@ -91,6 +93,21 @@ export function createApplicationStore(store: JobStore) {
   };
 
   return {
+    /** Resolves a chat instruction once, so later arrivals cannot widen it. */
+    selectedJobIds(input: JobSelectionInput): number[] {
+      const selection = JobSelectionSchema.parse(input);
+      if ("ids" in selection) return [...new Set(selection.ids)];
+      if (selection.filter.stage !== "resume")
+        throw new Error("Apply requires the Approved filter.");
+      const filter = toFilterSql(selection.filter);
+      return (
+        sql(`SELECT j.id FROM jobs j WHERE ${filter.where}
+        AND j.id NOT IN (SELECT value FROM json_each(?)) ORDER BY j.id`).all(
+          ...filter.params,
+          JSON.stringify(selection.except),
+        ) as { id: number }[]
+      ).map((row) => row.id);
+    },
     /** Queues approved jobs; the browser runner consumes these rows separately. */
     applyJobs(
       input: ApplyJobsInput,

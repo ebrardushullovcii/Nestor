@@ -96,6 +96,12 @@ export const JOB_COMMANDS = {
       "Removes one job site from the person's list. Saved jobs remain.",
     input: z.object({ id: JobSiteSchema.shape.id }).strict(),
   },
+  undo_site_change: {
+    effect: "local_write",
+    description:
+      "Undoes one site change, keeping later edits and saved jobs. Returns changed and skipped counts.",
+    input: z.object({ undoId: z.number().int().positive() }).strict(),
+  },
   set_sites_enabled: {
     effect: "local_write",
     description:
@@ -133,6 +139,11 @@ export const JOB_COMMANDS = {
   },
 } as const satisfies Record<string, AppCommandDefinition>;
 
+export interface SiteChange {
+  undoId: number | null;
+  undoCount: number;
+}
+
 export type JobCommandName = keyof typeof JOB_COMMANDS;
 
 export type JobCommandInput<K extends JobCommandName> = z.input<
@@ -147,10 +158,11 @@ export interface JobCommandOutputs {
   undo_move: MoveJobsResult;
   list_sites: JobSitePage;
   get_site: JobSite | null;
-  add_sites: AddJobSitesResult;
-  update_site: JobSite | null;
-  remove_site: { removed: boolean };
-  set_sites_enabled: { changed: number };
+  add_sites: AddJobSitesResult & SiteChange;
+  update_site: (JobSite & SiteChange) | null;
+  remove_site: { removed: boolean } & SiteChange;
+  set_sites_enabled: { changed: number } & SiteChange;
+  undo_site_change: { changed: number; skipped: number };
   start_search: JobSearchStatus;
   retry_source: JobSearchStatus;
   stop_search: JobSearchStatus;

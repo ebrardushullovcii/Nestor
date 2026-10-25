@@ -7,6 +7,7 @@ import {
   type ResumeCommandOutputs,
   type TrackerCommandOutputs,
   type TrackerChange,
+  type SiteChange,
 } from "@nestor/contracts";
 import {
   assistantCommandTools,
@@ -16,6 +17,7 @@ import {
 import { runJobCommand } from "../job-commands";
 import { runResumeCommand } from "../../routes/resumes";
 import { runTrackerCommand } from "../../routes/tracker";
+import { assistantApplicationCommands } from "./application-commands";
 
 async function trackerChange<T extends TrackerChange>(
   value: T,
@@ -46,9 +48,39 @@ async function trackerChange<T extends TrackerChange>(
   return { summary, data: value, parts: [part] };
 }
 
+async function siteChange<T extends SiteChange>(
+  value: T,
+  summary: string,
+  { session }: AssistantToolContext,
+) {
+  if (!value.undoId) return { summary, data: value };
+  const { part } = await session.recordChange({
+    target: "app_command",
+    targetId: String(value.undoId),
+    summary,
+    undoCommand: {
+      name: "undo_site_change",
+      input: { undoId: value.undoId },
+      expectedCount: value.undoCount,
+    },
+    entries: [
+      {
+        path: ["sites"],
+        kind: "set",
+        before: "Previous sites",
+        after: summary,
+        index: null,
+        label: "Job sites",
+      },
+    ],
+  });
+  return { summary, data: value, parts: [part] };
+}
+
 /** Add each screen's command catalog here as its store lands. */
 export function assistantAppCommands() {
   return [
+    ...assistantApplicationCommands(),
     ...assistantCommandTools<typeof TRACKER_COMMANDS, TrackerCommandOutputs>(
       TRACKER_COMMANDS,
       runTrackerCommand,
@@ -136,28 +168,96 @@ export function assistantAppCommands() {
           stop_search: ["cancel_search"],
         },
         results: {
-          list_jobs: (page) => ({
-            summary: `${page.rows.length} jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
+          list_sites: (page) => ({
+            summary: `${page.total} job sites match; ${page.enabledTotal} turned on in total.`,
             data: {
               ...page,
               rows: page.rows.map(
-                ({ id, stage, title, company, location, fitScore }) => ({
+                ({ id, label, url, enabled, health, lastSearchedAt }) => ({
                   id,
-                  stage,
-                  title,
-                  company,
-                  location,
-                  fitScore,
+                  label,
+                  url,
+                  enabled,
+                  health,
+                  lastSearchedAt,
                 }),
               ),
             },
           }),
-          get_job: (job) => ({
-            summary: job
-              ? `${job.title} at ${job.company}.`
-              : "That job was not found.",
-            data: job,
+          add_sites: (value, _input, context) =>
+            siteChange(
+              value,
+              `Added ${value.added} ${value.added === 1 ? "job site" : "job sites"}; ${value.duplicates} ${value.duplicates === 1 ? "duplicate" : "duplicates"}.${value.invalid.length ? ` ${value.invalid.length} invalid entries were left out.` : ""}`,
+              context,
+            ),
+          update_site: (value, _input, context) =>
+            value
+              ? siteChange(
+                  value,
+                  value.undoId
+                    ? `Updated ${value.label}.`
+                    : `${value.label} already matches the requested values.`,
+                  context,
+                )
+              : { summary: "That job site no longer exists.", data: null },
+          remove_site: (value, _input, context) =>
+            siteChange(
+              value,
+              value.removed
+                ? "Removed the site. Saved jobs remain."
+                : "That site was not removed.",
+              context,
+            ),
+          set_sites_enabled: (value, input, context) =>
+            siteChange(
+              value,
+              `Turned ${input.enabled ? "on" : "off"} ${value.changed} job sites.`,
+              context,
+            ),
+          undo_site_change: (value) => ({
+            summary: `Restored ${value.changed} job sites.${value.skipped ? ` ${value.skipped} later changes were kept.` : ""}`,
+            data: value,
           }),
+
+          list_jobs: async (page, _input, { session }) => {
+            await session.createResultSet({
+              kind: "jobs",
+              label: "Jobs",
+              itemIds: page.rows.map((row) => String(row.id)),
+              source: "tool_query",
+            });
+            return {
+              summary: `${page.rows.length} jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
+              data: {
+                ...page,
+                rows: page.rows.map(
+                  ({ id, stage, title, company, location, fitScore }) => ({
+                    id,
+                    stage,
+                    title,
+                    company,
+                    location,
+                    fitScore,
+                  }),
+                ),
+              },
+            };
+          },
+          get_job: async (job, _input, { session }) => {
+            if (job)
+              await session.createResultSet({
+                kind: "jobs",
+                label: job.title,
+                itemIds: [String(job.id)],
+                source: "tool_query",
+              });
+            return {
+              summary: job
+                ? `${job.title} at ${job.company}.`
+                : "That job was not found.",
+              data: job,
+            };
+          },
           async move_jobs(result, input, { session }) {
             const destination = {
               found: "Find jobs",
@@ -208,19 +308,29 @@ export function assistantAppCommands() {
           approve_resume: ["action_approve_resumes"],
         },
         results: {
-          list_shortlisted: (page) => ({
-            summary: `${page.rows.length} shortlisted jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
-            data: {
-              ...page,
-              rows: page.rows.map(({ id, stage, title, company, resume }) => ({
-                id,
-                stage,
-                title,
-                company,
-                resume,
-              })),
-            },
-          }),
+          list_shortlisted: async (page, _input, { session }) => {
+            await session.createResultSet({
+              kind: "jobs",
+              label: "Shortlisted",
+              itemIds: page.rows.map((row) => String(row.id)),
+              source: "tool_query",
+            });
+            return {
+              summary: `${page.rows.length} shortlisted jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
+              data: {
+                ...page,
+                rows: page.rows.map(
+                  ({ id, stage, title, company, resume }) => ({
+                    id,
+                    stage,
+                    title,
+                    company,
+                    resume,
+                  }),
+                ),
+              },
+            };
+          },
           async set_resume_level(value, input, { session }) {
             const label = `${value.level[0]!.toUpperCase()}${value.level.slice(1)}`;
             const summary = `Writing this resume at ${label}.`;

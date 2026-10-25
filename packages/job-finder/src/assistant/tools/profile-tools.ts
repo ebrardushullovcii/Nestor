@@ -804,7 +804,7 @@ function parseOperations(
         Object.hasOwn(entry.value.discovery, "targets")
       ) {
         problems.push(
-          "Source lists cannot be replaced through edit_profile. Use update_sources to add or enable/disable only the requested sources; omit discovery.targets here.",
+          "Source lists cannot be replaced through edit_profile. Use add_sites, update_site or set_sites_enabled to change only the requested sites; omit discovery.targets here.",
         );
         return;
       }
@@ -1038,8 +1038,6 @@ export const editProfileTool = defineTool({
         savedIdentity: basics(savedSnapshot.profile),
         savedLanguages: savedSnapshot.profile.spokenLanguages,
         savedSearchPreferences: preferences(savedSnapshot.searchPreferences),
-        savedSourceCount:
-          savedSnapshot.searchPreferences.discovery.targets.length,
         invalidatedApprovedResumeJobIds: result.invalidatedApprovedResumeJobIds,
         setup,
       },

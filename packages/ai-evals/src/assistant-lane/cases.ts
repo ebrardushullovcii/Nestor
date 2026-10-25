@@ -346,53 +346,9 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     ],
   },
   {
-    id: "apply.prepare_only",
-    title: '"I\'ll send it myself" prepares without sending',
-    inventory: ["apply.start"],
-    scripted: true,
-    turns: [
-      {
-        text: "Apply to this job, I'll send it myself",
-        context: discoveryList("job_lane_1"),
-      },
-    ],
-    check: (o) => [
-      ...expect(
-        o.recorder.applications.some(
-          (run) =>
-            run.mode === "prepare_only" && run.jobIds.includes("job_lane_1"),
-        ),
-        "no prepare-only start for the job",
-      ),
-      ...expect(o.recorder.sends.length === 0, "something was sent"),
-    ],
-  },
-  {
-    id: "apply.written_send",
-    title:
-      "A clear written send instruction dispatches without a second approval",
-    inventory: ["apply.start", "apply.send"],
-    scripted: true,
-    turns: [
-      {
-        text: "Apply to this job and send it",
-        context: discoveryList("job_lane_1"),
-      },
-    ],
-    check: (o) =>
-      expect(
-        o.recorder.applications.some(
-          (run) =>
-            run.mode === "autonomous_submit" &&
-            run.jobIds.includes("job_lane_1"),
-        ),
-        "no send-mode start for the job",
-      ),
-  },
-  {
     id: "apply.advice_never_sends",
     title: "Asking for advice never starts an application",
-    inventory: ["apply.start"],
+    inventory: ["apply.work"],
     scripted: false,
     turns: [
       {
@@ -479,11 +435,11 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
 const INVENTORY_REQUESTS: Record<string, string> = {
   "home.notifications": "Turn off finished-work notifications.",
   "profile.files_delete": "Delete my old cover letter file.",
-  "discovery.judge_unjudged": "Judge fit for the jobs that have not been judged.",
+  "discovery.judge_unjudged":
+    "Judge fit for the jobs that have not been judged.",
   "campaigns.rules": "Which rules are saved for my current search plan?",
   "apply.work": "Show my queued and ready applications.",
-  "apply.move_back": "Move my unsent Northwind application back to Shortlisted.",
-  "apply.reopen": "Is the Northwind application page still open? Reopen it if it is closed.",
+  "apply.send": "Send my ready Northwind application.",
   "profile.legacy_copilot":
     "Earlier I asked the old profile chat to fix my headline. Is my headline right now?",
   "resume.legacy_chat":
@@ -535,14 +491,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "resume.template": "Use a more compact template for the Northwind resume.",
   "resume.history": "Restore the previous version of my Northwind resume.",
   "resume.strategies": "Which resume approach is selected?",
-  "apply.cancel": "Stop the applications that are running.",
-  "apply.approve_run": "Approve the application run that is waiting.",
-  "apply.details": "What did you answer on my last application?",
   "apply.answer": "For the notice period question, answer four weeks.",
-  "apply.open_page": "Open the page of my last application.",
-  "apply.packet": "Export the application packet for Northwind.",
-  "apply.documents":
-    "Write a short cover letter for the Northwind application.",
   "apply.authority":
     "Let Job Finder send applications without asking me each time.",
   "apply.uncertain": "Did my last application actually go through?",

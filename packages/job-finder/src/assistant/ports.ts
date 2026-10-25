@@ -1,5 +1,5 @@
 import type {
-  ApplicationAutomationMode,
+  JobSelectionInput,
   ApplyRawPageHands,
   AssistantResumeBatchState,
   CandidateAsset,
@@ -35,28 +35,8 @@ export interface AssistantHostPorts {
     targetId: string | null;
   }): Promise<{ runId: string | null; message: string }>;
   cancelSearch(runId: string): Promise<void>;
-  /**
-   * Starts preparing applications as Apply to all does, in the given mode
-   * for this batch only. Resumes are approved the way Apply approves them;
-   * jobs whose resume waits on the person are held back and named.
-   */
-  startApplications(input: {
-    jobIds: readonly string[];
-    mode: ApplicationAutomationMode;
-    conversationId?: string;
-    onQueued?: (queueId: string) => Promise<void>;
-  }): Promise<{
-    startedJobIds: string[];
-    heldBack: { jobId: string; title: string; reason: string }[];
-    runId: string | null;
-    queueId?: string;
-    queuedJobIds?: string[];
-  }>;
-  /** Sends forms already filled in, one after another, through the send path. */
-  sendPreparedApplications(input: { jobIds: readonly string[] }): Promise<{
-    sentJobIds: string[];
-    failed: { jobId: string; reason: string }[];
-  }>;
+  /** Freeze the approved selection behind a sidebar instruction, without model pagination. */
+  resolveApprovedJobs?(selection: JobSelectionInput): Promise<number[]>;
   /** Runs a source check (the same as Check this source). */
   checkSource(
     targetId: string,

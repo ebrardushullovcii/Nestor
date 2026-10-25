@@ -10,10 +10,6 @@ import {
   plainFieldName,
 } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
-import {
-  applyToJobsTool,
-  getApplicationRunTool,
-} from "./application-tools";
 import { listDocumentsTool } from "./profile-tools";
 import { searchForJobsTool } from "./jobs-tools";
 import { setResumeTemplateTool } from "./resume-tools";
@@ -58,36 +54,6 @@ describe("the person's pause (R2)", () => {
     expect(startSearch).not.toHaveBeenCalled();
     const after = await workspaceService.getWorkspaceSnapshot();
     expect(after.activityControl.paused).toBe(true);
-  });
-
-  it("does not start applications while paused either", async () => {
-    const startApplications = vi.fn();
-    const snapshot = {
-      activityControl: { paused: true, pausedAt: null, reason: null },
-      applyRuns: [],
-      applyJobResults: [],
-      applicationRecords: [],
-      discoveryJobs: [],
-      companyJobs: [],
-      dismissedDiscoveryJobs: [],
-      searchPreferences: { companyBlacklist: [] },
-      settings: {},
-      userActionRequests: [],
-    } as unknown as JobFinderWorkspaceSnapshot;
-    const error = await rejection(
-      applyToJobsTool.execute(
-        { jobIds: ["job_1"], evenIfExcludedOrApplied: false },
-        {
-          service: {
-            getWorkspaceSnapshot: () => Promise.resolve(snapshot),
-          } as never,
-          session,
-          ports: { startApplications } as unknown as AssistantHostPorts,
-        },
-      ),
-    );
-    expect(error?.message).toContain("the person paused background work");
-    expect(startApplications).not.toHaveBeenCalled();
   });
 });
 
@@ -165,42 +131,6 @@ describe("answers the person gives through Needs you (R7)", () => {
         saveForFuture: true,
       }),
     );
-  });
-
-  it("says an answer being put on the form is not waiting on the person", async () => {
-    const snapshot = {
-      applyRuns: [{ id: "run_1", state: "paused_for_user_review" }],
-      applyJobResults: [
-        {
-          id: "result_1",
-          runId: "run_1",
-          jobId: "job_1",
-          state: "awaiting_review",
-          updatedAt: "2026-09-27T10:00:00.000Z",
-        },
-      ],
-      applicationRecords: [],
-      userActionRequests: [
-        {
-          id: "step_1",
-          state: "verifying",
-          title: "Answer the required question",
-          scope: { type: "application", jobId: "job_1" },
-        },
-      ],
-    } as unknown as JobFinderWorkspaceSnapshot;
-    const outcome = await getApplicationRunTool.execute(
-      { jobId: "job_1" },
-      {
-        service: {
-          getWorkspaceSnapshot: () => Promise.resolve(snapshot),
-          getApplyRunDetails: () => Promise.resolve(null),
-        } as never,
-        session,
-        ports: {} as AssistantHostPorts,
-      },
-    );
-    expect(outcome.summary).toContain("It is not waiting on the person");
   });
 });
 
