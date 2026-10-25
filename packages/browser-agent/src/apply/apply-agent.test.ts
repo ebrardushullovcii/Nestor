@@ -658,7 +658,7 @@ test("a covered Send is handed back to the model before the form finishes", asyn
   let covered = true;
   input.hands.checkAction = () => Promise.resolve(covered
     ? { ok: false, error: "Use essential only covers Send." }
-    : { ok: true });
+    : { ok: true, observedValue: "Reachable" });
   input.hands.clickElement = (ref) => {
     expect(ref).toBe("a1");
     covered = false;
