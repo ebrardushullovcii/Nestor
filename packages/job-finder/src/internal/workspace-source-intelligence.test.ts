@@ -1,4 +1,3 @@
-import { stat } from "node:fs";
 import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -25,6 +24,7 @@ import {
 } from "../workspace-service.test-fixtures";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -348,7 +348,9 @@ describe("collectPublicProviderJobs", () => {
     }
   });
   test("an unreadable feed from a live reader is not fetched again", async () => {
-    setDiscoveryFeedExecutor(() => Promise.reject(new Error("Unreadable feed")));
+    setDiscoveryFeedExecutor(() =>
+      Promise.reject(new Error("Unreadable feed")),
+    );
     try {
       const result = await collectGreenhouseJobs(null);
       expect(globalThis.fetch).toHaveBeenCalledOnce();
@@ -921,54 +923,53 @@ describe("collectPublicProviderJobs", () => {
   });
 
   test("does not time out a feed whose bytes arrived while the process was busy", async () => {
+    vi.useFakeTimers({
+      toFake: [
+        "Date",
+        "setTimeout",
+        "clearTimeout",
+        "setImmediate",
+        "clearImmediate",
+      ],
+    });
     const target = createGreenhouseTarget();
     const intelligence = inferSourceIntelligenceFromTarget({
       target,
       currentArtifact: null,
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      (_url, init) =>
-        new Promise((resolve, reject) => {
-          const response = new Response(
-            JSON.stringify({
-              jobs: [
-                {
-                  id: 5501,
-                  title: "Platform Engineer",
-                  absolute_url: "https://boards.greenhouse.io/acme/jobs/5501",
-                  location: { name: "Remote" },
-                  content: "<p>Build the platform.</p>",
-                },
-              ],
-            }),
-            { status: 200 },
-          );
-          setImmediate(() => {
-            // The answer arrives while other work holds the main process
-            // past the limit; it waits behind that work with the next
-            // network events (a file read started before the busy stretch
-            // stands in for the socket, so a loaded machine cannot finish
-            // it only after the timeout's own look).
-            stat(".", () =>
-              init?.signal?.aborted
-                ? reject(new DOMException("Aborted", "AbortError"))
-                : resolve(response),
-            );
-            const until = Date.now() + 80;
-            while (Date.now() < until) {
-              // busy
-            }
-          });
-        }),
+    const response = new Response(
+      JSON.stringify({
+        jobs: [
+          {
+            id: 5501,
+            title: "Platform Engineer",
+            absolute_url: "https://boards.greenhouse.io/acme/jobs/5501",
+            location: { name: "Remote" },
+            content: "<p>Build the platform.</p>",
+          },
+        ],
+      }),
+      { status: 200 },
     );
+    let deliverFeed!: (response: Response) => void;
+    const feed = new Promise<Response>((resolve) => {
+      deliverFeed = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockReturnValue(feed);
 
-    const result = await collectPublicProviderJobs({
+    const collecting = collectPublicProviderJobs({
       target,
       artifact: { intelligence },
       source: "target_site",
       retryDelaysMs: [],
       timeoutMs: 30,
     });
+    // Queue the quiet-time check, then deliver the response before its
+    // setImmediate abort decision. No real event-loop delay is required.
+    vi.advanceTimersByTime(30);
+    deliverFeed(response);
+    await vi.runAllTimersAsync();
+    const result = await collecting;
 
     expect(result.warning).toBeNull();
     expect(result.jobs.map((job) => job.sourceJobId)).toEqual(["5501"]);

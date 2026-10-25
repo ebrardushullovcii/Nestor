@@ -141,8 +141,6 @@ export default defineConfig({
         "**/test-fixtures/**",
         "**/.tmp/**",
         "**/coverage/**",
-        "packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts",
-        "packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts",
       ],
     },
   },

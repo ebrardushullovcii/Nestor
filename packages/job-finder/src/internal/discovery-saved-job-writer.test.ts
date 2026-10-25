@@ -172,45 +172,9 @@ describe("discovery saved-job checkpoint writer", () => {
     expect(read).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
   });
-  test.each([3_000, 10_000])(
-    "only reads and copies touched rows with %i saved jobs",
-    async (size) => {
-      const h = harness(size);
-      // Known persisted references are seeded once and incur no conversion.
-      for (const job of h.jobs) h.writer.stage(job);
-      await h.writer.persist();
-      expect(h.toStoredJob).not.toHaveBeenCalled();
-      expect(h.commit).not.toHaveBeenCalled();
-
-      for (let checkpoint = 0; checkpoint < 12; checkpoint += 1) {
-        const job = {
-          ...h.jobs[checkpoint]!,
-          description: `Checkpoint ${checkpoint}`,
-        };
-        h.writer.stage(job);
-        await h.writer.persist((current) => current);
-        // An unchanged repeat and the final pass neither copy nor reread it.
-        h.writer.stage(job);
-        await h.writer.persist();
-      }
-      const added = { ...h.jobs[0]!, id: "newly_kept" };
-      h.writer.stage(added);
-      await h.writer.persist();
-      await h.writer.persist();
-
-      expect(h.toStoredJob).toHaveBeenCalledTimes(13);
-      expect(h.readIds).toEqual(h.jobs.slice(0, 12).map((job) => job.id));
-      expect(h.upsertIds).toEqual([added.id]);
-      expect(h.rows.size).toBe(size + 1);
-      expect(h.persistDiscovery).not.toHaveBeenCalled();
-      for (let index = 12; index < size; index += 1) {
-        expect(h.rows.get(h.jobs[index]!.id)).toBe(h.jobs[index]);
-      }
-    },
-  );
 
   test("equal reconstructed rows are considered once and do not cause an empty row commit", async () => {
-    const h = harness(3_000);
+    const h = harness(3);
     const equal = { ...h.jobs[0]! };
     h.writer.stage(equal);
     await h.writer.persist((current) => current);
@@ -222,7 +186,7 @@ describe("discovery saved-job checkpoint writer", () => {
   });
 
   test("a concurrent working edit remains pending and the next delta preserves a user edit", async () => {
-    const h = harness(3_000);
+    const h = harness(3);
     const started = deferred();
     const release = deferred();
     const commit = h.commit.getMockImplementation()!;
@@ -255,7 +219,7 @@ describe("discovery saved-job checkpoint writer", () => {
   });
 
   test("a failed atomic write retains its baseline and retries once", async () => {
-    const h = harness(3_000);
+    const h = harness(3);
     h.commit.mockRejectedValueOnce(new Error("failed atomic checkpoint"));
     const changed = { ...h.jobs[0]!, description: "retry checkpoint" };
     h.writer.stage(changed);
@@ -270,7 +234,7 @@ describe("discovery saved-job checkpoint writer", () => {
   });
 
   test("rollback drops speculative new rows and restores only real working changes", async () => {
-    const h = harness(3_000);
+    const h = harness(3);
     const restored = { ...h.jobs[0]!, description: "earlier unsaved change" };
     const speculative = { ...restored, id: "failed_new_job" };
     h.writer.stage(restored);

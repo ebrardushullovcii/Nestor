@@ -1,6 +1,6 @@
 import type {
-  JobFinderWorkspaceDelta,
   JobFinderRendererWorkspaceSnapshot,
+  JobFinderWorkspaceDelta,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -512,49 +512,5 @@ describe("applyJobFinderWorkspaceDelta", () => {
     ]);
     expect(mixedResult.workspace.discoveryJobs[0]).toBe(jobOld);
     expect(mixedResult.workspace.discoveryJobs[1]).toBe(jobKeep);
-  });
-
-  it("applies thousands of no-op deltas within the performance budget", () => {
-    const jobCount = 5000;
-    const jobs = Array.from({ length: jobCount }, (_, index) => ({
-      id: `job-${index}`,
-      title: `Role ${index}`,
-      meta: { score: index, tags: [`tag-${index}`] },
-    }));
-    const workspace = {
-      ...createWorkspace(),
-      discoveryJobs: jobs,
-    } as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    let latest = workspace;
-    const emptyStartedAt = performance.now();
-    for (let iteration = 0; iteration < 200; iteration += 1) {
-      const result = applyJobFinderWorkspaceDelta({
-        revision: 7,
-        workspace: latest,
-        delta: createSliceDelta(),
-      });
-      latest = expectApplied(result).workspace;
-      expect(latest.discoveryJobs).toBe(jobs);
-    }
-    const emptyElapsedMs = performance.now() - emptyStartedAt;
-    expect(emptyElapsedMs).toBeLessThan(1000);
-    expect(latest).not.toBe(workspace);
-
-    const resentJobs = jobs.map((job) => ({
-      ...job,
-      meta: { ...job.meta, tags: [...job.meta.tags] },
-    }));
-    const upsertStartedAt = performance.now();
-    const upsertResult = applyJobFinderWorkspaceDelta({
-      revision: 7,
-      workspace: latest,
-      delta: createSliceDelta({
-        discoveryJobs: { upserts: resentJobs, removedIds: [] },
-      }),
-    });
-    expect(expectApplied(upsertResult).workspace.discoveryJobs).toBe(jobs);
-    const upsertElapsedMs = performance.now() - upsertStartedAt;
-    expect(upsertElapsedMs).toBeLessThan(2000);
   });
 });

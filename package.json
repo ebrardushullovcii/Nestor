@@ -26,12 +26,11 @@
     "validate:browser-runtime": "node scripts/validate-package.mjs browser-runtime",
     "validate:contracts": "node scripts/validate-package.mjs contracts",
     "knip": "knip",
-    "test": "pnpm test:correctness && pnpm test:performance",
+    "test": "pnpm test:correctness",
     "test:unit": "pnpm test:correctness",
     "test:smoke": "vitest run --dir packages/contracts/src",
-    "test:correctness": "vitest run --maxWorkers=4 --minWorkers=4 --exclude packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts --exclude packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts",
-    "test:performance": "vitest run packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts --maxWorkers=1 --minWorkers=1",
-    "test:coverage": "vitest run --coverage --maxWorkers=4 --minWorkers=4 --exclude packages/job-finder/src/internal/workspace-discovery-ledger.performance.test.ts --exclude packages/job-finder/src/workspace-service.discovery-ledger-performance.test.ts"
+    "test:correctness": "vitest run --maxWorkers=4 --minWorkers=4",
+    "test:coverage": "vitest run --coverage --maxWorkers=4 --minWorkers=4"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

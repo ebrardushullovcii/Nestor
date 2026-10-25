@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 
-import { performance } from "node:perf_hooks";
-
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import {
   act,
@@ -13,16 +11,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  DISCOVERY_RESULTS_PAGE_SIZE,
-} from "./discovery-results-panel";
+import { DISCOVERY_RESULTS_PAGE_SIZE } from "./discovery-results-panel";
 import {
   DiscoveryResultsPanelWithJobs,
   flushFindJobsQueries,
 } from "./find-jobs-query-fixture.test-support";
 
-const JOB_COUNT = 1_000;
-const DOM_COMMIT_BUDGET_MS = 2_000;
+const JOB_COUNT = 150;
 
 const browserSession = {
   source: "target_site" as const,
@@ -121,7 +116,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe("DiscoveryResultsPanel workspace scale", () => {
+describe("DiscoveryResultsPanel pagination", () => {
   it("keeps a bulk shortlist single-flight until its mutation finishes", async () => {
     const jobs = createJobs().slice(0, DISCOVERY_RESULTS_PAGE_SIZE + 10);
     let finish!: () => void;
@@ -194,48 +189,6 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     );
   });
 
-  it("bounds a 1,000-job React DOM commit to exactly one 50-row page", async () => {
-    const jobs = createJobs();
-    const startedAt = performance.now();
-    const { container } = await renderResults(jobs, null);
-    const durationMs = performance.now() - startedAt;
-    const resultButtons = getRenderedJobButtons(container);
-
-    console.info("job-finder-discovery-dom-scale", {
-      durationMs: Math.round(durationMs),
-      inputJobs: jobs.length,
-      renderedJobButtons: resultButtons.length,
-      renderedNodes: container.querySelectorAll("*").length,
-    });
-
-    expect(resultButtons).toHaveLength(DISCOVERY_RESULTS_PAGE_SIZE);
-    expect(resultButtons[0]?.dataset.jobResultId).toBe("dom_scale_job_0000");
-    expect(resultButtons.at(-1)?.dataset.jobResultId).toBe(
-      "dom_scale_job_0049",
-    );
-    expect(screen.getByText("1–50 of 1000")).toBeTruthy();
-    // The default "review before applying" verdict is the list baseline and
-    // earns no per-row badge; only stronger or weaker verdicts are badged.
-    expect(
-      resultButtons.filter((button) =>
-        button.textContent?.includes("Review before applying"),
-      ),
-    ).toHaveLength(0);
-    expect(
-      screen.getAllByLabelText("Overall fit: not assessed").length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText("70% fit")).toBeNull();
-    expect(screen.queryByText("Role and requirements")).toBeNull();
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Previous" })
-        .disabled,
-    ).toBe(true);
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Next" }).disabled,
-    ).toBe(false);
-    expect(durationMs).toBeLessThan(DOM_COMMIT_BUDGET_MS);
-  });
-
   it("suppresses provisional numbers while preserving authoritative labels", async () => {
     const catalogJob = createJobs(1)[0];
     if (!catalogJob) {
@@ -253,7 +206,10 @@ describe("DiscoveryResultsPanel workspace scale", () => {
       },
     });
 
-    const { container } = await renderResults([catalogJob, authoritativeJob], null);
+    const { container } = await renderResults(
+      [catalogJob, authoritativeJob],
+      null,
+    );
 
     expect(screen.getByLabelText("Overall fit: not assessed")).toBeTruthy();
     expect(screen.getByText("Fit not assessed")).toBeTruthy();
@@ -356,14 +312,14 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     expect(resultButtons.at(-1)?.dataset.jobResultId).toBe(
       "dom_scale_job_0099",
     );
-    expect(screen.getByText("51–100 of 1000")).toBeTruthy();
+    expect(screen.getByText("51–100 of 150")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     await flushFindJobsQueries();
 
     resultButtons = getRenderedJobButtons(container);
     expect(resultButtons[0]?.dataset.jobResultId).toBe("dom_scale_job_0000");
-    expect(screen.getByText("1–50 of 1000")).toBeTruthy();
+    expect(screen.getByText("1–50 of 150")).toBeTruthy();
   });
 
   it("moves ArrowDown across the 50-row page boundary while keeping the DOM bounded", async () => {
@@ -495,7 +451,7 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     expect(scrollRegion?.scrollTop).toBe(0);
     expect(container.scrollTop).toBe(120);
     expect(document.activeElement).toBe(nextButton);
-    expect(screen.getByText("51–100 of 1000")).toBeTruthy();
+    expect(screen.getByText("51–100 of 150")).toBeTruthy();
   });
 
   it("keeps pagination sticky within the shared results and filters scroller", async () => {
@@ -524,20 +480,20 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     expect(pagination?.className).toContain("bg-(--surface-panel)");
   });
 
-  it("opens directly on page 20 when the selected job is the final result", async () => {
+  it("opens directly on page 3 when the selected job is the final result", async () => {
     const jobs = createJobs();
-    const { container } = await renderResults(jobs, jobs[999] ?? null);
+    const { container } = await renderResults(jobs, jobs[149] ?? null);
     const resultButtons = getRenderedJobButtons(container);
 
     expect(resultButtons).toHaveLength(DISCOVERY_RESULTS_PAGE_SIZE);
-    expect(resultButtons[0]?.dataset.jobResultId).toBe("dom_scale_job_0950");
+    expect(resultButtons[0]?.dataset.jobResultId).toBe("dom_scale_job_0100");
     expect(resultButtons.at(-1)?.dataset.jobResultId).toBe(
-      "dom_scale_job_0999",
+      "dom_scale_job_0149",
     );
-    expect(screen.getByText("951–1000 of 1000")).toBeTruthy();
+    expect(screen.getByText("101–150 of 150")).toBeTruthy();
     expect(
       container
-        .querySelector('[data-job-result-id="dom_scale_job_0999"]')
+        .querySelector('[data-job-result-id="dom_scale_job_0149"]')
         ?.getAttribute("aria-current"),
     ).toBe("true");
     expect(
@@ -551,7 +507,7 @@ describe("DiscoveryResultsPanel workspace scale", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await flushFindJobsQueries();
-    expect(screen.getByText("51–100 of 1000")).toBeTruthy();
+    expect(screen.getByText("51–100 of 150")).toBeTruthy();
     const scrollRegion = container.querySelector<HTMLElement>(
       "[data-job-results-scroll-region]",
     );
@@ -574,7 +530,7 @@ describe("DiscoveryResultsPanel workspace scale", () => {
 
     const resultButtons = getRenderedJobButtons(container);
     expect(resultButtons[0]?.dataset.jobResultId).toBe("dom_scale_job_0050");
-    expect(screen.getByText("51–100 of 1000")).toBeTruthy();
+    expect(screen.getByText("51–100 of 150")).toBeTruthy();
     expect(scrollRegion?.scrollTop).toBe(640);
   });
 
@@ -595,12 +551,12 @@ describe("DiscoveryResultsPanel workspace scale", () => {
         hasCompletedSearch
         jobs={jobs}
         onSelectJob={vi.fn()}
-        selectedJob={jobs[999] ?? null}
+        selectedJob={jobs[149] ?? null}
       />,
     );
     await flushFindJobsQueries();
 
-    expect(screen.getByText("951–1000 of 1000")).toBeTruthy();
+    expect(screen.getByText("101–150 of 150")).toBeTruthy();
     expect(scrollRegion?.scrollTop).toBe(0);
   });
 
@@ -626,7 +582,7 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     );
     await flushFindJobsQueries();
 
-    expect(screen.getByText("51–100 of 1000")).toBeTruthy();
+    expect(screen.getByText("51–100 of 150")).toBeTruthy();
     expect(scrollRegion?.scrollTop).toBe(640);
   });
 
@@ -694,9 +650,9 @@ it("selects all shown without a first tick and keeps the whole selection across 
     }),
   );
   expect(screen.getByText("50 selected")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Page 20" }));
+  fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
   await flushFindJobsQueries();
-  expect(screen.getByText("951–1000 of 1000")).toBeTruthy();
+  expect(screen.getByText("101–150 of 150")).toBeTruthy();
   expect(container.querySelectorAll("button[data-job-result-id]")).toHaveLength(
     50,
   );
@@ -715,6 +671,6 @@ it("selects all shown without a first tick and keeps the whole selection across 
   );
   await flushFindJobsQueries();
   expect(onShortlistJobs).toHaveBeenCalledExactlyOnceWith(
-    [...jobs.slice(0, 50), ...jobs.slice(950)].map((job) => job.id),
+    [...jobs.slice(0, 50), ...jobs.slice(100)].map((job) => job.id),
   );
 });

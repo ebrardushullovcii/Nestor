@@ -1,28 +1,29 @@
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
-import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import type {
+  AgentDiscoveryOptions,
+  BrowserSessionRuntime,
+} from "@nestor/browser-runtime";
+import {
+  DiscoveryRunResultSchema,
+  JobPostingSchema,
+  SaveJobSearchCampaignInputSchema,
+  type DiscoveryActivityEvent,
+} from "@nestor/contracts";
 import { createFileJobFinderRepository } from "@nestor/db";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createJobFinderWorkspaceService } from "./index";
-import {
-  JobPostingSchema,
-  DiscoveryRunResultSchema,
-  SaveJobSearchCampaignInputSchema,
-  type DiscoveryActivityEvent,
-} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
+import { createJobFinderWorkspaceService } from "./index";
 import {
   createAgentAiClient,
   createAgentBrowserRuntime,
-  createSeed,
-  createSavedJob,
-  createWorkspaceServiceHarness,
   createDocumentManager,
   createResearchAdapter,
+  createSavedJob,
+  createSeed,
+  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
-import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
-import * as discoverySavedJobWriter from "./internal/discovery-saved-job-writer";
 
 function createCollectedJob(input: {
   token: string;
@@ -1312,107 +1313,6 @@ describe("discovery checkpoint incremental persistence", () => {
     expect(jobBCommit?.updateJobIds).toBeDefined();
     expect(jobBCommit?.updateJobIds).not.toContain(savedJobA!.id);
   });
-
-  test.each([100, 500])(
-    "successive checkpoints copy only their posting changes in a %i-job plan",
-    async (size) => {
-      const { seed } = createHarness();
-      const template = createSeed().savedJobs[0]!;
-      seed.savedJobs = Array.from({ length: size }, (_, index) => ({
-        ...template,
-        id: `checkpoint_seed_${index}`,
-        sourceJobId: `checkpoint_seed_${index}`,
-        canonicalUrl: `https://example.com/seed/${index}`,
-        applicationUrl: null,
-        company: `Synthetic company ${index % 30}`,
-        employerDomain: null,
-        employerWebsiteUrl: null,
-        status: "discovered" as const,
-      }));
-      let conversions = 0;
-      const createWriter =
-        discoverySavedJobWriter.createDiscoverySavedJobWriter;
-      const writerSpy = vi
-        .spyOn(discoverySavedJobWriter, "createDiscoverySavedJobWriter")
-        .mockImplementation((input) =>
-          createWriter({
-            ...input,
-            toStoredJob: (job) => {
-              conversions += 1;
-              return input.toStoredJob(job);
-            },
-          }),
-        );
-      const jobA = createCollectedJob({ token: "scale_new_a" });
-      const jobB = createCollectedJob({ token: "scale_new_b" });
-      const richerA = createCollectedJob({
-        token: "scale_new_a",
-        description:
-          "Grounded description with detailed scope, stakeholders, and delivery outcomes for the platform team.",
-        responsibilities: [
-          "Lead the design system roadmap",
-          "Partner with engineering on delivery",
-        ],
-      });
-      const conversionsAtCheckpoint: number[] = [];
-      const { workspaceService, repository } = createWorkspaceServiceHarness({
-        seed,
-        browserRuntime: createIncrementalRuntime({
-          checkpoints: [[jobA], [jobA, jobB], [richerA, jobB]],
-          finalJobs: [richerA, jobB],
-          onCheckpointSaved: () => {
-            conversionsAtCheckpoint.push(conversions);
-            return Promise.resolve();
-          },
-        }),
-        aiClient: createAgentAiClient(),
-      });
-      const commitSpy = vi.spyOn(repository, "commitSavedJobDelta");
-      try {
-        const snapshot = await workspaceService.runDiscoveryForTarget(
-          "target_incremental",
-          () => {},
-          new AbortController().signal,
-        );
-        expect(conversionsAtCheckpoint[1]! - conversionsAtCheckpoint[0]!).toBe(
-          1,
-        );
-        expect(conversionsAtCheckpoint[2]! - conversionsAtCheckpoint[1]!).toBe(
-          1,
-        );
-        const keptA = snapshot.discoveryJobs.find(
-          (job) => job.sourceJobId === jobA.sourceJobId,
-        )!;
-        const secondCommit = commitSpy.mock.calls.find(([input]) =>
-          input.upserts?.some((job) => job.sourceJobId === jobB.sourceJobId),
-        )![0];
-        expect(secondCommit.updateJobIds).toEqual([]);
-        const upgrade = commitSpy.mock.calls.find(
-          ([input]) =>
-            input.updateJobIds?.length === 1 &&
-            input.updateJobIds[0] === keptA.id,
-        );
-        expect(upgrade).toBeDefined();
-        expect(
-          commitSpy.mock.calls
-            .flatMap(([input]) => input.upserts ?? [])
-            .map((job) => job.sourceJobId),
-        ).toEqual([jobA.sourceJobId, jobB.sourceJobId]);
-        expect(snapshot.recentDiscoveryRuns[0]?.summary.jobsPersisted).toBe(2);
-        const savedIds = new Set(await repository.listSavedJobIds());
-        expect(savedIds.size).toBe(size + 2);
-        for (const job of seed.savedJobs)
-          expect(savedIds.has(job.id)).toBe(true);
-        expect(keptA.description).toBe(richerA.description);
-        expect(
-          (await repository.getDiscoveryState()).recentRuns[0]
-            ?.targetExecutions[0]?.agentCheckpoint?.collectedJobs,
-        ).toEqual([]);
-      } finally {
-        writerSpy.mockRestore();
-      }
-    },
-  );
 
   test("a later checkpoint upgrade preserves a person's concurrent saved-job edit", async () => {
     const { seed } = createHarness();

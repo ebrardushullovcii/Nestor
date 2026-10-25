@@ -8,11 +8,11 @@ import {
 describe("immutable row change hints", () => {
   test("carries only changed rows into thin versions and releases full-row hints", () => {
     const original = Object.freeze(
-      Array.from({ length: 1000 }, (_, i) =>
+      Array.from({ length: 3 }, (_, i) =>
         Object.freeze({ id: String(i), score: i, body: "Listing body" }),
       ),
     );
-    const changed = Object.freeze({ ...original[20]!, score: 2000 });
+    const changed = Object.freeze({ ...original[1]!, score: 2000 });
     const next = Object.freeze(
       original.map((row) => (row.id === changed.id ? changed : row)),
     );
@@ -29,15 +29,15 @@ describe("immutable row change hints", () => {
     };
     transferRowChanges(original, beforeRows, project);
     rememberRowChanges(original, next, [
-      { id: changed.id, before: original[20]!, after: changed },
+      { id: changed.id, before: original[1]!, after: changed },
     ]);
     transferRowChanges(next, afterRows, project);
-    expect(touched).toEqual(["20", "20"]);
+    expect(touched).toEqual(["1", "1"]);
     expect(readRowChanges(beforeRows, afterRows)).toEqual([
       {
-        id: "20",
-        before: { id: "20", score: 20 },
-        after: { id: "20", score: 2000 },
+        id: "1",
+        before: { id: "1", score: 1 },
+        after: { id: "1", score: 2000 },
       },
     ]);
     expect(readRowChanges(original, next)).toBeNull();

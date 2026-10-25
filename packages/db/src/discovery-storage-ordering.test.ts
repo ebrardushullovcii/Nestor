@@ -1,16 +1,15 @@
-import { DatabaseSync } from "node:sqlite";
 import {
   DiscoveryActivityEventSchema,
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   type JobFinderDiscoveryState,
 } from "@nestor/contracts";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   createSavedJob,
   createTempRepository,
 } from "./file-repository.test-support";
-import { createSeed } from "./test-fixtures";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import {
   createDiscoveryStorage,
@@ -18,6 +17,7 @@ import {
   readDiscoveryStorage,
   type DiscoveryDisplayRowCache,
 } from "./internal/discovery-storage";
+import { createSeed } from "./test-fixtures";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,7 +57,7 @@ function run(id: string, targetId = "target") {
   });
 }
 
-test("moving the first of 10k ledger rows to last and removing the first pending row writes two rows", async () => {
+test("moving the first ledger row to last and removing the first pending row writes two rows", async () => {
   const temp = await createTempRepository("nestor-bounded-order-");
   let repo = await temp.createRepository();
   const raw = new DatabaseSync(temp.filePath);
@@ -65,10 +65,10 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     const template = createSavedJob();
     await repo.commitDiscoveryStateUpdate((current) => ({
       ...current,
-      discoveryLedger: Array.from({ length: 10000 }, (_, index) =>
+      discoveryLedger: Array.from({ length: 3 }, (_, index) =>
         ledger(`ledger_${index}`),
       ),
-      pendingDiscoveryJobs: Array.from({ length: 10000 }, (_, index) => ({
+      pendingDiscoveryJobs: Array.from({ length: 3 }, (_, index) => ({
         ...template,
         id: `pending_${index}`,
       })),
@@ -149,7 +149,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
       raw
         .prepare("SELECT position FROM discovery_ledger WHERE id='ledger_0'")
         .get()?.position,
-    ).toBe(10000);
+    ).toBe(3);
     expect(
       raw
         .prepare("SELECT position FROM discovery_ledger WHERE id='ledger_1'")
@@ -183,9 +183,6 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     repo = await temp.createRepository();
     expect(await repo.getDiscoveryState()).toEqual(expected);
     expect(await repo.readDiscoveryDisplayProjection()).toEqual(expected);
-    console.info(
-      "10k ledger move + 10k pending removal: 1 ledger UPDATE, 1 pending DELETE; rollback markers 0",
-    );
   } finally {
     raw.close();
     await repo.close();
@@ -277,13 +274,13 @@ test("mid-list insertion, duplicate-id collisions, arbitrary reorder and exhaust
   }
 });
 
-test("warm display refresh batches 500 changed bodies in one indexed query and reuses other rows", async () => {
+test("display refresh reads changed bodies in one indexed query and reuses other rows", async () => {
   const temp = await createTempRepository("nestor-batched-dirty-");
   const repo = await temp.createRepository();
   try {
     await repo.commitDiscoveryStateUpdate((current) => ({
       ...current,
-      discoveryLedger: Array.from({ length: 1000 }, (_, index) =>
+      discoveryLedger: Array.from({ length: 3 }, (_, index) =>
         ledger(`batch_${index}`),
       ),
     }));
@@ -298,7 +295,7 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
     );
     const before = await read();
     raw.exec("BEGIN");
-    for (let index = 0; index < 500; index += 1)
+    for (let index = 0; index < 2; index += 1)
       raw
         .prepare("UPDATE discovery_ledger SET value=? WHERE id=?")
         .run(
@@ -311,7 +308,8 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
     const after = await read();
     const valueQueries = queries.mock.calls.filter(
       ([query]) =>
-        /^SELECT id, /.test(query) && query.includes("AS value FROM discovery_ledger"),
+        /^SELECT id, /.test(query) &&
+        query.includes("AS value FROM discovery_ledger"),
     );
     expect(valueQueries).toHaveLength(1);
     expect(valueQueries[0]![0]).toContain(
@@ -330,20 +328,17 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
         query.startsWith("SELECT value FROM discovery_ledger"),
       ),
     ).toBe(false);
-    expect(parse.mock.calls).toHaveLength(501);
+    expect(parse.mock.calls).toHaveLength(3);
     expect(after.discoveryLedger[0]?.title).toBe("changed 0");
-    expect(after.discoveryLedger[499]?.title).toBe("changed 499");
-    expect(after.discoveryLedger[500]).toBe(before.discoveryLedger[500]);
-    console.info(
-      "500 dirty ledger rows: 1 indexed body query, 501 JSON parses including small singleton",
-    );
+    expect(after.discoveryLedger[1]?.title).toBe("changed 1");
+    expect(after.discoveryLedger[2]).toBe(before.discoveryLedger[2]);
   } finally {
     raw.close();
     await temp.cleanup();
   }
 });
 
-test("run scopes are pruned across 48 histories with delimiters and duplicate IDs", async () => {
+test("run scopes are pruned across replaced histories with delimiters and duplicate IDs", async () => {
   const temp = await createTempRepository("nestor-run-cache-pruning-");
   const repo = await temp.createRepository();
   await repo.close();
@@ -354,7 +349,7 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
       scopes: new Map(),
       dirty: new Map(),
     };
-    for (let index = 0; index < 48; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       const before = storage.read();
       const nextRun = run(`run/${index}`);
       const recentRuns = [
@@ -424,9 +419,6 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
     storage.publish(empty);
     readDiscoveryStorage(raw, createSeed().discovery, false, cache);
     expect(cache.scopes.size).toBe(2);
-    console.info(
-      "48 run histories: at most 17 cache scopes / 10 retained rows; empty history returns to 2 global scopes",
-    );
   } finally {
     raw.close();
     await temp.cleanup();

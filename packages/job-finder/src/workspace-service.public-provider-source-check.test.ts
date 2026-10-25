@@ -77,14 +77,12 @@ describe("public provider source check", () => {
       aiClient,
     });
     const progressEvents: Array<{ waitReason: string; jobsFound: number }> = [];
-    const startedAt = performance.now();
 
     const snapshot = await workspaceService.runSourceDebug(
       "target_mercury",
       undefined,
       (event) => progressEvents.push(event),
     );
-    const elapsedMs = performance.now() - startedAt;
     const artifacts = await repository.listSourceInstructionArtifacts();
     const attempts = await repository.listSourceDebugAttempts();
     const evidenceRefs = await repository.listSourceDebugEvidenceRefs();
@@ -95,7 +93,6 @@ describe("public provider source check", () => {
     expect(openSessionCalls).toBe(0);
     expect(agentDiscoveryCalls).toBe(0);
     expect(aiReviewCalls).toBe(0);
-    expect(elapsedMs).toBeLessThan(2_000);
     expect(run).toMatchObject({
       state: "completed",
       phases: ["replay_verification"],

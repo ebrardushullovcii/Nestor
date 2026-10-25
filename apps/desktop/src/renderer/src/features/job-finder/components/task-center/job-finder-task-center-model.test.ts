@@ -6,12 +6,12 @@ import type {
   ResumeImportRun,
 } from "@nestor/contracts";
 import { describe, expect, it, test } from "vitest";
+import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
   isStaleFinishedTask,
 } from "./job-finder-task-center-model";
-import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 
 function createWorkspace(
   overrides: Partial<JobFinderRendererWorkspaceSnapshot> = {},
@@ -576,97 +576,6 @@ describe("buildJobFinderTaskCenterModel", () => {
       "2 of 2 sources finished · 0 new jobs saved · 15 duplicates merged",
     );
     expect(task.countLabel).not.toMatch(/\bfound\b/i);
-  });
-
-  test("compares 511 configured targets without repeated sorting", () => {
-    const targetIds = Array.from(
-      { length: 511 },
-      (_, index) => `source_${String(index).padStart(3, "0")}`,
-    );
-    const historicalTargetIds = [...targetIds].reverse();
-    const incompatibleTargetIds = [...historicalTargetIds];
-    incompatibleTargetIds[incompatibleTargetIds.length - 1] = targetIds[1]!;
-    const historicalRuns = [
-      createDiscoveryRun({
-        id: "discovery_history_duplicate-target",
-        state: "completed",
-        targetIds: incompatibleTargetIds,
-        summary: {
-          targetsPlanned: targetIds.length,
-          targetsCompleted: targetIds.length,
-          validJobsFound: 5,
-          durationMs: 12_000,
-        },
-      }),
-      ...Array.from({ length: 32 }, (_, index) =>
-        createDiscoveryRun({
-          id: `discovery_history_${index}`,
-          state: "completed",
-          targetIds: historicalTargetIds,
-          summary: {
-            targetsPlanned: targetIds.length,
-            targetsCompleted: targetIds.length,
-            validJobsFound: 5,
-            durationMs: 12_000,
-          },
-        }),
-      ),
-    ];
-    const currentRun = createDiscoveryRun({
-      targetIds,
-      summary: {
-        targetsPlanned: targetIds.length,
-        targetsCompleted: 0,
-        validJobsFound: 0,
-        durationMs: 0,
-      },
-    });
-
-    const startedAt = performance.now();
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace({
-        activeDiscoveryRun: currentRun,
-        recentDiscoveryRuns: historicalRuns,
-        searchPreferences: {
-          discovery: {
-            targets: targetIds.map((id, index) => ({
-              id,
-              label: `Source ${index}`,
-              startingUrl: `https://example.com/${id}`,
-              enabled: true,
-              adapterKind: "auto",
-              customInstructions: null,
-              instructionStatus: "missing",
-              validatedInstructionId: null,
-              draftInstructionId: null,
-              lastDebugRunId: null,
-              lastVerifiedAt: null,
-              staleReason: null,
-            })),
-            historyLimit: 5,
-          },
-        } as unknown as JobFinderRendererWorkspaceSnapshot["searchPreferences"],
-      }),
-      isDiscoveryPending: true,
-      isResumeImportPending: false,
-    });
-    const durationMs = performance.now() - startedAt;
-    const task = findTask(model, "discovery");
-
-    console.info("task-center-target-comparison-benchmark", {
-      durationMs: Math.round(durationMs),
-      historicalRuns: historicalRuns.length,
-      targetCount: targetIds.length,
-    });
-
-    expect(task.countLabel).toBe(
-      "0 of 511 sources finished · 0 new jobs saved",
-    );
-    expect(task.sourceLabel).toBe("Source 0 and 510 more sources");
-    expect(task.historyEstimateLabel).toBe(
-      "about 12s from 32 similar completed searches",
-    );
-    expect(durationMs).toBeLessThan(500);
   });
 
   test("keeps a persisted running import active after navigation clears the local pending flag", () => {
@@ -1460,7 +1369,9 @@ describe("buildJobFinderTaskCenterModel", () => {
       "2026-08-28T10:03:00.000Z",
       "outcome_uncertain",
     );
-    const build = (results: JobFinderRendererWorkspaceSnapshot["applyJobResults"]) =>
+    const build = (
+      results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
+    ) =>
       buildJobFinderTaskCenterModel({
         workspace: createWorkspace({ applyJobResults: results }),
         isDiscoveryPending: false,

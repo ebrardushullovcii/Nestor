@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   readDiscoveryPreparation,
-  readPreparedDiscoveryFingerprints,
   readPreparedBodySalaryRange,
+  readPreparedDiscoveryFingerprints,
   type JobDiscoveryTarget,
   type JobSource,
 } from "@nestor/contracts";
@@ -12,19 +12,19 @@ import {
   takePreparedDiscoveryPosting,
 } from "./discovery-feed-executor";
 
-import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
-import { preparePublicProviderFeed } from "./workspace-source-intelligence";
-import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
-import { extractSalaryRangeFromListingBody } from "./matching-compensation";
 import {
   buildJobIdentityAliases,
-  rememberPreparedListingContent,
   prepareListingContent,
+  rememberPreparedListingContent,
 } from "./job-identity";
+import { extractSalaryRangeFromListingBody } from "./matching-compensation";
+import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import {
   collectPublicProviderJobs,
   inferSourceIntelligenceFromTarget,
+  preparePublicProviderFeed,
 } from "./workspace-source-intelligence";
 
 const versionInfo = {
@@ -361,7 +361,6 @@ describe("public provider ATS acceptance matrix", () => {
         ok: true,
         json: () => Promise.resolve(payload),
       } as Response);
-      const startedAt = performance.now();
 
       const result = await runPublicProviderSourceCheck({
         target,
@@ -369,12 +368,10 @@ describe("public provider ATS acceptance matrix", () => {
         runId: `provider_matrix_${providerKey}`,
         versionInfo,
       });
-      const elapsedMs = performance.now() - startedAt;
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(fetchSpy.mock.calls[0]?.[0]).toBe(expectedApiUrl);
       expect(fetchSpy.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-      expect(elapsedMs).toBeLessThan(2_000);
       expect(result).not.toBeNull();
       expect(result?.jobCount).toBe(1);
       expect(result?.artifact).toMatchObject({

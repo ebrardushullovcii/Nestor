@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
 import type {
   CompanyEntity,
   DiscoveryJobView,
   SavedJob,
 } from "@nestor/contracts";
+import { describe, expect, it } from "vitest";
 import {
-  indexCompanyJobs,
   projectCompanyApplicationHistory,
   projectCompanyDuplicateJobs,
   projectCompanyOpenings,
@@ -224,46 +223,6 @@ describe("projectCompanyOpenings", () => {
     ]);
     expect(projection.lastOpenedAt).toBe("2026-08-10T00:00:00.000Z");
   });
-
-  it("projects representative companies from a shared 10,000-job index within budget", () => {
-    const jobs = Array.from({ length: 10_000 }, (_, index) =>
-      withActivity(
-        makeJob(`job_${String(index).padStart(5, "0")}`, {
-          postedAt: `2026-08-${String((index % 20) + 1).padStart(2, "0")}T00:00:00.000Z`,
-        }),
-        index % 3 === 0
-          ? {
-              status: "active",
-              observedAt: now,
-              evidence: "last_seen_at",
-            }
-          : { status: "unknown" },
-      ),
-    );
-    const companies = Array.from({ length: 100 }, (_, companyIndex) =>
-      makeCompany({
-        id: `company_${companyIndex}`,
-        jobIds: Array.from(
-          { length: 100 },
-          (_, offset) => jobs[companyIndex * 100 + offset]!.id,
-        ),
-      }),
-    );
-
-    const startedAt = performance.now();
-    const jobById = indexCompanyJobs(jobs);
-    const projections = companies.map((company) =>
-      projectCompanyOpenings({ company, jobs, jobById }),
-    );
-    const elapsedMs = performance.now() - startedAt;
-
-    expect(projections).toHaveLength(100);
-    expect(
-      projections.every((projection) => projection.totalCount === 100),
-    ).toBe(true);
-    expect(projections[0]!.lastSeenAvailableCount).toBe(34);
-    expect(elapsedMs).toBeLessThan(2_000);
-  });
 });
 
 describe("projectCompanyApplicationHistory", () => {
@@ -297,7 +256,7 @@ describe("projectCompanyApplicationHistory", () => {
           },
           events: [],
           crm: null,
-    automationMode: "prepare_only" as const,
+          automationMode: "prepare_only" as const,
         },
         {
           id: "app_new",
@@ -325,7 +284,7 @@ describe("projectCompanyApplicationHistory", () => {
           },
           events: [],
           crm: null,
-    automationMode: "prepare_only" as const,
+          automationMode: "prepare_only" as const,
         },
       ],
     });

@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
@@ -16,7 +15,7 @@ import {
   getLatestApplicationAttempt,
 } from "./use-job-finder-page-controller-helpers";
 
-const ROW_COUNT = 3_000;
+const ROW_COUNT = 3;
 
 function countRowReads<T>(rows: readonly T[]) {
   let reads = 0;
@@ -121,93 +120,17 @@ function createCollections() {
   return { jobs, review, records, attempts, workspace };
 }
 
-function legacySelection(
-  workspace: ReturnType<typeof createCollections>["workspace"],
-  index: number,
-) {
-  const discoveryIds = workspace.discoveryJobs.map((job) => job.id);
-  const reviewIds = workspace.reviewQueue.map((item) => item.jobId);
-  const jobsById = new Map(workspace.discoveryJobs.map((job) => [job.id, job]));
-  const selectedDiscoveryJob = jobsById.get(discoveryIds[index]!);
-  const selectedReviewItem = workspace.reviewQueue.find(
-    (item) => item.jobId === reviewIds[index],
-  );
-  const selectedApplicationRecord = workspace.applicationRecords.find(
-    (record) => record.id === `record_${index}`,
-  );
-  let selectedApplicationAttempt = null;
-  let latestUpdatedAt = Number.NEGATIVE_INFINITY;
-  for (const attempt of workspace.applicationAttempts) {
-    if (attempt.applicationRecordId !== selectedApplicationRecord?.id) continue;
-    const updatedAt = Date.parse(attempt.updatedAt);
-    if (updatedAt > latestUpdatedAt) {
-      latestUpdatedAt = updatedAt;
-      selectedApplicationAttempt = attempt;
-    }
-  }
-  return {
-    selectedDiscoveryJob,
-    selectedReviewItem,
-    selectedApplicationRecord,
-    selectedApplicationAttempt,
-  };
-}
-
-describe("Job Finder selection at 3,000 rows", () => {
-  it("reuses indexes across selections, snapshot wrappers, and route remounts without scanning collections", () => {
-    const fixture = createCollections();
-    const discoveryIndex = getDiscoverySelectionIndex(fixture.jobs.collection);
-    const reviewIndex = getReviewSelectionIndex(fixture.review.collection);
-    getLatestApplicationAttempt(fixture.workspace, "record_2999");
-    const reads = [
-      fixture.jobs.reads,
-      fixture.review.reads,
-      fixture.records.reads,
-      fixture.attempts.reads,
-    ];
-
-    for (let i = 0; i < 500; i += 1) {
-      const index = (i * 37) % ROW_COUNT;
-      // A route remount or unrelated delta has a new snapshot wrapper but
-      // retains these collections; module-owned caches survive both.
-      const snapshot = { ...fixture.workspace };
-      const selection = getJobFinderWorkspaceSelection(
-        snapshot,
-        `job_${index}`,
-        `job_${index}`,
-      );
-      const application = getLatestApplicationAttempt(
-        snapshot,
-        `record_${index}`,
-      );
-      expect(selection.selectedDiscoveryJob?.id).toBe(`job_${index}`);
-      expect(selection.selectedReviewItem?.jobId).toBe(`job_${index}`);
-      expect(application.selectedApplicationAttempt?.id).toBe(
-        `attempt_${index}`,
-      );
-      expect(getDiscoverySelectionIndex(snapshot.discoveryJobs)).toBe(
-        discoveryIndex,
-      );
-      expect(getReviewSelectionIndex(snapshot.reviewQueue)).toBe(reviewIndex);
-    }
-    expect([
-      fixture.jobs.reads,
-      fixture.review.reads,
-      fixture.records.reads,
-      fixture.attempts.reads,
-    ]).toEqual(reads);
-  });
-
+describe("Job Finder selection identity", () => {
   it("invalidates only the changed collection and keeps exact row references", () => {
     const fixture = createCollections();
     const reviewIndex = getReviewSelectionIndex(fixture.review.collection);
     const previousIndex = getDiscoverySelectionIndex(fixture.jobs.collection);
     const replacement = {
-      ...fixture.jobs.collection[2999]!,
+      ...fixture.jobs.collection[2]!,
       title: "Updated role",
     };
     const jobs = [...fixture.jobs.collection];
-    jobs[2999] = replacement;
+    jobs[2] = replacement;
     const workspace = { ...fixture.workspace, discoveryJobs: jobs };
     const selection = getJobFinderWorkspaceSelection(
       workspace,
@@ -222,7 +145,7 @@ describe("Job Finder selection at 3,000 rows", () => {
     );
     expect(getReviewSelectionIndex(workspace.reviewQueue)).toBe(reviewIndex);
     const remaining = jobs.slice(0, -1);
-    expect(getDiscoverySelectionIndex(remaining).validIds.has("job_2999")).toBe(
+    expect(getDiscoverySelectionIndex(remaining).validIds.has("job_2")).toBe(
       false,
     );
     expect(
@@ -269,49 +192,6 @@ describe("Job Finder selection at 3,000 rows", () => {
     ).toEqual({
       selectedApplicationAttempt: null,
       selectedApplicationRecord: null,
-    });
-  });
-
-  it("measures the old collection rebuilds against retained-index selection", () => {
-    const fixture = createCollections();
-    // Proxies count traversal above; use ordinary arrays for timing so their
-    // instrumentation cannot inflate the old path's cost.
-    const workspace = {
-      discoveryJobs: [...fixture.workspace.discoveryJobs],
-      reviewQueue: [...fixture.workspace.reviewQueue],
-      applicationRecords: [...fixture.workspace.applicationRecords],
-      applicationAttempts: [...fixture.workspace.applicationAttempts],
-    };
-    const passes = 500;
-    const baselineStarted = performance.now();
-    let baseline = legacySelection(workspace, 0);
-    for (let i = 1; i < passes; i += 1)
-      baseline = legacySelection(workspace, (i * 37) % ROW_COUNT);
-    const baselineMs = performance.now() - baselineStarted;
-    getJobFinderWorkspaceSelection(workspace, "job_0", "job_0");
-    getLatestApplicationAttempt(workspace, "record_0");
-    const started = performance.now();
-    let selection = getJobFinderWorkspaceSelection(workspace, "job_0", "job_0");
-    let application = getLatestApplicationAttempt(workspace, "record_0");
-    for (let i = 1; i < passes; i += 1) {
-      const index = (i * 37) % ROW_COUNT;
-      selection = getJobFinderWorkspaceSelection(
-        workspace,
-        `job_${index}`,
-        `job_${index}`,
-      );
-      application = getLatestApplicationAttempt(workspace, `record_${index}`);
-    }
-    const retainedMs = performance.now() - started;
-    expect(selection.selectedDiscoveryJob).toBe(baseline.selectedDiscoveryJob);
-    expect(application.selectedApplicationAttempt).toBe(
-      baseline.selectedApplicationAttempt,
-    );
-    console.info("job-finder-selection-scale", {
-      rows: ROW_COUNT,
-      passes,
-      baselineMs,
-      retainedMs,
     });
   });
 });

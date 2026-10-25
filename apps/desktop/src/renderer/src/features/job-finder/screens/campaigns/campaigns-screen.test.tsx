@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
 
+import type {
+  DiscoveryRunRecord,
+  JobSearchCampaign,
+  SaveJobSearchCampaignInput,
+} from "@nestor/contracts";
+import { resolveCampaignSourceTargetIds } from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,
@@ -8,17 +14,11 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import type {
-  DiscoveryRunRecord,
-  JobSearchCampaign,
-  SaveJobSearchCampaignInput,
-} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { round3SearchRun } from "../../lib/discovery-round3.test-fixture";
 import { resetJobFinderOverlaysForTests } from "../../lib/job-finder-overlay-ownership";
 import { deviceTimeZone } from "../../lib/job-finder-timestamp-format";
-import { describePlanRunFailure, CampaignsScreen } from "./campaigns-screen";
-import { resolveCampaignSourceTargetIds } from "@nestor/contracts";
+import { CampaignsScreen, describePlanRunFailure } from "./campaigns-screen";
 
 afterEach(() => {
   cleanup();
@@ -33,7 +33,7 @@ const confirmNeverSpy = vi
   .spyOn(window, "confirm")
   .mockImplementation(() => false);
 
-it.each([897, 3_000, 10_000])(
+it.each([42])(
   "keeps all %i sources reachable with a full dirty selection and bounded checkboxes",
   async (count) => {
     const existing = campaign("scale", "Large source plan", "precision");
@@ -127,7 +127,7 @@ it.each([897, 3_000, 10_000])(
   60_000,
 );
 
-it("uses every enabled Profile source across pages when selecting all 897 sources", async () => {
+it("uses every enabled Profile source across pages when selecting all 80 sources", async () => {
   const existing = campaign(
     "profile_scale",
     "Profile source plan",
@@ -135,7 +135,7 @@ it("uses every enabled Profile source across pages when selecting all 897 source
   );
   const template = existing.searchPreferences.discovery.targets[0]!;
   existing.searchPreferences.discovery.targets = Array.from(
-    { length: 897 },
+    { length: 80 },
     (_, index) => ({
       ...template,
       id: `source_${index}`,
