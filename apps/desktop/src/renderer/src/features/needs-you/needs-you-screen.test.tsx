@@ -280,6 +280,47 @@ it("saves numeric answers before Apply and reuses the same facts in number or te
   expect(applications.needsYou.list().rows).toEqual([]);
 });
 
+it("updates a single site card as sign-in reaches MFA and applications continue", async () => {
+  const request = (index: number, kind: "sign_in" | "mfa") =>
+    applications.needsYou.request({
+      applicationId: claimed[index]!.id,
+      attempt: claimed[index]!.attempt,
+      fieldKey: "site_access",
+      key: "access",
+      kind,
+      scope: { siteOrigin: "https://jobs.example.test" },
+      prompt: kind === "mfa" ? "Enter the code sent to you" : "Sign in first",
+      input: "text",
+      options: [],
+    });
+  const initial = request(0, "sign_in");
+  request(1, "sign_in");
+  request(2, "sign_in");
+  if (initial.status !== "needs_you") throw new Error("Missing task");
+  show();
+  await screen.findByRole("heading", { name: "Sign in to continue" });
+  act(() => {
+    request(0, "mfa");
+  });
+  await screen.findByRole("heading", { name: "Complete verification" });
+  expect(applications.needsYou.list().total).toBe(1);
+  expect(screen.queryByRole("textbox")).toBeNull();
+  act(() => {
+    applications.needsYou.completeAccess(initial.task.id, claimed[0]!.id);
+  });
+  await waitFor(() =>
+    expect(
+      applications.needsYou.details(initial.task.id)?.applications,
+    ).toHaveLength(2),
+  );
+  expect(screen.getByRole("button", { name: "Open in browser" })).toBeTruthy();
+  act(() => {
+    applications.needsYou.completeAccess(initial.task.id, claimed[1]!.id);
+    applications.needsYou.completeAccess(initial.task.id, claimed[2]!.id);
+  });
+  await waitFor(() => expect(applications.needsYou.list().total).toBe(0));
+});
+
 it("updates tab counts while a saved answer is being edited, without moving the editor", async () => {
   applications.needsYou.remember({
     key: "notice",

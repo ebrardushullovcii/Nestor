@@ -62,6 +62,27 @@ export function TaskPane(props: {
     };
   }, [id]);
 
+  // Browser steps can advance (sign-in → MFA) without a button press here.
+  // Question drafts keep their own stable editor and never refresh underneath typing.
+  const accessTask = details?.task.kind !== "question" && !!details;
+  useEffect(() => {
+    if (!accessTask) return;
+    let live = true;
+    const unsubscribe = window.nestor.jobs.onChange((change) => {
+      if (change.cause !== "application") return;
+      void window.nestor.needsYou
+        .run("get_need", { id })
+        .then((value) => {
+          if (live) setDetails(value);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, [id, accessTask]);
+
   function saveDraft() {
     if (pending.current) clearTimeout(pending.current);
     pending.current = null;
@@ -257,6 +278,10 @@ export function TaskPane(props: {
                     : "Complete verification"}
               </h2>
               <p className="text-sm text-foreground-soft">{task.prompt}</p>
+              <p className="text-sm text-foreground-muted">
+                Finish this step in the browser. Waiting applications continue
+                automatically once their pages are accessible.
+              </p>
               {task.scope.siteOrigin ? (
                 <p className="break-all text-sm">{task.scope.siteOrigin}</p>
               ) : null}

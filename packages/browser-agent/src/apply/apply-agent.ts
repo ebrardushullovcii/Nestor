@@ -60,6 +60,7 @@ import {
 } from "./application-facts";
 import {
   checkFormReadiness,
+  hasRemainingApplicationStep,
   runSubmitPreflight,
   unresolvedRequiredControls,
 } from "./submit-preflight";
@@ -1038,13 +1039,7 @@ async function runMeasuredApplyAgent(
         }
         // Completing the current step is not completing a multi-step form.
         // Give the model a chance to carry on before accepting a handoff.
-        const hasAnotherStep =
-          (observation.step.index !== null &&
-            observation.step.total !== null &&
-            observation.step.index < observation.step.total) ||
-          observation.actions.some(
-            (action) => action.kind === "advance" && action.visible,
-          );
+        const hasAnotherStep = hasRemainingApplicationStep(observation);
         if (
           hasAnotherStep &&
           !outcome.stuck &&

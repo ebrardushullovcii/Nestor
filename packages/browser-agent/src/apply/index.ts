@@ -21,6 +21,7 @@ export {
 } from "./control-classification";
 export {
   detectApplyBlocker,
+  canContinueApplicationAfterAccess,
   hasSubmissionConfirmationText,
   looksLikeSignInPage,
   siteLoginRequiredBlocker,

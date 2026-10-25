@@ -274,6 +274,24 @@ function application(site, job, error = "") {
   );
 }
 
+const pendingFactors = new Map();
+function workdayVerification(job, error = "") {
+  return page(
+    "workday",
+    "Two-step verification",
+    `<h1>Two-step verification</h1><p>Enter the verification code. This local replica's made-up code is 482917.</p>${error ? `<p role="alert">${escape(error)}</p>` : ""}` +
+      form(
+        `/workday/verify/${job.id}`,
+        input(
+          "code",
+          "Verification code",
+          "text",
+          true,
+          'autocomplete="one-time-code"',
+        ) + "<button>Verify</button>",
+      ),
+  );
+}
 function workday(job, stage, session, error = "") {
   const base = `/workday/apply/${job.id}`;
   const heading = `<h1>${job.title}</h1>${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}`;
@@ -310,7 +328,12 @@ function workday(job, stage, session, error = "") {
             input("password", "Password", "password") +
             (register
               ? input("verifyPassword", "Verify password", "password") +
-                checkbox("agree", "I agree")
+                checkbox("agree", "I agree") +
+                checkbox(
+                  "enableMfa",
+                  "Enable two-step verification for this local test",
+                  false,
+                )
               : "") +
             `<button>${register ? "Create account" : "Sign in"}</button>`,
         ),
@@ -421,7 +444,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       const fields = await readPost(req);
       // Local sign-in credentials are never part of fixture submission logs.
-      if (path !== "/authboard/signin") logPost(path, fields);
+      if (
+        path !== "/authboard/signin" &&
+        !/^\/workday\/(?:account|verify)\//u.test(path)
+      )
+        logPost(path, fields);
       if (path === "/authboard/signin") {
         if (missing(fields, ["email", "password"])) {
           return send(
@@ -469,6 +496,7 @@ const server = http.createServer(async (req, res) => {
             accounts.set(fields.email, {
               salt,
               hash: scryptSync(fields.password, salt, 32),
+              mfa: fields.enableMfa === "yes",
             });
           }
         } else {
@@ -483,11 +511,42 @@ const server = http.createServer(async (req, res) => {
             error = "Email or password did not match.";
         }
         if (error) return send(400, workday(job, action, null, error));
+        if (accounts.get(fields.email).mfa) {
+          const pending = randomBytes(24).toString("hex");
+          pendingFactors.set(pending, { email: fields.email });
+          res.writeHead(303, {
+            Location: `/workday/verify/${id}`,
+            "Set-Cookie": `fixture_mfa=${pending}; HttpOnly; SameSite=Lax; Path=/workday`,
+          });
+          return res.end();
+        }
         const newToken = randomBytes(24).toString("hex");
         sessions.set(newToken, { email: fields.email, drafts: new Map() });
         res.writeHead(303, {
           Location: `/workday/apply/${id}?stage=application`,
-          "Set-Cookie": `fixture_session=${newToken}; HttpOnly; SameSite=Lax; Path=/workday`,
+          "Set-Cookie": `fixture_session=${newToken}; HttpOnly; SameSite=Lax; Max-Age=86400; Path=/workday`,
+        });
+        return res.end();
+      }
+      const verify = /^\/workday\/verify\/([1-9]\d*)$/u.exec(path);
+      if (verify) {
+        const job = jobs.find((item) => item.id === verify[1]);
+        const pendingToken = /(?:^|;\s*)fixture_mfa=([^;]+)/u.exec(
+          req.headers.cookie || "",
+        )?.[1];
+        const pending = pendingFactors.get(pendingToken);
+        if (!job || !pending) return send(401, "Sign in to continue.");
+        if (fields.code !== "482917")
+          return send(
+            400,
+            workdayVerification(job, "That code did not match."),
+          );
+        pendingFactors.delete(pendingToken);
+        const newToken = randomBytes(24).toString("hex");
+        sessions.set(newToken, { email: pending.email, drafts: new Map() });
+        res.writeHead(303, {
+          Location: `/workday/apply/${job.id}?stage=application`,
+          "Set-Cookie": `fixture_session=${newToken}; HttpOnly; SameSite=Lax; Max-Age=86400; Path=/workday`,
         });
         return res.end();
       }
@@ -653,6 +712,16 @@ const server = http.createServer(async (req, res) => {
             ),
         ),
       );
+    }
+    const verification = /^\/workday\/verify\/([1-9]\d*)$/u.exec(path);
+    if (verification) {
+      const job = jobs.find((item) => item.id === verification[1]);
+      const pendingToken = /(?:^|;\s*)fixture_mfa=([^;]+)/u.exec(
+        req.headers.cookie || "",
+      )?.[1];
+      return job && pendingFactors.has(pendingToken)
+        ? send(200, workdayVerification(job))
+        : send(401, "Sign in to continue.");
     }
     const list =
       /^\/(authboard|board|lever|greenhouse|workday|gatekeeper|empty)\/?$/.exec(

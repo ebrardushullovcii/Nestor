@@ -33,7 +33,7 @@ Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no
 ## Safety rules
 
 - Never submit to a real employer site. Final submits, from an apply harness or the assistant, are allowed only against the local replica job sites (below): the harness must fail before sending if any application target is not a loopback replica origin. Every other apply harness keeps `submitAuthorized: false` and `accountCreationAuthorized: false` and fails if any attempt, job, or application record reaches `submitted`.
-- Live prepare-only runs use a temporary user-data directory, a fake profile, and an approved deterministic resume. Anonymous Workday must stop at the account gate with a `site_login_required` handoff; never attempt credentials.
+- Live prepare-only runs use a temporary user-data directory, a fake profile, and an approved deterministic resume. Anonymous Workday must stop at the account gate with a `site_login_required` handoff. In handover checks the harness may act as the person with made-up credentials on the local replicas; Apply itself never enters credentials, solves CAPTCHA or supplies MFA codes.
 - Live Assistant harnesses default to deterministic providers with AI credentials blanked. Live providers require `UI_LIVE_ASSISTANT_PROVIDER_MODE=configured` (see `docs/AI_PROVIDER_SETUP.md`).
 - Never add personal resumes, live workspaces, credentials, or authenticated browser state to benchmark corpora.
 - Fixtures must not seed approved resume exports through `upsertResumeExportArtifact({ isApproved: true })`; both repositories reject it. Use the repository seed or `approveResumeExport()`. The guard is the invariant under test.
@@ -65,7 +65,7 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/greenhouse/` exercises attachment buttons and a drop zone, optional cover-letter upload, custom questions, yes/no radios and optional EEO selects.
 
-`http://127.0.0.1:47950/workday/` exercises application choices, account creation/sign-in, four steps, repeatable work experience, simulated resume autofill, review and required terms. Use made-up credentials; accounts and saved steps live in server memory until restart. Saved steps do not restore after reload.
+`http://127.0.0.1:47950/workday/` exercises application choices, account creation/sign-in, opt-in two-step verification, four steps, repeatable work experience, simulated resume autofill, review and required terms. Use made-up credentials; accounts and saved steps live in server memory until restart. Saved steps do not restore after reload.
 
 `http://127.0.0.1:47950/gatekeeper/` exercises a cookie overlay, chat bubble, eight-second security interstitial, new-tab application, per-field autosaves and in-page confirmation after fetch submission.
 

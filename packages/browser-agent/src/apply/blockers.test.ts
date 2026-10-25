@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { detectApplyBlocker } from "./blockers";
+import {
+  canContinueApplicationAfterAccess,
+  detectApplyBlocker,
+} from "./blockers";
+import { buildApplyFormObservation } from "./page-hands";
+import type { RawApplyPage } from "@nestor/contracts";
 import type { ApplyFormControl } from "./types";
 
 function checkbox(checked: boolean): ApplyFormControl {
@@ -95,7 +100,12 @@ describe("detectApplyBlocker", () => {
       bodyText: "Use a made-up email and password.",
       controls: [
         { ...checkbox(false), label: "Password", kind: "text" },
-        { ...checkbox(false), ref: "f1", label: "Verify password", kind: "text" },
+        {
+          ...checkbox(false),
+          ref: "f1",
+          label: "Verify password",
+          kind: "text",
+        },
       ],
       actions: [
         {
@@ -170,4 +180,79 @@ describe("detectApplyBlocker", () => {
     expect(blocker?.code).toBe("site_login_required");
     expect(blocker?.requiresPerson).not.toBe(true);
   });
+});
+
+test("access continuation needs an actual form or application entry, never just an absent wall", () => {
+  const raw: RawApplyPage = {
+    url: "https://site.example.test/apply",
+    title: "Apply",
+    bodyText: "",
+    controls: [],
+    actions: [],
+    links: [],
+    clickables: [],
+    headings: [],
+    openedTabs: [],
+    validationErrors: [],
+    stepLabel: null,
+    loading: false,
+  };
+  const canContinue = (page: RawApplyPage) =>
+    canContinueApplicationAfterAccess(
+      buildApplyFormObservation(page, new Date().toISOString()),
+    );
+  expect(canContinue(raw)).toBe(false);
+  expect(canContinue({ ...raw, bodyText: "Page not found" })).toBe(false);
+  const entry = {
+    ...raw,
+    links: [
+      {
+        index: 0,
+        label: "Continue application",
+        href: "https://site.example.test/apply?form=1",
+        visible: true,
+        target: "",
+        topOffset: 0,
+      },
+    ],
+  };
+  expect(canContinue(entry)).toBe(true);
+  expect(
+    canContinue({
+      ...entry,
+      links: [{ ...entry.links[0], label: "Apply Manually" }],
+    }),
+  ).toBe(false);
+  expect(canContinue({ ...entry, loading: true })).toBe(false);
+  expect(
+    canContinue({ ...entry, bodyText: "Enter the verification code" }),
+  ).toBe(false);
+});
+
+test("a signup option for two-step verification is still sign-in, until an actual code step appears", () => {
+  const password = {
+    ...checkbox(false),
+    kind: "text" as const,
+    label: "Password",
+    credentialRole: "password" as const,
+  };
+  const control = {
+    ...checkbox(false),
+    label: "Enable two-step verification for this local test",
+  };
+  expect(
+    detectApplyBlocker({
+      bodyText:
+        "Create an account. Enable two-step verification for this local test",
+      controls: [password, control],
+      actions: [],
+    })?.code,
+  ).toBe("account_creation_required");
+  expect(
+    detectApplyBlocker({
+      bodyText: "Enter the verification code",
+      controls: [],
+      actions: [],
+    })?.code,
+  ).toBe("multi_factor_required");
 });

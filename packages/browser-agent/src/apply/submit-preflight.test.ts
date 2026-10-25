@@ -141,3 +141,33 @@ test("individually required declaration boxes cannot satisfy one another just be
   expect(unresolvedRequiredControls(observation)).toHaveLength(1);
   expect(checkFormReadiness(observation).ok).toBe(false);
 });
+
+test("an explicitly final review may offer Save beside Send, while earlier or unknown steps stay blocked", () => {
+  const actions = [
+    { index: 0, label: "Save and continue", visible: true, disabled: false },
+    { index: 1, label: "Submit", visible: true, disabled: false },
+  ];
+  expect(
+    checkFormReadiness(observe({ actions, stepLabel: "Step 4 of 4: Review" }))
+      .ok,
+  ).toBe(true);
+  expect(
+    checkFormReadiness(
+      observe({ actions, stepLabel: "Step 3 of 4: Questions" }),
+    ).ok,
+  ).toBe(false);
+  expect(checkFormReadiness(observe({ actions, stepLabel: null })).ok).toBe(
+    false,
+  );
+  expect(
+    checkFormReadiness(
+      observe({
+        actions: [
+          { ...actions[0], disabled: false },
+          { ...actions[1], disabled: true },
+        ],
+        stepLabel: "Step 4 of 4: Review",
+      }),
+    ).ok,
+  ).toBe(false);
+});
