@@ -1,3 +1,4 @@
+import { JobSiteSelectionSchema } from "./job-sites";
 import { z } from "zod";
 
 import { WorkModeSchema, type WorkMode } from "./base";
@@ -228,6 +229,7 @@ export const JobChangeSchema = z.object({
     "application",
     "tracker",
     "resume",
+    "sites",
   ]),
   stages: z.array(JobStageSchema),
   ids: z.array(JobIdSchema).nullable(),
@@ -285,12 +287,7 @@ export interface JobFitUpdate extends Omit<JobFit, "scoredAt"> {
 export const JobSearchSettingsSchema = z
   .object({
     depth: z.enum(["quick", "thorough"]).default("quick"),
-    sourceIds: z
-      .union([
-        z.literal("all"),
-        z.array(z.string().min(1).max(200)).min(1).max(2000),
-      ])
-      .default("all"),
+    sites: JobSiteSelectionSchema.default({ all: true, except: [] }),
     picky: z.enum(["open", "balanced", "strict"]).default("balanced"),
     postedWithin: z.enum(["week", "month", "any"]).default("month"),
     /** Anything specific for this search, in the person's words. */
@@ -354,14 +351,6 @@ export const JobSearchSourceStateSchema = z.object({
   message: z.string().nullable(),
 });
 export type JobSearchSourceState = z.infer<typeof JobSearchSourceStateSchema>;
-
-/** A job site a search can use: one the person turned on in Profile. */
-export const JobSiteSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-  url: z.string(),
-});
-export type JobSite = z.infer<typeof JobSiteSchema>;
 
 /** What a screen shows about the running or last search. */
 export const JobSearchStatusSchema = z.object({

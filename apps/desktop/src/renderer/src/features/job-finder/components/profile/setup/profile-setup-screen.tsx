@@ -1,3 +1,4 @@
+import { useSitePage } from "@renderer/features/job-lists/use-site-page";
 import { canRetrySavedResumeImport } from "@nestor/contracts";
 import { getRunningResumeImportProgress } from "@renderer/features/job-finder/lib/profile-resume-panel-utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -289,15 +290,23 @@ export function ProfileSetupScreen(props: {
   // A complete address typed into Job targets' add-source form counts as a
   // source the person meant to add; every save from the footer adds it first
   // instead of dropping it.
-  const pendingSourceFlushRef = useRef<(() => void) | null>(null);
+  const pendingSourceFlushRef = useRef<(() => Promise<void>) | null>(null);
   const registerPendingSourceFlush = useCallback(
-    (flush: (() => void) | null) => {
+    (flush: (() => Promise<void>) | null) => {
       pendingSourceFlushRef.current = flush;
     },
     [],
   );
-  const flushPendingSource = () => {
-    pendingSourceFlushRef.current?.();
+  const flushPendingSource = async () => {
+    try {
+      await pendingSourceFlushRef.current?.();
+      return true;
+    } catch (reason) {
+      setValidationMessage(
+        reason instanceof Error ? reason.message : "Could not save sources.",
+      );
+      return false;
+    }
   };
   const runningImportProgress = getRunningResumeImportProgress(
     latestResumeImportRun,
@@ -365,9 +374,15 @@ export function ProfileSetupScreen(props: {
   // Canonical readiness derivation: every visible setup count reads this one
   // presentation model, so the summary card and sticky footer cannot diverge
   // when a canonical blocker and a pending review item coexist.
+  const enabledSites = useSitePage({ limit: 1 }).enabledTotal;
   const pathReadiness = useMemo(
-    () => evaluateProfileSetupReadiness(draftProfile, draftSearchPreferences),
-    [draftProfile, draftSearchPreferences],
+    () =>
+      evaluateProfileSetupReadiness(
+        draftProfile,
+        draftSearchPreferences,
+        enabledSites,
+      ),
+    [draftProfile, draftSearchPreferences, enabledSites],
   );
   const readinessPresentation = useMemo(
     () =>
@@ -460,16 +475,19 @@ export function ProfileSetupScreen(props: {
             hasUserEdits={hasUserDraftChanges}
             isProfileSetupPending={setupMutationPending}
             onSaveAndFinish={() => {
-              flushPendingSource();
-              handleSaveStep("targeting", { finishSetup: true });
+              void flushPendingSource().then((ok) => {
+                if (ok) handleSaveStep("targeting", { finishSetup: true });
+              });
             }}
             onSaveAndGoToStep={(step) => {
-              flushPendingSource();
-              handleSaveStep(step);
+              void flushPendingSource().then((ok) => {
+                if (ok) handleSaveStep(step);
+              });
             }}
             onSaveCurrentStep={() => {
-              flushPendingSource();
-              handleSaveCurrentStep();
+              void flushPendingSource().then((ok) => {
+                if (ok) handleSaveCurrentStep();
+              });
             }}
             remainingBlockerLabels={remainingBlockerLabels}
             validationMessage={validationMessage}
@@ -517,8 +535,9 @@ export function ProfileSetupScreen(props: {
               disabled={setupMutationPending}
               hasImportedResume={hasImportedResume}
               onGoToStep={(step) => {
-                flushPendingSource();
-                goToStep(step);
+                void flushPendingSource().then((ok) => {
+                  if (ok) goToStep(step);
+                });
               }}
               profileSetupState={profileSetupState}
               unsavedSteps={[

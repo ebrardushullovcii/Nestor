@@ -1,3 +1,4 @@
+import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
@@ -67,6 +68,7 @@ export interface ApplicationPreparationCapacityToken {
 }
 
 export interface WorkspaceServiceContext {
+  jobSites?: JobSitesStore;
   aiClient: JobFinderAiClient;
   visionProvider?: ResumeVisionProvider;
   browserRuntime: BrowserSessionRuntime;
@@ -168,7 +170,7 @@ export interface WorkspaceServiceContext {
   saveDiscoveryTargetUpdate: (
     targetId: string,
     updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
-  ) => Promise<JobSearchPreferences>;
+  ) => Promise<JobDiscoveryTarget>;
   persistSourceDebugRun: (run: SourceDebugRunRecord) => Promise<void>;
   persistBrowserSessionState: (
     session: Awaited<ReturnType<BrowserSessionRuntime["openSession"]>>,

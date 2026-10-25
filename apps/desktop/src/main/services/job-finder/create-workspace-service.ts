@@ -1,3 +1,5 @@
+import { createJobSitesStore } from "@nestor/db/job-store";
+import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
 import {
@@ -665,7 +667,9 @@ export async function createJobFinderWorkspaceServiceAsync(
           return {
             profile,
             searchPreferences,
-            sources: searchPreferences.discovery.targets,
+            sources: createJobSitesStore(getJobStore())
+              .enabled()
+              .map(jobSiteTarget),
             sourceInstructionArtifacts,
           };
         },
@@ -732,6 +736,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     },
   });
   const workspaceService = createJobFinderWorkspaceService({
+    jobSites: createJobSitesStore(getJobStore()),
     resumeDraftProcessor,
     aiClient,
     visionProvider,

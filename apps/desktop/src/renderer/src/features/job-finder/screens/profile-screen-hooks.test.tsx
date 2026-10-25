@@ -20,6 +20,24 @@ import {
   useProfileScreenForms,
 } from "./profile-screen-hooks";
 
+vi.mock("@renderer/features/job-lists/use-site-page", () => {
+  const page = {
+    rows: [],
+    total: 0,
+    selected: 0,
+    enabledTotal: 0,
+    nextCursor: null,
+    counts: { all: 0, enabled: 0, disabled: 0, needs_attention: 0 },
+    loading: false,
+    error: null,
+    pageIndex: 0,
+    refresh: () => {},
+    previous: () => {},
+    next: () => {},
+  };
+  return { useSitePage: () => page };
+});
+
 const profile = CandidateProfileSchema.parse({
   id: "candidate_ready",
   firstName: "Ready",

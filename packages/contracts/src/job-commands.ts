@@ -11,10 +11,20 @@ import {
   type JobDetail,
   type JobListPage,
   type JobSearchStatus,
-  type JobSite,
   type JobStageCounts,
   type MoveJobsResult,
 } from "./jobs";
+
+import {
+  AddJobSitesInputSchema,
+  JobSiteListQuerySchema,
+  JobSiteSchema,
+  UpdateJobSiteInputSchema,
+  SetJobSitesEnabledInputSchema,
+  type AddJobSitesResult,
+  type JobSite,
+  type JobSitePage,
+} from "./job-sites";
 
 const NoInputSchema = z.object({}).strict();
 
@@ -56,8 +66,33 @@ export const JOB_COMMANDS = {
   list_sites: {
     effect: "read",
     description:
-      "The person's job sites a search can use: the ones turned on in Profile. Pass some ids as sourceIds to start_search to search only those.",
-    input: NoInputSchema,
+      "One indexed page of the person's job sites, with text and enabled/disabled/attention filters, matching counts and a next cursor. Use enabled sites for search selection.",
+    input: JobSiteListQuerySchema,
+  },
+  get_site: {
+    description:
+      "One job site with its address, preferences, health and saved guidance metadata.",
+    input: z.object({ id: JobSiteSchema.shape.id }).strict(),
+  },
+  add_sites: {
+    description:
+      "Adds job-site URLs from pasted text and turns them on. Reports duplicates and invalid entries without changing existing sites.",
+    input: AddJobSitesInputSchema,
+  },
+  update_site: {
+    description:
+      "Updates only one site's name, address, enabled state or custom instructions.",
+    input: UpdateJobSiteInputSchema,
+  },
+  remove_site: {
+    description:
+      "Removes one job site from the person's list. Saved jobs remain.",
+    input: z.object({ id: JobSiteSchema.shape.id }).strict(),
+  },
+  set_sites_enabled: {
+    description:
+      "Turns the selected sites on or off, including an entire filtered list except excluded ids. Writes only sites whose enabled state changes.",
+    input: SetJobSitesEnabledInputSchema,
   },
   start_search: {
     effect: "external",
@@ -90,7 +125,12 @@ export interface JobCommandOutputs {
   stage_counts: JobStageCounts;
   move_jobs: MoveJobsResult;
   undo_move: MoveJobsResult;
-  list_sites: { sites: JobSite[] };
+  list_sites: JobSitePage;
+  get_site: JobSite | null;
+  add_sites: AddJobSitesResult;
+  update_site: JobSite | null;
+  remove_site: { removed: boolean };
+  set_sites_enabled: { changed: number };
   start_search: JobSearchStatus;
   stop_search: JobSearchStatus;
   search_status: JobSearchStatus;

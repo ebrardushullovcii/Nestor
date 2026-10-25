@@ -38,7 +38,6 @@ describe("job commands", () => {
       store,
       search: () => Promise.reject(new Error("no search in this test")),
       currentSearch: () => null,
-      listSites: () => Promise.resolve([]),
     });
     const { added } = store.saveFoundJobs({
       searchId: null,
@@ -60,7 +59,6 @@ describe("job commands", () => {
       store,
       search: () => Promise.reject(new Error("no search in this test")),
       currentSearch: () => null,
-      listSites: () => Promise.resolve([]),
     });
     await expect(run("move_jobs", { to: "applied" })).rejects.toThrow();
     await expect(
@@ -84,14 +82,13 @@ describe("job commands", () => {
       store,
       search: () => Promise.resolve(search),
       currentSearch: () => search,
-      listSites: () => Promise.resolve([]),
     });
     await run("start_search", { depth: "thorough", picky: "strict" });
     expect(started).toMatchObject({
       depth: "thorough",
       picky: "strict",
       postedWithin: "month",
-      sourceIds: "all",
+      sites: { all: true, except: [] },
     });
   });
 });

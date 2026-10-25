@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import {
   SharedAgentCompactionPolicySchema,
   SourceDebugCompactionStateSchema,
@@ -216,9 +217,8 @@ export async function runSourceDebugWorkflow(
     clearActiveController();
     throw error;
   });
-  const target = searchPreferences.discovery.targets.find(
-    (entry) => entry.id === targetId,
-  );
+  const site = ctx.jobSites?.get(Number(targetId));
+  const target = site ? jobSiteTarget(site) : null;
   const sourceDebugCompactionPolicy = buildSourceDebugCompactionPolicy(
     modelContextWindowTokensSnapshot,
   );

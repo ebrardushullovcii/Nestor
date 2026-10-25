@@ -4,9 +4,8 @@ import {
   type JobCommandOutputs,
   type JobSearchSettings,
   type JobSearchStatus,
-  type JobSite,
 } from "@nestor/contracts";
-import type { JobStore } from "@nestor/db/job-store";
+import { createJobSitesStore, type JobStore } from "@nestor/db/job-store";
 import type { z } from "zod";
 
 /** What the commands need from the search runner. */
@@ -46,10 +45,9 @@ export function createJobCommandRunner(deps: {
   search?: () => Promise<JobSearchControl>;
   /** The runner if it already exists, so status reads never start it. */
   currentSearch?: () => JobSearchControl | null;
-  /** The sites turned on in Profile. */
-  listSites?: () => Promise<JobSite[]>;
 }): RunJobCommand {
   const { store } = deps;
+  const sites = createJobSitesStore(store);
   const search = () =>
     deps.search?.() ??
     Promise.reject(new Error("Searching is not available here."));
@@ -78,7 +76,12 @@ export function createJobCommandRunner(deps: {
       return result;
     },
     undo_move: ({ moveId }) => store.undoMove(moveId),
-    list_sites: async () => ({ sites: (await deps.listSites?.()) ?? [] }),
+    list_sites: (input) => sites.list(input),
+    get_site: ({ id }) => sites.get(id),
+    add_sites: (input) => sites.add(input),
+    update_site: (input) => sites.update(input),
+    remove_site: ({ id }) => ({ removed: sites.remove(id) }),
+    set_sites_enabled: (input) => ({ changed: sites.setEnabled(input) }),
     start_search: async (settings) => {
       const runner = await search();
       await runner.start(settings);

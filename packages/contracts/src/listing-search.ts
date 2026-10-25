@@ -40,6 +40,8 @@ export interface RoleScreenGoals {
 }
 
 export interface SourceInventory {
+  lane?: "http" | "browser";
+  provider?: string;
   cards: ListingCard[];
   pagesRead: number;
   complete: boolean;

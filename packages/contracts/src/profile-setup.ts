@@ -309,6 +309,7 @@ export function getProfileSetupLandingStep(
 }
 
 export interface DeriveProfileSetupStateOptions {
+  enabledSiteCount?: number;
   currentState?: ProfileSetupState | null;
   /** At least one search attempt is recorded for this workspace. */
   hasRunSearch?: boolean;
@@ -505,6 +506,7 @@ export function isFreshStartCandidateProfile(
 export function evaluateProfileSetupReadiness(
   profile: CandidateProfile,
   searchPreferences: JobSearchPreferences,
+  enabledSiteCount?: number,
 ): ProfileSetupReadiness {
   const freshStart = isFreshStartCandidateProfile(profile);
   const hasResumeText = hasMeaningfulText(profile.baseResume.textContent);
@@ -542,9 +544,10 @@ export function evaluateProfileSetupReadiness(
     hasMeaningfulStringList(profile.targetRoles) ||
     hasMeaningfulBackground,
   );
-  const hasDiscoverySource = searchPreferences.discovery.targets.some(
-    isRunnableJobDiscoveryTarget,
-  );
+  const hasDiscoverySource =
+    enabledSiteCount === undefined
+      ? searchPreferences.discovery.targets.some(isRunnableJobDiscoveryTarget)
+      : enabledSiteCount > 0;
   const hasEligibilityPreferences = Boolean(
     hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) ||
     profile.workEligibility.requiresVisaSponsorship !== null ||
@@ -626,7 +629,11 @@ export function deriveProfileSetupState(
   searchPreferences: JobSearchPreferences,
   options: DeriveProfileSetupStateOptions = {},
 ): ProfileSetupState {
-  const readiness = evaluateProfileSetupReadiness(profile, searchPreferences);
+  const readiness = evaluateProfileSetupReadiness(
+    profile,
+    searchPreferences,
+    options.enabledSiteCount,
+  );
   const currentState = options.currentState
     ? ProfileSetupStateSchema.parse(options.currentState)
     : null;

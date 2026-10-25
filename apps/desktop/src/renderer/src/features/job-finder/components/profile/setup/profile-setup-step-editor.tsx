@@ -75,7 +75,7 @@ export function ProfileSetupStepEditor(props: {
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
   resumeApplicationMode?: ResumeApplicationMode;
   recentSourceDebugRuns?: readonly SourceDebugRunRecord[];
-  registerPendingSourceFlush?: (flush: (() => void) | null) => void;
+  registerPendingSourceFlush?: (flush: (() => Promise<void>) | null) => void;
   searchPreferences: JobSearchPreferences;
   validationMessage: string | null;
 }) {
@@ -100,7 +100,7 @@ export function ProfileSetupStepEditor(props: {
 
   function renderFooter(options?: {
     nextLabel?: string;
-    onPrimary?: (() => void) | null;
+    onPrimary?: (() => void | Promise<void>) | null;
     primaryDisabled?: boolean;
     primaryLabel?: string;
   }) {
@@ -147,7 +147,9 @@ export function ProfileSetupStepEditor(props: {
                 !options.onPrimary
               }
               pending={props.isProfileSetupPending}
-              onClick={options.onPrimary ?? undefined}
+              onClick={() => {
+                void options.onPrimary?.();
+              }}
               type="button"
             >
               {options.primaryLabel ?? options.nextLabel ?? "Save and continue"}
@@ -243,7 +245,6 @@ export function ProfileSetupStepEditor(props: {
           {...(props.registerPendingSourceFlush
             ? { registerPendingSourceFlush: props.registerPendingSourceFlush }
             : {})}
-          savedDiscoveryTargets={props.searchPreferences.discovery.targets}
           suggestedWorkCountry={
             props.draftProfile.currentCountry?.trim() ||
             props.profile.currentCountry?.trim() ||

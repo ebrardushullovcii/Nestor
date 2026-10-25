@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness as createWorkspaceServiceHarness } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -5,7 +6,6 @@ import {
   createAgentAiClient,
   createBrowserRuntime,
   createSeed,
-  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
 afterEach(() => {
@@ -17,7 +17,7 @@ describe("public provider source check", () => {
     const seed = createSeed();
     seed.searchPreferences.discovery.targets = [
       {
-        id: "target_mercury",
+        id: "1",
         label: "Mercury Greenhouse",
         startingUrl: "https://job-boards.greenhouse.io/mercury",
         enabled: true,
@@ -71,15 +71,16 @@ describe("public provider source check", () => {
         return baseAiClient.chatWithTools(...args);
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime,
-      aiClient,
-    });
+    const { repository, workspaceService, jobSites } =
+      createWorkspaceServiceHarness({
+        seed,
+        browserRuntime,
+        aiClient,
+      });
     const progressEvents: Array<{ waitReason: string; jobsFound: number }> = [];
 
     const snapshot = await workspaceService.runSourceDebug(
-      "target_mercury",
+      "1",
       undefined,
       (event) => progressEvents.push(event),
     );
@@ -144,7 +145,7 @@ describe("public provider source check", () => {
       "finalizing",
     ]);
     expect(progressEvents.at(-1)?.jobsFound).toBe(56);
-    expect(snapshot.searchPreferences.discovery.targets[0]).toMatchObject({
+    expect(jobSites.get(1)).toMatchObject({
       instructionStatus: "validated",
       draftInstructionId: null,
     });

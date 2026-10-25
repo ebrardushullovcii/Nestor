@@ -1,3 +1,4 @@
+import { createTestJobSites } from "./source-debug.test-support";
 import {
   createDeterministicJobFinderAiClient,
   type JobFinderAiClient,
@@ -94,14 +95,18 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient,
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
     ).at(-1);
@@ -129,8 +134,12 @@ describe("createJobFinderWorkspaceService", () => {
       "Keep the source in draft if a future replay loses the collection route.",
     );
     expect(latestArtifact?.intelligence?.collection).toBeDefined();
-    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe("listing_route");
-    expect(latestArtifact?.intelligence?.collection?.startingRoutes.length).toBeGreaterThan(0);
+    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe(
+      "listing_route",
+    );
+    expect(
+      latestArtifact?.intelligence?.collection?.startingRoutes.length,
+    ).toBeGreaterThan(0);
   });
 
   test("skips the AI final reviewer when summary-first handoff still cannot fit the context budget", async () => {
@@ -196,23 +205,31 @@ describe("createJobFinderWorkspaceService", () => {
       {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
         reviewTranscriptByPhase: {
-          search_filter_probe: Array.from({ length: 200 }, (_, index) =>
-            `assistant: oversized transcript line ${index} with repeated evidence payload`,
+          search_filter_probe: Array.from(
+            { length: 200 },
+            (_, index) =>
+              `assistant: oversized transcript line ${index} with repeated evidence payload`,
           ),
-          replay_verification: Array.from({ length: 200 }, (_, index) =>
-            `assistant: oversized replay line ${index} with repeated verification payload`,
+          replay_verification: Array.from(
+            { length: 200 },
+            (_, index) =>
+              `assistant: oversized replay line ${index} with repeated verification payload`,
           ),
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient,
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(reviewCallCount).toBe(0);
   });
@@ -292,14 +309,18 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient,
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
     ).at(-1);
@@ -322,7 +343,9 @@ describe("createJobFinderWorkspaceService", () => {
     expect(learnedLines).toContain("visible location filter");
     expect(learnedLines).toContain("same-host detail pages");
     expect(latestArtifact?.intelligence?.collection).toBeDefined();
-    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe("listing_route");
+    expect(latestArtifact?.intelligence?.collection?.preferredMethod).toBe(
+      "listing_route",
+    );
   });
 
   test("keeps timed-out partial evidence in draft and exposes completion metadata in run details", async () => {
@@ -439,25 +462,24 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient: createAgentAiClient(),
       documentManager: createDocumentManager(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
-    const latestRunId =
-      snapshot.searchPreferences.discovery.targets[0]?.lastDebugRunId;
+    await workspaceService.runSourceDebug("1");
+    const latestRunId = jobSites.get(1)?.lastDebugRunId;
     const latestArtifact = (
       await repository.listSourceInstructionArtifacts()
     ).at(-1);
 
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.instructionStatus,
-    ).toBe("draft");
+    expect(jobSites.get(1)?.instructionStatus).toBe("draft");
     expect(latestArtifact?.status).toBe("draft");
     expect(
       latestArtifact?.warnings.some((warning) =>
@@ -549,24 +571,32 @@ describe("createJobFinderWorkspaceService", () => {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
         reviewTranscriptByPhase: {
           search_filter_probe: Array.from({ length: 3500 }, (_, index) =>
-            (`assistant: transcript line ${index} showing repeated route evidence with stable listing routes, visible filters, canonical detail confirmations, reusable collection routes, and durable replay notes for the final reviewer. `).repeat(4),
+            `assistant: transcript line ${index} showing repeated route evidence with stable listing routes, visible filters, canonical detail confirmations, reusable collection routes, and durable replay notes for the final reviewer. `.repeat(
+              4,
+            ),
           ),
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient,
       documentManager: createDocumentManager(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(reviewPrompts).toHaveLength(1);
     expect(reviewPrompts[0]).toContain('"mode": "summary_first"');
     expect(reviewPrompts[0]).not.toContain("transcript line 3499");
-    expect(reviewPrompts[0]).toContain("do not ask for the missing raw transcript lines");
+    expect(reviewPrompts[0]).toContain(
+      "do not ask for the missing raw transcript lines",
+    );
   });
 
   test("clears prior learned instructions for the target before a fresh source-debug run", async () => {
@@ -582,7 +612,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_old_validated",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "validated",
         createdAt: "2026-03-20T10:00:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -618,7 +648,7 @@ describe("createJobFinderWorkspaceService", () => {
       }),
       createSourceInstructionArtifact({
         id: "instruction_old_draft",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:01:00.000Z",
         updatedAt: "2026-03-20T10:06:00.000Z",
@@ -668,16 +698,18 @@ describe("createJobFinderWorkspaceService", () => {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient: createAgentAiClient(),
       documentManager: createDocumentManager(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const artifacts = await repository.listSourceInstructionArtifacts();
 
     expect(
@@ -686,18 +718,16 @@ describe("createJobFinderWorkspaceService", () => {
     expect(
       artifacts.some((artifact) => artifact.id === "instruction_old_draft"),
     ).toBe(false);
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.validatedInstructionId,
-    ).not.toBe("instruction_old_validated");
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.draftInstructionId,
-    ).not.toBe("instruction_old_draft");
+    expect(jobSites.get(1)?.validatedInstructionId).not.toBe(
+      "instruction_old_validated",
+    );
+    expect(jobSites.get(1)?.draftInstructionId).not.toBe(
+      "instruction_old_draft",
+    );
     expect(
       snapshot.sourceInstructionArtifacts.every(
-        (artifact) => artifact.targetId === "target_linkedin_default",
+        (artifact) => artifact.targetId === "1",
       ),
     ).toBe(true);
   });
-
-
 });

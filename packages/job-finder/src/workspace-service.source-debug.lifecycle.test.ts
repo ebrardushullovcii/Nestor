@@ -1,3 +1,4 @@
+import { createTestJobSites } from "./source-debug.test-support";
 import { describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import type { AgentDebugFindings } from "@nestor/contracts";
@@ -33,7 +34,8 @@ describe("createJobFinderWorkspaceService", () => {
         {
           snapshotId: "visual_snapshot_search_probe",
           observationSetId: "visual_observation_search_probe",
-          summary: "Visible search controls and job cards appear in the viewport.",
+          summary:
+            "Visible search controls and job cards appear in the viewport.",
           capturedAt: "2026-03-20T10:00:45.000Z",
           storagePath: "/tmp/source-debug/visual-search-probe.png",
           retention: "retained",
@@ -51,7 +53,8 @@ describe("createJobFinderWorkspaceService", () => {
           purpose: "source_debug",
           providerKind: "deterministic",
           providerLabel: "Deterministic browser visual analysis",
-          summary: "Visible search controls and job cards appear in the viewport.",
+          summary:
+            "Visible search controls and job cards appear in the viewport.",
           observations: [],
           blockers: [],
           visibleControls: ["Keyword search and location filter are visible"],
@@ -113,16 +116,18 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime,
       aiClient: createAgentAiClient(),
       documentManager: createDocumentManager(),
     });
 
-    const snapshot = await workspaceService.runSourceDebug(
-      "target_linkedin_default",
-    );
+    const snapshot = await workspaceService.runSourceDebug("1");
     const runs = await repository.listSourceDebugRuns();
     const attempts = await repository.listSourceDebugAttempts();
     const artifacts = await repository.listSourceInstructionArtifacts();
@@ -133,15 +138,9 @@ describe("createJobFinderWorkspaceService", () => {
 
     expect(snapshot.activeSourceDebugRun).toBeNull();
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("completed");
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.instructionStatus,
-    ).toBe("validated");
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.validatedInstructionId,
-    ).not.toBeNull();
-    expect(
-      snapshot.searchPreferences.discovery.targets[0]?.draftInstructionId,
-    ).toBeNull();
+    expect(jobSites.get(1)?.instructionStatus).toBe("validated");
+    expect(jobSites.get(1)?.validatedInstructionId).not.toBeNull();
+    expect(jobSites.get(1)?.draftInstructionId).toBeNull();
     expect(runs).toHaveLength(1);
     expect(attempts).toHaveLength(2);
     expect(attempts.every((attempt) => attempt.runId === runs[0]?.id)).toBe(
@@ -173,12 +172,14 @@ describe("createJobFinderWorkspaceService", () => {
     ];
     expect(new Set(learnedLines).size).toBe(learnedLines.length);
     expect(evidenceRefs.length).toBeGreaterThan(0);
-    expect(
-      attempts.some((attempt) => attempt.visualEvidence.length > 0),
-    ).toBe(true);
+    expect(attempts.some((attempt) => attempt.visualEvidence.length > 0)).toBe(
+      true,
+    );
     expect(
       attempts.some((attempt) =>
-        attempt.confirmedFacts.some((fact) => fact.includes("Visual evidence:")),
+        attempt.confirmedFacts.some((fact) =>
+          fact.includes("Visual evidence:"),
+        ),
       ),
     ).toBe(true);
     const visualEvidenceRef = evidenceRefs.find(
@@ -198,7 +199,7 @@ describe("createJobFinderWorkspaceService", () => {
         ...createSeed().discovery,
         activeSourceDebugRun: {
           id: "source_debug_run_lingering",
-          targetId: "target_linkedin_default",
+          targetId: "1",
           state: "running",
           startedAt: "2026-03-20T10:00:00.000Z",
           updatedAt: "2026-03-20T10:04:00.000Z",
@@ -225,7 +226,7 @@ describe("createJobFinderWorkspaceService", () => {
       sourceDebugRuns: [
         {
           id: "source_debug_run_lingering",
-          targetId: "target_linkedin_default",
+          targetId: "1",
           state: "running",
           startedAt: "2026-03-20T10:00:00.000Z",
           updatedAt: "2026-03-20T10:04:00.000Z",
@@ -249,7 +250,11 @@ describe("createJobFinderWorkspaceService", () => {
         },
       ],
     });
+    const jobSites = createTestJobSites(
+      (await repository.getSearchPreferences()).discovery.targets,
+    );
     const workspaceService = createJobFinderWorkspaceService({
+      jobSites,
       repository,
       browserRuntime: createBrowserRuntime(),
       aiClient: createAiClient(),
@@ -272,5 +277,4 @@ describe("createJobFinderWorkspaceService", () => {
     expect(runs[0]?.state).toBe("interrupted");
     expect(runs[0]?.activePhase).toBeNull();
   });
-
 });

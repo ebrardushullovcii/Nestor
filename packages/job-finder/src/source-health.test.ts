@@ -416,7 +416,7 @@ describe("describeEnabledSourceHealth", () => {
     expect(
       describeEnabledSourceHealth(source(), deriveSourceHealthSignals(input))
         .reason,
-    ).toBe("Completed, 0 jobs found.");
+    ).toBe("Completed, no jobs kept.");
     completed.jobsFound = 12;
     expect(
       describeEnabledSourceHealth(
@@ -424,7 +424,7 @@ describe("describeEnabledSourceHealth", () => {
         deriveSourceHealthSignals(input),
       ).reason,
     ).toBe(
-      "Readable · 12 job cards found. Saved guidance for this source is out of date.",
+      "Readable · 12 jobs kept. Saved guidance for this source is out of date.",
     );
     const failed = {
       ...completed,
@@ -463,9 +463,7 @@ describe("describeEnabledSourceHealth", () => {
     expect(
       describeEnabledSourceHealth(source(), deriveSourceHealthSignals({}))
         .reason,
-    ).toBe(
-      "Not checked yet. Searches can still use it.",
-    );
+    ).toBe("Not checked yet. Searches can still use it.");
   });
   test("a source proven by a completed run is healthy with a reason", () => {
     const target = source({ id: "target_run" });
@@ -574,7 +572,7 @@ describe("a source that returned nothing", () => {
     expect(listSourceAttentionReasons(target, emptyRun)).toEqual([]);
     expect(classifyEnabledSourceHealth(target, emptyRun)).toBe("healthy");
     expect(describeEnabledSourceHealth(target, emptyRun)).toMatchObject({
-      reason: "Completed, 0 jobs found.",
+      reason: "Completed, no jobs kept.",
       state: "healthy",
     });
   });
@@ -682,7 +680,9 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
       ],
     });
     const runs = [
-      failed("Public provider API collection failed: Greenhouse API request timed out."),
+      failed(
+        "Public provider API collection failed: Greenhouse API request timed out.",
+      ),
       failed("Public provider API collection failed: fetch failed"),
       failed("Public provider API collection failed: fetch failed"),
       failed(
@@ -717,9 +717,9 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
         },
       ],
     };
-    expect([...deriveRepeatedlyFailingTargetIds([missing, missing])]).toEqual(
-      ["api"],
-    );
+    expect([...deriveRepeatedlyFailingTargetIds([missing, missing])]).toEqual([
+      "api",
+    ]);
   });
 
   test("two failed runs in a row mark that source, and that source only", () => {

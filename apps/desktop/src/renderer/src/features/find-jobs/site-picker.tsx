@@ -1,4 +1,4 @@
-import type { JobSite } from "@nestor/contracts";
+import type { JobSiteSelection } from "@nestor/contracts";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -11,35 +11,16 @@ import {
   type PopoverPlacement,
 } from "@renderer/components/ui/popover";
 
-/** The person's job sites, read once per visit to the screen. */
-function useSites() {
-  const [sites, setSites] = useState<JobSite[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    void window.nestor.jobs
-      .run("list_sites", {})
-      .then(({ sites: next }) => {
-        if (live) setSites(next);
-      })
-      .catch(() => {
-        if (live) setSites([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
-  return sites;
-}
+import { useSitePage } from "@renderer/features/job-lists/use-site-page";
 
 /**
  * Which sites a search looks at: all of them, or the ones ticked. Only the
  * sites turned on in Profile are listed, so "All" means what it says.
  */
 export function SitePicker(props: {
-  value: "all" | readonly string[];
-  onChange: (value: "all" | string[]) => void;
+  value: JobSiteSelection;
+  onChange: (value: JobSiteSelection) => void;
 }) {
-  const sites = useSites();
   const navigate = useNavigate();
   const button = useRef<HTMLButtonElement>(null);
   const surface = useRef<HTMLDivElement>(null);
@@ -69,27 +50,24 @@ export function SitePicker(props: {
     };
   }, [open]);
 
-  const all = sites ?? [];
-  const chosen = new Set(
-    props.value === "all" ? all.map((site) => site.id) : props.value,
+  const sites = useSitePage({
+    text: filter,
+    filter: "enabled",
+    selection: props.value,
+    limit: open ? 25 : 1,
+  });
+  const ids = new Set(
+    "all" in props.value ? props.value.except : props.value.ids,
   );
+  const total = sites.enabledTotal;
   const label =
-    sites === null
+    sites.loading && total === 0
       ? "Your sites"
-      : all.length === 0
+      : total === 0
         ? "No sites yet"
-        : props.value === "all" || chosen.size === all.length
-          ? `All ${all.length} site${all.length === 1 ? "" : "s"}`
-          : `${chosen.size} of ${all.length} sites`;
-  const shown = filter.trim()
-    ? all.filter((site) =>
-        `${site.label} ${site.url}`
-          .toLowerCase()
-          .includes(filter.trim().toLowerCase()),
-      )
-    : all;
-  const set = (ids: Set<string>) =>
-    props.onChange(ids.size === all.length ? "all" : [...ids]);
+        : sites.selected === total
+          ? `All ${total} site${total === 1 ? "" : "s"}`
+          : `${sites.selected} of ${total} sites`;
 
   return (
     <>
@@ -124,7 +102,7 @@ export function SitePicker(props: {
         placement={placement ?? { top: 0, left: 0 }}
         ref={surface}
       >
-        {all.length === 0 ? (
+        {total === 0 ? (
           <div className="grid gap-2 text-(length:--text-small) text-foreground-soft">
             <p>Add the job sites you use, and searches look at them.</p>
             <Button
@@ -148,7 +126,7 @@ export function SitePicker(props: {
                 value={filter}
               />
               <Button
-                onClick={() => props.onChange("all")}
+                onClick={() => props.onChange({ all: true, except: [] })}
                 size="toolbar"
                 type="button"
                 variant="ghost"
@@ -156,7 +134,7 @@ export function SitePicker(props: {
                 All
               </Button>
               <Button
-                onClick={() => set(new Set())}
+                onClick={() => props.onChange({ ids: [] })}
                 size="toolbar"
                 type="button"
                 variant="ghost"
@@ -165,16 +143,24 @@ export function SitePicker(props: {
               </Button>
             </div>
             <ul className="grid max-h-72 list-none gap-0.5 overflow-y-auto p-0">
-              {shown.map((site) => (
+              {sites.rows.map((site) => (
                 <li key={site.id}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-(--radius-small) px-1.5 py-1 hover:bg-(--surface-overlay-list)">
                     <Checkbox
-                      checked={chosen.has(site.id)}
+                      checked={
+                        "all" in props.value
+                          ? !ids.has(site.id)
+                          : ids.has(site.id)
+                      }
                       onCheckedChange={() => {
-                        const next = new Set(chosen);
+                        const next = new Set(ids);
                         if (next.has(site.id)) next.delete(site.id);
                         else next.add(site.id);
-                        set(next);
+                        props.onChange(
+                          "all" in props.value
+                            ? { all: true, except: [...next] }
+                            : { ids: [...next] },
+                        );
                       }}
                     />
                     <span className="min-w-0 truncate text-(length:--text-small) text-foreground">
@@ -184,6 +170,27 @@ export function SitePicker(props: {
                 </li>
               ))}
             </ul>
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                size="toolbar"
+                variant="ghost"
+                disabled={sites.pageIndex === 0 || sites.loading}
+                onClick={sites.previous}
+              >
+                Previous sites
+              </Button>
+              <span className="text-xs">
+                {sites.total} match{sites.total === 1 ? "" : "es"}
+              </span>
+              <Button
+                size="toolbar"
+                variant="ghost"
+                disabled={!sites.nextCursor || sites.loading}
+                onClick={sites.next}
+              >
+                Next sites
+              </Button>
+            </div>
             <p className="text-(length:--text-tiny) text-foreground-muted">
               Sites you turned off in Profile are not listed.
             </p>

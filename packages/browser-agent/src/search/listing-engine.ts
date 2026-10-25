@@ -24,7 +24,7 @@ import {
   findApplyLinkInHtml,
 } from "./listing-detail-extraction";
 import { blockedByCheck } from "./bot-check";
-import { collectPublicFeed } from "./public-board-feed";
+import { collectPublicFeed, publicBoardFeed } from "./public-board-feed";
 
 export interface ListingEngineModel {
   client: LLMClient;
@@ -141,6 +141,8 @@ export async function collectSource(
       await input.onPage?.(feed);
       return {
         cards: feed,
+        lane: "http",
+        provider: publicBoardFeed(input.source.url)?.provider ?? "http",
         pagesRead: 1,
         complete: true,
         notes: [
@@ -199,6 +201,7 @@ export async function collectSource(
     for (const card of fallback.cards) cards.set(card.url, card);
     return {
       cards: [...cards.values()],
+      lane: "browser",
       pagesRead: visited.size + fallback.pagesRead,
       complete: fallback.complete,
       notes: [...notes, ...fallback.notes],
@@ -210,6 +213,7 @@ export async function collectSource(
   );
   return {
     cards: [...cards.values()],
+    lane: "http",
     pagesRead: visited.size,
     complete,
     notes,

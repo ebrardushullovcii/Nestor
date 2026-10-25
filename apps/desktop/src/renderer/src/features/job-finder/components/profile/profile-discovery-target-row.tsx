@@ -1,97 +1,86 @@
-import { useToast } from "@renderer/components/ui/toast";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { useMemo, useState } from "react";
 import type {
   EditableSourceInstructionArtifact,
-  SourceAccessPrompt,
+  JobSite,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
   SourceInstructionArtifact,
+  UpdateJobSiteInput,
 } from "@nestor/contracts";
-import { formatRunStateLabel } from "@renderer/features/job-finder/lib/job-finder-utils";
-import type { SearchPreferencesEditorValues } from "../../lib/profile-editor";
+import { Button } from "@renderer/components/ui/button";
+import { useToast } from "@renderer/components/ui/toast";
+import { openUrlInJobFinderBrowser } from "../open-outside-links";
 import { ProfileSourceDebugReviewModal } from "./profile-source-debug-review-modal";
 import {
-  DiscoveryTargetAccessPrompt,
-  DiscoveryTargetActionHeader,
   DiscoveryTargetFormFields,
   DiscoveryTargetInstructions,
 } from "./profile-discovery-target-row-sections";
 import {
   buildLearnedInstructionIntelligenceSummaries,
-  type LearnedInstructionField,
-  type LearnedInstructionSection,
   buildLearnedInstructionSections,
-  hasValidAbsoluteStartingUrl,
   normalizeEditableInstructionInput,
   updateArtifactInstructionSection,
+  type LearnedInstructionField,
+  type LearnedInstructionSection,
 } from "./profile-source-debug-instruction-utils";
 import { useProfileSourceDebugReview } from "./use-profile-source-debug-review";
 
-type DiscoveryTargetValue =
-  SearchPreferencesEditorValues["discoveryTargets"][number];
-
-function formatInstructionStatusSummary(target: DiscoveryTargetValue): string {
-  switch (target.instructionStatus) {
-    case "validated":
-      return target.lastVerifiedAt
-        ? `Saved guidance ready - checked ${new Date(target.lastVerifiedAt).toLocaleString()}`
-        : "Saved guidance ready";
-    case "draft":
-      return "Draft guidance saved";
-    case "stale":
-      return target.staleReason
-        ? `Guidance needs review - ${target.staleReason}`
-        : "Guidance needs review";
-    case "unsupported":
-      return "Not supported yet";
-    default:
-      return "No saved guidance yet";
-  }
-}
-
-interface ProfileDiscoveryTargetRowProps {
-  discoveryTargets: readonly DiscoveryTargetValue[];
-  index: number;
-  instructionArtifact: SourceInstructionArtifact | null;
-  isBrowserSessionPending: (targetId: string) => boolean;
-  isSourceDebugPending: (targetId: string) => boolean;
-  isSourceInstructionPending: (targetId: string) => boolean;
-  isSourceInstructionVerifyPending: (instructionId: string) => boolean;
-  isTargetDiscoveryPending: (targetId: string) => boolean;
-  onGetSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
-  onOpenBrowserSessionForTarget: (targetId: string) => void;
-  onRunDiscoveryForTarget?: (targetId: string) => void;
-  onRunSourceDebug: (targetId: string) => void;
+export interface SiteDebugActions {
+  isSourceDebugPending: (id: string) => boolean;
+  isSourceInstructionPending: (id: string) => boolean;
+  isSourceInstructionVerifyPending: (id: string) => boolean;
+  onGetSourceDebugRunDetails: (id: string) => Promise<SourceDebugRunDetails>;
+  onRunSourceDebug: (id: string) => void;
   onSaveSourceInstructionArtifact: (
-    targetId: string,
+    id: string,
     artifact: EditableSourceInstructionArtifact,
   ) => void;
-  onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
+  onVerifySourceInstructions: (id: string, instructionId: string) => void;
   recentSourceDebugRuns: readonly SourceDebugRunRecord[];
-  sourceAccessPrompt: SourceAccessPrompt | null;
-  target: DiscoveryTargetValue;
-  updateDiscoveryTargets: (
-    nextTargets: SearchPreferencesEditorValues["discoveryTargets"],
-  ) => void;
 }
 
 export function ProfileDiscoveryTargetRow(
-  props: ProfileDiscoveryTargetRowProps,
+  props: SiteDebugActions & {
+    target: JobSite;
+    instructionArtifact: SourceInstructionArtifact | null;
+    onRemoved: () => void;
+  },
 ) {
-  const baseId = useId();
-  const labelId = `${baseId}-label`;
-  const startingUrlId = `${baseId}-starting-url`;
-  const instructionsId = `${baseId}-instructions`;
-  const targetLabel = props.target.label.trim();
-  const displayName = targetLabel || "New source";
-  const accessibleLabel = targetLabel || `New source ${props.index + 1}`;
+  const site = props.target,
+    targetId = String(site.id);
+  const { showToast } = useToast();
+  const [draft, setDraft] = useState<
+    Partial<Pick<JobSite, "label" | "url" | "customInstructions">>
+  >({});
+  const [error, setError] = useState<string | null>(null);
+  const update = async (patch: Omit<UpdateJobSiteInput, "id">) => {
+    try {
+      await window.nestor.jobs.run("update_site", { id: site.id, ...patch });
+      setError(null);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Could not save this site.",
+      );
+      throw reason;
+    }
+  };
+  const saveDraft = async () => {
+    if (Object.keys(draft).length === 0) return;
+    const patch = { ...draft };
+    try {
+      await update(patch);
+      setDraft((current) => {
+        const next = { ...current };
+        if (current.label === patch.label) delete next.label;
+        if (current.url === patch.url) delete next.url;
+        if (current.customInstructions === patch.customInstructions)
+          delete next.customInstructions;
+        return next;
+      });
+    } catch {
+      /* The field and its error stay visible for correction. */
+    }
+  };
   const learnedInstructionSections = useMemo(
     () => buildLearnedInstructionSections(props.instructionArtifact),
     [props.instructionArtifact],
@@ -119,73 +108,24 @@ export function ProfileDiscoveryTargetRow(
     onRunSourceDebug: props.onRunSourceDebug,
     onVerifySourceInstructions: props.onVerifySourceInstructions,
     recentSourceDebugRuns: props.recentSourceDebugRuns,
-    targetId: props.target.id,
-    targetLastDebugRunId: props.target.lastDebugRunId,
+    targetId,
+    targetLastDebugRunId: site.lastDebugRunId,
   });
-  const latestDebugRunLabel = latestDebugRun
-    ? `${formatRunStateLabel(latestDebugRun.state)}${latestDebugRun.completedAt ? ` • ${new Date(latestDebugRun.completedAt).toLocaleString()}` : ""}`
-    : null;
   const [editingInstruction, setEditingInstruction] = useState<{
     field: LearnedInstructionField;
     normalizedKey: string;
   } | null>(null);
   const [editingInstructionValue, setEditingInstructionValue] = useState("");
-  const isTargetDiscoveryPending = props.isTargetDiscoveryPending(
-    props.target.id,
-  );
-  const isAnyTargetDiscoveryPending = props.discoveryTargets.some((target) =>
-    props.isTargetDiscoveryPending(target.id),
-  );
-  const isTargetBrowserSessionPending = props.isBrowserSessionPending(
-    props.target.id,
-  );
-  const isTargetSourceDebugPending = props.isSourceDebugPending(
-    props.target.id,
-  );
-  const isInstructionSavePending = props.isSourceInstructionPending(
-    props.target.id,
-  );
   const [pendingInstructionAction, setPendingInstructionAction] = useState<{
     field: LearnedInstructionField;
     kind: "edit" | "remove";
     normalizedKey: string;
   } | null>(null);
-  const sourceAccessPrompt = props.sourceAccessPrompt;
-  const signInToneClassName =
-    sourceAccessPrompt?.state === "prompt_login_required"
-      ? "border-(--warning-border) bg-(--warning-surface) text-(--warning-text)"
-      : "border-(--info-border) bg-(--info-surface) text-(--info-text)";
-  const canRunSearchNow =
-    !isAnyTargetDiscoveryPending &&
-    props.target.enabled &&
-    hasValidAbsoluteStartingUrl(props.target.startingUrl);
-  const canRunSourceDebug = hasValidAbsoluteStartingUrl(
-    props.target.startingUrl,
-  );
-
-  useEffect(() => {
-    if (!isInstructionSavePending) {
-      setPendingInstructionAction(null);
-    }
-  }, [isInstructionSavePending]);
-
-  const updateTarget = (nextTarget: DiscoveryTargetValue) => {
-    const existingTarget = props.discoveryTargets[props.index];
-    const nextTargets = [...props.discoveryTargets];
-    nextTargets[props.index] = {
-      ...nextTarget,
-      adapterKind:
-        nextTarget.adapterKind ?? existingTarget?.adapterKind ?? "auto",
-    };
-    props.updateDiscoveryTargets(nextTargets);
-  };
-
+  const isInstructionSavePending = props.isSourceInstructionPending(targetId);
+  const isTargetSourceDebugPending = props.isSourceDebugPending(targetId);
   const saveInstructionArtifact = (
     artifact: EditableSourceInstructionArtifact,
-  ) => {
-    props.onSaveSourceInstructionArtifact(props.target.id, artifact);
-  };
-
+  ) => props.onSaveSourceInstructionArtifact(targetId, artifact);
   const beginEditingInstruction = (
     section: LearnedInstructionSection,
     line: LearnedInstructionSection["lines"][number],
@@ -261,163 +201,113 @@ export function ProfileDiscoveryTargetRow(
     }
   };
 
-  const moveTarget = useCallback(
-    (direction: -1 | 1) => {
-      const nextIndex = props.index + direction;
-      const nextTargets = [...props.discoveryTargets];
-      const currentTarget = nextTargets[props.index];
-      const adjacentTarget = nextTargets[nextIndex];
-
-      if (!currentTarget || !adjacentTarget) {
-        return;
-      }
-
-      nextTargets[props.index] = adjacentTarget;
-      nextTargets[nextIndex] = currentTarget;
-      props.updateDiscoveryTargets(nextTargets);
-    },
-    [props.discoveryTargets, props.index, props.updateDiscoveryTargets],
-  );
-
-  const handleRunSourceDebug = useCallback(() => {
-    props.onRunSourceDebug(props.target.id);
-  }, [props.onRunSourceDebug, props.target.id]);
-
-  const handleRunDiscoveryForTarget = useCallback(() => {
-    props.onRunDiscoveryForTarget?.(props.target.id);
-  }, [props.onRunDiscoveryForTarget, props.target.id]);
-
-  const handleOpenBrowserSessionForTarget = useCallback(() => {
-    props.onOpenBrowserSessionForTarget(props.target.id);
-  }, [props.onOpenBrowserSessionForTarget, props.target.id]);
-
-  const handleMoveTargetUp = useCallback(() => {
-    moveTarget(-1);
-  }, [moveTarget]);
-
-  const handleMoveTargetDown = useCallback(() => {
-    moveTarget(1);
-  }, [moveTarget]);
-
-  const { showToast } = useToast();
-  const handleRemoveTarget = useCallback(() => {
-    props.updateDiscoveryTargets(
-      props.discoveryTargets.filter((entry) => entry.id !== props.target.id),
-    );
-    showToast({
-      title: "Source removed",
-      description:
-        "Its saved jobs stay in your plans with their original source name.",
-    });
-  }, [
-    props.discoveryTargets,
-    props.target.id,
-    props.updateDiscoveryTargets,
-    showToast,
-  ]);
-
-  const handleToggleEnabled = useCallback(
-    (checked: boolean) => {
-      updateTarget({ ...props.target, enabled: checked });
-    },
-    [
-      props.discoveryTargets,
-      props.index,
-      props.target,
-      props.updateDiscoveryTargets,
-    ],
-  );
-
-  const handleLabelChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      updateTarget({ ...props.target, label: event.target.value });
-    },
-    [
-      props.discoveryTargets,
-      props.index,
-      props.target,
-      props.updateDiscoveryTargets,
-    ],
-  );
-
-  const handleStartingUrlChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      updateTarget({ ...props.target, startingUrl: event.target.value });
-    },
-    [
-      props.discoveryTargets,
-      props.index,
-      props.target,
-      props.updateDiscoveryTargets,
-    ],
-  );
-
-  const handleCustomInstructionsChange = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) => {
-      updateTarget({ ...props.target, customInstructions: event.target.value });
-    },
-    [
-      props.discoveryTargets,
-      props.index,
-      props.target,
-      props.updateDiscoveryTargets,
-    ],
-  );
-
   return (
-    <article className="surface-card-tint grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-      <DiscoveryTargetActionHeader
-        accessibleLabel={accessibleLabel}
-        canRunDiscovery={canRunSearchNow}
-        canRunSourceDebug={canRunSourceDebug}
-        displayName={displayName}
-        index={props.index}
-        isBrowserSessionPending={isTargetBrowserSessionPending}
-        isLastTarget={props.index === props.discoveryTargets.length - 1}
-        isSourceDebugPending={isTargetSourceDebugPending}
-        isTargetDiscoveryPending={isTargetDiscoveryPending}
-        onMoveDown={handleMoveTargetDown}
-        onMoveUp={handleMoveTargetUp}
-        onOpenBrowserSession={handleOpenBrowserSessionForTarget}
-        onRemove={handleRemoveTarget}
-        onRunDiscovery={
-          props.onRunDiscoveryForTarget
-            ? handleRunDiscoveryForTarget
-            : undefined
-        }
-        onRunSourceDebug={handleRunSourceDebug}
-        sourceAccessPrompt={sourceAccessPrompt}
-      />
-
-      {sourceAccessPrompt ? (
-        <DiscoveryTargetAccessPrompt
-          signInToneClassName={signInToneClassName}
-          sourceAccessPrompt={sourceAccessPrompt}
-        />
-      ) : null}
-
-      <div className="grid gap-(--gap-content) md:grid-cols-2">
-        <DiscoveryTargetFormFields
-          customInstructions={props.target.customInstructions}
-          instructionStatusSummary={formatInstructionStatusSummary(
-            props.target,
-          )}
-          instructionsId={instructionsId}
-          isSourceDebugPending={isTargetSourceDebugPending}
-          labelId={labelId}
-          labelValue={props.target.label}
-          latestDebugRun={latestDebugRun}
-          latestDebugRunLabel={latestDebugRunLabel}
-          onCustomInstructionsChange={handleCustomInstructionsChange}
-          onLabelChange={handleLabelChange}
-          onReviewLatestRun={handleReviewLatestRun}
-          onStartingUrlChange={handleStartingUrlChange}
-          onToggleEnabled={handleToggleEnabled}
-          reviewCheckAriaLabel={`Review the latest source check for ${accessibleLabel}`}
-          startingUrl={props.target.startingUrl}
-          startingUrlId={startingUrlId}
-          targetEnabled={props.target.enabled}
-        />
+    <section
+      aria-label="Site details"
+      className="surface-panel-shell flex min-h-0 flex-col overflow-hidden rounded-(--radius-panel) border border-(--surface-panel-border)"
+    >
+      <header className="grid gap-3 border-b border-(--surface-panel-border) px-5 py-4">
+        <h2 className="font-display text-lg font-semibold">{site.label}</h2>
+        <p className="break-all text-sm text-foreground-soft">{site.url}</p>
+        <p className="text-xs text-foreground-muted">
+          {site.lastSearchedAt
+            ? `Last searched ${new Date(site.lastSearchedAt).toLocaleString()}`
+            : "Not searched yet"}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => openUrlInJobFinderBrowser(site.url)}
+          >
+            Open site
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => props.onRunSourceDebug(targetId)}
+            pending={isTargetSourceDebugPending}
+          >
+            Check source
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              void window.nestor.jobs
+                .run("remove_site", { id: site.id })
+                .then(() => {
+                  props.onRemoved();
+                  showToast({
+                    title: "Site removed",
+                    description: "Its saved jobs stay in your list.",
+                  });
+                })
+                .catch((reason: unknown) =>
+                  setError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Could not remove this site.",
+                  ),
+                );
+            }}
+          >
+            Remove
+          </Button>
+        </div>
+      </header>
+      <div className="grid min-h-0 flex-1 content-start gap-5 overflow-y-auto p-5">
+        {error ? (
+          <p role="alert" className="text-sm text-(--warning-text)">
+            {error}
+          </p>
+        ) : null}
+        <div
+          onBlur={() => {
+            void saveDraft();
+          }}
+        >
+          <DiscoveryTargetFormFields
+            customInstructions={
+              draft.customInstructions ?? site.customInstructions ?? ""
+            }
+            labelValue={draft.label ?? site.label}
+            instructionStatusSummary={
+              site.instructionStatus === "missing"
+                ? "No saved guidance yet"
+                : site.instructionStatus === "validated"
+                  ? "Guidance ready"
+                  : site.instructionStatus === "draft"
+                    ? "Draft guidance saved"
+                    : "Guidance needs review"
+            }
+            instructionsId={`site-${site.id}-notes`}
+            labelId={`site-${site.id}-label`}
+            latestDebugRun={latestDebugRun}
+            latestDebugRunLabel={latestDebugRun?.state ?? null}
+            onCustomInstructionsChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                customInstructions: event.target.value,
+              }))
+            }
+            onLabelChange={(event) =>
+              setDraft((current) => ({ ...current, label: event.target.value }))
+            }
+            onReviewLatestRun={handleReviewLatestRun}
+            onStartingUrlChange={(event) =>
+              setDraft((current) => ({ ...current, url: event.target.value }))
+            }
+            startingUrl={draft.url ?? site.url}
+            startingUrlId={`site-${site.id}-url`}
+            targetEnabled={site.enabled}
+            onToggleEnabled={(enabled) => {
+              void update({ enabled }).catch(() => undefined);
+            }}
+            isSourceDebugPending={isTargetSourceDebugPending}
+            reviewCheckAriaLabel={`Review check for ${site.label}`}
+          />
+        </div>
         <DiscoveryTargetInstructions
           editingInstruction={editingInstruction}
           editingInstructionValue={editingInstructionValue}
@@ -450,7 +340,7 @@ export function ProfileDiscoveryTargetRow(
           onPersistEditedInstruction={persistEditedInstruction}
           onRemoveInstructionLine={removeInstructionLine}
           sections={learnedInstructionSections}
-          targetId={props.target.id}
+          targetId={targetId}
         />
       </div>
       <ProfileSourceDebugReviewModal
@@ -466,8 +356,8 @@ export function ProfileDiscoveryTargetRow(
         open={reviewOpen}
         recentRuns={targetRuns}
         selectedRunId={selectedRunId}
-        targetLabel={displayName}
+        targetLabel={site.label}
       />
-    </article>
+    </section>
   );
 }
