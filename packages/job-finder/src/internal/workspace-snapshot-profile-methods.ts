@@ -689,7 +689,8 @@ export function createWorkspaceSnapshotProfileMethods(
   let lastJobViews: {
     input: JobViewInput;
     views: ReturnType<typeof buildJobViews>;
-    rawById: ReadonlyMap<string, SavedJob>;
+    // Service-private lookup; published rows and lists remain immutable.
+    rawById: Map<string, SavedJob>;
   } | null = null;
   // Kept in step with the listed jobs from one refresh to the next, so a
   // refresh indexes only the jobs that changed since the last one.
@@ -741,12 +742,14 @@ export function createWorkspaceSnapshotProfileMethods(
             input.rawSavedJobs,
           );
       const rawById = changes
-        ? new Map(last.rawById)
+        ? last.rawById
         : new Map(input.rawSavedJobs.map((job) => [job.id, job]));
-      if (changes) {
-        for (const id of changes.removedIds) rawById.delete(id);
-        for (const row of changes.rows) rawById.set(row.id, row);
-      }
+      const removedRawIds = new Set(changes?.removedIds ?? []);
+      const rawEdits = new Map(changes?.rows.map((row) => [row.id, row]) ?? []);
+      const currentRaw = (id: string) =>
+        rawEdits.get(id) ??
+        (removedRawIds.has(id) ? undefined : rawById.get(id));
+      const hasCurrentRaw = (id: string) => currentRaw(id) !== undefined;
       const rawChanged =
         changes?.rows ??
         input.rawSavedJobs.filter((job) => last.rawById.get(job.id) !== job);
@@ -769,7 +772,7 @@ export function createWorkspaceSnapshotProfileMethods(
             : [
                 ...input.rawSavedJobs,
                 ...input.pendingDiscoveryJobs.filter(
-                  (row) => !rawById.has(row.id),
+                  (row) => !hasCurrentRaw(row.id),
                 ),
               ],
         beforeById: last.rawById,
@@ -790,40 +793,43 @@ export function createWorkspaceSnapshotProfileMethods(
           if (!last.views.companyJobIds.has(id)) changedIds.add(id);
       }
       const changed = [...changedIds].flatMap((id) => {
-        const row = rawById.get(id);
+        const row = currentRaw(id);
         return row ? [readPlanAssessment(row, input.planId)] : [];
       });
       for (const job of input.pendingDiscoveryJobs)
-        if (changedIds.has(job.id) && !rawById.has(job.id))
+        if (changedIds.has(job.id) && !hasCurrentRaw(job.id))
           changed.push(readPlanAssessment(job, input.planId));
-      const projectedJobById = new Map(last.views.projectedJobById);
-      for (const id of changedIds) projectedJobById.delete(id);
-      for (const view of projectDiscoveryJobViews({
-        jobs: changed,
-        identityJobs:
-          input.pendingDiscoveryJobs.length === 0
-            ? input.rawSavedJobs
-            : [
-                ...input.rawSavedJobs,
-                ...input.pendingDiscoveryJobs.filter(
-                  (job) => !rawById.has(job.id),
-                ),
-              ],
-        discoveryLedger: input.discoveryLedger,
-        listingSignals: input.listingSignals,
-        applicationAttempts: input.applicationAttempts,
-        identityIndex: jobViewIdentityIndex,
-      }))
-        projectedJobById.set(view.id, view);
+      const projectedJobById = last.views.projectedJobById;
+      const projectedEdits = new Map(
+        projectDiscoveryJobViews({
+          jobs: changed,
+          identityJobs:
+            input.pendingDiscoveryJobs.length === 0
+              ? input.rawSavedJobs
+              : [
+                  ...input.rawSavedJobs,
+                  ...input.pendingDiscoveryJobs.filter(
+                    (job) => !hasCurrentRaw(job.id),
+                  ),
+                ],
+          discoveryLedger: input.discoveryLedger,
+          listingSignals: input.listingSignals,
+          applicationAttempts: input.applicationAttempts,
+          identityIndex: jobViewIdentityIndex,
+        }).map((view) => [view.id, view]),
+      );
       const project = (jobs: readonly SavedJob[]) =>
         jobs.flatMap((job) => {
-          const view = projectedJobById.get(job.id);
+          const view =
+            projectedEdits.get(job.id) ??
+            (changedIds.has(job.id) ? undefined : projectedJobById.get(job.id));
           return view ? [view] : [];
         });
-      const savedJobs =
-        changes &&
-        changes.removedIds.length === 0 &&
-        input.rawSavedJobs.length === last.input.rawSavedJobs.length
+      const savedJobs = sameJobs
+        ? last.views.savedJobs
+        : changes &&
+            changes.removedIds.length === 0 &&
+            input.rawSavedJobs.length === last.input.rawSavedJobs.length
           ? last.views.savedJobs.slice()
           : input.rawSavedJobs.map((job) =>
               readPlanAssessment(job, input.planId),
@@ -869,19 +875,27 @@ export function createWorkspaceSnapshotProfileMethods(
           changedIds,
           project(
             changed.filter(
-              (job) => rawById.has(job.id) && companyJobIds.has(job.id),
+              (job) => hasCurrentRaw(job.id) && companyJobIds.has(job.id),
             ),
           ),
           (left, right) =>
             compareDiscoveryJobs(
-              readPlanAssessment(rawById.get(left.id) ?? left, input.planId),
-              readPlanAssessment(rawById.get(right.id) ?? right, input.planId),
+              readPlanAssessment(currentRaw(left.id) ?? left, input.planId),
+              readPlanAssessment(currentRaw(right.id) ?? right, input.planId),
             ),
         ),
         projectedJobById,
         companyJobIds,
       };
       Object.freeze(views.companyJobs);
+      // Publish private lookup edits only after the new lists succeed. Held
+      // snapshots own their frozen rows/lists, never these service indexes.
+      if (changes) {
+        for (const id of changes.removedIds) rawById.delete(id);
+        for (const row of changes.rows) rawById.set(row.id, row);
+      }
+      for (const id of changedIds) projectedJobById.delete(id);
+      for (const [id, view] of projectedEdits) projectedJobById.set(id, view);
       lastJobViews = { input, views, rawById };
       return views;
     }
