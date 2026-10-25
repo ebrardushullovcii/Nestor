@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  AppendRapidReviewDecisionInputSchema,
   CampaignDigestCountsSchema,
   CampaignDigestFailedSourceSchema,
   CampaignDigestSchema,
@@ -19,9 +18,6 @@ import {
   MarkAllCampaignNotificationsReadInputSchema,
   MarkCampaignNotificationReadInputSchema,
   ProjectCampaignRuleFunnelInputSchema,
-  RapidReviewDecisionLogSchema,
-  RapidReviewDecisionSchema,
-  RapidReviewMutationInputSchema,
   RunCampaignNowInputSchema,
   SaveCampaignRuleInputSchema,
   SaveCampaignRuleRouteInputSchema,
@@ -257,146 +253,6 @@ describe("campaign rules", () => {
   });
 });
 
-describe("rapid review decisions", () => {
-  test("requires explicit bounded job ids and a revision for batch review", () => {
-    expect(
-      RapidReviewMutationInputSchema.safeParse({
-        type: "decide",
-        campaignId: "campaign_1",
-        jobIds: ["job_1", "job_2"],
-        decision: "shortlist",
-        expectedRevisions: { job_1: null, job_2: null },
-      }).success,
-    ).toBe(true);
-    expect(
-      RapidReviewMutationInputSchema.safeParse({
-        type: "decide",
-        campaignId: "campaign_1",
-        jobIds: [],
-        decision: "shortlist",
-        expectedRevisions: {},
-      }).success,
-    ).toBe(false);
-  });
-
-  test("parses append-only shortlist/reject/inspect decisions", () => {
-    for (const kind of ["shortlist", "reject", "inspect"] as const) {
-      const decision = RapidReviewDecisionSchema.parse({
-        id: `decision_${kind}`,
-        campaignId: "campaign_1",
-        jobId: "job_42",
-        kind,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      expect(decision.kind).toBe(kind);
-      expect(decision.revision).toBe(0);
-      expect(decision.reason).toBeNull();
-      expect(decision.undo).toBeNull();
-    }
-  });
-
-  test("parses explicit undo metadata on a decision", () => {
-    const decision = RapidReviewDecisionSchema.parse({
-      id: "decision_shortlist_42",
-      campaignId: "campaign_1",
-      jobId: "job_42",
-      kind: "shortlist",
-      revision: 2,
-      reason: "Strong match on seniority",
-      createdAt: now,
-      updatedAt: later,
-      undo: {
-        undoneAt: later,
-        reason: "Duplicate job posting",
-        restoringDecisionId: null,
-      },
-    });
-
-    expect(decision.revision).toBe(2);
-    expect(decision.undo?.undoneAt).toBe(later);
-    expect(decision.undo?.reason).toBe("Duplicate job posting");
-    expect(decision.undo?.restoringDecisionId).toBeNull();
-  });
-
-  test("append input defaults revision and reason for backward compatibility", () => {
-    const input = AppendRapidReviewDecisionInputSchema.parse({
-      campaignId: "campaign_1",
-      jobId: "job_7",
-      kind: "reject",
-      createdAt: now,
-    });
-
-    expect(input.revision).toBe(0);
-    expect(input.reason).toBeNull();
-  });
-
-  test("rejects undo metadata with a blank reason", () => {
-    expect(() =>
-      RapidReviewDecisionSchema.parse({
-        id: "decision_bad_undo",
-        campaignId: "campaign_1",
-        jobId: "job_1",
-        kind: "shortlist",
-        createdAt: now,
-        updatedAt: now,
-        undo: { undoneAt: later, reason: "   " },
-      }),
-    ).toThrow();
-  });
-
-  test("rejects duplicate ids and out-of-order append entries", () => {
-    const decision = (id: string, createdAt: string) => ({
-      id,
-      campaignId: "campaign_1",
-      jobId: "job_1",
-      kind: "shortlist" as const,
-      createdAt,
-      updatedAt: createdAt,
-    });
-
-    expect(() =>
-      RapidReviewDecisionLogSchema.parse({
-        campaignId: "campaign_1",
-        entries: [decision("decision_1", now), decision("decision_1", later)],
-      }),
-    ).toThrow();
-
-    expect(() =>
-      RapidReviewDecisionLogSchema.parse({
-        campaignId: "campaign_1",
-        entries: [decision("decision_1", later), decision("decision_2", now)],
-      }),
-    ).toThrow();
-  });
-
-  test("keeps the decision log append-only with bounded entries", () => {
-    const log = RapidReviewDecisionLogSchema.parse({
-      campaignId: "campaign_1",
-      entries: [],
-    });
-
-    expect(log.entries).toEqual([]);
-
-    expect(() =>
-      RapidReviewDecisionLogSchema.parse({
-        campaignId: "campaign_1",
-        entries: [
-          {
-            id: "decision_bad",
-            campaignId: "campaign_1",
-            jobId: "job_1",
-            kind: "inspect",
-            createdAt: now,
-            updatedAt: now,
-            revision: -1,
-          },
-        ],
-      }),
-    ).toThrow();
-  });
-});
 
 describe("schedule pause windows and run facts", () => {
   test("parses an enabled pause window", () => {

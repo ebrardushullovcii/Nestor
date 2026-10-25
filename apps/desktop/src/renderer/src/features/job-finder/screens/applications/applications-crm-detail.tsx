@@ -9,7 +9,6 @@ import type {
   ApplicationCrmStage,
   ApplicationRecord,
   CandidateAsset,
-  RecordOutcomeInput,
 } from "@nestor/contracts";
 import {
   deviceTimeZone,
@@ -29,7 +28,6 @@ import {
   APPLICATION_CRM_MANUAL_STAGES,
   applicationCrmDataForView,
 } from "./applications-crm-model";
-import { ApplicationsOutcomeRecorder } from "./applications-outcome-recorder";
 import { StatusBadge } from "../../components/status-badge";
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
 import { getJobFinderDateInputLocale } from "../../lib/job-finder-date-input-locale";
@@ -83,17 +81,6 @@ export function ApplicationsCrmDetail(props: {
     format: ApplicationCrmExportFormat,
     recordId: string,
   ) => Promise<void>;
-  onRecordOutcome?: (input: RecordOutcomeInput) => Promise<void>;
-  isRecordOutcomePending?: boolean;
-  outcomeCampaignId?: string | null;
-  outcomeResumeStrategyId?: string | null;
-  /** Outcomes the person recorded for this application, newest last. */
-  recordedOutcomes?: readonly {
-    id: string;
-    outcome: string;
-    occurredAt: string;
-    note: string | null;
-  }[];
 }) {
   const homeTimeZone = resolvePlanTimeZone(
     props.homeTimeZone ?? deviceTimeZone(),
@@ -1320,37 +1307,9 @@ export function ApplicationsCrmDetail(props: {
         )}
       </details>
 
-      {props.recordedOutcomes && props.recordedOutcomes.length > 0 ? (
-        <div className="grid gap-1.5 rounded-(--radius-field) border border-(--surface-panel-border) p-3">
-          <p className="text-sm font-semibold text-foreground">
-            Outcomes you recorded
-          </p>
-          <ul className="grid gap-1 text-sm text-foreground-soft">
-            {[...props.recordedOutcomes].reverse().map((entry) => (
-              <li key={entry.id}>
-                <span className="font-medium text-foreground">
-                  {entry.outcome
-                    .replaceAll("_", " ")
-                    .replace(/^./u, (first) => first.toUpperCase())}
-                </span>{" "}
-                · {formatTrackerMoment(entry.occurredAt, homeTimeZone)}
-                {entry.note ? ` · ${entry.note}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      {null}
 
-      {props.onRecordOutcome ? (
-        <ApplicationsOutcomeRecorder
-          isPending={props.isRecordOutcomePending ?? false}
-          jobId={props.record.jobId}
-          campaignId={props.outcomeCampaignId ?? null}
-          applicationRecordId={props.record.id}
-          onRecordOutcome={props.onRecordOutcome}
-          resumeStrategyId={props.outcomeResumeStrategyId ?? null}
-        />
-      ) : null}
+      {null}
     </section>
   );
 }

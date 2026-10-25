@@ -62,7 +62,6 @@ function envelope(overrides: Record<string, unknown> = {}) {
     revision: 1,
     scope: { campaignId: null, jobIds: ["job_test"] },
     maxApplicationsPerRun: 10,
-    maxApplicationsPerLocalDay: 20,
     intermediateMutationsAuthorized: false,
     accountCreationAuthorized: false,
     allowedResumeSha256: [RESUME_DIGEST],

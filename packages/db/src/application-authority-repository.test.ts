@@ -71,7 +71,6 @@ function createEnvelope() {
     revision: 1,
     scope: { campaignId: null, jobIds: ["job_1"] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     intermediateMutationsAuthorized: false,
     accountCreationAuthorized: false,
     allowedResumeSha256: [digest],
@@ -105,7 +104,6 @@ function createPreflight() {
     answers: { revision: 1, digest },
     finalControl: { signature: digest, ref: "final_control_1" },
     remainingRunCapacityBefore: 1,
-    remainingDailyCapacityBefore: 1,
     createdAt: at,
   });
 }

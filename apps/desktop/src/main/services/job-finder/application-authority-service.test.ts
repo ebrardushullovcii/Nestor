@@ -24,7 +24,6 @@ function createPolicy(
     mode: "prepare_only",
     scope: { campaignId: null, jobIds: [] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     intermediateMutationsAuthorized: false,
     allowedResumeSha256: [SHA],
     allowedOrigins: ["https://boards.example.com"],

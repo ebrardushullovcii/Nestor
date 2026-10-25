@@ -15,7 +15,6 @@ const FORBIDDEN_MORALIZING =
 const AGGRESSIVE_COPY_SURFACES = [
   "./profile-tailoring-copy.ts",
   "../../screens/review-queue/resume-claim-confirmation-panel.tsx",
-  "../../screens/review-queue/resume-strategy-context-panel.tsx",
   "../../screens/review-queue/resume-workspace-editor-panel.tsx",
 ] as const;
 

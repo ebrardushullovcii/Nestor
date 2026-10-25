@@ -2232,128 +2232,6 @@ describe("createPrimaryPageActions", () => {
     expect(approved).toMatch(/latest state/i);
   });
 
-  it("recommends a resume strategy with a pending scope and returns the reason", async () => {
-    const recommendation = {
-      jobId: "job_1",
-      campaignId: "campaign_1",
-      roleFamily: "Backend Engineering",
-      strategyId: "strategy_1",
-      strategyName: "Backend",
-      source: "role_family",
-      reason: "Exact role family match.",
-    };
-    const recommendResumeStrategy = vi
-      .fn<JobFinderShellActions["recommendResumeStrategy"]>()
-      .mockResolvedValue(recommendation as never);
-    type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
-    const setActionState = vi.fn();
-    const setPendingActionState = vi.fn();
-    const {
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      withPendingScope,
-    } = createActionRunners({ setActionState, setPendingActionState });
-    const pageActions = createPrimaryPageActions({
-      actions: { recommendResumeStrategy } as unknown as JobFinderShellActions,
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      setActionState,
-      setPendingActionState,
-      withPendingScope,
-    } as unknown as PrimaryPageActionArgs);
-
-    const result = await pageActions.onRecommendResumeStrategy({
-      jobId: "job_1",
-    });
-
-    expect(recommendResumeStrategy).toHaveBeenCalledWith({ jobId: "job_1" });
-    expect(result).toMatchObject({ strategyId: "strategy_1" });
-    expect(result?.reason).toBe("Exact role family match.");
-  });
-
-  it("reports a failed recommendation honestly without throwing", async () => {
-    const recommendResumeStrategy = vi
-      .fn<JobFinderShellActions["recommendResumeStrategy"]>()
-      .mockRejectedValue(new Error("That job is no longer available."));
-    type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
-    const setActionState = vi.fn();
-    const setPendingActionState = vi.fn();
-    const {
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      withPendingScope,
-    } = createActionRunners({ setActionState, setPendingActionState });
-    const pageActions = createPrimaryPageActions({
-      actions: { recommendResumeStrategy } as unknown as JobFinderShellActions,
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      setActionState,
-      setPendingActionState,
-      withPendingScope,
-    } as unknown as PrimaryPageActionArgs);
-
-    const result = await pageActions.onRecommendResumeStrategy({
-      jobId: "job_1",
-    });
-
-    expect(result).toBeNull();
-    expect(setActionState).toHaveBeenCalledWith({
-      message: "That job is no longer available.",
-    });
-  });
-
-  it("selects a resume strategy and explains that reuse never approves the resume", async () => {
-    const selectResumeStrategy = vi
-      .fn<JobFinderShellActions["selectResumeStrategy"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
-    const setActionState = vi.fn();
-    const setPendingActionState = vi.fn();
-    const {
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      withPendingScope,
-    } = createActionRunners({ setActionState, setPendingActionState });
-    const pageActions = createPrimaryPageActions({
-      actions: { selectResumeStrategy } as unknown as JobFinderShellActions,
-      runAction,
-      runResumeWorkspaceAction,
-      runSaveAction,
-      setActionState,
-      setPendingActionState,
-      withPendingScope,
-    } as unknown as PrimaryPageActionArgs);
-
-    pageActions.onSelectResumeStrategy({
-      jobId: "job_1",
-      campaignId: "campaign_1",
-      strategyId: "strategy_1",
-      source: "manual",
-      reason: "Picked by the user.",
-    });
-
-    await vi.waitFor(() => {
-      expect(selectResumeStrategy).toHaveBeenCalledWith({
-        jobId: "job_1",
-        campaignId: "campaign_1",
-        strategyId: "strategy_1",
-        source: "manual",
-        reason: "Picked by the user.",
-      });
-      // A finished action reports a success tone (ADR 0044).
-      expect(setActionState).toHaveBeenLastCalledWith({
-        message:
-          "Strategy chosen for this job. The job's resume still needs its own review and approval before it can be used.",
-        tone: "success",
-      });
-    });
-  });
-
   it("shortlists the exact clicked job without navigating or resetting resume workspace state", async () => {
     const queueJobForReview = vi
       .fn<JobFinderShellActions["queueJobForReview"]>()
@@ -3012,7 +2890,6 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
               skipped: [],
               activeRunId: "run_1",
               pausedReason: null,
-              resumesAt: null,
               createdAt: "2026-10-23T10:00:00.000Z",
               updatedAt: "2026-10-23T10:00:00.000Z",
             },
@@ -3035,10 +2912,7 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
       setActionState: wrappedSetActionState,
       setResumeWorkspaceDirty,
       workspace: {
-        dashboard:
-          input?.capacity === undefined
-            ? {}
-            : { globalDailyApplicationPreparationCapacity: input.capacity },
+        dashboard: input?.capacity === undefined ? {} : {},
       } as unknown as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
@@ -3339,15 +3213,14 @@ describe("describeApplyQueueStart", () => {
         skipped: [],
         activeRunId: "run_1",
         pausedReason: null,
-        resumesAt: null,
         createdAt: "2026-10-23T10:00:00.000Z",
         updatedAt: "2026-10-23T10:00:00.000Z",
       },
     }) as unknown as JobFinderRendererWorkspaceSnapshot;
 
-  it("counts only the jobs today's limit let start", () => {
+  it("counts the chosen jobs as started when they fit in the first run", () => {
     expect(describeApplyQueueStart(queue(["a"]), ["a", "b", "c"])).toBe(
-      "1 application started. Today's limit is reached, so 2 more start after midnight by themselves.",
+      "3 applications started. Watch them in Applications.",
     );
   });
 

@@ -116,7 +116,6 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         onUpdateWorkspaceBehavior={(input) =>
           callbacks.onUpdateWorkspaceBehavior(input)
         }
-        searchPreferences={{ tailoringMode: "balanced" }}
         settings={settings}
       />
     </MemoryRouter>,
@@ -357,45 +356,6 @@ describe("Settings save ownership", () => {
 
     await waitFor(() => expect(unsavedBar()).toBeNull());
     expect(within(tracker).getByText("Tracker settings saved.")).toBeTruthy();
-  });
-
-  it("saves the apply mode on press and names a typed daily limit in the bar", async () => {
-    const callbacks = createCallbacks();
-    renderScreen(parseSettings(), callbacks);
-
-    const applying = screen.getByRole("region", {
-      name: APPLICATION_AUTHORITY_LABEL,
-    });
-    // The mode is the one switch: nothing is left outstanding, so leaving
-    // Settings can no longer drop a chosen Send for me.
-    fireEvent.click(
-      within(applying).getByRole("radio", { name: /Send for me/ }),
-    );
-    await waitFor(() =>
-      expect(callbacks.onUpdateApplicationDefaults).toHaveBeenCalledWith({
-        applicationAutomationMode: "autonomous_submit",
-        maxApplicationsPerLocalDay: 20,
-      }),
-    );
-    expect(unsavedBar()).toBeNull();
-
-    fireEvent.change(
-      within(applying).getByLabelText("Most preparations in one day"),
-      { target: { value: "5" } },
-    );
-    const bar = unsavedBar();
-    expect(bar?.textContent).toContain("Unsaved changes in Applying.");
-    fireEvent.click(
-      within(bar as HTMLElement).getByRole("button", {
-        name: "Save daily limit",
-      }),
-    );
-    await waitFor(() =>
-      expect(callbacks.onUpdateApplicationDefaults).toHaveBeenLastCalledWith({
-        applicationAutomationMode: "autonomous_submit",
-        maxApplicationsPerLocalDay: 5,
-      }),
-    );
   });
 
   it("names every dirty section and offers no save when more than one is outstanding", async () => {

@@ -233,12 +233,7 @@ export const PENDING_ADOPTION = {
     "features/job-finder/screens/applications/applications-crm-detail.tsx",
     "features/job-finder/screens/applications/applications-crm-settings.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
-    "features/job-finder/screens/applications/applications-outcome-recorder.tsx",
     "features/job-finder/screens/applications/use-applications-apply-run-details.ts",
-    "features/job-finder/screens/companies/companies-screen.tsx",
-    "features/job-finder/screens/companies/company-detail-screen.tsx",
-    "features/job-finder/screens/rapid-review/rapid-review-screen.tsx",
-    "features/job-finder/screens/review-queue/resume-strategy-job-panel.tsx",
     "pages/use-job-finder-page-controller-actions.ts",
   ],
   formatStatusLabel: [
@@ -256,7 +251,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-run-history-section.tsx",
     "features/job-finder/screens/applications/applications-status.ts",
-    "features/job-finder/screens/companies/company-detail-screen.tsx",
     "features/job-finder/screens/discovery/discovery-detail-panel.tsx",
     "features/job-finder/screens/discovery/discovery-results-panel.tsx",
     "features/job-finder/screens/review-queue/resume-version-history-panel.tsx",
@@ -265,12 +259,8 @@ export const PENDING_ADOPTION = {
   underscoreDisplay: [
     "features/job-finder/components/profile/profile-timeline-repair-list.tsx",
     "features/job-finder/lib/source-intelligence-utils.ts",
-    "features/job-finder/screens/analytics/outcome-analytics-screen.tsx",
     "features/job-finder/screens/applications/applications-crm-detail.tsx",
     "features/job-finder/screens/applications/applications-crm-views.tsx",
-    "features/job-finder/screens/rapid-review/rapid-review-screen.tsx",
-    "features/job-finder/screens/safeguards/safeguards-presentation.ts",
-    "features/job-finder/screens/settings/settings-application-authority-section.tsx",
   ],
   legacyErrorMessageMapper: [
     "features/job-finder/screens/review-queue/resume-workspace-screen-helpers.ts",

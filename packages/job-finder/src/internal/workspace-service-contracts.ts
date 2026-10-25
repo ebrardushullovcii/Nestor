@@ -31,7 +31,6 @@ import type {
   CandidateAssetListInput,
   CandidateAssetListResult,
   ClearApplicationAnswerCommandInput,
-  CompanyIntelligenceMutationInput,
   ApplyRunDetails,
   ApplyGroupedManualAnswerInput,
   DeleteCampaignRuleInput,
@@ -71,21 +70,8 @@ import type {
   ProfileSetupReviewActionOptions,
   ProjectCampaignRuleFunnelInput,
   ProjectGroupedManualAnswerCommand,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
   RemoveEmployerExclusionInput,
-  ResumeStrategyRecommendation,
-  ReviewCompanyMergeInput,
   RunCampaignNowInput,
-  SaveResumeStrategyInput,
-  SafeguardBlockerView,
-  SafeguardMutationInput,
-  SafeguardsOverview,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
-  SetCompanyPreferenceInput,
-  SetOutcomeSuggestionEnabledInput,
   SnoozeGroupedDecisionInput,
   ResumeAssistantMessage,
   ResumeDraft,
@@ -476,63 +462,6 @@ export interface JobFinderWorkspaceService {
     jobIds: readonly string[],
     options?: DiscoveryFeedbackBatchOptions,
   ): Promise<DiscoveryFeedbackBatchResult>;
-  mutateRapidReview(
-    input: RapidReviewMutationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  recordOutcome(input: RecordOutcomeInput): Promise<JobFinderWorkspaceSnapshot>;
-  refreshCompanyIntelligence(): Promise<JobFinderWorkspaceSnapshot>;
-  setCompanyPreference(
-    input: SetCompanyPreferenceInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  reviewCompanyMerge(
-    input: ReviewCompanyMergeInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  mutateCompanyIntelligence(
-    input: CompanyIntelligenceMutationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  setOutcomeSuggestionEnabled(
-    input: SetOutcomeSuggestionEnabledInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Applies one typed local safeguard mutation (caps, conflicts, listing
-   * signals, failure pauses, sample reviews, contradictions, or dismissals).
-   * Mutations never grant credentials, login, CAPTCHA, MFA, legal consent,
-   * account creation, upload, redirect, or final-submit authority.
-   */
-  mutateSafeguards(
-    input: SafeguardMutationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Read-only gate overview used by the Safeguards screen and tests. */
-  getSafeguardsOverview(): Promise<SafeguardsOverview>;
-  /**
-   * Read-only gate projection for application preparation of the given jobs
-   * (caps, conflicts, signals, global pauses/reviews, advisory contradictions).
-   */
-  evaluateApplicationSafeguardBlockers(
-    jobIds: readonly string[],
-  ): Promise<readonly SafeguardBlockerView[]>;
-  /**
-   * Read-only gate projection for a discovery run (global pauses and pending
-   * sample reviews only; job-scoped gates are enforced at preparation time).
-   */
-  evaluateDiscoverySafeguardBlockers(): Promise<
-    readonly SafeguardBlockerView[]
-  >;
-  saveResumeStrategy(
-    input: SaveResumeStrategyInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  disableResumeStrategy(
-    strategyId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  selectResumeStrategy(
-    input: SelectResumeStrategyInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  recommendResumeStrategy(
-    input: RecommendResumeStrategyInput,
-  ): Promise<ResumeStrategyRecommendation>;
-  setCampaignResumeStrategyDefault(
-    input: SetCampaignResumeStrategyDefaultInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
   generateResume(
     jobId: string,
     options?: { language?: string | null },

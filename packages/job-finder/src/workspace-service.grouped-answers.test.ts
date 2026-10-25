@@ -1071,7 +1071,15 @@ describe("workspace grouped reusable manual answers", () => {
     // transition the writer reads the still-pending decision and its later
     // save reverts the approval.
     const mutationPromise =
-      harness.workspaceService.refreshCompanyIntelligence();
+      harness.workspaceService.saveResumeBatchCheckpoint({
+        id: "race_checkpoint",
+        jobIds: ["one"],
+        activeJobIds: ["one"],
+        completedJobIds: [],
+        done: false,
+        running: true,
+        stopRequested: false,
+      });
     releaseCommit();
     await applyPromise;
     await saveReachedPromise;

@@ -11,7 +11,6 @@ import {
   JobFinderAgentDiscoveryResultSchema,
   JobFinderOpenBrowserSessionInputSchema,
   JobFinderJobResumeApplicationModeInputSchema,
-  JobFinderResumeWorkspaceStrategyContextSchema,
   ApplyJobResultSchema,
   ApplicationAttemptSchema,
   JobFinderWorkspaceSnapshotSchema,
@@ -22,7 +21,7 @@ import {
 import { createApplyRunFixture, createSubmittedAttempt } from "./test-fixtures";
 
 describe("contracts workspace snapshot schema", () => {
-  test("defaults daily preparation capacity to unknown and enforces remaining", () => {
+  test("parses a dashboard summary with no daily preparation capacity", () => {
     const base = {
       generatedAt: "2026-03-20T10:05:00.000Z",
       activeCampaignId: "campaign-test",
@@ -47,90 +46,10 @@ describe("contracts workspace snapshot schema", () => {
     };
 
     expect(
-      JobFinderDashboardSummarySchema.parse(base)
-        .globalDailyApplicationPreparationCapacity,
-    ).toBeNull();
-    expect(
-      JobFinderDashboardSummarySchema.parse({
-        ...base,
-        globalDailyApplicationPreparationCapacity: {
-          limit: 20,
-          used: 7,
-          remaining: 13,
-          localDate: "2026-03-20",
-          resetsAt: "2026-03-21T00:00:00.000Z",
-        },
-      }).globalDailyApplicationPreparationCapacity?.legacyUncertain,
-    ).toBe(0);
-    expect(
       JobFinderDashboardSummarySchema.safeParse({
         ...base,
-        globalDailyApplicationPreparationCapacity: {
-          limit: 20,
-          used: 7,
-          legacyUncertain: 0,
-          remaining: 12,
-          localDate: "2026-03-20",
-          resetsAt: "2026-03-21T00:00:00.000Z",
-        },
       }).success,
-    ).toBe(false);
-  });
-  test("strategy context is advisory and cannot carry approval or readiness", () => {
-    expect(
-      JobFinderResumeWorkspaceStrategyContextSchema.parse({
-        roleFamily: "Backend Engineering",
-        recommendedStrategyId: "strategy-1",
-        recommendedStrategyName: "Backend",
-        recommendationSource: "role_family",
-        recommendationReason: "Exact role family match.",
-        selectedStrategyId: "strategy-1",
-        selectedStrategyName: "Backend",
-        selectionSource: "user",
-        selectionReason: "Picked by the user.",
-        selectedAt: "2026-03-20T10:00:00.000Z",
-        templateId: "modern_split",
-        headlinePolicy: "role_family_template",
-        skillsPolicy: "role_family_expanded",
-        coveragePolicy: "role_family_recommended",
-        tailoringStrength: "balanced",
-        evidenceBoundaries: {
-          allowExactClaims: true,
-          allowParaphrasedClaims: true,
-          maxEvidenceRefsPerBullet: 4,
-          requireVerifierPass: true,
-        },
-      }),
-    ).toMatchObject({
-      recommendedStrategyId: "strategy-1",
-      recommendationSource: "role_family",
-      selectionSource: "user",
-      templateId: "modern_split",
-    });
-
-    // The strict context cannot carry approval, readiness, or current flags.
-    expect(
-      JobFinderResumeWorkspaceStrategyContextSchema.safeParse({
-        roleFamily: null,
-        recommendedStrategyId: null,
-        recommendedStrategyName: null,
-        recommendationSource: "none",
-        recommendationReason: "No match.",
-        selectedStrategyId: null,
-        selectedStrategyName: null,
-        selectionSource: null,
-        selectionReason: null,
-        selectedAt: null,
-        templateId: null,
-        headlinePolicy: null,
-        skillsPolicy: null,
-        coveragePolicy: null,
-        tailoringStrength: null,
-        evidenceBoundaries: null,
-        approvedAt: "2026-03-20T10:00:00.000Z",
-        applicationReady: true,
-      }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
   test("parses a per-job CV mode selection", () => {
     expect(

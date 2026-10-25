@@ -125,7 +125,7 @@ export const applyBlockerReasonValues = [
   "submit_confirmation_missing",
   "unexpected_navigation",
   // Technical failure: the employer page never opened, so the application
-  // never began and this reason is excluded from begun daily capacity.
+  // never began.
   // Token intentionally mirrors the blocker code one-to-one.
   "application_page_unreachable",
   // ADR 0013 terminal uncertainty: the final-submission attempt could not be

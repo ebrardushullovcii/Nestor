@@ -8,12 +8,11 @@ describe("describeApplicationDefaultsSave", () => {
     // Original.
     const copy = describeApplicationDefaultsSave({
       applicationAutomationMode: "autonomous_submit",
-      maxApplicationsPerLocalDay: 20,
     });
 
     expect(copy.label).toBe("Applying");
     expect(copy.savedMessage).toBe(
-      "Applying saved. Apply fills in and sends each application, and pauses only when it needs you. At most 20 a day.",
+      "Applying saved. Apply fills in and sends each application, and pauses only when it needs you.",
     );
     expect(copy.savedMessage).not.toContain("resume");
     expect(copy.failedFallback).not.toContain("Resume");
@@ -26,8 +25,7 @@ describe("describeApplicationDefaultsSave", () => {
     });
 
     expect(copy.savedMessage).toBe(
-      "Resume look saved.",
-    );
+      "Resume look saved.");
     expect(copy.label).toBe("Resume look");
   });
 

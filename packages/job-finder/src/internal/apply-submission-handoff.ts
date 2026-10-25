@@ -247,7 +247,9 @@ export function describeSubmissionOutcome(input: {
         nextActionLabel: "View application",
       };
     case "outcome_uncertain":
-      if (input.result.outcome?.browserAction?.reason === "confirmation_timeout") {
+      if (
+        input.result.outcome?.browserAction?.reason === "confirmation_timeout"
+      ) {
         return {
           summary: "Send attempted; confirmation timed out",
           detail: `${input.siteLabel} did not confirm receipt in time. Check this application on the site before trying again.`,
@@ -260,7 +262,9 @@ export function describeSubmissionOutcome(input: {
         nextActionLabel: "Check the site and confirm",
       };
     case "recorded_not_submitted":
-      if (input.result.outcome?.browserAction?.reason === "form_validation_failed") {
+      if (
+        input.result.outcome?.browserAction?.reason === "form_validation_failed"
+      ) {
         return {
           summary: "Not sent: correct the marked fields",
           detail:
@@ -361,26 +365,6 @@ export function deriveApplySubmissionCapacity(input: {
     (outcome) => outcome.outcome !== "not_submitted",
   );
   input = { ...input, outcomes };
-  const attemptedToday = (() => {
-    const now = new Date(input.now);
-    if (Number.isNaN(now.getTime())) {
-      return input.outcomes.length;
-    }
-    const dayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    ).getTime();
-    const dayEnd = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 1,
-    ).getTime();
-    return input.outcomes.filter((outcome) => {
-      const at = Date.parse(outcome.attemptedAt);
-      return Number.isFinite(at) && at >= dayStart && at < dayEnd;
-    }).length;
-  })();
 
   const attemptedInRun = input.outcomes.filter(
     (outcome) => outcome.runId === input.runId,
@@ -391,18 +375,12 @@ export function deriveApplySubmissionCapacity(input: {
       0,
       input.envelope.maxApplicationsPerRun - attemptedInRun,
     ),
-    remainingDailyCapacity: Math.max(
-      0,
-      input.envelope.maxApplicationsPerLocalDay - attemptedToday,
-    ),
   };
 }
 
 export type SubmitPreparedApplicationRepository =
   SyntheticSubmissionAuthorityRepository & {
-    listSubmissionOutcomeRecords: (options?: {
-      jobId?: string;
-    }) => Promise<
+    listSubmissionOutcomeRecords: (options?: { jobId?: string }) => Promise<
       readonly {
         runId: string;
         attemptedAt: string;

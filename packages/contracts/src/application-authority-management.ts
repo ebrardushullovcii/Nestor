@@ -34,11 +34,6 @@ const ApplicationAuthorityEnvelopePolicyInputObjectSchema = z
     mode: ApplicationAutomationModeSchema.default("prepare_only"),
     scope: ApplicationAuthorityScopeSchema,
     maxApplicationsPerRun: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    maxApplicationsPerLocalDay: z
-      .number()
-      .int()
-      .min(1)
-      .max(Number.MAX_SAFE_INTEGER),
     intermediateMutationsAuthorized: z.boolean(),
     /**
      * The declarations the person approved in advance, by exact kind. Empty by
@@ -50,8 +45,7 @@ const ApplicationAuthorityEnvelopePolicyInputObjectSchema = z
       .default([]),
     /** What to do when a form asks what pay they expect. */
     salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.default(
-      "pause_for_user",
-    ),
+      "pause_for_user"),
     allowedResumeSha256: z
       .array(Sha256HexSchema)
       .max(applicationAuthorityMaxResumeDigests),

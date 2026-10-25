@@ -12,7 +12,6 @@ import {
   type ResumeGenerationEvidenceItem,
   type TailoredResumeDraft,
 } from "@nestor/ai-providers";
-import type { ResumeGenerationStrategyPolicy } from "@nestor/ai-providers";
 import {
   ResumeAssistantMessageSchema,
   ResumeDraftRevisionSchema,
@@ -1194,7 +1193,6 @@ export function validateResumeDraft(input: {
   profile?: CandidateProfile;
   pageCount?: number | null;
   validatedAt?: string;
-  strategy?: Pick<ResumeGenerationStrategyPolicy, "evidenceBoundaries"> | null;
 }): ResumeValidationResult {
   const validatedAt = input.validatedAt ?? new Date().toISOString();
   const issues: ResumeValidationIssue[] = [];
@@ -1544,30 +1542,6 @@ export function validateResumeDraft(input: {
           issue.category === "job_description_bleed") &&
         !matchResumeIssueApproval({ issue, draft: input.draft }),
     );
-    if (input.strategy && assessment.claimOrigin === "ai_generated") {
-      const boundary = input.strategy.evidenceBoundaries;
-      // The reference cap bounds the generator's own citations (it is in
-      // its prompt); the fact check's citations are not the writer's to trim.
-      const boundaryViolation =
-        (assessment.status === "exact" && !boundary.allowExactClaims) ||
-        (assessment.status === "paraphrase" &&
-          !boundary.allowParaphrasedClaims);
-      if (boundaryViolation) {
-        // The writer repairs this while it writes (see the generation
-        // preview); it never holds the person back.
-        issues.push({
-          id: `issue_strategy_evidence_boundary_${assessment.id}`,
-          severity: "warning",
-          category: "unsupported_claim",
-          sectionId: assessment.sectionId,
-          entryId: assessment.entryId,
-          bulletId: assessment.bulletId,
-          message:
-            "This AI-generated claim exceeds the selected resume strategy's evidence boundary and must be rewritten or removed before export.",
-          flaggedText: assessment.claimText,
-        });
-      }
-    }
 
     if (!blocksExport || alreadyReported) {
       continue;
@@ -1750,14 +1724,12 @@ export function evaluateResumeProposalExportGate(input: {
   job: SavedJob;
   profile?: CandidateProfile;
   evaluatedAt?: string;
-  strategy?: Pick<ResumeGenerationStrategyPolicy, "evidenceBoundaries"> | null;
 }): { accepted: boolean; blockers: ResumeExportBlocker[] } {
   const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
   const validationInput = {
     job: input.job,
     validatedAt: evaluatedAt,
     ...(input.profile ? { profile: input.profile } : {}),
-    ...(input.strategy ? { strategy: input.strategy } : {}),
   };
   const baselineBlockers = collectResumeExportBlockers({
     draft: input.baselineDraft,
@@ -1836,7 +1808,6 @@ export function evaluateResumeProposalGrounding(input: {
   job: SavedJob;
   profile?: CandidateProfile;
   evaluatedAt: string;
-  strategy?: Pick<ResumeGenerationStrategyPolicy, "evidenceBoundaries"> | null;
   /**
    * The model's verdicts on the edited draft's lines (ADR 0041), from
    * evaluateCheckedResumeProposalGrounding. Without them, new generated
@@ -1878,7 +1849,6 @@ export function evaluateResumeProposalGrounding(input: {
     job: input.job,
     evaluatedAt: input.evaluatedAt,
     ...(input.profile ? { profile: input.profile } : {}),
-    ...(input.strategy ? { strategy: input.strategy } : {}),
   });
 
   const approvalBlockers = gate.blockers.map((blocker) =>

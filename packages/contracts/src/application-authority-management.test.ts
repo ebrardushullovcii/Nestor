@@ -12,7 +12,6 @@ const VALID_POLICY = {
   mode: "prepare_only" as const,
   scope: { campaignId: null, jobIds: [] },
   maxApplicationsPerRun: 1,
-  maxApplicationsPerLocalDay: 1,
   intermediateMutationsAuthorized: false,
   allowedResumeSha256: [VALID_SHA],
   allowedOrigins: ["https://boards.example.com"],

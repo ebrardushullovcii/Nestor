@@ -428,7 +428,6 @@ export async function runApplicationSubmissionRuntime(
       answers: preflight.answers,
       finalControl: preflight.finalControl,
       remainingRunCapacity: preflight.remainingRunCapacityBefore,
-      remainingDailyCapacity: preflight.remainingDailyCapacityBefore,
       currentPolicyFacts: input.currentPolicyFacts,
     },
     now: input.now,

@@ -1,5 +1,4 @@
 import {
-  ApplicationRecordSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   DiscoveryRunRecordSchema,
@@ -15,7 +14,6 @@ import { createCampaign } from "./campaign-dashboard";
 import {
   deriveDiscoveryFailureEvidence,
   deriveDiscoveryRunFailureEvidence,
-  deriveSimultaneousApplicationConflicts,
   deriveSourceDebugCampaignWork,
   deriveSourceDebugFailureEvidence,
   isUserOwnedBlockerEvidence,
@@ -238,129 +236,6 @@ describe("automatic application safeguard identity", () => {
     expect(
       shouldPersistApplicationFailureNotification({ result, run: activeRun }),
     ).toBe(true);
-  });
-
-  function verifiedSubmission(appliedAt: string) {
-    const run = ApplyRunSchema.parse({
-      id: "run-1",
-      campaignId: null,
-      mode: "queue_auto",
-      state: "completed",
-      jobIds: ["job-a", "job-b"],
-      createdAt: startedAt,
-      updatedAt: appliedAt,
-      completedAt: appliedAt,
-      summary: "Completed",
-      detail: "Completed safely.",
-    });
-    const result = (jobId: string) =>
-      ApplyJobResultSchema.parse({
-        id: `result-${jobId}`,
-        runId: run.id,
-        jobId,
-        state: "submitted",
-        summary: "Submitted",
-        detail: "Submitted with final receipt.",
-        startedAt,
-        updatedAt: appliedAt,
-        completedAt: appliedAt,
-        privacyReceipt: {
-          generatedAt: appliedAt,
-          lineage: { runId: run.id, jobId, resultId: `result-${jobId}` },
-          destination: { origin: "https://example.com", safePath: "/apply" },
-          resume: { source: "original_upload", fileName: "resume.pdf" },
-          finalSubmitAuthorized: true,
-          finalSubmitOccurred: true,
-        },
-      });
-    return {
-      run,
-      results: [result("job-a"), result("job-b")],
-      records: [
-        ApplicationRecordSchema.parse({
-          id: "application-a",
-          jobId: "job-a",
-          title: "Engineer A",
-          company: "Acme",
-          status: "submitted",
-          lastActionLabel: "Submitted",
-          nextActionLabel: null,
-          lastUpdatedAt: appliedAt,
-        }),
-        ApplicationRecordSchema.parse({
-          id: "application-b",
-          jobId: "job-b",
-          title: "Engineer B",
-          company: "Acme",
-          status: "submitted",
-          lastActionLabel: "Submitted",
-          nextActionLabel: null,
-          lastUpdatedAt: appliedAt,
-        }),
-      ],
-    };
-  }
-
-  test("groups later verified sends into one stable company decision", () => {
-    const submission = verifiedSubmission("2026-08-15T10:01:00.000Z");
-    const first = deriveSimultaneousApplicationConflicts({
-      ...submission,
-      runs: [submission.run],
-      companies: [],
-      now: "2026-08-17T10:00:00.000Z",
-      windowDays: 7,
-    });
-    const extraRecord = ApplicationRecordSchema.parse({
-      ...submission.records[0],
-      id: "application-c",
-      jobId: "job-c",
-    });
-    const extraResult = ApplyJobResultSchema.parse({
-      ...submission.results[0],
-      id: "result-c",
-      jobId: "job-c",
-      completedAt: "2026-08-16T10:00:00.000Z",
-      privacyReceipt: {
-        ...submission.results[0]!.privacyReceipt!,
-        generatedAt: "2026-08-16T10:00:00.000Z",
-        lineage: {
-          runId: submission.run.id,
-          jobId: "job-c",
-          resultId: "result-c",
-        },
-      },
-    });
-    const later = deriveSimultaneousApplicationConflicts({
-      runs: [submission.run],
-      results: [...submission.results, extraResult],
-      records: [...submission.records, extraRecord],
-      companies: [],
-      now: "2026-08-17T10:00:00.000Z",
-      windowDays: 7,
-    });
-    expect(later).toHaveLength(1);
-    expect(later[0]?.conflictId).toBe(first[0]?.conflictId);
-    expect(later[0]?.explanation).toContain("future");
-  });
-
-  test("uses the verified submission occurrence in conflict identity", () => {
-    const first = verifiedSubmission("2026-08-15T10:01:00.000Z");
-    const second = verifiedSubmission("2026-08-16T10:01:00.000Z");
-    const input = (submission: ReturnType<typeof verifiedSubmission>) =>
-      deriveSimultaneousApplicationConflicts({
-        ...submission,
-        runs: [submission.run],
-        companies: [],
-        now: "2026-08-17T10:00:00.000Z",
-        windowDays: 7,
-      });
-
-    const firstConflict = input(first)[0];
-    const secondConflict = input(second)[0];
-    expect(firstConflict?.conflictId).toBeTruthy();
-    expect(secondConflict?.conflictId).toBeTruthy();
-    expect(firstConflict?.conflictId).not.toBe(secondConflict?.conflictId);
-    expect(input(first)[0]?.conflictId).toBe(firstConflict?.conflictId);
   });
 });
 

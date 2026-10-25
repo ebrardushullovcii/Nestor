@@ -19,15 +19,6 @@ export const jobFinderPendingActions = {
     "campaign-notification:all",
   campaignRuleFunnel: (campaignId: string): `campaign-rule-funnel:${string}` =>
     `campaign-rule-funnel:${campaignId}`,
-  companyIntelligenceMutation: (
-    companyId: string,
-  ): `company-intelligence:${string}` => `company-intelligence:${companyId}`,
-  companyIntelligenceRefresh: (): "company-intelligence:refresh" =>
-    "company-intelligence:refresh",
-  companyMergeReview: (companyId: string): `company-merge:${string}` =>
-    `company-merge:${companyId}`,
-  companyPreference: (companyId: string): `company-preference:${string}` =>
-    `company-preference:${companyId}`,
   groupedDecisionSnooze: (
     decisionId: string,
   ): `grouped-decision:snooze:${string}` =>
@@ -55,34 +46,9 @@ export const jobFinderPendingActions = {
   profileReviewItem: (reviewItemId: string): `profile:review:${string}` =>
     `profile:review:${reviewItemId}`,
   profileSetup: (): "profile:setup" => "profile:setup",
-  rapidReview: (): "rapid-review" => "rapid-review",
-  safeguardsMutation: (key: string): `safeguards:${string}` =>
-    `safeguards:${key}`,
-  recordOutcome: (jobId: string): `outcome:record:${string}` =>
-    `outcome:record:${jobId}`,
-  outcomeSuggestion: (
-    dimension: string,
-    key: string,
-  ): `outcome:suggestion:${string}:${string}` =>
-    `outcome:suggestion:${dimension}:${key}`,
   resumeJob: (jobId: string): `resume:${string}` => `resume:${jobId}`,
   resumeExport: (jobId: string): `resume:export:${string}` =>
     `resume:export:${jobId}`,
-  resumeStrategySave: (): "resume-strategy:save" => "resume-strategy:save",
-  resumeStrategyDisable: (
-    strategyId: string,
-  ): `resume-strategy:disable:${string}` =>
-    `resume-strategy:disable:${strategyId}`,
-  resumeStrategySelect: (jobId: string): `resume-strategy:select:${string}` =>
-    `resume-strategy:select:${jobId}`,
-  resumeStrategyRecommend: (
-    jobId: string,
-  ): `resume-strategy:recommend:${string}` =>
-    `resume-strategy:recommend:${jobId}`,
-  resumeStrategyCampaignDefault: (
-    campaignId: string,
-  ): `resume-strategy:campaign-default:${string}` =>
-    `resume-strategy:campaign-default:${campaignId}`,
   settingsSave: (): "settings:save" => "settings:save",
   sourceDebug: (targetId: string): `source-debug:${string}` =>
     `source-debug:${targetId}`,

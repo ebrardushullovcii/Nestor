@@ -35,7 +35,6 @@ import { buildResumeClaimConfirmationCommandInput } from "./resume-claim-confirm
 import { ResumeWorkspaceEditorPanel } from "./resume-workspace-editor-panel";
 import { ResumeWorkspaceHeader } from "./resume-workspace-header";
 import { ResumeWorkspaceContextDisclosure } from "./resume-workspace-context-disclosure";
-import { ResumeStrategyContextPanel } from "./resume-strategy-context-panel";
 import { ResumeWorkspaceSidebar } from "./resume-workspace-sidebar";
 import {
   useAssistant,
@@ -1501,12 +1500,6 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
               <ResumeWorkspaceSidebar
                 hasUnsavedChanges={hasUnsavedChanges}
                 workspace={props.workspace}
-              />
-              <ResumeStrategyContextPanel
-                context={props.workspace.strategyContext ?? null}
-                effectiveTailoringStrength={
-                  props.workspace.effectiveTailoringStrength
-                }
               />
             </ResumeWorkspaceContextDisclosure>
           }

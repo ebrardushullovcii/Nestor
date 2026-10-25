@@ -231,7 +231,6 @@ describe("desktop main application submission composition", () => {
         revision: 1,
         scope: { campaignId: "campaign_1", jobIds: ["job_1"] },
         maxApplicationsPerRun: 1,
-        maxApplicationsPerLocalDay: 1,
         intermediateMutationsAuthorized: false,
         accountCreationAuthorized: false,
         allowedResumeSha256: [RESUME_SHA256],
@@ -270,7 +269,7 @@ describe("desktop main application submission composition", () => {
         },
         resumeBytes: RESUME_BYTES,
         answers: { revision: 1, digest: ANSWER_SHA256 },
-        capacity: { remainingRunCapacity: 1, remainingDailyCapacity: 1 },
+        capacity: { remainingRunCapacity: 1 },
         currentPolicyFacts: {
           policy: POLICY_IDENTITY,
           answers: { revision: 1, digest: ANSWER_SHA256 },

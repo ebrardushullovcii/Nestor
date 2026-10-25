@@ -268,9 +268,6 @@ export function buildGroundedResumeRewriteModelPayload(
   input: ResumeGenerationInput,
 ) {
   return {
-    ...("strategy" in input && input.strategy
-      ? { strategy: input.strategy }
-      : {}),
     ...(input.resumeText?.trim() ? { baseResumeText: input.resumeText } : {}),
     ...("language" in input
       ? {

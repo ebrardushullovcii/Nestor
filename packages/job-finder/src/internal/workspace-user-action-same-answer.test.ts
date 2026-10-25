@@ -274,7 +274,6 @@ it.each(["pause_for_user", "answer_from_profile"] as const)(
       revision: 1,
       scope: { campaignId: null, jobIds: ["job_r_b"] },
       maxApplicationsPerRun: 2,
-      maxApplicationsPerLocalDay: 2,
       intermediateMutationsAuthorized: false,
       accountCreationAuthorized: false,
       allowedResumeSha256: [sha256],

@@ -111,10 +111,6 @@ export interface WorkspaceServiceContext {
     input: { resultId: string; runId: string; jobId: string },
     token?: ApplicationPreparationCapacityToken,
   ): Promise<ApplyJobResult>;
-  requireApplicationSafeguardClearance?(
-    jobIds: readonly string[],
-    savedJobs?: readonly SavedJob[],
-  ): Promise<void>;
   withApplicationCrmTransition<T>(operation: () => Promise<T>): Promise<T>;
   withIntelligenceTransition<T>(operation: () => Promise<T>): Promise<T>;
   withCampaignTransition<T>(operation: () => Promise<T>): Promise<T>;

@@ -2743,57 +2743,6 @@ export async function createFileJobFinderRepository(
       });
       return secureDatabaseFile(options.filePath);
     },
-    commitCompanyIntelligenceUpdate(expected, update) {
-      try {
-        const nextState = runImmediateTransaction(database, () => {
-          const intelligenceState =
-            getSingletonValue(
-              database,
-              "intelligence_state",
-              JobFinderIntelligenceStateSchema,
-            ) ?? normalizedSeed.intelligence;
-          const savedJob =
-            expected.jobId === null
-              ? null
-              : (listCollectionValues(database, "saved_jobs", SavedJobSchema, {
-                  whereSql: "id = ?",
-                  params: [expected.jobId],
-                  orderBySql: "id ASC",
-                })[0] ?? null);
-          const applicationRecord =
-            expected.applicationRecordId === null
-              ? null
-              : (listCollectionValues(
-                  database,
-                  "application_records",
-                  ApplicationRecordSchema,
-                  {
-                    whereSql: "id = ?",
-                    params: [expected.applicationRecordId],
-                    orderBySql: "id ASC",
-                  },
-                )[0] ?? null);
-          const normalized = JobFinderIntelligenceStateSchema.parse(
-            cloneValue(
-              update({
-                intelligenceState: cloneValue(intelligenceState),
-                savedJob: cloneValue(savedJob),
-                applicationRecord: cloneValue(applicationRecord),
-              }),
-            ),
-          );
-          saveSingletonValue(database, "intelligence_state", normalized);
-          return normalized;
-        });
-        return secureDatabaseFile(options.filePath).then(() =>
-          cloneValue(nextState),
-        );
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
     getActivityControl() {
       return Promise.resolve(
         getSingletonValue(

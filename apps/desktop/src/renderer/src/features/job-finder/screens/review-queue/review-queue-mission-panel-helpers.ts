@@ -25,8 +25,7 @@ export type PrimaryApplicationRecoveryKind =
   | "open_browser"
   | "open_job_details"
   | "open_profile"
-  | "open_resume_workspace"
-  | "open_safeguards";
+  | "open_resume_workspace";
 
 /**
  * Internal identifiers the safeguard layer appends in parentheses
@@ -61,7 +60,6 @@ export interface PrimaryApplicationAction {
     | "approve_and_apply"
     | "blocked"
     | "generate_resume"
-    | "open_safeguards"
     | "start_apply"
     | "waiting";
   label: string;
@@ -113,9 +111,8 @@ export function describeApplyOutcome(
  */
 export function describeApplyAllOutcome(
   mode: ApplicationAutomationMode,
-  dailyLimit: number | null = null,
 ): string {
-  const pace = `Ten at a time${dailyLimit ? `, up to ${dailyLimit.toLocaleString("en-US")} a day` : ""}, with no more presses.`;
+  const pace = "Ten at a time, with no more presses.";
   switch (mode) {
     case "autonomous_submit":
       return `Sends each application for you and stops only for one that needs you. ${pace}`;
@@ -147,12 +144,6 @@ export function getPrimaryApplicationAction(input: {
    * expires long before a real seven-minute run does.
    */
   runElapsedLabel?: string | null;
-  /**
-   * A safeguard that is holding preparation back, in plain words. When one is
-   * present the Apply control is replaced rather than merely disabled: the
-   * dialog used to open, close itself, and leave the page exactly as it was.
-   */
-  safeguardBlocker?: string | null;
   usesOriginalResume: boolean;
   /**
    * True when the draft has to be read by the person before it is used: an
@@ -177,12 +168,8 @@ export function getPrimaryApplicationAction(input: {
     needsGeneration,
     resumeReviewStatus,
     runElapsedLabel,
-    safeguardBlocker,
     usesOriginalResume,
   } = input;
-  const safeguardSentence = safeguardBlocker?.trim()
-    ? stripInternalCodeParenthetical(safeguardBlocker)
-    : null;
 
   if (isGenerating) {
     return {
@@ -273,19 +260,6 @@ export function getPrimaryApplicationAction(input: {
       enabled: !isSelectedJobPending,
       kind: "approve_resume",
       label: "Review the resume",
-      recovery: null,
-    };
-  }
-
-  // Nothing downstream can start while a safeguard holds preparation, so the
-  // start control is the safeguard control instead of an Apply button that
-  // opens a dialog and then does nothing.
-  if (safeguardSentence) {
-    return {
-      blocker: safeguardSentence,
-      enabled: true,
-      kind: "open_safeguards",
-      label: "Open Safeguards",
       recovery: null,
     };
   }
@@ -451,7 +425,6 @@ export function buildMissionPanelState(input: {
   selectedItem: ReviewQueueItem | null;
   selectedJob: JobListRow | null;
   isSelectedJobPendingTooLong?: boolean;
-  safeguardBlocker?: string | null;
   /** The still-running apply result for the selected job, when there is one. */
   selectedApplyResult?: { startedAt?: string | null } | null;
   /** Where the selected job's running resume is, when the run reports it. */
@@ -464,7 +437,6 @@ export function buildMissionPanelState(input: {
     selectedAsset,
     selectedItem,
     selectedJob,
-    safeguardBlocker = null,
     selectedApplyResult = null,
     isSelectedJobPendingTooLong = false,
     resumeRunStage = null,
@@ -510,7 +482,6 @@ export function buildMissionPanelState(input: {
     needsGeneration,
     resumeReviewStatus,
     runElapsedLabel: formatElapsedMinutes(selectedApplyResult?.startedAt),
-    safeguardBlocker,
     usesOriginalResume,
     draftNeedsPersonReview,
     needsTailoredResume: untailoredResume,
@@ -533,28 +504,26 @@ export function buildMissionPanelState(input: {
   // used to keep reading a browser sentence while a safeguard was refusing
   // every start.
   const readinessDescription =
-    primaryApplicationAction.kind === "open_safeguards"
-      ? (primaryApplicationAction.blocker ?? null)
-      : hasGenerationFailure && selectedAsset?.failureMessage?.trim()
-        ? // The failure box names the cause; a generic "could not be
-          // written… open it to see what happened" above it sent people
-          // looking for a reason that was already on screen.
-          null
-        : getReadinessDescription({
-            selectedItem,
-            selectedJob,
-            hasGenerationFailure,
-            needsGeneration,
-            isGenerating,
-            hasReadyApprovedAsset,
-            resumeReviewStatus,
-            applySupportState,
-            browserActionMessage,
-            draftNeedsPersonReview,
-            needsTailoredResume: untailoredResume,
-            isSelectedJobPendingTooLong,
-            resumeRunStage,
-          });
+    hasGenerationFailure && selectedAsset?.failureMessage?.trim()
+      ? // The failure box names the cause; a generic "could not be
+        // written… open it to see what happened" above it sent people
+        // looking for a reason that was already on screen.
+        null
+      : getReadinessDescription({
+          selectedItem,
+          selectedJob,
+          hasGenerationFailure,
+          needsGeneration,
+          isGenerating,
+          hasReadyApprovedAsset,
+          resumeReviewStatus,
+          applySupportState,
+          browserActionMessage,
+          draftNeedsPersonReview,
+          needsTailoredResume: untailoredResume,
+          isSelectedJobPendingTooLong,
+          resumeRunStage,
+        });
   const isGenerationAction =
     needsGeneration || hasGenerationFailure || untailoredResume;
   const isPrimaryApplyPending = isApplyPending && !isGenerationAction;

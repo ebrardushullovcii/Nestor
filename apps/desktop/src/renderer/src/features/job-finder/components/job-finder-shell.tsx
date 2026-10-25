@@ -16,9 +16,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  BarChart3,
   BellRing,
-  Building2,
   Menu,
   ClipboardCheck,
   Compass,
@@ -29,7 +27,6 @@ import {
   Minus,
   Search,
   Settings,
-  ShieldCheck,
   Square,
   UserRound,
   X,
@@ -66,12 +63,8 @@ import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
 import { countNeedsYouItems } from "../lib/needs-you-count";
 import {
   countApplicationRecords,
-  countCompaniesAwaitingMergeReview,
   countDiscoveryVisibleJobs,
   countNeedsYou,
-  countOutcomeEvents,
-  countResumeApproaches,
-  countSafeguardBlockers,
   countShortlistedJobs,
   countUnreadCampaignNotifications,
   countUserCreatedSearchPlans,
@@ -134,8 +127,7 @@ interface JobFinderShellProps {
 const screenRouteMap: Record<
   Exclude<
     JobFinderScreen,
-    "profile" | "rapid-review" | "resume-strategies" | "safeguards"
-  >,
+    "profile">,
   string
 > = {
   home: "/job-finder/home",
@@ -144,9 +136,7 @@ const screenRouteMap: Record<
   applications: "/job-finder/applications",
   campaigns: "/job-finder/campaigns",
   actions: "/job-finder/actions",
-  analytics: "/job-finder/analytics",
   settings: "/job-finder/settings",
-  companies: "/job-finder/companies",
 };
 
 const screenLabelMap: Record<JobFinderScreen, string> = {
@@ -157,12 +147,7 @@ const screenLabelMap: Record<JobFinderScreen, string> = {
   applications: "Applications",
   campaigns: "Search plans",
   actions: "Needs you",
-  analytics: "Outcomes",
   settings: "Settings",
-  "rapid-review": "Quick review",
-  "resume-strategies": "Resume approaches",
-  safeguards: "Safeguards",
-  companies: "Companies",
 };
 
 /**
@@ -507,10 +492,6 @@ function getActiveScreen(pathname: string): JobFinderScreen {
     return "applications";
   }
 
-  if (pathname.endsWith("/rapid-review")) {
-    return "rapid-review";
-  }
-
   if (pathname.endsWith("/campaigns")) {
     return "campaigns";
   }
@@ -519,24 +500,8 @@ function getActiveScreen(pathname: string): JobFinderScreen {
     return "actions";
   }
 
-  if (pathname.endsWith("/analytics")) {
-    return "analytics";
-  }
-
   if (pathname.endsWith("/settings")) {
     return "settings";
-  }
-
-  if (pathname.endsWith("/resume-strategies")) {
-    return "resume-strategies";
-  }
-
-  if (pathname.endsWith("/safeguards")) {
-    return "safeguards";
-  }
-
-  if (pathname.includes("/companies")) {
-    return "companies";
   }
 
   return "profile";
@@ -748,42 +713,6 @@ export function JobFinderShell({
         icon: BellRing,
       },
       {
-        id: "analytics",
-        label: "Outcomes",
-        count: toDestinationBadgeCount(countOutcomeEvents(workspace)),
-        countKind: "inventory",
-        icon: BarChart3,
-      },
-      {
-        id: "resume-strategies",
-        label: "Resume approaches",
-        count: toDestinationBadgeCount(countResumeApproaches(workspace)),
-        countKind: "inventory",
-        icon: Layers3,
-      },
-      {
-        // The number here is pending merge reviews, not companies — the
-        // Companies page lists every known company. It therefore renders as an
-        // attention count with its noun ("2 to review") rather than as a bare
-        // number that read as a company inventory an order of magnitude off.
-        id: "companies",
-        label: "Companies",
-        count: toDestinationBadgeCount(
-          countCompaniesAwaitingMergeReview(workspace),
-        ),
-        countKind: "attention",
-        countNoun: "to review",
-        icon: Building2,
-      },
-      {
-        id: "safeguards",
-        label: "Safeguards",
-        count: toDestinationBadgeCount(countSafeguardBlockers(workspace)),
-        countKind: "attention",
-        countNoun: "blocked",
-        icon: ShieldCheck,
-      },
-      {
         id: "settings",
         label: "Settings",
         count: null,
@@ -864,7 +793,7 @@ export function JobFinderShell({
       : []),
     {
       label: "Workspace",
-      screens: selectMenuScreens(["settings", "safeguards"]),
+      screens: selectMenuScreens(["settings"]),
     },
   ];
   const moreMenuItemCount = menuGroups.reduce(
@@ -883,12 +812,6 @@ export function JobFinderShell({
   // navigation, which genuinely has no room, keeps its More menu.
   const settingsScreen = screenDefinitions.find(
     (screen) => screen.id === "settings",
-  );
-  // Safeguards is not a step either, but the person must always be able to
-  // reach it (to look over the limits before anything is blocked), so it sits
-  // quietly just above Settings, counting only what it blocks.
-  const safeguardsScreen = screenDefinitions.find(
-    (screen) => screen.id === "safeguards",
   );
   const sidebarGroups = [
     {
@@ -1112,19 +1035,7 @@ export function JobFinderShell({
     const nextPath =
       nextScreen === "profile"
         ? getDefaultProfileRoute(workspace.profileSetupState)
-        : nextScreen === "resume-strategies"
-          ? "/job-finder/resume-strategies"
-          : nextScreen === "safeguards"
-            ? "/job-finder/safeguards"
-            : screenRouteMap[
-                nextScreen as Exclude<
-                  JobFinderScreen,
-                  | "profile"
-                  | "rapid-review"
-                  | "resume-strategies"
-                  | "safeguards"
-                >
-              ];
+        : screenRouteMap[nextScreen as Exclude<JobFinderScreen, "profile">];
 
     const nextPathname = nextPath.split(/[?#]/, 1)[0] ?? nextPath;
     try {
@@ -2026,17 +1937,7 @@ export function JobFinderShell({
                 collapsed column, which is reversed), so the person can always
                 reach it. It carries no count: what it blocks shows in
                 Activity. */}
-            {safeguardsScreen ? (
-              <div
-                className={cn(
-                  "min-w-0",
-                  isSidebarCollapsed ? "order-last" : "basis-full",
-                )}
-                data-job-finder-sidebar-safeguards-entry
-              >
-                {renderSidebarDestination({ ...safeguardsScreen, count: null })}
-              </div>
-            ) : null}
+
             <div className={cn("min-w-0", !isSidebarCollapsed && "flex-1")}>
               {settingsScreen ? renderSidebarDestination(settingsScreen) : null}
             </div>

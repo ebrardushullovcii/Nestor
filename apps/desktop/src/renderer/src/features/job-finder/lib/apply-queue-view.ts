@@ -9,7 +9,7 @@ export type ApplyQueueControlAction = "pause" | "continue" | "stop" | "dismiss";
 
 export interface ApplyQueueViewButton {
   label: string;
-  action: ApplyQueueControlAction | "raise_limit";
+  action: ApplyQueueControlAction;
 }
 
 /** What an Apply queue is doing, in the words Home and Applications show. */
@@ -43,10 +43,7 @@ export function isApplyQueueOngoing(
   queue: ApplyQueue | null | undefined,
 ): boolean {
   return (
-    !!queue &&
-    (queue.state === "running" ||
-      queue.state === "waiting_for_tomorrow" ||
-      queue.state === "paused")
+    !!queue && (queue.state === "running" || queue.state === "paused")
   );
 }
 
@@ -154,19 +151,9 @@ function describeOutcomes(
     .join(" · ");
 }
 
-function formatResumeTime(iso: string | null): string {
-  if (!iso) return "after midnight";
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "after midnight";
-  return at.getHours() === 0 && at.getMinutes() === 0
-    ? "after midnight"
-    : `at ${at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-}
-
 export function describeApplyQueue(
   queue: ApplyQueue | null | undefined,
   options: {
-    dailyLimit?: number | null;
     /** Run results, so a finished queue says what happened to each job. */
     results?: readonly ApplyQueueResult[] | null;
   } = {},
@@ -188,16 +175,6 @@ export function describeApplyQueue(
         primary: { label: "Pause", action: "pause" },
         secondary: { label: "Stop", action: "stop" },
       };
-    case "waiting_for_tomorrow": {
-      const limit = options.dailyLimit ?? null;
-      return {
-        title: `${verb.doing} ${jobs}`,
-        detail: `${limit ? `Today's limit of ${limit} is reached` : "Today's limit is reached"} · ${toGo} ${toGo === 1 ? "continues" : "continue"} ${formatResumeTime(queue.resumesAt)}${leftOutPart}`,
-        active: false,
-        primary: { label: "Raise the limit", action: "raise_limit" },
-        secondary: { label: "Stop", action: "stop" },
-      };
-    }
     case "paused":
       return {
         title: `${verb.doing} ${jobs} · paused`,

@@ -72,7 +72,6 @@ function createEnvelope(mode: ApplicationAutomationMode = "autonomous_submit") {
     revision: 1,
     scope: { campaignId: "campaign_1", jobIds: ["job_1"] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     // The orchestrator exercises final-action authority, not the independent
     // bounded ATS autosave capability.
     intermediateMutationsAuthorized: false,
@@ -108,7 +107,6 @@ function createPreflight() {
     answers: { revision: 1, digest: SHA_ANSWERS },
     finalControl: { signature: SHA_FINAL_CONTROL, ref: "final_control_1" },
     remainingRunCapacityBefore: 1,
-    remainingDailyCapacityBefore: 1,
     createdAt: NOW,
   });
 }
@@ -172,7 +170,6 @@ function createInput(
       answers: { revision: 1, digest: SHA_ANSWERS },
       finalControl: { signature: SHA_FINAL_CONTROL, ref: "final_control_1" },
       remainingRunCapacity: 1,
-      remainingDailyCapacity: 1,
       currentPolicyFacts: {
         policy: {
           version: DECISION_POLICY.version,
@@ -281,7 +278,6 @@ describe("synthetic application submission orchestrator", () => {
     const envelope = ApplicationAuthorityEnvelopeSchema.parse({
       ...createEnvelope(),
       maxApplicationsPerRun: 5,
-      maxApplicationsPerLocalDay: 5,
     });
     await commitEnvelope(repository);
     expect(
@@ -292,13 +288,12 @@ describe("synthetic application submission orchestrator", () => {
     ).toMatchObject({ status: "applied" });
     const first = await runSyntheticApplicationSubmission({
       ...createInput(repository, {
-        observation: { remainingRunCapacity: 5, remainingDailyCapacity: 5 },
+        observation: { remainingRunCapacity: 5 },
       }),
       preflight: SubmissionPreflightRecordSchema.parse({
         ...createPreflight(),
         authorityRevision: 2,
         remainingRunCapacityBefore: 5,
-        remainingDailyCapacityBefore: 5,
       }),
     });
     expect(first.status).toBe("recorded_not_submitted");
@@ -323,7 +318,7 @@ describe("synthetic application submission orchestrator", () => {
     const retry = await runSyntheticApplicationSubmission({
       ...createInput(repository, {
         executor: submitted,
-        observation: { remainingRunCapacity: 4, remainingDailyCapacity: 4 },
+        observation: { remainingRunCapacity: 4 },
       }),
       preflight: SubmissionPreflightRecordSchema.parse({
         ...createPreflight(),
@@ -331,7 +326,6 @@ describe("synthetic application submission orchestrator", () => {
         idempotencyKey: "submit_once_1_retry1",
         authorityRevision: 2,
         remainingRunCapacityBefore: 4,
-        remainingDailyCapacityBefore: 4,
       }),
     });
     expect(retry).toMatchObject({ status: "submitted" });

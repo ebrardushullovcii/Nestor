@@ -174,7 +174,6 @@ export function createWorkspaceCrmMethods(input: {
           results: snapshot.applyJobResults,
           runs: snapshot.applyRuns,
           request: command,
-          outcomes: snapshot.intelligence.outcomeEvents,
           customStages: settings.applicationCrm?.customStages ?? [],
         });
       });

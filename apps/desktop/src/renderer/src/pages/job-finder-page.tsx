@@ -58,7 +58,6 @@ import {
   Menu,
   Minus,
   Settings,
-  ShieldCheck,
   Square,
   UserRound,
   X,
@@ -96,20 +95,15 @@ import {
 
 export {
   JobFinderActionsRoute,
-  JobFinderAnalyticsRoute,
   JobFinderApplicationsRoute,
   JobFinderCampaignsRoute,
-  JobFinderCompaniesRoute,
-  JobFinderCompanyDetailRoute,
   JobFinderDiscoveryRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
-  JobFinderResumeStrategiesRoute,
   JobFinderRouteErrorBoundary,
   JobFinderResumeWorkspaceRoute,
   JobFinderReviewQueueRoute,
-  JobFinderSafeguardsRoute,
   JobFinderSettingsRoute,
 } from "./job-finder-page-routes";
 export type { JobFinderPageContext } from "./job-finder-page-context";
@@ -208,23 +202,11 @@ const openingShellPrimaryDestinations: readonly {
     path: "/job-finder/applications",
   },
 ];
-
-// Mirrors the loaded shell's pinned rail footer: Safeguards sits quietly
-// above Settings, Settings sits under the journey, outside the scroll region,
-// with the shortcuts reference beside it. The opening frame has to render the
-// same rows in the same place, or the sidebar visibly re-flows the moment the
-// workspace resolves.
-const openingShellSafeguardsDestination = {
-  icon: ShieldCheck,
-  label: "Safeguards",
-  path: "/job-finder/safeguards",
-} as const;
 const openingShellFooterDestinations: readonly {
   icon: LucideIcon;
   label: string;
   path: string;
 }[] = [
-  openingShellSafeguardsDestination,
   {
     icon: Settings,
     label: "Settings",
@@ -836,26 +818,10 @@ function JobFinderOpeningShell() {
             data-job-finder-sidebar-footer
             role="group"
           >
-            <div
-              className={cn(
-                "min-w-0",
-                isSidebarCollapsed ? "order-last" : "basis-full",
-              )}
-              data-job-finder-sidebar-safeguards-entry
-            >
-              {renderOpeningSidebarDestination(
-                openingShellSafeguardsDestination,
-              )}
-            </div>
             <div className={cn("min-w-0", !isSidebarCollapsed && "flex-1")}>
-              {openingShellFooterDestinations
-                .filter(
-                  (destination) =>
-                    destination !== openingShellSafeguardsDestination,
-                )
-                .map((destination) =>
-                  renderOpeningSidebarDestination(destination),
-                )}
+              {openingShellFooterDestinations.map((destination) =>
+                renderOpeningSidebarDestination(destination),
+              )}
             </div>
             {/* The shortcuts dialog belongs to the loaded shell. Its control
                 is still reserved here, or the footer is narrower while
@@ -978,7 +944,6 @@ export function ApplyCopilotVisualCheckpointDialog(props: {
   onResolve: (
     visualCheckpointsEnabled: boolean,
   ) => string | null | void | Promise<string | null | void>;
-  onOpenSafeguards?: () => void;
   request: ApplyCopilotVisualCheckpointRequest | null;
 }) {
   const dialogTitleId = useId();
@@ -1133,15 +1098,7 @@ export function ApplyCopilotVisualCheckpointDialog(props: {
           <Button onClick={props.onClose} type="button" variant="secondary">
             {refusal ? "Close" : "Cancel"}
           </Button>
-          {refusal && /safeguard/i.test(refusal) && props.onOpenSafeguards ? (
-            <Button
-              onClick={props.onOpenSafeguards}
-              type="button"
-              variant="primary"
-            >
-              Open Safeguards
-            </Button>
-          ) : refusal ? null : (
+          {refusal ? null : (
             <Button
               disabled={starting}
               onClick={() => {

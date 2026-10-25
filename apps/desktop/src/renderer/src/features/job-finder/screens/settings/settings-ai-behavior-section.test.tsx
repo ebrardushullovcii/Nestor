@@ -21,9 +21,9 @@ import { SettingsAiBehaviorSection } from "./settings-ai-behavior-section";
  * The AI behavior section, as a person meets it.
  *
  * What matters: every group is there, the defaults are the product's
- * original manner, each choice saves the whole section at once (Undo rides
- * on the save toast),
- * and the aggressive resume choice carries its own warning.
+ * original manner, and each choice saves the whole section at once (Undo
+ * rides on the save toast). The resume level is not here; it lives in
+ * Profile, under Preferences.
  */
 
 function parseSettings(
@@ -43,12 +43,10 @@ function parseSettings(
 function renderSection(
   onUpdateAiBehavior: (input: UpdateAiBehaviorInput) => Promise<boolean>,
   settings = parseSettings(),
-  tailoringMode: "conservative" | "balanced" | "aggressive" = "balanced",
 ) {
   return render(
     <SettingsAiBehaviorSection
       onUpdateAiBehavior={onUpdateAiBehavior}
-      searchPreferences={{ tailoringMode }}
       settings={settings}
     />,
   );
@@ -59,7 +57,7 @@ afterEach(() => {
 });
 
 describe("SettingsAiBehaviorSection", () => {
-  it("shows the four groups with the original behaviour selected by default", () => {
+  it("shows the groups with the original behaviour selected by default", () => {
     renderSection(vi.fn(() => Promise.resolve(true)));
 
     expect(
@@ -74,7 +72,11 @@ describe("SettingsAiBehaviorSection", () => {
       }),
     ).toBeTruthy();
     expect(screen.getByText("Finding jobs")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Resumes" })).toBeTruthy();
+    // No resume level here: it lives in Profile, under Preferences. The
+    // Resumes group only appears with the write-on-shortlist switch.
+    expect(
+      screen.queryByRole("radiogroup", { name: "Resume level" }),
+    ).toBeNull();
     expect(
       within(screen.getByTestId("settings-ai-applying")).getByRole("heading", {
         name: "Applying",
@@ -86,7 +88,6 @@ describe("SettingsAiBehaviorSection", () => {
     expect(checked(/Suggest a little/)).toBe("true");
     expect(checked(/^Brief/)).toBe("true");
     expect(checked(/^Balanced/)).toBe("true");
-    expect(checked(/^Tailored/)).toBe("true");
     expect(checked(/Only when required/)).toBe("true");
     expect(checked(/^Short/)).toBe("true");
     expect(
@@ -127,7 +128,6 @@ describe("SettingsAiBehaviorSection", () => {
     fireEvent.click(
       screen.getByRole("switch", { name: "Count remote jobs as any location" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /^Light/ }));
     fireEvent.click(
       screen.getByRole("radio", { name: /Whenever there is room/ }),
     );
@@ -171,7 +171,6 @@ describe("SettingsAiBehaviorSection", () => {
         language: null,
         sample: null,
       },
-      resumeApproach: "conservative",
     });
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
@@ -224,13 +223,17 @@ describe("SettingsAiBehaviorSection", () => {
       .mockResolvedValue(true);
     renderSection(onUpdateAiBehavior);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Aggressive/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Proactive/ }));
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
-    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resumeApproach: "aggressive" }),
-      { undo: expect.any(Function) as unknown },
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive" },
+      },
+    });
+    expect(onUpdateAiBehavior.mock.calls[0]?.[1]?.undo).toEqual(
+      expect.any(Function) as unknown,
     );
 
     const undo = onUpdateAiBehavior.mock.calls[0]?.[1]?.undo;
@@ -238,13 +241,15 @@ describe("SettingsAiBehaviorSection", () => {
 
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
     // Undoing offers no Undo of its own.
-    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resumeApproach: "balanced" }),
-      undefined,
-    );
+    expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toMatchObject({
+      aiBehavior: {
+        profileAssistant: { initiative: "suggest" },
+      },
+    });
+    expect(onUpdateAiBehavior.mock.calls[1]?.[1]).toBeUndefined();
     expect(
       screen
-        .getByRole("radio", { name: /^Tailored/ })
+        .getByRole("radio", { name: /Suggest a little/ })
         .getAttribute("aria-checked"),
     ).toBe("true");
     await waitFor(() =>
@@ -259,7 +264,7 @@ describe("SettingsAiBehaviorSection", () => {
       .mockResolvedValue(true);
     renderSection(onUpdateAiBehavior);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Original/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Proactive/ }));
     const retry = await screen.findByRole("button", {
       name: "Retry AI behavior",
     });
@@ -270,24 +275,25 @@ describe("SettingsAiBehaviorSection", () => {
     ).toBeTruthy();
     expect(
       screen
-        .getByRole("radio", { name: /^Original/ })
+        .getByRole("radio", { name: /^Proactive/ })
         .getAttribute("aria-checked"),
     ).toBe("true");
     fireEvent.click(retry);
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
     expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toMatchObject({
-      resumeApproach: "original_resume",
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive" },
+      },
     });
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
   });
 
-  it("shows the saved choice rather than the default, and warns on aggressive", () => {
+  it("shows the saved choice rather than the default", () => {
     renderSection(
       vi.fn(() => Promise.resolve(true)),
       parseSettings({
-        resumeApplicationMode: "tailored_per_job",
         coverLetter: {
           tone: "direct",
           length: "short",
@@ -295,32 +301,15 @@ describe("SettingsAiBehaviorSection", () => {
           sample: null,
         },
       }),
-      "aggressive",
     );
 
-    expect(
-      screen
-        .getByRole("radio", { name: /^Aggressive/ })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
-    expect(screen.getByRole("status").textContent).toContain(
-      "cannot be used until you confirm it yourself",
-    );
     expect(screen.getByDisplayValue("Dutch")).toBeTruthy();
     expect(screen.getByText(/Direct and brief/i)).toBeTruthy();
   });
 
-  it("reads the original file as the fourth resume choice and hides letter style when letters are off", () => {
-    renderSection(
-      vi.fn(() => Promise.resolve(true)),
-      parseSettings({ resumeApplicationMode: "original_resume" }),
-    );
+  it("hides letter style when letters are off", () => {
+    renderSection(vi.fn(() => Promise.resolve(true)));
 
-    expect(
-      screen
-        .getByRole("radio", { name: /^Original/ })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
     expect(screen.getByTestId("settings-ai-cover-letter-style")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /^Never/ }));
     expect(screen.queryByTestId("settings-ai-cover-letter-style")).toBeNull();
@@ -339,12 +328,6 @@ it("explains default background-check consent and sending without contradicting 
       "Ticks background or reference check consent on forms for you. Turn it off to be asked each time.",
     ),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("radio", { name: /^Aggressive/ }));
-  expect(
-    screen.getByText(/Aggressive resumes still need your approval/).textContent,
-  ).toContain(
-    "Aggressive resumes still need your approval; sending follows your Applying choice.",
-  );
   expect(
     screen.queryByText(/never approves or sends an application on its own/),
   ).toBeNull();

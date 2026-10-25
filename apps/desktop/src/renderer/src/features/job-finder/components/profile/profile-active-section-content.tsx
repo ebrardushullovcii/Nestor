@@ -1,6 +1,8 @@
 import type {
   DiscoveryRunRecord,
   EditableSourceInstructionArtifact,
+  ResumeApplicationMode,
+  ResumeApproach,
   SourceAccessPrompt,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
@@ -60,6 +62,10 @@ interface ProfileActiveSectionContentProps {
   onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
   profileForm: UseFormReturn<ProfileEditorValues>;
+  onResumeApproachChange?: (
+    approach: ResumeApproach,
+  ) => Promise<boolean | void> | void;
+  resumeApplicationMode?: ResumeApplicationMode | null | undefined;
   recentSourceDebugRuns: readonly SourceDebugRunRecord[];
   sourceAccessPrompts: readonly SourceAccessPrompt[];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
@@ -84,10 +90,12 @@ export function ProfileActiveSectionContent({
   onRunSourceDebug,
   onSaveSourceInstructionArtifact,
   onVerifySourceInstructions,
+  onResumeApproachChange,
   preferencesForm,
   profileForm,
   recentSourceDebugRuns,
   requestedFileKind = null,
+  resumeApplicationMode,
   requestedSourceFilter = null,
   sourceAccessPrompts,
   sourceInstructionArtifacts,
@@ -112,6 +120,9 @@ export function ProfileActiveSectionContent({
         preferencesForm={preferencesForm}
         profileForm={profileForm}
         customAnswerArray={backgroundArrays.customAnswerArray}
+        {...(onResumeApproachChange
+          ? { onResumeApproachChange, resumeApplicationMode }
+          : {})}
       />
     ),
     files: <ProfileFilesTab requestedKind={requestedFileKind ?? null} />,

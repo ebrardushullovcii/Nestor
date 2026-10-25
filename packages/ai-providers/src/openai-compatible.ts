@@ -17,7 +17,6 @@ import {
   type CreateResumeDraftInput,
   type JobFinderAiClient,
   type OpenAiCompatibleJobFinderAiClientOptions,
-  type ResumeGenerationStrategyPolicy,
   type StringMap,
   type TailorResumeInput,
   describeProfileAssistantBehavior,
@@ -174,7 +173,6 @@ export function normalizeModelUsage(usage: ModelUsagePayload): {
 }
 function buildResumeRewriteProposalPrompt(
   tailoringMode: "conservative" | "balanced" | "aggressive",
-  strategy?: ResumeGenerationStrategyPolicy | null,
 ): string {
   const modeGuidance =
     tailoringMode === "aggressive"
@@ -182,15 +180,6 @@ function buildResumeRewriteProposalPrompt(
       : tailoringMode === "conservative"
         ? "Conservative mode: stay very close to the cited wording and propose only clear, low-risk improvements."
         : "Balanced mode: improve structure and relevance while keeping every factual statement directly supported by cited evidence.";
-
-  // The strategy's own values travel in the payload's `strategy`, after the
-  // evidence. Naming them here made every job's instructions differ, so a
-  // batch's requests could not share a cached prefix with the AI service.
-  const strategyGuidance = strategy
-    ? [
-        "Apply the resume strategy in the payload's strategy: its strategyName for its roleFamily, its headlinePolicy, skillsPolicy and coveragePolicy, and its evidenceBoundaries (whether exact and paraphrased claims are allowed, and at most maxEvidenceRefsPerBullet evidence references per bullet). baseResumeDocumentId names the selected base resume; do not invent facts outside the supplied grounding evidence. Each line is fact-checked against the candidate's evidence before approval.",
-      ]
-    : [];
 
   const returnGuidance =
     tailoringMode === "aggressive"
@@ -215,7 +204,6 @@ function buildResumeRewriteProposalPrompt(
     "Use concise accomplishment statements: action, specific work, and outcome. Keep distinctive evidence terms and exact metrics unchanged. Do not repeat the same claim or metric in multiple bullets.",
     jobWordingGuidance,
     modeGuidance,
-    ...strategyGuidance,
     "Do not compose a full resume, identity metadata, compatibility scores, labels, notes, explanations, or uncited text except the requested languagePresentation display edits. In aggressive mode include coreSkills covering the candidate's key skills plus targetJob.listingRequestedSkills.",
   ].join(" ");
 }
@@ -554,11 +542,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     async createResumeDraft(input) {
       const payload = await fetchModelJson(
         "createResumeDraft",
-        buildResumeRewriteProposalPrompt(
-          input.strategy?.tailoringStrength ??
-            input.searchPreferences.tailoringMode,
-          input.strategy,
-        ),
+        buildResumeRewriteProposalPrompt(input.searchPreferences.tailoringMode),
         buildGroundedResumeRewriteModelPayload(input),
         {
           timeoutMs:
@@ -1272,10 +1256,7 @@ export function createJobFinderAiClientFromEnvironment(
   function selectResumeGenerationClient(
     input: CreateResumeDraftInput | TailorResumeInput,
   ): AgentCapableJobFinderAiClient {
-    const tailoringStrength =
-      "strategy" in input ? input.strategy?.tailoringStrength : undefined;
-    const effectiveTailoringMode =
-      tailoringStrength ?? input.searchPreferences.tailoringMode;
+    const effectiveTailoringMode = input.searchPreferences.tailoringMode;
     return effectiveTailoringMode === "aggressive"
       ? aggressiveClient
       : primaryClient;
@@ -1439,9 +1420,7 @@ export function createJobFinderAiClientFromEnvironment(
           client: modelClient,
           request: input,
           substantivePrompt: buildResumeRewriteProposalPrompt(
-            input.strategy?.tailoringStrength ??
-              input.searchPreferences.tailoringMode,
-            input.strategy,
+            input.searchPreferences.tailoringMode,
           ),
         });
         const model = modelClient.getStatus().model;

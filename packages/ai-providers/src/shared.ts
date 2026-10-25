@@ -39,13 +39,7 @@ import {
   type ResumeDraftPatch,
   type ResumeTemplateDefinition,
   type ResumeValidationIssue,
-  ResumeStrategyCoveragePolicySchema,
-  ResumeStrategyEvidenceBoundariesSchema,
-  ResumeStrategyHeadlinePolicySchema,
-  ResumeStrategyRecommendationSourceSchema,
-  ResumeStrategySkillsPolicySchema,
   ResumeTemplateIdSchema,
-  TailoringModeSchema,
   type TailoringMode,
   type Tool,
   type ToolCall,
@@ -292,39 +286,6 @@ export const TailoredResumeDraftSchema = z.object({
 
 export type TailoredResumeDraft = z.infer<typeof TailoredResumeDraftSchema>;
 
-/**
- * The resolved, enabled resume strategy that the generation boundary is
- * allowed to consume. Selection and recommendation provenance stay attached so
- * generated artifacts can explain which policy was used without granting any
- * approval or application authority.
- */
-export const ResumeGenerationStrategyPolicySchema = z
-  .object({
-    strategyId: NonEmptyStringSchema,
-    strategyName: NonEmptyStringSchema,
-    roleFamily: NonEmptyStringSchema,
-    baseResumeDocumentId: NonEmptyStringSchema,
-    templateId: ResumeTemplateIdSchema,
-    headlinePolicy: ResumeStrategyHeadlinePolicySchema,
-    skillsPolicy: ResumeStrategySkillsPolicySchema,
-    coveragePolicy: ResumeStrategyCoveragePolicySchema,
-    tailoringStrength: TailoringModeSchema,
-    evidenceBoundaries: ResumeStrategyEvidenceBoundariesSchema,
-    effectiveSource: z.enum(["selection", "recommendation"]),
-    effectiveReason: NonEmptyStringSchema,
-    recommendationSource: ResumeStrategyRecommendationSourceSchema,
-    recommendationReason: NonEmptyStringSchema.nullable().default(null),
-    selectionSource: z
-      .enum(["user", "campaign_default", "rule_match"])
-      .nullable()
-      .default(null),
-    selectionReason: NonEmptyStringSchema.nullable().default(null),
-  })
-  .strict();
-export type ResumeGenerationStrategyPolicy = z.infer<
-  typeof ResumeGenerationStrategyPolicySchema
->;
-
 export const JobFitAssessmentSchema = z.object({
   requirements: z.array(JobRequirementAssessmentSchema).max(40).optional(),
   score: z.number().int().min(0).max(100),
@@ -446,7 +407,6 @@ export interface CreateResumeDraftInput extends TailorResumeInput {
     personConfirmationCount?: number;
     languageFields?: Array<{ id: string; text: string }>;
   }>;
-  strategy?: ResumeGenerationStrategyPolicy | null;
   evidence?: {
     summary: readonly string[];
     candidateSummary: readonly string[];

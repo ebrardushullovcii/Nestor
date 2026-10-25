@@ -32,12 +32,7 @@ export const assistantScreenValues = [
   "applications",
   "actions",
   "campaigns",
-  "companies",
   "settings",
-  "analytics",
-  "safeguards",
-  "resume_strategies",
-  "rapid_review",
   "browser",
   "other",
 ] as const;
@@ -55,12 +50,7 @@ export const ASSISTANT_SCREEN_LABELS: Record<AssistantScreen, string> = {
   applications: "Applications",
   actions: "Needs you",
   campaigns: "Search plans",
-  companies: "Companies",
   settings: "Settings",
-  analytics: "Outcomes",
-  safeguards: "Safeguards",
-  resume_strategies: "Resume approaches",
-  rapid_review: "Quick review",
   browser: "Browser",
   other: "Job Finder",
 };
@@ -196,7 +186,7 @@ export type AssistantAttachment = z.infer<typeof AssistantAttachmentSchema>;
 
 export const AssistantContextReferenceSchema = z
   .object({
-    screen: AssistantScreenSchema,
+    screen: AssistantScreenSchema.catch("other"),
     route: z.string().trim().max(400).default(""),
     sectionLabel: z.string().trim().max(160).nullable().default(null),
     focus: AssistantEntityRefSchema.nullable().default(null),
@@ -287,7 +277,8 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("proposal"),
       proposalId: IdSchema,
-      kind: z.enum(["profile_operations", "resume_patches", "job_finder_action"]),
+      kind: z.enum(["profile_operations", "resume_patches", "job_finder_action",
+      ]),
       summary: NonEmptyStringSchema.max(400),
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
       targetId: IdSchema.nullable().default(null),

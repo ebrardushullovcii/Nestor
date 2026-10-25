@@ -12,11 +12,9 @@ import {
   type CoverLetterPreference,
   type CoverLetterTone,
   type JobFinderSettings,
-  type JobSearchPreferences,
   type JobSearchSelectivity,
   type ProfileAssistantInitiative,
   type ProfileAssistantReplyStyle,
-  type ResumeApproach,
   type UpdateAiBehaviorInput,
   type UpdateWorkspaceBehaviorInput,
   type WrittenAnswerLength,
@@ -30,10 +28,6 @@ import {
 } from "../../components/choice-cards";
 import { FormSelect } from "../../components/form-select";
 import { ToggleField } from "../../components/toggle-field";
-import {
-  RESUME_APPROACH_OPTIONS,
-  STRONG_REWRITE_WARNING,
-} from "../../components/profile/profile-tailoring-copy";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";
 import {
@@ -108,28 +102,6 @@ const selectivityOptions: readonly ChoiceCardOption<JobSearchSelectivity>[] = [
   },
 ];
 
-const resumeApproachOptions: readonly ChoiceCardOption<ResumeApproach>[] = [
-  {
-    id: "original_resume",
-    label: "Original",
-    detail: "Your file, unchanged.",
-  },
-  {
-    id: "conservative",
-    label: "Light",
-    detail: "Small edits. Every fact kept.",
-  },
-  {
-    id: "balanced",
-    label: "Tailored",
-    detail: "Fuller rewrite. Every fact kept.",
-  },
-  {
-    id: "aggressive",
-    label: "Aggressive",
-    detail: "May stretch, with your say-so.",
-  },
-];
 
 const coverLetterPolicyOptions: readonly ChoiceCardOption<CoverLetterPolicy>[] =
   [
@@ -220,9 +192,9 @@ const lengthOptions: ReadonlyArray<{
   label: string;
   value: CoverLetterLength;
 }> = [
-  { label: "Short — about 120 words", value: "short" },
-  { label: "Standard — about a page", value: "standard" },
-  { label: "Detailed — a fuller page", value: "detailed" },
+  { label: "Short â€” about 120 words", value: "short" },
+  { label: "Standard â€” about a page", value: "standard" },
+  { label: "Detailed â€” a fuller page", value: "detailed" },
 ];
 
 /** Typed text saves this long after the last keystroke, or on leaving the field. */
@@ -231,20 +203,12 @@ const TEXT_SAVE_DELAY_MS = 800;
 type AiBehaviorDraft = {
   behavior: AiBehaviorPreference;
   coverLetter: CoverLetterPreference;
-  resumeApproach: ResumeApproach;
 };
 
-function toDraft(
-  settings: JobFinderSettings,
-  searchPreferences: Pick<JobSearchPreferences, "tailoringMode">,
-): AiBehaviorDraft {
+function toDraft(settings: JobFinderSettings): AiBehaviorDraft {
   return {
     behavior: AiBehaviorPreferenceSchema.parse(settings.aiBehavior ?? {}),
     coverLetter: CoverLetterPreferenceSchema.parse(settings.coverLetter ?? {}),
-    resumeApproach:
-      settings.resumeApplicationMode === "original_resume"
-        ? "original_resume"
-        : searchPreferences.tailoringMode,
   };
 }
 
@@ -261,16 +225,9 @@ function toSavedInput(draft: AiBehaviorDraft): UpdateAiBehaviorInput {
         ? draft.coverLetter.sample.trim()
         : null,
     },
-    resumeApproach: draft.resumeApproach,
   };
 }
 
-function describeResumeApproach(approach: ResumeApproach): string {
-  return (
-    RESUME_APPROACH_OPTIONS.find((option) => option.value === approach)
-      ?.description ?? ""
-  );
-}
 
 // Title and one line. Each group used to carry an uppercase eyebrow that
 // repeated its own title ("RESUMES" over "Resumes").
@@ -307,7 +264,6 @@ interface SettingsAiBehaviorSectionProps {
   onUpdateWorkspaceBehavior?: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;
-  searchPreferences: Pick<JobSearchPreferences, "tailoringMode">;
   settings: JobFinderSettings;
 }
 
@@ -315,7 +271,6 @@ export function SettingsAiBehaviorSection({
   onSettingsDraftEdited,
   onUpdateAiBehavior,
   onUpdateWorkspaceBehavior,
-  searchPreferences,
   settings,
 }: SettingsAiBehaviorSectionProps) {
   const savedWritesOnShortlist = writesResumesOnShortlist(settings);
@@ -348,7 +303,7 @@ export function SettingsAiBehaviorSection({
   const lengthId = useId();
   const languageId = useId();
   const sampleId = useId();
-  const saved = toDraft(settings, searchPreferences);
+  const saved = toDraft(settings);
   const savedKey = JSON.stringify(toSavedInput(saved));
   const [draft, setDraft] = useState<AiBehaviorDraft>(saved);
   const [seededKey, setSeededKey] = useState(savedKey);
@@ -595,42 +550,18 @@ export function SettingsAiBehaviorSection({
         />
       </article>
 
-      <article
-        className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
-        data-testid="settings-ai-resumes"
-      >
-        <GroupHeading
-          title="Resumes"
-          description="How far a resume for a job may go from the one you imported. This is the default for jobs you shortlist from now on; you can still pick a level job by job on Shortlisted."
-        />
-        <ChoiceCards
-          aria-label="Default resume approach"
-          columns={4}
-          onChange={(resumeApproach) =>
-            edit((current) => ({ ...current, resumeApproach }))
-          }
-          options={resumeApproachOptions}
-          value={draft.resumeApproach}
-        />
-        {/* Aggressive gets its fuller warning below instead; printing both
-            explained the same stretch twice. */}
-        {draft.resumeApproach === "aggressive" ? null : (
-          <p
-            className="text-(length:--text-small) leading-5 text-foreground-soft"
-            data-testid="settings-ai-resume-approach-description"
-          >
-            {describeResumeApproach(draft.resumeApproach)}
-          </p>
-        )}
-        {draft.resumeApproach === "aggressive" ? (
-          <p className="text-sm leading-6 text-(--warning-text)" role="status">
-            {STRONG_REWRITE_WARNING}
-          </p>
-        ) : null}
-        {onUpdateWorkspaceBehavior ? (
+      {onUpdateWorkspaceBehavior ? (
+        <article
+          className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
+          data-testid="settings-ai-resumes"
+        >
+          <GroupHeading
+            title="Resumes"
+            description="When a job's resume gets written. The resume level itself lives in Profile, under Preferences."
+          />
           <ToggleField
             checked={writeOnShortlist}
-            description="A job's resume starts writing at this level as soon as you shortlist it, so it is ready when you open it."
+            description="A job's resume starts writing at your Profile resume level as soon as you shortlist it, so it is ready when you open it."
             hint={
               writeOnShortlistFailed
                 ? "This was not saved. Try the switch again."
@@ -641,8 +572,8 @@ export function SettingsAiBehaviorSection({
             label="Write resumes when I shortlist"
             onCheckedChange={updateWriteOnShortlist}
           />
-        ) : null}
-      </article>
+        </article>
+      ) : null}
 
       <article
         className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
@@ -788,7 +719,7 @@ export function SettingsAiBehaviorSection({
                 value={draft.coverLetter.sample ?? ""}
               />
               <p className="text-sm leading-5 text-foreground-soft">
-                Optional. Job Finder copies how you sound, not what you said —
+                Optional. Job Finder copies how you sound, not what you said â€”
                 nothing from this letter is reused as a fact about another job.
               </p>
             </Field>

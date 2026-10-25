@@ -2716,36 +2716,6 @@ export function createInMemoryJobFinderRepository(
       );
       return Promise.resolve();
     },
-    commitCompanyIntelligenceUpdate(expected, update) {
-      try {
-        const savedJob =
-          expected.jobId === null
-            ? null
-            : (state.savedJobs.find((job) => job.id === expected.jobId) ??
-              null);
-        const applicationRecord =
-          expected.applicationRecordId === null
-            ? null
-            : (state.applicationRecords.find(
-                (record) => record.id === expected.applicationRecordId,
-              ) ?? null);
-        const nextState = JobFinderIntelligenceStateSchema.parse(
-          cloneValue(
-            update({
-              intelligenceState: cloneValue(state.intelligence),
-              savedJob: cloneValue(savedJob),
-              applicationRecord: cloneValue(applicationRecord),
-            }),
-          ),
-        );
-        state.intelligence = nextState;
-        return Promise.resolve(cloneValue(nextState));
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
     getActivityControl() {
       return Promise.resolve(cloneValue(state.activityControl));
     },

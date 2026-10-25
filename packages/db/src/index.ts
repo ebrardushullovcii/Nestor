@@ -3,8 +3,6 @@ export type {
   ApplicationRecordBatchCommitResult,
   CampaignPreferencesCommitCurrent,
   CampaignPreferencesCommitNext,
-  CompanyIntelligenceCommitCurrent,
-  CompanyIntelligenceCommitExpected,
   DiscoveryFeedbackCommitCurrent,
   DiscoveryFeedbackCommitNext,
   JobFinderRepository,

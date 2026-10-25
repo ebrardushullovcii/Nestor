@@ -336,8 +336,7 @@ export const ApplicationAuthorityEnvelopeSchema = z
     status: ApplicationAuthorityStatusSchema,
     revision: z.number().int().positive(),
     scope: ApplicationAuthorityScopeSchema,
-    maxApplicationsPerRun: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    maxApplicationsPerLocalDay: z
+    maxApplicationsPerRun: z
       .number()
       .int()
       .min(1)
@@ -616,7 +615,6 @@ export const SubmissionPreflightRecordSchema = z
     answers: SubmissionAnswerSnapshotIdentitySchema,
     finalControl: SubmissionFinalControlIdentitySchema,
     remainingRunCapacityBefore: z.number().int().nonnegative(),
-    remainingDailyCapacityBefore: z.number().int().nonnegative(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();

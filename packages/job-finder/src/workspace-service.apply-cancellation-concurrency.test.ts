@@ -268,10 +268,6 @@ describe("apply run cancellation and application record concurrency", () => {
     expect(results[0]?.applicationPreparationStartedLocalDate).toMatch(
       /^\d{4}-\d{2}-\d{2}$/u,
     );
-    expect(
-      (await workspaceService.getWorkspaceSnapshot()).dashboard
-        .globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 1, remaining: 19 });
     expect(await repository.listApplicationAttempts()).toHaveLength(0);
     expect(
       (await repository.listUserActionRequests()).filter(
@@ -471,10 +467,6 @@ describe("apply run cancellation and application record concurrency", () => {
         applicationPreparationStartedLocalDate: null,
       }),
     ]);
-    expect(
-      (await workspaceService.getWorkspaceSnapshot()).dashboard
-        .globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 0, remaining: 20 });
     expect(await repository.listApplicationConsentRequests()).toHaveLength(0);
     expect(await repository.listApplicationQuestionRecords({})).toHaveLength(0);
     expect(await repository.listApplicationReplayCheckpoints()).toHaveLength(0);
@@ -1093,110 +1085,6 @@ describe("apply run cancellation and application record concurrency", () => {
     );
     expect(queuedRecord?.nextActionLabel).toBe(
       "Press Try again to pick this up later.",
-    );
-  });
-
-  test("a failed consent relaunch parks the run instead of leaving it falsely running", async () => {
-    // Keep the second job queued to exercise the relaunch failure itself.
-    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "1");
-    const seed = createSeed();
-    stageReadyTailoredJob(seed, "job_ready", "linkedin_signal_ready", {
-      filePath: "/tmp/job-ready-resume.pdf",
-    });
-    stageReadyTailoredJob(seed, "job_consent_queue", "linkedin_consent_queue", {
-      savedJob: {
-        title: "Staff Product Designer",
-        company: "Consent Labs",
-        description:
-          "Design the workflow system. This application asks whether you already have an account before continuing.",
-      },
-    });
-    const baseRuntime = createBrowserRuntime();
-    const workspaceServiceRef: {
-      workspaceService: Harness["workspaceService"] | null;
-    } = { workspaceService: null };
-    const flowedJobIds: string[] = [];
-    const executeApplicationFlow: ExecuteFlow = async (
-      source,
-      input,
-      flowOptions,
-    ) => {
-      flowedJobIds.push(input.job.id);
-      if (input.job.id === "job_consent_queue") {
-        const hookedWorkspaceService = workspaceServiceRef.workspaceService;
-        if (!hookedWorkspaceService) {
-          throw new Error("Expected the workspace service.");
-        }
-        await hookedWorkspaceService.mutateSafeguards({
-          type: "record_listing_signal",
-          signalId: "signal_pause_job_ready",
-          jobId: "job_ready",
-          signal: "stale",
-          detail: null,
-          detectedAt: "2026-08-20T10:00:00.000Z",
-          confidence: 0.9,
-          provenance: "provider",
-          explanation:
-            "Provider reported that the listing needs re-verification.",
-          recoveryGuidance: "Re-verify the listing before applying.",
-        });
-      }
-      return baseRuntime.executeApplicationFlow(source, input, flowOptions);
-    };
-    const harness = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: { ...baseRuntime, executeApplicationFlow },
-    });
-    const { workspaceService, repository } = harness;
-    workspaceServiceRef.workspaceService = workspaceService;
-
-    const staged = await workspaceService.startAutoApplyQueueRun([
-      "job_consent_queue",
-      "job_ready",
-    ]);
-    const runId = staged.applyRuns[0]?.id;
-    if (!runId) throw new Error("Expected a staged queue run.");
-    await workspaceService.approveApplyRun(runId);
-    expect(flowedJobIds).toEqual(["job_consent_queue"]);
-
-    // The safeguard parks the run without making it look process-owned. Clear
-    // that blocker, then break staged relaunch support so consent resolution
-    // reaches the post-transition relaunch catch rather than pausing normally.
-    await workspaceService.mutateSafeguards({
-      type: "dismiss_safeguard_entry",
-      kind: "listing_signal",
-      referenceId: "signal_pause_job_ready",
-      reason: "rechecked",
-      note: "Re-verified the listing before consent resolution.",
-    });
-    delete (harness.browserRuntime as { executeApplicationFlow?: ExecuteFlow })
-      .executeApplicationFlow;
-
-    const consentRequest = (
-      await repository.listApplicationConsentRequests({
-        runId,
-        jobId: "job_consent_queue",
-      })
-    ).find((entry) => entry.status === "pending");
-    if (!consentRequest) throw new Error("Expected a pending consent request.");
-
-    await expect(
-      workspaceService.resolveApplyConsentRequest(consentRequest.id, "approve"),
-    ).rejects.toThrow(/does not support staged apply execution/u);
-
-    const run = (await repository.listApplyRuns()).find(
-      (entry) => entry.id === runId,
-    );
-    // The unowned ghost running state is parked truthfully instead of being
-    // misreported as an app-closed run by startup recovery.
-    expect(run?.state).toBe("paused_for_user_review");
-    expect(run?.completedAt).toBeNull();
-    expect(run?.summary).toBe(
-      "Consent resolved, but the queue paused before continuing.",
-    );
-    expect(run?.detail).toMatch(/does not support staged apply execution/u);
-    expect(run?.summary).not.toBe(
-      "Automatic apply stopped because the app closed.",
     );
   });
 

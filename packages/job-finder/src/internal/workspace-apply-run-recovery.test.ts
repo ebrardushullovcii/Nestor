@@ -300,11 +300,6 @@ describe("selectReusableBatchApproval", () => {
     ).toContain("all work is paused");
     expect(
       describeUnstartedBatchReason(
-        "The global daily preparation safeguard allows at most 20 begun employer applications per local day.",
-      ),
-    ).toContain("today's limit");
-    expect(
-      describeUnstartedBatchReason(
         "This application is already being prepared. Wait for it to finish before starting it again.",
       ),
     ).toContain("already being prepared");

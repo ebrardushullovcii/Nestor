@@ -113,7 +113,6 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         onUpdateWorkspaceBehavior={(input) =>
           callbacks.onUpdateWorkspaceBehavior(input)
         }
-        searchPreferences={{ tailoringMode: "balanced" }}
         settings={currentSettings}
       />
     </MemoryRouter>
@@ -129,29 +128,6 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
     },
   };
 }
-
-const defaultAiBehaviorInput = {
-  aiBehavior: {
-    profileAssistant: { initiative: "suggest", replyStyle: "brief" },
-    jobSearch: { selectivity: "balanced", remoteCountsAsAnyLocation: true },
-    applying: {
-      coverLetterPolicy: "when_required",
-      writtenAnswerLength: "short",
-      preApprovedDeclarations: [
-        "truthfulness_certification",
-        "privacy_notice_acknowledgement",
-        "terms_acceptance",
-        "background_check_consent",
-      ],
-    },
-  },
-  coverLetter: {
-    tone: "plain_professional",
-    length: "standard",
-    language: null,
-    sample: null,
-  },
-} satisfies UpdateAiBehaviorInput;
 
 describe("SettingsScreen scoped section saves", () => {
   afterEach(() => {
@@ -249,11 +225,11 @@ describe("SettingsScreen scoped section saves", () => {
     const view = renderScreen(initialSettings, callbacks);
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
-    const originalChoice = within(aiRegion).getByRole("radio", {
-      name: /^Original/,
+    const proactiveChoice = within(aiRegion).getByRole("radio", {
+      name: /^Proactive/,
     });
-    fireEvent.click(originalChoice);
-    expect(originalChoice.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(proactiveChoice);
+    expect(proactiveChoice.getAttribute("aria-checked")).toBe("true");
     // The choice saves when picked.
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
 
@@ -264,7 +240,7 @@ describe("SettingsScreen scoped section saves", () => {
       name: AI_BEHAVIOR_LABEL,
     });
     const stillStagedChoice = within(refreshedAiRegion).getByRole("radio", {
-      name: /^Original/,
+      name: /^Proactive/,
     });
     // The staged choice survived the external settings prop refresh.
     expect(stillStagedChoice.getAttribute("aria-checked")).toBe("true");
@@ -284,12 +260,13 @@ describe("SettingsScreen scoped section saves", () => {
     ).toBeNull();
 
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith(
-      {
-        ...defaultAiBehaviorInput,
-        resumeApproach: "original_resume",
-      } satisfies UpdateAiBehaviorInput,
-      { undo: expect.any(Function) as unknown },
+    expect(callbacks.onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive" },
+      },
+    });
+    expect(callbacks.onUpdateAiBehavior.mock.calls[0]?.[1]?.undo).toEqual(
+      expect.any(Function) as unknown,
     );
     // No whole JobFinderSettings payload and no workspace fields leaked.
     const payload = callbacks.onUpdateAiBehavior.mock
@@ -297,7 +274,6 @@ describe("SettingsScreen scoped section saves", () => {
     expect(Object.keys(payload).sort()).toEqual([
       "aiBehavior",
       "coverLetter",
-      "resumeApproach",
     ]);
     expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
     expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
@@ -320,7 +296,7 @@ describe("SettingsScreen scoped section saves", () => {
     );
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
-    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
+    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Proactive/ }));
 
     // The click started the save; it shows as pending until it settles.
     expect(
@@ -453,7 +429,7 @@ describe("SettingsScreen scoped section saves", () => {
     const view = renderScreen(parseSettings(), callbacks);
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
-    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
+    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Proactive/ }));
 
     await waitFor(() =>
       expect(
@@ -470,7 +446,7 @@ describe("SettingsScreen scoped section saves", () => {
     // The staged choice survives the failed save.
     expect(
       within(aiRegion)
-        .getByRole("radio", { name: /^Original/ })
+        .getByRole("radio", { name: /^Proactive/ })
         .getAttribute("aria-checked"),
     ).toBe("true");
 

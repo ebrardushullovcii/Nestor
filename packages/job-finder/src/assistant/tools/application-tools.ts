@@ -4,7 +4,6 @@ import {
   ApplicationAnswerValueSchema,
   ApplicationCrmMutationSchema,
   ApplicationCrmStageSchema,
-  ApplicationOutcomeSchema,
   AssistantGrantActionSchema,
   NonEmptyStringSchema,
   applicationCrmStageValues,
@@ -334,11 +333,19 @@ export const applyToJobsTool = defineTool({
     const runIds: string[] = [];
     for (const [mode, jobIds] of byMode) {
       session.assertCurrent();
-      const result = await ports.startApplications({ jobIds, mode, conversationId: session.conversationId, onQueued: async (queueId) => {
-        session.assertCurrent();
-        await session.watchRun({ kind: "apply_queue", id: queueId, jobIds }, "Applying to the chosen jobs");
-        session.assertCurrent();
-      } });
+      const result = await ports.startApplications({
+        jobIds,
+        mode,
+        conversationId: session.conversationId,
+        onQueued: async (queueId) => {
+          session.assertCurrent();
+          await session.watchRun(
+            { kind: "apply_queue", id: queueId, jobIds },
+            "Applying to the chosen jobs",
+          );
+          session.assertCurrent();
+        },
+      });
       queued.push(...(result.queuedJobIds ?? []));
       started.push(...result.startedJobIds);
       heldBack.push(
@@ -375,7 +382,7 @@ export const sendApplicationsTool = defineTool({
   name: "send_applications",
   group: "applications",
   description:
-    "Sends applications already filled in and waiting, one after another through the send path (preflight, daily limit, one send at a time). Only jobs whose recorded instruction says to send; a prepare-only instruction blocks it. The saved default apply mode does not matter here: the person's send instruction is the permission, so never change settings to send. An application counts as sent only when the employer's page confirms it.",
+    "Sends applications already filled in and waiting, one after another through the send path (preflight, one send at a time). Only jobs whose recorded instruction says to send; a prepare-only instruction blocks it. The saved default apply mode does not matter here: the person's send instruction is the permission, so never change settings to send. An application counts as sent only when the employer's page confirms it.",
   parameters: json.object({ jobIds: json.ids() }, ["jobIds"]),
   input: z.object({ jobIds: z.array(Id).min(1).max(50) }),
   label: (input) =>
@@ -996,41 +1003,6 @@ export const setStageForManyTool = defineTool({
   },
 });
 
-export const recordOutcomeTool = defineTool({
-  name: "record_outcome",
-  group: "tracking",
-  description:
-    "Records what happened with an application (interview, offer, rejection, no response...), as the person reported it.",
-  parameters: json.object(
-    {
-      jobId: json.string(),
-      outcome: json.string(
-        "An outcome value such as interview, offer, rejected.",
-      ),
-      note: json.string(),
-    },
-    ["jobId", "outcome"],
-  ),
-  input: z.object({
-    jobId: Id,
-    outcome: ApplicationOutcomeSchema,
-    note: z.string().trim().min(1).max(2_000).optional(),
-  }),
-  label: () => "Recording the outcome",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    await service.recordOutcome({
-      jobId: input.jobId,
-      outcome: input.outcome,
-      resumeStrategyId: null,
-      note: input.note ?? null,
-    });
-    ports.publishWorkspaceUpdate();
-    return { summary: "Outcome recorded." };
-  },
-});
-
 export const exportTrackerTool = defineTool({
   name: "export_tracker",
   group: "tracking",
@@ -1073,6 +1045,5 @@ export const applicationTools = [
 export const trackingTools = [
   updateTrackingTool,
   setStageForManyTool,
-  recordOutcomeTool,
   exportTrackerTool,
 ];

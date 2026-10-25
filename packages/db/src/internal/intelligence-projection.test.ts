@@ -14,16 +14,9 @@ afterEach(() => vi.restoreAllMocks());
 function intelligence(updatedAt = "2026-10-13T10:00:00.000Z") {
   return JobFinderIntelligenceStateSchema.parse({
     updatedAt,
-    rapidReviewLogs: [{ campaignId: "synthetic_campaign", entries: [] }],
+    resumeOnShortlistJobIds: ["synthetic_job"],
   });
 }
-
-const expected = {
-  companyId: "synthetic",
-  expectedCompanyUpdatedAt: "2026-10-13T10:00:00.000Z",
-  jobId: null,
-  applicationRecordId: null,
-};
 
 for (const mode of ["memory", "file"] as const) {
   describe(`${mode} intelligence display projection`, () => {
@@ -47,55 +40,28 @@ for (const mode of ["memory", "file"] as const) {
         expect(clone).not.toHaveBeenCalled();
         parse.mockRestore();
         clone.mockRestore();
-        expect(() =>
-          before.rapidReviewLogs.push({ campaignId: "illegal", entries: [] }),
-        ).toThrow();
-        expect(() =>
-          before.rapidReviewLogs[0]!.entries.push({} as never),
-        ).toThrow();
+        expect(() => before.resumeOnShortlistJobIds!.push("illegal")).toThrow();
+        expect(() => before.resumeOnShortlistJobIds!.splice(0, 1)).toThrow();
         const owned = await repo.getIntelligenceState();
         owned.updatedAt = "2026-10-13T10:02:00.000Z";
-        owned.rapidReviewLogs[0]!.campaignId = "caller mutation";
+        owned.resumeOnShortlistJobIds![0] = "caller mutation";
         expect(await repo.getIntelligenceState()).toEqual(intelligence());
         await repo.commitSavedJobDelta({
           upserts: [createSavedJob({ id: "unrelated" })],
         });
         expect(await repo.readIntelligenceProjection!()).toBe(before);
-        await expect(
-          repo.commitCompanyIntelligenceUpdate(expected, () => {
-            throw new Error("intelligence rollback");
-          }),
-        ).rejects.toThrow("intelligence rollback");
-        await expect(
-          repo.commitCompanyIntelligenceUpdate(
-            expected,
-            () => ({ companies: "invalid" }) as never,
-          ),
-        ).rejects.toThrow();
-        expect(await repo.readIntelligenceProjection!()).toBe(before);
-        const result = await repo.commitCompanyIntelligenceUpdate(
-          expected,
-          (current) => {
-            current.intelligenceState.rapidReviewLogs[0]!.campaignId =
-              "owned updater";
-            return {
-              ...current.intelligenceState,
-              updatedAt: "2026-10-13T10:03:00.000Z",
-            };
-          },
-        );
+        await repo.saveIntelligenceState({
+          ...intelligence(),
+          resumeOnShortlistJobIds: ["updated_job"],
+        });
         const after = await repo.readIntelligenceProjection!();
         expect(after).not.toBe(before);
-        expect(after.rapidReviewLogs[0]?.campaignId).toBe("owned updater");
-        result.rapidReviewLogs[0]!.campaignId = "returned mutation";
-        expect(
-          (await repo.getIntelligenceState()).rapidReviewLogs[0]?.campaignId,
-        ).toBe("owned updater");
+        expect(after.resumeOnShortlistJobIds).toEqual(["updated_job"]);
         const imported = await repo.exportState();
         await repo.reset(createSeed());
         expect(
-          (await repo.readIntelligenceProjection!()).rapidReviewLogs,
-        ).toEqual([]);
+          (await repo.readIntelligenceProjection!()).resumeOnShortlistJobIds,
+        ).toBeUndefined();
         await repo.reset(imported);
         expect(await repo.readIntelligenceProjection!()).toEqual(
           imported.intelligence,

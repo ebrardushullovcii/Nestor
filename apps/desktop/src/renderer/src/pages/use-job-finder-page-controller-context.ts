@@ -13,16 +13,12 @@ import type {
   ProfileCopilotMessage,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
-  RapidReviewMutationInput,
-  RecordOutcomeInput,
   ResumeImportProgressEvent,
   ResumeAssistantMessage,
   ResumeDraft,
-  SafeguardMutationInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
-  SetOutcomeSuggestionEnabledInput,
   SnoozeGroupedDecisionInput,
 } from "@nestor/contracts";
 import type {
@@ -39,7 +35,6 @@ import {
   hasDiscoveryRunReportCounts,
 } from "@renderer/features/job-finder/lib/discovery-run-count-label";
 import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
-import { safeguardMutationKey } from "@renderer/features/job-finder/screens/safeguards/safeguards-presentation";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import type {
   PendingActionScope,
@@ -424,120 +419,6 @@ export function buildJobFinderPageContext(
         );
       }
     },
-    onRefreshCompanyIntelligence: async () => {
-      await runAction(
-        () => actions.refreshCompanyIntelligence(),
-        () => undefined,
-        "What Job Finder knows about these employers was refreshed from your saved jobs and applications.",
-        { scope: jobFinderPendingActions.companyIntelligenceRefresh() },
-      );
-    },
-    onMutateCompanyIntelligence: async (command) => {
-      const completed = await runAction(
-        () => actions.mutateCompanyIntelligence(command),
-        () => undefined,
-        command.mutation.type.includes("contact")
-          ? "Company contact updated."
-          : command.mutation.type.includes("note")
-            ? "Company note updated."
-            : "Salary/offer evidence updated.",
-        {
-          scope: jobFinderPendingActions.companyIntelligenceMutation(
-            command.companyId,
-          ),
-        },
-      );
-      if (!completed) {
-        throw new Error("The company change could not be saved.");
-      }
-    },
-    onSetCompanyPreference: async (input) => {
-      const completed = await runAction(
-        () =>
-          actions.setCompanyPreference({
-            companyId: input.companyId,
-            preference: input.preference,
-          }),
-        () => undefined,
-        "Company preference saved. It only changes local tracking and never affects final-submit authority.",
-        { scope: jobFinderPendingActions.companyPreference(input.companyId) },
-      );
-      if (!completed) {
-        throw new Error("The company preference could not be saved.");
-      }
-    },
-    onReviewCompanyMerge: async (input) => {
-      const completed = await runAction(
-        () =>
-          actions.reviewCompanyMerge({
-            companyId: input.companyId,
-            candidateId: input.candidateId,
-            decision: input.decision,
-          }),
-        () => undefined,
-        input.decision === "accepted"
-          ? "Companies merged. Their aliases, jobs, applications, contacts, notes, and evidence were preserved."
-          : "Duplicate suggestion rejected. The two companies stay separate.",
-        { scope: jobFinderPendingActions.companyMergeReview(input.companyId) },
-      );
-      if (!completed) {
-        throw new Error("The merge decision could not be saved.");
-      }
-    },
-    onMutateRapidReview: async (input: RapidReviewMutationInput) => {
-      const completed = await runAction(
-        () => actions.mutateRapidReview(input),
-        () => undefined,
-        input.type === "decide"
-          ? "Quick review decision saved."
-          : "Quick review decision undone.",
-        { scope: jobFinderPendingActions.rapidReview() },
-      );
-      if (!completed) {
-        throw new Error("The rapid review change could not be saved.");
-      }
-    },
-    onMutateSafeguards: (input: SafeguardMutationInput) => {
-      return runAction(
-        () => actions.mutateSafeguards(input),
-        () => undefined,
-        "Safeguard updated. It only pauses or unblocks local work and never grants submission authority.",
-        {
-          scope: jobFinderPendingActions.safeguardsMutation(
-            safeguardMutationKey(input),
-          ),
-        },
-      );
-    },
-    onRecordOutcome: async (input: RecordOutcomeInput) => {
-      const completed = await runAction(
-        () => actions.recordOutcome(input),
-        () => undefined,
-        "Outcome recorded. Analytics use only outcomes you record here; this stays local tracking and is not submission evidence.",
-        {
-          rethrowError: true,
-          scope: jobFinderPendingActions.recordOutcome(input.jobId),
-        },
-      );
-      if (!completed) {
-        throw new Error("The outcome could not be recorded.");
-      }
-      return completed;
-    },
-    onSetOutcomeSuggestionEnabled: (input: SetOutcomeSuggestionEnabledInput) =>
-      runAction(
-        () => actions.setOutcomeSuggestionEnabled(input),
-        () => undefined,
-        input.enabled || input.reset
-          ? "Suggestion reset. Analytics will re-evaluate it from outcomes you recorded."
-          : "Suggestion disabled. It stays off until you reset it.",
-        {
-          scope: jobFinderPendingActions.outcomeSuggestion(
-            input.dimension,
-            input.key,
-          ),
-        },
-      ),
     onGetSourceDebugRunDetails: actions.getSourceDebugRunDetails,
     // Returns the run's settled outcome instead of discarding it: the
     // Applications hand-off reports what actually happened beside the control,

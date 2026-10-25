@@ -37,9 +37,7 @@ function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
     selectedReviewJobId: "queue-old",
     selectedApplyRunId: "apply-old",
     selectedApplicationRecordId: "record-old",
-    dashboard: {
-      globalDailyApplicationPreparationCapacity: null,
-    },
+    dashboard: {},
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
@@ -61,16 +59,7 @@ function createDelta(
     selectedReviewJobId: "queue-new",
     selectedApplyRunId: "apply-new",
     selectedApplicationRecordId: "record-new",
-    dashboard: {
-      globalDailyApplicationPreparationCapacity: {
-        limit: 20,
-        used: 7,
-        legacyUncertain: 0,
-        remaining: 13,
-        localDate: "2026-07-31",
-        resetsAt: "2026-08-01T00:00:00.000Z",
-      },
-    },
+    dashboard: {},
     discoveryJobs: {
       upserts: [identified("job-new")],
       removedIds: ["job-old"],
@@ -238,9 +227,6 @@ describe("applyJobFinderWorkspaceDelta", () => {
     expect(result.workspace.selectedReviewJobId).toBe("queue-new");
     expect(result.workspace.selectedApplyRunId).toBe("apply-new");
     expect(result.workspace.selectedApplicationRecordId).toBe("record-new");
-    expect(
-      result.workspace.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ limit: 20, used: 7, remaining: 13 });
   });
 
   it("rejects a stale delta without replacing the current workspace", () => {

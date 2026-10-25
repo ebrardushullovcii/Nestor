@@ -327,7 +327,7 @@ function startCampaignScheduler(
   powerMonitor.on("suspend", onPowerSuspend);
   powerMonitor.on("resume", onPowerResume);
   campaignScheduler.start();
-  // An Apply queue that was running or waiting for tomorrow carries on.
+  // An Apply queue that was running carries on.
   void import("./routes/job-finder")
     .then((routes) => routes.resumeApplyQueueAfterRestart())
     .catch((error: unknown) => {

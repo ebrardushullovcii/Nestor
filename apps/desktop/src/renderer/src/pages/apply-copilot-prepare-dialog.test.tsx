@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApplyCopilotVisualCheckpointDialog } from "./job-finder-page";
 
@@ -19,34 +20,31 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
     const onClose = vi.fn();
     const onResolve = vi.fn(() =>
       Promise.resolve(
-        "Safeguards are blocking this step. Too many searches failed in a row.",
+        "This step is blocked right now. Too many searches failed in a row.",
       ),
     );
 
     render(
       <ApplyCopilotVisualCheckpointDialog
         onClose={onClose}
-        onOpenSafeguards={vi.fn()}
         onResolve={onResolve}
         request={request}
       />,
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }),
-    );
+      screen.getByRole("button", { name: "Apply" }));
 
     // Never a silent close: the reason lands in the dialog the person is
-    // looking at, with the one action that can change it.
+    // looking at.
     const refusal = await screen.findByRole("alert");
-    expect(refusal.textContent).toMatch(/Safeguards are blocking this step/);
+    expect(refusal.textContent).toMatch(/This step is blocked right now/);
     expect(onClose).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("button", { name: "Open Safeguards" }),
-    ).toBeTruthy();
+      screen.getAllByRole("button", { name: "Close" }).length,
+    ).toBeGreaterThan(0);
     expect(
-      screen.queryByRole("button", { name: "Apply" }),
-    ).toBeNull();
+      screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
 
   it("says so plainly when the start throws rather than claiming nothing", async () => {
@@ -59,8 +57,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }),
-    );
+      screen.getByRole("button", { name: "Apply" }));
     const refusal = await screen.findByRole("alert");
     expect(refusal.textContent).toMatch(/could not start this preparation/i);
     expect(refusal.textContent).toMatch(/nothing was sent/i);
@@ -77,8 +74,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }),
-    );
+      screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(onResolve).toHaveBeenCalledWith(false);
     });

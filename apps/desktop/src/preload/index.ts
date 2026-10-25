@@ -51,7 +51,6 @@ import type {
   CampaignRuleFunnelProjection,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
-  CompanyIntelligenceMutationInput,
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
@@ -158,18 +157,7 @@ import type {
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
   SaveJobSearchCampaignInput,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
-  ResumeStrategyRecommendation,
-  ReviewCompanyMergeInput,
   RunCampaignNowInput,
-  SafeguardMutationInput,
-  SaveResumeStrategyInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
-  SetCompanyPreferenceInput,
-  SetOutcomeSuggestionEnabledInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
@@ -885,72 +873,6 @@ const desktopApi = {
     setActivityControl: (input: SetJobFinderActivityControlInput) =>
       ipcRenderer.invoke(
         "job-finder:set-activity-control",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    mutateRapidReview: (input: RapidReviewMutationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-rapid-review",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    recordOutcome: (input: RecordOutcomeInput) =>
-      ipcRenderer.invoke(
-        "job-finder:record-outcome",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveResumeStrategy: (input: SaveResumeStrategyInput) =>
-      ipcRenderer.invoke(
-        "job-finder:save-resume-strategy",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    disableResumeStrategy: (strategyId: string) =>
-      ipcRenderer.invoke(
-        "job-finder:disable-resume-strategy",
-        strategyId,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    selectResumeStrategy: (input: SelectResumeStrategyInput) =>
-      ipcRenderer.invoke(
-        "job-finder:select-resume-strategy",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    recommendResumeStrategy: (input: RecommendResumeStrategyInput) =>
-      ipcRenderer.invoke(
-        "job-finder:recommend-resume-strategy",
-        input,
-      ) as Promise<ResumeStrategyRecommendation>,
-    setCampaignResumeStrategyDefault: (
-      input: SetCampaignResumeStrategyDefaultInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:set-campaign-resume-strategy-default",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    refreshCompanyIntelligence: () =>
-      ipcRenderer.invoke(
-        "job-finder:refresh-company-intelligence",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    setCompanyPreference: (input: SetCompanyPreferenceInput) =>
-      ipcRenderer.invoke(
-        "job-finder:set-company-preference",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    reviewCompanyMerge: (input: ReviewCompanyMergeInput) =>
-      ipcRenderer.invoke(
-        "job-finder:review-company-merge",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    mutateCompanyIntelligence: (input: CompanyIntelligenceMutationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-company-intelligence",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    setOutcomeSuggestionEnabled: (input: SetOutcomeSuggestionEnabledInput) =>
-      ipcRenderer.invoke(
-        "job-finder:set-outcome-suggestion-enabled",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    mutateSafeguards: (input: SafeguardMutationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-safeguards",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
     saveSettings: (settings: JobFinderSettings) =>

@@ -149,19 +149,7 @@ import type {
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
   SaveJobSearchCampaignInput,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
-  CompanyIntelligenceMutationInput,
-  ResumeStrategyRecommendation,
-  ReviewCompanyMergeInput,
   RunCampaignNowInput,
-  SaveResumeStrategyInput,
-  SafeguardMutationInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
-  SetCompanyPreferenceInput,
-  SetOutcomeSuggestionEnabledInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
@@ -397,43 +385,6 @@ declare global {
         ) => Promise<CampaignRuleFunnelProjection>;
         setActivityControl: (
           input: SetJobFinderActivityControlInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        mutateRapidReview: (
-          input: RapidReviewMutationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        recordOutcome: (
-          input: RecordOutcomeInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        saveResumeStrategy: (
-          input: SaveResumeStrategyInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        disableResumeStrategy: (
-          strategyId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        selectResumeStrategy: (
-          input: SelectResumeStrategyInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        recommendResumeStrategy: (
-          input: RecommendResumeStrategyInput,
-        ) => Promise<ResumeStrategyRecommendation>;
-        setCampaignResumeStrategyDefault: (
-          input: SetCampaignResumeStrategyDefaultInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        refreshCompanyIntelligence: () => Promise<JobFinderWorkspaceSyncResult>;
-        setCompanyPreference: (
-          input: SetCompanyPreferenceInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        reviewCompanyMerge: (
-          input: ReviewCompanyMergeInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        mutateCompanyIntelligence: (
-          input: CompanyIntelligenceMutationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        setOutcomeSuggestionEnabled: (
-          input: SetOutcomeSuggestionEnabledInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        mutateSafeguards: (
-          input: SafeguardMutationInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         saveSettings: (
           settings: JobFinderSettings,

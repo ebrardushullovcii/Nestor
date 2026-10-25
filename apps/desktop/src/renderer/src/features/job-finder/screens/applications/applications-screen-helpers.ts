@@ -1,33 +1,24 @@
 import type {
   ApplicationAttemptListRow,
   ApplicationRecord,
-  GlobalDailyApplicationPreparationCapacity,
 } from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "../../lib/describe-failure";
-import {
-  formatDailyPreparationCapacityReachedText,
-  isDailyPreparationCapacityExhausted,
-} from "../../lib/job-finder-daily-capacity";
 import type { ApplicationsViewFilter } from "./applications-filters";
 import type { ApplyJobStateKind } from "../../lib/apply-mode-contracts-stub";
 
 /**
  * Resolves the one route-owned action status Applications presents. Retry,
- * queue, and copilot refusals and backend errors must stay visible here, but
- * a refusal that repeats the fixed daily-limit text is already owned by the
- * Recovery section's dedicated reached alert, so the route surface suppresses
- * exactly that duplicate instead of announcing the same sentence twice.
+ * queue, and copilot refusals and backend errors must stay visible here.
  */
 export function resolveVisibleRouteActionMessage(input: {
   actionMessage: string | null | undefined;
-  dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   /**
    * How many jobs of the newest finished automatic run are waiting on the
    * person. Zero (or absent) means no batch outcome is on screen.
    */
   latestRunAttentionCount?: number;
 }): string | null {
-  const { actionMessage, dailyPreparationCapacity } = input;
+  const { actionMessage } = input;
 
   if (!actionMessage) {
     return null;
@@ -45,15 +36,6 @@ export function resolveVisibleRouteActionMessage(input: {
     attentionCount > 0
   ) {
     return formatApplicationsNeedYouSentence(attentionCount);
-  }
-
-  if (
-    dailyPreparationCapacity &&
-    isDailyPreparationCapacityExhausted(dailyPreparationCapacity) &&
-    actionMessage ===
-      formatDailyPreparationCapacityReachedText(dailyPreparationCapacity)
-  ) {
-    return null;
   }
 
   // The detail already confirms this exact click inline, directly under the

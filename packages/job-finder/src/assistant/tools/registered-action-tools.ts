@@ -26,13 +26,6 @@ function compactResult(value: unknown, input: unknown): unknown {
     activeCampaignId: snapshot.activeCampaignId,
     activityControl: snapshot.activityControl,
     applyQueue: snapshot.applyQueue,
-    ...(record.companyId
-      ? {
-          company: snapshot.intelligence.companies.find(
-            (company) => company.id === record.companyId,
-          ),
-        }
-      : {}),
     ...(record.campaignId
       ? {
           campaign: snapshot.campaigns.find(

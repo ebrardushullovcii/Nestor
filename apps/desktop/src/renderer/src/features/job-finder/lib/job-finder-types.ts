@@ -13,7 +13,6 @@ import type {
   CandidateLinkKind,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
-  CompanyIntelligenceMutationInput,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
@@ -43,20 +42,9 @@ import type {
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSettings,
   JobSearchPreferences,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
-  ResumeStrategyRecommendation,
-  ReviewCompanyMergeInput,
-  SaveResumeStrategyInput,
-  SafeguardMutationInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
-  SetCompanyPreferenceInput,
   SetJobFinderActivityControlInput,
-  SetOutcomeSuggestionEnabledInput,
   JobFinderRendererWorkspaceSnapshot,
   JobSourceAdapterKind,
   ProfileCopilotContext,
@@ -94,12 +82,7 @@ export type JobFinderScreen =
   | "applications"
   | "campaigns"
   | "actions"
-  | "analytics"
-  | "settings"
-  | "rapid-review"
-  | "resume-strategies"
-  | "safeguards"
-  | "companies";
+  | "settings";
 
 /**
  * Typed result of starting an employer-application batch queue. Curation is
@@ -112,7 +95,6 @@ export type JobFinderAutoApplyQueueStartOutcome =
   | {
       status: "refused";
       reason:
-        | "daily_capacity_exhausted"
         | "work_paused"
         | "empty_selection"
         | "cancelled_stayed_in_workspace";
@@ -232,43 +214,6 @@ export interface JobFinderShellActions {
   ) => Promise<CampaignRuleFunnelProjection>;
   setActivityControl: (
     input: SetJobFinderActivityControlInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  mutateRapidReview: (
-    input: RapidReviewMutationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  recordOutcome: (
-    input: RecordOutcomeInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveResumeStrategy: (
-    input: SaveResumeStrategyInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  disableResumeStrategy: (
-    strategyId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  selectResumeStrategy: (
-    input: SelectResumeStrategyInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  recommendResumeStrategy: (
-    input: RecommendResumeStrategyInput,
-  ) => Promise<ResumeStrategyRecommendation>;
-  setCampaignResumeStrategyDefault: (
-    input: SetCampaignResumeStrategyDefaultInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  refreshCompanyIntelligence: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setCompanyPreference: (
-    input: SetCompanyPreferenceInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  reviewCompanyMerge: (
-    input: ReviewCompanyMergeInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  mutateCompanyIntelligence: (
-    input: CompanyIntelligenceMutationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setOutcomeSuggestionEnabled: (
-    input: SetOutcomeSuggestionEnabledInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  mutateSafeguards: (
-    input: SafeguardMutationInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveSettings: (
     settings: JobFinderSettings,

@@ -8,10 +8,7 @@ import type {
   SourceDebugRunRecord,
 } from "@nestor/contracts";
 import {
-  classifyPausedApplyRun,
-  hasPendingSampleReview,
-} from "../../lib/apply-run-pause-state";
-import { countWorkspaceSafeguardBlockers } from "../../lib/destination-counts";
+  classifyPausedApplyRun } from "../../lib/apply-run-pause-state";
 import {
   formatDiscoveryRunCountLabel,
   formatDiscoveryRunReportLabel,
@@ -951,41 +948,6 @@ function buildApplyRunTask(
           ? "Open Applications"
           : null,
     ...(canPrepareRemaining ? { applyRecoveryJobIds } : {}),
-    ...(stoppedBySafeguard
-      ? {
-          reviewRoute: "/job-finder/safeguards",
-          // Only a pending sample review has a sample to review; a company
-          // cap or a failure-rate pause is settled on Safeguards itself.
-          reviewActionLabel: hasPendingSampleReview(input.workspace, run.id)
-            ? "Review prepared sample"
-            : "Open Safeguards",
-        }
-      : {}),
-  };
-}
-
-function buildSafeguardTask(
-  input: BuildJobFinderTaskCenterModelInput,
-): JobFinderTaskCenterItem | null {
-  const blockerCount = countWorkspaceSafeguardBlockers(input.workspace);
-  if (blockerCount === 0) {
-    return null;
-  }
-
-  return {
-    id: "safeguards-active",
-    kind: "safeguards",
-    title: "Safeguards need attention",
-    status: "paused",
-    stageLabel: "Waiting for safeguards",
-    sourceLabel:
-      "Affected work is waiting; some safeguards pause application preparation only, while others also pause job discovery.",
-    countLabel: `${blockerCount} active blocker${blockerCount === 1 ? "" : "s"}`,
-    historyEstimateLabel: null,
-    canCancel: false,
-    cancelKind: null,
-    resumeRoute: "/job-finder/safeguards",
-    resumeActionLabel: "Open Safeguards",
   };
 }
 
@@ -1058,7 +1020,6 @@ export function buildJobFinderTaskCenterModel(
     buildResumeTask(input),
     ...buildApplyTasks(input),
     buildTailoredDraftsTask(input),
-    buildSafeguardTask(input),
   ].filter((item): item is JobFinderTaskCenterItem => item !== null);
 
   return {

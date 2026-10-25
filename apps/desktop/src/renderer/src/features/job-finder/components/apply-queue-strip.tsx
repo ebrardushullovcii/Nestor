@@ -16,21 +16,16 @@ import {
  */
 export function ApplyQueueStrip(props: {
   queue: ApplyQueue | null | undefined;
-  dailyLimit: number | null;
   results?: readonly ApplyQueueResult[] | null;
   pending?: boolean;
   onControl: (action: ApplyQueueControlAction) => void;
-  onRaiseLimit: () => void;
 }) {
   const view = describeApplyQueue(props.queue, {
-    dailyLimit: props.dailyLimit,
     results: props.results ?? null,
   });
   if (!view) return null;
   const press = (button: ApplyQueueViewButton) =>
-    button.action === "raise_limit"
-      ? props.onRaiseLimit()
-      : props.onControl(button.action);
+    props.onControl(button.action);
   return (
     <section
       aria-label="Apply queue"

@@ -27,8 +27,6 @@ import {
   markResumeBatchRunning,
   withResumeBatchLiveness,
 } from "./resume-batch-checkpoint";
-import { checkSameCompanySends } from "./same-company-sends";
-import { SameCompanyApplicationConflictError } from "../application-run-refusal";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -231,11 +229,6 @@ import {
   buildDraftWithoutAssistantEdit,
   findDraftAfterRevision,
 } from "./resume-assistant-edit-undo";
-import {
-  buildResumeGenerationStrategyPolicy,
-  buildResumeStrategyContext,
-  resolveCampaignDefaultResumeStrategyId,
-} from "./resume-strategy-application";
 import { createApplicationUserActionResumer } from "./workspace-application-user-action-resumption";
 import {
   buildRecentResumeAssistantConversation,
@@ -1224,16 +1217,6 @@ export function createWorkspaceApplicationMethods(
       // job records nothing, so the next look can try again.
       console.warn("[shortlist] Listing assessment failed", error);
     }
-  }
-
-  async function requireApplicationSafeguardClearance(
-    jobIds: readonly string[],
-    savedJobs?: readonly ReturnType<typeof SavedJobSchema.parse>[],
-  ): Promise<void> {
-    if (!ctx.requireApplicationSafeguardClearance) {
-      throw new Error("Application safeguard gate not initialized.");
-    }
-    await ctx.requireApplicationSafeguardClearance(jobIds, savedJobs);
   }
 
   type DirectApplyExecutionClaim = {
@@ -2783,7 +2766,7 @@ export function createWorkspaceApplicationMethods(
     let shouldCloseActiveSessionOnExit = false;
     let queuedCampaignPauseReason: string | null = null;
     let admissionStopped = false;
-    let admissionStopDetail: string | null = null;
+    const admissionStopDetail: string | null = null;
     const readQueueProgress = async () => {
       const committedResults = await ctx.repository.listApplyJobResults({
         runId: run.id,
@@ -2834,39 +2817,6 @@ export function createWorkspaceApplicationMethods(
         const exactApplicationRecordId = jobResult.applicationRecordId;
 
         if (jobResult?.state && jobResult.state !== "planned") {
-          return;
-        }
-
-        try {
-          const queuedJob = savedJobsById.get(jobId);
-          await requireApplicationSafeguardClearance(
-            [jobId],
-            queuedJob ? [queuedJob] : [],
-          );
-        } catch (error) {
-          if (await stopIfRunWasCancelled(true)) {
-            return;
-          }
-          admissionStopped = true;
-          admissionStopDetail =
-            error instanceof Error
-              ? error.message
-              : "Application safeguards could not be verified before the next queued job.";
-          await withApplyRunTransition(run.id, async () => {
-            if (await stopIfRunWasCancelled()) return;
-            const progress = await readQueueProgress();
-            currentRunState = ApplyRunSchema.parse({
-              ...currentRunState,
-              ...progress,
-              state: "paused_for_user_review",
-              currentJobId: jobId,
-              updatedAt: new Date().toISOString(),
-              completedAt: null,
-              summary: "Automatic apply paused before the next queued job.",
-              detail: admissionStopDetail,
-            });
-            await ctx.repository.upsertApplyRun(currentRunState);
-          });
           return;
         }
 
@@ -4269,17 +4219,12 @@ export function createWorkspaceApplicationMethods(
         settings,
         savedJobs,
         existingAsset,
-        intelligenceState,
-        campaignState,
       ] = await Promise.all([
         ctx.repository.getProfileWithRevision(),
         ctx.repository.getSearchPreferences(),
         ctx.repository.getSettings(),
         ctx.repository.listSavedJobsByIds([jobId]),
         ctx.repository.getTailoredAssetByJobId(jobId),
-        ctx.repository.readIntelligenceProjection?.() ??
-          ctx.repository.getIntelligenceState(),
-        ctx.repository.getCampaignState(),
       ]);
       const { revision: profileRevision } = profileState;
       const profile = {
@@ -4321,56 +4266,13 @@ export function createWorkspaceApplicationMethods(
 
       const existingDraft = await ctx.repository.getResumeDraftByJobId(jobId);
       const templates = ctx.documentManager.listResumeTemplates();
-      const strategyContext = buildResumeStrategyContext({
-        state: intelligenceState,
-        job,
-        campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
-          campaignState,
-          jobId,
-        ),
-      });
-      const strategyPolicy = buildResumeGenerationStrategyPolicy({
-        state: intelligenceState,
-        job,
-        campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
-          campaignState,
-          jobId,
-        ),
-      });
       const effectiveTailoringMode =
-        job.resumeTailoringMode ??
-        strategyPolicy?.tailoringStrength ??
-        searchPreferences.tailoringMode;
+        job.resumeTailoringMode ?? searchPreferences.tailoringMode;
       const generationSearchPreferences = {
         ...searchPreferences,
         tailoringMode: effectiveTailoringMode,
       };
-      const generationStrategyPolicy =
-        strategyPolicy && job.resumeTailoringMode
-          ? {
-              ...strategyPolicy,
-              tailoringStrength: job.resumeTailoringMode,
-            }
-          : strategyPolicy;
-      const selectedBaseResumeDocumentId =
-        strategyPolicy?.baseResumeDocumentId ?? profile.baseResume.id;
-      const resumeImportBundles = strategyPolicy
-        ? await ctx.repository.listResumeImportDocumentBundles()
-        : [];
-      const selectedBaseResume =
-        resumeImportBundles.find(
-          (bundle) =>
-            bundle.id === selectedBaseResumeDocumentId ||
-            bundle.sourceResumeId === selectedBaseResumeDocumentId,
-        ) ?? null;
-      const resumeText =
-        selectedBaseResume?.fullText ?? profile.baseResume.textContent;
-      const baseResumeFallbackNote =
-        strategyPolicy &&
-        selectedBaseResumeDocumentId !== profile.baseResume.id &&
-        !selectedBaseResume?.fullText
-          ? `Strategy base resume document "${selectedBaseResumeDocumentId}" was unavailable, so the current profile resume was used as the grounded source.`
-          : null;
+      const resumeText = profile.baseResume.textContent;
       const existingDraftRevisions = existingDraft
         ? await ctx.repository.listResumeDraftRevisions(existingDraft.id)
         : [];
@@ -4379,13 +4281,9 @@ export function createWorkspaceApplicationMethods(
           (revision.actor === "user" || revision.actor === "restore") &&
           revision.diff?.templateChanged === true,
       );
-      const hasExplicitStrategyTemplate =
-        strategyPolicy?.effectiveSource === "selection";
       const lockedTemplateId = hasExplicitDraftTemplate
         ? (existingDraft?.templateId ?? null)
-        : hasExplicitStrategyTemplate
-          ? (strategyContext.templateId ?? null)
-          : null;
+        : null;
       // Generation, rendering, and persistence failures must leave durable
       // queue truth behind: record the failed tailored asset before
       // propagating the original error to callers.
@@ -4419,7 +4317,6 @@ export function createWorkspaceApplicationMethods(
               settings,
               searchPreferences: generationSearchPreferences,
               resumeText,
-              strategy: generationStrategyPolicy,
             },
           ),
           createdAt: new Date().toISOString(),
@@ -4438,14 +4335,12 @@ export function createWorkspaceApplicationMethods(
           settings,
           job,
           resumeText,
-          strategy: generationStrategyPolicy,
           evidence,
           researchContext,
           availableTemplates: templates,
           selectedTemplateId:
             lockedTemplateId ??
             existingDraft?.templateId ??
-            strategyContext.templateId ??
             settings.resumeTemplateId,
           templateSelectionLocked: lockedTemplateId !== null,
           language: targetLanguage,
@@ -4500,9 +4395,6 @@ export function createWorkspaceApplicationMethods(
                   : assembledPreviewDraft,
                 job,
                 profile,
-                ...(generationStrategyPolicy
-                  ? { sourceSkills: previewDraft.coreSkills }
-                  : {}),
               },
               {
                 ...(checkSignal ? { signal: checkSignal } : {}),
@@ -4531,7 +4423,6 @@ export function createWorkspaceApplicationMethods(
               draft: previewResumeDraft,
               job,
               profile,
-              strategy: generationStrategyPolicy,
               pageCount: rendered.pageCount ?? null,
               validatedAt: previewAt,
             });
@@ -4605,19 +4496,14 @@ export function createWorkspaceApplicationMethods(
         // never approves or readies the artifact: the generated draft stays
         // unapproved and the per-job approval/staleness checks stay
         // authoritative.
-        const strategyTemplateId =
+        const selectedTemplateId =
           lockedTemplateId ??
           draft.recommendedTemplateId ??
           existingDraft?.templateId ??
-          strategyContext.templateId ??
-          null;
-        const strategyDisplayName =
-          strategyContext.selectedStrategyName ??
-          strategyContext.recommendedStrategyName ??
           null;
         const sourceDraft = buildResumeDraftFromTailoredDraft({
           job,
-          templateId: strategyTemplateId ?? settings.resumeTemplateId,
+          templateId: selectedTemplateId ?? settings.resumeTemplateId,
           draft,
           createdAt: existingDraft?.createdAt ?? now,
           updatedAt: now,
@@ -4628,14 +4514,6 @@ export function createWorkspaceApplicationMethods(
             generationMethod === "ai_assisted" ? "ai" : "deterministic",
           profile,
           research,
-          headline:
-            strategyPolicy?.headlinePolicy === "fixed"
-              ? profile.headline
-              : strategyPolicy?.headlinePolicy === "role_family_template"
-                ? strategyPolicy.roleFamily
-                : strategyPolicy?.headlinePolicy === "per_job_tailored"
-                  ? job.title
-                  : undefined,
         });
         const languageDraft = {
           ...sourceDraft,
@@ -4659,7 +4537,6 @@ export function createWorkspaceApplicationMethods(
             draft: resumeDraft,
             job,
             profile,
-            ...(strategyPolicy ? { sourceSkills: draft.coreSkills } : {}),
           },
           { fixGeneratedLines: true },
         );
@@ -4712,7 +4589,6 @@ export function createWorkspaceApplicationMethods(
           draft: sanitizedResumeDraft,
           job,
           profile,
-          strategy: generationStrategyPolicy,
           pageCount: renderedArtifact.pageCount ?? null,
           validatedAt: now,
         });
@@ -4777,17 +4653,6 @@ export function createWorkspaceApplicationMethods(
           tailoringMode: effectiveTailoringMode,
           notes: uniqueStrings([
             ...draft.notes,
-            ...(strategyTemplateId && !existingDraft
-              ? [
-                  `Used resume strategy${strategyDisplayName ? ` "${strategyDisplayName}"` : ""} as the template default. The strategy does not approve or ready this artifact; it still needs your review and explicit approval.`,
-                ]
-              : []),
-            ...(strategyPolicy
-              ? [
-                  `Applied resume strategy "${strategyPolicy.strategyName}" (${strategyPolicy.effectiveSource}: ${strategyPolicy.effectiveReason}); policies ${strategyPolicy.headlinePolicy} headline, ${strategyPolicy.skillsPolicy} skills, ${strategyPolicy.coveragePolicy} coverage, ${strategyPolicy.tailoringStrength} tailoring.`,
-                ]
-              : []),
-            ...(baseResumeFallbackNote ? [baseResumeFallbackNote] : []),
             ...(renderedArtifact.fileName
               ? [
                   `Generated ${renderedArtifact.format.toUpperCase()} resume artifact ${renderedArtifact.fileName}.`,
@@ -8883,25 +8748,6 @@ export function createWorkspaceApplicationMethods(
         applicationAutomationMode ??
         scopedSettings.applicationAutomationMode ??
         "prepare_only";
-      if (effectiveApplicationAutomationMode === "autonomous_submit") {
-        const refused = new Map<string, string>();
-        const overlap = await checkSameCompanySends({
-          repository: ctx.repository,
-          jobIds: uniqueJobIds,
-          transition: ctx.withIntelligenceTransition.bind(ctx),
-          onRefusedJob: (jobId, reason) => {
-            if (!refused.has(jobId)) refused.set(jobId, reason);
-          },
-        });
-        if (overlap)
-          throw new SameCompanyApplicationConflictError(
-            overlap,
-            [...refused].map(([jobId, reason]) => ({
-              jobId,
-              reason: reason.slice(0, 500),
-            })),
-          );
-      }
       const capturedCampaignId = await ctx.getActiveCampaignId();
       const runId = createUniqueId("apply_run");
       const approvalId = createUniqueId("apply_submit_approval");
@@ -9008,11 +8854,6 @@ export function createWorkspaceApplicationMethods(
         scopedProfileState.revision,
         "staging this automatic application queue",
       );
-      if (inheritedApproval) {
-        // The same clearance the explicit approval path performs. Reuse skips
-        // the second question, never the safety checks.
-        await requireApplicationSafeguardClearance(uniqueJobIds);
-      }
       await Promise.all([
         ctx.repository.upsertApplyRun(run),
         ctx.repository.upsertApplySubmitApproval(approval),
@@ -9114,8 +8955,6 @@ export function createWorkspaceApplicationMethods(
             `Submit approval for run '${runId}' is already ${approval.status}.`,
           );
         }
-
-        await requireApplicationSafeguardClearance(run.jobIds);
 
         const now = new Date().toISOString();
         const updatedApproval = ApplySubmitApprovalSchema.parse({
@@ -9386,19 +9225,6 @@ export function createWorkspaceApplicationMethods(
           throw new Error(
             `Consent request '${requestId}' cannot be resolved because run '${run.id}' is ${run.state}.`,
           );
-        }
-
-        const pendingJobs = run.jobIds.filter((jobId) => {
-          if (jobId === request.jobId) return false;
-          const result = results.find(
-            (entry) => entry.runId === run.id && entry.jobId === jobId,
-          );
-          return !result || result.state === "planned";
-        });
-        const jobsThatWillContinue =
-          action === "approve" ? [request.jobId, ...pendingJobs] : pendingJobs;
-        if (jobsThatWillContinue.length > 0) {
-          await requireApplicationSafeguardClearance(jobsThatWillContinue);
         }
 
         type ConsentResolutionOutcome = {

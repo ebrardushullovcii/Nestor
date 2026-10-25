@@ -3,7 +3,6 @@ import type {
   ApplicationCrmSettings,
   BrowserSessionState,
   JobFinderSettings,
-  JobSearchPreferences,
   ResumeTemplateDefinition,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
@@ -214,8 +213,6 @@ export function SettingsScreen(props: {
   onUpdateWorkspaceBehavior: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;
-  /** The saved resume tailoring strength lives here, not in settings. */
-  searchPreferences: Pick<JobSearchPreferences, "tailoringMode">;
   settings: JobFinderSettings;
 }) {
   const {
@@ -229,7 +226,6 @@ export function SettingsScreen(props: {
     onUpdateApplicationDefaults,
     onUpdateTrackerCrm,
     onUpdateWorkspaceBehavior,
-    searchPreferences,
     settings,
   } = props;
 
@@ -553,7 +549,6 @@ export function SettingsScreen(props: {
             onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateAiBehavior={onUpdateAiBehavior}
             onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
-            searchPreferences={searchPreferences}
             settings={settings}
           />
         </section>
@@ -594,15 +589,11 @@ export function SettingsScreen(props: {
                 throw new Error("Your pay choice did not save.");
             }}
             headingId="settings-application-authority-heading"
-            maxApplicationsPerLocalDay={
-              settings.maxApplicationsPerLocalDay ?? 20
-            }
             mode={settings.applicationAutomationMode ?? "prepare_only"}
             onSave={async (input) => {
               onSettingsDraftEdited();
               const saved = await onUpdateApplicationDefaults({
                 applicationAutomationMode: input.mode,
-                maxApplicationsPerLocalDay: input.maxApplicationsPerLocalDay,
               });
               if (saved === false) {
                 throw new Error("The application mode did not save.");

@@ -10,7 +10,6 @@ import type {
   ApplyGroupedManualAnswerInput,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
-  CompanyIntelligenceMutationInput,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
@@ -39,20 +38,10 @@ import type {
   JobFinderWorkspaceEntityMutation,
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
   ResolveSubmissionOutcomeInput,
-  SafeguardMutationInput,
-  ReviewCompanyMergeInput,
-  SaveResumeStrategyInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
-  SetCompanyPreferenceInput,
   SetJobFinderActivityControlInput,
-  SetOutcomeSuggestionEnabledInput,
   WorkspaceRevision,
   ProfileCopilotContext,
   ProfileSetupReviewAction,
@@ -495,7 +484,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   const syncWorkspaceFromUpdate = useCallback(async () => {
     if (!workspaceRef.current) return null;
     const commitVersion = workspaceCommitVersionRef.current;
-    const baseRevision = workspaceRevisionRef.current || null;
+    const baseRevision = workspaceRevisionRef.current;
 
     try {
       const result = await window.nestor.jobFinder.syncWorkspace(baseRevision);
@@ -1258,56 +1247,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.setActivityControl(input),
         ),
-      mutateRapidReview: (input: RapidReviewMutationInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.mutateRapidReview(input),
-        ),
-      recordOutcome: (input: RecordOutcomeInput) =>
-        runWorkspaceAction(() => window.nestor.jobFinder.recordOutcome(input)),
-      saveResumeStrategy: (input: SaveResumeStrategyInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveResumeStrategy(input),
-        ),
-      disableResumeStrategy: (strategyId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.disableResumeStrategy(strategyId),
-        ),
-      selectResumeStrategy: (input: SelectResumeStrategyInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.selectResumeStrategy(input),
-        ),
-      recommendResumeStrategy: (input: RecommendResumeStrategyInput) =>
-        window.nestor.jobFinder.recommendResumeStrategy(input),
-      setCampaignResumeStrategyDefault: (
-        input: SetCampaignResumeStrategyDefaultInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.setCampaignResumeStrategyDefault(input),
-        ),
-      refreshCompanyIntelligence: () =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.refreshCompanyIntelligence(),
-        ),
-      setCompanyPreference: (input: SetCompanyPreferenceInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.setCompanyPreference(input),
-        ),
-      reviewCompanyMerge: (input: ReviewCompanyMergeInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.reviewCompanyMerge(input),
-        ),
-      mutateCompanyIntelligence: (input: CompanyIntelligenceMutationInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.mutateCompanyIntelligence(input),
-        ),
-      setOutcomeSuggestionEnabled: (input: SetOutcomeSuggestionEnabledInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.setOutcomeSuggestionEnabled(input),
-        ),
-      mutateSafeguards: (input: SafeguardMutationInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.mutateSafeguards(input),
-        ),
       saveSettings: (settings: JobFinderSettings) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.saveSettings(settings),
@@ -1585,46 +1524,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     loadRequest,
     recoverFullWorkspaceOnce,
   ]);
-
-  const capacityResetsAt =
-    workspaceState.status === "ready"
-      ? workspaceState.workspace.dashboard
-          ?.globalDailyApplicationPreparationCapacity?.resetsAt
-      : undefined;
-
-  useEffect(() => {
-    if (!capacityResetsAt) {
-      return;
-    }
-
-    const resetAtMs = Date.parse(capacityResetsAt);
-    if (!Number.isFinite(resetAtMs)) {
-      return;
-    }
-
-    const refreshIfStale = () => {
-      if (Date.now() >= resetAtMs) {
-        void syncWorkspace().catch(() => undefined);
-      }
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        refreshIfStale();
-      }
-    };
-    const timeout = window.setTimeout(
-      refreshIfStale,
-      Math.max(0, resetAtMs - Date.now() + 100),
-    );
-    window.addEventListener("focus", refreshIfStale);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearTimeout(timeout);
-      window.removeEventListener("focus", refreshIfStale);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [capacityResetsAt, syncWorkspace]);
 
   return workspaceState;
 }

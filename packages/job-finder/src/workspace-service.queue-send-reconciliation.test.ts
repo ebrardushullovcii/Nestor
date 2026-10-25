@@ -163,7 +163,6 @@ async function installAutonomousAuthority(input: {
       revision: 1,
       scope: { campaignId: null, jobIds: ["job_ready"] },
       maxApplicationsPerRun: 1,
-      maxApplicationsPerLocalDay: 50,
       intermediateMutationsAuthorized: true,
       accountCreationAuthorized: false,
       allowedResumeSha256: [input.resumeSha256],

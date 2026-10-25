@@ -1401,7 +1401,12 @@ describe("useJobFinderWorkspace entity mutations", () => {
       for (const listener of feedListeners)
         listener({
           changes: [
-            { revision: 2, table: "saved_jobs", id: listed.id, operation: "upsert" },
+            {
+              revision: 2,
+              table: "saved_jobs",
+              id: listed.id,
+              operation: "upsert",
+            },
           ],
           revision: 2,
           hasMore: false,
@@ -1417,7 +1422,10 @@ describe("useJobFinderWorkspace entity mutations", () => {
     );
     const workspace = requireReadyWorkspace(result.current).workspace;
     expect(syncWorkspace).toHaveBeenCalledTimes(1);
-    expect(getJobDetail).toHaveBeenCalledWith(listed.id, loaded.activeCampaignId);
+    expect(getJobDetail).toHaveBeenCalledWith(
+      listed.id,
+      loaded.activeCampaignId,
+    );
     // Everything else from the first view; the Find jobs list kept, patched.
     expect(workspace.hydration.phase).toBe("complete");
     expect(workspace.discoveryJobs.map((job) => job.id)).toEqual([listed.id]);
@@ -1795,79 +1803,6 @@ describe("useJobFinderWorkspace entity mutations", () => {
     }
   });
 
-  it("refreshes just after server reset and when focus or visibility finds stale capacity", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-09T10:00:00.000Z"));
-    const initialWorkspace = {
-      ...createWorkspace("job-capacity"),
-      dashboard: {
-        globalDailyApplicationPreparationCapacity: {
-          limit: 20,
-          used: 7,
-          legacyUncertain: 0,
-          remaining: 13,
-          localDate: "2026-08-09",
-          resetsAt: "2026-08-09T10:00:01.000Z",
-        },
-      },
-    } as JobFinderRendererWorkspaceSnapshot;
-    const refreshedWorkspace = {
-      ...initialWorkspace,
-      dashboard: {
-        globalDailyApplicationPreparationCapacity: {
-          limit: 20,
-          used: 0,
-          legacyUncertain: 0,
-          remaining: 20,
-          localDate: "2026-08-10",
-          resetsAt: "2026-08-10T10:00:01.000Z",
-        },
-      },
-    } as JobFinderRendererWorkspaceSnapshot;
-    syncWorkspace.mockResolvedValue({
-      kind: "snapshot",
-      currentRevision: 1,
-      reason: "initial",
-      snapshot: initialWorkspace,
-    });
-
-    const { result } = renderHook(() => useJobFinderWorkspace());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(result.current.status).toBe("ready");
-    syncWorkspace.mockClear();
-    syncWorkspace.mockResolvedValue({
-      kind: "snapshot",
-      currentRevision: 2,
-      reason: "initial",
-      snapshot: refreshedWorkspace,
-    });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_100);
-    });
-    expect(syncWorkspace).toHaveBeenCalledTimes(1);
-
-    syncWorkspace.mockClear();
-    vi.setSystemTime(new Date("2026-08-10T10:00:02.000Z"));
-    window.dispatchEvent(new Event("focus"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(syncWorkspace).toHaveBeenCalledTimes(1);
-
-    syncWorkspace.mockClear();
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      value: "visible",
-    });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(syncWorkspace).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("useJobFinderWorkspace concurrency convergence", () => {

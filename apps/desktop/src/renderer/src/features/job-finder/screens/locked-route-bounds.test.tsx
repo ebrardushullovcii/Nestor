@@ -231,7 +231,6 @@ function renderApplicationsScreen(
         applicationRecords={[record]}
         applyRuns={[]}
         applyJobResults={[]}
-        dailyPreparationCapacity={null}
         discoveryJobs={[]}
         isApplyPending={false}
         isApplyRequestPending={() => false}
@@ -312,7 +311,6 @@ function renderReviewQueueScreen(
         }
         campaignId="campaign_1"
         draftPreparation={createIdleDraftPreparation()}
-        globalDailyApplicationPreparationCapacity={null}
         isApplyPending={false}
         isJobPending={() => false}
         onEditResumeWorkspace={vi.fn()}

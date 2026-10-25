@@ -1,7 +1,6 @@
 export const JOB_FINDER_CONTEXT_QUERY_KEYS = {
   applicationRecordId: "applicationRecordId",
   jobId: "jobId",
-  returnTo: "returnTo",
   targetId: "targetId",
 } as const;
 
@@ -14,16 +13,7 @@ export type JobFinderNavigationContext = {
   targetId: string | null;
 };
 
-export const JOB_FINDER_RETURN_ROUTES = {
-  rapidReview: "/job-finder/rapid-review",
-} as const;
-
-export type JobFinderReturnRoute =
-  (typeof JOB_FINDER_RETURN_ROUTES)[keyof typeof JOB_FINDER_RETURN_ROUTES];
-
-export type JobFinderContextRouteQuery = Partial<JobFinderNavigationContext> & {
-  returnTo?: JobFinderReturnRoute | null;
-};
+export type JobFinderContextRouteQuery = Partial<JobFinderNavigationContext>;
 
 export function selectJobFinderContext<T>(
   entries: readonly T[],
@@ -60,11 +50,6 @@ export function buildJobFinderContextRoute(
   );
   setContextQueryValue(
     search,
-    JOB_FINDER_CONTEXT_QUERY_KEYS.returnTo,
-    context.returnTo,
-  );
-  setContextQueryValue(
-    search,
     JOB_FINDER_CONTEXT_QUERY_KEYS.targetId,
     context.targetId,
   );
@@ -87,22 +72,6 @@ export function readJobFinderNavigationContext(
       JOB_FINDER_CONTEXT_QUERY_KEYS.targetId,
     ),
   };
-}
-
-// Only allow-listed in-app routes may act as a return target. Anything else
-// (unknown path, external URL, blank value) fails safely to null so callers
-// simply render without a return action.
-export function readJobFinderReturnRoute(
-  search: URLSearchParams,
-): JobFinderReturnRoute | null {
-  const value =
-    search.get(JOB_FINDER_CONTEXT_QUERY_KEYS.returnTo)?.trim() ?? "";
-  for (const route of Object.values(JOB_FINDER_RETURN_ROUTES)) {
-    if (route === value) {
-      return route;
-    }
-  }
-  return null;
 }
 
 export function clearJobFinderContextQuery(

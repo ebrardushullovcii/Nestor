@@ -275,7 +275,6 @@ async function createHarness(input: {
     revision: 1,
     scope: { campaignId: "campaign_1", jobIds: ["job_1"] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     intermediateMutationsAuthorized: false,
     accountCreationAuthorized: false,
     allowedResumeSha256: input.mode === "prepare_only" ? [] : [RESUME_SHA256],
@@ -322,7 +321,7 @@ async function createHarness(input: {
       },
       resumeBytes: RESUME_BYTES,
       answers: { revision: 1, digest: ANSWER_SHA256 },
-      capacity: { remainingRunCapacity: 1, remainingDailyCapacity: 1 },
+      capacity: { remainingRunCapacity: 1 },
       currentPolicyFacts: {
         policy: input.mode === "prepare_only" ? null : POLICY_IDENTITY,
         answers: { revision: 1, digest: ANSWER_SHA256 },
@@ -354,7 +353,7 @@ async function commitConfirmGrant(
     resumeBytes: RESUME_BYTES,
     answers: { revision: 1, digest: ANSWER_SHA256 },
     finalControl: CONTROL.identity,
-    capacity: { remainingRunCapacity: 1, remainingDailyCapacity: 1 },
+    capacity: { remainingRunCapacity: 1 },
     createdAt: NOW,
   });
   await repository.commitSubmissionPreflight(preflight);

@@ -414,10 +414,6 @@ describe("apply restart recovery", () => {
       applicationPreparationStartedAt: startedAt,
       applicationPreparationStartedLocalDate: "2026-03-20",
     });
-    // The interrupted-but-begun slot keeps consuming today's daily capacity.
-    expect(
-      snapshot.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 1, remaining: 19 });
     expect((await repository.listApplyJobResults())[0]).toEqual(
       recoveredResult,
     );
@@ -531,9 +527,6 @@ describe("apply restart recovery", () => {
       applicationPreparationStartedAt: startedAt,
       applicationPreparationStartedLocalDate: "2026-03-20",
     });
-    expect(
-      snapshot.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 1, legacyUncertain: 0, remaining: 19 });
 
     const persistedResults = await repository.listApplyJobResults();
     expect(
@@ -1464,10 +1457,6 @@ describe("apply restart recovery", () => {
       skippedJobs: 0,
       blockedJobs: 0,
     });
-    // The begun slot keeps consuming today's daily capacity.
-    expect(
-      snapshot.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 1, remaining: 19 });
 
     // Reopening again is a no-op: every sweep write is idempotent.
     const secondSnapshot =

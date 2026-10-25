@@ -63,7 +63,6 @@ function envelope(
     revision: 3,
     scope: { campaignId: "campaign_1", jobIds: ["job_1"] },
     maxApplicationsPerRun: 10,
-    maxApplicationsPerLocalDay: 20,
     // Final-submission policy tests do not grant the separate bounded ATS
     // autosave capability. Keeping it off avoids coupling these fixtures to
     // autosave's intentionally narrower single-job/no-campaign scope.
@@ -103,7 +102,6 @@ function preflight(
     answers: { revision: 2, digest: SHA_ANSWERS },
     finalControl: { signature: SHA_FINAL_CONTROL, ref: "submit-final-0" },
     remainingRunCapacityBefore: 9,
-    remainingDailyCapacityBefore: 18,
     createdAt: "2026-08-26T11:30:00.000Z",
     ...patch,
   };
@@ -149,7 +147,6 @@ function autonomousInput(
     answers: { revision: 2, digest: SHA_ANSWERS },
     finalControl: { signature: SHA_FINAL_CONTROL, ref: "submit-final-0" },
     remainingRunCapacity: 9,
-    remainingDailyCapacity: 18,
     idempotency: "unused",
     executionGrant: null,
     currentPolicyFacts: {
@@ -428,30 +425,14 @@ describe("application submission policy", () => {
         patch: { remainingRunCapacity: 8 },
       },
       {
-        name: "remaining daily capacity drifted from preflight",
-        reason: "capacity_invalid",
-        patch: { remainingDailyCapacity: 17 },
-      },
-      {
         name: "remaining run capacity is exhausted",
         reason: "capacity_invalid",
         patch: { remainingRunCapacity: 0 },
       },
       {
-        name: "remaining daily capacity is exhausted",
-        reason: "capacity_invalid",
-        patch: { remainingDailyCapacity: 0 },
-      },
-      {
         name: "remaining run capacity is fractional",
         reason: "capacity_invalid",
         patch: { remainingRunCapacity: 1.5 },
-      },
-      {
-        name: "remaining daily capacity exceeds the authority ceiling",
-        reason: "capacity_invalid",
-        patch: { remainingDailyCapacity: 21 },
-        preflightPatch: { remainingDailyCapacityBefore: 21 },
       },
       {
         name: "the idempotency key already executed",

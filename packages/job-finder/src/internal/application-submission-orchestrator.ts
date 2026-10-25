@@ -52,7 +52,6 @@ export interface SyntheticSubmissionObservation {
   answers: SubmissionAnswerSnapshotIdentity;
   finalControl: SubmissionFinalControlIdentity;
   remainingRunCapacity: number;
-  remainingDailyCapacity: number;
   currentPolicyFacts: CurrentApplicationSubmissionPolicyFacts;
 }
 
@@ -287,7 +286,6 @@ function samePreflight(
     left.finalControl.signature === right.finalControl.signature &&
     left.finalControl.ref === right.finalControl.ref &&
     left.remainingRunCapacityBefore === right.remainingRunCapacityBefore &&
-    left.remainingDailyCapacityBefore === right.remainingDailyCapacityBefore &&
     left.createdAt === right.createdAt
   );
 }
@@ -394,7 +392,6 @@ function policyInput(
     answers: input.observation.answers,
     finalControl: input.observation.finalControl,
     remainingRunCapacity: input.observation.remainingRunCapacity,
-    remainingDailyCapacity: input.observation.remainingDailyCapacity,
     idempotency,
     executionGrant: currentExecutionGrant,
     currentPolicyFacts: input.observation.currentPolicyFacts,

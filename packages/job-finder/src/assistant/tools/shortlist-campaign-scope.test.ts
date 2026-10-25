@@ -47,7 +47,6 @@ async function world() {
   const { workspaceService: service, repository } =
     createWorkspaceServiceHarness({ seed });
   await service.getWorkspaceSnapshot();
-  await service.refreshCompanyIntelligence();
   const session = {
     assertCurrent: () => undefined,
     createResultSet: (input: { itemIds: string[] }) =>
@@ -82,7 +81,7 @@ describe("assistant queries use the active plan's shortlist", () => {
       context.sharedJob.id,
     );
     expect(
-      snapshot.companyJobs.some((job) => job.id === context.sharedJob.id),
+      snapshot.discoveryJobs.some((job) => job.id === context.sharedJob.id),
     ).toBe(true);
     const result = await queryJobsTool.execute(shortlistQuery, context);
     expect(
@@ -109,7 +108,7 @@ describe("assistant queries use the active plan's shortlist", () => {
       context.activeJob.id,
     );
     expect(
-      snapshot.companyJobs.find((job) => job.id === context.activeJob.id)!
+      snapshot.discoveryJobs.find((job) => job.id === context.activeJob.id)!
         .status,
     ).toBe("shortlisted");
     const result = await queryJobsTool.execute(shortlistQuery, context);

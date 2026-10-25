@@ -62,7 +62,6 @@ function envelope(mode: "confirm_before_submit" | "autonomous_submit") {
     revision: 4,
     scope: { campaignId: null, jobIds: ["job_test"] },
     maxApplicationsPerRun: 10,
-    maxApplicationsPerLocalDay: 20,
     intermediateMutationsAuthorized: false,
     accountCreationAuthorized: false,
     allowedResumeSha256: ["a".repeat(64)],
@@ -202,7 +201,7 @@ describe("handing one application to the submission path", () => {
           applicationRecordId: "application_1",
           campaignId: null,
         },
-        capacity: { remainingRunCapacity: 3, remainingDailyCapacity: 9 },
+        capacity: { remainingRunCapacity: 3 },
         resumeBytes: new Uint8Array([1, 2, 3]),
         idempotencyKey: "idempotency_1",
         preflightId: "preflight_1",
@@ -274,8 +273,7 @@ describe("the safety net on a preparation result", () => {
             visualCheckpoints: [],
             nextActionLabel: null,
             checkpoints: [],
-          } as never,
-        ),
+          } as never),
       ).toThrow(/Preparation never sends anything/iu);
     }
   });
@@ -350,8 +348,6 @@ describe("sending, gathered at the moment it is asked", () => {
     expect(runSubmission.mock.calls[0]?.[0]?.capacity).toEqual({
       // 10 per run, two already attempted in this run whenever they happened.
       remainingRunCapacity: 8,
-      // 20 per day, two attempted today; yesterday's does not count.
-      remainingDailyCapacity: 18,
     });
   });
 
@@ -367,7 +363,6 @@ describe("sending, gathered at the moment it is asked", () => {
     });
     expect(spent).toEqual({
       remainingRunCapacity: 0,
-      remainingDailyCapacity: 0,
     });
   });
 });
@@ -493,7 +488,6 @@ describe("deriveApplySubmissionCapacity", () => {
   it("does not spend the allowance on a send that reached nothing", () => {
     const envelope = {
       maxApplicationsPerRun: 2,
-      maxApplicationsPerLocalDay: 5,
     } as Parameters<typeof deriveApplySubmissionCapacity>[0]["envelope"];
     const at = "2026-09-27T10:00:00.000Z";
     expect(
@@ -507,7 +501,7 @@ describe("deriveApplySubmissionCapacity", () => {
         runId: "run",
         now: at,
       }),
-    ).toEqual({ remainingRunCapacity: 1, remainingDailyCapacity: 4 });
+    ).toEqual({ remainingRunCapacity: 1 });
   });
 });
 

@@ -3,9 +3,7 @@ import {
   buildJobFinderContextRoute,
   clearJobFinderContextQuery,
   JOB_FINDER_CONTEXT_QUERY_KEYS,
-  JOB_FINDER_RETURN_ROUTES,
   readJobFinderNavigationContext,
-  readJobFinderReturnRoute,
   selectJobFinderContext,
 } from "./job-finder-context-navigation";
 
@@ -73,45 +71,4 @@ describe("job finder contextual navigation", () => {
     expect(next.toString()).toBe("targetId=target-1");
   });
 
-  it("builds a return route into the context query", () => {
-    expect(
-      buildJobFinderContextRoute("/job-finder/discovery", {
-        jobId: "job-target",
-        returnTo: JOB_FINDER_RETURN_ROUTES.rapidReview,
-      }),
-    ).toBe(
-      `/job-finder/discovery?jobId=job-target&returnTo=${encodeURIComponent(
-        "/job-finder/rapid-review",
-      )}`,
-    );
-  });
-
-  it("reads a return route only from the allow-listed in-app paths", () => {
-    expect(
-      readJobFinderReturnRoute(
-        new URLSearchParams(
-          `returnTo=${encodeURIComponent("/job-finder/rapid-review")}`,
-        ),
-      ),
-    ).toBe("/job-finder/rapid-review");
-  });
-
-  it("fails safely on unknown, external, or blank return routes", () => {
-    for (const invalid of [
-      "home",
-      "/job-finder/settings",
-      "https://evil.example/steal",
-      "javascript:alert(1)",
-      "",
-      "   ",
-    ]) {
-      expect(
-        readJobFinderReturnRoute(
-          new URLSearchParams(`returnTo=${encodeURIComponent(invalid)}`),
-        ),
-      ).toBeNull();
-    }
-
-    expect(readJobFinderReturnRoute(new URLSearchParams())).toBeNull();
-  });
 });

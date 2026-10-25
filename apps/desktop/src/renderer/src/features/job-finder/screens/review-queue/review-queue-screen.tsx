@@ -14,7 +14,6 @@ import type {
   ApplicationAutomationMode,
   ApplicationRecord,
   CandidateProfile,
-  GlobalDailyApplicationPreparationCapacity,
   JobFinderApplicationStartTarget,
   JobFinderRendererWorkspaceSnapshot,
   ResumeApplicationMode,
@@ -109,7 +108,6 @@ export function ReviewQueueScreen(props: {
   resumeBatchCheckpoint?: JobFinderRendererWorkspaceSnapshot["intelligence"]["resumeBatchCheckpoint"];
   /** The Apply queue, so its jobs are not offered again and its state shows. */
   applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
-  globalDailyApplicationPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   isApplyPending: boolean;
   /**
    * The live apply results, so the start control can follow the run record
@@ -137,8 +135,6 @@ export function ReviewQueueScreen(props: {
   onOpenApplications?: () => void;
   onApproveResumes?: (jobIds: readonly string[]) => Promise<unknown>;
   onOpenProfile: () => void;
-  onOpenSafeguards?: () => void;
-  safeguardBlocker?: string | null;
   /** All work is paused: Apply controls wait for Continue. */
   applicationWorkPaused?: boolean;
   onClaimResumeIdentity?: () => void;
@@ -175,7 +171,6 @@ export function ReviewQueueScreen(props: {
     applicationAutomationMode = "prepare_only",
     browserSession,
     draftPreparation,
-    globalDailyApplicationPreparationCapacity,
     isApplyPending,
     applyJobResults,
     isJobPending,
@@ -191,8 +186,6 @@ export function ReviewQueueScreen(props: {
     onOpenApplication,
     onOpenApplications,
     onOpenProfile,
-    onOpenSafeguards,
-    safeguardBlocker,
     applicationWorkPaused = false,
     onClaimResumeIdentity,
     onKeepResumeIdentity,
@@ -388,7 +381,7 @@ export function ReviewQueueScreen(props: {
   }, [isSelectedJobPreparing, selectedJobId, operationStartedAt]);
 
   // Apply to the selected jobs, this page or all ready jobs: one press
-  // queues them all, ten at a time inside the daily limit (ADR 0058). Jobs
+  // queues them all, ten at a time (ADR 0058). Jobs
   // already in Applications, running, or in the queue are left alone.
   const [applyAllPending, setApplyAllPending] = useState(false);
   const handleApplyToJobs = useCallback(
@@ -428,9 +421,7 @@ export function ReviewQueueScreen(props: {
       queuedJobIds,
     ],
   );
-  const applyQueueView = describeApplyQueue(props.applyQueue, {
-    dailyLimit: globalDailyApplicationPreparationCapacity?.limit ?? null,
-  });
+  const applyQueueView = describeApplyQueue(props.applyQueue, {});
   const applyQueueStatusItem: PageStatusItem | null =
     applyQueueView && isApplyQueueOngoing(props.applyQueue)
       ? {
@@ -611,15 +602,11 @@ export function ReviewQueueScreen(props: {
               : "Prepare"
           }
           applyAllOutcome={describeApplyAllOutcome(
-            applicationAutomationMode,
-            globalDailyApplicationPreparationCapacity?.limit ?? null,
-          )}
+            applicationAutomationMode)}
           onPrepareTailoredDrafts={onPrepareTailoredDrafts}
           {...(onRemoveReviewJobs ? { onRemoveJobs: onRemoveReviewJobs } : {})}
           {...(onMoveResumesBackToReview ? { onMoveResumesBackToReview } : {})}
           {...(onTakeOutOfApplyQueue ? { onTakeOutOfApplyQueue } : {})}
-          {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
-          safeguardBlocker={safeguardBlocker ?? null}
           applicationWorkPaused={applicationWorkPaused}
           onSelectItem={selectItemAndRevealWorkspace}
           onShowItem={onSelectItem}
@@ -683,9 +670,6 @@ export function ReviewQueueScreen(props: {
                 applicationRecords={applicationRecords}
                 browserSession={browserSession}
                 pendingElapsedSeconds={pendingElapsedSeconds}
-                globalDailyApplicationPreparationCapacity={
-                  globalDailyApplicationPreparationCapacity
-                }
                 applyJobResults={applyJobResults ?? []}
                 isApplyPending={isApplyPending}
                 applicationWorkPaused={applicationWorkPaused}
@@ -701,8 +685,6 @@ export function ReviewQueueScreen(props: {
                 onOpenJobDetails={onOpenJobDetails}
                 onOpenApplication={onOpenApplication ?? (() => undefined)}
                 onOpenProfile={onOpenProfile}
-                {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
-                safeguardBlocker={safeguardBlocker ?? null}
                 {...(onClaimResumeIdentity ? { onClaimResumeIdentity } : {})}
                 {...(onKeepResumeIdentity ? { onKeepResumeIdentity } : {})}
                 onRemoveReviewJob={onRemoveReviewJob}
