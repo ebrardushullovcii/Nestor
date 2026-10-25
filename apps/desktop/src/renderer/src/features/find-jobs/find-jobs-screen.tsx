@@ -160,15 +160,24 @@ export function FindJobsScreen() {
       const nextStage = view.stage ?? stage;
       if (!TABS.includes(nextStage as TriageStage)) return false;
       const targetStage = nextStage as TriageStage;
-      const changed = targetStage !== stage || (view.text !== undefined && view.text !== text) || (view.minFit !== undefined && view.minFit !== floor);
+      const changed =
+        targetStage !== stage ||
+        (view.text !== undefined && view.text !== text) ||
+        (view.minFit !== undefined && view.minFit !== floor);
       setStage(targetStage);
       if (view.text !== undefined) setText(view.text);
-      if (view.minFit !== undefined) { setFitFloor(view.minFit); setFloorTouched(true); }
-      if (view.sort) setSortByStage((current) => ({ ...current, [targetStage]: view.sort! }));
+      if (view.minFit !== undefined) {
+        setFitFloor(view.minFit);
+        setFloorTouched(true);
+      }
+      if (view.sort)
+        setSortByStage((current) => ({
+          ...current,
+          [targetStage]: view.sort!,
+        }));
       return changed;
     },
   });
-
 
   // `?job=<id>` opens that job in its tab, so a link or the Assistant can
   // point at one job.
@@ -194,11 +203,27 @@ export function FindJobsScreen() {
     const { list, selection, activeId, filter } = latest.current;
     return {
       screen: "discovery",
-      focus: activeId === null ? null : { kind: "job", id: String(activeId), label: list.rows.find((row) => row.id === activeId)?.title ?? null },
+      focus:
+        activeId === null
+          ? null
+          : {
+              kind: "job",
+              id: String(activeId),
+              label:
+                list.rows.find((row) => row.id === activeId)?.title ?? null,
+            },
       list: {
-        listKind: "jobs", selectedIds: selection.all ? [] : [...selection.ids].map(String),
-        displayedIds: list.rows.map((row) => String(row.id)), filteredIds: [],
-        totalFilteredCount: list.total, filterSummary: JSON.stringify({ ...filter, allSelected: selection.all, except: selection.all ? [...selection.ids] : [] }), campaignId: null,
+        listKind: "jobs",
+        selectedIds: selection.all ? [] : [...selection.ids].map(String),
+        displayedIds: list.rows.map((row) => String(row.id)),
+        filteredIds: [],
+        totalFilteredCount: list.total,
+        filterSummary: JSON.stringify({
+          ...filter,
+          allSelected: selection.all,
+          except: selection.all ? [...selection.ids] : [],
+        }),
+        campaignId: null,
       },
     };
   });
@@ -352,9 +377,20 @@ export function FindJobsScreen() {
     stage === "found" && counts.found === 0
       ? running
         ? ["Searching your job sites…", "Jobs show up here as they are found."]
-        : sortedJobs > 0
-          ? ["All caught up", "Every found job is shortlisted or hidden."]
-          : ["No jobs yet", "Pick how to search above and press Search."]
+        : (status.progress?.failed ?? 0) > 0 ||
+            status.search?.state === "failed"
+          ? [
+              "Some sites could not be read",
+              "Check the failed sites above, fix their URLs or retry the search.",
+            ]
+          : (status.progress?.needsYou ?? 0) > 0
+            ? [
+                "Some sites need you",
+                "Open Needs you to sign in, then retry those sites.",
+              ]
+            : sortedJobs > 0
+              ? ["All caught up", "Every found job is shortlisted or hidden."]
+              : ["No jobs yet", "Pick how to search above and press Search."]
       : filtered && list.total === 0
         ? [
             text.trim() === "" && stage === "found" && floor !== null
@@ -423,7 +459,14 @@ export function FindJobsScreen() {
         value={stage}
       />
       <ListDetailLayout
-        state={{ stage, text, minFit: floor, sort, selectedIds: [...selection.ids], all: selection.all }}
+        state={{
+          stage,
+          text,
+          minFit: floor,
+          sort,
+          selectedIds: [...selection.ids],
+          all: selection.all,
+        }}
         detail={
           <JobDetailPane
             actions={actions}

@@ -426,6 +426,44 @@ export function readInventoryHtml(
     if (heading && hasJobSections && hasApplyAction) {
       const title = text(heading),
         body = root ? text(root) : "";
+      const field = (name: RegExp) =>
+        content.find(
+          (node) =>
+            !excluded(node) &&
+            name.test(
+              [attr(node, "class"), attr(node, "itemprop")].join(" "),
+            ) &&
+            text(node).length < 180,
+        );
+      const siblings = heading.parentNode?.childNodes ?? [];
+      const preceding = siblings
+        .slice(0, siblings.indexOf(heading))
+        .filter(element)
+        .at(-1);
+      // Many vacancies put employer and location together immediately above the title.
+      // Read that observed byline, never the site's header or branding.
+      const byline =
+        preceding?.tagName === "p" ? text(preceding).split(/\s+[·|]\s+/u) : [];
+      const employer = field(
+        /(?:^|[\s_-])(?:company|employer|hiringOrganization)(?:$|[\s_-])/iu,
+      );
+      const place = field(/(?:^|[\s_-])(?:location|jobLocation)(?:$|[\s_-])/iu);
+      const bylineEmployer = byline[0];
+      const companyHint = employer
+        ? text(employer)
+        : byline.length >= 2 &&
+            bylineEmployer &&
+            bylineEmployer.toLowerCase() !== title.toLowerCase() &&
+            !/^(?:home|careers|jobs|opportunities|remote|hybrid|on[ -]?site)$/iu.test(
+              bylineEmployer,
+            )
+          ? bylineEmployer
+          : undefined;
+      const locationHint = place
+        ? text(place)
+        : byline.length >= 2
+          ? byline[1]
+          : undefined;
       if (
         body.length > title.length + 80 &&
         !/^(?:apply|sign in|log in|create (?:an )?account)\b/iu.test(title)
@@ -434,6 +472,8 @@ export function readInventoryHtml(
           url,
           title,
           text: body,
+          ...(companyHint ? { companyHint } : {}),
+          ...(locationHint ? { locationHint } : {}),
           sourceId: source.id,
           sourceLabel: source.label,
           cardFingerprint: fingerprint(title.trim().toLowerCase()),

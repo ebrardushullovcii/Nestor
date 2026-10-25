@@ -118,8 +118,19 @@ function lastSearchLine(status: JobSearchStatus): string | null {
   const search = status.search;
   if (!search || search.state === "running") return null;
   const when = describeAge(search.finishedAt ?? search.startedAt) ?? "";
-  const outcome =
-    search.state === "failed"
+  const failed = status.progress?.failed ?? 0;
+  const needsYou = status.progress?.needsYou ?? 0;
+  const problems = [
+    ...(failed > 0
+      ? [
+          `${failed} of ${plural(search.sourcesTotal, "site")} could not be read`,
+        ]
+      : []),
+    ...(needsYou > 0 ? [`${plural(needsYou, "site")} need you`] : []),
+  ].join("; ");
+  const outcome = problems
+    ? `${plural(search.added, "new job")}; ${problems}`
+    : search.state === "failed"
       ? `stopped with a problem${search.error ? `: ${search.error}` : ""}`
       : search.added === 0
         ? "nothing new"
@@ -250,6 +261,7 @@ export function SearchPanel(props: {
           ) : null}
           {props.status.search !== null ? (
             <SiteResults
+              showFailures={(props.status.progress?.failed ?? 0) > 0}
               searchId={props.status.search.id}
               revision={props.status.sourceRevision}
             />
