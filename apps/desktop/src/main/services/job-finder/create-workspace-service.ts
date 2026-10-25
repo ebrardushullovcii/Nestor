@@ -48,7 +48,7 @@ import {
 import {
   createDefaultListingHtmlFetcher,
   createJobFinderWorkspaceService,
-  createCurrentSearchEngine,
+  createListingSearchEngine,
   createJobSearchRunner,
 } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
@@ -653,16 +653,9 @@ export async function createJobFinderWorkspaceServiceAsync(
     Promise.resolve(
       createJobSearchRunner({
         store: getJobStore(),
-        engine: createCurrentSearchEngine({
+        engine: createListingSearchEngine({
           browserRuntime,
           aiClient,
-          openBrowserSession: async (source, target) => {
-            await browserRuntime.openSession(source, {
-              purpose: "automation",
-              targetUrl: target.startingUrl,
-              targetId: target.id,
-            });
-          },
         }),
         readContext: async () => {
           const [profile, searchPreferences, sourceInstructionArtifacts] =

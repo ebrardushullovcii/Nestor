@@ -22,8 +22,8 @@ export interface JobSearchRunnerDeps {
   store: JobStore;
   engine: JobSearchEngine;
   readContext(): Promise<JobSearchContext>;
-  /** Defaults: two browser sites, four feed sites, two fit requests. */
-  concurrency?: { browser?: number; feeds?: number; fit?: number };
+  /** Defaults: four HTTP inventories and six fit batches. Browser reads are capped by the engine. */
+  concurrency?: { sources?: number; fit?: number };
 }
 
 export interface JobSearchRunner {

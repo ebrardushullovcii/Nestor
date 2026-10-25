@@ -1,6 +1,6 @@
 import type { ListingCard, ListingSearchReader } from "@nestor/contracts";
-import { htmlToPlainText } from "./listing-detail-extraction";
-import { fingerprint, readListingHtml } from "./listing-html";
+import { htmlToPlainText, listingPageText } from "./listing-detail-extraction";
+import { fingerprint } from "./listing-html";
 
 /** Provider protocols live here; orchestration never contains individual board rules. */
 const SOURCE_CAPABILITY_RULES = [
@@ -44,7 +44,9 @@ const SOURCE_CAPABILITY_RULES = [
 
 export function publicBoardFeed(url: string) {
   const parsed = new URL(url),
-    token = parsed.pathname.split("/").filter(Boolean)[0];
+    parts = parsed.pathname.split("/").filter(Boolean),
+    token = parts[0];
+  if (parts.length !== 1) return null;
   const adapter = SOURCE_CAPABILITY_RULES.find((rule) =>
     rule.hosts.includes(parsed.hostname),
   );
@@ -87,10 +89,9 @@ export async function collectPublicFeed(
   }
   const companyEvidence = feed.metadata
     ? (await input.readPage(feed.metadata, { signal: input.signal })).html
-    : readListingHtml(
+    : listingPageText(
         (await input.readPage(input.source.url, { signal: input.signal })).html,
-        "",
-      ).text.slice(0, 3000);
+      ).slice(0, 3000);
   return rows
     .filter((row) => object(row).isListed !== false)
     .map((row) => {
@@ -134,6 +135,7 @@ export async function collectPublicFeed(
         categories,
         workplaceType: job.workplaceType,
         employmentType: job.employmentType,
+        compensation: job.compensation,
         companyEvidence,
       });
       return {
@@ -144,6 +146,9 @@ export async function collectPublicFeed(
         cardFingerprint: fingerprint([title, text, listingText]),
         sourceId: input.source.id,
         sourceLabel: input.source.label,
+        ...(typeof job.id === "string" || typeof job.id === "number"
+          ? { sourceJobId: String(job.id) }
+          : {}),
       };
     });
 }

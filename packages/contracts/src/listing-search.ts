@@ -15,10 +15,13 @@ export interface ListingCard {
   sourceLabel: string;
   /** Complete body from an authoritative provider feed; avoids a second GET. */
   listingText?: string;
+  /** An already-read detail page, when a source URL itself was a vacancy. */
+  listingPage?: { html: string; finalUrl: string };
   /** Visible card facts; detail reading must corroborate the employer. */
   companyHint?: string;
   locationHint?: string;
   sourceJobId?: string;
+  postedAt?: string;
 }
 
 export interface SeenListingCard {
@@ -40,6 +43,7 @@ export interface SourceInventory {
   pagesRead: number;
   complete: boolean;
   notes: string[];
+  needsYou?: boolean;
 }
 
 export interface ListingSearchReader {
@@ -50,10 +54,11 @@ export interface ListingSearchReader {
 /** The runner merges these sightings before passing unscored jobs to fit. */
 export interface ReadListingResult {
   jobs: FoundJob[];
-  failures: Array<{ url: string; reason: string }>;
+  failures: Array<{ url: string; reason: string; needsYou?: boolean }>;
 }
 
 export interface SearchFitInput {
+  request?: string;
   profile: CandidateProfile;
   goals: JobSearchGoals;
   jobs: readonly JobDetail[];

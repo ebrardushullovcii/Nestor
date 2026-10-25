@@ -38,6 +38,14 @@ export type ReadDiscoveryPostingPage = (
   },
 ) => Promise<{ html: string; finalUrl: string }>;
 
+/** A reader can retry an authenticated page in the person's browser context. */
+export class DiscoveryPageReadError extends Error {
+  constructor(readonly status: number) {
+    super(`Listing read returned HTTP ${status}.`);
+    this.name = "DiscoveryPageReadError";
+  }
+}
+
 /** Do not spread saved preferences: they also contain every source URL. */
 export function toJobSearchGoals(preferences: JobSearchGoals): JobSearchGoals {
   const {

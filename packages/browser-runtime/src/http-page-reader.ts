@@ -1,4 +1,4 @@
-import type { ReadDiscoveryPostingPage } from "@nestor/contracts";
+import { DiscoveryPageReadError, type ReadDiscoveryPostingPage } from "@nestor/contracts";
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
@@ -80,7 +80,7 @@ export function createHttpPageReader(
       }
       if (!response.ok) {
         await response.body?.cancel();
-        throw new Error(`Listing read returned HTTP ${response.status}.`);
+        throw new DiscoveryPageReadError(response.status);
       }
       return { html: await response.text(), finalUrl: response.url || url };
     }

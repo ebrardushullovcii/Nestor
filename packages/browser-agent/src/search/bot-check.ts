@@ -1,5 +1,19 @@
 import type { Page } from "playwright";
 import type { ApplyFormObservation } from "../apply/types";
+import { htmlToPlainText, listingPageText } from "./listing-detail-extraction";
+
+/** The same challenge detector for a read-only HTTP snapshot. */
+export function blockedByCheck(html: string): boolean {
+  return isBotCheckInterstitial({
+    title: htmlToPlainText(
+      html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
+    ),
+    bodyTextExcerpt: listingPageText(html),
+    headings: [],
+    controls: [],
+    links: [],
+  });
+}
 
 type BotCheckPage = Pick<
   ApplyFormObservation,

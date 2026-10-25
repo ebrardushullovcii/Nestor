@@ -61,7 +61,10 @@ export interface JobStore {
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
   findKnownUrls(urls: readonly string[]): string[];
-  lookupSeenCards(cards: readonly Pick<SeenListingCard, "url" | "cardFingerprint">[], roleGoalsKey: string): SeenListingCard[];
+  lookupSeenCards(
+    cards: readonly Pick<SeenListingCard, "url" | "cardFingerprint">[],
+    roleGoalsKey: string,
+  ): SeenListingCard[];
   rememberSeenCards(cards: readonly SeenListingCard[]): void;
 
   listJobs(query: JobListQueryInput): JobListPage;
@@ -194,8 +197,11 @@ export function openJobStore(filePath: string): JobStore {
     },
     notify,
 
-    lookupSeenCards: (cards, roleGoalsKey) => lookupSeenCards(sql, cards, roleGoalsKey),
-    rememberSeenCards: cards => transaction(() => rememberSeenCards(sql, cards)),
+    lookupSeenCards: (cards, roleGoalsKey) =>
+      lookupSeenCards(sql, cards, roleGoalsKey),
+    rememberSeenCards: (cards) => {
+      if (cards.length) transaction(() => rememberSeenCards(sql, cards));
+    },
 
     findKnownUrls(urls) {
       const find = sql("SELECT 1 FROM job_keys WHERE key = ?");
@@ -263,7 +269,7 @@ export function openJobStore(filePath: string): JobStore {
     unscoredJobIds: (limit) =>
       (
         sql(
-          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted') AND fit_score = -1
+          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'hidden') AND fit_score = -1
            ORDER BY found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DiscoveryPageReadError } from "@nestor/contracts";
 import type {
   FoundJob,
   JobFitUpdate,
@@ -21,7 +22,7 @@ import {
   extractListingDetailFromHtml,
   findApplyLinkInHtml,
 } from "./listing-detail-extraction";
-import { blockedByCheck } from "./read-posting-detail";
+import { blockedByCheck } from "./bot-check";
 import { collectPublicFeed } from "./public-board-feed";
 
 export interface ListingEngineModel {
@@ -37,7 +38,7 @@ async function mapConcurrent<T, R>(
 ): Promise<R[]> {
   const iterator = items.entries();
   const output = new Array<R>(items.length);
-  await Promise.all(
+  const settled = await Promise.allSettled(
     Array.from({ length: Math.min(limit, items.length) }, async () => {
       for (;;) {
         const entry = iterator.next();
@@ -47,6 +48,11 @@ async function mapConcurrent<T, R>(
       }
     }),
   );
+  for (const result of settled)
+    if (result.status === "rejected") {
+      const reason: unknown = result.reason;
+      throw reason instanceof Error ? reason : new Error(String(reason));
+    }
   return output;
 }
 
@@ -193,6 +199,7 @@ export async function collectSource(
       pagesRead: visited.size + fallback.pagesRead,
       complete: fallback.complete,
       notes: [...notes, ...fallback.notes],
+      ...(fallback.needsYou ? { needsYou: true } : {}),
     };
   }
   notes.push(
@@ -297,36 +304,129 @@ export async function readListings(
     ListingSearchReader & { cards: readonly ListingCard[] },
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
-  const reads = await mapConcurrent(input.cards, 6, async (card) => {
+  const sameCards = new Map<string, ListingCard[]>();
+  for (const card of input.cards) {
+    const key = fingerprint([card.title, card.text]);
+    const group = sameCards.get(key) ?? [];
+    group.push(card);
+    sameCards.set(key, group);
+  }
+  const site = (card: ListingCard) => {
+    const url = new URL(card.url);
+    return `${url.host}/${url.pathname.split("/").filter(Boolean)[0] ?? ""}`;
+  };
+  // Identical cards can share a body across sites. Two same-site openings never
+  // share a read merely because their cards look alike (the store uses this boundary too).
+  const groups = [...sameCards.values()].flatMap((group) =>
+    new Set(group.map(site)).size === group.length &&
+    new Set(group.map((card) => card.sourceId)).size === group.length
+      ? [group]
+      : group.map((card) => [card]),
+  );
+  const reads = await mapConcurrent(groups, 6, async (group) => {
+    const [first] = group;
+    if (!first) return null;
+    let card = first;
+    let needsYou = false;
     try {
-      let page = card.listingText
-        ? { html: "", finalUrl: card.url }
-        : await input.readPage(card.url, { signal: input.signal });
+      let page: { html: string; finalUrl: string } | null = null;
+      let lastError: unknown;
+      let authenticatedCard: ListingCard | null = null;
+      for (const candidate of group) {
+        try {
+          const alternative =
+            candidate.listingPage ??
+            (candidate.listingText
+              ? { html: "", finalUrl: candidate.url }
+              : await input.readPage(candidate.url, { signal: input.signal }));
+          if (!page || !blockedByCheck(alternative.html)) {
+            card = candidate;
+            page = alternative;
+          }
+          if (!blockedByCheck(alternative.html)) break;
+        } catch (error) {
+          input.signal?.throwIfAborted();
+          lastError = error;
+          if (
+            error instanceof DiscoveryPageReadError &&
+            [401, 403].includes(error.status)
+          )
+            authenticatedCard = candidate;
+        }
+      }
+      if (!page && authenticatedCard) {
+        needsYou = true;
+        card = authenticatedCard;
+        page = await input.readPage(card.url, {
+          signal: input.signal,
+          rendered: true,
+          ready: (html) => !blockedByCheck(html),
+        });
+      }
+      if (!page)
+        throw lastError instanceof Error
+          ? lastError
+          : new Error("The listing could not be read.");
       if (blockedByCheck(page.html))
         page = await input.readPage(card.url, {
           signal: input.signal,
           rendered: true,
           ready: (html) => !blockedByCheck(html),
         });
-      if (blockedByCheck(page.html))
+      if (blockedByCheck(page.html)) {
+        needsYou = true;
         throw new Error("The listing is behind a browser check.");
-      const body = card.listingText
-        ? { text: card.listingText, html: "" }
+      }
+      let body = card.listingText
+        ? {
+            text: card.listingText,
+            html: "",
+            detailHeading: true,
+            renderSuggested: false,
+          }
         : readListingHtml(page.html, card.title);
-      if (body.text.length < 100)
-        throw new Error("The page did not contain a full listing.");
+      if (body.renderSuggested) {
+        page = await input.readPage(card.url, {
+          signal: input.signal,
+          rendered: true,
+          ready: (html) =>
+            !blockedByCheck(html) &&
+            readListingHtml(html, card.title).detailHeading,
+        });
+        body = readListingHtml(page.html, card.title);
+      }
       const structured = extractListingDetailFromHtml({
         html: page.html,
         url: page.finalUrl,
         expectedTitle: card.title,
       });
-      return { card, page, body, structured };
+      const publishedOnly = !body.text && Boolean(structured?.description);
+      if (publishedOnly && structured?.description) {
+        body.text = structured.description;
+        body.detailHeading = true;
+      }
+      if (!body.text)
+        throw new Error("The page did not contain readable listing text.");
+      return {
+        card,
+        aliases: group.filter((alias) => alias !== card),
+        page,
+        body,
+        structured,
+        publishedOnly,
+        needsYou:
+          needsYou ||
+          (!body.detailHeading &&
+            /<input\b[^>]*\btype\s*=\s*["']password["']/iu.test(page.html)),
+      };
     } catch (error) {
       input.signal?.throwIfAborted();
-      failures.push({
-        url: card.url,
-        reason: error instanceof Error ? error.message : String(error),
-      });
+      for (const card of group)
+        failures.push({
+          url: card.url,
+          reason: error instanceof Error ? error.message : String(error),
+          ...(needsYou ? { needsYou: true } : {}),
+        });
       return null;
     }
   });
@@ -335,19 +435,27 @@ export async function readListings(
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
   const append = (read: Read, fields: Omit<Fields, "id">): void => {
-    jobs.push({
-      ...fields,
-      url: read.card.url,
-      applyUrl: findApplyLinkInHtml(read.page.html, read.page.finalUrl),
-      sourceId: read.card.sourceId,
-      sourceLabel: read.card.sourceLabel,
-      postedAt: read.structured?.postedAt ?? null,
-      description: read.body.text,
-      summary: null,
-      salaryMin: null,
-      salaryMax: null,
-      salaryCurrency: null,
-    });
+    for (const sighting of [read.card, ...read.aliases])
+      jobs.push({
+        ...fields,
+        sourceJobId:
+          sighting === read.card
+            ? (fields.sourceJobId ?? sighting.sourceJobId ?? null)
+            : (sighting.sourceJobId ?? null),
+        url: sighting.url,
+        applyUrl:
+          sighting === read.card
+            ? findApplyLinkInHtml(read.page.html, read.page.finalUrl)
+            : null,
+        sourceId: sighting.sourceId,
+        sourceLabel: sighting.sourceLabel,
+        postedAt: read.structured?.postedAt ?? read.card.postedAt ?? null,
+        description: read.body.text,
+        summary: null,
+        salaryMin: null,
+        salaryMax: null,
+        salaryCurrency: null,
+      });
   };
   const uncertain: Read[] = [];
   for (const read of good) {
@@ -355,15 +463,39 @@ export async function readListings(
     const location =
       read.card.locationHint?.split("·")[0]?.trim() ||
       read.structured?.location;
+    const name = company?.trim().toLowerCase();
+    const conflictingEmployer =
+      read.structured?.company &&
+      read.card.companyHint &&
+      read.structured.company.trim().toLowerCase() !==
+        read.card.companyHint.trim().toLowerCase();
     const employerCorroborated =
-      company &&
-      (read.structured?.company === company ||
-        read.body.text.toLowerCase().includes(company.toLowerCase()));
-    if (!employerCorroborated || !location) {
+      name &&
+      (read.publishedOnly ||
+        read.body.text.split("\n").some((line) => {
+          const field = line.trim().toLowerCase();
+          return (
+            field === name ||
+            field.startsWith(`${name} ·`) ||
+            field.startsWith(`${name} |`)
+          );
+        }));
+    if (
+      !company ||
+      !employerCorroborated ||
+      conflictingEmployer ||
+      !location ||
+      !read.body.detailHeading
+    ) {
       uncertain.push(read);
       continue;
     }
-    const cardFacts = read.card.text.toLowerCase();
+    const cardFacts = [
+      read.card.text,
+      ...(read.structured?.workModeHints ?? []),
+    ]
+      .join(" ")
+      .toLowerCase();
     const workModes: Fields["workModes"] = /\bremote\b/iu.test(cardFacts)
       ? ["remote"]
       : /\bhybrid\b/iu.test(cardFacts)
@@ -393,7 +525,7 @@ export async function readListings(
     async (batch) => {
       const answer = await ask(
         input,
-        'Read listing metadata faithfully. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null}]}. Use one result for every id. Unknown fields are null or empty strings/arrays. Listing card and full page are evidence; preserve employer and reference/requisition numbers exactly. Do not assess fit and do not summarize the body.',
+        'Read listing metadata faithfully. A sign-in page, talent pool or results list is not one vacancy: return empty title and company for those. A closed vacancy is still a listing. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null}]}. Use one result for every id. Unknown fields are null or empty strings/arrays. Listing card and full page are evidence; preserve employer and reference/requisition numbers exactly. Do not assess fit and do not summarize the body.',
         {
           listings: batch.map((read, id) => ({
             id,
@@ -421,7 +553,10 @@ export async function readListings(
         if (!fields || !fields.title || !fields.company) {
           failures.push({
             url: read.card.url,
-            reason: "The listing's title or hiring employer could not be read.",
+            reason: read.needsYou
+              ? "Sign in to read this listing."
+              : "The listing's title or hiring employer could not be read.",
+            ...(read.needsYou ? { needsYou: true } : {}),
           });
           continue;
         }
@@ -484,10 +619,11 @@ export async function fitJobs(
     async (batch) => {
       const answer = await ask(
         input,
-        'Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regional restrictions matter; Worldwide includes the person. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: 85–100 strong realistic choice, 65–84 worth applying, 40–64 stretch or material tradeoff, 0–39 poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON: {"fits":[{"id":integer,"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["full|partial","brief evidence coverage"]}]}. Optional "for" and "against" arrays may add up to 4 specific strengths or gaps ONLY when they add information absent from the explanations. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.',
+        'Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: 85–100 strong realistic choice, 65–84 worth applying, 40–64 stretch or material tradeoff, 0–39 poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON: {"fits":[{"id":integer,"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}]}. Optional "for" and "against" arrays may add up to 4 specific strengths or gaps ONLY when they add information absent from the explanations. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.',
         {
           person,
           goals: input.goals,
+          request: input.request,
           listings: batch.map((job) => ({
             id: job.id,
             title: job.title,
@@ -495,6 +631,7 @@ export async function fitJobs(
             location: job.location,
             workModes: job.workModes,
             employmentType: job.employmentType,
+            salaryText: job.salaryText,
             seniority: job.seniority,
             fullText: job.description,
           })),

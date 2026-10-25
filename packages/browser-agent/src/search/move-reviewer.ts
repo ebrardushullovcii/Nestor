@@ -6,6 +6,7 @@ import { searchSelectivity } from "./job-search-prompts";
 
 /** The search or source-check goal, for the reviewer. */
 export function describeSearchGoal(config: AgentConfig): string {
+  if (config.inventoryOnly) return `Collect vacancy cards from ${config.promptContext.siteLabel} and its observed employer/ATS handoffs. Do not judge fit, location, seniority or preferences; the following engine steps do that.`;
   const packet = config.promptContext.taskPacket;
   const searchIntent = config.promptContext.searchRequest?.intent.trim();
   return packet

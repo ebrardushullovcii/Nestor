@@ -265,7 +265,7 @@ export interface ApplicationPreparationProgress {
 export interface BrowserSessionRuntime {
   readRenderedPage?(
     url: string,
-    options?: { signal?: AbortSignal; onPage?: AutomationPageListener },
+    options?: { signal?: AbortSignal | undefined; onPage?: AutomationPageListener; ready?: (html: string) => boolean },
   ): Promise<{ html: string; finalUrl: string }>;
   getSessionState(source: JobSource): Promise<BrowserSessionState>;
   openSession(
@@ -447,6 +447,8 @@ export interface BrowserApplicationExecutionOptions {
 }
 
 export interface AgentDiscoveryOptions {
+  /** Browser fallback collects cards; the new engine screens and reads them. */
+  inventoryOnly?: boolean;
   lookupKnownUrls?: KnownJobUrlLookup;
   /** Capacity waits happen before page navigation and do not fail a source. */
   onWaitingForBrowserTab?: () => void;

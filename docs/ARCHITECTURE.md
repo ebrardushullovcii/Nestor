@@ -36,13 +36,14 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 - desktop: renderer -> preload -> Electron main -> package services
 - resume import: desktop ingress -> parser/text/vision branches -> review candidates -> accepted canonical writes
-- discovery: the model owns each search and source-check run on `runAgentLoop`
-  with general page tools plus `extract_jobs`, `saved_jobs`, and `finish`
-  (ADR 0023); job details come from the model reading the page (ADR 0041). `browser-agent` owns the source-generic search policy,
-  prompts, and structured outputs; `job-finder` owns budgets, canonical merge,
-  matching, dedupe, ledger, persistence, and run truth. Each checkpoint's new
-  postings carry their full listing description before using the same canonical
-  merge path as final collection. Fit judging and resume writing share that text.
+- discovery: the normal Find jobs engine collects HTTP lists, provider feeds
+  and JSON-LD, screens professions in batches, reads full listings, merges
+  sightings, then fits each unscored job once (ADR 0041). `browser-agent` owns
+  collection policy, prompts and structured outputs; `job-finder` schedules the
+  work and persists through the indexed job store in `db`. Fit and resume
+  writing share the same complete listing text. Browser navigation fallback
+  and source-debug use `runAgentLoop` with general page tools, `extract_jobs`,
+  `saved_jobs` and `finish` (ADR 0023); fallback collects cards without a fit gate.
 - applications: the apply agent fills the form and sends it only under Send
   for me or on the person's Send press under Ask before sending (ADR 0024,
   ADR 0027). Browser packages own generic observation and execution hands;

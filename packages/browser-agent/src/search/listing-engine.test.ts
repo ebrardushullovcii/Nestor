@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import {
   CandidateProfileSchema,
+  DiscoveryPageReadError,
   JobDetailSchema,
   type ListingCard,
 } from "@nestor/contracts";
@@ -140,13 +141,103 @@ test("provider endpoints are reusable across boards and never claimed from looka
   expect(publicBoardFeed("https://jobs.lever.co/example")?.url).toBe(
     "https://api.lever.co/v0/postings/example?mode=json&limit=250&skip=0",
   );
-  expect(
-    publicBoardFeed("https://job-boards.greenhouse.io/acme/jobs/123")?.url,
-  ).toBe("https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true");
+  expect(publicBoardFeed("https://job-boards.greenhouse.io/acme")?.url).toBe(
+    "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
+  );
   expect(publicBoardFeed("https://jobs.ashbyhq.com/acme")?.provider).toBe(
     "ashby",
   );
   expect(publicBoardFeed("https://jobs.lever.co.evil.test/acme")).toBeNull();
+  expect(
+    publicBoardFeed("https://jobs.lever.co/acme/exact-vacancy"),
+  ).toBeNull();
+});
+
+test("identical cross-site cards share one full read, preserving each site's identity and the real employer", async () => {
+  const first = {
+    ...card("Backend Engineer"),
+    companyHint: "Real Employer",
+    locationHint: "Remote, Worldwide",
+    sourceJobId: "7",
+  };
+  const alias = {
+    ...first,
+    url: "https://other.example/vacancies/abc",
+    sourceId: "other",
+    sourceJobId: "abc",
+  };
+  const readPage = vi.fn(() =>
+    Promise.resolve({
+      finalUrl: first.url,
+      html: `<main><h1>Backend Engineer</h1><p>Real Employer · Remote, Worldwide</p><h2>Requirements</h2><p>${"Build production APIs with SQL. ".repeat(10)}</p><a href="/apply/7">Apply now</a></main>`,
+    }),
+  );
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(
+        new Error("Published corroborated facts need no model read"),
+      ),
+    ),
+  };
+  const result = await readListings({
+    cards: [first, alias],
+    readPage,
+    client,
+  });
+  expect(result.failures).toEqual([]);
+  expect(readPage).toHaveBeenCalledTimes(1);
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(
+    result.jobs.map((job) => [job.company, job.sourceJobId, job.applyUrl]),
+  ).toEqual([
+    ["Real Employer", "7", "https://board.example/apply/7"],
+    ["Real Employer", "abc", null],
+  ]);
+  expect(result.jobs[1]?.description).toBe(result.jobs[0]?.description);
+  readPage.mockClear();
+  await readListings({
+    cards: [
+      first,
+      {
+        ...first,
+        url: "https://board.example/another-opening",
+        sourceJobId: "8",
+      },
+    ],
+    readPage,
+    client,
+  });
+  expect(readPage).toHaveBeenCalledTimes(2);
+});
+
+test("an authenticated listing uses the browser session after HTTP refuses it", async () => {
+  const listing = {
+    ...card("Backend Engineer"),
+    companyHint: "Real Employer",
+    locationHint: "Remote, Worldwide",
+  };
+  const readPage = vi.fn((url: string, options: { rendered?: boolean }) =>
+    options.rendered
+      ? Promise.resolve({
+          finalUrl: url,
+          html: "<main><h1>Backend Engineer</h1><p>Real Employer</p><p>Own APIs and SQL production services.</p></main>",
+        })
+      : Promise.reject(new DiscoveryPageReadError(401)),
+  );
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(new Error("No model transcription needed")),
+    ),
+  };
+  const full = await readListings({ cards: [listing], readPage, client });
+  expect(full.failures).toEqual([]);
+  expect(full.jobs[0]?.description).toContain(
+    "Own APIs and SQL production services.",
+  );
+  expect(
+    readPage.mock.calls.map(([, options]) => options.rendered ?? false),
+  ).toEqual([false, true]);
+  expect(client.chatWithTools).not.toHaveBeenCalled();
 });
 
 test("judges merged unscored jobs once, retaining low scores and all three explanations", async () => {
@@ -165,6 +256,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   const job = JobDetailSchema.parse({
     id: 1,
     stage: "found",
+    stageNote: null,
     stageChangedAt: now,
     title: "Senior Data Analyst",
     company: "Employer",

@@ -128,6 +128,10 @@ export function readInventoryHtml(
     }
     if (!/^https?:/u.test(href)) continue;
     const body = JSON.stringify(job);
+    const identifier =
+      job.identifier && typeof job.identifier === "object"
+        ? (job.identifier as Record<string, unknown>).value
+        : job.identifier;
     cards.set(href, {
       url: href,
       title: job.title,
@@ -135,6 +139,13 @@ export function readInventoryHtml(
       cardFingerprint: fingerprint(body),
       sourceId: source.id,
       sourceLabel: source.label,
+      ...(typeof identifier === "string" || typeof identifier === "number"
+        ? { sourceJobId: String(identifier) }
+        : {}),
+      ...(published.length === 1 &&
+      (href === url || readListingHtml(html, job.title).detailHeading)
+        ? { listingPage: { html, finalUrl: url } }
+        : {}),
     });
   }
   for (const node of nodes) {
@@ -142,22 +153,23 @@ export function readInventoryHtml(
       !(
         node.tagName === "article" ||
         node.tagName === "li" ||
+        node.tagName === "a" ||
         attr(node, "role") === "listitem"
       )
     )
       continue;
     const children = descendants(node);
     const heading = children.find((child) => /^h[1-6]$/u.test(child.tagName));
+    if (!heading) continue;
     const anchor =
-      heading &&
-      (heading.tagName === "a"
-        ? heading
-        : descendants(heading).find((child) => child.tagName === "a"));
+      node.tagName === "a"
+        ? node
+        : descendants(heading).find((child) => child.tagName === "a");
     if (!anchor) continue;
     const href = link(anchor, url),
       title = text(heading),
       body = text(node);
-    if (!href || !title || body === title || body.length > 12000) continue;
+    if (!href || !title || body === title) continue;
     const paragraphs = children.filter((child) => child.tagName === "p");
     const companyNode =
       paragraphs.find((child) =>
@@ -178,6 +190,40 @@ export function readInventoryHtml(
       paragraphs.find(
         (child) => children.indexOf(child) > children.indexOf(heading),
       );
+    const publishedTime = children.find(
+      (child) => child.tagName === "time" && attr(child, "datetime"),
+    );
+    let postedAt = publishedTime ? attr(publishedTime, "datetime") : "";
+    if (!postedAt) {
+      const ageNode = children.find((child) =>
+        /(?:^|[-_\s])(?:age|posted|date-posted)(?:$|[-_\s])/iu.test(
+          attr(child, "class"),
+        ),
+      );
+      const age = ageNode ? text(ageNode).trim().toLowerCase() : "";
+      const relative = age.match(
+        /^(\d+)\s*(days?|d|weeks?|w|hours?|h|minutes?)\s*(?:ago)?$/iu,
+      );
+      if (relative) {
+        const unit = relative[2] ?? "";
+        const duration = /^w/iu.test(unit)
+          ? 7 * 86400000
+          : /^d/iu.test(unit)
+            ? 86400000
+            : /^h/iu.test(unit)
+              ? 3600000
+              : 60000;
+        const timestamp = Date.now() - Number(relative[1]) * duration;
+        if (
+          Number.isFinite(timestamp) &&
+          Math.abs(timestamp) <= 8640000000000000
+        )
+          postedAt = new Date(timestamp).toISOString();
+      } else if (age === "today" || age === "yesterday")
+        postedAt = new Date(
+          Date.now() - (age === "yesterday" ? 86400000 : 0),
+        ).toISOString();
+    }
     cards.set(href, {
       url: href,
       title,
@@ -188,6 +234,9 @@ export function readInventoryHtml(
       ...(locationNode ? { locationHint: text(locationNode) } : {}),
       ...(attr(anchor, "data-job-id")
         ? { sourceJobId: attr(anchor, "data-job-id") }
+        : {}),
+      ...(postedAt && Number.isFinite(Date.parse(postedAt))
+        ? { postedAt: new Date(postedAt).toISOString() }
         : {}),
       cardFingerprint: fingerprint([
         title,
@@ -228,7 +277,12 @@ export function readInventoryHtml(
 export function readListingHtml(
   html: string,
   expectedTitle: string,
-): { text: string; html: string } {
+): {
+  text: string;
+  html: string;
+  detailHeading: boolean;
+  renderSuggested: boolean;
+} {
   const doc = parse(html),
     nodes = descendants(doc);
   const articles = nodes.filter((node) => node.tagName === "article");
@@ -246,8 +300,21 @@ export function readListingHtml(
     ) ??
     nodes.find((node) => node.tagName === "body") ??
     doc;
+  const detailHeading = descendants(root).some(
+    (node) =>
+      node.tagName === "h1" &&
+      text(node).toLowerCase() === expectedTitle.toLowerCase(),
+  );
   return {
     text: text(root),
     html: element(root) ? serializeOuter(root) : html,
+    detailHeading,
+    renderSuggested:
+      !detailHeading &&
+      nodes.some(
+        (node) =>
+          node.tagName === "script" &&
+          attr(node, "type") !== "application/ld+json",
+      ),
   };
 }

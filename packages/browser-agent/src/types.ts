@@ -53,6 +53,7 @@ export interface AgentPromptContext {
 }
 
 export interface AgentConfig {
+  inventoryOnly?: boolean;
   lookupKnownUrls?: KnownJobUrlLookup;
   /** No person-specified result cap; retain every suitable posting found. */
   retainAllFound?: boolean;

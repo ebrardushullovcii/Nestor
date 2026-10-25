@@ -50,8 +50,10 @@ function Choice(props: { label: string; children: React.ReactNode }) {
 
 function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
   const search = props.status.search!;
+  const checkingFit =
+    search.sourcesTotal > 0 && search.sourcesDone === search.sourcesTotal;
   const percent =
-    search.sourcesTotal > 0
+    !checkingFit && search.sourcesTotal > 0
       ? (search.sourcesDone / search.sourcesTotal) * 100
       : null;
   const working = props.status.sources.filter((s) => s.state === "searching");
@@ -63,7 +65,9 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
           aria-live="polite"
           className="min-w-0 flex-1 truncate text-(length:--text-description) text-foreground"
         >
-          <strong className="font-semibold">Searching</strong>{" "}
+          <strong className="font-semibold">
+            {checkingFit ? "Checking fit" : "Searching"}
+          </strong>{" "}
           {search.sourcesDone} of {plural(search.sourcesTotal, "site")} ·{" "}
           {plural(search.added, "new job")}
           {search.merged > 0 ? ` · ${search.merged} already saved` : ""}
@@ -87,7 +91,7 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
       {working.length > 0 || needsYou.length > 0 ? (
         <p className="truncate text-(length:--text-small) text-foreground-muted">
           {working.length > 0
-            ? `Now: ${working.map((s) => s.label).join(", ")}`
+            ? `Now: ${working.map((s) => (s.message ? `${s.label}: ${s.message}` : s.label)).join(" · ")}`
             : ""}
           {needsYou.length > 0
             ? `${working.length > 0 ? " · " : ""}Needs you: ${needsYou
@@ -125,7 +129,7 @@ function SiteResults(props: { sources: readonly JobSearchSourceState[] }) {
             <span className="shrink-0">
               {source.state === "done"
                 ? `${plural(source.found, "listing")}, ${source.added} new${
-                    source.hidden > 0 ? `, ${source.hidden} not a fit` : ""
+                    source.hidden > 0 ? `, ${source.hidden} hidden` : ""
                   }`
                 : SITE_STATE[source.state]}
             </span>
@@ -269,6 +273,15 @@ export function SearchPanel(props: {
           <p className="text-(length:--text-small) text-foreground-muted">
             {summary}
           </p>
+          {props.status.search?.error &&
+          props.status.search.state === "done" ? (
+            <p
+              role="status"
+              className="text-(length:--text-small) text-(--warning-text)"
+            >
+              Some jobs still need a fit score. The next search will retry them.
+            </p>
+          ) : null}
           {props.status.sources.length > 0 ? (
             <SiteResults sources={props.status.sources} />
           ) : null}
