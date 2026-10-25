@@ -36,7 +36,8 @@ export async function readPostingDetail(input: {
       url: page.finalUrl,
       expectedTitle: posting.title,
     });
-    if (structured) {
+    const visibleText = listingPageText(page.html);
+    if (structured && !visibleText.trim()) {
       return JobPostingSchema.parse({
         ...posting,
         title: structured.title ?? posting.title,
@@ -67,7 +68,7 @@ export async function readPostingDetail(input: {
       input.extractor.extractJobsFromPage({
         pageUrl: page.finalUrl,
         pageType: "job_detail",
-        pageText: `Listing identity from the result card (page data): ${JSON.stringify({ title: posting.title, company: posting.company, url: posting.canonicalUrl })}\n\n${listingPageText(page.html)}\n\nPage links:\n${JSON.stringify(listingPageLinks(page.html, page.finalUrl))}`,
+        pageText: `Listing identity from the result card (page data): ${JSON.stringify({ title: posting.title, company: posting.company, url: posting.canonicalUrl })}\n\n${listingPageText(page.html)}\n\nPublished JobPosting facts (page data): ${JSON.stringify(structured)}\n\nPage links:\n${JSON.stringify(listingPageLinks(page.html, page.finalUrl))}`,
         maxJobs: 1,
         ...(input.signal ? { signal: input.signal } : {}),
       });

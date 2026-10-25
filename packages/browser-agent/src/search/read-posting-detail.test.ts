@@ -62,7 +62,7 @@ test("the model reads plain listing text with the card's employer and returns th
     posting,
     readPage: () =>
       Promise.resolve({
-        html: `<title>Board brand</title><h1>Backend Engineer</h1><p>${description}</p>`,
+        html: `<title>Board brand</title><script type="application/ld+json">${JSON.stringify({"@type":"JobPosting",title:posting.title,description:"Build APIs."})}</script><h1>Backend Engineer</h1><p>${description}</p>`,
         finalUrl: posting.canonicalUrl,
       }),
     extractor: { extractJobsFromPage },
@@ -71,6 +71,7 @@ test("the model reads plain listing text with the card's employer and returns th
   expect(full.company).toBe("Willow House");
   expect(extractJobsFromPage).toHaveBeenCalledTimes(1);
   expect(requestedText).toContain('"company":"Willow House"');
+  expect(requestedText).toContain("Benefits: flexible hours.");
 });
 
 test("a failed full read cannot masquerade as a complete description", async () => {

@@ -7,12 +7,10 @@ import type {
  * Reads the body of a job listing out of its own page HTML, without a browser.
  *
  * Source-generic on purpose (ADR 0007): the reader knows schema.org, Open
- * Graph, and ordinary HTML, never a board. Most job pages carry a full
- * `JobPosting` record as JSON-LD in the initial HTML because search engines
- * require it; that record is the same data a card-only scan never saw
- * (description, pay, location, posting date). When a page has no record, the
- * model reads the page's text instead (ADR 0041); this module only turns that
- * page into text and never decides what the posting says.
+ * Graph, and ordinary HTML, never a board. A published `JobPosting` record
+ * can omit requirements that appear elsewhere on the page. This reader
+ * preserves the published facts; the workflow also reads visible listing
+ * text before treating the description as complete.
  */
 
 /**
