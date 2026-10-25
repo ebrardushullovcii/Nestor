@@ -28,23 +28,12 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ApplicationRecord,
-  BrowserSessionState,
-  ResumeSourceDocument,
-  ReviewQueueItem,
-} from "@nestor/contracts";
+import type { ApplicationRecord } from "@nestor/contracts";
 import { ApplicationRecordSchema } from "@nestor/contracts";
 import { ApplicationsScreen } from "./applications/applications-screen";
-import { ReviewQueueScreen } from "./review-queue/review-queue-screen";
-import {
-  DISCOVERY_DETAIL_REGION_ID,
-  revealDiscoveryDetailAfterPointerSelection,
-} from "./discovery/discovery-accessibility";
-import type { TailoredDraftPreparationViewState } from "./review-queue/review-queue-status";
 
 const SCREENS_DIR = dirname(fileURLToPath(import.meta.url));
 const FEATURE_DIR = join(SCREENS_DIR, "..");
@@ -54,7 +43,7 @@ const SCROLL_REGION_MARKER = "data-locked-pane-scroll-region";
 const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
   profile: "screens/profile-screen.tsx",
   discovery: "screens/discovery/discovery-screen.tsx",
-  "review-queue": "screens/review-queue/review-queue-screen.tsx",
+  "review-queue": "../shortlisted/shortlisted-screen.tsx",
   applications: "screens/applications/applications-screen.tsx",
 };
 
@@ -63,7 +52,6 @@ const ROUTE_OWNERSHIP: readonly (readonly [string, string])[] = [
   ["screens/profile-screen.tsx", "profile"],
   ["components/profile/", "profile"],
   ["screens/discovery/", "discovery"],
-  ["screens/review-queue/", "review-queue"],
   ["screens/applications/", "applications"],
 ];
 
@@ -186,22 +174,6 @@ function stubStackedViewport(): void {
   );
 }
 
-function spyOnScrollIntoView(elementId: string): ReturnType<typeof vi.fn> {
-  const element = document.getElementById(elementId);
-
-  if (!element) {
-    throw new Error(`No element with id "${elementId}" was rendered`);
-  }
-
-  const scrollIntoView = vi.fn();
-  Object.defineProperty(element, "scrollIntoView", {
-    configurable: true,
-    value: scrollIntoView,
-  });
-
-  return scrollIntoView;
-}
-
 function createTrackedApplication(): ApplicationRecord {
   return ApplicationRecordSchema.parse({
     id: "application_beta",
@@ -258,91 +230,6 @@ function renderApplicationsScreen(
   );
 
   return record;
-}
-
-function createQueueItem(jobId: string): ReviewQueueItem {
-  return {
-    jobId,
-    title: `Role ${jobId}`,
-    company: "Acme",
-    location: "Remote",
-    matchScore: 80,
-    applicationStatus: "shortlisted",
-    assetStatus: "not_started",
-    progressPercent: null,
-    resumeAssetId: null,
-    resumeApplicationMode: "tailored_per_job",
-    resumeReview: { status: "not_started" },
-    updatedAt: "2026-08-20T00:00:00.000Z",
-  };
-}
-
-function createIdleDraftPreparation(): TailoredDraftPreparationViewState {
-  return {
-    attemptedCount: 0,
-    completedCount: 0,
-    currentIndex: null,
-    eligibleRemainingCount: 0,
-    failedCount: 0,
-    status: "idle",
-    totalCount: 0,
-  };
-}
-
-function renderReviewQueueScreen(
-  onSelectItem: (jobId: string) => void,
-): readonly ReviewQueueItem[] {
-  const queue = [createQueueItem("job_a"), createQueueItem("job_b")];
-
-  render(
-    <MemoryRouter>
-      <ReviewQueueScreen
-        actionState={{ message: null }}
-        applicationRecords={[]}
-        browserSession={
-          {
-            source: "user",
-            status: "unknown",
-            driver: "catalog_seed",
-            label: "Browser",
-            detail: null,
-            lastCheckedAt: "2026-08-20T00:00:00.000Z",
-          } as unknown as BrowserSessionState
-        }
-        campaignId="campaign_1"
-        draftPreparation={createIdleDraftPreparation()}
-        isApplyPending={false}
-        isJobPending={() => false}
-        onEditResumeWorkspace={vi.fn()}
-        onGenerateResume={vi.fn(() => Promise.resolve(true))}
-        onOpenBrowserSession={vi.fn()}
-        onOpenJobDetails={vi.fn()}
-        onOpenProfile={vi.fn()}
-        onPrepareTailoredDrafts={vi.fn()}
-        onRemoveReviewJob={vi.fn()}
-        onSelectItem={onSelectItem}
-        onSetJobResumeApplicationMode={vi.fn()}
-        onStartApplyCopilot={vi.fn()}
-        onStartAutoApplyQueue={vi.fn(() =>
-          Promise.resolve({ status: "confirmed" as const }),
-        )}
-        onStopTailoredDraftPreparation={vi.fn()}
-        originalResume={
-          {
-            id: "resume_base",
-            fileName: "base-resume.pdf",
-            uploadedAt: "2026-08-20T00:00:00.000Z",
-          } as unknown as ResumeSourceDocument
-        }
-        queue={queue}
-        selectedAsset={null}
-        selectedItem={queue[0] ?? null}
-        selectedJob={null}
-      />
-    </MemoryRouter>,
-  );
-
-  return queue;
 }
 
 describe("locked route bounds", () => {
@@ -427,89 +314,5 @@ describe("locked route bounds", () => {
     for (const region of regions) {
       expect(lockedContent?.contains(region)).toBe(true);
     }
-  });
-
-  it("reveals the stacked detail region on selection for Find jobs, Shortlisted and Applications", async () => {
-    // Find jobs — the shared helper its result rows call on pointer selection.
-    stubStackedViewport();
-    const discoveryRegion = document.createElement("div");
-    discoveryRegion.id = DISCOVERY_DETAIL_REGION_ID;
-    document.body.append(discoveryRegion);
-    const discoveryScrollIntoView = spyOnScrollIntoView(
-      DISCOVERY_DETAIL_REGION_ID,
-    );
-
-    revealDiscoveryDetailAfterPointerSelection();
-    await Promise.resolve();
-
-    expect(discoveryScrollIntoView).toHaveBeenCalledWith({ block: "start" });
-    expect(
-      readFeatureSource("screens/discovery/discovery-results-panel.tsx"),
-    ).toContain("revealDiscoveryDetailAfterPointerSelection()");
-    discoveryRegion.remove();
-
-    // Applications.
-    const onSelectRecord = vi.fn();
-    const record = renderApplicationsScreen(onSelectRecord);
-    const applicationsScrollIntoView = spyOnScrollIntoView(
-      "applications-detail-content",
-    );
-
-    fireEvent.click(
-      document.querySelector(
-        `[data-collection-item-id="${record.id}"]`,
-      ) as HTMLElement,
-    );
-
-    expect(onSelectRecord).toHaveBeenCalledWith(record.id);
-    expect(applicationsScrollIntoView).toHaveBeenCalledWith({
-      block: "start",
-    });
-    cleanup();
-
-    // Shortlisted.
-    const onSelectItem = vi.fn();
-    const queue = renderReviewQueueScreen(onSelectItem);
-    const reviewQueueScrollIntoView = spyOnScrollIntoView(
-      "review-queue-workspace-panel",
-    );
-
-    fireEvent.click(
-      document.querySelector(
-        `[data-collection-item-id="${queue[1]?.jobId}"]`,
-      ) as HTMLElement,
-    );
-
-    expect(onSelectItem).toHaveBeenCalledWith(queue[1]?.jobId);
-    expect(reviewQueueScrollIntoView).toHaveBeenCalledWith({ block: "start" });
-  });
-
-  it("does not reveal the stacked detail region at two-pane widths", () => {
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((query: string) => ({
-        matches: /min-width:\s*1280px/.test(query),
-        media: query,
-      })),
-    );
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      vi.fn((callback: FrameRequestCallback) => {
-        callback(0);
-        return 1;
-      }),
-    );
-
-    const queue = renderReviewQueueScreen(vi.fn());
-    const scrollIntoView = spyOnScrollIntoView("review-queue-workspace-panel");
-
-    fireEvent.click(
-      document.querySelector(
-        `[data-collection-item-id="${queue[1]?.jobId}"]`,
-      ) as HTMLElement,
-    );
-
-    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

@@ -785,7 +785,7 @@ export const openInAppTool = defineTool({
       ? `/job-finder/applications?${input.screen === "tracker" ? "view=tracker&" : ""}applicationRecordId=${encodeURIComponent(input.applicationRecordId)}`
       : input.jobId
         ? input.resume
-          ? `/job-finder/review-queue/${encodeURIComponent(input.jobId)}/resume`
+          ? `/job-finder/review-queue?jobId=${encodeURIComponent(input.jobId)}`
           : `/job-finder/discovery?jobId=${encodeURIComponent(input.jobId)}`
         : input.screen === "profile" && input.section
           ? `${APP_ROUTES.profile}?section=${input.section}`

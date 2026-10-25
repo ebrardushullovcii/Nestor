@@ -12,11 +12,7 @@ import {
 const FORBIDDEN_MORALIZING =
   /\b(lie|lies|lying|liar|dishonest|unethical|fraud)\b/i;
 
-const AGGRESSIVE_COPY_SURFACES = [
-  "./profile-tailoring-copy.ts",
-  "../../screens/review-queue/resume-claim-confirmation-panel.tsx",
-  "../../screens/review-queue/resume-workspace-editor-panel.tsx",
-] as const;
+const AGGRESSIVE_COPY_SURFACES = ["./profile-tailoring-copy.ts"] as const;
 
 describe("aggressive tailoring user copy", () => {
   it("states the first-interview purpose without calling the stretches lies", () => {

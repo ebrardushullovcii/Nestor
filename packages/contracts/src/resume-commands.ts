@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { JobIdSchema, JobListQuerySchema, type JobDetail } from "./jobs";
+import type { ResumeTemplateId } from "./base";
 import { ResumeDraftSchema } from "./resume";
 import {
   ResumeLevelSchema,
@@ -76,7 +77,12 @@ export interface ShortlistedPage {
 
 export interface ResumeCommandOutputs {
   list_shortlisted: ShortlistedPage;
-  get_resume: { job: JobDetail; resume: StoredResume | null };
+  get_resume: {
+    job: JobDetail;
+    resume: StoredResume | null;
+    /** The templates a resume can use, by id and name. */
+    templates: { id: ResumeTemplateId; label: string }[];
+  };
   save_resume: StoredResume;
   set_resume_level: StoredResume;
   undo_resume_level: StoredResume;

@@ -1,4 +1,4 @@
-import { buildResumeWorkspaceRoute } from "../../lib/resume-workspace-route";
+import { buildShortlistedJobRoute } from "../../lib/resume-workspace-route";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
@@ -393,42 +393,6 @@ describe("buildJobSearchHomeModel · while something runs", () => {
     expect(model.next.id).toBe("wait_search");
   });
 
-  it("shows resume writing with a stop, and never recommends creating the same resumes again", () => {
-    const ws = withShortlist(withJobs(workspace(), 3), [
-      queueItem("job_0", { assetStatus: "generating" }),
-      queueItem("job_1"),
-      queueItem("job_2"),
-    ]);
-    const tasks = buildJobFinderTaskCenterModel({
-      workspace: ws,
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-      tailoredDraftPreparation: {
-        attemptedCount: 1,
-        completedCount: 0,
-        currentIndex: 1,
-        eligibleRemainingCount: 0,
-        failedCount: 0,
-        status: "running",
-        totalCount: 3,
-      },
-      now: NOW,
-    });
-    const model = build(ws, { tasks });
-    expect(model.now[0]).toMatchObject({
-      title: "Writing resumes",
-      stop: { action: { kind: "stop_resumes" } },
-    });
-    expect(model.next.id).toBe("wait_resumes");
-    expect(model.stages?.[1]).toMatchObject({
-      label: "Shortlisted",
-      count: 3,
-      // The running batch writes the two not started yet; they are not
-      // waiting on the person.
-      detail: "2 need a resume · 1 being written",
-    });
-  });
-
   it("shows an application run with Stop and says nothing is needed", () => {
     const ws = withShortlist(withJobs(workspace(), 1), [
       queueItem("job_0", {
@@ -757,27 +721,6 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
   });
 
-  it("offers to create the missing resumes in place", () => {
-    const ws = withShortlist(withJobs(workspace(), 5), [
-      queueItem("job_0"),
-      queueItem("job_1"),
-      queueItem("job_2"),
-    ]);
-    const model = build(ws);
-    expect(model.next).toMatchObject({
-      id: "create_resumes",
-      title: "Create 3 resumes",
-      primary: {
-        label: "Create 3 resumes",
-        action: { kind: "create_resumes" },
-      },
-    });
-    expect(model.stages?.[1]).toMatchObject({
-      count: 3,
-      detail: "3 need a resume",
-    });
-  });
-
   it("offers Apply to all once the resumes are ready, in the mode from Settings", () => {
     const ready = (id: string) =>
       queueItem(id, {
@@ -835,7 +778,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         label: "Review the resume",
         action: {
           kind: "navigate",
-          route: "/job-finder/review-queue/job_0/resume",
+          route: "/job-finder/review-queue?jobId=job_0",
         },
       },
     });
@@ -876,7 +819,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         label: "Review the resume",
         action: {
           kind: "navigate",
-          route: "/job-finder/review-queue/job_0/resume",
+          route: "/job-finder/review-queue?jobId=job_0",
         },
       },
     });
@@ -893,83 +836,6 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     expect(apply?.action).toEqual({
       kind: "apply_all",
       jobIds: ["job_1", "job_2"],
-    });
-  });
-
-  it("keeps Create and Apply one press away beside an Aggressive review", () => {
-    const ws = withShortlist(withJobs(workspace(), 3), [
-      queueItem("job_0", {
-        assetStatus: "ready",
-        resumeAssetId: "asset-0",
-        resumeTailoringMode: "aggressive",
-        resumeReview: {
-          status: "needs_review",
-        } as ReviewQueueItem["resumeReview"],
-      }),
-      queueItem("job_1"),
-      queueItem("job_2", {
-        assetStatus: "ready",
-        resumeAssetId: "asset-2",
-        resumeReview: { status: "approved" } as ReviewQueueItem["resumeReview"],
-      }),
-    ]);
-    const model = build(ws);
-    expect(model.next).toMatchObject({
-      id: "review_resumes",
-      title: "Review the resume",
-    });
-    expect(
-      model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Create the missing resume", "Apply to 1 ready job"]);
-  });
-
-  it("leads with Create when most shortlisted jobs still need a resume, with Apply beside it", () => {
-    const ws = withShortlist(withJobs(workspace(), 5), [
-      queueItem("job_0", {
-        assetStatus: "ready",
-        resumeAssetId: "asset-0",
-        resumeReview: { status: "approved" } as ReviewQueueItem["resumeReview"],
-      }),
-      queueItem("job_1"),
-      queueItem("job_2"),
-      queueItem("job_3"),
-      queueItem("job_4"),
-    ]);
-    const model = build(ws);
-    expect(model.next).toMatchObject({
-      id: "create_resumes",
-      title: "Create 4 resumes",
-      primary: {
-        label: "Create 4 resumes",
-        action: { kind: "create_resumes" },
-      },
-    });
-    expect(model.next.secondary[0]).toMatchObject({
-      label: "Apply to 1 ready job",
-      action: { kind: "apply_all", jobIds: ["job_0"] },
-    });
-  });
-
-  it("keeps Apply first when most jobs are ready, with Create in place beside it", () => {
-    const ready = (id: string) =>
-      queueItem(id, {
-        assetStatus: "ready",
-        resumeAssetId: `asset-${id}`,
-        resumeReview: { status: "approved" } as ReviewQueueItem["resumeReview"],
-      });
-    const ws = withShortlist(withJobs(workspace(), 3), [
-      ready("job_0"),
-      ready("job_1"),
-      queueItem("job_2"),
-    ]);
-    const model = build(ws);
-    expect(model.next).toMatchObject({
-      id: "apply",
-      title: "Apply to 2 ready jobs",
-    });
-    expect(model.next.secondary[0]).toMatchObject({
-      label: "Create the missing resume",
-      action: { kind: "create_resumes" },
     });
   });
 
@@ -1856,42 +1722,6 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     expect(model.stages?.[0]?.detail).toBe("+ 3 weaker");
   });
 
-
-  it("keeps waiting for a writing batch and offers the ready ones as a second press", () => {
-    const ws = withShortlist(withJobs(workspace(), 3), [
-      readyItem("job_0"),
-      queueItem("job_1", { assetStatus: "generating" }),
-      queueItem("job_2"),
-    ]);
-    const tasks = buildJobFinderTaskCenterModel({
-      workspace: ws,
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-      tailoredDraftPreparation: {
-        attemptedCount: 2,
-        completedCount: 1,
-        currentIndex: 2,
-        eligibleRemainingCount: 0,
-        failedCount: 0,
-        status: "running",
-        totalCount: 3,
-      },
-      now: NOW,
-    });
-    const model = build(ws, { tasks });
-    expect(model.next.id).toBe("wait_resumes");
-    expect(model.next.detail).toContain("1 is ready so far");
-    expect(model.next.secondary).toEqual([
-      {
-        label: "Apply to the ready one now",
-        action: { kind: "apply_all", jobIds: ["job_0"] },
-      },
-    ]);
-    expect(model.stages?.[1]?.detail).toBe(
-      "1 need a resume · 1 being written · 1 ready to apply",
-    );
-  });
-
   it("keeps Needs you one press away while work is paused", () => {
     const ws = workspace();
     ws.activityControl = {
@@ -1927,9 +1757,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
   });
 
   it("names the count on a partial retry offered beside another card", () => {
-    const ws = withShortlist(withJobs(workspace(), 4), [
-      readyItem("job_0"),
-    ]);
+    const ws = withShortlist(withJobs(workspace(), 4), [readyItem("job_0")]);
     ws.applicationRecords = [
       {
         id: "record-job_0",
@@ -2332,54 +2160,12 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
       title: "Review 2 resumes",
       primary: {
         label: "Start reviewing",
-        action: { kind: "navigate", route: buildResumeWorkspaceRoute("job_1") },
+        action: { kind: "navigate", route: buildShortlistedJobRoute("job_1") },
       },
     });
     expect(model.next.also?.map((line) => line.id)).toEqual(["check_closed"]);
     expect(model.next.also?.[0]?.link?.label).toBe("Open Applications");
   });
-});
-it("separates untouched jobs, queued drafts and active writers in a ten-job batch", () => {
-  const ws = withShortlist(
-    withJobs(workspace(), 32),
-    Array.from({ length: 32 }, (_, index) =>
-      queueItem(
-        `job_${index}`,
-        index < 8
-          ? {
-              assetStatus: "ready",
-              resumeAssetId: `asset_${index}`,
-              resumeReview: { status: "needs_review" },
-            }
-          : {},
-      ),
-    ),
-  );
-  ws.intelligence.resumeBatchCheckpoint = {
-    id: "batch",
-    jobIds: Array.from({ length: 10 }, (_, index) => `job_${index + 2}`),
-    activeJobIds: ["job_8", "job_9"],
-    completedJobIds: Array.from(
-      { length: 6 },
-      (_, index) => `job_${index + 2}`,
-    ),
-    done: false,
-    stopRequested: false,
-  };
-  const model = build(ws, {
-    tailoredDraftPreparation: {
-      status: "running",
-      totalCount: 10,
-      attemptedCount: 8,
-      completedCount: 6,
-      failedCount: 0,
-      eligibleRemainingCount: 20,
-      currentIndex: 8,
-    },
-  });
-  expect(
-    model.stages?.find((stage) => stage.label === "Shortlisted")?.detail,
-  ).toContain("20 need a resume · 2 queued · 2 being written");
 });
 
 it("Home counts the selected plan's sources rather than every saved source", () => {

@@ -46,8 +46,7 @@ export const ROUTE_SKELETON_PANES_BY_PATH: ReadonlyArray<{
   // Profile is locked but single-column: section tabs above one editor column.
   { panes: 1, path: "/job-finder/profile" },
   // Find jobs, Shortlisted and Applications are all `xl:grid-cols-[…_…]` list
-  // + detail. The Studio lives under `/job-finder/review-queue/…` and is a
-  // two-pane preview + tools grid, so the same prefix answers for both.
+  // + detail.
   { panes: 2, path: "/job-finder/discovery" },
   { panes: 2, path: "/job-finder/review-queue" },
   { panes: 2, path: "/job-finder/applications" },

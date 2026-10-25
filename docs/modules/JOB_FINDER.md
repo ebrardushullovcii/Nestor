@@ -15,7 +15,7 @@ Owns profile, resume import, discovery, source-debug, resumes, applications, and
 - Never persist a paged or stale saved-job collection through a destructive replacement API; ordinary mutations use the row-local repository commit.
 - Employer exclusion is exact-name, previewed, atomic, and reversible. Domain evidence may corroborate identity but never becomes a domain-wide exclusion.
 - Application documents fail closed on stale question/application lineage.
-- Every covering surface (dialogs, menus, palettes) registers through `useJobFinderOverlayOwnership` so one Escape closes only the topmost layer. The Resume Studio preview iframe stays outside that registry on purpose.
+- Every covering surface (dialogs, menus, palettes) registers through `useJobFinderOverlayOwnership` so one Escape closes only the topmost layer. The resume preview is an inert iframe outside that registry, so keys like Ctrl+Enter stay with the screen.
 - One assistant serves every Job Finder screen from the right-hand sidebar (ADR 0037). It opens only when asked. Asked-for edits apply with a per-change Undo and never overwrite unsaved typing; suggestions stay proposals. It works in the browser only in the tab lent to it (ADR 0038). New visible actions need an entry in `packages/job-finder/src/assistant/action-inventory.ts` and a tool, or a stated exclusion.
 - Resume rewrites stay grounded: only Aggressive may go past the saved evidence, through ADR 0018's two user-owned relaxations, which choosing Aggressive accepts (ADR 0051). The writer decides what each resume shows and settles lines it cannot back; nothing is approved, queued, or sent without the person's press or their written instruction to the assistant (ADR 0039).
 

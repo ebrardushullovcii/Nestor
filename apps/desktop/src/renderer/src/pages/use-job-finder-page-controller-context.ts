@@ -34,7 +34,6 @@ import {
   getDiscoveryRunReportCounts,
   hasDiscoveryRunReportCounts,
 } from "@renderer/features/job-finder/lib/discovery-run-count-label";
-import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import type {
   PendingActionScope,
@@ -143,14 +142,7 @@ type BuildJobFinderPageContextArgs = {
   setSelectedApplicationRecordId: (recordId: string) => void;
   setSelectedDiscoveryJobId: (jobId: string) => void;
   setSelectedReviewJobId: (jobId: string) => void;
-  setTailoredDraftPreparation: Dispatch<
-    SetStateAction<TailoredDraftPreparationViewState>
-  >;
   sourceDebugRunIdRef: MutableRefObject<number>;
-  tailoredDraftPreparation: TailoredDraftPreparationViewState;
-  tailoredDraftPreparationRunRef: MutableRefObject<boolean>;
-  tailoredDraftPreparationStopRequestedRef: MutableRefObject<boolean>;
-  tailoredDraftPreparationDisposedRef: MutableRefObject<boolean>;
   workspace: JobFinderRendererWorkspaceSnapshot;
 };
 
@@ -160,8 +152,6 @@ export function buildJobFinderPageContext(
   const {
     actionState,
     actions,
-    activeRouteResumeAssistantMessages,
-    activeRouteResumeAssistantPending,
     activeRouteResumeWorkspace,
     canImportResume,
     confirmLeaveDirtyResumeWorkspace,
@@ -211,25 +201,14 @@ export function buildJobFinderPageContext(
     onSettingsDraftEdited,
     onProfileSurfaceDraftEdited,
     onCancelImportResume,
-    onResumeWorkspaceDraftEdited,
     setSelectedApplicationRecordId,
     setSelectedDiscoveryJobId,
     setSelectedReviewJobId,
-    setTailoredDraftPreparation,
     sourceDebugRunIdRef,
-    tailoredDraftPreparation,
-    tailoredDraftPreparationRunRef,
-    tailoredDraftPreparationStopRequestedRef,
-    tailoredDraftPreparationDisposedRef,
     workspace,
   } = args;
 
-  const {
-    runAction,
-    runResumeWorkspaceAction,
-    runSaveAction,
-    withPendingScope,
-  } = createActionRunners({
+  const { runAction, runSaveAction, withPendingScope } = createActionRunners({
     saveCoordinator,
     setActionState,
     setPendingActionState,
@@ -252,7 +231,6 @@ export function buildJobFinderPageContext(
     adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
-    runResumeWorkspaceAction,
     runSaveAction,
     saveCoordinator,
     withPendingScope,
@@ -269,11 +247,7 @@ export function buildJobFinderPageContext(
     clearResumeWorkspaceState,
     setResumeWorkspaceDirty,
     setSelectedReviewJobId,
-    setTailoredDraftPreparation,
     sourceDebugRunIdRef,
-    tailoredDraftPreparationRunRef,
-    tailoredDraftPreparationStopRequestedRef,
-    tailoredDraftPreparationDisposedRef,
     latestWorkspaceRef,
     workspace,
   });
@@ -334,21 +308,12 @@ export function buildJobFinderPageContext(
           ),
         },
       ),
-    tailoredDraftPreparation,
     onApplyResumeTimelineRepairAction: async (runId, proposalId, action) => {
       await actions.applyResumeTimelineRepairAction(runId, proposalId, action);
     },
     onGetApplyRunDetails: actions.getApplyRunDetails,
     onSaveApplicationAnswer: actions.saveApplicationAnswer,
     onClearApplicationAnswer: actions.clearApplicationAnswer,
-    // The confirmation mutates the saved draft; the studio reads the resume
-    // workspace, not the general snapshot, so refresh it or the approved row
-    // only changes after a reload.
-    onSetResumeClaimConfirmation: async (input) => {
-      const snapshot = await actions.setResumeClaimConfirmation(input);
-      await refreshResumeWorkspace(input.jobId);
-      return snapshot;
-    },
     onExportApplicationPacket: async (input) => {
       await runAction(
         () => actions.exportApplicationPacket(input),
@@ -529,7 +494,6 @@ export function buildJobFinderPageContext(
         },
       );
     },
-    onPreviewResumeDraft: actions.previewResumeDraft,
     onSaveCampaign: (campaign: SaveJobSearchCampaignInput) =>
       runAction(
         () => actions.saveCampaign(campaign),
@@ -669,8 +633,6 @@ export function buildJobFinderPageContext(
         },
       );
     },
-    onResumeWorkspaceDirtyChange: setResumeWorkspaceDirty,
-    onResumeWorkspaceDraftEdited,
     onSelectApplicationRecord: setSelectedApplicationRecordId,
     onSelectCampaign: (campaignId: string) =>
       confirmLeaveDirtyResumeWorkspace("switch search plans").then(
@@ -698,9 +660,6 @@ export function buildJobFinderPageContext(
     selectedReviewItem,
     selectedReviewJob,
     selectedTailoredAsset,
-    resumeAssistantMessages: activeRouteResumeAssistantMessages,
-    resumeAssistantPending: activeRouteResumeAssistantPending,
-    resumeWorkspace: activeRouteResumeWorkspace,
     workspace,
   };
 }

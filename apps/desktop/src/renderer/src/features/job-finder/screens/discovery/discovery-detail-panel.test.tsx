@@ -502,53 +502,6 @@ describe("DiscoveryDetailPanel", () => {
     expect(getByRole("status")).toBeTruthy();
   });
 
-  it("reads the readiness Shortlisted computed instead of deriving its own", () => {
-    // The stored job status still says the resume is waiting for review while
-    // Shortlisted already approved it; one value has to win, and it is the
-    // Shortlisted one.
-    const selectedJob = createSelectedJob({
-      id: "job_ready",
-      status: "ready_for_review",
-    });
-
-    render(
-      <MemoryRouter>
-        <DiscoveryDetailPanel
-          discoveryTargets={[]}
-          isJobPending={() => false}
-          onDismissJob={vi.fn()}
-          onQueueJob={vi.fn()}
-          reviewQueue={[
-            {
-              jobId: "job_ready",
-              title: "Office Administrative Assistant",
-              company: "Cardinal Field Services",
-              location: "Remote",
-              matchScore: 80,
-              applicationStatus: "ready_for_review",
-              assetStatus: "ready",
-              progressPercent: null,
-              resumeAssetId: "asset_ready",
-              resumeApplicationMode: "tailored_per_job",
-              resumeReview: {
-                status: "approved",
-                approvedAt: "2026-08-20T00:00:00.000Z",
-                approvedExportId: "export_ready",
-                approvedFormat: "pdf",
-                approvedFilePath: "C:/exports/ready.pdf",
-              },
-              updatedAt: "2026-08-20T00:00:00.000Z",
-            },
-          ]}
-          selectedJob={selectedJob}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByText("Resume needs review")).toBeNull();
-    expect(screen.getByText("Ready to apply")).toBeTruthy();
-  });
-
   it("confirms the exact job identity after a shortlist outcome", () => {
     const selectedJob = createSelectedJob({
       id: "job_office",
@@ -1796,9 +1749,7 @@ describe("requested listing assessment", () => {
         />
       </MemoryRouter>,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Judge fit" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Judge fit" }));
     await waitFor(() =>
       expect(
         screen.getByText(
@@ -1926,9 +1877,9 @@ it("puts the verdict, the deciding facts and the triage actions above the listin
   const summary = screen.getByTestId("discovery-detail-primary-action");
   const verdict = screen.getByTestId("discovery-detail-verdict");
   expect(summary.contains(verdict)).toBe(true);
-  expect(summary.contains(screen.getByTestId("discovery-detail-key-facts"))).toBe(
-    true,
-  );
+  expect(
+    summary.contains(screen.getByTestId("discovery-detail-key-facts")),
+  ).toBe(true);
   // One verdict, at the top: the scroll area does not repeat it.
   expect(screen.getAllByTestId("discovery-detail-why-it-fits")).toHaveLength(1);
   expect(
@@ -1945,9 +1896,9 @@ it("puts the verdict, the deciding facts and the triage actions above the listin
   expect(onNotInterested).toHaveBeenCalledTimes(1);
   expect(onSkip).toHaveBeenCalledTimes(1);
   // Not interested is offered once; the form below adds only the employer.
-  expect(screen.getAllByRole("button", { name: /Not interested/ })).toHaveLength(
-    1,
-  );
+  expect(
+    screen.getAllByRole("button", { name: /Not interested/ }),
+  ).toHaveLength(1);
   expect(
     screen.getByRole("button", { name: "Hide this employer…" }),
   ).toBeTruthy();

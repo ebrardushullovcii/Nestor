@@ -55,10 +55,9 @@ import {
   countTailoredDraftPreparationEligible,
   isQueueStageReady,
   isTailoredDraftPreparationEligible,
-  type TailoredDraftPreparationViewState,
   needsPersonResumeReview,
-} from "../review-queue/review-queue-status";
-import { buildResumeWorkspaceRoute } from "../../lib/resume-workspace-route";
+} from "../../lib/review-queue-status";
+import { buildShortlistedJobRoute } from "../../lib/resume-workspace-route";
 import {
   describeApplyQueue,
   isApplyQueueOngoing,
@@ -83,7 +82,6 @@ import {
 export type HomeAction =
   | { kind: "navigate"; route: string }
   | { kind: "run_search"; request?: JobFinderSearchRequest }
-  | { kind: "create_resumes" }
   | { kind: "resume_setup"; step: ProfileSetupStep }
   | { kind: "apply_all"; jobIds: readonly string[] }
   /** Job Finder presses Send on each filled-in form (Send for me). */
@@ -91,7 +89,6 @@ export type HomeAction =
   | { kind: "stop_search"; runId: string }
   | { kind: "stop_apply"; runId: string }
   | { kind: "apply_queue"; action: ApplyQueueControlAction }
-  | { kind: "stop_resumes" }
   | { kind: "pause_activity" }
   | { kind: "resume_activity" };
 
@@ -112,7 +109,6 @@ interface HomeNextStep {
     | "check_closed"
     | "review_resumes"
     | "apply"
-    | "create_resumes"
     | "wait_search"
     | "wait_resumes"
     | "wait_apply"
@@ -201,10 +197,6 @@ export interface HomeFindJobsCounts {
 export interface BuildJobSearchHomeModelInput {
   workspace: JobFinderRendererWorkspaceSnapshot;
   tasks: JobFinderTaskCenterModel;
-  tailoredDraftPreparation?:
-    | TailoredDraftPreparationViewState
-    | null
-    | undefined;
   /** A search request is in flight but the run has not been recorded yet. */
   discoveryRunPending: boolean;
   /**
@@ -842,28 +834,6 @@ function buildNowItem(
           action: { kind: "navigate", route: discoveryRoute },
         },
       };
-    case "tailored_drafts":
-      return {
-        id: item.id,
-        title: item.canCancel ? "Writing resumes" : "Stopping resumes",
-        detail:
-          joinParts([
-            item.countLabel,
-            item.canCancel
-              ? "up to two at once"
-              : "finishing the ones already started",
-          ]) ?? "",
-        stop: item.canCancel
-          ? {
-              label: "Stop new resumes",
-              action: { kind: "stop_resumes" },
-            }
-          : null,
-        open: {
-          label: "Open Shortlisted",
-          action: { kind: "navigate", route: reviewQueueRoute },
-        },
-      };
     case "apply": {
       const waitingForTab =
         item.status !== "paused" &&
@@ -1046,8 +1016,9 @@ export function buildJobSearchHomeModel(
       .filter((item): item is HomeNowItem => item !== null),
   ];
   const searchRunning = hasDiscoveryNow || input.discoveryRunPending;
-  const resumesWriting = tasks.items.some(
-    (item) => item.kind === "tailored_drafts" && item.status === "active",
+  const resumesWriting = queue.some(
+    (item) =>
+      item.assetStatus === "generating" || item.assetStatus === "queued",
   );
   const applyRunning =
     isApplyQueueOngoing(workspace.applyQueue) ||
@@ -1077,34 +1048,10 @@ export function buildJobSearchHomeModel(
     input.findJobsCounts?.weaker ?? countDiscoveryWeakerJobs(workspace, jobIds);
   const shortlisted = countShortlistedJobs(workspace, jobIds);
   const shortlist = countShortlist(queue, workspace);
-  const resumeBatch =
-    input.tailoredDraftPreparation?.status === "running"
-      ? input.tailoredDraftPreparation
-      : null;
-  const resumeBatchJobIds = new Set(
-    resumeBatch && !workspace.intelligence.resumeBatchCheckpoint?.done
-      ? workspace.intelligence.resumeBatchCheckpoint?.jobIds
-      : [],
-  );
-  const untouchedResumes =
-    resumeBatchJobIds.size > 0
-      ? countTailoredDraftPreparationEligible(
-          queue.filter((item) => !resumeBatchJobIds.has(item.jobId)),
-          collectPreparedApplicationJobIds(workspace.applicationRecords),
-        )
-      : shortlist.missingResumes;
-  const activeResumes = resumeBatch
-    ? Math.max(
-        0,
-        resumeBatch.attemptedCount -
-          resumeBatch.completedCount -
-          resumeBatch.failedCount,
-      )
-    : shortlist.writing;
-  const queuedResumes =
-    resumeBatch && !resumeBatch.stopRequested
-      ? Math.max(0, resumeBatch.totalCount - resumeBatch.attemptedCount)
-      : 0;
+  // Resumes write themselves on shortlist; nothing waits for a batch.
+  const untouchedResumes = shortlist.missingResumes;
+  const activeResumes = shortlist.writing;
+  const queuedResumes = 0;
   const applicationCount = countApplicationRecords(workspace, jobIds);
   const applications = countApplications(
     workspace,
@@ -1349,28 +1296,6 @@ export function buildJobSearchHomeModel(
           };
         })()
       : null;
-  const createNext: HomeNextStep | null =
-    shortlist.missingResumes > 0 && !resumesWriting
-      ? {
-          id: "create_resumes",
-          title: `Create ${plural(shortlist.missingResumes, "resume")}`,
-          detail:
-            "Written two at a time while you wait. To change a job's resume level first, open Shortlisted.",
-          primary: {
-            label:
-              shortlist.missingResumes === 1
-                ? "Create the missing resume"
-                : `Create ${shortlist.missingResumes} resumes`,
-            action: { kind: "create_resumes" },
-          },
-          secondary: [
-            {
-              label: "Open Shortlisted",
-              action: { kind: "navigate", route: reviewQueueRoute },
-            },
-          ],
-        }
-      : null;
   // While a batch of resumes is being written, applying waits for it (one
   // press for all instead of one now and another later).
   // Send for me covers forms filled in before the person chose it: the agent
@@ -1412,7 +1337,6 @@ export function buildJobSearchHomeModel(
     sendNext,
     retryNext,
     resumesWriting ? null : applyNext,
-    createNext,
   ].find((candidate) => candidate !== null);
   // As a second button on another card the title is not there to say how
   // many, so the label carries the count ("Try again" alone beside "Send 5
@@ -1507,8 +1431,8 @@ export function buildJobSearchHomeModel(
   } else if (setupIncomplete) {
     next = setupFresh
       ? {
-      id: "setup",
-      title: "Set up your profile",
+          id: "setup",
+          title: "Set up your profile",
           detail:
             "Import your resume and tell Job Finder what you're looking for. Takes about five minutes.",
           primary: {
@@ -1516,7 +1440,8 @@ export function buildJobSearchHomeModel(
             action: { kind: "navigate", route: profileSetupRoute },
           },
           secondary: [],
-        }: {
+        }
+      : {
           id: "setup",
           title: "Finish setting up",
           detail: firstSetupBlocker
@@ -1668,7 +1593,7 @@ export function buildJobSearchHomeModel(
             label: "Review the resume",
             action: {
               kind: "navigate",
-              route: buildResumeWorkspaceRoute(only.jobId),
+              route: buildShortlistedJobRoute(only.jobId),
             },
           }
         : first
@@ -1676,7 +1601,7 @@ export function buildJobSearchHomeModel(
               label: "Start reviewing",
               action: {
                 kind: "navigate",
-                route: buildResumeWorkspaceRoute(first.jobId),
+                route: buildShortlistedJobRoute(first.jobId),
               },
             }
           : {
@@ -1700,7 +1625,6 @@ export function buildJobSearchHomeModel(
               },
             ]
           : []),
-        ...(createNext ? [createNext.primary] : []),
         ...(applyNext && applyNext.id === "apply" && !resumesWriting
           ? [
               {
@@ -1769,44 +1693,12 @@ export function buildJobSearchHomeModel(
       },
       secondary: [],
     };
-  } else if (
-    applyNext &&
-    applyNext.id === "apply" &&
-    createNext &&
-    shortlist.missingResumes > shortlist.readyToApply
-  ) {
-    // Most shortlisted jobs still need a resume: writing them is the next
-    // step, and applying to the few ready ones stays one press beside it.
-    // Leading with "Apply to 1 ready job" and no Create cost two presses
-    // through Shortlisted.
-    next = {
-      ...createNext,
-      secondary: [
-        {
-          ...applyNext.primary,
-          label: describeSecondaryPress(
-            applyNext,
-            shortlist.readyToApply,
-            input.applicationAutomationMode,
-          ),
-        },
-        ...createNext.secondary,
-      ],
-    };
   } else if (applyNext && !(resumesWriting && applyNext.id === "apply")) {
     // While the batch of resumes is still being written, waiting for it and
     // applying to all at once is one press; "Apply to 1 ready job" mid-batch
     // invited a partial press and a second one later. Jobs still waiting for
     // a resume get Create in place beside Apply.
-    next =
-      createNext && applyNext.id === "apply"
-        ? {
-            ...applyNext,
-            secondary: [createNext.primary, ...applyNext.secondary],
-          }
-        : applyNext;
-  } else if (createNext) {
-    next = createNext;
+    next = applyNext;
   } else if (applyRunning) {
     next = {
       id: "wait_apply",
@@ -2032,9 +1924,7 @@ export function buildJobSearchHomeModel(
   if (
     hasSearchHistory &&
     !searchRunning &&
-    ["send", "retry", "review_resumes", "apply", "create_resumes"].includes(
-      next.id,
-    )
+    ["send", "retry", "review_resumes", "apply"].includes(next.id)
   ) {
     next = { ...next, secondary: [...next.secondary, searchAgain] };
   }

@@ -17,6 +17,10 @@ function configureWindowNestor(input: {
       ping: vi.fn<() => Promise<DesktopPlatformPing>>(() =>
         Promise.resolve({ ok: true, platform: "win32" as const }),
       ),
+      jobs: {
+        run: vi.fn(() => new Promise(() => undefined)),
+        onChange: () => () => undefined,
+      },
       jobFinder: {
         getWorkspaceBootstrap: vi.fn(() =>
           Promise.reject(input.getWorkspaceBootstrapError),

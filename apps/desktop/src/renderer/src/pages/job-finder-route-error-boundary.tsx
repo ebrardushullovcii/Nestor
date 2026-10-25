@@ -66,19 +66,6 @@ function getRecoveryCopy(
     };
   }
 
-  if (pathname.includes("/review-queue/") && pathname.endsWith("/resume")) {
-    return {
-      kicker: "Resume workspace error",
-      title: "Resume workspace hit a snag",
-      description:
-        "The editor crashed while this draft was rendering. Your saved data is unchanged, and you can jump back to Shortlisted.",
-      secondaryAction: {
-        label: "Back to Shortlisted",
-        path: "/job-finder/review-queue",
-      },
-    };
-  }
-
   return {
     kicker: "Screen error",
     title: "This screen stopped responding",

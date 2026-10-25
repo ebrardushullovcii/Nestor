@@ -15,8 +15,6 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { JobFinderTaskCenter } from "./job-finder-task-center";
-import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
-
 
 // The fixtures' runs end on 31 July; Activity shows a finished run for a day.
 beforeEach(() => {
@@ -28,7 +26,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-
 
 function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   const discoveryRun = {
@@ -390,93 +387,6 @@ describe("JobFinderTaskCenter", () => {
     expect(screen.getAllByText("Progress").length).toBeGreaterThan(0);
     expect(screen.queryByText("Pause")).toBeNull();
     expect(screen.queryByText("Not available")).toBeNull();
-  });
-
-  test("tracks an active tailored-drafts batch with progress, failures, and a working Stop control", async () => {
-    const onStopTailoredDraftPreparation = vi.fn();
-    const preparation: TailoredDraftPreparationViewState = {
-      attemptedCount: 3,
-      completedCount: 2,
-      currentIndex: 3,
-      eligibleRemainingCount: 0,
-      failedCount: 1,
-      status: "running",
-      totalCount: 5,
-    };
-
-    const { rerender } = render(
-      <JobFinderTaskCenter
-        isDiscoveryPending={false}
-        isResumeImportPending={false}
-        onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
-        tailoredDraftPreparation={preparation}
-        workspace={createQuietWorkspace()}
-      />,
-    );
-
-    const summary = screen.getByLabelText("Activity: 1 running");
-    expect(summary).toBeInstanceOf(HTMLElement);
-    const task = document.querySelector('[data-task-kind="tailored_drafts"]');
-    expect(task).not.toBeNull();
-    expect(
-      within(task as HTMLElement).getByText("2 of 5 prepared · 1 failed"),
-    ).toBeInstanceOf(HTMLElement);
-
-    const stopButton = within(task as HTMLElement).getByRole("button", {
-      name: "Stop",
-    });
-    fireEvent.click(stopButton);
-    expect(onStopTailoredDraftPreparation).toHaveBeenCalledOnce();
-    expect(
-      within(task as HTMLElement).getByRole<HTMLButtonElement>("button", {
-        name: "Stop",
-      }).disabled,
-    ).toBe(true);
-
-    rerender(
-      <JobFinderTaskCenter
-        isDiscoveryPending={false}
-        isResumeImportPending={false}
-        onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
-        tailoredDraftPreparation={{
-          ...preparation,
-          status: "stopped",
-        }}
-        workspace={createQuietWorkspace()}
-      />,
-    );
-    await waitFor(() =>
-      expect(
-        document.querySelector('[data-task-kind="tailored_drafts"]'),
-      ).toBeNull(),
-    );
-  });
-
-  test("hides the tailored-drafts task when no batch run is active", () => {
-    render(
-      <JobFinderTaskCenter
-        isDiscoveryPending={false}
-        isResumeImportPending={false}
-        tailoredDraftPreparation={{
-          attemptedCount: 3,
-          completedCount: 3,
-          currentIndex: null,
-          eligibleRemainingCount: 0,
-          failedCount: 0,
-          status: "completed",
-          totalCount: 3,
-        }}
-        workspace={createQuietWorkspace()}
-      />,
-    );
-
-    expect(
-      document.querySelector('[data-task-kind="tailored_drafts"]'),
-    ).toBeNull();
-    // Nothing running: the chip names itself and renders no count at all.
-    const summary = document.querySelector("summary") as HTMLElement;
-    expect(summary.getAttribute("aria-label")).toBe("Activity");
-    expect(summary.textContent).not.toMatch(/\d/);
   });
 });
 

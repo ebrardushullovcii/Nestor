@@ -1,6 +1,6 @@
 # ADR 0026: Shortlisted is three steps per job, and one decision list in the resume
 
-Status: accepted (2026-09-20). Resume selection and batch concurrency are amended by [ADR 0035](0035-selected-resume-batches.md). The "Lines to confirm" list is removed by [ADR 0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md). Per-job level picking is removed by the 2026-10-25 scope in `docs/PRODUCT.md`: the resume is written at the Profile level.
+Status: superseded (2026-10-25). Shortlisted now lists each job with where its resume is (Writing, To review, Approved), opens the resume beside it, and approves with one press or Ctrl+Enter; each job starts at the Profile level, and changing one job's level rewrites it with Undo. Resumes live in the job store (`packages/job-finder/src/resumes`).
 
 ## Context
 

@@ -41,22 +41,18 @@ const LIST_PANEL_PATHS = [
   "screens/applications/applications-records-panel.tsx",
   "screens/discovery/discovery-results-panel.tsx",
   "screens/discovery/find-jobs-launch.tsx",
-  "screens/review-queue/review-queue-list-panel.tsx",
 ];
 
 /**
- * Where each of those three lists renders its ROW. Usually the panel itself;
- * Shortlisted keeps its row in a module of its own so the row can be memoised
- * and a one-job update stops re-rendering the whole list. Still one list
- * treatment. Find jobs also renders its first query page before the full
- * workspace loads; those rows must use the same treatment too.
+ * Where each of those lists renders its ROW. Find jobs also renders its first
+ * query page before the full workspace loads; those rows must use the same
+ * treatment too.
  */
 const LIST_ROW_PATHS = [
   "screens/applications/applications-records-panel.tsx",
   "screens/discovery/discovery-results-panel.tsx",
   // The launch page's rows stand in for the results list until it loads.
   "screens/discovery/find-jobs-launch.tsx",
-  "screens/review-queue/review-queue-list-row.tsx",
 ];
 
 describe("Job Finder list rows carry no chrome of their own", () => {
@@ -73,9 +69,9 @@ describe("Job Finder list rows carry no chrome of their own", () => {
       sources.has("screens/applications/applications-records-panel.tsx"),
     ).toBe(true);
     expect(sources.has("components/ui/selectable-row.tsx")).toBe(true);
-    expect(
-      sources.has("features/live-assistant/live-assistant-page.tsx"),
-    ).toBe(true);
+    expect(sources.has("features/live-assistant/live-assistant-page.tsx")).toBe(
+      true,
+    );
 
     const rowSources = [...sources.entries()].filter(([, source]) =>
       source.includes("<SelectableRow"),

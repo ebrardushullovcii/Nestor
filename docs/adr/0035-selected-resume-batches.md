@@ -1,6 +1,6 @@
 # ADR 0035: Selected resume batches
 
-Status: accepted (2026-09-26). The sequential-applying bullet is superseded by [ADR 0036](0036-parallel-application-preparation.md). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
+Status: accepted (2026-09-26). The sequential-applying bullet is superseded by [ADR 0036](0036-parallel-application-preparation.md). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md). Superseded on 2026-10-25 by Shortlisted on the job store: resumes live in a `resumes` table beside `jobs` and are written by `packages/job-finder/src/resumes`, up to six at once, as soon as a job is shortlisted; approving one moves its job to the `resume` stage that Apply reads.
 
 ## Context
 

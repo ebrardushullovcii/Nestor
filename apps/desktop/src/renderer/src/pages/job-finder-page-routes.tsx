@@ -22,14 +22,6 @@ import {
   readFullWorkspaceIfBehind,
   useFindJobsListsCurrent,
 } from "@renderer/features/job-finder/lib/workspace-view-refresh";
-import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
-import {
-  describeResumeReviewProgress,
-  listResumesToReview,
-  useResumeReviewSession,
-  type ResumeReviewFlow,
-} from "@renderer/features/job-finder/screens/review-queue/resume-review-session";
-import { prefetchResumeWorkspace } from "@renderer/features/job-finder/lib/resume-workspace-prefetch";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
@@ -43,7 +35,6 @@ import {
   useSearchParams,
   useLocation,
   useOutletContext,
-  useParams,
 } from "react-router-dom";
 import {
   consumeFirstSearchRequest,
@@ -83,18 +74,12 @@ import type {
 import { getJobFinderErrorDetail } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { DiscoveryScreen } from "@renderer/features/job-finder/screens/discovery/discovery-screen";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
-import { ReviewQueueScreen } from "@renderer/features/job-finder/screens/review-queue/review-queue-screen";
 import {
-  buildJobFinderContextRoute,
   clearJobFinderContextQuery,
   JOB_FINDER_CONTEXT_QUERY_KEYS,
   readJobFinderNavigationContext,
   selectJobFinderContext,
 } from "@renderer/features/job-finder/lib/job-finder-context-navigation";
-import {
-  RESUME_WORKSPACE_REQUIRED_COLLECTIONS,
-  resolveResumeWorkspaceRouteState,
-} from "@renderer/features/job-finder/lib/resume-workspace-route-state";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-memo";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
@@ -168,11 +153,6 @@ const loadActionsScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/screens/actions-screen")
   ).ActionsScreen,
 }));
-const loadResumeWorkspaceScreen = createSharedRouteLoader(async () => ({
-  default: (
-    await import("@renderer/features/job-finder/screens/review-queue/resume-workspace-screen")
-  ).ResumeWorkspaceScreen,
-}));
 const loadSettingsScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/screens/settings-screen")
@@ -196,7 +176,6 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
     for (const load of [
       loadJobSearchHomeScreen,
       loadSettingsScreen,
-      loadResumeWorkspaceScreen,
       loadCampaignsScreen,
       loadActionsScreen,
       loadProfileSetupScreen,
@@ -212,7 +191,6 @@ const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
 const CampaignsScreen = lazyScreen(loadCampaignsScreen);
 const JobSearchHomeScreen = lazyScreen(loadJobSearchHomeScreen);
 const ActionsScreen = lazyScreen(loadActionsScreen);
-const ResumeWorkspaceScreen = lazyScreen(loadResumeWorkspaceScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
 
 // The empty-input parse is a constant, so it belongs outside the render path
@@ -661,7 +639,6 @@ export function JobFinderHomeRoute() {
             { stayOnCurrentPage: true },
           )
         }
-        onCreateResumes={context.onPrepareTailoredDrafts}
         onSendPreparedApplications={context.onSendPreparedApplications}
         onResumeSetup={context.onResumeProfileSetup}
         onMarkAllCampaignNotificationsRead={
@@ -688,7 +665,6 @@ export function JobFinderHomeRoute() {
         }}
         onStopApply={stopApplyRun}
         onControlApplyQueue={context.onControlApplyQueue}
-        onStopResumes={context.onStopTailoredDraftPreparation}
         {...(context.onCancelDiscovery
           ? {
               onStopSearch: (runId: string) => {
@@ -697,7 +673,6 @@ export function JobFinderHomeRoute() {
             }
           : {})}
         resumeImportProgress={context.resumeImportProgress}
-        tailoredDraftPreparation={context.tailoredDraftPreparation}
         workspace={context.workspace}
       />
     </JobFinderHydrationGate>
@@ -1491,428 +1466,6 @@ export function JobFinderDiscoveryRoute() {
   );
 }
 
-export function JobFinderReviewQueueRoute() {
-  // The shortlist mounts its real heading on the first commit: no deferred
-  // surface timer, no placeholder, and no Suspense throttle in front of the
-  // canonical screen.
-  return <JobFinderReviewQueueRouteContent />;
-}
-
-function JobFinderReviewQueueRouteContent() {
-  const context = useJobFinderPageContext();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigationContext = readJobFinderNavigationContext(searchParams);
-  const scopedPlanId =
-    searchParams.get("plan") ?? context.workspace.activeCampaignId;
-  const activeCampaign = context.workspace.campaigns.find(
-    (campaign) => campaign.id === scopedPlanId,
-  );
-  const campaignJobIds = new Set(activeCampaign?.jobIds ?? []);
-  const queue = context.workspace.reviewQueue.filter((item) =>
-    campaignJobIds.has(item.jobId),
-  );
-  const requestedItem = navigationContext.jobId
-    ? (queue.find((item) => item.jobId === navigationContext.jobId) ?? null)
-    : null;
-  const isHydrating = isJobFinderHydratingCollections(context.workspace, [
-    ...jobRowsFor(context.workspace),
-    "review_queue",
-    "documents",
-  ]);
-
-  useEffect(() => {
-    if (
-      requestedItem &&
-      requestedItem.jobId !== context.selectedReviewItem?.jobId
-    ) {
-      context.onSelectReviewItem(requestedItem.jobId);
-    }
-  }, [
-    context.onSelectReviewItem,
-    context.selectedReviewItem?.jobId,
-    requestedItem,
-  ]);
-
-  // A resume shortlisting asked for is being written too (ADR 0076): the
-  // row says so and nothing offers to write it a second time.
-  const shortlistResumeJobIds =
-    context.workspace.intelligence.resumeOnShortlistJobIds;
-  const writingOnShortlist = useMemo(
-    () => new Set(shortlistResumeJobIds ?? []),
-    [shortlistResumeJobIds],
-  );
-  // One identity while nothing starts or finishes, so the list's per-job
-  // statuses are not worked out again on every render.
-  const isReviewJobPending = useCallback(
-    (jobId: string) =>
-      writingOnShortlist.has(jobId) ||
-      context.isPending(jobFinderPendingActions.resumeJob(jobId)),
-    [context.isPending, writingOnShortlist],
-  );
-  const handleSelectItem = useCallback(
-    (jobId: string) => {
-      context.onSelectReviewItem(jobId);
-      if (navigationContext.jobId) {
-        setSearchParams(
-          (current) =>
-            clearJobFinderContextQuery(
-              current,
-              JOB_FINDER_CONTEXT_QUERY_KEYS.jobId,
-            ),
-          { replace: true },
-        );
-      }
-    },
-    [context.onSelectReviewItem, navigationContext.jobId, setSearchParams],
-  );
-
-  if (isHydrating) {
-    return (
-      <JobFinderHydrationGate
-        collections={[
-          ...jobRowsFor(context.workspace),
-          "review_queue",
-          "documents",
-        ]}
-        workspace={context.workspace}
-      >
-        {null}
-      </JobFinderHydrationGate>
-    );
-  }
-
-  if (navigationContext.jobId && !requestedItem) {
-    return (
-      <WorkspaceStateScreen
-        action={{
-          label: "Show all shortlisted jobs",
-          onClick: () => context.onNavigateSafely("/job-finder/review-queue"),
-        }}
-        kicker="Shortlisted"
-        message="The requested job is no longer in Shortlisted, so no other job was selected."
-        title="Shortlisted job unavailable"
-      />
-    );
-  }
-
-  const selectedItem = selectJobFinderContext(
-    queue,
-    navigationContext.jobId,
-    context.selectedReviewItem?.jobId,
-    (item) => item.jobId,
-  );
-  const selectedJob = selectedItem
-    ? (context.workspace.discoveryJobs.find(
-        (job) => job.id === selectedItem.jobId,
-      ) ?? null)
-    : null;
-  const selectedAsset = selectedItem
-    ? (context.workspace.tailoredAssets.find(
-        (asset) => asset.jobId === selectedItem.jobId,
-      ) ?? null)
-    : null;
-
-  return (
-    <JobFinderHydrationGate
-      collections={[
-        ...jobRowsFor(context.workspace),
-        "review_queue",
-        "documents",
-      ]}
-      workspace={context.workspace}
-    >
-      <ReviewQueueScreen
-        applicationWorkPaused={
-          context.workspace.activityControl?.paused ?? false
-        }
-        // One plan has nothing to choose between; a picker with one entry
-        // was just another row above the list.
-        scopeControl={
-          hasSearchPlanChoice(context.workspace.campaigns) ? (
-            <SearchPlanScope
-              campaigns={context.workspace.campaigns}
-              activeCampaignId={scopedPlanId}
-              countsByCampaignId={Object.fromEntries(
-                context.workspace.campaigns.map((plan) => [
-                  plan.id,
-                  context.workspace.reviewQueue.filter((item) =>
-                    plan.jobIds.includes(item.jobId),
-                  ).length,
-                ]),
-              )}
-              collection="Shortlisted"
-              onSelect={(campaignId) => {
-                setSearchParams({ plan: campaignId }, { replace: true });
-                return Promise.resolve(true);
-              }}
-            />
-          ) : null
-        }
-        actionState={context.actionState}
-        applicationAutomationMode={
-          context.workspace.settings.applicationAutomationMode ?? "prepare_only"
-        }
-        applicationRecords={context.workspace.applicationRecords}
-        browserSession={context.workspace.browserSession}
-        campaignId={activeCampaign?.id ?? ""}
-        resumeOperationStarts={context.resumeOperationStarts}
-        draftPreparation={context.tailoredDraftPreparation}
-        resumeBatchCheckpoint={
-          context.workspace.intelligence.resumeBatchCheckpoint
-        }
-        applyQueue={context.workspace.applyQueue}
-        listingUrlForJob={(jobId) =>
-          context.workspace.discoveryJobs.find((job) => job.id === jobId)
-            ?.canonicalUrl ?? null
-        }
-        applyJobResults={context.workspace.applyJobResults}
-        isApplyPending={context.isPending(jobFinderPendingActions.apply())}
-        isJobPending={isReviewJobPending}
-        onPrepareTailoredDrafts={context.onPrepareTailoredDrafts}
-        onStopTailoredDraftPreparation={context.onStopTailoredDraftPreparation}
-        onStartAutoApplyQueue={context.onStartAutoApplyQueue}
-        onStartApplyCopilot={context.onStartApplyCopilot}
-        onEditResumeWorkspace={context.onEditResumeWorkspace}
-        onApproveResumeAndApply={context.onApproveResumeAndApply}
-        onGenerateResume={context.onGenerateResume}
-        onOpenBrowserSession={() => {
-          void context.onOpenBrowserSession();
-        }}
-        // A link to the job: Find jobs lists only jobs still waiting on a
-        // decision, so a shortlisted job opened by selection alone left an
-        // empty page (STAB-004). The link holds it open there.
-        onOpenJobDetails={(jobId) => {
-          context.onSelectDiscoveryJob(jobId);
-          context.onNavigateSafely(
-            buildJobFinderContextRoute("/job-finder/discovery", { jobId }),
-          );
-        }}
-        onOpenApplication={(recordId) => {
-          context.onSelectApplicationRecord(recordId);
-          context.onNavigateSafely("/job-finder/applications");
-        }}
-        onOpenApplications={() =>
-          context.onNavigateSafely("/job-finder/applications")
-        }
-        onApproveResumes={context.onApproveResumes}
-        onOpenProfile={context.onOpenProfile}
-        {...(() => {
-          // A safeguard that has paused the plan refuses every preparation
-          // start. Shortlisted needs to say so on the control itself instead
-          // of opening a dialog that closes and changes nothing.
-          const blockingPause = projectPlanSafeguardPauses(
-            context.workspace.intelligence?.safeguards,
-            context.workspace.campaigns,
-          )[0];
-          return blockingPause ? {} : {};
-        })()}
-        onClaimResumeIdentity={context.onClaimResumeIdentity}
-        onKeepResumeIdentity={context.onKeepResumeIdentity}
-        onRemoveReviewJob={context.onRemoveReviewJob}
-        onMoveResumesBackToReview={context.onMoveResumesBackToReview}
-        onTakeOutOfApplyQueue={context.onTakeOutOfApplyQueue}
-        onReadJobListing={context.onAssessJobListing}
-        {...(context.onRemoveReviewJobs
-          ? { onRemoveReviewJobs: context.onRemoveReviewJobs }
-          : {})}
-        onSetJobResumeApplicationMode={context.onSetJobResumeApplicationMode}
-        onSelectItem={handleSelectItem}
-        originalResume={context.workspace.profile.baseResume}
-        profile={context.workspace.profile}
-        queue={queue}
-        selectedAsset={selectedAsset}
-        selectedItem={selectedItem}
-        selectedJob={selectedJob}
-        tailoredAssets={context.workspace.tailoredAssets}
-      />
-    </JobFinderHydrationGate>
-  );
-}
-
-/**
- * The pass through "To review" for the open resume: how far the person is,
- * which resume comes next, and approvals that failed behind them. Null when
- * the open resume is not one waiting for review.
- */
-function useResumeReviewFlow(
-  context: ReturnType<typeof useJobFinderPageContext>,
-  jobId: string | undefined,
-): ResumeReviewFlow | null {
-  const session = useResumeReviewSession();
-  const { workspace } = context;
-  // The same list Shortlisted shows: the active plan's jobs. Collections a
-  // still-hydrating snapshot has not filled yet read as empty.
-  const queue = useMemo(() => {
-    const campaign = workspace.campaigns?.find(
-      (entry) => entry.id === workspace.activeCampaignId,
-    );
-    const jobIds = new Set(campaign?.jobIds ?? []);
-    return (workspace.reviewQueue ?? []).filter((item) =>
-      jobIds.has(item.jobId),
-    );
-  }, [workspace.activeCampaignId, workspace.campaigns, workspace.reviewQueue]);
-  const toReview = useMemo(
-    () =>
-      listResumesToReview({
-        queue,
-        tailoredAssets: workspace.tailoredAssets ?? [],
-        applicationRecords: workspace.applicationRecords ?? [],
-        session,
-      }),
-    [queue, session, workspace.applicationRecords, workspace.tailoredAssets],
-  );
-  const isReviewing =
-    Boolean(jobId) && toReview.some((item) => item.jobId === jobId);
-  const progress = isReviewing
-    ? describeResumeReviewProgress({
-        currentJobId: jobId!,
-        toReview,
-        queue,
-        session,
-      })
-    : null;
-  const next = progress?.next ?? null;
-  const nextJobId = next?.jobId ?? null;
-  // Read the next resume while this one is being read.
-  useEffect(() => {
-    if (
-      !nextJobId ||
-      typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function"
-    )
-      return;
-    const timer = window.setTimeout(
-      () =>
-        prefetchResumeWorkspace(nextJobId, (id) =>
-          window.nestor.jobFinder.getResumeWorkspace(id),
-        ),
-      400,
-    );
-    return () => window.clearTimeout(timer);
-  }, [nextJobId]);
-  if (!jobId || !progress) return null;
-  return {
-    reviewed: progress.reviewed,
-    total: progress.total,
-    nextTitle: next?.title ?? null,
-    failures: progress.failures.map(({ item, reason }) => ({
-      jobId: item.jobId,
-      title: item.title,
-      reason,
-    })),
-    onApproveAndNext: (exportId) =>
-      context.onApproveResumeAndContinue(jobId, next?.jobId ?? null, exportId),
-    onSkip: next ? () => context.onEditResumeWorkspace(next.jobId) : null,
-    onOpenJob: (id) => context.onEditResumeWorkspace(id),
-  };
-}
-
-export function JobFinderResumeWorkspaceRoute() {
-  const context = useJobFinderPageContext();
-  const { jobId } = useParams<{ jobId: string }>();
-  const reviewFlow = useResumeReviewFlow(context, jobId);
-
-  if (!jobId) {
-    return <Navigate replace to="/job-finder/review-queue" />;
-  }
-
-  const routeState = resolveResumeWorkspaceRouteState({
-    hydration: context.workspace.hydration,
-    jobId,
-    reviewQueue: context.workspace.reviewQueue,
-  });
-
-  if (routeState.kind === "hydrating") {
-    return (
-      <JobFinderHydrationGate
-        collections={RESUME_WORKSPACE_REQUIRED_COLLECTIONS}
-        workspace={context.workspace}
-      >
-        {null}
-      </JobFinderHydrationGate>
-    );
-  }
-
-  if (routeState.kind === "unavailable") {
-    // The job genuinely left the hydrated shortlist. Do not silently bounce
-    // the URL: keep the route and explain why, so a background refresh that
-    // recomputes the queue (or a stale deep link) never yanks the operator.
-    return (
-      <WorkspaceStateScreen
-        action={{
-          label: "View Shortlisted",
-          onClick: () => context.onNavigateSafely("/job-finder/review-queue"),
-        }}
-        kicker="Resume workspace"
-        message="This resume is no longer available because the job is no longer in Shortlisted. Choose another shortlisted job to keep preparing."
-        title="Resume no longer available"
-      />
-    );
-  }
-
-  return (
-    <JobFinderHydrationGate
-      collections={RESUME_WORKSPACE_REQUIRED_COLLECTIONS}
-      workspace={context.workspace}
-    >
-      <ResumeWorkspaceScreen
-        actionMessage={context.actionState.message}
-        actionSavedFilePath={context.actionState.savedFilePath ?? null}
-        onClaimResumeIdentity={context.onClaimResumeIdentity}
-        onRevealSavedFile={context.onRevealSavedFile}
-        assistantMessages={context.resumeAssistantMessages}
-        availableResumeTemplates={context.workspace.availableResumeTemplates}
-        assistantPending={context.resumeAssistantPending}
-        isExportPending={context.isPending(
-          jobFinderPendingActions.resumeExport(jobId),
-        )}
-        isApplyPending={context.isPending(jobFinderPendingActions.apply())}
-        isWorkspacePending={context.isPending(
-          jobFinderPendingActions.resumeJob(jobId),
-        )}
-        jobId={jobId}
-        onApproveCurrentResume={context.onApproveCurrentResume}
-        onApproveResume={context.onApproveResume}
-        onBack={() => context.onEditResumeWorkspace("")}
-        onPrepareApplication={() => context.onStartApplyCopilot({ jobId })}
-        onClearResumeApproval={context.onClearResumeApproval}
-        onSetWorkHistoryReviewAcknowledgment={
-          context.onSetWorkHistoryReviewAcknowledgment
-        }
-        onSetResumeClaimConfirmation={context.onSetResumeClaimConfirmation}
-        onExportPdf={context.onExportResumePdf}
-        onApplyPatch={context.onApplyResumePatch}
-        onDirtyChange={context.onResumeWorkspaceDirtyChange}
-        onDraftEdited={context.onResumeWorkspaceDraftEdited}
-        onPreviewDraft={context.onPreviewResumeDraft}
-        onRefresh={() => context.onRefreshResumeWorkspace(jobId)}
-        onRegenerateDraft={context.onRegenerateResumeDraft}
-        onRestoreRevision={context.onRestoreResumeDraftRevision}
-        onUndoAiEdit={context.onUndoResumeAssistantEdit}
-        originalResumeRoute={
-          context.workspace.reviewQueue.find((item) => item.jobId === jobId)
-            ?.resumeApplicationMode === "original_resume"
-            ? {
-                source: context.workspace.profile.baseResume,
-                levelLabel: describeSavedResumeLevel(
-                  context.workspace.searchPreferences.tailoringMode,
-                ),
-                onWriteEditableResume:
-                  context.onWriteEditableResumeForOriginalJob,
-              }
-            : null
-        }
-        onSaveDraft={context.onSaveResumeDraft}
-        onSaveDraftAndThen={context.onSaveResumeDraftAndThen}
-        onAutosaveDraft={context.onAutosaveResumeDraft}
-        onSendAssistantMessage={context.onSendResumeAssistantMessage}
-        onResolveAssistantProposal={context.onResolveResumeAssistantProposal}
-        reviewFlow={reviewFlow}
-        workspace={context.resumeWorkspace}
-      />
-    </JobFinderHydrationGate>
-  );
-}
-
 /**
  * The stage tracker is a separate destination on the same route, so opening it
  * is a link with a URL instead of a peer tab that renders a full CRM beside a
@@ -2583,7 +2136,6 @@ export function JobFinderApplicationsRoute() {
         applyQueue={context.workspace.applyQueue}
         onControlApplyQueue={context.onControlApplyQueue}
         onStartApplyCopilot={context.onStartApplyCopilot}
-        onReviewResumePdf={context.onReviewResumePdf}
         onSelectRecord={handleSelectRecord}
         selectedApplyRunId={selectedApplyRunId}
         selectedAttempt={selectedAttempt}

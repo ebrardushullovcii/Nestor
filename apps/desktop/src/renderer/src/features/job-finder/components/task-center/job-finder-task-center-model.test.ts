@@ -6,7 +6,6 @@ import type {
   ResumeImportRun,
 } from "@nestor/contracts";
 import { describe, expect, it, test } from "vitest";
-import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
@@ -89,21 +88,6 @@ function findTask(
   const task = model.items.find((item) => item.kind === kind);
   expect(task).toBeDefined();
   return task!;
-}
-
-function createTailoredDraftPreparation(
-  overrides: Partial<TailoredDraftPreparationViewState> = {},
-): TailoredDraftPreparationViewState {
-  return {
-    attemptedCount: 2,
-    completedCount: 1,
-    currentIndex: 2,
-    eligibleRemainingCount: 0,
-    failedCount: 0,
-    status: "running",
-    totalCount: 3,
-    ...overrides,
-  };
 }
 
 describe("buildJobFinderTaskCenterModel", () => {
@@ -1229,72 +1213,6 @@ describe("buildJobFinderTaskCenterModel", () => {
 
     expect(task.status).toBe("active");
     expect(task.historyEstimateLabel).toBeNull();
-  });
-
-  test("shows the tailored-drafts task only while a batch run is active", () => {
-    const buildModel = (
-      preparation: TailoredDraftPreparationViewState | null,
-    ) =>
-      buildJobFinderTaskCenterModel({
-        workspace: createWorkspace(),
-        isDiscoveryPending: false,
-        isResumeImportPending: false,
-        tailoredDraftPreparation: preparation,
-      });
-
-    expect(
-      buildModel(null).items.some((item) => item.kind === "tailored_drafts"),
-    ).toBe(false);
-    for (const status of ["idle", "completed", "stopped", "failed"] as const) {
-      expect(
-        buildModel(createTailoredDraftPreparation({ status })).items.some(
-          (item) => item.kind === "tailored_drafts",
-        ),
-      ).toBe(false);
-    }
-
-    const model = buildModel(createTailoredDraftPreparation());
-    const task = findTask(model, "tailored_drafts");
-    expect(task.status).toBe("active");
-    expect(task.title).toBe("Tailored drafts");
-    expect(task.countLabel).toBe("1 of 3 prepared");
-    expect(task.canCancel).toBe(true);
-    expect(task.cancelKind).toBe("tailored_drafts");
-    expect(model.activeCount).toBe(1);
-  });
-
-  test("a stopped tailored-draft batch reads Stopping and offers no second stop", () => {
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace(),
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-      tailoredDraftPreparation: createTailoredDraftPreparation({
-        stopRequested: true,
-      }),
-    });
-    const task = findTask(model, "tailored_drafts");
-
-    expect(task.status).toBe("active");
-    expect(task.stageLabel).toMatch(/^Stopping/);
-    expect(task.canCancel).toBe(false);
-  });
-
-  test("reports tailored-draft failures in progress without claiming durability", () => {
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace(),
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-      tailoredDraftPreparation: createTailoredDraftPreparation({
-        completedCount: 2,
-        failedCount: 1,
-        totalCount: 5,
-      }),
-    });
-    const task = findTask(model, "tailored_drafts");
-
-    expect(task.countLabel).toBe("2 of 5 prepared · 1 failed");
-    expect(task.stageLabel).not.toMatch(/complete|finished/i);
-    expect(task.resumeRoute).toBe("/job-finder/review-queue");
   });
 
   test("routes an uncertain outcome to non-cancellable employer-site verification", () => {

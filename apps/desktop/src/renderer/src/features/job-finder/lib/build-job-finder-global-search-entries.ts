@@ -1,7 +1,7 @@
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { JobFinderGlobalSearchEntry } from "./job-finder-global-search";
 import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
-import { buildResumeWorkspaceRoute } from "./resume-workspace-route";
+import { buildShortlistedJobRoute } from "./resume-workspace-route";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 import {
   isEmployerAbsenceLabel,
@@ -209,7 +209,7 @@ export function buildJobFinderGlobalSearchEntries(
   const documentEntries: JobFinderGlobalSearchEntry[] = [
     ...tailoredAssets.map((asset) => ({
       campaignId: campaignIdForJob(asset.jobId),
-      href: buildResumeWorkspaceRoute(asset.jobId),
+      href: buildShortlistedJobRoute(asset.jobId),
       id: asset.id,
       kind: "document" as const,
       metadata: [asset.templateName, asset.status, asset.version],
@@ -224,7 +224,7 @@ export function buildJobFinderGlobalSearchEntries(
     })),
     ...resumeExportArtifacts.map((artifact) => ({
       campaignId: campaignIdForJob(artifact.jobId),
-      href: buildResumeWorkspaceRoute(artifact.jobId),
+      href: buildShortlistedJobRoute(artifact.jobId),
       id: artifact.id,
       kind: "document" as const,
       metadata: [artifact.templateId, artifact.format, artifact.filePath],

@@ -1,6 +1,4 @@
 import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
-import type { ResumeBatchGenerationProgress } from "@nestor/contracts";
-import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
   JOB_FINDER_BROWSER_NAME,
   JOB_FINDER_BROWSER_NAME_SENTENCE_START,
@@ -15,7 +13,6 @@ import {
 } from "@nestor/contracts";
 import type {
   AppearanceTheme,
-  AssistantResumeBatchState,
   ApplicationCrmSettings,
   CandidateProfile,
   DiscoveryActivityEvent,
@@ -27,7 +24,6 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderResumeWorkspace,
   JobFinderApplicationStartTarget,
-  ReviewQueueItem,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderRendererWorkspaceSnapshot,
@@ -40,26 +36,12 @@ import type {
   RemoveEmployerExclusionInput,
   ResumeAssistantMessage,
   ResumeApplicationMode,
-  TailoringMode,
   ResumeDraft,
-  ResumeDraftPatch,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
 } from "@nestor/contracts";
-import {
-  collectPreparedApplicationJobIds,
-  countTailoredDraftPreparationEligible,
-  describeResumeRunResult,
-  describeSavedResumeLevel,
-  getTailoredDraftPreparationCandidates,
-  getTailoredDraftPreparationResultMessage,
-  isTailoredDraftPreparationEligible,
-  prepareTailoredDraftBatch,
-  shouldRewriteResumeAfterLevelChange,
-  type ResumeRunStage,
-  type TailoredDraftPreparationViewState,
-} from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
+import { collectPreparedApplicationJobIds } from "@renderer/features/job-finder/lib/review-queue-status";
 import { isFinishBlockingReviewItem } from "@renderer/features/job-finder/components/profile/setup/profile-setup-screen-helpers";
 import type {
   ActionState,
@@ -87,13 +69,7 @@ import {
   type DiscoveryRunFeedback,
 } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import {
-  buildWorkHistoryReviewAcknowledgmentCommandInput,
-  type ResumeWorkHistoryDecisionRequest,
-} from "@renderer/features/job-finder/screens/review-queue/resume-workspace-work-history-decisions";
-import {
-  clearPendingActionScopes,
   getPendingActionGeneration,
-  invalidatePendingActionScope,
   type PendingActionScope,
   type PendingActionState,
   jobFinderPendingActions,
@@ -108,7 +84,6 @@ import {
   listApplyQueueWaitingJobIds,
   type ApplyQueueControlAction,
 } from "../features/job-finder/lib/apply-queue-view";
-import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   getRecentChangeUndo,
   listRecentChanges,
@@ -117,14 +92,6 @@ import {
   type RecentChange,
   type RecentChangeInput,
 } from "@renderer/features/job-finder/lib/recent-changes";
-import {
-  enqueueResumeApproval,
-  forgetResumeReview,
-  getResumeReviewSession,
-  markResumeReviewApproved,
-  markResumeReviewApproving,
-  markResumeReviewFailed,
-} from "@renderer/features/job-finder/screens/review-queue/resume-review-session";
 import { buildSourceDebugOutcomeMessage } from "./job-finder-page-route-utils";
 import {
   createSaveDedupeKey,
@@ -133,10 +100,6 @@ import {
 } from "./job-finder-save-state";
 
 import { COMMAND_PENDING_RELEASE_MS } from "@renderer/features/job-finder/lib/discovery-stop-state";
-import {
-  describeResumeIdentityOwnershipChoice,
-  useResumeSourceNameForProfile,
-} from "@nestor/job-finder/resume-identity";
 import { describeFailure } from "@renderer/features/job-finder/lib/describe-failure";
 import { describeApplicationDefaultsSave } from "@renderer/features/job-finder/screens/settings/settings-application-defaults-save-copy";
 
@@ -230,12 +193,6 @@ type BaseActionArgs = {
   clearResumeWorkspaceState: () => void;
   setResumeWorkspaceDirty: Dispatch<SetStateAction<boolean>>;
   setSelectedReviewJobId: (jobId: string) => void;
-  setTailoredDraftPreparation: Dispatch<
-    SetStateAction<TailoredDraftPreparationViewState>
-  >;
-  tailoredDraftPreparationRunRef: MutableRefObject<boolean>;
-  tailoredDraftPreparationStopRequestedRef: MutableRefObject<boolean>;
-  tailoredDraftPreparationDisposedRef: MutableRefObject<boolean>;
   setDiscoveryRunFeedback: Dispatch<
     SetStateAction<DiscoveryRunFeedback | null>
   >;
@@ -261,39 +218,6 @@ let isDiscoveryRunActive = false;
 
 // Context rebuilds must not turn one pending bulk click into several IPC writes.
 let isBulkShortlistActive = false;
-
-/**
- * Single-flight guard for the tailored-draft batch. Module scope for the same
- * reason as `isDiscoveryRunActive`: replacing an unmounted controller creates
- * fresh refs that cannot see a run parked by the previous controller. The
- * synchronous check-and-set is atomic because the renderer is single-threaded.
- * A disposed controller asks its parked run to stop at the next item
- * boundary; until that run releases the guard in `finally`, this flag blocks
- * duplicate starts from a replacement controller. It covers in-session
- * lifetimes only; it never survives a full reload.
- */
-let isTailoredDraftPreparationRunActive = false;
-
-/**
- * Stop lives beside the run guard, not only on a controller ref.
- *
- * The batch survives a controller remount — the module flag above is exactly
- * what keeps it running — but the stop request was written to a `useRef` that
- * a remount replaces with a fresh `false`. A Stop pressed after that remount
- * reached nobody: testers saw preparation advance to "Writing resume 8 of 10"
- * forty-five seconds after pressing it. This flag lives as long as the run.
- */
-let tailoredDraftPreparationStopRequested = false;
-let uiResumeBatch: AssistantResumeBatchState | null = null;
-
-export function stopAssistantUiResumeBatch(batchId: string): boolean {
-  if (uiResumeBatch?.id === batchId && !uiResumeBatch.done) {
-    uiResumeBatch.stopRequested = true;
-    tailoredDraftPreparationStopRequested = true;
-    return true;
-  }
-  return false;
-}
 
 /**
  * Route ownership for the single page-level action status (`ActionState`).
@@ -541,16 +465,6 @@ function resolvePendingScope(
   return options?.scope ?? null;
 }
 
-function markHandledRefreshError(error: unknown): HandledRefreshError {
-  const handledError =
-    error instanceof Error
-      ? error
-      : new Error("The resume editor could not refresh automatically.");
-
-  (handledError as HandledRefreshError)[handledRefreshErrorTag] = true;
-  return handledError as HandledRefreshError;
-}
-
 function isHandledRefreshError(error: unknown): error is HandledRefreshError {
   return Boolean(
     error &&
@@ -589,23 +503,6 @@ function decrementPendingScope(
   const nextState = { ...current };
   delete nextState[scope];
   return nextState;
-}
-
-function getActiveCampaignReviewQueue(
-  snapshot: JobFinderRendererWorkspaceSnapshot | null,
-  campaignId = snapshot?.activeCampaignId,
-): ReviewQueueItem[] {
-  if (!snapshot) {
-    return [];
-  }
-
-  const activeCampaign = snapshot.campaigns?.find(
-    (campaign) => campaign.id === campaignId,
-  );
-  const campaignJobIds = new Set(activeCampaign?.jobIds ?? []);
-  return (snapshot.reviewQueue ?? []).filter((item) =>
-    campaignJobIds.has(item.jobId),
-  );
 }
 
 /**
@@ -845,45 +742,6 @@ export function createActionRunners(args: {
     }
   };
 
-  const runResumeWorkspaceAction = async <TResult>(
-    action: () => Promise<TResult>,
-    onSuccess: (result: TResult) => void | Promise<void>,
-    successMessage: string | null | ((result: TResult) => string | null),
-    options?: ActionOptions,
-  ): Promise<void> => {
-    const ownerStartRoute = jobFinderStatusRoute;
-    const applyStatusMessage = (next: ActionState) =>
-      writeActionStateWithOwner(
-        setActionState,
-        next,
-        resolveStatusOwner(null, ownerStartRoute),
-      );
-
-    await runAction(
-      action,
-      async (result) => {
-        try {
-          await onSuccess(result);
-        } catch (error) {
-          if (isHandledRefreshError(error)) {
-            throw error;
-          }
-
-          const detail =
-            error instanceof Error
-              ? error.message
-              : "The resume editor could not refresh automatically.";
-          applyStatusMessage({
-            message: `Resume action succeeded, but the editor could not refresh automatically. ${detail}`,
-          });
-          throw markHandledRefreshError(error);
-        }
-      },
-      successMessage,
-      options,
-    );
-  };
-
   const runSaveAction = async <TResult>(input: {
     action: () => Promise<TResult>;
     dedupeKey: string;
@@ -976,7 +834,6 @@ export function createActionRunners(args: {
 
   return {
     runAction,
-    runResumeWorkspaceAction,
     runSaveAction,
     withPendingScope,
   };
@@ -990,12 +847,6 @@ export function createPrimaryPageActions(
       successMessage: string | null | ((result: TResult) => string | null),
       options?: ActionOptions,
     ) => Promise<boolean>;
-    runResumeWorkspaceAction: <TResult>(
-      action: () => Promise<TResult>,
-      onSuccess: (result: TResult) => void | Promise<void>,
-      successMessage: string | null | ((result: TResult) => string | null),
-      options?: ActionOptions,
-    ) => Promise<void>;
     runSaveAction: <TResult>(input: {
       action: () => Promise<TResult>;
       dedupeKey: string;
@@ -1016,39 +867,23 @@ export function createPrimaryPageActions(
 ) {
   const {
     actions,
-    activeRouteResumeWorkspace,
     canImportResume,
     confirmLeaveDirtyResumeWorkspace,
     importResumeGuardMessage,
-    isCurrentResumeAssistantRequest,
-    isCurrentResumeWorkspaceJob,
     getLocationPathname,
     navigate,
     profileSetupState,
     profileCopilotRequestTokenRef,
-    refreshResumeWorkspace,
-    adoptAutosavedResumeDraft,
-    resumeAssistantRequestTokenRef,
     runAction,
-    runResumeWorkspaceAction,
     runSaveAction,
     withPendingScope,
     setActionState,
     setLiveDiscoveryEvents,
     setOptimisticProfileCopilotMessages,
-    setPendingActionState,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
-    setResumeAssistantMessages,
-    setResumeAssistantPending,
-    setResumeWorkspace,
-    clearResumeWorkspaceState,
     setResumeWorkspaceDirty,
     setSelectedReviewJobId,
-    setTailoredDraftPreparation,
-    tailoredDraftPreparationRunRef,
-    tailoredDraftPreparationStopRequestedRef,
-    tailoredDraftPreparationDisposedRef,
     setDiscoveryRunFeedback,
     sourceDebugRunIdRef,
     latestWorkspaceRef,
@@ -1223,7 +1058,6 @@ export function createPrimaryPageActions(
                 id,
                 change.restoreStatus?.[id] ?? "needs_review",
               );
-            for (const id of ids) forgetResumeReview(id);
           },
           ids.length === 1
             ? "The resume is back under To review."
@@ -1261,14 +1095,6 @@ export function createPrimaryPageActions(
         return Promise.resolve(false);
     }
   };
-  const reviewStatusBeforeApproval = (
-    jobId: string,
-  ): "draft" | "needs_review" =>
-    (latestWorkspaceRef.current ?? workspace).reviewQueue.find(
-      (item) => item.jobId === jobId,
-    )?.resumeReview.status === "draft"
-      ? "draft"
-      : "needs_review";
 
   const runDiscoveryAction = (
     targetId?: string,
@@ -1535,352 +1361,6 @@ export function createPrimaryPageActions(
     );
   };
 
-  const getCampaignReviewQueue = () => {
-    const activeCampaign = workspace.campaigns?.find(
-      (campaign) => campaign.id === workspace.activeCampaignId,
-    );
-    const campaignJobIds = new Set(activeCampaign?.jobIds ?? []);
-    return (workspace.reviewQueue ?? []).filter((item) =>
-      campaignJobIds.has(item.jobId),
-    );
-  };
-
-  // The bounded tailored-draft batch is owned here instead of the
-  // Review Queue screen so that sibling route changes neither lose the run
-  // nor let a rebuilt context start a duplicate. The refs live in the page
-  // controller, which stays mounted across every Job Finder route change;
-  // true controller teardown flips the disposed ref so the parked loop stops
-  // after its current items and writes nothing further. The module-scope
-  // guard blocks duplicates during the gap before a replacement controller
-  // can see a fresh release.
-  const prepareTailoredDrafts = (jobIds?: readonly string[]) => {
-    if (
-      isTailoredDraftPreparationRunActive ||
-      tailoredDraftPreparationRunRef.current
-    ) {
-      return;
-    }
-
-    const ownerStartRoute = jobFinderStatusRoute;
-    const ownerCampaignId = workspace.activeCampaignId;
-    const selectedJobIds = jobIds ? new Set(jobIds) : null;
-    const preparedJobIds = collectPreparedApplicationJobIds(
-      workspace.applicationRecords,
-    );
-    const checkpoint = workspace.intelligence?.resumeBatchCheckpoint;
-    const continuing =
-      !!selectedJobIds &&
-      !!checkpoint &&
-      !checkpoint.done &&
-      !checkpoint.running &&
-      [...selectedJobIds].every((id) => checkpoint.jobIds.includes(id));
-    const queue = (
-      continuing ? workspace.reviewQueue : getCampaignReviewQueue()
-    ).filter(
-      (item) =>
-        !preparedJobIds.has(item.jobId) &&
-        (!selectedJobIds || selectedJobIds.has(item.jobId)),
-    );
-    // A job the old batch finished is skipped only while it still has that
-    // resume: one it wrote with the person's original wording, or one that
-    // failed since, still needs one. Skipping those made "Create 10 resumes"
-    // on such jobs do nothing at all.
-    const candidates = continuing
-      ? queue.filter(
-          (item) =>
-            !checkpoint.completedJobIds.includes(item.jobId) ||
-            isTailoredDraftPreparationEligible(item, preparedJobIds),
-        )
-      : getTailoredDraftPreparationCandidates(queue);
-    if (candidates.length === 0) {
-      applyRouteScopedMessage({
-        message: "These jobs already have their resumes.",
-      });
-      return;
-    }
-
-    const eligibleTotal = countTailoredDraftPreparationEligible(queue);
-    const completedJobIds = new Set<string>();
-    const batch: AssistantResumeBatchState = {
-      id: crypto.randomUUID(),
-      jobIds: candidates.map((item) => item.jobId),
-      activeJobIds: [],
-      completedJobIds: [],
-      done: false,
-      stopRequested: false,
-      running: true,
-      durationsMs: continuing ? [...(checkpoint.durationsMs ?? [])] : [],
-      ...(continuing
-        ? {
-            requests: checkpoint.requests ?? [],
-            resumedBatchIds: (
-              workspace.intelligence.resumeBatchCheckpoints ?? [checkpoint]
-            )
-              .filter((entry) => !entry.done)
-              .map((entry) => entry.id),
-          }
-        : {}),
-    };
-    const batchStartedAt = Date.now();
-    const stages = new Map<string, ResumeBatchGenerationProgress["stage"]>();
-    const unsubscribeProgress = window.nestor.jobFinder.onResumeBatchProgress(
-      (progress) => {
-        if (
-          progress.batchId !== batch.id ||
-          tailoredDraftPreparationDisposedRef.current
-        )
-          return;
-        if (progress.stage === "finished") stages.delete(progress.jobId);
-        else stages.set(progress.jobId, progress.stage);
-        const counts = { writingCount: 0, processingCount: 0, waitingCount: 0 };
-        const stageByJobId: Record<string, ResumeRunStage> = {};
-        for (const [jobId, stage] of stages) {
-          if (stage === "finished") continue;
-          stageByJobId[jobId] = stage;
-          if (stage === "writing") counts.writingCount += 1;
-          else if (stage === "processing") counts.processingCount += 1;
-          else counts.waitingCount += 1;
-        }
-        // Each job's own stage lets its Next step say what is happening.
-        setTailoredDraftPreparation((current) => ({
-          ...current,
-          ...counts,
-          stageByJobId,
-        }));
-      },
-    );
-    uiResumeBatch = batch;
-    const syncBatch = async () => {
-      const result = await window.nestor.assistant.syncResumeBatch(batch);
-      if (result.providerBlock) batch.providerBlock = result.providerBlock;
-      if (result.stopRequested) {
-        batch.stopRequested = true;
-        stopAssistantUiResumeBatch(batch.id);
-      }
-    };
-    isTailoredDraftPreparationRunActive = true;
-    tailoredDraftPreparationRunRef.current = true;
-    tailoredDraftPreparationStopRequestedRef.current = false;
-    tailoredDraftPreparationStopRequested = false;
-
-    try {
-      setTailoredDraftPreparation({
-        attemptedCount: 0,
-        completedCount: 0,
-        currentIndex: null,
-        eligibleRemainingCount: Math.max(0, eligibleTotal - candidates.length),
-        failedCount: 0,
-        status: "running",
-        totalCount: candidates.length,
-      });
-
-      void syncBatch()
-        .then(() =>
-          prepareTailoredDraftBatch(
-            candidates,
-            async (jobId) => {
-              let startedAt: number | null = null;
-              try {
-                batch.activeJobIds.push(jobId);
-                await syncBatch();
-                if (
-                  batch.stopRequested ||
-                  tailoredDraftPreparationStopRequested ||
-                  tailoredDraftPreparationStopRequestedRef.current ||
-                  tailoredDraftPreparationDisposedRef.current
-                )
-                  return null;
-                const request = batch.requests?.findLast(
-                  (entry) => entry.jobId === jobId,
-                );
-                const current = latestWorkspaceRef.current ?? workspace;
-                if (
-                  current.reviewQueue.find((item) => item.jobId === jobId)
-                    ?.resumeApplicationMode === "original_resume" &&
-                  !request?.level
-                ) {
-                  completedJobIds.add(jobId);
-                  batch.completedJobIds.push(jobId);
-                  return "original";
-                }
-                startedAt = Date.now();
-                const generated = await withPendingScope(
-                  jobFinderPendingActions.resumeJob(jobId),
-                  () =>
-                    window.nestor.jobFinder.generateResumeForBatch({
-                      batchId: batch.id,
-                      jobId,
-                      regenerate:
-                        continuing &&
-                        current.resumeDrafts.some(
-                          (draft) => draft.jobId === jobId,
-                        ),
-                    }),
-                );
-                if (generated.outcome === "not_started") return null;
-                if (generated.outcome === "failed") return false;
-                if (generated.outcome === "blocked") {
-                  if (generated.providerBlock)
-                    batch.providerBlock = generated.providerBlock;
-                  batch.stopRequested = true;
-                  stopAssistantUiResumeBatch(batch.id);
-                  return "blocked";
-                }
-                batch.durationsMs!.push(Math.max(0, Date.now() - startedAt));
-                completedJobIds.add(jobId);
-                batch.completedJobIds.push(jobId);
-                return generated.outcome;
-              } catch {
-                return false;
-              } finally {
-                batch.activeJobIds = batch.activeJobIds.filter(
-                  (id) => id !== jobId,
-                );
-                await syncBatch();
-              }
-            },
-            {
-              includeExisting: continuing,
-              onProgress: ({
-                completedCount,
-                fallbackCount,
-                originalChoiceCount,
-                cancelledCount,
-                currentIndex,
-                failedCount,
-                totalCount,
-              }) => {
-                if (tailoredDraftPreparationDisposedRef.current) return;
-
-                setTailoredDraftPreparation((current) => ({
-                  ...current,
-                  ...(batch.providerBlock
-                    ? { providerBlock: batch.providerBlock }
-                    : {}),
-                  attemptedCount: currentIndex,
-                  durationsMs: [...(batch.durationsMs ?? [])],
-                  elapsedMs: Date.now() - batchStartedAt,
-                  completedCount,
-                  ...(fallbackCount ? { fallbackCount } : {}),
-                  ...(originalChoiceCount ? { originalChoiceCount } : {}),
-                  ...(cancelledCount ? { cancelledCount } : {}),
-                  failedCount,
-                  currentIndex,
-                  totalCount,
-                  status: "running",
-                  stopRequested:
-                    batch.stopRequested ||
-                    tailoredDraftPreparationStopRequested,
-                }));
-              },
-              shouldStop: () =>
-                tailoredDraftPreparationStopRequested ||
-                tailoredDraftPreparationStopRequestedRef.current ||
-                tailoredDraftPreparationDisposedRef.current,
-            },
-          ),
-        )
-        .then((result) => {
-          // A disposed controller no longer owns visible state; skip the
-          // final aggregate write instead of updating a dead tree.
-          if (tailoredDraftPreparationDisposedRef.current) {
-            return;
-          }
-
-          // The final remainder reads the newest workspace render so jobs
-          // added, removed, or changed while the run was parked are counted.
-          // Items this batch completed are excluded even when a not-yet-
-          // refreshed snapshot still lists them as eligible; failures stay
-          // counted because they remain eligible for a rerun.
-          const currentSnapshot = latestWorkspaceRef.current ?? workspace;
-          const currentQueue = getActiveCampaignReviewQueue(
-            currentSnapshot,
-            ownerCampaignId,
-          ).filter(
-            (item) =>
-              !completedJobIds.has(item.jobId) &&
-              (!selectedJobIds || selectedJobIds.has(item.jobId)),
-          );
-          const finalState: TailoredDraftPreparationViewState = {
-            ...(batch.providerBlock
-              ? { providerBlock: batch.providerBlock }
-              : {}),
-            attemptedCount: result.attemptedCount,
-            completedCount: result.completedCount,
-            ...(result.fallbackCount
-              ? { fallbackCount: result.fallbackCount }
-              : {}),
-            ...(result.originalChoiceCount
-              ? { originalChoiceCount: result.originalChoiceCount }
-              : {}),
-            ...(result.cancelledCount
-              ? { cancelledCount: result.cancelledCount }
-              : {}),
-            currentIndex: null,
-            eligibleRemainingCount: Math.max(
-              0,
-              countTailoredDraftPreparationEligible(
-                currentQueue,
-                collectPreparedApplicationJobIds(
-                  currentSnapshot.applicationRecords,
-                ),
-              ),
-            ),
-            failedCount: result.failedCount,
-            status:
-              result.failedCount > 0
-                ? "failed"
-                : result.stopped
-                  ? "stopped"
-                  : "completed",
-            totalCount: result.totalCount,
-          };
-          setTailoredDraftPreparation(finalState);
-          // On Shortlisted the result is a note under the batch control, where
-          // it can be dismissed. As a route message it also landed in the Next
-          // step card of whatever job was open, and stayed there.
-          if (!ownerStartRoute?.startsWith("/job-finder/review-queue")) {
-            applyRouteScopedMessage(
-              {
-                // The durable dismissible batch notice owns provider-outage copy.
-                message: batch.providerBlock
-                  ? null
-                  : getTailoredDraftPreparationResultMessage(finalState),
-              },
-              ownerStartRoute,
-            );
-          }
-        })
-        .catch(() => {
-          if (tailoredDraftPreparationDisposedRef.current) return;
-          setTailoredDraftPreparation((current) => ({
-            ...current,
-            status: "failed",
-          }));
-        })
-        .finally(async () => {
-          unsubscribeProgress();
-          batch.running = false;
-          batch.done =
-            !batch.stopRequested &&
-            !tailoredDraftPreparationStopRequested &&
-            !tailoredDraftPreparationDisposedRef.current &&
-            batch.jobIds.every((jobId) => completedJobIds.has(jobId));
-          batch.activeJobIds = [];
-          await syncBatch().catch(() => undefined);
-          isTailoredDraftPreparationRunActive = false;
-          tailoredDraftPreparationStopRequested = false;
-          tailoredDraftPreparationRunRef.current = false;
-        });
-    } catch (error) {
-      unsubscribeProgress();
-      isTailoredDraftPreparationRunActive = false;
-      tailoredDraftPreparationStopRequested = false;
-      tailoredDraftPreparationRunRef.current = false;
-      throw error;
-    }
-  };
-
   return {
     onAnalyzeProfileFromResume: () => {
       if (!canImportResume) {
@@ -2069,43 +1549,6 @@ export function createPrimaryPageActions(
         ? { status: "failed", message: null }
         : { status: "unknown" };
     },
-    onApproveResumes: (jobIds: readonly string[]) => {
-      const restoreStatus = Object.fromEntries(
-        jobIds.map((id) => [id, reviewStatusBeforeApproval(id)]),
-      );
-      let change: RecentChange | null = null;
-      return runAction(
-        () => actions.approveResumes({ jobIds: [...jobIds] }),
-        () => undefined,
-        (snapshot) => {
-          const chosen = new Set(jobIds);
-          const approvedIds = (snapshot.reviewQueue ?? [])
-            .filter(
-              (item) =>
-                chosen.has(item.jobId) &&
-                item.resumeReview.status === "approved",
-            )
-            .map((item) => item.jobId);
-          const approved = approvedIds.length;
-          if (approved > 0)
-            change = recordMove({
-              kind: "approved",
-              jobIds: approvedIds,
-              restoreStatus,
-            });
-          const left = jobIds.length - approved;
-          return `${approved === 1 ? "1 resume approved" : `${approved} resumes approved`}.${left > 0 ? ` ${left} could not be: open ${left === 1 ? "it" : "them"} under To review.` : ""}`;
-        },
-        {
-          scope: jobFinderPendingActions.apply(),
-          startMessage: `Approving ${jobIds.length === 1 ? "1 resume" : `${jobIds.length} resumes`}...`,
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-          ...(jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
-        },
-      );
-    },
     onReturnApplicationToShortlist: (record: { id: string; jobId: string }) => {
       let change: RecentChange | null = null;
       return runAction(
@@ -2171,26 +1614,6 @@ export function createPrimaryPageActions(
         () => actions.startAutoApplyRun(input),
         "Application staged. Press Apply now in Applications to start it.",
         jobFinderPendingActions.apply(),
-      );
-    },
-    onReviewResumePdf: (jobId: string) => {
-      const current = latestWorkspaceRef.current ?? workspace;
-      const approved = current.resumeExportArtifacts.some(
-        (artifact) => artifact.jobId === jobId && artifact.isApproved,
-      );
-      if (!approved) {
-        navigate(buildResumeWorkspaceRoute(jobId));
-        applyRouteScopedMessage({
-          message: "Review and approve a PDF for this job, then apply again.",
-          tone: "failure",
-        });
-        return;
-      }
-      void runAction(
-        () => actions.setJobResumeApplicationMode(jobId, "tailored_per_job"),
-        () => navigate(buildResumeWorkspaceRoute(jobId)),
-        "This job will use your approved PDF. Review it before applying again.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
       );
     },
     onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => {
@@ -2325,379 +1748,7 @@ export function createPrimaryPageActions(
         },
       );
     },
-    onEditResumeWorkspace: (jobId: string) => {
-      void confirmLeaveDirtyResumeWorkspace("open that resume instead").then(
-        (mayLeave) => {
-          if (!mayLeave) {
-            return;
-          }
-
-          if (!jobId) {
-            navigate("/job-finder/review-queue");
-            return;
-          }
-
-          setSelectedReviewJobId(jobId);
-          navigate(buildResumeWorkspaceRoute(jobId));
-        },
-      );
-    },
-    onGenerateResume: async (
-      jobId: string,
-      options?: { selectAfter?: boolean },
-    ): Promise<boolean> =>
-      runAction(
-        () => actions.generateResume(jobId),
-        () => {
-          if (options?.selectAfter === false) {
-            return;
-          }
-
-          setSelectedReviewJobId(jobId);
-        },
-        (snapshot) =>
-          describeResumeRunResult(
-            snapshot,
-            jobId,
-            "Resume created for this job.",
-          ),
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
-    ...(actions.removeJobsFromReview
-      ? {
-          onRemoveReviewJobs: async (
-            jobIds: readonly string[],
-            options?: { quiet?: boolean },
-          ) => {
-            const ids = [...new Set(jobIds)];
-            if (ids.length === 0) return;
-            const mayLeave = await confirmLeaveDirtyResumeWorkspace(
-              "remove these jobs from Shortlisted",
-            );
-            if (!mayLeave) return;
-            let change: RecentChange | null = null;
-            await runAction(
-              () => actions.removeJobsFromReview!(ids),
-              () => {
-                change = recordMove({
-                  kind: "moved_to_find_jobs",
-                  jobIds: ids,
-                });
-              },
-              options?.quiet
-                ? null
-                : `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
-              {
-                rethrowError: true,
-                scope: jobFinderPendingActions.resumeJob("bulk-remove"),
-                undo: () => {
-                  if (change) void undoRecentChange(change);
-                },
-                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
-              },
-            );
-          },
-        }
-      : {}),
-    onRemoveReviewJob: (jobId: string) => {
-      void confirmLeaveDirtyResumeWorkspace(
-        "remove this job from Shortlisted",
-      ).then((mayLeave) => {
-        if (!mayLeave) {
-          return;
-        }
-
-        let change: RecentChange | null = null;
-        void runAction(
-          () => actions.removeJobFromReview(jobId),
-          () => {
-            change = recordMove({
-              kind: "moved_to_find_jobs",
-              jobIds: [jobId],
-            });
-            clearResumeWorkspaceState();
-            const queue = getCampaignReviewQueue();
-            const index = queue.findIndex((item) => item.jobId === jobId);
-            const next = queue[index + 1] ?? queue[index - 1];
-            setSelectedReviewJobId(next?.jobId ?? "");
-            navigate("/job-finder/review-queue", { replace: true });
-          },
-          "Job moved back to Find jobs.",
-          {
-            scope: jobFinderPendingActions.resumeJob(jobId),
-            undo: () => {
-              if (change) void undoRecentChange(change);
-            },
-          },
-        );
-      });
-    },
-    onApproveCurrentResume: (jobId: string) => {
-      const restoreStatus = reviewStatusBeforeApproval(jobId);
-      let change: RecentChange | null = null;
-      void runResumeWorkspaceAction(
-        async () => {
-          try {
-            await actions.exportResumePdf(jobId, "approval");
-          } catch (error) {
-            // A refused export re-checks the draft and saves what it found.
-            // The studio has to show that fresh result, or the person keeps
-            // looking at a list they already finished while the button says
-            // something still blocks — the exact state one tester hit,
-            // fixed only by restarting the app.
-            await refreshResumeWorkspace(jobId).catch(() => false);
-            throw error;
-          }
-          return approveLatestResumeExport(jobId);
-        },
-        async () => {
-          change = recordMove({
-            kind: "approved",
-            jobIds: [jobId],
-            restoreStatus: { [jobId]: restoreStatus },
-          });
-          await refreshResumeWorkspace(jobId);
-        },
-        "Resume approved.",
-        {
-          scope: jobFinderPendingActions.resumeExport(jobId),
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-        },
-      );
-    },
-    onApproveResumeAndContinue: (
-      jobId: string,
-      nextJobId: string | null,
-      exportId?: string,
-    ) => {
-      // Building and checking the application PDF takes seconds. The person
-      // has read this resume and approved it, so the next one opens now and
-      // the approval finishes behind it, one at a time. A failure keeps the
-      // job in "To review" and is named on the review line in the studio.
-      // Undo puts the resume back under To review as it was, so it needs
-      // the status the approval is about to replace.
-      const restoreStatus = reviewStatusBeforeApproval(jobId);
-      const change = recordMove({
-        kind: "approved",
-        jobIds: [jobId],
-        restoreStatus: { [jobId]: restoreStatus },
-      });
-      markResumeReviewApproving(jobId);
-      enqueueResumeApproval(async () => {
-        try {
-          await withPendingScope(
-            jobFinderPendingActions.resumeExport(jobId),
-            async () => {
-              if (exportId) {
-                await actions.approveResume(jobId, exportId);
-                return;
-              }
-              await actions.exportResumePdf(jobId, "approval");
-              await approveLatestResumeExport(jobId);
-            },
-          );
-          markResumeReviewApproved(jobId);
-        } catch (error) {
-          markResumeReviewFailed(
-            jobId,
-            getJobFinderErrorMessage(
-              error,
-              "The resume could not be approved.",
-            ),
-          );
-        }
-      });
-      setSelectedReviewJobId(nextJobId ?? jobId);
-      const destination = nextJobId
-        ? buildResumeWorkspaceRoute(nextJobId)
-        : "/job-finder/review-queue";
-      navigate(destination);
-      let undone = false;
-      applyRouteScopedMessage(
-        {
-          message: "Resume approved.",
-          tone: "success",
-          undo: () => {
-            if (undone) return;
-            undone = true;
-            // After the approval itself, which may still be building.
-            enqueueResumeApproval(async () => {
-              if (getResumeReviewSession().failed.has(jobId)) return;
-              await runAction(
-                () => actions.clearResumeApproval(jobId, restoreStatus),
-                () => {
-                  forgetResumeReview(jobId);
-                  if (change) markRecentChangeUndone(change);
-                },
-                "The resume is back under To review.",
-                { scope: jobFinderPendingActions.resumeExport(jobId) },
-              );
-            });
-          },
-        },
-        destination,
-      );
-    },
-    onApproveResumeAndApply: (jobId: string) => {
-      const capacityRefusal = getApplicationStartRefusalMessage();
-      if (capacityRefusal) {
-        applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
-        return;
-      }
-      // Light and Tailored drafts keep every fact the person wrote, so
-      // pressing Apply is the approval: the PDF is built, the draft approved
-      // and the application started, without a detour through the studio.
-      // Aggressive drafts still go through review (ADR 0018).
-      void (async () => {
-        try {
-          await withPendingScope(
-            jobFinderPendingActions.resumeExport(jobId),
-            async () => {
-              await actions.exportResumePdf(jobId, "approval");
-              const workspace = await actions.getResumeWorkspace(jobId);
-              const exportToApprove = workspace.exports
-                .filter(
-                  (artifact) =>
-                    artifact.jobId === jobId &&
-                    artifact.draftId === workspace.draft.id,
-                )
-                .sort(
-                  (left, right) =>
-                    new Date(right.exportedAt).getTime() -
-                    new Date(left.exportedAt).getTime(),
-                )[0];
-              if (!exportToApprove) {
-                throw new Error(
-                  "Job Finder could not create the application PDF for this resume.",
-                );
-              }
-              await actions.approveResume(jobId, exportToApprove.id);
-              await refreshResumeWorkspace(jobId);
-            },
-          );
-        } catch (error) {
-          applyRouteScopedMessage({
-            message: getJobFinderErrorMessage(
-              error,
-              "The resume could not be approved, so the application was not started.",
-            ),
-          });
-          // The refusal names lines the person has to decide on; the place
-          // to decide is the resume, so it opens with the fresh check.
-          await refreshResumeWorkspace(jobId).catch(() => false);
-          setSelectedReviewJobId(jobId);
-          navigate(buildResumeWorkspaceRoute(jobId));
-          return;
-        }
-        startAutoFlow(
-          () =>
-            actions.startApplyCopilotRun({
-              jobId,
-              visualCheckpointsEnabled: false,
-            }),
-          "Application run finished.",
-          jobFinderPendingActions.apply(),
-          { jobId },
-        );
-      })();
-    },
-    onApproveResume: (jobId: string, exportId: string) => {
-      const restoreStatus = reviewStatusBeforeApproval(jobId);
-      let change: RecentChange | null = null;
-      void runResumeWorkspaceAction(
-        () => actions.approveResume(jobId, exportId),
-        async () => {
-          change = recordMove({
-            kind: "approved",
-            jobIds: [jobId],
-            restoreStatus: { [jobId]: restoreStatus },
-          });
-          await refreshResumeWorkspace(jobId);
-        },
-        "Resume approved for this job.",
-        {
-          scope: jobFinderPendingActions.resumeJob(jobId),
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-        },
-      );
-    },
-    onMoveResumesBackToReview: (jobIds: readonly string[]) => {
-      // Approved -> To review, on purpose: the approval is cleared and the
-      // resume waits for a read again exactly as before it was approved.
-      // Undo approves the same PDF again.
-      const current = latestWorkspaceRef.current ?? workspace;
-      const approvedExportIds: Record<string, string> = {};
-      for (const item of current.reviewQueue)
-        if (
-          jobIds.includes(item.jobId) &&
-          item.resumeReview.status === "approved"
-        )
-          approvedExportIds[item.jobId] = item.resumeReview.approvedExportId;
-      const ids = Object.keys(approvedExportIds);
-      if (ids.length === 0) return Promise.resolve(false);
-      let change: RecentChange | null = null;
-      return runAction(
-        async () => {
-          for (const id of ids)
-            await actions.clearResumeApproval(id, "needs_review");
-          for (const id of ids) forgetResumeReview(id);
-        },
-        () => {
-          change = recordMove({
-            kind: "moved_to_review",
-            jobIds: ids,
-            approvedExportIds,
-          });
-        },
-        ids.length === 1
-          ? "The resume is back under To review."
-          : `${ids.length} resumes are back under To review.`,
-        {
-          scope: jobFinderPendingActions.apply(),
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-          ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
-        },
-      );
-    },
     onUndoRecentChange: undoRecentChange,
-    onSetWorkHistoryReviewAcknowledgment: (
-      jobId: string,
-      decision: ResumeWorkHistoryDecisionRequest,
-    ) =>
-      void runResumeWorkspaceAction(
-        async () => {
-          const workspace = await actions.getResumeWorkspace(jobId);
-          const commandInput = buildWorkHistoryReviewAcknowledgmentCommandInput(
-            {
-              decision,
-              draft: workspace.draft,
-              jobId,
-              suggestions: workspace.workHistoryReviewSuggestions,
-            },
-          );
-
-          if (!commandInput) {
-            throw new Error(
-              "This work-history decision no longer matches the saved draft. Reload the workspace and try again.",
-            );
-          }
-
-          return actions.setWorkHistoryReviewAcknowledgment(commandInput);
-        },
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        decision.intent === "acknowledge"
-          ? "Saved. This role stays out of the resume by your explicit decision."
-          : "Removed the leave-off decision for this role.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
     onImportResume: (options?: { retryInterrupted?: boolean }) => {
       if (!canImportResume) {
         applyRouteScopedMessage({ message: importResumeGuardMessage });
@@ -2963,251 +2014,12 @@ export function createPrimaryPageActions(
         return { status: "failure", message: failureMessage };
       }
     },
-    onPrepareTailoredDrafts: prepareTailoredDrafts,
-    onStopTailoredDraftPreparation: () => {
-      // The run outlives this controller, so a Stop pressed after a remount
-      // has to be accepted on the module-level guard as well.
-      if (
-        !tailoredDraftPreparationRunRef.current &&
-        !isTailoredDraftPreparationRunActive
-      ) {
-        return;
-      }
-
-      tailoredDraftPreparationStopRequestedRef.current = true;
-      tailoredDraftPreparationStopRequested = true;
-      if (uiResumeBatch && !uiResumeBatch.done) {
-        uiResumeBatch.stopRequested = true;
-        void window.nestor.assistant
-          .syncResumeBatch(uiResumeBatch)
-          .catch(() => undefined);
-      }
-      // Show at once that the press landed; the active drafts still finish.
-      setTailoredDraftPreparation((current) =>
-        current.status === "running"
-          ? { ...current, stopRequested: true }
-          : current,
-      );
-      // The progress figure freezes where it stands (see `onProgress`): the
-      // run is finishing the draft it already started and scheduling nothing
-      // after it. The terminal state is written when it really has stopped,
-      // so nothing here claims it stopped before it did.
-    },
-    onSetJobResumeApplicationMode: (
-      jobId: string,
-      resumeApplicationMode: ResumeApplicationMode,
-      resumeTailoringMode?: TailoringMode | null,
-    ) => {
-      const current = latestWorkspaceRef.current ?? workspace;
-      const item = current.reviewQueue.find((entry) => entry.jobId === jobId);
-      // A written resume is rewritten at the level just picked, in the same
-      // press; otherwise Apply would approve and send the old level's text.
-      const rewrite = item
-        ? shouldRewriteResumeAfterLevelChange({
-            item,
-            defaultTailoringMode: current.searchPreferences.tailoringMode,
-            nextApplicationMode: resumeApplicationMode,
-            nextTailoringMode: resumeTailoringMode ?? null,
-          })
-        : false;
-      const levelName =
-        resumeTailoringMode === "aggressive"
-          ? "Aggressive"
-          : resumeTailoringMode === "conservative"
-            ? "Light"
-            : "Tailored";
-      void runAction(
-        async () => {
-          const snapshot = await actions.setJobResumeApplicationMode(
-            jobId,
-            resumeApplicationMode,
-            resumeTailoringMode,
-          );
-          if (!rewrite) return snapshot;
-          try {
-            return await actions.regenerateResumeDraft(jobId);
-          } catch (error) {
-            // A rewrite that failed changed nothing (ADR 0041), so the level
-            // goes back to the one the resume on screen was written at.
-            if (item) {
-              await actions
-                .setJobResumeApplicationMode(
-                  jobId,
-                  item.resumeApplicationMode,
-                  item.resumeTailoringMode,
-                )
-                .catch(() => undefined);
-            }
-            throw error;
-          }
-        },
-        () => setSelectedReviewJobId(jobId),
-        rewrite
-          ? (snapshot) =>
-              describeResumeRunResult(
-                snapshot,
-                jobId,
-                `Resume rewritten at ${levelName} for this job.`,
-              )
-          : resumeApplicationMode === "original_resume"
-            ? "This job will use your original resume unchanged."
-            : resumeTailoringMode === "aggressive"
-              ? "This job will get an aggressive resume."
-              : resumeTailoringMode === "conservative"
-                ? "This job will get a lightly tailored resume."
-                : "This job will get a tailored resume.",
-        {
-          scope: jobFinderPendingActions.resumeJob(jobId),
-          ...(rewrite
-            ? {
-                startMessage: `Rewriting this job's resume at ${levelName}…`,
-              }
-            : {}),
-        },
-      );
-    },
     onRejectProfileCopilotPatchGroup: (patchGroupId: string) =>
       void runAction(
         () => actions.rejectProfileCopilotPatchGroup(patchGroupId),
         () => undefined,
         "Profile change proposal dismissed.",
         { scope: jobFinderPendingActions.profileMutation() },
-      ),
-    onRefreshResumeWorkspace: (jobId: string) => {
-      const scope = jobFinderPendingActions.resumeJob(jobId);
-
-      // Reload is the safe renderer recovery for a long-running assistant
-      // request. Retire the old visual request and pending scope first;
-      // the underlying IPC promise may still finish and persist its real
-      // result, but its late callbacks are fenced below.
-      resumeAssistantRequestTokenRef.current += 1;
-      invalidatePendingActionScope(scope);
-      setPendingActionState((current) =>
-        clearPendingActionScopes(current, [scope]),
-      );
-      setResumeAssistantPending(false);
-
-      void runResumeWorkspaceAction(
-        () =>
-          refreshResumeWorkspace(jobId, {
-            updateAssistantMessages: true,
-          }),
-        () => undefined,
-        "Workspace reloaded.",
-        {
-          scope,
-          startMessage: "Reloading the saved workspace…",
-        },
-      );
-    },
-    onRegenerateResumeDraft: (jobId: string) =>
-      void runResumeWorkspaceAction(
-        async () => {
-          try {
-            return await actions.regenerateResumeDraft(jobId);
-          } catch (error) {
-            await refreshResumeWorkspace(jobId).catch(() => undefined);
-            throw new Error(FAILURE_SENTENCES.assistant_unavailable, {
-              cause: error,
-            });
-          }
-        },
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        "Draft refreshed.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
-    onRegenerateResumeSection: (jobId: string, sectionId: string) => {
-      // Proposal-only service: regeneration stores its outcome as the newest
-      // assistant message and never mutates the draft. The success copy is
-      // derived from that message instead of claiming "Section refreshed.";
-      // a failed message read stays silent rather than guessing either way.
-      // Action rejections keep the existing runResumeWorkspaceAction error
-      // handling untouched.
-      let sectionOutcomeMessage: string | null = null;
-      void runResumeWorkspaceAction(
-        async () => {
-          const snapshot = await actions.regenerateResumeSection(
-            jobId,
-            sectionId,
-          );
-          const latestAssistantMessage =
-            (await actions.getResumeAssistantMessages(jobId)).at(-1) ?? null;
-          sectionOutcomeMessage =
-            latestAssistantMessage !== null &&
-            latestAssistantMessage.proposalStatus === "pending"
-              ? "Rewrite proposed for review. Nothing changed yet."
-              : "No changes were proposed for this section.";
-          return snapshot;
-        },
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        () => sectionOutcomeMessage,
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      );
-    },
-    onRestoreResumeDraftRevision: (jobId: string, revisionId: string) =>
-      void runResumeWorkspaceAction(
-        () => actions.restoreResumeDraftRevision(jobId, revisionId),
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        "Earlier draft restored. Review it before exporting or approving again.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
-    onWriteEditableResumeForOriginalJob: (
-      jobId: string,
-      pendingRequest: string | null,
-    ) => {
-      // Original sends the imported file, so nothing in the studio reaches
-      // the employer. One press moves this job to the saved level, writes the
-      // resume, and sends the Assistant request the Original draft could not
-      // take, so the person only has to accept the proposal.
-      const current = latestWorkspaceRef.current ?? workspace;
-      const savedLevel = current.searchPreferences.tailoringMode;
-      const levelName = describeSavedResumeLevel(savedLevel);
-      void runResumeWorkspaceAction(
-        async () => {
-          await actions.setJobResumeApplicationMode(
-            jobId,
-            "tailored_per_job",
-            savedLevel,
-          );
-          const snapshot = await actions.generateResume(jobId);
-          if (pendingRequest) {
-            await actions.sendResumeAssistantMessage(jobId, pendingRequest);
-          }
-          return snapshot;
-        },
-        async () => {
-          await refreshResumeWorkspace(jobId, {
-            updateAssistantMessages: true,
-          });
-        },
-        (snapshot) =>
-          describeResumeRunResult(
-            snapshot,
-            jobId,
-            pendingRequest
-              ? `Wrote an editable ${levelName} resume and asked the Assistant again. Review its proposal.`
-              : `Wrote an editable ${levelName} resume for this job.`,
-          ),
-        {
-          scope: jobFinderPendingActions.resumeJob(jobId),
-          startMessage: `Writing an editable ${levelName} resume for this job…`,
-        },
-      );
-    },
-    onUndoResumeAssistantEdit: (jobId: string, revisionId: string) =>
-      void runResumeWorkspaceAction(
-        () => actions.undoResumeAssistantEdit(jobId, revisionId),
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        "AI edit undone. Your later edits are kept.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
       ),
     onRunAgentDiscovery: (searchRequest?: JobFinderSearchRequest) =>
       runDiscoveryAction(undefined, searchRequest),
@@ -3524,182 +2336,6 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.profileMutation(),
         surface: "answers",
       }),
-    onSaveResumeDraft: (
-      draft: ResumeDraft,
-      onSaved?: (updatedAt: string) => void,
-    ) =>
-      void runSaveAction({
-        action: () => actions.saveResumeDraft(draft),
-        dedupeKey: createSaveDedupeKey("resume", draft),
-        failedFallback:
-          "Resume draft was not saved. Retry before leaving Resume Studio.",
-        label: "Resume draft",
-        onSuccess: async (snapshot) => {
-          const savedDraft = snapshot.resumeDrafts.find(
-            (entry) => entry.id === draft.id,
-          );
-          if (savedDraft) onSaved?.(savedDraft.updatedAt);
-          await refreshResumeWorkspace(draft.jobId);
-        },
-        savedMessage: "Draft saved.",
-        scope: jobFinderPendingActions.resumeJob(draft.jobId),
-        surface: "resume",
-      }),
-    // Resume Studio saves edits by itself a moment after the last one. It is
-    // quiet: no "Saving…" line, no toast, no pending scope that would lock
-    // the fields, and it stays out of the save coordinator so leaving the
-    // page mid-save asks nothing. The editor shows its own state and keeps
-    // the edits marked unsaved only when this fails.
-    onAutosaveResumeDraft: async (
-      draft: ResumeDraft,
-      onSaved: (updatedAt: string) => void,
-      autosaveSessionId?: string,
-    ): Promise<{ saved: true } | { saved: false; message: string }> => {
-      try {
-        const snapshot = await actions.saveResumeDraft(
-          draft,
-          autosaveSessionId,
-        );
-        const savedDraft = snapshot.resumeDrafts.find(
-          (entry) => entry.id === draft.id,
-        );
-        if (savedDraft) {
-          onSaved(savedDraft.updatedAt);
-          // Not a reload of the whole resume (~0.3 s of main-process work
-          // after every pause in typing): the save's own fields go on the
-          // text that was sent, and the checks and history follow later.
-          adoptAutosavedResumeDraft({
-            ...draft,
-            status: savedDraft.status,
-            approvedAt: savedDraft.approvedAt,
-            approvedExportId: savedDraft.approvedExportId,
-            staleReason: savedDraft.staleReason,
-            updatedAt: savedDraft.updatedAt,
-          });
-        } else {
-          await refreshResumeWorkspace(draft.jobId);
-        }
-        return { saved: true };
-      } catch (error) {
-        return {
-          saved: false,
-          message: getJobFinderErrorMessage(
-            error,
-            "Your latest resume edits were not saved.",
-          ),
-        };
-      }
-    },
-    onSaveResumeDraftAndThen: (
-      draft: ResumeDraft,
-      next: () => void | Promise<void>,
-      successMessage?: string | null,
-      onSaved?: (updatedAt: string) => void,
-    ) =>
-      void (async () => {
-        const ownerStartRoute = jobFinderStatusRoute;
-        const jobId = draft.jobId;
-        let saveSucceeded = false;
-
-        // A language rewrite is AI work, not an unsaved editor draft. Its
-        // failure and retry belong to Resume Studio, never the global save notice.
-        if (
-          (draft.language ?? null) !==
-          (activeRouteResumeWorkspace?.draft.language ?? null)
-        ) {
-          await runResumeWorkspaceAction(
-            async () => {
-              try {
-                return await actions.saveResumeDraft(draft);
-              } catch (error) {
-                throw new Error(FAILURE_SENTENCES.assistant_unavailable, {
-                  cause: error,
-                });
-              }
-            },
-            async (snapshot) => {
-              const savedDraft = snapshot.resumeDrafts.find(
-                (entry) => entry.id === draft.id,
-              );
-              if (savedDraft) onSaved?.(savedDraft.updatedAt);
-              saveSucceeded = await refreshResumeWorkspace(jobId);
-              if (saveSucceeded && isCurrentResumeWorkspaceJob(jobId))
-                await next();
-            },
-            successMessage ?? "Changes saved.",
-            { scope: jobFinderPendingActions.resumeJob(jobId) },
-          );
-          return;
-        }
-
-        await runSaveAction({
-          action: () => actions.saveResumeDraft(draft),
-          dedupeKey: createSaveDedupeKey("resume", draft),
-          failedFallback:
-            "Resume draft was not saved. Retry before continuing.",
-          label: "Resume draft",
-          onSuccess: async (snapshot) => {
-            const savedDraft = snapshot.resumeDrafts.find(
-              (entry) => entry.id === draft.id,
-            );
-            if (savedDraft) onSaved?.(savedDraft.updatedAt);
-            saveSucceeded = await refreshResumeWorkspace(jobId);
-          },
-          savedMessage: successMessage ?? "Changes saved.",
-          scope: jobFinderPendingActions.resumeJob(jobId),
-          surface: "resume",
-        });
-
-        if (saveSucceeded && isCurrentResumeWorkspaceJob(jobId)) {
-          try {
-            await next();
-          } catch (error) {
-            console.error("Resume workspace follow-up action failed.", error);
-            applyRouteScopedMessage(
-              {
-                message:
-                  error instanceof Error
-                    ? `Changes were saved, but the follow-up action failed. ${error.message}`
-                    : "Changes were saved, but the follow-up action failed.",
-              },
-              ownerStartRoute,
-            );
-          }
-        }
-      })(),
-    onApplyResumePatch: (
-      patch: ResumeDraftPatch,
-      revisionReason?: string | null,
-    ) => {
-      if (!activeRouteResumeWorkspace) {
-        applyRouteScopedMessage({
-          message:
-            "Open a resume workspace before applying an assistant change.",
-        });
-        return;
-      }
-
-      const jobId = activeRouteResumeWorkspace.job.id;
-      return void runSaveAction({
-        action: () => actions.applyResumePatch(patch, revisionReason),
-        dedupeKey: createSaveDedupeKey("resume", {
-          jobId,
-          patch,
-          revisionReason,
-        }),
-        failedFallback:
-          "The assistant resume change was not saved. Retry before leaving this page.",
-        label: "Resume assistant change",
-        onSuccess: async () => {
-          await refreshResumeWorkspace(jobId, {
-            updateAssistantMessages: true,
-          });
-        },
-        savedMessage: "Resume updated.",
-        scope: jobFinderPendingActions.resumeJob(jobId),
-        surface: "resume",
-      });
-    },
     onSaveProfile: (profile: CandidateProfile) =>
       void runSaveAction({
         action: () => actions.saveProfile(profile),
@@ -3712,91 +2348,6 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.profileMutation(),
         surface: "profile",
       }),
-    onExportResumePdf: (jobId: string) => {
-      const ownerStartRoute = jobFinderStatusRoute;
-      void (async () => {
-        const completed: {
-          result: Awaited<
-            ReturnType<JobFinderShellActions["exportResumePdf"]>
-          > | null;
-        } = { result: null };
-        await runResumeWorkspaceAction(
-          () => actions.exportResumePdf(jobId),
-          async (result) => {
-            completed.result = result;
-            await refreshResumeWorkspace(jobId);
-          },
-          null,
-          { scope: jobFinderPendingActions.resumeExport(jobId) },
-        );
-        if (completed.result === null) {
-          return;
-        }
-
-        const result = completed.result;
-        // The action runner clears its pending status after onSuccess. Write
-        // the durable outcome afterwards so that final cleanup cannot erase
-        // the saved path and its Open folder action.
-        applyRouteScopedMessage(
-          {
-            message: result.outputPath
-              ? `Saved your resume PDF to ${result.outputPath}.`
-              : "Export cancelled. No file was saved.",
-            savedFilePath: result.outputPath,
-          },
-          ownerStartRoute,
-        );
-      })();
-    },
-    // "The imported resume identifies 'TAYLOR QUINN', but the visible resume
-    // identity is 'Jamal Reyes'" is sometimes simply true: one document, one
-    // person, an old name. The block offered no way to say so, which left the
-    // whole resume path dead. Saying it is the person's own action and it is
-    // recorded as such — nothing is inferred for them (ADR 0018).
-    onClaimResumeIdentity: () => {
-      const profile = workspace.profile;
-      if (!profile) {
-        return;
-      }
-
-      const choice = describeResumeIdentityOwnershipChoice(profile);
-      void runSaveAction({
-        action: () =>
-          actions.saveProfile({
-            ...profile,
-            resumeIdentityOwnership: choice.acknowledgement,
-          }),
-        dedupeKey: createSaveDedupeKey("profile", choice.acknowledgement),
-        failedFallback:
-          "That choice was not saved. Retry before leaving this page.",
-        label: "Resume identity",
-        onSuccess: () => undefined,
-        savedMessage: choice.sourceFullName
-          ? `Saved. Job Finder will treat "${choice.sourceFullName}" as your own earlier name and use your profile name on resumes.`
-          : "Saved. Job Finder will use your profile name on resumes.",
-        scope: jobFinderPendingActions.profileMutation(),
-        surface: "profile",
-      });
-    },
-    onKeepResumeIdentity: () => {
-      const profile = workspace.profile;
-      if (!profile) {
-        return;
-      }
-
-      const nextProfile = useResumeSourceNameForProfile(profile);
-      void runSaveAction({
-        action: () => actions.saveProfile(nextProfile),
-        dedupeKey: createSaveDedupeKey("profile", nextProfile),
-        failedFallback:
-          "The resume name was not saved. Retry before preparing jobs.",
-        label: "Resume identity",
-        onSuccess: () => undefined,
-        savedMessage: "Saved. Your profile now uses the resume's name.",
-        scope: jobFinderPendingActions.profileMutation(),
-        surface: "profile",
-      });
-    },
     onRevealSavedFile: (path: string) => {
       const ownerStartRoute = jobFinderStatusRoute;
       void (async () => {
@@ -3851,15 +2402,6 @@ export function createPrimaryPageActions(
         surface: "profile",
       });
     },
-    onClearResumeApproval: (jobId: string) =>
-      void runResumeWorkspaceAction(
-        () => actions.clearResumeApproval(jobId),
-        async () => {
-          await refreshResumeWorkspace(jobId);
-        },
-        "Approved PDF removed.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
     onUpdateApplicationDefaults: (input: UpdateApplicationDefaultsInput) =>
       runSaveAction({
         action: () => actions.updateApplicationDefaults(input),
@@ -4011,184 +2553,5 @@ export function createPrimaryPageActions(
         "Last assistant change was undone.",
         { scope: jobFinderPendingActions.profileMutation() },
       ),
-    onSendResumeAssistantMessage: (jobId: string, content: string) =>
-      void (async () => {
-        const ownerStartRoute = jobFinderStatusRoute;
-        const requestJobId = jobId;
-        const requestToken = ++resumeAssistantRequestTokenRef.current;
-        const createdAt = new Date().toISOString();
-        const optimisticUserMessage: ResumeAssistantMessage = {
-          id: `resume_message_user_optimistic_${jobId}_${requestToken}`,
-          jobId,
-          role: "user",
-          content,
-          patches: [],
-          proposalStatus: "none",
-          baseDraftUpdatedAt: null,
-          resolvedPatchIds: [],
-          resolvedAt: null,
-          proposalError: null,
-          createdAt,
-        };
-        const optimisticAssistantMessage: ResumeAssistantMessage = {
-          id: `resume_message_assistant_pending_${jobId}_${requestToken}`,
-          jobId,
-          role: "assistant",
-          content: "Updating your draft...",
-          patches: [],
-          proposalStatus: "none",
-          baseDraftUpdatedAt: null,
-          resolvedPatchIds: [],
-          resolvedAt: null,
-          proposalError: null,
-          createdAt,
-        };
-        const scope = jobFinderPendingActions.resumeJob(jobId);
-
-        setPendingActionState((current) =>
-          incrementPendingScope(current, scope),
-        );
-        const pendingGeneration = getPendingActionGeneration(scope);
-        setResumeAssistantPending(true);
-        setResumeAssistantMessages((current) => [
-          ...current,
-          optimisticUserMessage,
-          optimisticAssistantMessage,
-        ]);
-        applyRouteScopedMessage(
-          { message: "Assistant is updating your draft..." },
-          ownerStartRoute,
-        );
-
-        try {
-          const messages = await actions.sendResumeAssistantMessage(
-            jobId,
-            content,
-          );
-          const assistantReply = [...messages]
-            .reverse()
-            .find((message) => message.role === "assistant");
-          const proposedCount = assistantReply?.patches.length ?? 0;
-
-          if (
-            !isCurrentResumeWorkspaceJob(requestJobId) ||
-            requestToken !== resumeAssistantRequestTokenRef.current
-          ) {
-            return;
-          }
-
-          setResumeAssistantMessages(messages);
-          setResumeAssistantPending(false);
-
-          let refreshMessage: string | null = null;
-
-          try {
-            const nextWorkspace = await actions.getResumeWorkspace(jobId);
-            if (isCurrentResumeWorkspaceJob(nextWorkspace.job.id)) {
-              setResumeWorkspace(nextWorkspace);
-            }
-          } catch (error) {
-            refreshMessage =
-              error instanceof Error
-                ? error.message
-                : "The editor could not refresh automatically.";
-          }
-
-          if (isCurrentResumeAssistantRequest(requestJobId, requestToken)) {
-            applyRouteScopedMessage(
-              {
-                message:
-                  refreshMessage !== null
-                    ? `Assistant finished${proposedCount > 0 ? ` and proposed ${proposedCount} change${proposedCount === 1 ? "" : "s"}` : ""}, but the editor could not refresh automatically. ${refreshMessage}`
-                    : proposedCount > 0
-                      ? `Assistant proposed ${proposedCount} change${proposedCount === 1 ? "" : "s"}. Review and accept the changes you want.`
-                      : "Assistant finished and shared a reply with no direct resume changes.",
-              },
-              ownerStartRoute,
-            );
-          }
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "The requested resume action failed.";
-          if (isCurrentResumeAssistantRequest(requestJobId, requestToken)) {
-            setResumeAssistantPending(false);
-            setResumeAssistantMessages((current) =>
-              current.filter(
-                (entry) =>
-                  entry.id !== optimisticUserMessage.id &&
-                  entry.id !== optimisticAssistantMessage.id,
-              ),
-            );
-            applyRouteScopedMessage({ message }, ownerStartRoute);
-          }
-        } finally {
-          // Reload/navigation may retire this request before its IPC promise
-          // settles. Its late cleanup must not decrement a newer operation
-          // that reused the same job scope.
-          if (getPendingActionGeneration(scope) === pendingGeneration) {
-            setPendingActionState((current) =>
-              decrementPendingScope(current, scope),
-            );
-          }
-        }
-      })(),
-    onResolveResumeAssistantProposal: (
-      jobId: string,
-      proposalId: string,
-      action: "accept" | "reject",
-      patchIds: readonly string[],
-    ) =>
-      void (async () => {
-        const ownerStartRoute = jobFinderStatusRoute;
-        const scope = jobFinderPendingActions.resumeJob(jobId);
-        setPendingActionState((current) =>
-          incrementPendingScope(current, scope),
-        );
-        try {
-          const messages = await actions.resolveResumeAssistantProposal(
-            jobId,
-            proposalId,
-            action,
-            patchIds,
-          );
-          setResumeAssistantMessages(messages);
-          const nextWorkspace = await actions.getResumeWorkspace(jobId);
-          if (isCurrentResumeWorkspaceJob(nextWorkspace.job.id)) {
-            setResumeWorkspace(nextWorkspace);
-          }
-          applyRouteScopedMessage(
-            {
-              message:
-                action === "accept"
-                  ? `Applied ${patchIds.length} approved guided edit${patchIds.length === 1 ? "" : "s"}. Undo is available in version history.`
-                  : "Guided edits proposal rejected. The resume was not changed.",
-            },
-            ownerStartRoute,
-          );
-        } catch (error) {
-          try {
-            setResumeAssistantMessages(
-              await actions.getResumeAssistantMessages(jobId),
-            );
-          } catch {
-            // The primary failure remains visible in the page action state.
-          }
-          applyRouteScopedMessage(
-            {
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "The guided edits proposal could not be resolved.",
-            },
-            ownerStartRoute,
-          );
-        } finally {
-          setPendingActionState((current) =>
-            decrementPendingScope(current, scope),
-          );
-        }
-      })(),
   };
 }

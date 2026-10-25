@@ -24,7 +24,6 @@ import { useApplicationPageStates } from "../../hooks/use-application-page-state
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
 import type { ActionState } from "../../lib/job-finder-types";
-import type { TailoredDraftPreparationViewState } from "../review-queue/review-queue-status";
 import {
   buildJobSearchHomeModel,
   type HomeFindJobsCounts,
@@ -58,13 +57,11 @@ export interface JobSearchHomeScreenProps {
   isResumeImportPending?: boolean;
   liveDiscoveryEvents?: readonly DiscoveryActivityEvent[];
   resumeImportProgress?: ResumeImportProgressEvent | null;
-  tailoredDraftPreparation?: TailoredDraftPreparationViewState | null;
   onApplyToJobs?: (jobIds: readonly string[]) => Promise<unknown> | void;
   /** Send for me: Job Finder presses Send on each filled-in form. */
   onSendPreparedApplications?: (
     jobIds: readonly string[],
   ) => Promise<unknown> | void;
-  onCreateResumes?: () => void;
   onMarkAllCampaignNotificationsRead?: () => void;
   onMarkCampaignNotificationRead?: (notificationId: string) => void;
   onNavigate: (path: string) => void;
@@ -76,7 +73,6 @@ export interface JobSearchHomeScreenProps {
   onSelectCampaign: (campaignId: string) => void;
   onStopApply?: (runId: string) => void;
   onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
-  onStopResumes?: () => void;
   onStopSearch?: (runId: string) => void;
 }
 
@@ -265,7 +261,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     isResumeImportPending: props.isResumeImportPending ?? false,
     liveDiscoveryEvents: props.liveDiscoveryEvents,
     resumeImportProgress: props.resumeImportProgress,
-    tailoredDraftPreparation: props.tailoredDraftPreparation,
   });
   // A search outcome the person has to do something about (a browser that
   // would not open, a source that needs sign-in) keeps its own callout with
@@ -279,7 +274,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     workspace: props.workspace,
     applicationPageStates,
     tasks,
-    tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,
     findJobsCounts: props.findJobsCounts ?? null,
     canRunDiscovery: Boolean(props.onRunDiscovery),
@@ -378,13 +372,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
           props.onNavigate(JOB_FINDER_ROUTE_PATHS.discovery);
         }
         return;
-      case "create_resumes":
-        if (props.onCreateResumes) {
-          props.onCreateResumes();
-        } else {
-          props.onNavigate(JOB_FINDER_ROUTE_PATHS.reviewQueue);
-        }
-        return;
       case "resume_setup":
         if (props.onResumeSetup) {
           props.onResumeSetup(action.step);
@@ -420,9 +407,6 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         return;
       case "apply_queue":
         props.onControlApplyQueue?.(action.action);
-        return;
-      case "stop_resumes":
-        props.onStopResumes?.();
         return;
       case "pause_activity":
         props.onPauseActivity();

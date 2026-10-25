@@ -1,12 +1,6 @@
 // @vitest-environment jsdom
 
-import { RESUME_PIPELINE_CAPACITY } from "@nestor/contracts";
-import type {
-  JobFinderRendererWorkspaceSnapshot,
-  ResumeBatchGenerationProgress,
-  ResumeBatchGenerationResult,
-} from "@nestor/contracts";
-import { StrictMode } from "react";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -22,8 +16,6 @@ import {
 } from "vitest";
 import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
 import { useJobFinderPageController } from "./use-job-finder-page-controller";
-
-type BatchGenerate = Window["nestor"]["jobFinder"]["generateResumeForBatch"];
 
 function createReviewQueueItem(jobId: string) {
   return {
@@ -76,78 +68,6 @@ function createBatchWorkspace(
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function createBatchHarness(options: { parkFirstCall?: boolean } = {}) {
-  const parkFirstCall = options.parkFirstCall ?? true;
-  const workspace = createBatchWorkspace(
-    parkFirstCall ? RESUME_PIPELINE_CAPACITY + 1 : 3,
-  );
-  const activeResolvers: (() => void)[] = [];
-  const parkedIds = new Set<string>();
-  let releasedFirstBatch = false;
-  const generateResumeForBatch = vi.fn<BatchGenerate>(({ jobId }) => {
-    if (!parkedIds.has(jobId) && !releasedFirstBatch && parkFirstCall) {
-      parkedIds.add(jobId);
-      return new Promise<ResumeBatchGenerationResult>((resolve) => {
-        activeResolvers.push(() => resolve({ jobId, outcome: "written" }));
-      });
-    }
-    return Promise.resolve({ jobId, outcome: "written" });
-  });
-  const generateResume = vi.fn(() => Promise.resolve(workspace));
-  const progressListeners = new Set<
-    (progress: ResumeBatchGenerationProgress) => void
-  >();
-  const unsubscribeProgress = vi.fn();
-  const getWorkspaceBootstrap = vi.fn(() => Promise.resolve(workspace));
-
-  Object.defineProperty(window, "nestor", {
-    configurable: true,
-    value: {
-      ping: vi.fn(() => Promise.resolve({ platform: "darwin" as const })),
-      assistant: {
-        syncResumeBatch: (state: unknown) => Promise.resolve(state),
-        onResumeBatchStop: () => () => undefined,
-      },
-      jobFinder: {
-        getWorkspaceBootstrap,
-        generateResume,
-        generateResumeForBatch,
-        onResumeBatchProgress: (
-          listener: (progress: ResumeBatchGenerationProgress) => void,
-        ) => {
-          progressListeners.add(listener);
-          return () => {
-            progressListeners.delete(listener);
-            unsubscribeProgress();
-          };
-        },
-      },
-    } as unknown as Window["nestor"],
-  });
-
-  return {
-    generateResume,
-    generateResumeForBatch,
-    getWorkspaceBootstrap,
-    progressListeners,
-    unsubscribeProgress,
-    resolveParked: () => {
-      releasedFirstBatch = true;
-      activeResolvers.forEach((resolve) => resolve());
-    },
-  };
-}
-
-async function flushTurns(turns = 6) {
-  for (let index = 0; index < turns; index += 1) {
-    await act(async () => {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
-      });
-    });
-  }
-}
-
 type JobFinderPageController = ReturnType<typeof useJobFinderPageController>;
 
 // The data router constructs a real fetch Request for every navigation.
@@ -175,150 +95,6 @@ beforeAll(() => {
 
 afterAll(() => {
   vi.unstubAllGlobals();
-});
-
-// The controller mounts a React Router blocker, so the harness must host it in
-// a data router. A probe component publishes the live controller value so the
-// assertions keep reading the latest render's result.
-function mountController(strictMode: boolean) {
-  const mounted: { current: JobFinderPageController | null } = {
-    current: null,
-  };
-
-  function ControllerProbe() {
-    mounted.current = useJobFinderPageController();
-    return null;
-  }
-
-  const router = createMemoryRouter(
-    [
-      {
-        path: "*",
-        element: strictMode ? (
-          <StrictMode>
-            <ControllerProbe />
-          </StrictMode>
-        ) : (
-          <ControllerProbe />
-        ),
-      },
-    ],
-    { initialEntries: ["/job-finder/review-queue"] },
-  );
-
-  const view = render(<RouterProvider router={router} />);
-
-  return {
-    get current() {
-      return mounted.current;
-    },
-    unmount: view.unmount,
-  };
-}
-
-describe("useJobFinderPageController tailored-draft lifecycle", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    cleanup();
-    Reflect.deleteProperty(window, "nestor");
-  });
-
-  it("lets a truly unmounted controller stop the batch tail after admitted items settle", async () => {
-    const harness = createBatchHarness();
-    const first = mountController(false);
-    await waitFor(() =>
-      expect(first.current?.workspaceState.status).toBe("ready"),
-    );
-    const firstContext = first.current?.context;
-    expect(firstContext).not.toBeNull();
-
-    act(() => {
-      firstContext?.onPrepareTailoredDrafts();
-    });
-    await waitFor(() =>
-      expect(harness.generateResumeForBatch).toHaveBeenCalledTimes(
-        RESUME_PIPELINE_CAPACITY,
-      ),
-    );
-
-    // True teardown settles admitted jobs without dispatching the next one.
-    first.unmount();
-
-    harness.resolveParked();
-    await flushTurns();
-
-    const admittedIds = Array.from(
-      { length: RESUME_PIPELINE_CAPACITY },
-      (_, index) => `job_${index + 1}`,
-    );
-    expect(
-      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
-    ).toEqual(admittedIds);
-    expect(harness.unsubscribeProgress).toHaveBeenCalledOnce();
-    expect(harness.progressListeners.size).toBe(0);
-    expect(harness.generateResume).not.toHaveBeenCalled();
-
-    // The released global guard lets a freshly mounted controller run again.
-    const second = mountController(false);
-    await waitFor(() =>
-      expect(second.current?.workspaceState.status).toBe("ready"),
-    );
-    const secondContext = second.current?.context;
-    expect(secondContext).not.toBeNull();
-
-    act(() => {
-      secondContext?.onPrepareTailoredDrafts();
-    });
-    await waitFor(() =>
-      expect(second.current?.context?.tailoredDraftPreparation.status).toBe(
-        "completed",
-      ),
-    );
-    await flushTurns();
-    expect(
-      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
-    ).toEqual([
-      ...admittedIds,
-      ...admittedIds,
-      `job_${RESUME_PIPELINE_CAPACITY + 1}`,
-    ]);
-    expect(harness.getWorkspaceBootstrap).toHaveBeenCalledTimes(2);
-    expect(harness.generateResume).not.toHaveBeenCalled();
-    expect(harness.unsubscribeProgress).toHaveBeenCalledTimes(2);
-    expect(harness.progressListeners.size).toBe(0);
-  });
-
-  it("keeps a mounted controller's batch runnable across StrictMode effect cycling", async () => {
-    const harness = createBatchHarness({ parkFirstCall: false });
-    const mountedController = mountController(true);
-    await waitFor(() =>
-      expect(mountedController.current?.workspaceState.status).toBe("ready"),
-    );
-    const context = mountedController.current?.context;
-    expect(context).not.toBeNull();
-
-    act(() => {
-      context?.onPrepareTailoredDrafts();
-    });
-    await waitFor(() =>
-      expect(
-        mountedController.current?.context?.tailoredDraftPreparation.status,
-      ).toBe("completed"),
-    );
-
-    // StrictMode's simulated unmount/remount reset the disposal signal, so
-    // every eligible job still ran under the same live controller.
-    expect(
-      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
-    ).toEqual(["job_1", "job_2", "job_3"]);
-    await flushTurns();
-    expect(harness.generateResume).not.toHaveBeenCalled();
-    expect(harness.unsubscribeProgress).toHaveBeenCalledOnce();
-    expect(harness.progressListeners.size).toBe(0);
-  });
 });
 
 describe("useJobFinderPageController cross-route status lifetime", () => {

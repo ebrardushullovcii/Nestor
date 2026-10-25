@@ -219,7 +219,7 @@ const RULES: readonly Rule[] = [
  *
  * Owners, by zone: `screens/applications/**` and `pages/**` → Applications;
  * `screens/settings/**` → Settings; `screens/discovery/**` → Find jobs;
- * `screens/review-queue/**` → Shortlisted and Resume Studio;
+ * `../shortlisted/**` → Shortlisted;
  * `components/profile/**` → Profile; `screens/companies/**`,
  * `screens/actions/**`, `screens/analytics/**`, `screens/rapid-review/**`,
  * `screens/safeguards/**` → their named zone; `components/job-finder-shell.tsx`
@@ -253,7 +253,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/screens/applications/applications-status.ts",
     "features/job-finder/screens/discovery/discovery-detail-panel.tsx",
     "features/job-finder/screens/discovery/discovery-results-panel.tsx",
-    "features/job-finder/screens/review-queue/resume-version-history-panel.tsx",
     "features/job-finder/screens/settings/settings-runtime-summary.tsx",
   ],
   underscoreDisplay: [
@@ -262,10 +261,7 @@ export const PENDING_ADOPTION = {
     "features/job-finder/screens/applications/applications-crm-detail.tsx",
     "features/job-finder/screens/applications/applications-crm-views.tsx",
   ],
-  legacyErrorMessageMapper: [
-    "features/job-finder/screens/review-queue/resume-workspace-screen-helpers.ts",
-    "pages/use-job-finder-page-controller-actions.ts",
-  ],
+  legacyErrorMessageMapper: ["pages/use-job-finder-page-controller-actions.ts"],
   // Empty on purpose, and it must stay empty: the sweep that added this rule
   // removed every occurrence it found.
   internalVocabulary: [],

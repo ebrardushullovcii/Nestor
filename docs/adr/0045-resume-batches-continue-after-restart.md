@@ -1,6 +1,6 @@
 # ADR 0045: Resume batches can be continued after a restart
 
-Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md). Resumes started by shortlisting carry on after a restart by themselves ([ADR 0076](0076-write-resumes-when-a-job-is-shortlisted.md)).
+Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md). Resumes started by shortlisting carry on after a restart by themselves ([ADR 0076](0076-write-resumes-when-a-job-is-shortlisted.md)). Superseded on 2026-10-25 by Shortlisted on the job store: resumes live in a `resumes` table beside `jobs` and are written by `packages/job-finder/src/resumes`, up to six at once, as soon as a job is shortlisted; approving one moves its job to the `resume` stage that Apply reads.
 
 ## Context
 
