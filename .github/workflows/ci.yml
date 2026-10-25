@@ -58,4 +58,17 @@ jobs:
           pnpm --dir apps/desktop exec playwright install chromium
           CHROME_PATH="$(pnpm --dir apps/desktop exec node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
           echo "NESTOR_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
-      - run: pnpm test:correctness
+      - name: Create the temp root the script tests expect
+        run: New-Item -ItemType Directory -Force (Join-Path (Split-Path -Qualifier $PWD) 'tmp') | Out-Null
+      # A shared runner can't judge speed, so stopwatch and scale tests are
+      # skipped here, and slow disks get a longer timeout. The two release-tool
+      # tests need a sealed acceptance setup that only exists on a dev machine.
+      - name: Tests
+        run: >-
+          pnpm exec vitest run --maxWorkers=4 --minWorkers=4
+          --testTimeout=30000 --hookTimeout=30000
+          --exclude "**/*.performance.test.*"
+          --exclude "**/*.scale.test.*"
+          --exclude "**/workspace-scale.test.ts"
+          --exclude "apps/desktop/scripts/prepare-blind-persona-workspaces.test.ts"
+          --exclude "apps/desktop/scripts/blind-resume-comparison-harness.test.ts"
