@@ -9,11 +9,9 @@ import { Suspense } from "react";
 import type { ReactElement } from "react";
 import { createDiscoveryRunInterruptedFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import type * as LaunchReadsModule from "@renderer/features/job-finder/lib/launch-reads";
-import type { LaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   JobFinderApplicationsRoute,
-  JobFinderDiscoveryRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
 } from "./job-finder-page-routes";
@@ -21,7 +19,7 @@ import {
 // What the window read from the database at launch; empty unless a test sets
 // it, as the real reads are before they answer.
 const launch = vi.hoisted(() => ({
-  reads: { counts: null, home: null, context: null, findJobs: null } as unknown,
+  reads: { counts: null, home: null, context: null } as unknown,
 }));
 vi.mock(
   "@renderer/features/job-finder/lib/launch-reads",
@@ -391,49 +389,7 @@ describe("canonical route first paint", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    launch.reads = { counts: null, home: null, context: null, findJobs: null };
-  });
-
-  it("mounts the real Find jobs heading immediately without a suspense fallback or deferred surface timer", () => {
-    const { setTimeoutSpy } = renderCanonicalRoute(
-      "/job-finder/discovery",
-      <JobFinderDiscoveryRoute />,
-    );
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Find jobs" }),
-    ).toBeTruthy();
-    expect(screen.queryByText("Loading screen")).toBeNull();
-    expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
-  });
-
-  it("renders the offline catalog state without a browser CTA", () => {
-    const context = createContext();
-    const onOpenBrowserSession = vi.fn();
-    context.onOpenBrowserSession = onOpenBrowserSession;
-    const baseCampaign = context.workspace.campaigns[0];
-    context.workspace = {
-      ...context.workspace,
-      campaigns: baseCampaign ? [{ ...baseCampaign, jobIds: [] }] : [],
-      discoveryJobs: [],
-    };
-    renderCanonicalRoute(
-      "/job-finder/discovery",
-      <JobFinderDiscoveryRoute />,
-      context,
-    );
-
-    // Find jobs lands on Results; the results panel owns the unavailable-
-    // search fact in one sentence. The slim search bar drops its browser
-    // link entirely instead of repeating it.
-    expect(
-      screen.getAllByText(/Job Finder cannot search right now/u).length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByTestId("discovery-search-bar-browser")).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Open the Job Finder browser" }),
-    ).toBeNull();
-    expect(onOpenBrowserSession).not.toHaveBeenCalled();
+    launch.reads = { counts: null, home: null, context: null };
   });
 
   it("opens a browser session from Home without forwarding the React click event", async () => {
@@ -479,32 +435,6 @@ describe("canonical route first paint", () => {
 
     expect(screen.getByText("Loading your workspace")).toBeTruthy();
     expect(screen.queryByText("Run your first search")).toBeNull();
-  });
-
-  it("shows the full Home on its first view, with Find jobs' counts from the database", () => {
-    const page = (total: number) => ({ rows: [], total });
-    launch.reads = {
-      counts: null,
-      home: null,
-      context: null,
-      findJobs: { focused: page(7), wide: page(31) },
-    } as unknown as LaunchReads;
-    const context = createContext();
-    context.workspace = {
-      ...context.workspace,
-      discoveryJobs: [],
-      hydration: {
-        phase: "bootstrap",
-        deferredCollections: ["discovery_jobs"],
-      },
-    };
-    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
-
-    expect(screen.queryByText("Loading your workspace")).toBeNull();
-    expect(screen.getByTestId("home-next-step")).toBeTruthy();
-    const findJobs = screen.getByRole("button", { name: /^Find jobs/u });
-    expect(findJobs.textContent).toContain("7");
-    expect(findJobs.textContent).toContain("+ 24 weaker");
   });
 
   it("mounts the real Your profile heading immediately without a suspense fallback or deferred surface timer", () => {

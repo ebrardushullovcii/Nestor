@@ -14,6 +14,28 @@ import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { JobFinderShell } from "@renderer/features/job-finder/components/job-finder-shell";
 import { JobFinderOpeningShell } from "./job-finder-page";
 
+/** Find jobs reads the job store, even before the workspace loads. */
+function jobsBridgeStub() {
+  const counts = { found: 0, hidden: 0, shortlisted: 0, resume: 0, applied: 0 };
+  const answers: Record<string, unknown> = {
+    list_jobs: {
+      rows: [],
+      nextCursor: null,
+      total: 0,
+      totalCapped: false,
+      counts,
+    },
+    stage_counts: counts,
+    search_status: { search: null, sources: [] },
+    list_sites: { sites: [] },
+  };
+  return {
+    run: (name: string) => Promise.resolve(answers[name]),
+    onChange: () => () => undefined,
+    onSearchStatus: () => () => undefined,
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -43,6 +65,7 @@ function renderOpeningShell(
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
+      jobs: jobsBridgeStub(),
       ping: vi.fn().mockResolvedValue({ ok: true, platform }),
       window: windowBridge,
     },
@@ -290,6 +313,7 @@ function renderLoadedShell(initialEntry = "/job-finder/home") {
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
+      jobs: jobsBridgeStub(),
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
       window: {
         close: vi.fn().mockResolvedValue(undefined),
@@ -336,6 +360,7 @@ function renderOpeningShellContainer(initialEntry = "/job-finder/home") {
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
+      jobs: jobsBridgeStub(),
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
       window: {
         close: vi.fn().mockResolvedValue(undefined),

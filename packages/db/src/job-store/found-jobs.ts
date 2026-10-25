@@ -261,14 +261,3 @@ export function writeFoundJobs(
   for (const id of [...added, ...hidden]) merged.delete(id);
   return { added, hidden, merged: [...merged], mergedStages };
 }
-
-/** The stage of the saved job with this listing or apply link, if any. */
-export function readListingStage(
-  sql: Statements,
-  url: string,
-): JobStage | null {
-  const row = sql(
-    "SELECT j.stage FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
-  ).get(`url:${normalizeUrl(url)}`) as { stage: JobStage } | undefined;
-  return row?.stage ?? null;
-}

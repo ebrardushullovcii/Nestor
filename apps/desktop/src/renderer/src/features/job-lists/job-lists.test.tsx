@@ -56,6 +56,7 @@ function installBridge(): void {
   const bridge: DesktopJobsBridge = {
     run: (name, input) => run(name, input),
     onChange: (listener) => store.onChange(listener),
+    onSearchStatus: () => () => undefined,
   };
   Object.assign(window, { nestor: { jobs: bridge } });
 }

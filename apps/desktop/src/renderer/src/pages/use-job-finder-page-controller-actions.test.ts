@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { takeFirstSearchRequest } from "@renderer/features/find-jobs/first-search";
 import type { SetStateAction } from "react";
 import {
   CandidateProfileSchema,
-  DiscoveryActivityEventSchema,
   JobSearchPreferencesSchema,
-  type DiscoveryActivityEvent,
-  type JobFinderAgentDiscoveryResult,
   type JobFinderRendererWorkspaceSnapshot,
   type ResumeExtractionStatus,
 } from "@nestor/contracts";
@@ -16,7 +14,6 @@ import type {
 import {
   createActionRunners,
   createDiscoveryWorkspaceRefreshCoordinator,
-  consumeFirstSearchRequest,
   createPrimaryPageActions,
   describeApplyQueueStart,
   describePreparedApplicationSubmitResult,
@@ -727,7 +724,7 @@ describe("createPrimaryPageActions", () => {
   });
 
   it("starts the first search when the source was added on the finishing step", async () => {
-    consumeFirstSearchRequest();
+    takeFirstSearchRequest();
     // The workspace the handler closed over predates the source the person
     // just added on this step; only the saved snapshot has it.
     const staleWorkspace = {
@@ -791,9 +788,7 @@ describe("createPrimaryPageActions", () => {
         replace: true,
       }),
     );
-    expect(consumeFirstSearchRequest(savedSnapshot.activeCampaignId)).toBe(
-      true,
-    );
+    expect(takeFirstSearchRequest()).toBe(true);
   });
 
   it("hands off to Find jobs before the completed setup state is persisted", async () => {
@@ -1668,87 +1663,6 @@ describe("createPrimaryPageActions", () => {
 
   const submitOutcomeClaimPattern =
     /nothing (?:was |is )?submitted|no application (?:was |is )?submitted|(?:was|were) not submitted|without final submit|non-submitting|(?:stops?|stopped|stopping|pauses?|paused|pausing)(?: before)?(?: the)? final submit/i;
-
-  it("keeps a 511-source discovery run to one final snapshot read", async () => {
-    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
-    const workspace = {
-      searchPreferences: JobSearchPreferencesSchema.parse({
-        targetRoles: ["Engineer"],
-        minimumSalaryUsd: null,
-        approvalMode: "review_before_submit",
-        tailoringMode: "balanced",
-        discovery: {
-          historyLimit: 5,
-          targets: [
-            {
-              id: "source_enabled",
-              label: "Enabled source",
-              startingUrl: "https://jobs.example.com",
-            },
-          ],
-        },
-      }),
-    } as JobFinderRendererWorkspaceSnapshot;
-    const refreshWorkspace = vi
-      .fn<JobFinderShellActions["refreshWorkspace"]>()
-      .mockResolvedValue(snapshot);
-    const runAgentDiscovery = vi.fn(
-      (onActivity?: (event: DiscoveryActivityEvent) => void) => {
-        for (let index = 0; index < 511; index += 1) {
-          onActivity?.(
-            DiscoveryActivityEventSchema.parse({
-              id: `source_${index}_completed`,
-              runId: "run_511_sources",
-              timestamp: "2026-08-19T10:00:00.000Z",
-              kind: "success",
-              stage: "target",
-              targetId: `source_${index}`,
-              terminalState: "completed",
-              message: `Finished source ${index}`,
-            }),
-          );
-        }
-
-        const result: JobFinderAgentDiscoveryResult = {
-          outcome: "completed",
-          snapshot,
-        };
-        return Promise.resolve(result);
-      },
-    );
-    let liveEvents: DiscoveryActivityEvent[] = [];
-    let maxRetainedEvents = 0;
-    const setLiveDiscoveryEvents = (
-      next: SetStateAction<DiscoveryActivityEvent[]>,
-    ) => {
-      liveEvents = typeof next === "function" ? next(liveEvents) : next;
-      maxRetainedEvents = Math.max(maxRetainedEvents, liveEvents.length);
-    };
-    const runAction = vi.fn(async (action: () => Promise<unknown>) => {
-      await action();
-      return true;
-    });
-    type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
-    const pageActions = createPrimaryPageActions({
-      actions: {
-        refreshWorkspace,
-        runAgentDiscovery,
-      } as unknown as JobFinderShellActions,
-      runAction,
-      setDiscoveryRunFeedback: vi.fn(),
-      setLiveDiscoveryEvents,
-      workspace,
-    } as unknown as PrimaryPageActionArgs);
-
-    pageActions.onRunAgentDiscovery();
-
-    await vi.waitFor(() => {
-      expect(refreshWorkspace).toHaveBeenCalledTimes(1);
-    });
-    expect(runAgentDiscovery).toHaveBeenCalledTimes(1);
-    expect(maxRetainedEvents).toBe(511);
-    expect(liveEvents).toEqual([]);
-  });
 
   it("routes application-default saves through the scoped action without touching tracker CRM or whole-object save", async () => {
     const snapshot = {} as JobFinderRendererWorkspaceSnapshot;

@@ -54,13 +54,6 @@ const PENDING_ADOPTION: ReadonlyArray<{
       "The Task center popover derives its own `max-h-[calc(100vh-…)]` instead of taking a solved height.",
     rule: "viewport-max-height",
   },
-  {
-    owner: "PKG-07",
-    path: "features/job-finder/screens/discovery/discovery-activity-panel.tsx",
-    reason:
-      "The search-history dialog renders in place instead of through a portal.",
-    rule: "portal",
-  },
 ];
 
 function collectSourceFiles(directory: string): string[] {

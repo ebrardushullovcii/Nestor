@@ -1,10 +1,10 @@
 import { Navigate, createHashRouter } from "react-router-dom";
 import { lazy, Suspense, type ReactNode } from "react";
+import { FindJobsScreen } from "../features/find-jobs/find-jobs-screen";
 import { ShortlistedScreen } from "../features/shortlisted/shortlisted-screen";
 import {
   JobFinderActionsRoute,
   JobFinderApplicationsRoute,
-  JobFinderDiscoveryRoute,
   JobFinderPage,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
@@ -95,7 +95,7 @@ export const appRouter = createHashRouter([
       {
         path: "discovery",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderDiscoveryRoute />,
+        element: <FindJobsScreen />,
       },
       {
         path: "review-queue",

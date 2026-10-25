@@ -1,6 +1,6 @@
 # ADR 0077: Home opens on a first view before the full snapshot
 
-Status: accepted (2026-10-24). Builds on [ADR 0065](0065-screen-reads-before-evidence-conversion.md) and [ADR 0075](0075-find-jobs-reads-its-page-from-queries.md).
+Status: accepted (2026-10-24). Builds on [ADR 0065](0065-screen-reads-before-evidence-conversion.md).
 
 ## Context
 

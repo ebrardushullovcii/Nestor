@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  consumeFirstSearchRequest,
-  requestFirstSearchOnFindJobs,
-  shouldStartFirstSearchAfterSetup,
-} from "./use-job-finder-page-controller-actions";
+import { shouldStartFirstSearchAfterSetup } from "./use-job-finder-page-controller-actions";
 
 type Input = Parameters<typeof shouldStartFirstSearchAfterSetup>[0];
 
@@ -55,17 +51,4 @@ describe("shouldStartFirstSearchAfterSetup", () => {
       false,
     );
   });
-
-  it("hands Find jobs exactly one first-search request", () => {
-    expect(consumeFirstSearchRequest()).toBe(false);
-    requestFirstSearchOnFindJobs("plan_a");
-    expect(consumeFirstSearchRequest("plan_a")).toBe(true);
-    expect(consumeFirstSearchRequest()).toBe(false);
-  });
-});
-
-it("does not start the pending setup search after selecting another plan", () => {
-  requestFirstSearchOnFindJobs("plan_a");
-  expect(consumeFirstSearchRequest("plan_b")).toBe(false);
-  expect(consumeFirstSearchRequest("plan_a")).toBe(false);
 });

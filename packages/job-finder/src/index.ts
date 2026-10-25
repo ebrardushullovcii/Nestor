@@ -1,4 +1,5 @@
 export * from "./workspace-service";
+export * from "./job-search";
 export {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,

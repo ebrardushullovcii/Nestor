@@ -251,8 +251,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-run-history-section.tsx",
     "features/job-finder/screens/applications/applications-status.ts",
-    "features/job-finder/screens/discovery/discovery-detail-panel.tsx",
-    "features/job-finder/screens/discovery/discovery-results-panel.tsx",
     "features/job-finder/screens/settings/settings-runtime-summary.tsx",
   ],
   underscoreDisplay: [

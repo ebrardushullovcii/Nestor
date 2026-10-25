@@ -1,8 +1,10 @@
 import {
   JOBS_CHANGED_CHANNEL,
   JOBS_RUN_CHANNEL,
+  JOBS_SEARCH_STATUS_CHANNEL,
   JOBS_SUBSCRIBE_CHANNEL,
   JobChangeSchema,
+  JobSearchStatusSchema,
   type DesktopJobsBridge,
   type JobCommandOutput,
 } from "@nestor/contracts";
@@ -25,17 +27,28 @@ export function createJobsBridge(ipc: {
       subscribed = null;
     });
   };
+  const listen = <T>(
+    channel: string,
+    parse: (payload: unknown) => T,
+    listener: (value: T) => void,
+  ) => {
+    subscribe();
+    const handler: Listener = (_event, payload) => listener(parse(payload));
+    ipc.on(channel, handler);
+    return () => ipc.removeListener(channel, handler);
+  };
   return {
     run: (name, input) =>
       ipc.invoke(JOBS_RUN_CHANNEL, { name, input }) as Promise<
         JobCommandOutput<typeof name>
       >,
-    onChange: (listener) => {
-      subscribe();
-      const handler: Listener = (_event, payload) =>
-        listener(JobChangeSchema.parse(payload));
-      ipc.on(JOBS_CHANGED_CHANNEL, handler);
-      return () => ipc.removeListener(JOBS_CHANGED_CHANNEL, handler);
-    },
+    onChange: (listener) =>
+      listen(JOBS_CHANGED_CHANNEL, (p) => JobChangeSchema.parse(p), listener),
+    onSearchStatus: (listener) =>
+      listen(
+        JOBS_SEARCH_STATUS_CHANNEL,
+        (p) => JobSearchStatusSchema.parse(p),
+        listener,
+      ),
   };
 }

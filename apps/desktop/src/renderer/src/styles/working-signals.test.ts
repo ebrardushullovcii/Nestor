@@ -16,7 +16,6 @@ const longLivedSignals = [
   ["../features/job-finder/assistant/assistant-toggle.tsx", "{assistant.working && !assistant.open ? ("],
   ["../features/job-finder/components/apply-queue-strip.tsx", "view.active"],
   ["../features/job-finder/screens/job-search-home/job-search-home-screen.tsx", "item.active === false"],
-  ["../features/job-finder/screens/discovery/discovery-results-panel.tsx", "{resultsStatusLine.busy ? ("],
   ["../components/ui/progress-bar.tsx", "data-progress-indeterminate"],
 ] as const;
 

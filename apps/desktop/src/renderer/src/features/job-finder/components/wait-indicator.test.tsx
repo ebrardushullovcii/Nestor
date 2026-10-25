@@ -72,7 +72,6 @@ const SCANNED_FILES = [
   "features/job-finder/components/job-finder-save-status.tsx",
   "features/job-finder/components/startup-database-recovery-notice.tsx",
   "features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section.tsx",
-  "features/job-finder/screens/discovery/discovery-detail-panel.tsx",
   "features/job-finder/screens/settings/settings-support-controls.tsx",
   "pages/job-finder-page.tsx",
 ];
@@ -275,10 +274,6 @@ describe("lazy-route fallback", () => {
     // Read the pane count back out of each route's own layout rather than
     // restating it, so a route that changes shape fails here.
     const twoPaneRoutes = [
-      {
-        path: "/job-finder/discovery",
-        source: "features/job-finder/screens/discovery/discovery-screen.tsx",
-      },
       {
         path: "/job-finder/review-queue",
         // Shortlisted lays out through the shared list and details layout.

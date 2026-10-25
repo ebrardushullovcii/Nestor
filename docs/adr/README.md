@@ -77,7 +77,6 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0071](0071-store-evidence-once-and-query-startup-facts.md) | accepted | Store evidence once and query startup facts |
 | [0072](0072-background-database-backups-and-export-retention.md) | accepted | Background database backups and generated export retention |
 | [0074](0074-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
-| [0075](0075-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
 | [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | superseded 2026-10-25 by Shortlisted on the job store | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
 | [0077](0077-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
 | [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
