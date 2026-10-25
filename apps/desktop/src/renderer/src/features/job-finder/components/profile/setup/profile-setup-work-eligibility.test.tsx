@@ -113,7 +113,7 @@ describe("Job targets asks the two questions every application form asks", () =>
   it("adds an address typed into the source form when the footer saves", () => {
     render(<Harness />);
 
-    fireEvent.change(screen.getByLabelText("Careers or job-board URL"), {
+    fireEvent.change(screen.getByLabelText("Careers or job-board URLs"), {
       target: { value: "http://127.0.0.1:47950/greenhouse/" },
     });
     expect(latestPreferencesValues?.discoveryTargets).toHaveLength(0);
