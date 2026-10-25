@@ -1,4 +1,10 @@
 import type {
+  ApplicationListPage,
+  ApplicationListQuery,
+  ApplyJobsInput,
+  ApplyJobsResult,
+  JobChange,
+  ApplicationStoreDemoResult,
   WorkspaceQueryApi,
   JobFinderDiscoveryCommandReply,
   JobFinderDiscoveryCancellationReply,
@@ -249,6 +255,9 @@ declare global {
         ) => Promise<JobFinderRendererWorkspaceSnapshot>;
       };
       jobFinder: {
+        applyJobs: (input: ApplyJobsInput) => Promise<ApplyJobsResult>;
+        listApplications: (input?: ApplicationListQuery) => Promise<ApplicationListPage>;
+        onApplicationsChange: (listener: (change: JobChange) => void) => () => void;
         queries: WorkspaceQueryApi;
         getApplicationAuthorityReadiness: (
           input?: GetApplicationAuthorityReadinessInput,
@@ -683,6 +692,7 @@ declare global {
           input: ApplicationCrmExportInput,
         ) => Promise<ApplicationCrmFileExportResult>;
         test?: {
+          loadApplicationsStoreDemo: (input: { sourceUrl: string }) => Promise<ApplicationStoreDemoResult>;
           getSystemThemeOverride: () => "dark" | "light" | null;
           setSystemThemeOverride: (
             theme: "dark" | "light" | null,
