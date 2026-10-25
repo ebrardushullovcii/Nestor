@@ -2618,6 +2618,12 @@ export async function createFileJobFinderRepository(
         cloneValue(campaignState),
       );
       runImmediateTransaction(database, () => {
+        const current = getSingletonValue(
+          database,
+          "campaign_state",
+          JobSearchCampaignCollectionSchema,
+        );
+        if (isDeepStrictEqual(current, normalizedCampaignState)) return;
         saveSingletonValue(database, "campaign_state", normalizedCampaignState);
       });
       return secureDatabaseFile(options.filePath);

@@ -1,10 +1,10 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   getDefaultCampaignConfiguration,
   JobSearchCampaignSchema,
   type JobSearchCampaignCollection,
 } from "@nestor/contracts";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
 import { createTempRepository } from "../file-repository.test-support";
 import {
@@ -36,6 +36,43 @@ function plans(ids: string[]): JobSearchCampaignCollection {
     notifications: [],
   };
 }
+
+test("unchanged campaign saves bind no plans, preferences or memberships and keep the revision", async () => {
+  const temp = await createTempRepository("nestor-unchanged-plan-");
+  const repo = await temp.createRepository();
+  const db = new DatabaseSync(temp.filePath);
+  try {
+    const state = plans(["a", "b"]);
+    await repo.saveCampaignState(state);
+    const revision = () =>
+      db
+        .prepare(
+          "SELECT revision FROM singleton_state WHERE key='campaign_state'",
+        )
+        .get()!.revision;
+    const before = revision();
+    const run = vi.spyOn(StatementSync.prototype, "run");
+    try {
+      await repo.saveCampaignState(structuredClone(state));
+      expect(run).not.toHaveBeenCalled();
+      expect(revision()).toBe(before);
+    } finally {
+      run.mockRestore();
+    }
+    await repo.saveCampaignState({
+      ...state,
+      campaigns: state.campaigns.map((plan) => ({
+        ...plan,
+        name: "Changed name",
+      })),
+    });
+    expect(revision()).toBe(Number(before) + 1);
+  } finally {
+    db.close();
+    await repo.close();
+    await temp.cleanup();
+  }
+});
 
 test("retention keeps exact plan order while writing only moved, added and removed memberships", () => {
   const db = new DatabaseSync(":memory:");

@@ -4,6 +4,10 @@ import { SavedJobSchema } from "@nestor/contracts";
 import { createSavedJob } from "../file-repository.test-support";
 import { createSavedJobDetails } from "./saved-job-details";
 import { createSavedJobProjectionReader } from "./saved-job-projection";
+import {
+  ensureSavedJobRelations,
+  writeSavedJobStorage,
+} from "./saved-job-storage";
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -100,4 +104,108 @@ test("held projection details survive edits, deletion and cache eviction", async
   db.exec("DELETE FROM saved_jobs");
   expect(await read()).toEqual([]);
   expect(JSON.parse(JSON.stringify(first[0]))).toEqual(firstJob);
+});
+
+test("sightings, verdicts and preparation reuse evidence while changed bodies keep old versions", async () => {
+  const db = database();
+  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const put = db.prepare("INSERT OR REPLACE INTO saved_jobs VALUES (?, ?)");
+  const job = createSavedJob({ id: "shared", description: "Original listing" });
+  put.run(job.id, JSON.stringify(job));
+  const read = createSavedJobProjectionReader(db, { sqliteDetails: true });
+  const first = await read();
+  const next = {
+    ...job,
+    lastSeenAt: "2026-10-25T00:00:00.000Z",
+    matchAssessment: {
+      ...job.matchAssessment,
+      score: job.matchAssessment.score + 1,
+    },
+  };
+  put.run(job.id, JSON.stringify(next));
+  const second = await read();
+  expect(
+    db.prepare("SELECT count(*) AS n FROM saved_job_details").get()!.n,
+  ).toBe(1);
+  expect(JSON.parse(JSON.stringify(second[0]))).toEqual(next);
+  expect(JSON.parse(JSON.stringify(first[0]))).toEqual(job);
+  const changed = {
+    ...next,
+    description: "Changed listing",
+    keySkills: ["New skill"],
+  };
+  put.run(job.id, JSON.stringify(changed));
+  const third = await read();
+  expect(
+    db.prepare("SELECT count(*) AS n FROM saved_job_details").get()!.n,
+  ).toBe(2);
+  db.exec("DELETE FROM saved_jobs");
+  expect(JSON.parse(JSON.stringify(third[0]))).toEqual(changed);
+  expect(JSON.parse(JSON.stringify(second[0]))).toEqual(next);
+});
+
+test("normalized details include source facts and never reuse reset text IDs", async () => {
+  const db = database();
+  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  ensureSavedJobRelations(db);
+  const base = createSavedJob({
+    id: "normalized",
+    description: "Original text",
+  });
+  const job = createSavedJob({
+    ...base,
+    provenance: [
+      {
+        targetId: "source",
+        adapterKind: "auto",
+        startingUrl: "https://example.test/jobs",
+        discoveredAt: base.discoveredAt,
+        collectionMethod: "api",
+        providerKey: null,
+        providerBoardToken: null,
+        titleTriageOutcome: "pass",
+        resolvedAdapterKind: "target_site",
+        listingFacts: {
+          title: base.title,
+          company: base.company,
+          location: base.location,
+          salaryText: base.salaryText,
+          seniority: base.seniority,
+          description: "Source text",
+          summary: base.summary,
+        },
+      },
+    ],
+  });
+  writeSavedJobStorage(db, job);
+  const read = createSavedJobProjectionReader(db, { sqliteDetails: true });
+  const first = await read();
+  writeSavedJobStorage(db, { ...job, lastSeenAt: "2026-10-25T00:00:00.000Z" });
+  const next = await read();
+  expect(
+    db.prepare("SELECT count(*) AS n FROM saved_job_details").get()!.n,
+  ).toBe(1);
+  const changed = {
+    ...job,
+    provenance: job.provenance.map((source) => ({
+      ...source,
+      listingFacts: {
+        ...source.listingFacts!,
+        description: "Changed source text",
+      },
+    })),
+  };
+  writeSavedJobStorage(db, changed);
+  const sourceChanged = await read();
+  expect(sourceChanged[0]!.provenance[0]!.listingFacts!.description).toBe(
+    "Changed source text",
+  );
+  expect(next[0]!.provenance[0]!.listingFacts!.description).toBe("Source text");
+  db.exec(
+    "DELETE FROM saved_jobs; DELETE FROM job_provenance; DELETE FROM job_listing_texts; DELETE FROM job_fit_assessments",
+  );
+  const reset = { ...job, description: "Reset text" };
+  writeSavedJobStorage(db, reset);
+  expect(JSON.parse(JSON.stringify((await read())[0]))).toEqual(reset);
+  expect(JSON.parse(JSON.stringify(first[0]))).toEqual(job);
 });

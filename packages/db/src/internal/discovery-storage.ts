@@ -129,13 +129,41 @@ function writeSmall(database: DatabaseSync, state: JobFinderDiscoveryState): voi
       revision = singleton_state.revision + 1`).run(JSON.stringify(smallValue(state)));
 }
 
-function replaceRow(database: DatabaseSync, table: string, keys: readonly (string | number)[], value: unknown): void {
-  const columns = table === "discovery_runs" || table === "discovery_ledger" || table === "discovery_pending_jobs"
-    ? table === "discovery_runs" ? "id, position, active, value" : "id, position, value"
-    : table === "discovery_run_targets" || table === "discovery_run_activity"
-      ? "run_id, id, position, value" : "run_id, id, value";
+function replaceRow(
+  database: DatabaseSync,
+  table: string,
+  keys: readonly (string | number)[],
+  value: unknown,
+): void {
+  const columns =
+    table === "discovery_runs" ||
+    table === "discovery_ledger" ||
+    table === "discovery_pending_jobs"
+      ? table === "discovery_runs"
+        ? "id, position, active, value"
+        : "id, position, value"
+      : table === "discovery_run_targets" || table === "discovery_run_activity"
+        ? "run_id, id, position, value"
+        : "run_id, id, value";
   const parameters = [...keys, JSON.stringify(value)];
-  statement(database, `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${parameters.map(() => "?").join(", ")})`).run(...parameters);
+  const runScoped = columns.startsWith("run_id");
+  const identity = runScoped ? "run_id, id" : "id";
+  const updates = table === "discovery_runs" ? ["active", "value"] : ["value"];
+  // Existing progress keeps its rowid and indexes. Only newly appended log
+  // entries insert; changed values do not delete and reinsert their keys.
+  statement(
+    database,
+    `INSERT INTO ${table} (${columns}) VALUES (${parameters.map(() => "?").join(", ")})
+    ON CONFLICT(${identity}) DO UPDATE SET ${updates.map((column) => `${column}=excluded.${column}`).join(",")}
+    WHERE ${updates.map((column) => `${column} IS NOT excluded.${column}`).join(" OR ")}`,
+  ).run(...parameters);
+  if (columns.includes("position")) {
+    const position = keys[runScoped ? 2 : 1]!;
+    statement(
+      database,
+      `UPDATE ${table} SET position=? WHERE ${runScoped ? "run_id=? AND " : ""}id=? AND position IS NOT ?`,
+    ).run(position, ...keys.slice(0, runScoped ? 2 : 1), position);
+  }
 }
 
 function clearRows(database: DatabaseSync): void {

@@ -79,6 +79,30 @@ for (const storage of ["file", "memory"] as const)
       expect(readPreparedMatchAssessmentPostingFingerprint(canonical!)).toBe(
         matchAssessmentPostingFingerprint,
       );
+      if (storage === "file") {
+        const run = vi.spyOn(StatementSync.prototype, "run");
+        try {
+          await repo.writeSavedJobDiscoveryFingerprints([job]);
+          expect(run).not.toHaveBeenCalled();
+        } finally {
+          run.mockRestore();
+        }
+        const changedStatus = { ...job, status: "shortlisted" as const };
+        const inspect = new DatabaseSync(temp!.filePath);
+        inspect.exec(`CREATE TRIGGER reject_unchanged_fingerprint BEFORE INSERT ON saved_job_discovery_fingerprints
+          BEGIN SELECT RAISE(ABORT, 'unchanged fingerprint was bound'); END`);
+        try {
+          await repo.commitSavedJobDelta({ upserts: [changedStatus] });
+          expect(
+            (await repo.readSavedJobDiscoveryFingerprints([job.id])).get(
+              job.id,
+            ),
+          ).toEqual(preparedValue);
+        } finally {
+          inspect.exec("DROP TRIGGER reject_unchanged_fingerprint");
+          inspect.close();
+        }
+      }
       canonical!.title = "Changed in place";
       expect(readPreparedDiscoveryFingerprints(canonical!)).toBeNull();
       expect(readPreparedSavedJobIdentity(canonical!)).toBeNull();

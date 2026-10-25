@@ -130,6 +130,16 @@ export function writeDiscoveryLedgerRows(
         "UPDATE discovery_ledger SET position=? WHERE id=? AND position<>?",
       ).run(position, key, position);
     }
+    if (
+      previous &&
+      [...mutable].every((field) =>
+        isDeepStrictEqual(
+          Reflect.get(row, field),
+          Reflect.get(previous, field),
+        ),
+      )
+    )
+      continue;
     observations.push([
       key,
       row.lastSeenAt,
@@ -154,7 +164,9 @@ export function writeDiscoveryLedgerRows(
       db,
       `INSERT INTO discovery_ledger_observations VALUES ${batch.map(() => "(?,?,?,?,?)").join(",")}
       ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at,inactive_at=excluded.inactive_at,
-        title_triage_outcome=excluded.title_triage_outcome,listing_screen=excluded.listing_screen`,
+        title_triage_outcome=excluded.title_triage_outcome,listing_screen=excluded.listing_screen
+      WHERE last_seen_at IS NOT excluded.last_seen_at OR inactive_at IS NOT excluded.inactive_at
+        OR title_triage_outcome IS NOT excluded.title_triage_outcome OR listing_screen IS NOT excluded.listing_screen`,
     ).run(...batch.flat());
   }
 }

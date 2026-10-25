@@ -16,6 +16,7 @@ import {
 } from "./saved-job-fingerprints";
 import { notifyWorkspaceCommit } from "../workspace-commits";
 import { writeSavedJobPlanAssessments } from "./saved-job-plan-assessments";
+import { refreshSavedJobReadIndex } from "./workspace-read-index";
 
 export const savedJobSalarySelectSql = `, (SELECT salary_prepared FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_prepared,
   (SELECT salary_evidence FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_range`;
@@ -93,14 +94,18 @@ function intern(
 ): number {
   const key = createHash("sha256").update(value).digest("hex");
   const column = table === "job_listing_texts" ? "text" : "value";
-  statement(
-    db,
-    `INSERT OR IGNORE INTO ${table}(stable_key, ${column}) VALUES (?, ?)`,
-  ).run(key, value);
-  const stored = statement(
+  const read = statement(
     db,
     `SELECT id${table === "job_listing_texts" ? ", salary_prepared" : ""} FROM ${table} WHERE stable_key = ?`,
-  ).get(key)!;
+  );
+  let stored = read.get(key);
+  if (!stored) {
+    statement(
+      db,
+      `INSERT INTO ${table}(stable_key, ${column}) VALUES (?, ?)`,
+    ).run(key, value);
+    stored = read.get(key)!;
+  }
   if (table === "job_listing_texts" && stored.salary_prepared !== 1)
     statement(
       db,
@@ -140,16 +145,12 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
       "job_fit_assessments",
       JSON.stringify(matchAssessment),
     );
-    statement(
+    const bodyValue = JSON.stringify(body);
+    const current = statement(
       db,
-      `INSERT INTO saved_jobs(id, value, description_id, assessment_id, has_plan_assessments, list_visible, display_company, display_location, first_seen_at, last_seen_at, last_verified_active_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value, description_id = excluded.description_id,
-    assessment_id = excluded.assessment_id, has_plan_assessments = excluded.has_plan_assessments, list_visible = excluded.list_visible,
-    display_company = excluded.display_company, display_location = excluded.display_location,
-    first_seen_at = excluded.first_seen_at, last_seen_at = excluded.last_seen_at, last_verified_active_at = excluded.last_verified_active_at`,
-    ).run(
-      job.id,
-      JSON.stringify(body),
+      "SELECT value FROM saved_jobs WHERE id = ?",
+    ).get(job.id);
+    const columns = [
       descriptionId,
       assessmentId,
       planAssessments === undefined ? 0 : 1,
@@ -159,7 +160,38 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
       firstSeenAt,
       lastSeenAt,
       lastVerifiedActiveAt,
-    );
+    ];
+    if (current?.value === bodyValue) {
+      statement(
+        db,
+        `UPDATE saved_jobs SET description_id=?, assessment_id=?, has_plan_assessments=?, list_visible=?,
+        display_company=?, display_location=?, first_seen_at=?, last_seen_at=?, last_verified_active_at=?
+        WHERE id=? AND (description_id IS NOT ? OR assessment_id IS NOT ? OR has_plan_assessments IS NOT ? OR list_visible IS NOT ?
+        OR display_company IS NOT ? OR display_location IS NOT ? OR first_seen_at IS NOT ? OR last_seen_at IS NOT ? OR last_verified_active_at IS NOT ?)`,
+      ).run(...columns, job.id, ...columns);
+    } else
+      statement(
+        db,
+        `INSERT INTO saved_jobs(id, value, description_id, assessment_id, has_plan_assessments, list_visible, display_company, display_location, first_seen_at, last_seen_at, last_verified_active_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value, description_id = excluded.description_id,
+    assessment_id = excluded.assessment_id, has_plan_assessments = excluded.has_plan_assessments, list_visible = excluded.list_visible,
+    display_company = excluded.display_company, display_location = excluded.display_location,
+    first_seen_at = excluded.first_seen_at, last_seen_at = excluded.last_seen_at, last_verified_active_at = excluded.last_verified_active_at`,
+      ).run(
+        job.id,
+        bodyValue,
+        descriptionId,
+        assessmentId,
+        planAssessments === undefined ? 0 : 1,
+        job.status !== "discovered" || !isLikelyUtilityShortlistJob(job)
+          ? 1
+          : 0,
+        resolveSavedJobCompany(job),
+        resolveSavedJobLocation(job),
+        firstSeenAt,
+        lastSeenAt,
+        lastVerifiedActiveAt,
+      );
     statement(
       db,
       "DELETE FROM job_plan_assessments WHERE job_id = ? AND plan_id NOT IN (SELECT value FROM json_each(?))",
@@ -172,7 +204,15 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
         assessment,
       })),
     );
-    statement(db, "DELETE FROM job_provenance WHERE job_id = ?").run(job.id);
+    const existingSightings = new Map(
+      statement(
+        db,
+        "SELECT position, value, description_id FROM job_provenance WHERE job_id = ?",
+      )
+        .all(job.id)
+        .map((row) => [Number(row.position), row]),
+    );
+    let provenanceChanged = false;
     provenance.forEach((sighting, position) => {
       const facts = sighting.listingFacts;
       const sourceDescriptionId = facts
@@ -181,18 +221,29 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
       const value = facts
         ? { ...sighting, listingFacts: { ...facts, description: undefined } }
         : sighting;
-      statement(db, "INSERT INTO job_provenance VALUES (?, ?, ?, ?)").run(
-        job.id,
-        position,
-        JSON.stringify(value),
-        sourceDescriptionId,
-      );
+      const serialized = JSON.stringify(value);
+      const previous = existingSightings.get(position);
+      if (
+        previous?.value === serialized &&
+        previous.description_id === sourceDescriptionId
+      )
+        return;
+      provenanceChanged = true;
+      statement(
+        db,
+        `INSERT INTO job_provenance VALUES (?, ?, ?, ?) ON CONFLICT(job_id,position)
+        DO UPDATE SET value=excluded.value, description_id=excluded.description_id`,
+      ).run(job.id, position, serialized, sourceDescriptionId);
     });
+    if (existingSightings.size > provenance.length) {
+      provenanceChanged = true;
+      statement(
+        db,
+        "DELETE FROM job_provenance WHERE job_id=? AND position>=?",
+      ).run(job.id, provenance.length);
+    }
     writeSavedJobFingerprints(db, job);
-    // The read model observes the completed relations in the same transaction.
-    statement(db, "UPDATE saved_jobs SET value = value WHERE id = ?").run(
-      job.id,
-    );
+    if (provenanceChanged) refreshSavedJobReadIndex(db, job.id);
     if (ownTransaction) {
       db.exec("COMMIT");
       notifyWorkspaceCommit(db);

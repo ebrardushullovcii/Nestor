@@ -1,4 +1,5 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import {
   SavedJobSchema,
   readPreparedDiscoveryFingerprints,
@@ -25,6 +26,22 @@ export const savedJobDetailFields = [
   "screeningHints",
   "keywordSignals",
 ] as const satisfies readonly (keyof SavedJob)[];
+
+/** Only lazy getter inputs: timestamps, verdicts and preparation do not own evidence. */
+export function savedJobDetailKeySql(relational: boolean): string {
+  const fields = savedJobDetailFields
+    .filter((key) => key !== "description")
+    .map(
+      (key) => `json_type(value, '$.${key}'), json_extract(value, '$.${key}')`,
+    );
+  return `json_array(${relational ? "(SELECT stable_key FROM job_listing_texts WHERE id = saved_jobs.description_id)" : "json_extract(value, '$.description')"},
+    ${fields.join(", ")}, json(${
+      relational
+        ? `(SELECT json_group_array(json_array((SELECT stable_key FROM job_listing_texts WHERE id = source.description_id), json_type(value, '$.listingFacts'), json_extract(value, '$.listingFacts')))
+          FROM (SELECT description_id, value FROM job_provenance WHERE job_id = saved_jobs.id ORDER BY position) AS source)`
+        : `(SELECT json_group_array(json_array(json_type(value, '$.listingFacts'), json_extract(value, '$.listingFacts'))) FROM json_each(saved_jobs.value, '$.provenance'))`
+    }))`;
+}
 
 /**
  * Immutable projection versions keep their bodies in SQLite's temporary file,
@@ -56,6 +73,10 @@ export function createSavedJobDetails(database: DatabaseSync) {
     retired.push(version),
   );
   let nextVersion = 0;
+  const latest = new Map<
+    string,
+    { key: string; anchor: WeakRef<{ version: number }> }
+  >();
 
   function read(version: number): SavedJob {
     const cached = cache.get(version);
@@ -109,6 +130,7 @@ export function createSavedJobDetails(database: DatabaseSync) {
   function project(
     job: SavedJobListFacts | SavedJob,
     rawValue?: string,
+    detailKey?: string,
   ): SavedJob {
     // A search can release thousands of versions in one GC. Reclaim a bounded
     // part per projected row, alongside the reader's existing paged yields.
@@ -118,9 +140,26 @@ export function createSavedJobDetails(database: DatabaseSync) {
       descriptions.delete(version);
     }
     if (released.length) remove.run(JSON.stringify(released));
-    const version = ++nextVersion;
-    const anchor = { version };
-    if (rawValue === undefined) {
+    const key = createHash("sha256")
+      .update(
+        detailKey ??
+          JSON.stringify([
+            ...savedJobDetailFields.map((field) => [
+              Object.hasOwn(job, field),
+              Reflect.get(job, field) as unknown,
+            ]),
+            job.provenance.map((entry) => [
+              Object.hasOwn(entry, "listingFacts"),
+              Reflect.get(entry, "listingFacts") as unknown,
+            ]),
+          ]),
+      )
+      .digest("hex");
+    const previous = latest.get(job.id);
+    const shared = previous?.key === key ? previous.anchor.deref() : undefined;
+    const anchor = shared ?? { version: ++nextVersion };
+    const { version } = anchor;
+    if (!shared && rawValue === undefined) {
       if (!copyStored) {
         const relational = database
           .prepare("PRAGMA table_info(saved_jobs)")
@@ -130,7 +169,11 @@ export function createSavedJobDetails(database: DatabaseSync) {
         SELECT ?, id, ${relational ? savedJobValueSql() : "value"} FROM main.saved_jobs WHERE id = ?`);
       }
       copyStored.run(version, job.id);
-    } else put.run(version, job.id, rawValue);
+    } else if (!shared) put.run(version, job.id, rawValue!);
+    if (!shared) {
+      latest.set(job.id, { key, anchor: new WeakRef(anchor) });
+      registry.register(anchor, version);
+    }
     // Every omitted field is a real validated, indexed SQLite read, never a
     // placeholder SavedJob. The compatibility view keeps existing read-only
     // consumers honest while its retained data is the explicit facts contract.
@@ -169,7 +212,6 @@ export function createSavedJobDetails(database: DatabaseSync) {
         savedIdentity: { owner: row, value: identity },
       });
     Object.freeze(row);
-    registry.register(anchor, version);
     return row;
   }
   return { project };

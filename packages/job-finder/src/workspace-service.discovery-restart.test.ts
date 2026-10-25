@@ -3,7 +3,7 @@ import {
   JobFinderDiscoveryStateSchema,
 } from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";
 import {
@@ -65,6 +65,51 @@ function createService(
 }
 
 describe("discovery restart recovery", () => {
+  test("startup recovery waits for background readiness and runs without a snapshot", async () => {
+    const seed = createSeed();
+    seed.discovery = {
+      ...seed.discovery,
+      runState: "running",
+      activeRun: createInterruptedDiscoveryRun(),
+    };
+    const repository = createInMemoryJobFinderRepository(seed);
+    let release: () => void = () => {};
+    const backgroundWorkReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalRead =
+      repository.readDiscoveryDisplayProjection.bind(repository);
+    let recoveryReads = 0;
+    vi.spyOn(repository, "readDiscoveryDisplayProjection").mockImplementation(
+      () => {
+        if (
+          new Error().stack?.includes("recoverInterruptedDiscoveryStateOnLoad")
+        )
+          recoveryReads++;
+        return originalRead();
+      },
+    );
+    const service = createJobFinderWorkspaceService({
+      repository,
+      browserRuntime: createBrowserRuntime(),
+      aiClient: createAiClient(),
+      documentManager: createDocumentManager(),
+      backgroundWorkReady,
+    });
+    await service.getWorkspaceBootstrap();
+    expect((await repository.getDiscoveryState()).runState).toBe("running");
+    expect(recoveryReads).toBe(0);
+    release();
+    await vi.waitFor(async () =>
+      expect((await repository.getDiscoveryState()).runState).toBe("failed"),
+    );
+    expect(recoveryReads).toBe(1);
+    await service.getWorkspaceSnapshot();
+    await service.getWorkspaceSnapshot();
+    expect(recoveryReads).toBe(1);
+    await service.shutdown();
+    await repository.close();
+  });
   test("fails a hard-interrupted run on reopen, preserves durable jobs, and allows a new search", async () => {
     const repository = createInMemoryJobFinderRepository(createSeed());
     const previousService = createService(repository);
@@ -83,6 +128,9 @@ describe("discovery restart recovery", () => {
 
     // Simulate a process death: do not call shutdown or abort on the old service.
     const reopenedService = createService(repository);
+    await vi.waitFor(async () =>
+      expect((await repository.getDiscoveryState()).runState).toBe("failed"),
+    );
     const recoveredSnapshot = await reopenedService.getWorkspaceSnapshot();
     const recoveredRun = recoveredSnapshot.recentDiscoveryRuns.find(
       (run) => run.id === interruptedRun.id,
@@ -202,6 +250,7 @@ describe("discovery restart recovery", () => {
     };
     const reopenedService = createService(repository);
 
+    await vi.waitFor(() => expect(interceptedFirstCommit).toBe(true));
     await reopenedService.getWorkspaceSnapshot();
 
     const persisted = await baseRepository.getDiscoveryState();
@@ -238,6 +287,7 @@ describe("discovery restart recovery", () => {
     };
     const reopenedService = createService(repository);
 
+    await vi.waitFor(() => expect(interceptedFirstCommit).toBe(true));
     await reopenedService.getWorkspaceSnapshot();
 
     const persisted = await baseRepository.getDiscoveryState();

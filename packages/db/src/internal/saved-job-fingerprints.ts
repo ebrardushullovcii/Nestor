@@ -15,17 +15,34 @@ import {
 } from "@nestor/contracts";
 
 export function ensureSavedJobFingerprintStorage(db: DatabaseSync): void {
+  const inputs = new Set([
+    ...DISCOVERY_FINGERPRINT_FIELDS,
+    ...Object.keys(captureDiscoverySavedIdentityBasis({})).filter(
+      (key) => key !== "alternateListingUrls",
+    ),
+    "provenance",
+  ]);
   db.exec(`CREATE TABLE IF NOT EXISTS saved_job_discovery_fingerprints (
     job_id TEXT PRIMARY KEY REFERENCES saved_jobs(id) ON DELETE CASCADE,
     value TEXT NOT NULL
   );
-  CREATE TRIGGER IF NOT EXISTS saved_job_preparation_update AFTER UPDATE OF value ON saved_jobs
-    WHEN OLD.value IS NOT NEW.value BEGIN
-    DELETE FROM saved_job_discovery_fingerprints WHERE job_id = OLD.id;
-  END;
   CREATE TRIGGER IF NOT EXISTS saved_job_preparation_delete AFTER DELETE ON saved_jobs BEGIN
     DELETE FROM saved_job_discovery_fingerprints WHERE job_id = OLD.id;
   END;`);
+  const update = `CREATE TRIGGER saved_job_preparation_update AFTER UPDATE OF value ON saved_jobs
+    WHEN OLD.value IS NOT NEW.value AND CASE WHEN json_valid(OLD.value) AND json_valid(NEW.value) THEN
+      ${[...inputs].map((key) => `(json_type(OLD.value, '$.${key}') IS NOT json_type(NEW.value, '$.${key}') OR json_extract(OLD.value, '$.${key}') IS NOT json_extract(NEW.value, '$.${key}'))`).join(" OR ")}
+      ELSE 1 END BEGIN
+    DELETE FROM saved_job_discovery_fingerprints WHERE job_id = OLD.id;
+  END`;
+  const existing = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE name='saved_job_preparation_update'",
+    )
+    .get()?.sql;
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  if (typeof existing !== "string" || normalize(existing) !== normalize(update))
+    db.exec(`DROP TRIGGER IF EXISTS saved_job_preparation_update; ${update}`);
 }
 
 type StoredFingerprints = Omit<DiscoverySavedJobFingerprints, "identity"> & {
@@ -117,7 +134,7 @@ export function readSavedJobFingerprintBatch(
 /** The caller's job transaction owns this write and any rollback. */
 const writes = new WeakMap<
   DatabaseSync,
-  { put: StatementSync; remove: StatementSync }
+  { put: StatementSync; remove: StatementSync; read: StatementSync }
 >();
 export function writeSavedJobFingerprints(
   db: DatabaseSync,
@@ -132,6 +149,9 @@ export function writeSavedJobFingerprints(
         ON CONFLICT(job_id) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value`),
       remove: db.prepare(
         "DELETE FROM saved_job_discovery_fingerprints WHERE job_id = ?",
+      ),
+      read: db.prepare(
+        "SELECT value FROM saved_job_discovery_fingerprints WHERE job_id = ?",
       ),
     };
     writes.set(db, prepared);
@@ -160,7 +180,11 @@ export function writeSavedJobFingerprints(
         }
       : {}),
   };
-  prepared.put.run(job.id, JSON.stringify(stored));
+  const serialized = JSON.stringify(stored);
+  // Read transaction-current storage rather than caching across rollback or
+  // another connection's edit. Equality is checked before binding the body.
+  if (prepared.read.get(job.id)?.value === serialized) return;
+  prepared.put.run(job.id, serialized);
 }
 
 function capturedFingerprintBasis(
