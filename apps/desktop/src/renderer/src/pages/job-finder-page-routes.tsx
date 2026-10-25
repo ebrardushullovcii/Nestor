@@ -14,15 +14,13 @@ import {
 } from "@renderer/features/job-finder/components/profile/setup/guided-setup-auto-open";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
-import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
 import { HomeScreen } from "@renderer/features/home/home-screen";
 
-// The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
-// Applications) are part of the initial-route bundle so their real headings
-// mount on the first commit without a Suspense placeholder. Long-tail route
-// surfaces stay lazy: they are independent chunks loaded only when their
-// route is rendered, and this file keeps their shared loading fallback so a
-// first visit is explicit and recoverable instead of rendering a blank page.
+// Home and the store screens (Find jobs, Shortlisted, Applications, Needs
+// you) are part of the startup bundle so they mount on the first commit.
+// Screens that still read the old workspace (Profile, setup, Settings) wait
+// for it anyway, so their code is its own chunk, fetched once the window is
+// idle or on the first visit, whichever comes first.
 function createSharedRouteLoader<T>(load: () => Promise<T>) {
   let promise: Promise<T> | null = null;
   const loader = Object.assign(
@@ -64,6 +62,10 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/components/profile/setup/profile-setup-screen")
   ).ProfileSetupScreen,
 }));
+const loadProfileScreen = createSharedRouteLoader(async () => ({
+  default: (await import("@renderer/features/job-finder/screens/profile-screen"))
+    .ProfileScreen,
+}));
 const loadSettingsScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/screens/settings-screen")
@@ -74,7 +76,11 @@ const loadSettingsScreen = createSharedRouteLoader(async () => ({
 // click on any of them renders at once instead of waiting on its chunk.
 if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   const preloadScreens = () => {
-    for (const load of [loadSettingsScreen, loadProfileSetupScreen])
+    for (const load of [
+      loadProfileScreen,
+      loadSettingsScreen,
+      loadProfileSetupScreen,
+    ])
       void load().catch(() => undefined);
   };
   if (typeof window.requestIdleCallback === "function")
@@ -82,6 +88,7 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   else window.setTimeout(preloadScreens, 2000);
 }
 
+const ProfileScreen = lazyScreen(loadProfileScreen);
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
 
