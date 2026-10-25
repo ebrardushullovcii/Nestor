@@ -38,6 +38,8 @@ vi.mock("electron", () => ({
 import "./index";
 
 type ExposedJobFinderApi = {
+  applyJobs: Window["nestor"]["jobFinder"]["applyJobs"];
+  listApplications: Window["nestor"]["jobFinder"]["listApplications"];
   runAgentDiscovery: Window["nestor"]["jobFinder"]["runAgentDiscovery"];
   runAgentDiscoveryCommand: Window["nestor"]["jobFinder"]["runAgentDiscoveryCommand"];
   cancelDiscoveryRunCommand: Window["nestor"]["jobFinder"]["cancelDiscoveryRunCommand"];
@@ -709,4 +711,18 @@ it("shares the discovery request lock and releases the activity listener for com
     "job-finder:cancel-discovery-run-command",
     { runId: "command_run" },
   );
+});
+
+it("exposes the store Apply selection and paged applications without a workspace response", async () => {
+  mockInvoke.mockReset();
+  mockInvoke.mockImplementation((channel: string) => {
+    if (channel === "job-finder:apply-jobs") return Promise.resolve({ queued: 2, unchanged: 0, notApproved: 0 });
+    if (channel === "job-finder:list-applications") return Promise.resolve({ rows: [], nextCursor: null });
+    return Promise.resolve({ ready: true });
+  });
+  expect(await exposedJobFinder.applyJobs({ selection: { ids: [1, 2] } })).toEqual({ queued: 2, unchanged: 0, notApproved: 0 });
+  expect(mockInvoke).toHaveBeenCalledWith("job-finder:apply-jobs", { selection: { ids: [1, 2] } });
+  expect(() => exposedJobFinder.applyJobs({ selection: { ids: [-1] } })).toThrow();
+  expect(await exposedJobFinder.listApplications({ state: "queued", limit: 20 })).toEqual({ rows: [], nextCursor: null });
+  expect(mockInvoke).toHaveBeenCalledWith("job-finder:list-applications", { state: "queued", cursor: null, limit: 20 });
 });

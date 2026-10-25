@@ -8,6 +8,8 @@
  * version change. Changing an existing table bumps `JOB_STORE_VERSION`, which
  * starts the file over. There are no migrations before release.
  */
+import { APPLICATION_SCHEMA } from "./application-schema";
+
 export const JOB_STORE_VERSION = 1;
 
 const JOBS = `
@@ -125,4 +127,4 @@ CREATE TABLE IF NOT EXISTS job_move_items (
 CREATE INDEX IF NOT EXISTS job_move_items_by_job ON job_move_items (job_id);
 `;
 
-export const JOB_STORE_SCHEMA: readonly string[] = [JOBS];
+export const JOB_STORE_SCHEMA: readonly string[] = [JOBS, APPLICATION_SCHEMA];

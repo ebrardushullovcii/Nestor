@@ -1,4 +1,14 @@
 import {
+  ApplicationListPageSchema,
+  ApplicationListQuerySchema,
+  ApplyJobsInputSchema,
+  ApplyJobsResultSchema,
+  JobChangeSchema,
+  ApplicationStoreDemoInputSchema,
+  ApplicationStoreDemoResultSchema,
+  type ApplicationListQuery,
+  type ApplyJobsInput,
+  type JobChange,
   type JobFinderDiscoveryCommandReply,
   type JobFinderDiscoveryCancellationReply,
   ApplicationPageStatesInputSchema,
@@ -582,6 +592,17 @@ const desktopApi = {
       ) as Promise<JobFinderRendererWorkspaceSnapshot>,
   },
   jobFinder: {
+    applyJobs: (input: ApplyJobsInput) => ipcRenderer
+      .invoke("job-finder:apply-jobs", ApplyJobsInputSchema.parse(input))
+      .then((result) => ApplyJobsResultSchema.parse(result)),
+    listApplications: (input: ApplicationListQuery = {}) => ipcRenderer
+      .invoke("job-finder:list-applications", ApplicationListQuerySchema.parse(input))
+      .then((result) => ApplicationListPageSchema.parse(result)),
+    onApplicationsChange: (listener: (change: JobChange) => void) => {
+      const handler = (_event: unknown, value: unknown) => listener(JobChangeSchema.parse(value));
+      ipcRenderer.on("job-finder:applications-changed", handler);
+      return () => ipcRenderer.removeListener("job-finder:applications-changed", handler);
+    },
     queries: createWorkspaceQueryBridge(),
     getTailoredAsset: (assetId: string): Promise<TailoredAsset | null> =>
       ipcRenderer
@@ -1533,6 +1554,9 @@ const desktopApi = {
     ...(testApiEnabled
       ? {
           test: {
+            loadApplicationsStoreDemo: (input: { sourceUrl: string }) => ipcRenderer
+              .invoke("job-finder:test-load-applications-store-demo", ApplicationStoreDemoInputSchema.parse(input))
+              .then((result) => ApplicationStoreDemoResultSchema.parse(result)),
             getSystemThemeOverride: () => currentSystemThemeOverride,
             setSystemThemeOverride: (theme: "dark" | "light" | null) =>
               Promise.resolve().then(() => {
