@@ -25,6 +25,7 @@ import { parseNormalizedCompensation } from "./matching-compensation";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import {
   DISCOVERY_NO_JOB_SITES_MESSAGE,
+  toJobSearchGoals,
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
   DiscoveryAgentMetadataSchema,
   readPreparedBodySalaryRange,
@@ -1156,6 +1157,7 @@ async function collectTargetJobs(input: {
   >;
   searchPreferences: JobSearchPreferences;
   searchMode: "precision" | "scale";
+  lookupKnownUrls: (urls: readonly string[]) => Promise<readonly string[]>;
   searchRequest?: JobFinderSearchRequest;
   /** The saved AI search behavior (Settings), handed to the agent's prompt. */
   searchGuidance: AiJobSearchBehavior;
@@ -1379,8 +1381,10 @@ async function collectTargetJobs(input: {
           ? { sourceCatalog, sourceCatalogComplete: catalogWarning === null }
           : {}),
         retainAllFound: input.retainAllFound,
+        lookupKnownUrls: input.lookupKnownUrls,
         userProfile: input.profile,
         searchPreferences: {
+          ...toJobSearchGoals(input.searchPreferences),
           targetRoles:
             input.searchPreferences.targetRoles.length > 0
               ? input.searchPreferences.targetRoles
@@ -1779,6 +1783,16 @@ export function createWorkspaceDiscoveryMethods(
     }
 
     let workingSavedJobs = startingSavedJobs.slice();
+    const knownListingUrls = new Set(
+      [...startingSavedJobs, ...startingDiscovery.pendingDiscoveryJobs].flatMap(
+        (job) => [
+          job.canonicalUrl,
+          ...job.provenance.flatMap((sighting) =>
+            sighting.listingUrl ? [sighting.listingUrl] : [],
+          ),
+        ],
+      ),
+    );
     // Upgrade old rows as they are prepared, without rewriting their bodies.
     // Subsequent runs read the persisted compact facts instead of normalizing again.
     for (
@@ -3678,6 +3692,8 @@ export function createWorkspaceDiscoveryMethods(
         try {
           collected = await collectTargetJobs({
             ctx,
+            lookupKnownUrls: async (urls) =>
+              urls.filter((url) => knownListingUrls.has(url)),
             target,
             sourceInstructionArtifacts,
             profile,

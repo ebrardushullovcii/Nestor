@@ -28,6 +28,8 @@ import type {
   JobFinderSearchRequest,
   JobPosting,
   JobSearchPreferences,
+  JobSearchGoals,
+  KnownJobUrlLookup,
   JobSearchCampaignMode,
   AiJobSearchBehavior,
   JobSource,
@@ -305,9 +307,15 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
-  getApplicationPageState?(source: JobSource, key: string): Promise<ApplicationPageState>;
-  reopenApplicationPage?(source: JobSource, key: string,
-    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<ApplicationPageState>;
+  getApplicationPageState?(
+    source: JobSource,
+    key: string,
+  ): Promise<ApplicationPageState>;
+  reopenApplicationPage?(
+    source: JobSource,
+    key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void,
+  ): Promise<ApplicationPageState>;
   /** Discard a ready form only after an exact guarded refill has been verified. */
   hibernateApplicationPageBinding?(
     source: JobSource,
@@ -439,6 +447,7 @@ export interface BrowserApplicationExecutionOptions {
 }
 
 export interface AgentDiscoveryOptions {
+  lookupKnownUrls?: KnownJobUrlLookup;
   /** Capacity waits happen before page navigation and do not fail a source. */
   onWaitingForBrowserTab?: () => void;
   /** No person-specified result cap; retain every suitable posting found. */
@@ -448,11 +457,7 @@ export interface AgentDiscoveryOptions {
   /** True only for a complete authoritative inventory of this source. */
   sourceCatalogComplete?: boolean;
   userProfile: CandidateProfile;
-  searchPreferences: {
-    targetRoles: string[];
-    locations: string[];
-    workModes?: string[];
-  };
+  searchPreferences: JobSearchGoals;
   /** The person's search focus, expressed as an instruction to the agent. */
   searchMode?: JobSearchCampaignMode;
   /** The person's plain-language goal and run-scoped search choices. */

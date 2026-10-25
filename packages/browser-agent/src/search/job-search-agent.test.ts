@@ -10,9 +10,35 @@ import { buildApplyFormObservation } from "../apply/page-hands";
 import type { ApplyPageHands } from "../apply/types";
 import type { AgentConfig } from "../types";
 import type { Page } from "playwright";
-import { describeNonPosting, runJobSearchAgent } from "./job-search-agent";
+import { buildExtractionSelectionContext, describeNonPosting, runJobSearchAgent } from "./job-search-agent";
 import { createSearchResultCache } from "./search-result-cache";
 import { createJobSearchPrompts } from "./job-search-prompts";
+import { describeSearchGoal } from "./move-reviewer";
+
+test("a wide request and related roles reach browsing, extraction and off-site review", () => {
+  const run = config({
+    searchPreferences: {
+      targetRoles: ["Backend Engineer"],
+      jobFamilies: ["Platform Engineer", "API Engineer"],
+      locations: ["United States"],
+      excludedLocations: ["Canada"],
+      employmentTypes: ["Full-time"],
+    },
+    promptContext: {
+      siteLabel: "Jobs",
+      searchRequest: { intent: "Include related roles", breadth: "wide", freshness: "any", sourceIds: "all" },
+      searchGuidance: { selectivity: "best_matches", remoteCountsAsAnyLocation: true },
+    },
+  });
+  const prompt = createJobSearchPrompts(run).system;
+  const extraction = JSON.parse(buildExtractionSelectionContext(run, []));
+  expect(prompt).toContain("find a broad pool of plausible jobs");
+  expect(prompt).toContain("Platform Engineer, API Engineer");
+  expect(prompt).toContain('"excludedLocations":["Canada"]');
+  expect(extraction.goals).toEqual(run.searchPreferences);
+  expect(extraction.searchGuidance.selectivity).toBe("wide_net");
+  expect(describeSearchGoal(run)).toContain("broad pool");
+});
 
 function rawPage(overrides: Partial<RawApplyPage> = {}): RawApplyPage {
   return {
@@ -684,7 +710,7 @@ describe("job search agent", () => {
     });
     expect(seen[0]).toContain("Find data roles");
     expect(seen[0]).toContain("Freshness: prefer postings marked as recent");
-    expect(seen[0]).toContain("public feed already supplied 2 postings");
+    expect(seen[0]).toContain("public feed supplied 2 new postings");
     expect(result.jobs).toEqual([catalog[1]]);
     expect(result.phaseCompletionReason).toBe(
       "The data role fits the requested focus.",

@@ -24,6 +24,17 @@ function listOrNone(
   return values && values.length > 0 ? values.join(", ") : none;
 }
 
+/** One choice reaches navigation, page extraction and off-site review alike. */
+export function searchSelectivity(config: AgentConfig) {
+  const { searchRequest, searchGuidance, searchMode } = config.promptContext;
+  return searchRequest?.breadth === "wide"
+    ? "wide_net"
+    : searchRequest?.breadth === "best_only"
+      ? "best_matches"
+      : (searchGuidance?.selectivity ??
+        (searchMode === "scale" ? "wide_net" : "best_matches"));
+}
+
 export function createJobSearchPrompts(config: AgentConfig): {
   system: string;
   user: string;
@@ -40,11 +51,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
     : config.retainAllFound
       ? `Find current job postings on ${promptContext.siteLabel} that fit this person, and save all suitable results you find. There is no default numeric result cap; honor any limit in the person's request.`
       : `Find up to ${config.targetJobCount} current job postings on ${promptContext.siteLabel} that fit this person, and save them.`;
-  // The saved AI search behavior (Settings) decides how picky the run is; a
-  // run-scoped mode is the fallback for callers that still pass only that.
-  const selectivity =
-    promptContext.searchGuidance?.selectivity ??
-    (promptContext.searchMode === "scale" ? "wide_net" : "best_matches");
+  const selectivity = searchSelectivity(config);
   const searchFocus =
     selectivity === "wide_net"
       ? "Search focus: find a broad pool of plausible jobs. Explore widely and save borderline possibilities when they could reasonably fit; later review will narrow them."
@@ -107,8 +114,21 @@ export function createJobSearchPrompts(config: AgentConfig): {
       ? `- Summary: ${config.userProfile.summary}`
       : null,
     `- Roles they want: ${listOrNone(searchPreferences.targetRoles, "not specified")}`,
+    `- Related roles: ${listOrNone(searchPreferences.jobFamilies, "use transferable work")}. Search alternate titles; target titles are not exact-string filters.`,
     `- Locations: ${listOrNone(searchPreferences.locations, "no constraint; do not add their current location as one")}`,
     `- Work modes: ${listOrNone(searchPreferences.workModes, "not specified")}`,
+    `- Other saved goals: ${JSON.stringify({
+      excludedLocations: searchPreferences.excludedLocations,
+      seniorityLevels: searchPreferences.seniorityLevels,
+      employmentTypes: searchPreferences.employmentTypes,
+      targetIndustries: searchPreferences.targetIndustries,
+      targetCompanyStages: searchPreferences.targetCompanyStages,
+      companyBlacklist: searchPreferences.companyBlacklist,
+      companyWhitelist: searchPreferences.companyWhitelist,
+      compensation: searchPreferences.compensation,
+      shiftPreference: searchPreferences.shiftPreference,
+      weeklyHours: searchPreferences.weeklyHours,
+    })}`,
     config.userProfile.yearsExperience != null
       ? `- Experience: ${config.userProfile.yearsExperience} years`
       : null,
@@ -126,7 +146,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
     "- Read each supplied starting URL. When one is an exact vacancy page, consider and extract that vacancy before exploring other employer pages; do not substitute senior vacancies for a supplied graduate role. Check country/location variants separately rather than assuming a US-only card describes a Canada variant. If a supplied vacancy is excluded, name it and the specific reason in your finish report.",
     "- Explicit exclusions and the person's source notes apply in every breadth, including wide searches. Keep plausible related roles, not unrelated job families. Extraction receives these instructions too. Your finish report must agree with what you saved; do not say no suitable jobs were kept when saved_jobs contains unsuitable ones.",
     `- Work eligibility: ${JSON.stringify(config.userProfile.workEligibility)}. Saved authorization: ${config.userProfile.answerBank.workAuthorization ?? "not stated"}. Saved availability: ${config.userProfile.answerBank.availability ?? "not stated"}. Remote country restrictions still apply.`,
-    "- Work the site out the way a person would. Use search and filters when they help. Read each results page before changing filters again; a page with no matches is still coverage. Use next_page with the forward or Load more control's ref. list_links exposes links missing from the excerpt; you decide which are jobs and which move through results. Never guess numbered-page URLs.",
+    "- Read the unfiltered inventory once when practical; when exhausted, finish. Keyword searches cannot add jobs to an inventory already read. For a large or partial inventory, use search for target and related work. When searches expose no unseen listings, change route or finish with what remains unexplored. Use observed Next/Load more controls; never guess pagination URLs.",
     `- Save from results pages with extract_jobs, including listings below the screen; there is no need to observe or read_text first. It reads long pages in bounded parts: if it reports unread parts, call it again before moving on. A timed-out part is retried without rereading successful parts. An unchanged fully read page finds nothing new; advance instead, or scroll if that loads more. Pass rejected with URL, category and reason for decisions you already made.${packet ? "" : " The page reader checks every listing against the person's goals and records its rejections too; you need not decide them twice. Keep a card whose deciding detail is unclear, such as remote with only a city named: kept jobs' full listings are read and judged afterwards."} Cover every results page until exhausted; report what remains if you stop early. saved_jobs lists retained matches. Never reopen a saved posting.`,
     packet
       ? null
