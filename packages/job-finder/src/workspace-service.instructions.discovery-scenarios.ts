@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { describe, expect, test, vi } from "vitest";
 import {
@@ -160,7 +161,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_linkedin_debug_seeded",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -241,7 +242,7 @@ describe("createJobFinderWorkspaceService", () => {
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -251,7 +252,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [
@@ -286,7 +287,7 @@ describe("createJobFinderWorkspaceService", () => {
     const seed = createSeed();
     seed.searchPreferences.discovery.targets[0] = {
       ...seed.searchPreferences.discovery.targets[0]!,
-      id: "target_example_default",
+      id: "1",
       label: "Example Careers",
       startingUrl: "https://example.com/",
       instructionStatus: "draft",
@@ -296,7 +297,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_example_seeded",
-        targetId: "target_example_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -375,7 +376,7 @@ describe("createJobFinderWorkspaceService", () => {
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -385,7 +386,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_example_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [
@@ -401,7 +402,7 @@ describe("createJobFinderWorkspaceService", () => {
     const seed = createSeed();
     seed.searchPreferences.discovery.targets[0] = {
       ...seed.searchPreferences.discovery.targets[0]!,
-      id: "target_greenhouse_remote",
+      id: "1",
       label: "Remote Greenhouse",
       startingUrl: "https://job-boards.greenhouse.io/remote",
       instructionStatus: "missing",
@@ -467,7 +468,7 @@ describe("createJobFinderWorkspaceService", () => {
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -477,7 +478,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_greenhouse_remote");
+    await workspaceService.runSourceDebug("1");
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(capturedPhaseInputs.size).toBe(0);
@@ -504,7 +505,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_linkedin_collection_only",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:04:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -580,7 +581,7 @@ describe("createJobFinderWorkspaceService", () => {
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { workspaceService } = createSourceDebugServiceHarness({
       seed: {
         ...seed,
         savedJobs: [],
@@ -590,7 +591,7 @@ describe("createJobFinderWorkspaceService", () => {
       aiClient: createAgentAiClient(),
     });
 
-    await workspaceService.runSourceDebug("target_linkedin_default");
+    await workspaceService.runSourceDebug("1");
 
     expect(capturedPhaseInputs.get("Site Structure Mapping")).toEqual({
       startingUrls: [

@@ -27,7 +27,14 @@ function jobsBridgeStub() {
     },
     stage_counts: counts,
     search_status: { search: null, sources: [] },
-    list_sites: { sites: [] },
+    list_sites: {
+      rows: [],
+      nextCursor: null,
+      total: 0,
+      selected: 0,
+      enabledTotal: 0,
+      counts: { all: 0, enabled: 0, disabled: 0, needs_attention: 0 },
+    },
   };
   return {
     run: (name: string) => Promise.resolve(answers[name]),

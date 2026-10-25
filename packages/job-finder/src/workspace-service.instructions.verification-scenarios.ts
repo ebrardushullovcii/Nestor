@@ -1,3 +1,4 @@
+import { createSourceDebugServiceHarness } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { describe, expect, test } from "vitest";
 import {
@@ -6,7 +7,6 @@ import {
   createSeed,
   createSourceInstructionArtifact,
   createStrongSourceDebugFindingsByPhase,
-  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
 describe("createJobFinderWorkspaceService", () => {
@@ -23,7 +23,7 @@ describe("createJobFinderWorkspaceService", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_existing_validated",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "validated",
         createdAt: "2026-03-20T10:00:00.000Z",
         updatedAt: "2026-03-20T10:05:00.000Z",
@@ -31,7 +31,9 @@ describe("createJobFinderWorkspaceService", () => {
         basedOnRunId: "existing_run",
         basedOnAttemptIds: ["existing_attempt"],
         notes: "Existing validated instructions",
-        navigationGuidance: ["Use the existing validated collection route first."],
+        navigationGuidance: [
+          "Use the existing validated collection route first.",
+        ],
         searchGuidance: [
           "Use the existing validated keyword search box to change the result set.",
         ],
@@ -72,7 +74,8 @@ describe("createJobFinderWorkspaceService", () => {
           source: "target_site",
           sourceJobId: "linkedin_verify_case",
           discoveryMethod: "catalog_seed",
-          canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_verify_case",
+          canonicalUrl:
+            "https://www.linkedin.com/jobs/view/linkedin_verify_case",
           title: "Frontend Engineer",
           company: "Signal Systems",
           location: "Remote",
@@ -111,18 +114,19 @@ describe("createJobFinderWorkspaceService", () => {
         return baseRuntime.runAgentDiscovery!(source, options);
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed: {
-        ...seed,
-        savedJobs: [],
-        tailoredAssets: [],
-      },
-      browserRuntime,
-      aiClient: createAgentAiClient(),
-    });
+    const { repository, workspaceService, jobSites } =
+      createSourceDebugServiceHarness({
+        seed: {
+          ...seed,
+          savedJobs: [],
+          tailoredAssets: [],
+        },
+        browserRuntime,
+        aiClient: createAgentAiClient(),
+      });
 
-    const snapshot = await workspaceService.verifySourceInstructions(
-      "target_linkedin_default",
+    await workspaceService.verifySourceInstructions(
+      "1",
       "instruction_existing_validated",
     );
     const artifacts = await repository.listSourceInstructionArtifacts();
@@ -132,10 +136,12 @@ describe("createJobFinderWorkspaceService", () => {
     const successorArtifact = artifacts.find(
       (artifact) =>
         artifact.id !== "instruction_existing_validated" &&
-        artifact.targetId === "target_linkedin_default",
+        artifact.targetId === "1",
     );
 
-    expect(replayInstructionsByLabel.get("Primary target Replay Verification")).toEqual(
+    expect(
+      replayInstructionsByLabel.get("Primary target Replay Verification"),
+    ).toEqual(
       expect.arrayContaining([
         "[Navigation] Use the existing validated collection route first.",
         "[Search] Use the existing validated keyword search box to change the result set.",
@@ -154,7 +160,7 @@ describe("createJobFinderWorkspaceService", () => {
     ]);
     expect(successorArtifact?.status).toBe("validated");
     expect(successorArtifact?.verification?.outcome).toBe("passed");
-    expect(snapshot.searchPreferences.discovery.targets[0]?.validatedInstructionId).toBe(
+    expect(jobSites.get(1)?.validatedInstructionId).toBe(
       successorArtifact?.id ?? null,
     );
   });

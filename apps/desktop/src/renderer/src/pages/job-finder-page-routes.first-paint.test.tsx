@@ -382,6 +382,15 @@ describe("canonical route first paint", () => {
 
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: {
+        jobs: {
+          run: vi.fn(() => new Promise(() => {})),
+          onChange: () => () => undefined,
+        },
+      },
+    });
   });
 
   afterEach(() => {
@@ -389,6 +398,7 @@ describe("canonical route first paint", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     launch.reads = { counts: null, home: null, context: null };
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("opens a browser session from Home without forwarding the React click event", async () => {

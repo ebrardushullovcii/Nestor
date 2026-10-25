@@ -66,30 +66,35 @@ export const JOB_COMMANDS = {
   list_sites: {
     effect: "read",
     description:
-      "One indexed page of the person's job sites, with text and enabled/disabled/attention filters, matching counts and a next cursor. Use enabled sites for search selection.",
+      "One indexed page of the person's job sites, with text and enabled/disabled/attention filters, matching counts and a next cursor. Use filter=enabled for search selection; pass sites:{ids:[...]} to start_search, or sites:{all:true,except:[...]} for all except a few.",
     input: JobSiteListQuerySchema,
   },
   get_site: {
+    effect: "read",
     description:
       "One job site with its address, preferences, health and saved guidance metadata.",
     input: z.object({ id: JobSiteSchema.shape.id }).strict(),
   },
   add_sites: {
+    effect: "local_write",
     description:
       "Adds job-site URLs from pasted text and turns them on. Reports duplicates and invalid entries without changing existing sites.",
     input: AddJobSitesInputSchema,
   },
   update_site: {
+    effect: "local_write",
     description:
       "Updates only one site's name, address, enabled state or custom instructions.",
     input: UpdateJobSiteInputSchema,
   },
   remove_site: {
+    effect: "local_write",
     description:
       "Removes one job site from the person's list. Saved jobs remain.",
     input: z.object({ id: JobSiteSchema.shape.id }).strict(),
   },
   set_sites_enabled: {
+    effect: "local_write",
     description:
       "Turns the selected sites on or off, including an entire filtered list except excluded ids. Writes only sites whose enabled state changes.",
     input: SetJobSitesEnabledInputSchema,
