@@ -2,9 +2,11 @@ import { CreateAnswerPane } from "./create-answer-pane";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   NeedsYouCounts,
+  NeedsYouKind,
   NeedsYouTask,
   SavedFormAnswerSummary,
 } from "@nestor/contracts";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
@@ -42,10 +44,23 @@ const KIND = {
   captcha: "CAPTCHA",
   mfa: "Verification",
 };
+/** What a `?kind=` link (from Home) narrows the list to. */
+const KIND_FILTER_LABEL: Record<NeedsYouKind, string> = {
+  question: "Questions for applications",
+  sign_in: "Site sign-ins",
+  captcha: "CAPTCHA checks",
+  mfa: "Verification codes",
+};
 
 export function NeedsYouScreen() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<"tasks" | "saved">("tasks");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedKind = searchParams.get("kind");
+  const kind =
+    requestedKind && requestedKind in KIND_FILTER_LABEL
+      ? (requestedKind as NeedsYouKind)
+      : null;
   const [text, setText] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
@@ -89,7 +104,7 @@ export function NeedsYouScreen() {
     };
   }, []);
   const list = useStoreList<Item, NeedsYouCounts>({
-    key: JSON.stringify([tab, text]),
+    key: JSON.stringify([tab, text, kind]),
     emptyCounts: EMPTY_COUNTS,
     pauseUpdates: editing,
     refreshOn: (change) => change.cause === "application",
@@ -100,6 +115,7 @@ export function NeedsYouScreen() {
           after,
           limit,
           text,
+          kind,
         });
         return {
           ...page,
@@ -124,7 +140,7 @@ export function NeedsYouScreen() {
     setEditing(false);
     setCreating(false);
     pinned.current = null;
-  }, [tab, text]);
+  }, [tab, text, kind]);
   useEffect(() => {
     if (
       pinned.current !== null &&
@@ -240,6 +256,18 @@ export function NeedsYouScreen() {
               { value: "saved", label: `Saved answers ${counts.saved}` },
             ]}
           />
+          {tab === "tasks" && kind ? (
+            <p className="flex items-center gap-2 text-sm text-foreground-soft">
+              Showing {KIND_FILTER_LABEL[kind].toLowerCase()} only.
+              <Button
+                onClick={() => setSearchParams({}, { replace: true })}
+                size="toolbar"
+                variant="ghost"
+              >
+                Show everything
+              </Button>
+            </p>
+          ) : null}
           {list.error ? <p role="alert">{list.error}</p> : null}
         </div>
       }

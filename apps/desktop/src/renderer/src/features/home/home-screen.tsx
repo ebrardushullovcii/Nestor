@@ -33,16 +33,38 @@ interface NextStep {
   to: string;
 }
 
+const NEEDS_YOU_PATH = "/job-finder/actions";
+
 /** What is waiting on the person, most urgent first. */
 function nextSteps(summary: HomeSummary): NextStep[] {
   const steps: NextStep[] = [];
-  if (summary.needsYou > 0)
+  const { questions, signIns, checks } = summary.needsYou;
+  if (questions > 0)
     steps.push({
-      id: "needs-you",
-      text: `Apply is waiting on ${plural(summary.needsYou, "answer")} from you`,
-      detail: "A question, sign-in or check it can't do alone.",
+      id: "needs-you-questions",
+      text: `Answer ${plural(questions, "question")} for your applications`,
+      detail: "Apply asked; it carries on once you answer.",
       action: "Answer",
-      to: JOB_FINDER_ROUTE_PATHS.applications,
+      to: `${NEEDS_YOU_PATH}?kind=question`,
+    });
+  if (signIns > 0)
+    steps.push({
+      id: "needs-you-sign-ins",
+      text:
+        signIns === 1
+          ? "Sign in to 1 job site"
+          : `Sign in to ${signIns.toLocaleString()} job sites`,
+      detail: "Searching or applying there waits until you do.",
+      action: "Sign in",
+      to: `${NEEDS_YOU_PATH}?kind=sign_in`,
+    });
+  if (checks > 0)
+    steps.push({
+      id: "needs-you-checks",
+      text: `Pass ${plural(checks, "site check")}`,
+      detail: "A CAPTCHA or verification code only you can enter.",
+      action: "Open",
+      to: NEEDS_YOU_PATH,
     });
   if (summary.followUpsDue > 0)
     steps.push({
@@ -116,9 +138,7 @@ export function HomeScreen() {
     summary.recent.no_reply -
     summary.recent.withdrawn;
   const interviewing = summary.tracker.assessment + summary.tracker.interview;
-  const interviewsThisWeek = summary.upcoming.filter(
-    (item) => item.kind === "interview",
-  ).length;
+  const { interviewsThisWeek } = summary;
 
   return (
     <section aria-label="Home" className="grid min-w-0 gap-4">
@@ -202,7 +222,7 @@ export function HomeScreen() {
               {summary.upcoming.map((item) => (
                 <UpcomingItem
                   item={item}
-                  key={`${item.jobId}:${item.at}`}
+                  key={`${item.jobId}:${item.at}:${item.what}`}
                   onOpen={() =>
                     void navigate(
                       `${JOB_FINDER_ROUTE_PATHS.applications}?jobId=${item.jobId}`,

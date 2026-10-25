@@ -148,47 +148,6 @@ describe("preload jobFinder grouped manual-answer boundary", () => {
     expect(result).toEqual(snapshot);
   });
 
-  it("forwards exact application lineage through preparation IPC", async () => {
-    const detailsTarget = {
-      runId: "run-1",
-      jobId: "job-1",
-      applicationRecordId: "application-1",
-    };
-    const startTarget = {
-      jobId: "job-1",
-      applicationRecordId: "application-1",
-      visualCheckpointsEnabled: true,
-    };
-    const consentTarget = {
-      ...detailsTarget,
-      requestId: "consent-1",
-      action: "approve",
-    };
-    mockInvoke.mockResolvedValue({ ok: true });
-
-    await exposedJobFinder.getApplyRunDetails(detailsTarget);
-    await exposedJobFinder.exportApplicationPacket(detailsTarget);
-    await exposedJobFinder.startApplyCopilotRun(startTarget);
-    await exposedJobFinder.startAutoApplyRun({
-      jobId: "job-1",
-      applicationRecordId: "application-1",
-    });
-    await exposedJobFinder.cancelApplyRun(detailsTarget);
-    await exposedJobFinder.resolveApplyConsentRequest(consentTarget);
-
-    expect(mockInvoke.mock.calls).toEqual([
-      ["job-finder:get-apply-run-details", detailsTarget],
-      ["job-finder:export-application-packet", detailsTarget],
-      ["job-finder:start-apply-copilot-run", startTarget],
-      [
-        "job-finder:start-auto-apply-run",
-        { jobId: "job-1", applicationRecordId: "application-1" },
-      ],
-      ["job-finder:cancel-apply-run", detailsTarget],
-      ["job-finder:resolve-apply-consent-request", consentTarget],
-    ]);
-  });
-
 });
 
 describe("preload prepared application page boundary", () => {
@@ -303,58 +262,6 @@ describe("preload jobFinder resume import boundary", () => {
       generatedAt: "2026-08-30T10:02:00.000Z",
     });
     void parkedImport;
-  });
-});
-
-describe("preload jobFinder resume claim confirmation boundary", () => {
-  beforeEach(() => {
-    mockInvoke.mockClear();
-  });
-
-  it("exposes setResumeClaimConfirmation over the typed channel", async () => {
-    const snapshot = { generatedAt: "2026-08-26T10:00:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-    const removeCommand = {
-      intent: "remove",
-      jobId: "job_1",
-      draftId: "resume_draft_job_1",
-      expectedDraftUpdatedAt: "2026-08-26T09:00:00.000Z",
-      confirmationId: "claim_confirmation_section_experience_abc",
-    };
-
-    const result =
-      await exposedJobFinder.setResumeClaimConfirmation(removeCommand);
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:set-resume-claim-confirmation",
-      removeCommand,
-    );
-    expect(result).toEqual(snapshot);
-  });
-
-  it("exposes the add intent without reshaping the command", async () => {
-    const snapshot = { generatedAt: "2026-08-26T10:01:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-    const addCommand = {
-      intent: "add",
-      jobId: "job_1",
-      draftId: "resume_draft_job_1",
-      expectedDraftUpdatedAt: "2026-08-26T09:00:00.000Z",
-      field: "entry_bullet",
-      sectionId: "section_experience",
-      entryId: "experience_1",
-      bulletId: "experience_1_bullet_1",
-      confirmedClaimContentHash: "fnv1a32:5678efab",
-      ownershipStatement: "I confirm this content is accurate and my own.",
-    };
-
-    const result =
-      await exposedJobFinder.setResumeClaimConfirmation(addCommand);
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:set-resume-claim-confirmation",
-      addCommand,
-    );
-    expect(result).toEqual(snapshot);
   });
 });
 
@@ -558,29 +465,6 @@ describe("preload bulk shortlist boundary", () => {
       mockInvoke.mockReset();
     }
   });
-});
-
-it("validates thin resume batch receipts and progress, then detaches its listener", async () => {
-  mockInvoke.mockResolvedValueOnce({ jobId: "job", outcome: "written" });
-  expect(
-    await exposedJobFinder.generateResumeForBatch({
-      batchId: "batch",
-      jobId: "job",
-    }),
-  ).toEqual({ jobId: "job", outcome: "written" });
-  const listener = vi.fn();
-  const unsubscribe = exposedJobFinder.onResumeBatchProgress(listener);
-  const handle = mockIpcRendererOn.mock.calls.findLast(
-    ([channel]) => channel === "job-finder:resume-batch-progress",
-  )![1] as (_event: unknown, payload: unknown) => void;
-  handle({}, { batchId: "batch", jobId: "job", stage: "writing" });
-  handle({}, { batchId: "batch", jobId: "job", stage: "bogus" });
-  expect(listener).toHaveBeenCalledOnce();
-  unsubscribe();
-  expect(mockIpcRendererOff).toHaveBeenCalledWith(
-    "job-finder:resume-batch-progress",
-    handle,
-  );
 });
 
 it("reopen validates progress for the requested result and removes its listener after failure", async () => {

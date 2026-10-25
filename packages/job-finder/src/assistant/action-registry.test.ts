@@ -48,13 +48,6 @@ describe("registered user actions", () => {
       "undoReturnApplicationToShortlist",
       ["j"],
     ],
-    ["clear-resume-approval", { jobId: "j" }, "clearResumeApproval", ["j"]],
-    [
-      "clear-resume-approval",
-      { jobId: "j", restoreStatus: "needs_review" },
-      "clearResumeApproval",
-      ["j", { restoreStatus: "needs_review" }],
-    ],
     ["cancel-source-debug", { runId: "r" }, "cancelSourceDebug", ["r"]],
     ["get-source-debug-run", { runId: "r" }, "getSourceDebugRun", ["r"]],
     [
@@ -76,19 +69,6 @@ describe("registered user actions", () => {
       "verifySourceInstructions",
       ["t", "i"],
     ],
-    [
-      "regenerate-resume-section",
-      { jobId: "j", sectionId: "s" },
-      "regenerateResumeSection",
-      ["j", "s"],
-    ],
-    [
-      "restore-resume-draft-revision",
-      { jobId: "j", revisionId: "v" },
-      "restoreResumeDraftRevision",
-      ["j", "v"],
-    ],
-
     [
       "snooze-grouped-decision",
       { decisionId: "d", expectedRevision: 1, until: at },

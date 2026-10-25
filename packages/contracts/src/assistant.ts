@@ -1,7 +1,5 @@
 import { z } from "zod";
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
-import { ResumeBatchCheckpointSchema } from "./resume";
-import { RESUME_PIPELINE_CAPACITY } from "./resume-batch";
 
 /**
  * The one Job Finder assistant (ADR 0037).
@@ -274,11 +272,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("proposal"),
       proposalId: IdSchema,
-      kind: z.enum([
-        "profile_operations",
-        "resume_patches",
-        "job_finder_action",
-      ]),
+      kind: z.enum(["profile_operations", "job_finder_action"]),
       summary: NonEmptyStringSchema.max(400),
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
       targetId: IdSchema.nullable().default(null),
@@ -297,7 +291,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
       /** Where the authoritative proposal lives (legacy stores keep theirs). */
       source: z
         .object({
-          store: z.enum(["assistant", "profile_copilot", "resume_assistant"]),
+          store: z.enum(["assistant", "profile_copilot"]),
           legacyMessageId: IdSchema.nullable().default(null),
           patchGroupIds: z.array(IdSchema).max(30).default([]),
         })
@@ -423,7 +417,7 @@ export const AssistantMessageSchema = z
     contextResultSetIds: z.array(IdSchema).max(4).default([]),
     migratedFrom: z
       .object({
-        source: z.enum(["profile_copilot", "resume_assistant"]),
+        source: z.enum(["profile_copilot"]),
         legacyId: IdSchema,
       })
       .strict()
@@ -507,7 +501,6 @@ export const AssistantOperationSchema = z
           "apply_batch",
           "apply_queue",
           "apply_run",
-          "resume_generation",
           "source_check",
         ]),
         id: IdSchema,
@@ -578,7 +571,7 @@ export const AssistantProposalSchema = z
     id: IdSchema,
     conversationId: IdSchema,
     messageId: IdSchema.nullable().default(null),
-    kind: z.enum(["profile_operations", "resume_patches", "job_finder_action"]),
+    kind: z.enum(["profile_operations", "job_finder_action"]),
     targetId: IdSchema.nullable().default(null),
     summary: NonEmptyStringSchema.max(400),
     items: z
@@ -680,11 +673,10 @@ export const AssistantRunRefSchema = z
       "apply_batch",
       "apply_queue",
       "apply_run",
-      "resume_generation",
       "source_check",
     ]),
     id: IdSchema,
-    /** Jobs the run covers, when known (apply batches, resume batches). */
+    /** Jobs the run covers, when known (apply batches). */
     jobIds: z.array(IdSchema).max(2000).default([]),
   })
   .strict();
@@ -1127,38 +1119,12 @@ export type AssistantMentionSearchResult = z.infer<
 >;
 
 /** Transient resume work owned by the UI; never resumed after restart. */
-export const AssistantResumeBatchStateSchema =
-  ResumeBatchCheckpointSchema.extend({
-    id: IdSchema,
-    jobIds: z.array(IdSchema),
-    completedJobIds: z.array(IdSchema),
-    activeJobIds: z.array(IdSchema).max(RESUME_PIPELINE_CAPACITY),
-  })
-    .strict()
-    .refine(
-      (batch) => {
-        const queued = new Set(batch.jobIds);
-        return batch.activeJobIds.every((jobId) => queued.has(jobId));
-      },
-      {
-        message: "Active resumes must belong to the batch queue.",
-        path: ["activeJobIds"],
-      },
-    );
-export type AssistantResumeBatchState = z.infer<
-  typeof AssistantResumeBatchStateSchema
->;
 
 /** The typed preload bridge the sidebar uses (`window.nestor.assistant`). */
 export interface DesktopAssistantBridge {
   acknowledgeNavigation(
     input: AssistantNavigationAcknowledgment,
   ): Promise<void>;
-  stopResumeBatch(): Promise<void>;
-  syncResumeBatch(
-    state: AssistantResumeBatchState,
-  ): Promise<AssistantResumeBatchState>;
-  onResumeBatchStop(listener: (batchId: string) => void): () => void;
   getStatus(): Promise<AssistantStatus>;
   listConversations(): Promise<AssistantConversationList>;
   createConversation(): Promise<AssistantConversation>;

@@ -287,15 +287,15 @@ describe('Job Finder save coordinator', () => {
     )
     const coordinator = createJobFinderSaveCoordinator({ onStateChange: (state) => states.push(state) })
     const pending = coordinator.run({
-      dedupeKey: createSaveDedupeKey('resume', { text: 'draft' }),
+      dedupeKey: createSaveDedupeKey('profile', { text: 'draft' }),
       execute,
-      failedMessage: () => 'Resume draft was not saved.',
-      label: 'Resume draft',
+      failedMessage: () => 'Profile was not saved.',
+      label: 'Profile',
       savedMessage: 'Draft saved.',
-      surface: 'resume'
+      surface: 'profile'
     })
 
-    coordinator.markSurfaceRevised('resume')
+    coordinator.markSurfaceRevised('profile')
     rejectSave(new Error('offline'))
     await pending
 

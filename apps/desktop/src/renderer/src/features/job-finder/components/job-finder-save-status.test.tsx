@@ -161,41 +161,6 @@ describe("JobFinderSaveStatus", () => {
     }
   });
 
-  it("dismisses a successful confirmation when its route changes", () => {
-    const onDismissSaved = vi.fn();
-    const saveState = {
-      state: "saved" as const,
-      version: 4,
-      attempt: 1,
-      surface: "resume" as const,
-      label: "Draft",
-      message: "Draft saved.",
-      canRetry: false,
-    };
-    const view = render(
-      <JobFinderSaveStatus
-        layoutKey="/job-finder/resume"
-        onDismissSaved={onDismissSaved}
-        onRetry={vi.fn()}
-        saveState={saveState}
-      />,
-    );
-
-    expect(screen.getByRole("status").textContent).toContain("Draft saved.");
-
-    view.rerender(
-      <JobFinderSaveStatus
-        layoutKey="/job-finder/applications"
-        onDismissSaved={onDismissSaved}
-        onRetry={vi.fn()}
-        saveState={saveState}
-      />,
-    );
-
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(onDismissSaved).toHaveBeenCalledOnce();
-  });
-
   it.each([
     ["saving", "Saving draft…"],
     ["failed", "Draft was not saved."],
@@ -210,7 +175,7 @@ describe("JobFinderSaveStatus", () => {
             state,
             version: 5,
             attempt: 1,
-            surface: "resume",
+            surface: "profile",
             label: "Draft",
             message,
             canRetry: state === "failed",
@@ -226,7 +191,7 @@ describe("JobFinderSaveStatus", () => {
             state,
             version: 5,
             attempt: 1,
-            surface: "resume",
+            surface: "profile",
             label: "Draft",
             message,
             canRetry: state === "failed",

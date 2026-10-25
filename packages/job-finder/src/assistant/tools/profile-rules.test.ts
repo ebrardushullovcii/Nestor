@@ -291,50 +291,6 @@ describe("profile editing rules", () => {
       (await workspaceService.getWorkspaceSnapshot()).profile.headline,
     ).toBe(after.profile.headline);
   });
-
-  it("tells the model when a saved profile change cleared an existing resume approval", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    await workspaceService.generateResume("job_ready");
-    const exported = await workspaceService.exportResumePdf("job_ready");
-    const artifact = exported.resumeExportArtifacts.find(
-      (entry) => entry.jobId === "job_ready",
-    )!;
-    await workspaceService.approveResume("job_ready", artifact.id);
-    const session = {
-      assertCurrent: () => undefined,
-      recordChange: () =>
-        Promise.resolve({
-          receipt: { id: "receipt_1", fieldLabels: ["Headline"] },
-          part: { type: "notice", kind: "info", text: "Saved" },
-        }),
-    } as unknown as AssistantTurnSession;
-    const result = await editProfileTool.execute(
-      editProfileTool.input.parse({
-        summary: "Update headline",
-        operations: [
-          {
-            operation: "replace_identity_fields",
-            value: { headline: "Senior Frontend Platform Engineer" },
-          },
-        ],
-      }),
-      {
-        service: workspaceService,
-        session,
-        ports: {
-          publishWorkspaceUpdate: () => undefined,
-        } as unknown as AssistantHostPorts,
-      },
-    );
-    expect(result.summary).toContain("cleared approval on 1 resume");
-    expect(result.summary).toContain("need refreshing and fresh review");
-    expect(result.data).toMatchObject({
-      invalidatedApprovedResumeJobIds: ["job_ready"],
-    });
-    const savedResume = await workspaceService.getResumeWorkspace("job_ready");
-    expect(savedResume.draft.status).toBe("stale");
-    expect(savedResume.draft.approvedExportId).toBeNull();
-  });
 });
 
 describe("sidebar resume import outcomes", () => {

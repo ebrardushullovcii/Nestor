@@ -1,4 +1,4 @@
-export type JobFinderSaveSurface = 'profile' | 'settings' | 'resume' | 'answers'
+export type JobFinderSaveSurface = 'profile' | 'settings' | 'answers'
 
 export type JobFinderSaveState =
   | { state: 'idle'; version: 0 }
@@ -50,7 +50,7 @@ export type JobFinderSaveReceipt = {
 type SaveReceiptStorage = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>
 
 function isSaveSurface(value: unknown): value is JobFinderSaveSurface {
-  return value === 'profile' || value === 'settings' || value === 'resume' || value === 'answers'
+  return value === 'profile' || value === 'settings' || value === 'answers'
 }
 
 export function loadJobFinderSaveReceipt(storage: SaveReceiptStorage): JobFinderSaveReceipt | null {

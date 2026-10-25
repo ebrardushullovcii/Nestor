@@ -1,5 +1,3 @@
-import { publishJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
-import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 import { BrowserWindow, dialog } from "electron";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import {
@@ -21,23 +19,12 @@ import {
   AssistantSendMessageInputSchema,
   AssistantSendMessageResultSchema,
   AssistantStatusSchema,
-  AssistantResumeBatchStateSchema,
   AssistantUndoChangeInputSchema,
   AssistantUndoChangeResultSchema,
-  type AssistantResumeBatchState,
   type CandidateAssetKind,
 } from "@nestor/contracts";
 
-import {
-  clearUiResumeBatch,
-  isUiResumeBatchInvalidated,
-  readUiResumeBatch,
-  syncUiResumeBatch,
-} from "../services/assistant/ui-resume-batch";
-
 import { getAssistantHost } from "../services/assistant/assistant-service";
-import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
-import { resumesFinishedNotice } from "../setup/finished-work-notices";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
 
 /**
@@ -74,72 +61,6 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
       (await getAssistantHost()).acknowledgeNavigation(input);
     },
   );
-  const queueOwners = new WeakSet<object>();
-  let queueOwnerId: number | null = null;
-  ipcMain.handle(
-    "job-finder:assistant:sync-resume-batch",
-    async (event, payload: unknown) => {
-      assertAppWindow(event);
-      const input = AssistantResumeBatchStateSchema.parse(payload);
-      const invalidatedResponse = () =>
-        AssistantResumeBatchStateSchema.parse({
-          ...input,
-          activeJobIds: [],
-          stopRequested: true,
-          running: false,
-          done: false,
-        });
-      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
-      queueOwnerId = event.sender.id;
-      if (!queueOwners.has(event.sender)) {
-        queueOwners.add(event.sender);
-        const clearOwnedQueue = () => {
-          if (queueOwnerId === event.sender.id) {
-            const interrupted = readUiResumeBatch();
-            clearUiResumeBatch();
-            queueOwnerId = null;
-            if (interrupted) {
-              void getJobFinderWorkspaceService()
-                .then((service) =>
-                  service.saveResumeBatchCheckpoint({
-                    ...interrupted,
-                    running: false,
-                    activeJobIds: [],
-                  }),
-                )
-                .catch((error: unknown) =>
-                  console.warn(
-                    "Resume batch interruption could not be saved.",
-                    error,
-                  ),
-                );
-            }
-          }
-        };
-        event.sender.on("destroyed", clearOwnedQueue);
-        event.sender.on("render-process-gone", clearOwnedQueue);
-        event.sender.on("did-finish-load", clearOwnedQueue);
-      }
-      const batch = AssistantResumeBatchStateSchema.parse(
-        syncUiResumeBatch(input),
-      );
-      noteResumeBatchOnTaskbar(batch);
-      const service = await getJobFinderWorkspaceService();
-      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
-      await service.saveResumeBatchCheckpoint(batch);
-      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
-      // The last job publishes before the renderer's final checkpoint sync.
-      // Publish once more after the durable running=false receipt so screens
-      // cannot keep showing a stale running queue until navigation or restart.
-      if (batch.running === false)
-        publishJobFinderWorkspaceUpdate(event.sender);
-      return batch;
-    },
-  );
-  ipcMain.handle("job-finder:assistant:stop-resume-batch", async (event) => {
-    assertAppWindow(event);
-    await (await getAssistantHost()).stopResumeBatches();
-  });
   ipcMain.handle("job-finder:assistant:get-status", async () => {
     const host = await getAssistantHost();
     return AssistantStatusSchema.parse(host.getStatus());
@@ -366,28 +287,5 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
               : null,
       });
     },
-  );
-}
-
-/** A running batch fills the taskbar button; a finished one says so once. */
-function noteResumeBatchOnTaskbar(batch: AssistantResumeBatchState): void {
-  const notices = getFinishedWorkNotifier();
-  if (!batch.done && batch.running !== false) {
-    notices.progress(
-      "resumes",
-      batch.jobIds.length > 0
-        ? batch.completedJobIds.length / batch.jobIds.length
-        : null,
-    );
-    return;
-  }
-  notices.end(
-    "resumes",
-    batch.done &&
-      !batch.stopRequested &&
-      !batch.providerBlock &&
-      batch.completedJobIds.length > 0
-      ? resumesFinishedNotice(batch.completedJobIds.length)
-      : null,
   );
 }

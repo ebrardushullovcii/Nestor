@@ -5,8 +5,7 @@ import type {
 
 import { isApplicationTrackedAsSentByPerson } from "@nestor/contracts";
 
-import { readBackgroundBatch } from "./tools";
-import { allJobs, } from "./tools/format";
+import { allJobs } from "./tools/format";
 
 /**
  * Whether a background run a conversation waits on has ended, and what the
@@ -194,72 +193,6 @@ export function readRunStatus(
           kind: request.kind,
           title: request.title,
         })),
-      },
-    };
-  }
-  if (run.kind === "resume_generation") {
-    const batch = readBackgroundBatch(run.id);
-    if (batch && !batch.done) {
-      const settled =
-        batch.completedJobIds.length +
-        batch.failures.length +
-        batch.skipped.length;
-      return {
-        done: false,
-        summary: batch.cancelled
-          ? `No further resume jobs will start; ${batch.activeJobIds.length} active draft(s) finishing.`
-          : `Writing resumes: ${settled} of ${batch.jobIds.length} finished${batch.failures.length ? `; ${batch.failures.length} failed` : ""}.`,
-        details: {
-          completed: batch.completedJobIds,
-          active: batch.activeJobIds,
-          failures: batch.failures,
-          skipped: batch.skipped,
-        },
-      };
-    }
-    const assets = snapshot.tailoredAssets.filter((asset) =>
-      run.jobIds.includes(asset.jobId),
-    );
-    const generating = assets.some((asset) => asset.status === "generating");
-    if (!batch && generating) {
-      return { done: false, summary: "Writing resumes.", details: null };
-    }
-    return {
-      done: true,
-      summary: batch
-        ? `Resume ${batch.cancelled ? "batch stopped" : "writing finished"}: ${batch.completedJobIds.length} rewritten, ${batch.failures.length} failed, ${batch.skipped.length} skipped, ${Math.max(0, batch.jobIds.length - batch.completedJobIds.length - batch.failures.length - batch.skipped.length)} not started.`
-        : "The resume writer is no longer running. Its completion counts are unavailable; inspect each saved draft before claiming a completed rewrite.",
-      details: {
-        resumes: run.jobIds.map((jobId) => {
-          const item = snapshot.reviewQueue.find(
-            (entry) => entry.jobId === jobId,
-          );
-          const mode =
-            item?.resumeApplicationMode ??
-            snapshot.settings.resumeApplicationMode;
-          const draft = snapshot.resumeDrafts.find(
-            (entry) => entry.jobId === jobId,
-          );
-          return {
-            jobId,
-            resume: item?.resumeReview.status ?? "unknown",
-            mode,
-            level:
-              mode === "original_resume"
-                ? "original"
-                : (item?.resumeTailoringMode ??
-                  snapshot.searchPreferences.tailoringMode),
-            generationMethod: draft?.generationMethod ?? null,
-            revision: draft?.updatedAt ?? null,
-            approved:
-              mode !== "original_resume" && draft?.status === "approved",
-            linesToDecide: item?.resumeLinesToDecide ?? 0,
-          };
-        }),
-        completedJobIds: batch?.completedJobIds ?? [],
-        failures: batch?.failures ?? [],
-        skipped: batch?.skipped ?? [],
-        cancelled: batch?.cancelled ?? false,
       },
     };
   }

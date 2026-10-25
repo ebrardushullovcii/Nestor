@@ -4,7 +4,6 @@ import {
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import type { AssistantHostPorts } from "./ports";
-import { listBackgroundResumeBatches } from "./tools/resume-tools";
 
 export function readAssistantWorkState(
   ports: AssistantHostPorts,
@@ -15,13 +14,7 @@ export function readAssistantWorkState(
     ports.isResumeImportActive?.() === true ||
     snapshot.resumeImportActive ||
     (latest !== null && isResumeImportRunInProgress(latest));
-  const uiBatch = ports.readResumeBatch?.();
   return {
-    resumeBatches: [
-      ...listBackgroundResumeBatches(),
-      ...(uiBatch ? [uiBatch] : []),
-    ],
-    uiResumeQueueVisible: ports.readResumeBatch !== undefined,
     resumeImport: {
       active: importing,
       runId: latest?.id ?? null,

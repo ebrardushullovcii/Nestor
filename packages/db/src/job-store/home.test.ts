@@ -84,7 +84,7 @@ describe("Home summary", () => {
     expect(home.foundToday).toBe(1);
   });
 
-  it("lists due and upcoming interviews and reminders, soonest first", () => {
+  it("lists interviews first, then due and upcoming reminders, soonest first", () => {
     const now = Date.now();
     const { store, ids, tracker } = workspace(now);
     tracker.addEvent({
@@ -111,9 +111,50 @@ describe("Home summary", () => {
 
     expect(home.followUpsDue).toBe(1);
     expect(home.upcoming.map((item) => [item.kind, item.what])).toEqual([
-      ["reminder", "Follow up"],
       ["interview", "Panel"],
+      ["reminder", "Follow up"],
     ]);
-    expect(home.upcoming[1]?.place).toBe("https://meet.example.test/x");
+    expect(home.upcoming[0]?.place).toBe("https://meet.example.test/x");
+  });
+
+  it("counts this week's interviews even behind an earlier reminder on the same job", () => {
+    const now = Date.now();
+    const { store, ids, tracker } = workspace(now);
+    tracker.addEvent({
+      jobId: ids[0]!,
+      kind: "reminder",
+      title: "Send references",
+      dueAt: new Date(now - 60_000).toISOString(),
+    });
+    tracker.addEvent({
+      jobId: ids[0]!,
+      kind: "interview",
+      title: "Hiring manager call",
+      dueAt: new Date(now + 3 * 3_600_000).toISOString(),
+    });
+
+    const home = createHomeStore(store).summary({ utcOffsetMinutes: 0 }, now);
+
+    expect(home.interviewsThisWeek).toBe(1);
+    expect(home.upcoming.map((item) => item.what)).toEqual([
+      "Hiring manager call",
+      "Send references",
+    ]);
+  });
+
+  it("keeps questions for applications apart from site sign-ins", () => {
+    const now = Date.now();
+    const { store } = workspace(now);
+    const open = store.sql(
+      `INSERT INTO needs_you (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at)
+       VALUES (?, ?, '', ?, 'Synthetic', 'text', '[]', ?)`,
+    );
+    open.run("question", "notice", "https://jobs.example.test", now);
+    for (const site of ["a", "b", "c"])
+      open.run("sign_in", "account", `https://${site}.example.test`, now);
+
+    const home = createHomeStore(store).summary({ utcOffsetMinutes: 0 }, now);
+
+    expect(home.needsYou).toEqual({ questions: 1, signIns: 3, checks: 0 });
   });
 });

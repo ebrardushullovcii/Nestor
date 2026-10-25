@@ -1,13 +1,6 @@
-import {
-  ResumeDraftBulletSchema,
-  ResumeDraftPatchSchema,
-} from "@nestor/contracts";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
-import {
-  profileProposalPreview,
-  resumeProposalPreview,
-} from "./proposal-preview";
+import { profileProposalPreview } from "./proposal-preview";
 
 it("shows the complete current and proposed summary, including text beyond old preview limits", async () => {
   const { workspaceService } = createWorkspaceServiceHarness();
@@ -49,47 +42,4 @@ it("names the role and changed fields instead of an upsert command", async () =>
     "Current achievements: Published a synthetic report.\nPublished a synthetic report.\nProposed achievements: Published a synthetic report.",
   );
   expect(JSON.stringify(preview)).not.toMatch(/upsert|experiences|recordId/u);
-});
-
-describe("resume replacements", () => {
-  it("shows full section and bullet wording with their current text", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
-    const workspace = await workspaceService.getResumeWorkspace(
-      snapshot.reviewQueue[0]!.jobId,
-    );
-    const section = workspace.draft.sections[0]!;
-    section.text = "Current synthetic summary.";
-    section.bullets = [
-      ResumeDraftBulletSchema.parse({
-        id: "bullet_test",
-        text: "Current synthetic achievement.",
-        included: true,
-        locked: false,
-        origin: "user_edited",
-        updatedAt: snapshot.generatedAt,
-      }),
-    ];
-    const newText = "The proposed exact sentence. ".repeat(90).trim();
-    const patch = ResumeDraftPatchSchema.parse({
-      id: "patch_1",
-      draftId: workspace.draft.id,
-      operation: "replace_section_text",
-      targetSectionId: section.id,
-      newText,
-      origin: "assistant",
-      appliedAt: snapshot.generatedAt,
-    });
-    expect(resumeProposalPreview(patch, workspace.draft).detail).toBe(
-      `Current: ${section.text}\nProposed: ${newText}`,
-    );
-    const bulletPatch = {
-      ...patch,
-      operation: "update_bullet" as const,
-      targetBulletId: "bullet_test",
-    };
-    expect(resumeProposalPreview(bulletPatch, workspace.draft).detail).toBe(
-      `Current: Current synthetic achievement.\nProposed: ${newText}`,
-    );
-  });
 });

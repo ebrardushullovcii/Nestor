@@ -10,7 +10,6 @@ import {
 } from "../../lib/describe-failure";
 import type { FailureDescription } from "../../lib/describe-failure";
 import { useModalFocusTrap } from "../../components/profile/use-modal-focus-trap";
-import { clearTailoredAssetDetailCache } from "../../hooks/use-tailored-asset-detail";
 
 interface SettingsWorkspaceControlsProps {
   isWorkspaceResetPending: boolean;
@@ -51,7 +50,6 @@ export function SettingsWorkspaceControls({
     if (!restorePreview) return;
     setRestorePending(true);
     setRestoreError(null);
-    clearTailoredAssetDetailCache();
     try {
       const result =
         await window.nestor.jobFinder.confirmPersonalWorkspaceRestore({
@@ -65,7 +63,6 @@ export function SettingsWorkspaceControls({
     } catch (error) {
       setRestoreError(describeWorkspaceRestoreFailure(error));
     } finally {
-      clearTailoredAssetDetailCache();
       setRestorePending(false);
     }
   }

@@ -15,10 +15,7 @@ import type {
   AppearanceTheme,
   CandidateProfile,
   JobFinderSearchRequest,
-  JobFinderApplyConsentActionInput,
-  JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
-  JobFinderResumeWorkspace,
   JobFinderApplicationStartTarget,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
@@ -29,9 +26,7 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProfileSetupStep,
-  ResumeAssistantMessage,
   ResumeApplicationMode,
-  ResumeDraft,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
@@ -40,7 +35,6 @@ import { collectPreparedApplicationJobIds } from "@renderer/features/job-finder/
 import { isFinishBlockingReviewItem } from "@renderer/features/job-finder/components/profile/setup/profile-setup-screen-helpers";
 import type {
   ActionState,
-  JobFinderAutoApplyQueueStartOutcome,
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import {
@@ -107,15 +101,8 @@ type ActionOptions = {
 
 type BaseActionArgs = {
   actions: JobFinderShellActions;
-  activeRouteResumeWorkspace: JobFinderResumeWorkspace | null;
   canImportResume: boolean;
-  confirmLeaveDirtyResumeWorkspace: (pendingAction: string) => Promise<boolean>;
   importResumeGuardMessage: string | null;
-  isCurrentResumeAssistantRequest: (
-    jobId: string,
-    requestToken: number,
-  ) => boolean;
-  isCurrentResumeWorkspaceJob: (jobId: string) => boolean;
   /** The current route, read when an action runs rather than per render. */
   getLocationPathname: () => string;
   navigate: (
@@ -137,18 +124,6 @@ type BaseActionArgs = {
     ) => string | null | void | Promise<string | null | void>;
     onCancel?: () => void;
   }) => void;
-  refreshResumeWorkspace: (
-    jobId: string,
-    options?: {
-      updateAssistantMessages?: boolean;
-    },
-  ) => Promise<boolean>;
-  /**
-   * Puts an autosaved draft into the open resume at once and reloads the rest
-   * (checks, history) only once the edits settle.
-   */
-  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
-  resumeAssistantRequestTokenRef: MutableRefObject<number>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
   setOptimisticProfileCopilotMessages: Dispatch<
     SetStateAction<readonly ProfileCopilotMessage[]>
@@ -156,13 +131,6 @@ type BaseActionArgs = {
   setPendingActionState: Dispatch<SetStateAction<PendingActionState>>;
   setProfileCopilotBusy: Dispatch<SetStateAction<boolean>>;
   setProfileCopilotPendingContextKey: Dispatch<SetStateAction<string | null>>;
-  setResumeAssistantMessages: Dispatch<
-    SetStateAction<readonly ResumeAssistantMessage[]>
-  >;
-  setResumeAssistantPending: Dispatch<SetStateAction<boolean>>;
-  setResumeWorkspace: Dispatch<SetStateAction<JobFinderResumeWorkspace | null>>;
-  clearResumeWorkspaceState: () => void;
-  setResumeWorkspaceDirty: Dispatch<SetStateAction<boolean>>;
   setSelectedReviewJobId: (jobId: string) => void;
   sourceDebugRunIdRef: MutableRefObject<number>;
   latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
@@ -424,42 +392,6 @@ function decrementPendingScope(
   const nextState = { ...current };
   delete nextState[scope];
   return nextState;
-}
-
-/**
- * What an Apply press queued. Up to ten start at once; a longer choice goes
- * on in runs of ten, and a day's limit waits for tomorrow (ADR 0058).
- */
-export function describeApplyQueueStart(
-  snapshot:
-    | Pick<JobFinderRendererWorkspaceSnapshot, "applyQueue" | "reviewQueue">
-    | null
-    | undefined,
-  jobIds: readonly string[],
-  options?: { onlyWhenHeldBack?: boolean },
-): string | null {
-  const queue = snapshot?.applyQueue ?? null;
-  if (!queue) return null;
-  const chosen = new Set(jobIds);
-  const heldBack = queue.skipped.filter((entry) => chosen.has(entry.jobId));
-  const heldBackSentence =
-    heldBack.length === 0
-      ? ""
-      : heldBack.length === 1
-        ? ` ${snapshot?.reviewQueue.find((item) => item.jobId === heldBack[0]!.jobId)?.title ?? "One job"} waits: ${heldBack[0]!.reason}`
-        : ` ${heldBack.length} wait for you first: ${heldBack[0]!.reason}`;
-  if (queue.state === "paused" && queue.pausedReason) {
-    return `Nothing new started. ${queue.pausedReason}`;
-  }
-  if (options?.onlyWhenHeldBack) return heldBackSentence.trim() || null;
-  const going = jobIds.length - heldBack.length;
-  const started =
-    going <= 10
-      ? going === 1
-        ? "Application started. Watch it in Applications."
-        : `${going} applications started. Watch them in Applications.`
-      : `${going} applications queued: ten at a time, with no more presses. Progress is on Home and Applications.`;
-  return `${started}${heldBackSentence}`;
 }
 
 export function describePreparedApplicationSubmitResult(
@@ -789,7 +721,6 @@ export function createPrimaryPageActions(
   const {
     actions,
     canImportResume,
-    confirmLeaveDirtyResumeWorkspace,
     importResumeGuardMessage,
     getLocationPathname,
     navigate,
@@ -802,7 +733,6 @@ export function createPrimaryPageActions(
     setOptimisticProfileCopilotMessages,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
-    setResumeWorkspaceDirty,
     sourceDebugRunIdRef,
     latestWorkspaceRef,
     workspace,
@@ -929,49 +859,34 @@ export function createPrimaryPageActions(
      */
     destination?: { jobId: string },
   ) => {
-    // Stay resolves false: take no action and keep every draft. Leave
-    // resolves true after the controller discarded only the named draft
-    // state, so the flow starts exactly once.
-    void confirmLeaveDirtyResumeWorkspace("start this application flow").then(
-      (mayLeave) => {
-        if (!mayLeave) {
+    const action = runAction(
+      runner,
+      () => {
+        if (destination) {
           return;
         }
-
-        const action = runAction(
-          runner,
-          () => {
-            if (destination) {
-              return;
-            }
-            setResumeWorkspaceDirty(false);
-            if (jobFinderStatusRoute !== "/job-finder/applications") {
-              navigate("/job-finder/applications");
-            }
-          },
-          successMessage,
-          // Preparation can run for minutes and can hang on a job site; the
-          // Applications screen and the Tasks panel show its real state, so
-          // the buttons must not stay disabled for the whole call.
-          {
-            scope,
-            releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
-            ...(destination
-              ? { statusOwnerPath: "/job-finder/applications" }
-              : {}),
-          },
-        );
-        if (destination) {
-          setResumeWorkspaceDirty(false);
-          navigate(
-            buildJobFinderContextRoute("/job-finder/applications", {
-              jobId: destination.jobId,
-            }),
-          );
+        if (jobFinderStatusRoute !== "/job-finder/applications") {
+          navigate("/job-finder/applications");
         }
-        void action;
+      },
+      successMessage,
+      // Preparation can run for minutes and can hang on a job site; the
+      // Applications screen and the Tasks panel show its real state, so
+      // the buttons must not stay disabled for the whole call.
+      {
+        scope,
+        releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
+        ...(destination ? { statusOwnerPath: "/job-finder/applications" } : {}),
       },
     );
+    if (destination) {
+      navigate(
+        buildJobFinderContextRoute("/job-finder/applications", {
+          jobId: destination.jobId,
+        }),
+      );
+    }
+    void action;
   };
 
   return {
@@ -1039,39 +954,6 @@ export function createPrimaryPageActions(
             "This took too long to confirm. Check its status before trying again.",
         },
       ),
-    onApproveApply: (jobId: string) => {
-      const startRefusal = getApplicationStartRefusalMessage();
-      if (startRefusal) {
-        applyRouteScopedMessage({ message: startRefusal, tone: "failure" });
-        return;
-      }
-      void confirmLeaveDirtyResumeWorkspace("approve this application").then(
-        (mayLeave) => {
-          if (!mayLeave) {
-            return;
-          }
-
-          void runAction(
-            () =>
-              actions.startApplyCopilotRun({
-                jobId,
-                visualCheckpointsEnabled: false,
-              }),
-            () => {
-              setResumeWorkspaceDirty(false);
-              if (jobFinderStatusRoute !== "/job-finder/applications") {
-                navigate("/job-finder/applications");
-              }
-            },
-            "Applications updated. Check the latest attempt and next step there.",
-            {
-              scope: jobFinderPendingActions.apply(),
-              startMessage: `Filling in the application in ${JOB_FINDER_BROWSER_NAME}. It follows the apply mode chosen for this run.`,
-            },
-          );
-        },
-      );
-    },
     onRevokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
       void runAction(
         () => actions.revokeApplyRunApproval(input),
@@ -1079,89 +961,6 @@ export function createPrimaryPageActions(
         "Application run approval revoked.",
         { scope: jobFinderPendingActions.applyRun(input.runId) },
       ),
-    onResolveApplyConsentRequest: (input: JobFinderApplyConsentActionInput) =>
-      void runAction(
-        () => actions.resolveApplyConsentRequest(input),
-        () => undefined,
-        input.action === "approve"
-          ? "Consent approved. Check the application's latest state as the run continues."
-          : "Consent declined. The run skips that job.",
-        { scope: jobFinderPendingActions.applyRequest(input.requestId) },
-      ),
-    onStartAutoApplyQueue: async (
-      jobIds: string[],
-      applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-      options?: { stayOnCurrentPage?: boolean },
-    ): Promise<JobFinderAutoApplyQueueStartOutcome> => {
-      // The Apply queue runs ten at a time and reports on Home and
-      // Applications (ADR 0058).
-      if (jobIds.length === 0) {
-        const message = "No jobs selected for auto-apply queue.";
-        applyRouteScopedMessage({ message });
-        return { status: "refused", reason: "empty_selection", message };
-      }
-      if (workspace?.activityControl?.paused) {
-        const message = APPLICATION_WORK_PAUSED_REASON;
-        applyRouteScopedMessage({ message, tone: "failure" });
-        return { status: "refused", reason: "work_paused", message };
-      }
-
-      // Stay resolves false: take no action and keep every draft. Leave
-      // resolves true after the controller discarded only the named draft
-      // state, so the flow starts exactly once.
-      const mayLeave = await confirmLeaveDirtyResumeWorkspace(
-        "start this application flow",
-      );
-      if (!mayLeave) {
-        return {
-          status: "refused",
-          reason: "cancelled_stayed_in_workspace",
-          message: null,
-        };
-      }
-
-      // Tag backend rejections separately from every other non-confirmed
-      // ending: a rejected runner means no run was created (handled failure
-      // with visible feedback), while any other false from runAction is an
-      // ambiguous outcome where a run may exist, so staged curation stays.
-      let backendRejected = false;
-      const confirmed = await runAction(
-        () =>
-          actions
-            .startApplyQueue({
-              jobIds: [...jobIds],
-              ...(applicationAutomationMode
-                ? { applicationAutomationMode }
-                : {}),
-            })
-            .catch((error: unknown) => {
-              backendRejected = true;
-              throw error;
-            }),
-        () => {
-          setResumeWorkspaceDirty(false);
-          if (!options?.stayOnCurrentPage) {
-            if (jobFinderStatusRoute !== "/job-finder/applications") {
-              navigate("/job-finder/applications");
-            }
-          }
-        },
-        (snapshot) =>
-          describeApplyQueueStart(snapshot, jobIds, {
-            // Home shows the queue itself; a "started" line there outlived
-            // it. It keeps only what needs the person.
-            onlyWhenHeldBack: options?.stayOnCurrentPage === true,
-          }),
-        { scope: jobFinderPendingActions.apply() },
-      );
-
-      if (confirmed) {
-        return { status: "confirmed" };
-      }
-      return backendRejected
-        ? { status: "failed", message: null }
-        : { status: "unknown" };
-    },
     onReturnApplicationToShortlist: (record: { id: string; jobId: string }) => {
       let change: RecentChange | null = null;
       return runAction(
@@ -1227,28 +1026,6 @@ export function createPrimaryPageActions(
         () => actions.startAutoApplyRun(input),
         "Application staged. Press Apply now in Applications to start it.",
         jobFinderPendingActions.apply(),
-      );
-    },
-    onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getApplicationStartRefusalMessage();
-      if (capacityRefusal) {
-        applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
-        return;
-      }
-
-      // One press starts it. The mode (fill in, ask before sending, send for
-      // me) is a setting the person already chose; a second dialog naming
-      // the same job was one more click on every application. Screenshots
-      // stay off unless Settings turns them on.
-      startAutoFlow(
-        () =>
-          actions.startApplyCopilotRun({
-            ...input,
-            visualCheckpointsEnabled: false,
-          }),
-        "Application run finished.",
-        jobFinderPendingActions.apply(),
-        { jobId: input.jobId },
       );
     },
     onSubmitPreparedApplication: async (jobId: string): Promise<void> => {
@@ -1404,17 +1181,9 @@ export function createPrimaryPageActions(
       ).then((completed) => completed && focused);
     },
     onOpenProfile: () => {
-      void confirmLeaveDirtyResumeWorkspace("open your profile").then(
-        (mayLeave) => {
-          if (!mayLeave) {
-            return;
-          }
-
-          navigate("/job-finder/profile", {
-            state: { forceFullProfile: true },
-          });
-        },
-      );
+      navigate("/job-finder/profile", {
+        state: { forceFullProfile: true },
+      });
     },
     onAssessJobListing: async (jobId: string) => {
       await withPendingScope(jobFinderPendingActions.discoveryJob(jobId), () =>

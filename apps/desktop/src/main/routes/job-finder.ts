@@ -13,16 +13,6 @@ import {
   ApplicationPageReopenProgressSchema,
 } from "@nestor/contracts";
 import { getApplicationPageAccessForWorkspaceService } from "../services/job-finder/create-workspace-service";
-import {
-  ResumeBatchGenerationInputSchema,
-  ResumeBatchGenerationResultSchema,
-  ResumeBatchGenerationProgressSchema,
-} from "@nestor/contracts";
-import {
-  readUiResumeBatch,
-  blockUiResumeBatch,
-  invalidateUiResumeBatch,
-} from "../services/assistant/ui-resume-batch";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { resetJobFinderBrowser } from "../services/job-finder/reset-workspace";
 import { readFile, writeFile } from "node:fs/promises";
@@ -38,11 +28,6 @@ import {
 } from "../services/job-finder/paths";
 import path from "node:path";
 import { access } from "node:fs/promises";
-import { createConcurrencyLimiter } from "@nestor/core";
-import {
-  buildResumeExportDefaultPath,
-  chooseResumeExportPath,
-} from "./resume-export-path";
 import { app, BrowserWindow, clipboard, dialog, shell } from "electron";
 import type {
   IpcMain,
@@ -63,24 +48,13 @@ import {
   ApplyRunDetailsSchema,
   DesktopTestOkResponseSchema,
   JobFinderApplicationPacketExportResultSchema,
-  JobFinderApplyCopilotActionInputSchema,
-  JobFinderApplyConsentActionInputSchema,
-  JobFinderApplyQueueActionInputSchema,
   JobFinderApplyRunActionInputSchema,
   JobFinderApplyRunDetailsQuerySchema,
   JobFinderApplicationStartTargetSchema,
-  JobFinderPreviewResumeDraftInputSchema,
-  JobFinderResumePreviewSchema,
-  JobFinderResumePreviewModeSchema,
   JobFinderRepositoryStateSchema,
   JobFinderStartupDatabaseRecoveryFactSchema,
   JobFinderStartupResetRecoveryFactSchema,
-  ResumeQualityBenchmarkRequestSchema,
   ResumeImportBenchmarkRequestSchema,
-  JobFinderResumeWorkspaceQuerySchema,
-  JobFinderResumeWorkspaceSchema,
-  JobFinderExportResumePdfInputSchema,
-  JobFinderResumePdfExportOutcomeSchema,
   JobFinderJobActionInputSchema,
   JobFinderSendPreparedApplicationsInputSchema,
   JobFinderPreparedApplicationPageInputSchema,
@@ -97,8 +71,6 @@ import {
   JobFinderWorkspaceEntityMutationInputSchema,
   JobFinderWorkspaceSnapshotSchema,
   JobFinderJobDetailQuerySchema,
-  JobFinderTailoredAssetQuerySchema,
-  JobFinderTailoredAssetDetailSchema,
   JobFinderWorkspaceSyncInputSchema,
   JobFinderWorkspaceHeldRevisionSchema,
   ResumeImportBenchmarkReportSchema,
@@ -109,7 +81,6 @@ import {
   CancelResumeImportRequestSchema,
   ResumeImportProgressEventSchema,
   ResumeImportRunSchema,
-  ResumeQualityBenchmarkReportSchema,
   SaveApplicationAnswerCommandSchema,
   SaveUserActionAnswerDraftInputSchema,
   UserActionCommandSchema,
@@ -121,13 +92,11 @@ import type {
   JobFinderWorkspaceSnapshot,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
-  JobFinderResumePdfExportReply,
 } from "@nestor/contracts";
 
 import {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
-  resolveTailoredAssetLabel,
   withApplicationAuthorityGate,
 } from "@nestor/job-finder";
 
@@ -147,10 +116,6 @@ import {
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
 import {
-  listJobsNotInProgress,
-  startApplyBatch,
-} from "../services/job-finder/start-apply-batch";
-import {
   getJobFinderApplicationAuthorityService,
   getJobFinderRepositoryForWorkspaceService,
   getJobFinderWorkspaceService,
@@ -159,17 +124,14 @@ import {
   isDesktopTestApiEnabled,
   loadApplyQueueDemoState,
   loadAgentOwnedBrowserDriveState,
-  loadResumeWorkspaceDemoState,
   loadWorkHistoryReviewDriveState,
   parseResumeImportPathPayload,
   resetJobFinderWorkspace,
   getJobFinderStartupResetRecoveryFact,
   dismissJobFinderStartupDatabaseRecoveryNotice,
   getJobFinderStartupDatabaseRecoveryFact,
-  runDesktopResumeQualityBenchmark,
   runDesktopResumeImportBenchmark,
   defaultBenchmarkCases,
-  setJobFinderWorkspaceServiceTestEnv,
 } from "../services/job-finder";
 import {
   armJobFinderTestSaveFailure,
@@ -539,180 +501,6 @@ export async function scopeSendPermissionToPreparedJobs(
  * performs the same export-and-approve sequence before
  * submission authority is scoped from approved export hashes.
  */
-/** A job whose resume Apply could not approve, and the sentence saying why. */
-export interface HeldBackApplicationResume {
-  jobId: string;
-  title: string;
-  reason: string;
-}
-
-// Shared by bulk presses: overlapping presses cannot multiply print workers.
-const resumeApprovals = createConcurrencyLimiter(2);
-
-export async function approveApplicationResumes(
-  workspaceService: Awaited<ReturnType<typeof getJobFinderWorkspaceService>>,
-  jobIds: readonly string[],
-  options?: {
-    /**
-     * A batch press holds back only the jobs whose resume waits on the
-     * person (an unapproved Aggressive resume, a line still to decide) and
-     * approves the rest; a single-job press refuses with the same sentence.
-     */
-    holdBackResumesAwaitingPerson?: boolean;
-    /**
-     * The person pressed Approve for exactly these resumes: that press is
-     * the Aggressive approval, and one resume that cannot be approved is
-     * held back with its reason instead of stopping the others.
-     */
-    personApproved?: boolean;
-    onProgress?: (done: number) => void;
-  },
-): Promise<HeldBackApplicationResume[]> {
-  const heldBack: HeldBackApplicationResume[] = [];
-  const holdBack = (job: { id: string; title: string }, reason: string) => {
-    if (!options?.holdBackResumesAwaitingPerson) throw new Error(reason);
-    heldBack.push({ jobId: job.id, title: job.title, reason });
-  };
-  const repository =
-    getJobFinderRepositoryForWorkspaceService(workspaceService);
-  if (!repository) {
-    throw new Error(
-      "Job Finder could not open the application workspace, so nothing was started.",
-    );
-  }
-
-  const [jobs, settings, searchPreferences] = await Promise.all([
-    repository.listSavedJobs(),
-    repository.getSettings(),
-    repository.getSearchPreferences(),
-  ]);
-
-  const uniqueJobIds = [...new Set(jobIds)];
-  let completed = 0;
-  async function approveSelected(jobId: string) {
-    const job = jobs.find((candidate) => candidate.id === jobId) ?? null;
-    if (!job) {
-      throw new Error(
-        "Job Finder could not find a selected application, so nothing was started.",
-      );
-    }
-    if (options?.personApproved) {
-      try {
-        await approveOneApplicationResume(job, { personApproved: true });
-      } catch (error: unknown) {
-        heldBack.push({
-          jobId: job.id,
-          title: job.title,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-      options?.onProgress?.(++completed);
-      return;
-    }
-    await approveOneApplicationResume(job, {});
-  }
-  if (options?.personApproved) {
-    await Promise.all(
-      uniqueJobIds.map((jobId) =>
-        resumeApprovals.run(() => approveSelected(jobId)),
-      ),
-    );
-  } else {
-    for (const jobId of uniqueJobIds) await approveSelected(jobId);
-  }
-  return heldBack;
-
-  async function approveOneApplicationResume(
-    job: (typeof jobs)[number],
-    approval: { personApproved?: boolean },
-  ): Promise<void> {
-    const jobId = job.id;
-    const usesOriginalResume =
-      (job.resumeApplicationMode ??
-        settings.resumeApplicationMode ??
-        "tailored_per_job") === "original_resume";
-    if (usesOriginalResume) return;
-
-    if (approval.personApproved) {
-      try {
-        await workspaceService.approveCurrentResume(jobId);
-      } catch (error: unknown) {
-        if (
-          error instanceof Error &&
-          /still need your decision/iu.test(error.message)
-        ) {
-          throw new Error(
-            `The resume for '${job.title}' has a line waiting for your decision.`,
-          );
-        }
-        throw error;
-      }
-      return;
-    }
-
-    const workspace = await workspaceService.getResumeWorkspace(jobId);
-    const approvedExport = workspace.exports.find(
-      (artifact) =>
-        artifact.id === workspace.draft.approvedExportId &&
-        artifact.draftId === workspace.draft.id &&
-        artifact.isApproved,
-    );
-    const alreadyApproved =
-      workspace.draft.status === "approved" && approvedExport !== undefined;
-    if (alreadyApproved && approvedExport) {
-      const exportExists = await access(approvedExport.filePath).then(
-        () => true,
-        () => false,
-      );
-      if (exportExists) return;
-      // Re-render the same approved draft if its managed PDF was removed.
-      // Its existing claim decisions still apply, including Aggressive ones.
-    }
-
-    const tailoringMode =
-      job.resumeTailoringMode ?? searchPreferences.tailoringMode;
-    if (tailoringMode === "aggressive" && !alreadyApproved) {
-      holdBack(
-        job,
-        `Read and approve the Aggressive resume for '${job.title}' before applying.`,
-      );
-      return;
-    }
-
-    try {
-      await workspaceService.exportResumePdf(jobId, null);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        /still need your decision/iu.test(error.message)
-      ) {
-        holdBack(
-          job,
-          `The resume for '${job.title}' has a line waiting for your decision. Open it, keep or change the line, then apply.`,
-        );
-        return;
-      }
-      throw error;
-    }
-    const exportedWorkspace = await workspaceService.getResumeWorkspace(jobId);
-    const exportToApprove = exportedWorkspace.exports
-      .filter(
-        (artifact) =>
-          artifact.jobId === jobId &&
-          artifact.draftId === exportedWorkspace.draft.id,
-      )
-      .sort((left, right) =>
-        right.exportedAt.localeCompare(left.exportedAt),
-      )[0];
-    if (!exportToApprove) {
-      throw new Error(
-        `Job Finder could not create the application PDF for '${job.title}', so nothing was started.`,
-      );
-    }
-    await workspaceService.approveResume(jobId, exportToApprove.id);
-  }
-}
-
 function parseOptionalRequestId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -737,13 +525,6 @@ function parseSourceReadabilityTimeout(payload: unknown): number | null {
     : null;
 }
 
-function throwIfResumePreviewAborted(signal: AbortSignal): void {
-  if (!signal.aborted) {
-    return;
-  }
-
-  throw new DOMException("Resume preview was superseded.", "AbortError");
-}
 
 function sanitizeFileNameSegment(value: string): string {
   return value
@@ -904,7 +685,6 @@ export async function confirmWorkspaceRestore(
       stopAssistantForWorkspaceRestore,
     } = await import("../services/assistant/assistant-service");
     await service.withWorkspaceRestore(async () => {
-      invalidateUiResumeBatch();
       await stopAssistantForWorkspaceRestore();
       await restorePersonalWorkspace({
         backup: prepared.backup,
@@ -975,13 +755,6 @@ export function registerJobFinderRouteHandlers(
       workspaceDeltaTracker.noteHeldRevision(event.sender, revision);
     },
   );
-  const activeResumePreviewRequests = new WeakMap<
-    object,
-    {
-      requestId: string;
-      controller: AbortController;
-    }
-  >();
   const activeResumeImportRequests = new WeakMap<
     object,
     {
@@ -1004,19 +777,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle(
-    "job-finder:get-tailored-asset",
-    async (_event, payload: unknown) => {
-      const { assetId } = JobFinderTailoredAssetQuerySchema.parse(payload);
-      const service = await getJobFinderWorkspaceService();
-      const repository = getJobFinderRepositoryForWorkspaceService(service);
-      if (!repository)
-        throw new Error("Resume preview storage is unavailable.");
-      return JobFinderTailoredAssetDetailSchema.parse(
-        await repository.getTailoredAssetById(assetId),
-      );
-    },
-  );
 
   /**
    * Registers one protected save channel. The only behavior it adds is the
@@ -1079,10 +839,6 @@ export function registerJobFinderRouteHandlers(
     "update-workspace-behavior",
     "update-ai-behavior",
     "update-appearance-theme",
-    "save-resume-draft",
-    "restore-resume-draft-revision",
-    "undo-resume-assistant-edit",
-    "apply-resume-patch",
   ] as const) {
     handleJobFinderSaveRoute(`job-finder:${name}`, (event, payload: unknown) =>
       runRegisteredAction(name, event, payload),
@@ -1101,16 +857,9 @@ export function registerJobFinderRouteHandlers(
     "list-source-debug-runs",
     "accept-source-instruction-draft",
     "queue-job-for-review",
-    "set-job-resume-application-mode",
     "remove-job-from-review",
     "clear-application-answer",
     "snooze-grouped-decision",
-    "get-resume-workspace",
-    "regenerate-resume-section",
-    "approve-resume",
-    "clear-resume-approval",
-    "set-work-history-review-acknowledgment",
-    "set-resume-claim-confirmation",
     "return-application-to-shortlist",
     "undo-return-application-to-shortlist",
   ] as const) {
@@ -1180,12 +929,6 @@ export function registerJobFinderRouteHandlers(
               input.mutation.jobIds,
             );
             return readWorkspaceProjection(jobFinderWorkspaceService);
-          case "set_job_resume_application_mode":
-            return jobFinderWorkspaceService.setJobResumeApplicationMode(
-              input.mutation.jobId,
-              input.mutation.resumeApplicationMode,
-              input.mutation.resumeTailoringMode,
-            );
           case "remove_job_from_review":
             return jobFinderWorkspaceService.removeJobFromReview(
               input.mutation.jobId,
@@ -1471,37 +1214,7 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle("job-finder:test-load-resume-workspace-demo", async () => {
-    if (!isDesktopTestApiEnabled()) {
-      throw new Error(
-        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
-      );
-    }
 
-    const snapshot = await loadResumeWorkspaceDemoState();
-
-    return toRendererWorkspaceSnapshot(
-      JobFinderWorkspaceSnapshotSchema.parse(snapshot),
-    );
-  });
-
-  ipcMain.handle(
-    "job-finder:test-set-resume-preview-mode",
-    async (_event, payload: unknown) => {
-      if (!isDesktopTestApiEnabled()) {
-        throw new Error(
-          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
-        );
-      }
-
-      const mode = JobFinderResumePreviewModeSchema.parse(payload);
-      await setJobFinderWorkspaceServiceTestEnv({
-        NESTOR_TEST_RESUME_PREVIEW: mode,
-      });
-
-      return DesktopTestOkResponseSchema.parse({ ok: true });
-    },
-  );
 
   ipcMain.handle("job-finder:test-load-apply-queue-demo", async () => {
     if (!isDesktopTestApiEnabled()) {
@@ -1698,41 +1411,6 @@ export function registerJobFinderRouteHandlers(
     };
   });
 
-  ipcMain.handle(
-    "job-finder:test-run-resume-quality-benchmark",
-    async (_event, payload: unknown) => {
-      if (!isDesktopTestApiEnabled()) {
-        throw new Error(
-          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
-        );
-      }
-
-      const parsed = ResumeQualityBenchmarkRequestSchema.partial().parse(
-        payload ?? {},
-      );
-      const options = {
-        ...(parsed.benchmarkVersion !== undefined
-          ? { benchmarkVersion: parsed.benchmarkVersion }
-          : {}),
-        ...(parsed.caseIds !== undefined ? { caseIds: parsed.caseIds } : {}),
-        ...(parsed.templateIds !== undefined
-          ? { templateIds: parsed.templateIds }
-          : {}),
-        ...(parsed.canaryOnly !== undefined
-          ? { canaryOnly: parsed.canaryOnly }
-          : {}),
-        ...(parsed.useConfiguredAi !== undefined
-          ? { useConfiguredAi: parsed.useConfiguredAi }
-          : {}),
-        ...(parsed.persistArtifactsDirectory !== undefined
-          ? { persistArtifactsDirectory: parsed.persistArtifactsDirectory }
-          : {}),
-      };
-
-      const report = await runDesktopResumeQualityBenchmark(options);
-      return ResumeQualityBenchmarkReportSchema.parse(report);
-    },
-  );
 
   ipcMain.handle(
     "job-finder:test-import-resume-from-path",
@@ -2096,124 +1774,8 @@ export function registerJobFinderRouteHandlers(
     await writeFile(outputPath, diagnostic.content, "utf8");
     return JobFinderDiagnosticExportResultSchema.parse({ status: "saved" });
   });
-  ipcMain.handle(
-    "job-finder:preview-resume-draft",
-    async (event, payload: unknown) => {
-      const { draft, requestId } =
-        JobFinderPreviewResumeDraftInputSchema.parse(payload);
-      const previousRequest = activeResumePreviewRequests.get(event.sender);
-      previousRequest?.controller.abort();
-      const request = {
-        requestId,
-        controller: new AbortController(),
-      };
-      activeResumePreviewRequests.set(event.sender, request);
 
-      const assertCurrentRequest = () => {
-        throwIfResumePreviewAborted(request.controller.signal);
-        if (activeResumePreviewRequests.get(event.sender) !== request) {
-          throw new DOMException(
-            `Resume preview request '${request.requestId}' was superseded.`,
-            "AbortError",
-          );
-        }
-      };
 
-      try {
-        assertCurrentRequest();
-        const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-        assertCurrentRequest();
-        const preview = await jobFinderWorkspaceService.previewResumeDraft(
-          draft,
-          request.controller.signal,
-        );
-        assertCurrentRequest();
-
-        return JobFinderResumePreviewSchema.parse(preview);
-      } finally {
-        if (activeResumePreviewRequests.get(event.sender) === request) {
-          activeResumePreviewRequests.delete(event.sender);
-        }
-      }
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:regenerate-resume-draft",
-    async (event, payload: unknown) => {
-      const { jobId } = JobFinderJobActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot =
-        await jobFinderWorkspaceService.regenerateResumeDraft(jobId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:export-resume-pdf",
-    async (event, payload: unknown) => {
-      const { intent, jobId } =
-        JobFinderExportResumePdfInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      let outputPath: string | null = null;
-
-      if (intent === "download") {
-        const workspace =
-          await jobFinderWorkspaceService.getResumeWorkspace(jobId);
-        const defaultPath = buildResumeExportDefaultPath(
-          resolveTailoredAssetLabel({
-            existingLabel: workspace.tailoredAsset?.label ?? null,
-            generationMethod:
-              workspace.draft.generationMethod === "ai"
-                ? "ai_assisted"
-                : "deterministic",
-            generationReason: workspace.tailoredAsset?.generationReason ?? null,
-          }),
-          workspace.job.title,
-          workspace.job.company,
-        );
-        const chosenPath = await chooseResumeExportPath(
-          event.sender,
-          defaultPath,
-        );
-
-        if (!chosenPath) {
-          const snapshot = await readWorkspaceProjection(
-            jobFinderWorkspaceService,
-          );
-
-          // A dismissed dialog wrote nothing. Saying so is the difference
-          // between "no dialog, no toast, no error and no file" and a person
-          // knowing where they stand.
-          return {
-            ...JobFinderResumePdfExportOutcomeSchema.parse({
-              outcome: "cancelled",
-              outputPath: null,
-            }),
-            workspace: workspaceMutationResponse(event.sender, snapshot),
-          } satisfies JobFinderResumePdfExportReply;
-        }
-
-        outputPath = chosenPath;
-      }
-
-      const snapshot = await jobFinderWorkspaceService.exportResumePdf(
-        jobId,
-        outputPath,
-      );
-
-      // The workspace goes as a delta, like every other change; parsing and
-      // sending the whole of it made each approval over a second slower.
-      return {
-        ...JobFinderResumePdfExportOutcomeSchema.parse({
-          outcome: "saved",
-          outputPath,
-        }),
-        workspace: workspaceMutationResponse(event.sender, snapshot),
-      } satisfies JobFinderResumePdfExportReply;
-    },
-  );
 
   // Shows a file the app itself wrote in the operating system's file manager.
   // The export already named the path; without this the person had to find it
@@ -2245,121 +1807,11 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle(
-    "job-finder:get-resume-assistant-messages",
-    async (_event, payload: unknown) => {
-      const { jobId } = JobFinderResumeWorkspaceQuerySchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const messages =
-        await jobFinderWorkspaceService.getResumeAssistantMessages(jobId);
 
-      return JobFinderResumeWorkspaceSchema.shape.assistantMessages.parse(
-        messages,
-      );
-    },
-  );
 
-  // The old chat is retired (ADR 0037): the assistant sidebar is the only
-  // writer. Archived histories stay readable through the assistant.
-  ipcMain.handle("job-finder:send-resume-assistant-message", () =>
-    Promise.reject(new Error(RETIRED_CHAT_MESSAGE)),
-  );
 
-  // The old chat is retired (ADR 0037): the assistant sidebar is the only
-  // writer. Archived histories stay readable through the assistant.
-  ipcMain.handle("job-finder:resolve-resume-assistant-proposal", () =>
-    Promise.reject(new Error(RETIRED_CHAT_MESSAGE)),
-  );
 
-  ipcMain.handle(
-    "job-finder:generate-resume-for-batch",
-    async (event, payload: unknown) => {
-      const input = ResumeBatchGenerationInputSchema.parse(payload);
-      const owner = BrowserWindow.fromWebContents(event.sender);
-      if (!owner || owner.webContents.id !== event.sender.id)
-        throw new Error("Resume batches only start from the app window.");
-      const shouldStop = () => {
-        const batch = readUiResumeBatch();
-        return (
-          event.sender.isDestroyed() ||
-          !batch ||
-          batch.id !== input.batchId ||
-          batch.stopRequested ||
-          !batch.jobIds.includes(input.jobId)
-        );
-      };
-      if (shouldStop())
-        return ResumeBatchGenerationResultSchema.parse({
-          jobId: input.jobId,
-          outcome: "not_started",
-        });
-      const service = await getJobFinderWorkspaceService();
-      try {
-        return ResumeBatchGenerationResultSchema.parse(
-          await service.generateResumeForBatch(input.jobId, {
-            ...(input.regenerate === undefined
-              ? {}
-              : { regenerate: input.regenerate }),
-            shouldStop,
-            onProviderBlocked: (block) =>
-              blockUiResumeBatch(input.batchId, block),
-            onStage: (stage) => {
-              if (!event.sender.isDestroyed())
-                event.sender.send(
-                  "job-finder:resume-batch-progress",
-                  ResumeBatchGenerationProgressSchema.parse({
-                    batchId: input.batchId,
-                    jobId: input.jobId,
-                    stage,
-                  }),
-                );
-            },
-          }),
-        );
-      } finally {
-        publishJobFinderWorkspaceUpdate(event.sender);
-      }
-    },
-  );
 
-  ipcMain.handle(
-    "job-finder:generate-resume",
-    async (event, payload: unknown) => {
-      const { jobId } = JobFinderJobActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot = await jobFinderWorkspaceService.generateResume(jobId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:start-apply-copilot-run",
-    async (event, payload: unknown) => {
-      const {
-        jobId,
-        applicationRecordId,
-        startNewApplication,
-        visualCheckpointsEnabled,
-      } = JobFinderApplyCopilotActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await approveApplicationResumes(jobFinderWorkspaceService, [jobId]);
-      await syncApplicationAuthorityForSavedMode(jobFinderWorkspaceService, [
-        jobId,
-      ]);
-      const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
-        jobFinderWorkspaceService.startApplyCopilotRun(
-          jobId,
-          {
-            visualCheckpointsEnabled,
-          },
-          startNewApplication ? null : applicationRecordId,
-        ),
-      );
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
 
   ipcMain.handle(
     "job-finder:start-auto-apply-run",
@@ -2381,75 +1833,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle(
-    "job-finder:start-auto-apply-queue-run",
-    async (event, payload: unknown) => {
-      const { jobIds: requestedJobIds, applicationAutomationMode } =
-        JobFinderApplyQueueActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const repository = getJobFinderRepositoryForWorkspaceService(
-        jobFinderWorkspaceService,
-      );
-      // A second press while the batch is running is a no-op for the jobs
-      // it already has; their send permission is not re-issued mid-send.
-      const pendingJobIds = repository
-        ? await listJobsNotInProgress(repository, requestedJobIds)
-        : requestedJobIds;
-      if (pendingJobIds.length === 0) {
-        return workspaceMutationResponse(
-          event.sender,
-          await readWorkspaceProjection(jobFinderWorkspaceService),
-        );
-      }
-      // A resume that waits on the person holds back its own job only; the
-      // ready ones start, and the renderer names the one held back.
-      const heldBack = await approveApplicationResumes(
-        jobFinderWorkspaceService,
-        pendingJobIds,
-        { holdBackResumesAwaitingPerson: true },
-      );
-      const heldBackIds = new Set(heldBack.map((entry) => entry.jobId));
-      const jobIds = pendingJobIds.filter((jobId) => !heldBackIds.has(jobId));
-      if (jobIds.length === 0) {
-        throw new Error(
-          heldBack.length === 1
-            ? `Nothing was started. ${heldBack[0]!.reason}`
-            : `Nothing was started: ${heldBack.length} resumes wait for your review (${heldBack.map((entry) => entry.title).join(", ")}). Open each one, decide its flagged lines, then apply.`,
-        );
-      }
-      await syncApplicationAuthorityForSavedMode(
-        jobFinderWorkspaceService,
-        jobIds,
-        applicationAutomationMode,
-      );
-      // "Apply to all" is one press (ADR 0022, ADR 0026): the mode chosen in
-      // Settings is the permission, so the batch starts at once instead of
-      // waiting for a second "Start preparing N jobs" click on Applications.
-      // The press returns once the batch is running; a refusal comes back as
-      // its own sentence instead of a batch that never moves.
-      if (repository) {
-        await startApplyBatch({
-          service: jobFinderWorkspaceService,
-          runs: repository,
-          jobIds,
-          ...(applicationAutomationMode ? { applicationAutomationMode } : {}),
-          onBackgroundSettled: () => {
-            publishJobFinderWorkspaceUpdate(event.sender);
-          },
-        });
-      } else {
-        await jobFinderWorkspaceService.startAutoApplyQueueRun(
-          jobIds,
-          applicationAutomationMode,
-        );
-      }
-
-      return workspaceMutationResponse(
-        event.sender,
-        await readWorkspaceProjection(jobFinderWorkspaceService),
-      );
-    },
-  );
 
   ipcMain.handle(
     "job-finder:approve-apply-run",
@@ -2485,69 +1868,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle(
-    "job-finder:resolve-apply-consent-request",
-    async (event, payload: unknown) => {
-      const { requestId, runId, jobId, applicationRecordId, action } =
-        JobFinderApplyConsentActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const details = await jobFinderWorkspaceService.getApplyRunDetails(
-        runId,
-        jobId,
-        applicationRecordId,
-      );
-      const request = details.consentRequests.find(
-        (candidate) => candidate.id === requestId,
-      );
-      if (!request) {
-        throw new Error(
-          `Consent request '${requestId}' does not belong to the selected application record.`,
-        );
-      }
-      if (
-        action === "approve" &&
-        request.kind === "resume_use" &&
-        request.status === "pending"
-      ) {
-        await approveApplicationResumes(jobFinderWorkspaceService, [jobId]);
-        const repository = getJobFinderRepositoryForWorkspaceService(
-          jobFinderWorkspaceService,
-        );
-        const record = (await repository?.listApplicationRecords())?.find(
-          (candidate) =>
-            candidate.id === applicationRecordId && candidate.jobId === jobId,
-        );
-        await syncApplicationAuthorityForSavedMode(
-          jobFinderWorkspaceService,
-          [jobId],
-          record?.automationMode ?? "prepare_only",
-        );
-      }
-      const snapshot =
-        await jobFinderWorkspaceService.resolveApplyConsentRequest(
-          requestId,
-          action,
-        );
-
-      if (
-        action === "approve" &&
-        request.kind === "resume_use" &&
-        request.status === "pending" &&
-        details.run.mode === "copilot"
-      ) {
-        return workspaceMutationResponse(
-          event.sender,
-          await jobFinderWorkspaceService.startApplyCopilotRun(
-            jobId,
-            undefined,
-            applicationRecordId,
-          ),
-        );
-      }
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
 
   ipcMain.handle(
     "job-finder:revoke-apply-run-approval",

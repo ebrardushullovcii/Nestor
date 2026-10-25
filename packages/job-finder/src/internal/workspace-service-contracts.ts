@@ -41,11 +41,8 @@ import type {
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderResumePreview,
-  JobFinderResumeWorkspace,
   JobFinderSearchRequest,
-  JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderWorkspaceSnapshot,
   JobPosting,
   JobSearchCampaignMode,
@@ -58,15 +55,7 @@ import type {
   ProjectGroupedManualAnswerCommand,
   RawApplyPage,
   RemoveEmployerExclusionInput,
-  ResumeApplicationMode,
-  ResumeAssistantMessage,
-  ResumeBatchCheckpoint,
-  ResumeBatchGenerationProgress,
-  ResumeBatchGenerationResult,
-  ResumeBatchProviderBlock,
   ResumeDocumentBundle,
-  ResumeDraft,
-  ResumeDraftPatch,
   ResumeDraftProcessor,
   ResumeImportFieldCandidate,
   ResumeImportRun,
@@ -84,7 +73,6 @@ import type {
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-  TailoringMode,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
@@ -94,11 +82,9 @@ import type { JobFinderRepository, JobFinderRepositorySeed } from "@nestor/db";
 import type { ListingHtmlFetcher } from "./listing-detail-enrichment";
 import type { ResumeRenderDocument } from "./resume-workspace-structure";
 import type {
-  AssistantEditResult,
   AssistantProfileEditResult,
   AssistantUndoResult,
 } from "./workspace-assistant-edit-methods";
-import type { ResumeSpecialistResult } from "./workspace-assistant-resume-specialist";
 import type { ResumeExportFileVerifier } from "./workspace-service-context";
 
 export interface JobFinderWorkspaceResetOptions {
@@ -343,13 +329,6 @@ export interface JobFinderWorkspaceService {
   /** One row-local shortlist commit, without constructing a workspace per job. */
   queueJobsForReview?(jobIds: readonly string[]): Promise<void>;
   /** Starts resumes that shortlisting asked for and a restart left waiting. */
-  continueResumesOnShortlist?(): Promise<void>;
-  saveResumeBatchCheckpoint(checkpoint: ResumeBatchCheckpoint): Promise<void>;
-  setJobResumeApplicationMode(
-    jobId: string,
-    resumeApplicationMode: ResumeApplicationMode,
-    resumeTailoringMode?: TailoringMode | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
   removeJobFromReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** Moves several jobs back to Find jobs, then reads the workspace once. */
   removeJobsFromReview?(jobIds: readonly string[]): Promise<void>;
@@ -379,102 +358,6 @@ export interface JobFinderWorkspaceService {
     jobIds: readonly string[],
     options?: DiscoveryFeedbackBatchOptions,
   ): Promise<DiscoveryFeedbackBatchResult>;
-  generateResume(
-    jobId: string,
-    options?: { language?: string | null },
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  generateResumeForBatch(
-    jobId: string,
-    options: {
-      regenerate?: boolean;
-      shouldStop: () => boolean;
-      onStage?: (stage: ResumeBatchGenerationProgress["stage"]) => void;
-      onProviderBlocked?: (block: ResumeBatchProviderBlock) => void;
-    },
-  ): Promise<ResumeBatchGenerationResult>;
-  getResumeWorkspace(jobId: string): Promise<JobFinderResumeWorkspace>;
-  previewResumeDraft(
-    draft: ResumeDraft,
-    signal?: AbortSignal,
-  ): Promise<JobFinderResumePreview>;
-  saveResumeDraft(
-    draft: ResumeDraft,
-    autosaveSessionId?: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  restoreResumeDraftRevision(
-    jobId: string,
-    revisionId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Removes one accepted AI edit and keeps every edit made after it. Unlike
-   * restoring a revision, later manual edits survive.
-   */
-  undoResumeAssistantEdit(
-    jobId: string,
-    revisionId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  regenerateResumeDraft(
-    jobId: string,
-    options?: { language?: string | null },
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  regenerateResumeSection(
-    jobId: string,
-    sectionId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  exportResumePdf(
-    jobId: string,
-    outputPath?: string | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  approveResume(
-    jobId: string,
-    exportId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Same export/approval gates, reusing a current PDF without a full snapshot. */
-  approveCurrentResume(jobId: string): Promise<void>;
-  clearResumeApproval(
-    jobId: string,
-    options?: { restoreStatus?: "draft" | "needs_review" },
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Acknowledges or removes one server-owned work-history review decision as
-   * a real draft mutation. The command validates the exact projected
-   * suggestion identity (including the FNV-1a message hash) under the per-job
-   * draft transition lock and never starts an export, approval, preparation,
-   * or submission.
-   */
-  setWorkHistoryReviewAcknowledgment(
-    input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Adds or removes one server-owned resume claim confirmation as a real
-   * draft mutation. The command validates the exact projected `confirm_needed`
-   * assessment identity (locator plus normalized content hash) or the stored
-   * confirmation id under the per-job draft transition lock, never accepts
-   * hard unsupported claims, and never starts an export, approval,
-   * preparation, or submission.
-   */
-  setResumeClaimConfirmation(
-    input: JobFinderSetResumeClaimConfirmationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  applyResumePatch(
-    patch: ResumeDraftPatch,
-    revisionReason?: string | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  getResumeAssistantMessages(
-    jobId: string,
-  ): Promise<readonly ResumeAssistantMessage[]>;
-  /** Read the retired chats in order, without creating or loading resumes. */
-  getResumeAssistantHistory(): Promise<readonly ResumeAssistantMessage[]>;
-  sendResumeAssistantMessage(
-    jobId: string,
-    content: string,
-  ): Promise<readonly ResumeAssistantMessage[]>;
-  resolveResumeAssistantProposal(
-    jobId: string,
-    proposalId: string,
-    action: "accept" | "reject",
-    patchIds: readonly string[],
-  ): Promise<readonly ResumeAssistantMessage[]>;
   getApplyRunDetails(
     runId: string,
     jobId: string,
@@ -597,30 +480,11 @@ export interface JobFinderWorkspaceService {
   undoAssistantSettingsChange(request: {
     entries: readonly AssistantChangeEntry[];
   }): Promise<AssistantUndoResult>;
-  applyAssistantResumePatches(request: {
-    jobId: string;
-    patches: readonly Omit<
-      ResumeDraftPatch,
-      "draftId" | "origin" | "appliedAt" | "id"
-    >[];
-    expectedDraftUpdatedAt: string | null;
-    summary: string;
-  }): Promise<AssistantEditResult & { draftUpdatedAt: string }>;
-  applyAssistantResumeRevision(request: {
-    jobId: string;
-    patches: readonly ResumeDraftPatch[];
-    baseDraftUpdatedAt: string;
-    summary: string;
-  }): Promise<AssistantEditResult & { draftUpdatedAt: string }>;
   undoAssistantResumeChange(request: {
     jobId: string;
     entries: readonly AssistantChangeEntry[];
     reason: string;
   }): Promise<AssistantUndoResult>;
-  /**
-   * Runs the resume revision specialist for a substantial rewrite and returns
-   * gate-checked patches without storing any chat message.
-   */
   /** Reads the job postings on a page the assistant was lent (no writes). */
   addJobFromBrowserPage(input: {
     html: string;
@@ -650,11 +514,6 @@ export interface JobFinderWorkspaceService {
     newJobIds: string[];
     mergedJobIds: string[];
   }>;
-  runResumeRevisionSpecialist(input: {
-    jobId: string;
-    brief: string;
-    recentExcerpt: readonly { role: "user" | "assistant"; content: string }[];
-  }): Promise<ResumeSpecialistResult>;
 }
 
 type DiscoveryTargetPipelineSharedOptions = {

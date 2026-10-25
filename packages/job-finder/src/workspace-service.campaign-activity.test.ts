@@ -164,42 +164,6 @@ describe("workspace campaign and activity controls", () => {
     expect(typeof pausedRun?.completedAt).toBe("string");
   });
 
-  test("deduplicates and aborts the legacy approveApply browser run when activity pauses", async () => {
-    const interruptible = createInterruptibleBrowserRuntime();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      browserRuntime: interruptible.browserRuntime,
-    });
-    await workspaceService.generateResume("job_ready");
-    const exported = await workspaceService.exportResumePdf("job_ready");
-    const exportArtifact = exported.resumeExportArtifacts.find(
-      (artifact) => artifact.jobId === "job_ready",
-    );
-    expect(exportArtifact).toBeTruthy();
-    await workspaceService.approveResume("job_ready", exportArtifact!.id);
-
-    const firstRun = workspaceService.approveApply("job_ready");
-    await interruptible.started;
-    expect(await repository.listApplyRuns()).toEqual([
-      expect.objectContaining({
-        state: "running",
-        jobIds: ["job_ready"],
-      }),
-    ]);
-    await expect(workspaceService.approveApply("job_ready")).rejects.toThrow(
-      /already being prepared/i,
-    );
-
-    const pause = workspaceService.setActivityControl({ paused: true });
-    await expect(firstRun).rejects.toThrow(/aborted/i);
-    const paused = await pause;
-
-    expect(interruptible.executeApplicationFlow).toHaveBeenCalledTimes(1);
-    expect(interruptible.executionState.signal?.aborted).toBe(true);
-    const pausedRun = paused.applyRuns[0];
-    expect(pausedRun?.state).toBe("cancelled");
-    expect(typeof pausedRun?.completedAt).toBe("string");
-  });
-
   test("aborts and recovers a direct copilot run when the workspace shuts down", async () => {
     const seed = createSeed();
     seed.settings = {

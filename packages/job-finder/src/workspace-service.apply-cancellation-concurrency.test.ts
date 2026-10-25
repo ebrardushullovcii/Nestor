@@ -35,19 +35,6 @@ const inputServiceRef: {
   workspaceService: Harness["workspaceService"] | null;
 } = { workspaceService: null };
 
-async function approveTailoredResume(
-  workspaceService: Harness["workspaceService"],
-  jobId: string,
-): Promise<void> {
-  await workspaceService.generateResume(jobId);
-  const exported = await workspaceService.exportResumePdf(jobId);
-  const approvedExport = exported.resumeExportArtifacts.find(
-    (artifact) => artifact.jobId === jobId,
-  );
-  if (!approvedExport) throw new Error("Expected an exported resume artifact.");
-  await workspaceService.approveResume(jobId, approvedExport.id);
-}
-
 function createOriginalResumeHarness(options?: { cancelDuringFlow?: boolean }) {
   const seed = createSeed();
   seed.settings.resumeApplicationMode = "original_resume";
@@ -561,106 +548,6 @@ describe("apply run cancellation and application record concurrency", () => {
         (entry) => entry.id === "job_ready",
       )?.status,
     ).not.toBe("submitted");
-  });
-
-  test("CRM set-stage survives a later apply sync and stays revision-continuous", async () => {
-    const { workspaceService, repository } = createOriginalResumeHarness();
-    await approveTailoredResume(workspaceService, "job_ready");
-
-    await workspaceService.startApplyCopilotRun("job_ready");
-    const afterFirstSync = (await repository.listApplicationRecords()).find(
-      (record) => record.jobId === "job_ready",
-    );
-    if (!afterFirstSync) throw new Error("Expected an application record.");
-
-    await workspaceService.mutateApplicationCrm({
-      applicationRecordId: afterFirstSync.id,
-      expectedRevision: 0,
-      mutation: {
-        type: "set_stage",
-        stage: "recruiter_contact",
-        customStageId: null,
-        note: "Recruiter replied.",
-      },
-    });
-
-    // A second apply sync over the same job must merge on top of the fresh
-    // CRM instead of resetting it to the schema default.
-    await workspaceService.startApplyCopilotRun("job_ready");
-
-    const afterSecondSync = (await repository.listApplicationRecords()).find(
-      (record) => record.jobId === "job_ready",
-    );
-    expect(afterSecondSync?.crm).toMatchObject({
-      revision: 1,
-      stage: "recruiter_contact",
-    });
-    expect(
-      afterSecondSync?.crm?.events.some(
-        (event) => event.kind === "stage_changed",
-      ),
-    ).toBe(true);
-    expect(afterSecondSync?.status).toBe("approved");
-    expect(afterSecondSync?.lastAttemptState).toBe("paused");
-
-    await workspaceService.mutateApplicationCrm({
-      applicationRecordId: afterFirstSync.id,
-      expectedRevision: 1,
-      mutation: {
-        type: "set_stage",
-        stage: "assessment",
-        customStageId: null,
-        note: null,
-      },
-    });
-
-    const settled = (await repository.listApplicationRecords()).find(
-      (record) => record.jobId === "job_ready",
-    );
-    expect(settled?.crm).toMatchObject({ revision: 2, stage: "assessment" });
-  });
-
-  test("live-assistant writes and CRM mutations serialize per job without deadlock", async () => {
-    const { workspaceService, repository } = createOriginalResumeHarness();
-    await approveTailoredResume(workspaceService, "job_ready");
-    await workspaceService.startApplyCopilotRun("job_ready");
-    const record = (await repository.listApplicationRecords()).find(
-      (entry) => entry.jobId === "job_ready",
-    );
-    if (!record) throw new Error("Expected an application record.");
-    const priorEventIds = record.events.map((event) => event.id);
-
-    await Promise.all([
-      workspaceService.recordLiveAssistantApplicationAction({
-        applicationRecordId: record.id,
-        sessionId: "session_1",
-        action: "mark_interviewed",
-      }),
-      workspaceService.mutateApplicationCrm({
-        applicationRecordId: record.id,
-        expectedRevision: 0,
-        mutation: {
-          type: "set_stage",
-          stage: "recruiter_contact",
-          customStageId: null,
-          note: null,
-        },
-      }),
-    ]);
-
-    const merged = (await repository.listApplicationRecords()).find(
-      (entry) => entry.id === record.id,
-    );
-    expect(merged?.status).toBe("interview");
-    expect(merged?.crm).toMatchObject({
-      revision: 1,
-      stage: "recruiter_contact",
-    });
-    for (const priorEventId of priorEventIds) {
-      expect(merged?.events.some((event) => event.id === priorEventId)).toBe(
-        true,
-      );
-    }
   });
 
   test("every production apply invocation allows field saves and denies sending, including resumption", async () => {

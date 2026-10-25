@@ -25,9 +25,6 @@ interface JobFinderTaskCenterProps {
     | ((runId: string) => boolean | void | Promise<boolean | void>)
     | undefined;
   onNavigate?: ((path: string) => void | Promise<void>) | undefined;
-  onPrepareRemainingJobs?:
-    | ((jobIds: readonly string[]) => void | Promise<unknown>)
-    | undefined;
   /** Puts back one of the person's recent moves. */
   onUndoRecentChange?: ((change: RecentChange) => Promise<boolean>) | undefined;
 }
@@ -236,11 +233,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
   }
 
   async function runResumeAction(item: JobFinderTaskCenterItem) {
-    if (item.applyRecoveryJobIds?.length && props.onPrepareRemainingJobs) {
-      await props.onPrepareRemainingJobs(item.applyRecoveryJobIds);
-      setIsPanelOpen(false);
-      return;
-    }
     await navigateToTask(item);
   }
 

@@ -438,8 +438,6 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "apply.send": "Send my ready Northwind application.",
   "profile.legacy_copilot":
     "Earlier I asked the old profile chat to fix my headline. Is my headline right now?",
-  "resume.legacy_chat":
-    "What did the old resume assistant change on my Northwind resume?",
   "home.pause": "Pause Job Finder for now.",
   "profile.edit_experience":
     "Add an education entry: BA in Interaction Design, Lisbon School of Design, 2014.",
@@ -470,22 +468,8 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "campaigns.run_now": "Run my search plan now.",
   "shortlist.list": "What's on my shortlist and are the resumes ready?",
   "shortlist.remove": "Take Bluebird Health off my shortlist.",
-  "shortlist.level": "Use the lightest resume changes for the Northwind job.",
-  "shortlist.create_resumes": "Create the missing resumes for my shortlist.",
-  "resume.read":
-    "What does my resume for the Northwind job say, and are there issues?",
-  "resume.edit":
-    "In my Northwind resume, shorten the summary to two sentences.",
-  "resume.revise": "Rewrite my Northwind resume to fit on one page.",
-  "resume.regenerate": "Write a fresh resume for the Northwind job.",
-  "resume.preview": "How many pages is my Northwind resume?",
-  "resume.export_approve": "Export the Northwind resume as a PDF.",
-  "resume.lines_to_confirm":
-    "Keep every line I need to confirm on the Northwind resume.",
-  "resume.work_history_ack":
-    "Leave the older roles off my Northwind resume on purpose.",
-  "resume.template": "Use a more compact template for the Northwind resume.",
-  "resume.history": "Restore the previous version of my Northwind resume.",
+  "resume.commands":
+    "Use the lightest resume changes for the Northwind job, then tell me what the resume says.",
   "resume.strategies": "Which resume approach is selected?",
   "apply.authority":
     "Let Job Finder send applications without asking me each time.",

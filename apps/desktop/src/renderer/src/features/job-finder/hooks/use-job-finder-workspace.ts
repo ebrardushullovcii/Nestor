@@ -9,23 +9,17 @@ import type {
   ClearApplicationAnswerCommandInput,
   EditableSourceInstructionArtifact,
   JobFinderApplicationStartTarget,
-  JobFinderApplyConsentActionInput,
-  JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
-  JobFinderApproveResumesInput,
   JobFinderJobDetail,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  JobFinderStartApplyQueueInput,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
   JobFinderWorkspaceSyncResult,
@@ -36,17 +30,12 @@ import type {
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
   ResolveSubmissionOutcomeInput,
-  ResumeApplicationMode,
-  ResumeDraft,
-  ResumeDraftPatch,
   ResumeImportProgressEvent,
-  ResumePdfExportIntent,
   ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
-  TailoringMode,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
@@ -72,7 +61,6 @@ import {
   registerFullWorkspaceRead,
 } from "../lib/workspace-view-refresh";
 import { clearJobDetailCache } from "./use-job-detail";
-import { clearTailoredAssetDetailCache } from "./use-tailored-asset-detail";
 
 /** How long update-driven syncs rest, as a multiple of the last sync. */
 const UPDATE_SYNC_REST_FACTOR = 2;
@@ -738,103 +726,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           type: "remove_job_from_review",
           jobId,
         }),
-      getResumeWorkspace: (jobId: string) =>
-        window.nestor.jobFinder.getResumeWorkspace(jobId),
-      previewResumeDraft: (draft: ResumeDraft, requestId?: string) =>
-        window.nestor.jobFinder.previewResumeDraft(draft, requestId),
-      saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveResumeDraft(draft, autosaveSessionId),
-        ),
-      regenerateResumeDraft: (jobId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.regenerateResumeDraft(jobId),
-        ),
-      regenerateResumeSection: (jobId: string, sectionId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.regenerateResumeSection(jobId, sectionId),
-        ),
-      restoreResumeDraftRevision: (jobId: string, revisionId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.restoreResumeDraftRevision(jobId, revisionId),
-        ),
-      undoResumeAssistantEdit: (jobId: string, revisionId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.undoResumeAssistantEdit(jobId, revisionId),
-        ),
-      exportResumePdf: async (
-        jobId: string,
-        intent: ResumePdfExportIntent = "download",
-      ) => {
-        const hydrating = waitForWorkspaceHydrated();
-        if (hydrating) await hydrating;
-        const sequence = beginWorkspaceRequest();
-        const { workspace, ...outcome } =
-          await window.nestor.jobFinder.exportResumePdf(jobId, intent);
-        // The workspace comes as a delta from the revision this window
-        // holds, like every other change's answer.
-        if (!isCurrentWorkspaceRequest(sequence)) scheduleConvergenceFetch();
-        const snapshot =
-          commitWorkspaceSyncResult(workspace, sequence) ??
-          (await recoverFullWorkspaceOnce(sequence));
-        return { ...outcome, snapshot };
-      },
       // Reveal is not a workspace mutation: it selects the written file in the
       // OS file manager and returns what happened, so it never refreshes.
       revealSavedFile: (path: string) =>
         window.nestor.jobFinder.revealSavedFile(path),
-      approveResume: (jobId: string, exportId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.approveResume(jobId, exportId),
-        ),
-      clearResumeApproval: (
-        jobId: string,
-        restoreStatus?: "draft" | "needs_review",
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.clearResumeApproval(jobId, restoreStatus),
-        ),
-      setWorkHistoryReviewAcknowledgment: (
-        input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.setWorkHistoryReviewAcknowledgment(input),
-        ),
-      setResumeClaimConfirmation: (
-        input: JobFinderSetResumeClaimConfirmationInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.setResumeClaimConfirmation(input),
-        ),
-      applyResumePatch: (
-        patch: ResumeDraftPatch,
-        revisionReason?: string | null,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.applyResumePatch(patch, revisionReason),
-        ),
-      getResumeAssistantMessages: (jobId: string) =>
-        window.nestor.jobFinder.getResumeAssistantMessages(jobId),
-      sendResumeAssistantMessage: (jobId: string, content: string) =>
-        window.nestor.jobFinder.sendResumeAssistantMessage(jobId, content),
-      resolveResumeAssistantProposal: (
-        jobId: string,
-        proposalId: string,
-        action: "accept" | "reject",
-        patchIds: readonly string[],
-      ) =>
-        window.nestor.jobFinder.resolveResumeAssistantProposal(
-          jobId,
-          proposalId,
-          action,
-          patchIds,
-        ),
-      generateResume: (jobId: string) =>
-        runWorkspaceAction(() => window.nestor.jobFinder.generateResume(jobId)),
-      startApplyCopilotRun: (input: JobFinderApplyCopilotActionInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.startApplyCopilotRun(input),
-        ),
       startAutoApplyRun: (input: JobFinderApplicationStartTarget) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.startAutoApplyRun(input),
@@ -849,12 +744,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
             applicationAutomationMode,
           ),
         ),
-      startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.startApplyQueue(input),
-        ),
-      approveResumes: (input: JobFinderApproveResumesInput) =>
-        runWorkspaceAction(() => window.nestor.jobFinder.approveResumes(input)),
       controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.controlApplyQueue(input),
@@ -879,10 +768,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
       cancelApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() => window.nestor.jobFinder.cancelApplyRun(input)),
-      resolveApplyConsentRequest: (input: JobFinderApplyConsentActionInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.resolveApplyConsentRequest(input),
-        ),
       revokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.revokeApplyRunApproval(input),
@@ -971,29 +856,16 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           type: "queue_jobs_for_review",
           jobIds: [...jobIds],
         }),
-      setJobResumeApplicationMode: (
-        jobId: string,
-        resumeApplicationMode: ResumeApplicationMode,
-        resumeTailoringMode?: TailoringMode | null,
-      ) =>
-        runWorkspaceEntityMutation({
-          type: "set_job_resume_application_mode",
-          jobId,
-          resumeApplicationMode,
-          ...(resumeTailoringMode === undefined ? {} : { resumeTailoringMode }),
-        }),
       refreshWorkspace: syncWorkspace,
       requestWorkspaceRefresh,
       resetBrowser: () =>
         runWorkspaceAction(() => window.nestor.jobFinder.resetBrowser()),
       resetWorkspace: () => {
         clearJobDetailCache();
-        clearTailoredAssetDetailCache();
         return runWorkspaceAction(() =>
           window.nestor.jobFinder.resetWorkspace(),
         ).finally(() => {
           clearJobDetailCache();
-          clearTailoredAssetDetailCache();
         });
       },
       runSourceDebug: (

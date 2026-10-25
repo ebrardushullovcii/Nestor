@@ -22,7 +22,6 @@ import { diffValues } from "../change-diff";
 import type { AssistantToolContext } from "../tool-kit";
 import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
 import { readAssistantWorkState } from "../work-state";
-import { stopResumeWork } from "./resume-tools";
 
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
@@ -336,17 +335,15 @@ export const pauseActivityTool = defineTool({
         ? { pauseBehavior: "finish_current" as const }
         : {}),
     });
-    const resumes = input.paused ? stopResumeWork(ports) : null;
     const after = await service.getWorkspaceSnapshot();
     const work = readAssistantWorkState(ports, after);
     ports.publishWorkspaceUpdate();
     return {
       summary: input.paused
-        ? `Background work is paused. ${resumes?.summary}${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${after.applyRuns.some((run) => run.state === "running") ? " Current applications are still finishing." : ""}${after.activeSourceDebugRun?.state === "running" ? " The source check is still running; it was not stopped." : ""}`
+        ? `Background work is paused.${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${after.applyRuns.some((run) => run.state === "running") ? " Current applications are still finishing." : ""}${after.activeSourceDebugRun?.state === "running" ? " The source check is still running; it was not stopped." : ""}`
         : "Resumed.",
       data: {
         activityPaused: after.activityControl.paused,
-        resumes: resumes?.data ?? null,
         finishingApplications: after.applyRuns
           .filter((run) => run.state === "running")
           .map((run) => ({ id: run.id, jobIds: run.jobIds })),

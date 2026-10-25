@@ -1,7 +1,6 @@
 import type {
   JobSelectionInput,
   ApplyRawPageHands,
-  AssistantResumeBatchState,
   CandidateAsset,
   JobFinderJobDetail,
 } from "@nestor/contracts";
@@ -25,9 +24,6 @@ export interface AssistantHostPorts {
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
   /** Includes reading the file before the domain import run is stored. */
   isResumeImportActive?(): boolean;
-  /** The UI-owned queue uses this same stop flag before dispatching a draft. */
-  readResumeBatch?(): AssistantResumeBatchState | null;
-  stopResumeBatch?(): AssistantResumeBatchState | null;
   /** Freeze the approved selection behind a sidebar instruction, without model pagination. */
   resolveApprovedJobs?(selection: JobSelectionInput): Promise<number[]>;
   /** Runs a source check (the same as Check this source). */

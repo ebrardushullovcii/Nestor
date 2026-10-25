@@ -3,7 +3,6 @@ import {
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileCopilotPatchGroupSchema,
-  ResumeDraftPatchSchema,
   ResumeDraftSchema,
   type AssistantChangeEntry,
   type AssistantChangeTarget,
@@ -13,7 +12,6 @@ import {
   type ProfileCopilotPatchOperation,
   type ResumeApplicationMode,
   type ResumeDraft,
-  type ResumeDraftPatch,
 } from "@nestor/contracts";
 
 import { diffValues, undoChangeEntries } from "../assistant/change-diff";
@@ -22,7 +20,6 @@ import {
   createMonotonicTimestamp,
   preserveWorkHistoryReviewGuidance,
 } from "./resume-draft-commit-support";
-import { applyPatchToResumeDraft } from "./resume-workspace-patches";
 import {
   buildResumeDraftRevision,
   buildResumeDraftStateHash,
@@ -35,7 +32,6 @@ import {
   ensureResumeDraft,
   sanitizeAndCheckResumeDraft,
 } from "./workspace-application-resume-support";
-import { resolveJobResumeApplicationMode } from "./job-resume-application-mode";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 import {
   buildProfileRevision,
@@ -186,38 +182,6 @@ function labelFromPath(
     return `${base} (${humanField})`;
   }
   return base;
-}
-
-function resumeLabelFromPath(
-  draft: ResumeDraft,
-  path: readonly string[],
-): string | null {
-  const sectionId = path
-    .find((segment, index) => index > 0 && path[index - 1] === "sections")
-    ?.replace(/^#id:/, "");
-  const section = draft.sections.find((entry) => entry.id === sectionId);
-  if (!section) {
-    const top = path[0];
-    return top === "templateId"
-      ? "Template"
-      : top === "targetPageCount"
-        ? "Page target"
-        : top === "identity"
-          ? "Name and contact"
-          : null;
-  }
-  const entryId = path
-    .find((segment, index) => index > 0 && path[index - 1] === "entries")
-    ?.replace(/^#id:/, "");
-  const entry = section.entries.find((candidate) => candidate.id === entryId);
-  const entryLabel = entry
-    ? [entry.title, entry.subtitle].filter(Boolean).join(" at ")
-    : null;
-  const isBullet = path.includes("bullets");
-  return [section.label, entryLabel, isBullet ? "bullet" : null]
-    .filter(Boolean)
-    .join(": ")
-    .replace(": bullet", " bullet");
 }
 
 type ResumeProjection = Pick<
@@ -528,118 +492,6 @@ export function createWorkspaceAssistantEditMethods(input: {
     return sanitized;
   }
 
-  /**
-   * Applies several resume patches as one assistant change against the
-   * expected draft revision. An Original job is refused with a typed error;
-   * the caller decides to switch that job to an editable draft.
-   */
-  async function applyAssistantResumePatches(request: {
-    jobId: string;
-    patches: readonly Omit<
-      ResumeDraftPatch,
-      "draftId" | "origin" | "appliedAt" | "id"
-    >[];
-    expectedDraftUpdatedAt: string | null;
-    summary: string;
-  }): Promise<AssistantEditResult & { draftUpdatedAt: string }> {
-    return withDraftTransition(request.jobId, async () => {
-      const state = await ensureResumeDraft(ctx, request.jobId);
-      if (
-        resolveJobResumeApplicationMode(state.job, state.settings) ===
-        "original_resume"
-      ) {
-        throw new AssistantEditConflictError(
-          "This job sends the imported resume file unchanged (Original), so its draft is not used.",
-          "original_resume",
-        );
-      }
-      if (
-        request.expectedDraftUpdatedAt &&
-        request.expectedDraftUpdatedAt !== state.draft.updatedAt
-      ) {
-        throw new AssistantEditConflictError(
-          `The resume changed since it was read (now at revision ${state.draft.updatedAt}). Read it again before changing it.`,
-          "stale_revision",
-        );
-      }
-      const updatedAt = createMonotonicTimestamp(state.draft.updatedAt);
-      let draft = state.draft;
-      for (const patch of request.patches) {
-        draft = applyPatchToResumeDraft({
-          draft,
-          patch: ResumeDraftPatchSchema.parse({
-            ...patch,
-            id: createUniqueId("assistant_resume_patch"),
-            draftId: state.draft.id,
-            origin: "assistant",
-            appliedAt: updatedAt,
-          }),
-          updatedAt,
-        });
-      }
-      const committed = await commitResumeDraft({
-        jobId: request.jobId,
-        before: state.draft,
-        next: ResumeDraftSchema.parse({ ...draft, updatedAt }),
-        actor: "assistant",
-        mutationKind: "assistant_patch",
-        reason: `Assistant change: ${request.summary}`,
-      });
-      if (!committed) {
-        throw new AssistantEditConflictError(
-          "Those changes leave the resume as it already is, so nothing was saved.",
-          "no_change",
-        );
-      }
-      const entries = diffValues(
-        projectResume(state.draft),
-        projectResume(committed),
-        {
-          ignoreKeys: RESUME_IGNORED_KEYS,
-          labelFor: (path) => resumeLabelFromPath(committed, path),
-        },
-      );
-      return {
-        changes:
-          entries.length > 0
-            ? [{ target: "resume_draft", targetId: request.jobId, entries }]
-            : [],
-        draftUpdatedAt: committed.updatedAt,
-      };
-    });
-  }
-
-  /**
-   * Commits a whole revised draft produced by the resume revision specialist
-   * (substantial rewrites), as one assistant change.
-   */
-  async function applyAssistantResumeRevision(request: {
-    jobId: string;
-    patches: readonly ResumeDraftPatch[];
-    baseDraftUpdatedAt: string;
-    summary: string;
-  }): Promise<AssistantEditResult & { draftUpdatedAt: string }> {
-    return applyAssistantResumePatches({
-      jobId: request.jobId,
-      patches: request.patches.map((patch) => ({
-        operation: patch.operation,
-        targetSectionId: patch.targetSectionId,
-        targetEntryId: patch.targetEntryId,
-        anchorEntryId: patch.anchorEntryId,
-        targetBulletId: patch.targetBulletId,
-        anchorBulletId: patch.anchorBulletId,
-        position: patch.position,
-        newText: patch.newText,
-        newIncluded: patch.newIncluded,
-        newLocked: patch.newLocked,
-        newBullets: patch.newBullets,
-        conflictReason: null,
-      })),
-      expectedDraftUpdatedAt: request.baseDraftUpdatedAt,
-      summary: request.summary,
-    });
-  }
-
   async function undoAssistantResumeChange(request: {
     jobId: string;
     entries: readonly AssistantChangeEntry[];
@@ -689,8 +541,6 @@ export function createWorkspaceAssistantEditMethods(input: {
     applyAssistantProfileOperations,
     undoAssistantProfileChange,
     undoAssistantSettingsChange,
-    applyAssistantResumePatches,
-    applyAssistantResumeRevision,
     undoAssistantResumeChange,
   };
 }

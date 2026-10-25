@@ -10,7 +10,6 @@ import {
 import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";
-import { validateResumeDraft } from "./internal/resume-workspace-helpers";
 import { buildResumeDraftIdentity } from "./internal/resume-workspace-structure";
 import {
   describeResumeIdentityOwnershipChoice,
@@ -65,27 +64,6 @@ function createCaseyProfile() {
       textContent: "Casey Rowan\nCasey City\ncasey@example.com",
     },
     skills: ["Casey Skill"],
-  });
-}
-
-function createHybridProfile() {
-  const seed = createSeed();
-  return CandidateProfileSchema.parse({
-    ...seed.profile,
-    firstName: "Taylor",
-    lastName: "Quinn",
-    middleName: null,
-    fullName: "Taylor Quinn",
-    preferredDisplayName: "Casey Rowan",
-    email: "taylor@example.com",
-    applicationIdentity: {
-      ...seed.profile.applicationIdentity,
-      preferredEmail: "casey@example.com",
-    },
-    baseResume: {
-      ...seed.profile.baseResume,
-      textContent: "Taylor Quinn\nTaylor City\ntaylor@example.com",
-    },
   });
 }
 
@@ -593,43 +571,6 @@ describe("resume import identity and revision safety", () => {
         " ",
       ),
     ).toMatch(/Élodie Brûlé/);
-  });
-
-  test("warns about a mixed canonical/preferred identity without blocking preview or export", async () => {
-    const seed = createSeed();
-    const hybridProfile = createHybridProfile();
-    const identityResolution = resolveResumeIdentity(hybridProfile);
-    expect(identityResolution.mismatchReasons.length).toBeGreaterThan(0);
-    expect(buildResumeDraftIdentity(hybridProfile)).toMatchObject({
-      fullName: "Casey Rowan",
-      email: "casey@example.com",
-    });
-
-    const base = createInMemoryJobFinderRepository({
-      ...seed,
-      profile: hybridProfile,
-    });
-    const workspaceService = createService(base);
-    const job = seed.savedJobs[0]!;
-    const workspace = await workspaceService.getResumeWorkspace(job.id);
-    const validation = validateResumeDraft({
-      draft: workspace.draft,
-      job,
-      profile: hybridProfile,
-    });
-    const identityIssue = validation.issues.find(
-      (issue) => issue.category === "identity_mismatch",
-    );
-    expect(identityIssue?.severity).toBe("warning");
-
-    await expect(
-      workspaceService.previewResumeDraft(workspace.draft),
-    ).resolves.toBeTruthy();
-    const exportError = await workspaceService
-      .exportResumePdf(job.id)
-      .then(() => null)
-      .catch((error: unknown) => String(error));
-    expect(exportError ?? "").not.toMatch(/identity/i);
   });
 
   test("allows an aligned identity through import and draft identity resolution", async () => {

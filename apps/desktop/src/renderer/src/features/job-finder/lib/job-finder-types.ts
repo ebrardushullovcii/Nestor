@@ -15,25 +15,16 @@ import type {
   EditableSourceInstructionArtifact,
   JobFinderApplicationPacketExportResult,
   JobFinderApplicationStartTarget,
-  JobFinderApplyConsentActionInput,
-  JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
-  JobFinderApproveResumesInput,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
-  JobFinderResumePdfExportResult,
-  JobFinderResumePreview,
-  JobFinderResumeWorkspace,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  JobFinderStartApplyQueueInput,
   JobSearchPreferences,
   JobSourceAdapterKind,
   ProfileCopilotContext,
@@ -43,11 +34,6 @@ import type {
   ProjectGroupedManualAnswerCommand,
   ResolveSubmissionOutcomeInput,
   ResolveSubmissionOutcomeResult,
-  ResumeApplicationMode,
-  ResumeAssistantMessage,
-  ResumeDraft,
-  ResumeDraftPatch,
-  ResumePdfExportIntent,
   ResumeTimelineRepairAction,
   RevealSavedFileResult,
   SaveApplicationAnswerCommandInput,
@@ -56,7 +42,6 @@ import type {
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceInstructionStatus,
-  TailoringMode,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
@@ -219,99 +204,21 @@ export interface JobFinderShellActions {
   removeJobsFromReview?: (
     jobIds: readonly string[],
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setJobResumeApplicationMode: (
-    jobId: string,
-    resumeApplicationMode: ResumeApplicationMode,
-    resumeTailoringMode?: TailoringMode | null,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   removeJobFromReview: (
     jobId: string,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  getResumeWorkspace: (jobId: string) => Promise<JobFinderResumeWorkspace>;
-  previewResumeDraft: (
-    draft: ResumeDraft,
-    requestId?: string,
-  ) => Promise<JobFinderResumePreview>;
-  saveResumeDraft: (
-    draft: ResumeDraft,
-    autosaveSessionId?: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  regenerateResumeDraft: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  regenerateResumeSection: (
-    jobId: string,
-    sectionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  restoreResumeDraftRevision: (
-    jobId: string,
-    revisionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  undoResumeAssistantEdit: (
-    jobId: string,
-    revisionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  exportResumePdf: (
-    jobId: string,
-    intent?: ResumePdfExportIntent,
-  ) => Promise<JobFinderResumePdfExportResult>;
   /**
    * Shows a file the app wrote in the OS file manager. The export already
    * named the path and then left the person to find it by hand; nothing is
    * opened or executed, only selected.
    */
   revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
-  approveResume: (
-    jobId: string,
-    exportId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  clearResumeApproval: (
-    jobId: string,
-    restoreStatus?: "draft" | "needs_review",
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setWorkHistoryReviewAcknowledgment: (
-    input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setResumeClaimConfirmation: (
-    input: JobFinderSetResumeClaimConfirmationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  applyResumePatch: (
-    patch: ResumeDraftPatch,
-    revisionReason?: string | null,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  getResumeAssistantMessages: (
-    jobId: string,
-  ) => Promise<readonly ResumeAssistantMessage[]>;
-  sendResumeAssistantMessage: (
-    jobId: string,
-    content: string,
-  ) => Promise<readonly ResumeAssistantMessage[]>;
-  resolveResumeAssistantProposal: (
-    jobId: string,
-    proposalId: string,
-    action: "accept" | "reject",
-    patchIds: readonly string[],
-  ) => Promise<readonly ResumeAssistantMessage[]>;
-  generateResume: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  startApplyCopilotRun: (
-    input: JobFinderApplyCopilotActionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   startAutoApplyRun: (
     input: JobFinderApplicationStartTarget,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   startAutoApplyQueueRun: (
     jobIds: JobFinderApplyQueueActionInput["jobIds"],
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** One Apply press over many jobs: a saved queue of runs of ten. */
-  startApplyQueue: (
-    input: JobFinderStartApplyQueueInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** The person's "Approve N resumes" press. */
-  approveResumes: (
-    input: JobFinderApproveResumesInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   controlApplyQueue: (
     input: JobFinderApplyQueueControlInput,
@@ -332,9 +239,6 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   cancelApplyRun: (
     input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  resolveApplyConsentRequest: (
-    input: JobFinderApplyConsentActionInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   revokeApplyRunApproval: (
     input: JobFinderApplyRunActionInput,

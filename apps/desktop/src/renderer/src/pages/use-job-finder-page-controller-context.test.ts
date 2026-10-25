@@ -1,13 +1,5 @@
-import {
-  clearUiResumeBatch,
-  syncUiResumeBatch,
-} from "../../../main/services/assistant/ui-resume-batch";
-import type {
-  AssistantResumeBatchState,
-  ResumeBatchGenerationProgress,
-} from "@nestor/contracts";
 import { ApplicationCrmBulkStageMutationInputSchema } from "@nestor/contracts";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MutableRefObject, SetStateAction } from "react";
 import type {
   ActionState,
@@ -19,36 +11,8 @@ import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
 
-type BatchGenerate = Window["nestor"]["jobFinder"]["generateResumeForBatch"];
-type BatchProgressListener = (progress: ResumeBatchGenerationProgress) => void;
-const progressListeners = new Set<BatchProgressListener>();
-const unsubscribeProgress = vi.fn();
-
-beforeEach(() => {
-  clearUiResumeBatch();
-  progressListeners.clear();
-  unsubscribeProgress.mockClear();
-  vi.stubGlobal("window", {
-    nestor: {
-      jobFinder: {
-        onResumeBatchProgress: (listener: BatchProgressListener) => {
-          progressListeners.add(listener);
-          return () => {
-            progressListeners.delete(listener);
-            unsubscribeProgress();
-          };
-        },
-      },
-      assistant: {
-        syncResumeBatch: (state: AssistantResumeBatchState) =>
-          Promise.resolve(syncUiResumeBatch(state)),
-      },
-    },
-  });
-});
 function buildContext(overrides: {
   actions: Partial<JobFinderShellActions>;
-  batchGenerate?: BatchGenerate;
   workspace?: JobFinderRendererWorkspaceSnapshot;
   latestWorkspaceRef?: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
 }) {
@@ -61,19 +25,6 @@ function buildContext(overrides: {
     ({
       activeCampaignId: "campaign_active",
     } as JobFinderRendererWorkspaceSnapshot);
-  // Existing command stubs represent the service's work. The controller talks
-  // only to the new typed receipt bridge and receives no workspace per job.
-  const generateResumeForBatch = vi.fn<BatchGenerate>(
-    overrides.batchGenerate ??
-      (async ({ jobId }) => {
-        if (!overrides.actions.generateResume)
-          throw new Error("This test must provide a batch generation stub.");
-        await overrides.actions.generateResume(jobId);
-        return { jobId, outcome: "written" };
-      }),
-  );
-  if (window.nestor.jobFinder)
-    window.nestor.jobFinder.generateResumeForBatch = generateResumeForBatch;
   const setActionState = (next: SetStateAction<ActionState>) => {
     actionState = typeof next === "function" ? next(actionState) : next;
     actionMessages.push(actionState.message);
@@ -137,8 +88,6 @@ function buildContext(overrides: {
     setResumeAssistantMessages: vi.fn(),
     setResumeAssistantPending: vi.fn(),
     setResumeWorkspace: vi.fn(),
-    clearResumeWorkspaceState: vi.fn(),
-    setResumeWorkspaceDirty: vi.fn(),
     setSelectedApplicationRecordId: vi.fn(),
     setSelectedDiscoveryJobId: vi.fn(),
     setSelectedReviewJobId: vi.fn(),
@@ -152,7 +101,6 @@ function buildContext(overrides: {
     getActionMessages: () => actionMessages,
     getPendingActionState: () => pendingActionState,
     getDiscoveryRunFeedback: () => discoveryRunFeedback,
-    generateResumeForBatch,
   };
 }
 
