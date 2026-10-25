@@ -32,4 +32,4 @@ export { runJobSearchAgent, type JobSearchAgentInput } from './search/job-search
 export { createJobSearchPrompts } from './search/job-search-prompts'
 export { createMoveReviewer, describeSearchGoal, type MoveReview } from './search/move-reviewer'
 
-export { createSearchResultCache } from "./search/search-result-cache";
+export { createSearchResultCache, readCachedSearchResult } from "./search/search-result-cache";

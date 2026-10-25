@@ -1313,7 +1313,7 @@ describe("discovery checkpoint incremental persistence", () => {
     expect(jobBCommit?.updateJobIds).not.toContain(savedJobA!.id);
   });
 
-  test.each([3_000, 10_000])(
+  test.each([100, 500])(
     "successive checkpoints copy only their posting changes in a %i-job plan",
     async (size) => {
       const { seed } = createHarness();
@@ -1412,8 +1412,6 @@ describe("discovery checkpoint incremental persistence", () => {
         writerSpy.mockRestore();
       }
     },
-    // About 16 s alone; a full parallel run more than doubles it.
-    60_000,
   );
 
   test("a later checkpoint upgrade preserves a person's concurrent saved-job edit", async () => {

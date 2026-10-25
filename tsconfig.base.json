@@ -23,6 +23,7 @@
       "@nestor/ai-evals": ["packages/ai-evals/src/index.ts"],
       "@nestor/ai-providers": ["packages/ai-providers/src/index.ts"],
       "@nestor/browser-agent": ["packages/browser-agent/src/index.ts"],
+      "@nestor/browser-agent/listing-detail-extraction": ["packages/browser-agent/src/search/listing-detail-extraction.ts"],
       "@nestor/browser-runtime": ["packages/browser-runtime/src/index.ts"],
       "@nestor/contracts": ["packages/contracts/src/index.ts"],
       "@nestor/core": ["packages/core/src/index.ts"],

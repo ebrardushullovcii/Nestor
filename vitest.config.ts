@@ -36,6 +36,7 @@ export default defineConfig({
         "packages/ai-providers/src/index.ts",
       ),
       "@renderer": path.resolve(currentDir, "apps/desktop/src/renderer/src"),
+      "@nestor/browser-agent/listing-detail-extraction": path.resolve(currentDir, "packages/browser-agent/src/search/listing-detail-extraction.ts"),
       "@nestor/browser-agent": path.resolve(
         currentDir,
         "packages/browser-agent/src/index.ts",

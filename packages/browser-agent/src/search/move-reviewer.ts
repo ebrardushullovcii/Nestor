@@ -2,6 +2,7 @@ import { parseToolArguments } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
 import type { AgentConfig } from "../types";
+import { searchSelectivity } from "./job-search-prompts";
 
 /** The search or source-check goal, for the reviewer. */
 export function describeSearchGoal(config: AgentConfig): string {
@@ -10,7 +11,7 @@ export function describeSearchGoal(config: AgentConfig): string {
   return packet
     ? `Check ${config.promptContext.siteLabel} so a future search can use it well. The goal of the check: ${packet.phaseGoal}`
     : `Find ${config.retainAllFound ? "all suitable" : `up to ${config.targetJobCount}`} current job postings on ${config.promptContext.siteLabel} that fit roles ${config.searchPreferences.targetRoles.join(", ") || "not specified"} in ${config.searchPreferences.locations.join(", ") || "any location"}.${searchIntent ? ` The person asked for ${JSON.stringify(searchIntent)}.` : ""} ${
-        config.promptContext.searchMode === "scale"
+        searchSelectivity(config) !== "best_matches"
           ? "Find a broad pool of plausible jobs, including borderline possibilities."
           : "Keep only strong fits rather than filling the list."
       }`;
@@ -61,7 +62,11 @@ export function createMoveReviewer(input: {
   /** Hostnames that count as home. */
   homeHosts: readonly string[];
   signal?: AbortSignal;
-}): (move: { url: string; reason: string; fromUrl: string | null }) => Promise<MoveReview> {
+}): (move: {
+  url: string;
+  reason: string;
+  fromUrl: string | null;
+}) => Promise<MoveReview> {
   const { goal } = input;
 
   return async (move) => {
@@ -103,7 +108,8 @@ export function createMoveReviewer(input: {
       }
       return {
         allowed: false,
-        verdict: "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
+        verdict:
+          "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
       };
     }
     const call = (response.toolCalls ?? []).find(
@@ -112,7 +118,8 @@ export function createMoveReviewer(input: {
     if (!call) {
       return {
         allowed: false,
-        verdict: "The review gave no decision, so the move stays refused for now.",
+        verdict:
+          "The review gave no decision, so the move stays refused for now.",
       };
     }
     const args = parseToolArguments(call.function.arguments);

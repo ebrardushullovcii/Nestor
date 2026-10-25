@@ -41,7 +41,8 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   (ADR 0023); job details come from the model reading the page (ADR 0041). `browser-agent` owns the source-generic search policy,
   prompts, and structured outputs; `job-finder` owns budgets, canonical merge,
   matching, dedupe, ledger, persistence, and run truth. Each checkpoint's new
-  postings use the same canonical merge path as final collection.
+  postings carry their full listing description before using the same canonical
+  merge path as final collection. Fit judging and resume writing share that text.
 - applications: the apply agent fills the form and sends it only under Send
   for me or on the person's Send press under Ask before sending (ADR 0024,
   ADR 0027). Browser packages own generic observation and execution hands;

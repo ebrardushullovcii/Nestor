@@ -17,7 +17,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { writeFoundJobs } from "./found-jobs";
+import { normalizeUrl, writeFoundJobs } from "./found-jobs";
 import { getJob, listJobs, readStageCounts } from "./job-list";
 import {
   CHANGE_ID_LIMIT,
@@ -53,6 +53,8 @@ export interface JobStore {
     jobs: readonly FoundJob[];
   }): SaveFoundJobsResult;
   setFit(updates: readonly JobFitUpdate[]): void;
+  /** Indexed identity lookup before discovery reads a saved listing again. */
+  findKnownUrls(urls: readonly string[]): string[];
 
   listJobs(query: JobListQueryInput): JobListPage;
   getJob(id: number): JobDetail | null;
@@ -183,6 +185,13 @@ export function openJobStore(filePath: string): JobStore {
       return () => listeners.delete(listener);
     },
     notify,
+
+    findKnownUrls(urls) {
+      const find = sql("SELECT 1 FROM job_keys WHERE key = ?");
+      return [...new Set(urls)].filter((url) =>
+        Boolean(find.get(`url:${normalizeUrl(url)}`)),
+      );
+    },
 
     saveFoundJobs({ searchId, jobs }) {
       if (jobs.length === 0) return { added: [], merged: [] };

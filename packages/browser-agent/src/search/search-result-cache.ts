@@ -1,5 +1,6 @@
 import type { JobPosting } from "@nestor/contracts";
 import type { AgentConfig, AgentResult } from "../types";
+import { onlyNewJobs } from "./known-listings";
 
 /** Session-local, bounded reuse of model judgments after a fresh complete feed read. */
 export function createSearchResultCache(maxEntries = 24) {
@@ -107,3 +108,14 @@ export function createSearchResultCache(maxEntries = 24) {
   };
 }
 export type SearchResultCache = ReturnType<typeof createSearchResultCache>;
+
+export async function readCachedSearchResult(
+  cache: SearchResultCache | undefined,
+  config: AgentConfig,
+  completeIndex?: string,
+): Promise<AgentResult | null> {
+  const result = cache?.read(config, completeIndex) ?? null;
+  if (result)
+    result.jobs = await onlyNewJobs(result.jobs, config.lookupKnownUrls);
+  return result;
+}

@@ -349,9 +349,9 @@ describe("enrichSavedJobListingDetails", () => {
     ).toBe(true);
   });
 
-  it("retries a body that ends mid-word once and records partial listing text", async () => {
+  it("does not repeat a complete published listing based only on its final word", async () => {
     const job = cardOnlyJob();
-    const incompleteDescription = `${"Build reliable TypeScript services with a senior product team. ".repeat(12)}Coordinate delivery across th`;
+    const incompleteDescription = `${"Build reliable TypeScript services with a senior product team. ".repeat(12)}Work as a platform engineer`;
     const html = `<script type="application/ld+json">${JSON.stringify({
       "@type": "JobPosting",
       title: job.title,
@@ -368,12 +368,11 @@ describe("enrichSavedJobListingDetails", () => {
       now: () => NOW,
     });
 
-    expect(fetchHtml).toHaveBeenCalledTimes(2);
-    expect(result.jobs[0]?.detailQuality).toBe("partial_detail");
+    expect(fetchHtml).toHaveBeenCalledTimes(1);
+    expect(result.jobs[0]?.description).toBe(incompleteDescription);
+    expect(result.jobs[0]?.detailQuality).toBe("detail_enriched");
     expect(result.jobs[0]?.listingDetailFetch).toMatchObject({
-      outcome: "partial",
-      detail:
-        "Read partial listing text; some page text was omitted or the response was incomplete.",
+      outcome: "enriched",
     });
   });
 
