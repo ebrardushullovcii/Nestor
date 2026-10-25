@@ -11,6 +11,7 @@ import {
 } from "@nestor/job-finder";
 
 import { getJobStore } from "./job-store";
+import { registerServiceStopper } from "./service-stoppers";
 import { getApplicationStore } from "./job-finder/application-store";
 import { createJobFinderApplicationAuthorityService } from "./job-finder/application-authority-service";
 import { getCandidateAssetLibrary } from "./job-finder/candidate-asset-library-instance";
@@ -190,6 +191,7 @@ export async function startApplicationService(
     instructionMode,
   });
   await service.start();
+  registerServiceStopper(stopApplicationService);
   resolveReady?.(service);
   resolveReady = null;
   ready = Promise.resolve(service);

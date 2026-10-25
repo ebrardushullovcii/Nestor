@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { afterFirstScreen } from "../lib/after-first-screen";
 import type {
   AssistantActivity,
   AssistantNavigationDisplay,
@@ -302,34 +303,40 @@ export function useAssistantConversation(options: {
       }
       setState((current) => applyAssistantEvent(current, event));
     });
-    void (async () => {
-      try {
-        const [status, list] = await Promise.all([
-          bridge.getStatus(),
-          bridge.listConversations(),
-        ]);
-        if (disposed) return;
-        setState((current) => ({
-          ...current,
-          status,
-          conversations: list.conversations,
-        }));
-        const current = list.conversations.find(
-          (entry) =>
-            entry.id === list.currentConversationId &&
-            entry.status === "active",
-        );
-        await loadConversation(current?.id ?? null);
-      } catch (error) {
-        if (!disposed) {
-          setState((current) => ({
-            ...current,
-            error: describeError(error),
-            loading: false,
-          }));
-        }
-      }
-    })();
+    // The first read makes main load the Assistant; it waits for the
+    // first screen so launch is not held behind it.
+    afterFirstScreen(
+      () =>
+        void (async () => {
+          try {
+            if (disposed) return;
+            const [status, list] = await Promise.all([
+              bridge.getStatus(),
+              bridge.listConversations(),
+            ]);
+            if (disposed) return;
+            setState((current) => ({
+              ...current,
+              status,
+              conversations: list.conversations,
+            }));
+            const current = list.conversations.find(
+              (entry) =>
+                entry.id === list.currentConversationId &&
+                entry.status === "active",
+            );
+            await loadConversation(current?.id ?? null);
+          } catch (error) {
+            if (!disposed) {
+              setState((current) => ({
+                ...current,
+                error: describeError(error),
+                loading: false,
+              }));
+            }
+          }
+        })(),
+    );
     return () => {
       disposed = true;
       unsubscribe();

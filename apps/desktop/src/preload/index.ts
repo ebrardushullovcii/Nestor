@@ -365,6 +365,7 @@ const desktopApi = {
   tracker: createTrackerBridge(nativeIpcRenderer),
   home: createHomeBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
+  firstScreenShown: () => ipcRenderer.send("system:first-screen-shown"),
   window: {
     close: () => ipcRenderer.invoke("window:close") as Promise<{ ok: true }>,
     showContextMenu: (input: DesktopContextMenuInput) =>

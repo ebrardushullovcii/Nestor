@@ -23,8 +23,7 @@ import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerHomeRoutes } from "./routes/home";
 import { registerTrackerRoutes } from "./routes/tracker";
-import { stopResumeService } from "./services/resumes";
-import { stopApplicationService } from "./services/applications";
+import { stopRegisteredServices } from "./services/service-stoppers";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -117,6 +116,9 @@ let disposeInterviewSessionControls = () => {};
 // run exactly once, since services were never torn down); once actual
 // shutdown commits, the latch is permanent. Feature routes also lazily load
 // their own services on demand.
+/** How long after the page loads background services start at the latest. */
+const FIRST_SCREEN_FALLBACK_MS = 2_500;
+
 const deferredBackgroundInit = createDeferredBackgroundInitController({
   // Counted from the window's page load, not its creation; see below.
   scheduleDelayMs: 150,
@@ -283,10 +285,18 @@ void app
       return;
     }
     recordStartupDiagnostic("main window created");
-    // Service initialization shares main's thread with the window's load.
-    mainWindow.webContents.once("did-finish-load", () =>
+    // Background services share main's thread with the first screen, so
+    // they start once it is usable, or shortly after the page loads if it
+    // never says so (a window that opens on another screen).
+    ipcMain.once("system:first-screen-shown", () =>
       deferredBackgroundInit.schedule(),
     );
+    mainWindow.webContents.once("did-finish-load", () => {
+      setTimeout(
+        () => deferredBackgroundInit.schedule(),
+        FIRST_SCREEN_FALLBACK_MS,
+      );
+    });
     mainWindow.on("closed", () => {
       deferredBackgroundInit.cancelScheduled();
       closeInterviewOverlayWindows();
@@ -419,8 +429,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  stopApplicationService();
-  stopResumeService();
+  stopRegisteredServices();
   closeJobStore();
   disposeInterviewSessionControls();
 });

@@ -12,7 +12,6 @@ import {
   listBrowserImportSources,
 } from "../services/browser/browser-profile-import";
 
-import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 import { publishJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
 
 export function registerBrowserRoutes(ipc: IpcMain): void {
@@ -34,6 +33,10 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
     );
     if (!page)
       throw new Error("Wait for this page to finish loading, then try again.");
+    // The old workspace service loads on first use, not with main.
+    const { getJobFinderWorkspaceService } = await import(
+      "../services/job-finder/workspace-service"
+    );
     const service = await getJobFinderWorkspaceService();
     const result = await service.addJobFromBrowserPage({
       html: page.value,

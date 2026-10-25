@@ -30,8 +30,10 @@ vi.mock("electron", () => ({
 }));
 vi.mock("node:fs", () => ({ existsSync: mocks.exists }));
 vi.mock("@nestor/db", () => ({
-  subscribeWorkspaceCommits: mocks.subscribe,
   prepareWorkspaceQueryDatabase: mocks.prepare,
+}));
+vi.mock("@nestor/db/workspace-commits", () => ({
+  subscribeWorkspaceCommits: mocks.subscribe,
 }));
 vi.mock("../services/job-finder/paths", () => ({
   getJobFinderWorkspaceFilePath: () => "workspace.sqlite",

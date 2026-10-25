@@ -8,13 +8,9 @@ import {
   type ResumePdfExportResult,
   type ResumePreviewResult,
 } from "@nestor/contracts";
-import {
-  createResumeCommandRunner,
-  type RunResumeCommand,
-} from "@nestor/job-finder/resumes";
+import type { RunResumeCommand } from "@nestor/job-finder/resumes";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 
-import { getResumeService } from "../services/resumes";
 import {
   buildResumeExportDefaultPath,
   chooseResumeExportPath,
@@ -22,23 +18,30 @@ import {
 
 /**
  * The resume service starts with the workspace's AI client and renderer;
- * loaded lazily so registering these routes at startup stays cheap.
+ * it and the resume code load on first use, so registering these routes at
+ * startup stays cheap.
  */
 async function resumeService() {
   const { getJobFinderWorkspaceService } =
     await import("../services/job-finder");
   await getJobFinderWorkspaceService();
+  const { getResumeService } = await import("../services/resumes");
   return getResumeService();
 }
 
 let runner: RunResumeCommand | null = null;
 
 /** The same commands the Shortlisted screen uses; the Assistant calls this. */
-export function runResumeCommand<K extends ResumeCommandName>(
+export async function runResumeCommand<K extends ResumeCommandName>(
   name: K,
   input: unknown,
 ) {
-  runner ??= createResumeCommandRunner(resumeService);
+  if (!runner) {
+    const { createResumeCommandRunner } = await import(
+      "@nestor/job-finder/resumes"
+    );
+    runner ??= createResumeCommandRunner(resumeService);
+  }
   return runner(name, input);
 }
 

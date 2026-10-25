@@ -6,6 +6,7 @@ import {
 } from "@nestor/job-finder/resumes";
 
 import { getJobStore } from "./job-store";
+import { registerServiceStopper } from "./service-stoppers";
 
 let service: ResumeService | null = null;
 let ready: Promise<ResumeService> | null = null;
@@ -36,6 +37,7 @@ export function startResumeService(
     },
   });
   service.start();
+  registerServiceStopper(stopResumeService);
   resolveReady?.(service);
   resolveReady = null;
   ready = Promise.resolve(service);

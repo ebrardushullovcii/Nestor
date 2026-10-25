@@ -8,7 +8,7 @@ import {
 } from "electron";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { subscribeWorkspaceCommits } from "@nestor/db";
+import { subscribeWorkspaceCommits } from "@nestor/db/workspace-commits";
 import {
   WorkspaceReadRequestSchema,
   type WorkspaceReaderControl,

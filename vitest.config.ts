@@ -41,6 +41,10 @@ export default defineConfig({
         currentDir,
         "packages/browser-agent/src/index.ts",
       ),
+      "@nestor/browser-runtime/apply-page": path.resolve(
+        currentDir,
+        "packages/browser-runtime/src/apply-page-mechanics.ts",
+      ),
       "@nestor/browser-runtime": path.resolve(
         currentDir,
         "packages/browser-runtime/src/index.ts",
@@ -57,6 +61,10 @@ export default defineConfig({
         currentDir,
         "packages/db/src/job-store/job-store.ts",
       ),
+      "@nestor/db/workspace-commits": path.resolve(
+        currentDir,
+        "packages/db/src/workspace-commits.ts",
+      ),
       "@nestor/db": path.resolve(currentDir, "packages/db/src/index.ts"),
       "@nestor/job-finder/job-commands": path.resolve(
         currentDir,
@@ -65,6 +73,10 @@ export default defineConfig({
       "@nestor/job-finder/resumes": path.resolve(
         currentDir,
         "packages/job-finder/src/resumes/index.ts",
+      ),
+      "@nestor/job-finder/needs-you": path.resolve(
+        currentDir,
+        "packages/job-finder/src/applications/needs-you-commands.ts",
       ),
       "@nestor/job-finder/applications": path.resolve(
         currentDir,
