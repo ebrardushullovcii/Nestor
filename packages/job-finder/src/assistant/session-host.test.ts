@@ -12,6 +12,7 @@ import {
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
+  type NeedsYouDetails,
   type UserActionRequest,
 } from "@nestor/contracts";
 import { createAssistantRepository } from "@nestor/db";
@@ -266,6 +267,7 @@ describe("assistant session host", () => {
   const hosts: AssistantSessionHost[] = [];
   afterEach(async () => {
     for (const host of hosts.splice(0)) await host.shutdown();
+    vi.useRealTimers();
   });
 
   function setup(
@@ -1003,7 +1005,7 @@ describe("assistant session host", () => {
     const { host, repository, ports } = setup();
     const conversation = await host.createConversation();
     const readNeed = vi.fn(() =>
-      Promise.resolve<import("@nestor/contracts").NeedsYouDetails | null>(
+      Promise.resolve<NeedsYouDetails | null>(
         NeedsYouDetailsSchema.parse({
           task: {
             id: 1,
@@ -1139,6 +1141,8 @@ describe("assistant session host", () => {
   });
 
   it("reports login once, follows human verification and filling, then reports its receipt once", async () => {
+    // This test drives every watch check; background intervals must not race it.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const fixture = applicationHandoff();
     const chat = vi.fn(() =>
       Promise.resolve({ content: "Current application status recorded." }),
