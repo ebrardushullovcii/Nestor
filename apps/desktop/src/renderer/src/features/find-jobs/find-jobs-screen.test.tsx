@@ -179,9 +179,15 @@ it("shows failed sites and recovery advice instead of a successful empty search"
   expect(screen.getAllByText(/try the board’s main jobs URL/)).toHaveLength(4);
   expect(
     screen.getAllByText(
-      "The listing's title or hiring employer could not be read.",
+      "The vacancy title or hiring employer could not be identified on this page.",
     ),
   ).toHaveLength(4);
+  expect(screen.getAllByText("Technical details")).toHaveLength(4);
+  expect(
+    document.querySelector<HTMLDetailsElement>(
+      "[data-site-result] details details",
+    )?.open,
+  ).toBe(false);
   expect(
     document.querySelector<HTMLDetailsElement>("[data-site-result] details")
       ?.open,

@@ -876,3 +876,11 @@ test("single vacancies also preserve explicitly labelled employer and location a
   expect(client.chatWithTools).not.toHaveBeenCalled();
   expect(readPage).toHaveBeenCalledTimes(1);
 });
+
+test("a breadcrumb above a vacancy is not its hiring employer", () => {
+  const html =
+    '<main><p>Home · Careers</p><h1>Backend Engineer</h1><h2>About the role</h2><p>Build production services and collaborate with engineers on reliable software, APIs and data systems.</p><a href="/apply">Apply</a></main>';
+  expect(
+    readInventoryHtml(html, source.url, source).cards[0]?.companyHint,
+  ).toBeUndefined();
+});

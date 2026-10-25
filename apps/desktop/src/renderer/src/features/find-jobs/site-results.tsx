@@ -5,6 +5,11 @@ import type {
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
+import { plural } from "@renderer/features/job-lists";
+import {
+  describeFailure,
+  TECHNICAL_DETAILS_LABEL,
+} from "@renderer/features/job-finder/lib/describe-failure";
 
 const EMPTY: JobSearchSourcePage = { rows: [], nextCursor: null, total: 0 };
 const LABELS: Record<JobSearchSourceState["state"], string> = {
@@ -15,6 +20,21 @@ const LABELS: Record<JobSearchSourceState["state"], string> = {
   needs_you: "Needs you",
   stopped: "Stopped",
 };
+function failureReason(message: string | null): string {
+  if (
+    /ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED|ECONNREFUSED|ENOTFOUND/iu.test(
+      message ?? "",
+    )
+  )
+    return "This site could not be reached. Check its address and your connection.";
+  if (message?.includes("title or hiring employer could not be read"))
+    return "The vacancy title or hiring employer could not be identified on this page.";
+  return describeFailure(message, {
+    unknownSentence:
+      "This site could not be read completely. Check its address and try again.",
+  }).sentence;
+}
+
 /** Only an opened page is read. A search status never transports all 900 sites. */
 export function SiteResults(props: {
   searchId: string;
@@ -123,7 +143,8 @@ export function SiteResults(props: {
                 >
                   <summary className="cursor-pointer">
                     <strong>{source.label}</strong> · {LABELS[source.state]} ·{" "}
-                    {source.cards} listings · {source.added} new jobs
+                    {plural(source.cards, "listing")} ·{" "}
+                    {plural(source.added, "new job")}
                     {source.hidden ? ` · ${source.hidden} saved hidden` : ""}
                   </summary>
                   <p className="mt-2 break-all text-xs text-foreground-muted">
@@ -136,7 +157,9 @@ export function SiteResults(props: {
                       ? ` · ${source.failedReads} reads need attention`
                       : ""}
                   </p>
-                  {source.message ? (
+                  {source.state === "failed" ? (
+                    <p className="mt-1">{failureReason(source.message)}</p>
+                  ) : source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
                   ) : null}
                   {source.state === "failed" ? (
@@ -145,6 +168,16 @@ export function SiteResults(props: {
                       again. If a vacancy page cannot be read, try the board’s
                       main jobs URL.
                     </p>
+                  ) : null}
+                  {source.state === "failed" && source.message ? (
+                    <details className="mt-2 text-xs text-foreground-muted">
+                      <summary className="cursor-pointer">
+                        {TECHNICAL_DETAILS_LABEL}
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap break-words">
+                        {source.message}
+                      </p>
+                    </details>
                   ) : null}
                 </details>
               </li>

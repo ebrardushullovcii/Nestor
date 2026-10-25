@@ -448,10 +448,16 @@ export function readInventoryHtml(
         /(?:^|[\s_-])(?:company|employer|hiringOrganization)(?:$|[\s_-])/iu,
       );
       const place = field(/(?:^|[\s_-])(?:location|jobLocation)(?:$|[\s_-])/iu);
+      const bylineEmployer = byline[0];
       const companyHint = employer
         ? text(employer)
-        : byline.length >= 2
-          ? byline[0]
+        : byline.length >= 2 &&
+            bylineEmployer &&
+            bylineEmployer.toLowerCase() !== title.toLowerCase() &&
+            !/^(?:home|careers|jobs|opportunities|remote|hybrid|on[ -]?site)$/iu.test(
+              bylineEmployer,
+            )
+          ? bylineEmployer
           : undefined;
       const locationHint = place
         ? text(place)
