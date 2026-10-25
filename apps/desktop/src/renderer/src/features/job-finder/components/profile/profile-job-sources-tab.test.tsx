@@ -171,10 +171,7 @@ describe("ProfileJobSourcesTab", () => {
         "jobs.example.com, https://company.example/careers\nnot a url\njobs.example.com",
       ),
     ).toEqual({
-      urls: [
-        "https://jobs.example.com/",
-        "https://company.example/careers",
-      ],
+      urls: ["https://jobs.example.com/", "https://company.example/careers"],
       invalid: ["not a url"],
     });
   });
@@ -243,7 +240,9 @@ describe("ProfileJobSourcesTab", () => {
         )}
       />,
     );
-    expect(screen.getAllByRole("heading", { name: "Company careers" })).toHaveLength(2);
+    expect(
+      screen.getAllByRole("heading", { name: "Company careers" }),
+    ).toHaveLength(2);
     for (const url of urls) expect(screen.getByText(url)).toBeTruthy();
   });
 
@@ -792,7 +791,9 @@ describe("ProfileJobSourcesTab", () => {
       target: { value: "https://gamma.example/careers" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add 1 source" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit gamma.example/careers" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit gamma.example/careers" }),
+    );
 
     const includeToggle = screen.getByRole("checkbox", {
       name: "Include this source in searches",
@@ -818,14 +819,39 @@ describe("ProfileJobSourcesTab", () => {
           "https://alpha.example/careers\nbeta.example/jobs, https://jobs-1.example.com/openings",
       },
     });
+    // The duplicate is named before adding, not silently skipped.
+    expect(screen.getByText("1 is already in your list.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add 2 sources" }));
 
-    expect(screen.getByText("Added and turned on 2 sources.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Added and turned on 2 sources. 1 was already in your list.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByText("3 sources")).toBeTruthy();
     expect(screen.getByText("alpha.example/careers")).toBeTruthy();
     expect(screen.getByText("https://alpha.example/careers")).toBeTruthy();
     expect(screen.getByText("beta.example/jobs")).toBeTruthy();
     expect(screen.getByText("https://beta.example/jobs")).toBeTruthy();
+  });
+
+  it("says so when everything pasted is already in the list", () => {
+    render(<JobSourcesHarness targets={[createTarget(1), createTarget(2)]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add sources" }));
+    fireEvent.change(screen.getByLabelText("Add sources"), {
+      target: {
+        value:
+          "https://jobs-1.example.com/openings\nhttps://jobs-2.example.com/openings",
+      },
+    });
+
+    expect(screen.getByText("2 are already in your list.")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Add 0 sources" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   it("checks every listed source one at a time and stops on request", () => {

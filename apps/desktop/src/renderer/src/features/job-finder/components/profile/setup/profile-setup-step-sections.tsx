@@ -16,7 +16,10 @@ import {
   isValidProfileSetupSourceUrl,
   PROFILE_SETUP_SOURCE_PAGE_SIZE,
 } from "./profile-setup-screen-helpers";
-import { parseJobSourceUrls } from "../profile-job-sources-tab";
+import {
+  canonicalSourceUrl,
+  parseJobSourceUrls,
+} from "../profile-job-sources-tab";
 import { deriveJobSourceLabel } from "../../../lib/job-source-display-name";
 import {
   type CandidateProfile,
@@ -672,6 +675,7 @@ export function ProfileSetupTargetingStep(props: {
   const [lastAddedSources, setLastAddedSources] = useState<{
     count: number;
     label: string;
+    duplicates: number;
   } | null>(null);
   const manualSourceLabelId = "profile-setup-field-manual-source-label";
   const manualSourceUrlId = "profile-setup-field-manual-source-url";
@@ -772,9 +776,18 @@ export function ProfileSetupTargetingStep(props: {
       return;
     }
 
-    const addedUrls = parsedManualSources.urls.filter(
-      (url) => !discoveryTargets.some((target) => target.startingUrl === url),
+    // Canonical compare, like Profile › Job sources: an address saved with
+    // a trailing slash or different host casing is the same site. The Set
+    // also keeps a 900-line paste from scanning the whole list per line.
+    const existingUrls = new Set(
+      discoveryTargets
+        .map((target) => canonicalSourceUrl(target.startingUrl))
+        .filter((value): value is string => Boolean(value)),
     );
+    const addedUrls = parsedManualSources.urls.filter(
+      (url) => !existingUrls.has(url),
+    );
+    const duplicateCount = parsedManualSources.urls.length - addedUrls.length;
     const nextTargets: SearchPreferencesEditorValues["discoveryTargets"] = [
       ...discoveryTargets,
       ...addedUrls.map((url) => ({
@@ -807,6 +820,7 @@ export function ProfileSetupTargetingStep(props: {
     setIsManualSourceOpen(true);
     setLastAddedSources({
       count: addedUrls.length,
+      duplicates: duplicateCount,
       label:
         addedUrls.length === 1
           ? manualSourceLabel.trim() || deriveJobSourceLabel(addedUrls[0] ?? "")
@@ -1332,8 +1346,11 @@ export function ProfileSetupTargetingStep(props: {
                   ? "Those sites are already in your list."
                   : lastAddedSources.count === 1
                     ? `Added ${lastAddedSources.label} and turned it on.`
-                    : `Added ${lastAddedSources.count} sources and turned them on.`}{" "}
-                Paste another address to add one more.
+                    : `Added ${lastAddedSources.count} sources and turned them on.`}
+                {lastAddedSources.count > 0 && lastAddedSources.duplicates > 0
+                  ? ` ${lastAddedSources.duplicates} ${lastAddedSources.duplicates === 1 ? "was" : "were"} already in your list.`
+                  : ""}{" "}
+                Paste more addresses to add more.
               </p>
             ) : null}
             {isManualSourceOpen ? (
@@ -1345,10 +1362,10 @@ export function ProfileSetupTargetingStep(props: {
                   addManualDiscoveryTarget();
                 }}
               >
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="grid gap-(--gap-field)">
+                <div className="grid gap-3">
+                  <div className="grid gap-(--gap-field) md:max-w-100">
                     <FieldLabel htmlFor={manualSourceLabelId}>
-                      Source name (optional)
+                      Source name (optional, for one site)
                     </FieldLabel>
                     <ProfileInput
                       id={manualSourceLabelId}
@@ -1361,9 +1378,9 @@ export function ProfileSetupTargetingStep(props: {
                   </div>
                   <div className="grid gap-(--gap-field)">
                     <FieldLabel htmlFor={manualSourceUrlId}>
-                      Careers or job-board URL
+                      Careers or job-board URLs
                     </FieldLabel>
-                    <ProfileInput
+                    <ProfileTextarea
                       aria-describedby={
                         isManualSourceUrlInvalid
                           ? manualSourceUrlErrorId
@@ -1371,28 +1388,19 @@ export function ProfileSetupTargetingStep(props: {
                       }
                       aria-invalid={isManualSourceUrlInvalid}
                       id={manualSourceUrlId}
-                      onPaste={(event) => {
-                        const pasted = event.clipboardData.getData("text");
-                        if (pasted.includes("\n") || pasted.includes("\r")) {
-                          // A one-line field drops line breaks; keep one
-                          // address per entry by joining them with commas.
-                          event.preventDefault();
-                          setManualSourceUrl(
-                            pasted
-                              .split(/[\r\n]+/u)
-                              .map((line) => line.trim())
-                              .filter(Boolean)
-                              .join(", "),
-                          );
-                        }
-                      }}
                       onChange={(event) =>
                         setManualSourceUrl(event.target.value)
                       }
-                      placeholder="https://company.example/careers"
-                      type="text"
+                      placeholder={
+                        "https://company.example/careers\nhttps://jobs.example/your-team"
+                      }
+                      rows={4}
                       value={manualSourceUrl}
                     />
+                    <p className="text-(length:--text-body) leading-6 text-foreground-soft">
+                      One per line — paste as many as you have. Names come from
+                      each site when you add several at once.
+                    </p>
                   </div>
                 </div>
                 {isManualSourceUrlInvalid ? (

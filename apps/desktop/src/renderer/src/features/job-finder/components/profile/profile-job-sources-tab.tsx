@@ -54,7 +54,10 @@ const sourceFilterOptions: ReadonlyArray<{
   { id: "all", label: "All" },
   { id: "enabled", label: "Enabled" },
   { id: "disabled", label: "Disabled" },
-  { id: SOURCES_NEEDING_ATTENTION_FILTER, label: SOURCES_NEEDING_ATTENTION_LABEL },
+  {
+    id: SOURCES_NEEDING_ATTENTION_FILTER,
+    label: SOURCES_NEEDING_ATTENTION_LABEL,
+  },
 ];
 
 function parseSourceFilter(value: string | null | undefined): SourceFilter {
@@ -65,7 +68,7 @@ function getSourceHost(startingUrl: string): string {
   return deriveJobSourceLabel(startingUrl);
 }
 
-function canonicalSourceUrl(value: string): string | null {
+export function canonicalSourceUrl(value: string): string | null {
   const candidate = /^[a-z][a-z\d+.-]*:/iu.test(value)
     ? value
     : `https://${value}`;
@@ -255,7 +258,8 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     parseSourceFilter(props.requestedFilter),
   );
   useEffect(() => {
-    if (props.requestedFilter) setFilter(parseSourceFilter(props.requestedFilter));
+    if (props.requestedFilter)
+      setFilter(parseSourceFilter(props.requestedFilter));
   }, [props.requestedFilter]);
   const [page, setPage] = useState(0);
   const [expandedTargetId, setExpandedTargetId] = useState<string | null>(null);
@@ -319,8 +323,10 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
         (target) => target.id === checkQueue.launched?.targetId,
       )
     : undefined;
-  // Each filter's count over the searched sources. A filter that would
-  // show all of them or none of them is not offered; the active one stays.
+  // Each filter's count over the searched sources, in one pass: with ~900
+  // sources the four full re-filters this replaced re-ran per keystroke.
+  // A filter that would show all of them or none of them is not offered;
+  // the active one stays.
   const filterCounts = useMemo(() => {
     const counts: Record<SourceFilter, number> = {
       all: 0,
@@ -328,16 +334,34 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
       enabled: 0,
       needs_attention: 0,
     };
-    for (const option of sourceFilterOptions) {
-      counts[option.id] = filterJobSources(
-        discoveryTargets,
-        deferredQuery,
-        option.id,
-        sourceHealthSignals,
-      ).length;
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
+    for (const target of discoveryTargets) {
+      if (
+        normalizedQuery.length > 0 &&
+        !target.label.toLocaleLowerCase().includes(normalizedQuery) &&
+        !target.startingUrl.toLocaleLowerCase().includes(normalizedQuery)
+      ) {
+        continue;
+      }
+      counts.all += 1;
+      if (target.enabled) counts.enabled += 1;
+      else counts.disabled += 1;
+      if (isSourceNeedingAttention(target, sourceHealthSignals)) {
+        counts.needs_attention += 1;
+      }
     }
     return counts;
   }, [deferredQuery, discoveryTargets, sourceHealthSignals]);
+  // Grouped once per run list instead of filtering every run for every row.
+  const sourceDebugRunsByTargetId = useMemo(() => {
+    const grouped = new Map<string, SourceDebugRunRecord[]>();
+    for (const run of props.recentSourceDebugRuns) {
+      const existing = grouped.get(run.targetId);
+      if (existing) existing.push(run);
+      else grouped.set(run.targetId, [run]);
+    }
+    return grouped;
+  }, [props.recentSourceDebugRuns]);
   const filterChoices = sourceFilterOptions.filter(
     (option) =>
       option.id !== "all" &&
@@ -394,20 +418,31 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     return `target_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   };
 
-  const parsedSourceDraft = parseJobSourceUrls(sourceUrlDraft);
-  const existingSourceUrls = new Set(
-    discoveryTargets
-      .map((target) =>
-        canonicalSourceUrl(target.startingUrl),
-      )
-      .filter((value): value is string => Boolean(value)),
+  // Memoized: unmemoized, every keystroke anywhere on the page
+  // re-canonicalized all ~900 saved addresses through the URL parser.
+  const parsedSourceDraft = useMemo(
+    () => parseJobSourceUrls(sourceUrlDraft),
+    [sourceUrlDraft],
   );
-  const newSourceUrls = parsedSourceDraft.urls.filter(
-    (url) => !existingSourceUrls.has(url),
+  const existingSourceUrls = useMemo(
+    () =>
+      new Set(
+        discoveryTargets
+          .map((target) => canonicalSourceUrl(target.startingUrl))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    [discoveryTargets],
   );
+  const newSourceUrls = useMemo(
+    () => parsedSourceDraft.urls.filter((url) => !existingSourceUrls.has(url)),
+    [existingSourceUrls, parsedSourceDraft],
+  );
+  const duplicateSourceCount =
+    parsedSourceDraft.urls.length - newSourceUrls.length;
 
   const addSourceUrls = () => {
     if (newSourceUrls.length === 0) return;
+    const skippedDuplicates = duplicateSourceCount;
     const additions = newSourceUrls.map((startingUrl) => ({
       id: createDiscoveryTargetId(),
       label: getSourceHost(startingUrl),
@@ -427,7 +462,10 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     setPage(Math.floor(discoveryTargets.length / JOB_SOURCES_PAGE_SIZE));
     setSourceUrlDraft("");
     setSourceAddMessage(
-      `Added and turned on ${additions.length} source${additions.length === 1 ? "" : "s"}.`,
+      `Added and turned on ${additions.length} source${additions.length === 1 ? "" : "s"}.` +
+        (skippedDuplicates > 0
+          ? ` ${skippedDuplicates} ${skippedDuplicates === 1 ? "was" : "were"} already in your list.`
+          : ""),
     );
     // Adding is the whole act: the person should not have to find Save.
     if (props.onSaveNow) {
@@ -520,6 +558,10 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                 <p className="text-sm text-destructive" role="alert">
                   {`${parsedSourceDraft.invalid.length} entr${parsedSourceDraft.invalid.length === 1 ? "y is" : "ies are"} not a web address.`}
                 </p>
+              ) : duplicateSourceCount > 0 ? (
+                <p className="text-sm text-foreground-soft" role="status">
+                  {`${duplicateSourceCount} ${duplicateSourceCount === 1 ? "is" : "are"} already in your list.`}
+                </p>
               ) : sourceAddMessage ? (
                 <p className="text-sm text-foreground-soft" role="status">
                   {sourceAddMessage}
@@ -576,7 +618,10 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                 >
                   {option.label}
                   {option.id === "all" ? null : (
-                    <span aria-hidden="true" className="tabular-nums opacity-75">
+                    <span
+                      aria-hidden="true"
+                      className="tabular-nums opacity-75"
+                    >
                       {filterCounts[option.id]}
                     </span>
                   )}
@@ -706,7 +751,7 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
               // A check newer than the last search is what the row reports.
               const checkLine = describeLatestSourceCheck(
                 target,
-                props.recentSourceDebugRuns,
+                sourceDebugRunsByTargetId.get(target.id) ?? [],
                 sourceHealthSignals.latestExecutions?.get(target.id) ?? null,
               );
 

@@ -517,7 +517,7 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     const addButton = screen.getByRole("button", { name: "Add and turn on" });
     expect(addButton.hasAttribute("disabled")).toBe(true);
 
-    const urlInput = screen.getByLabelText("Careers or job-board URL");
+    const urlInput = screen.getByLabelText("Careers or job-board URLs");
     fireEvent.change(urlInput, {
       target: { value: "example.com/careers" },
     });
@@ -527,9 +527,12 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     expect(urlInput.getAttribute("aria-invalid")).toBe("true");
     expect(addButton.hasAttribute("disabled")).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("Source name (optional)"), {
-      target: { value: "Acme careers" },
-    });
+    fireEvent.change(
+      screen.getByLabelText("Source name (optional, for one site)"),
+      {
+        target: { value: "Acme careers" },
+      },
+    );
     fireEvent.change(urlInput, {
       target: { value: "https://acme.example/careers" },
     });
@@ -546,7 +549,8 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
       document.querySelector("[data-profile-setup-source-added]")?.textContent,
     ).toContain("Added Acme careers and turned it on.");
     expect(
-      screen.getByLabelText<HTMLInputElement>("Careers or job-board URL").value,
+      screen.getByLabelText<HTMLInputElement>("Careers or job-board URLs")
+        .value,
     ).toBe("");
 
     const acmeRowCandidate = screen
@@ -589,7 +593,7 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     render(<SetupCatalogHarness targets={[]} />);
 
     const urlInput = () =>
-      screen.getByLabelText<HTMLInputElement>("Careers or job-board URL");
+      screen.getByLabelText<HTMLInputElement>("Careers or job-board URLs");
     fireEvent.change(urlInput(), {
       target: { value: "http://127.0.0.1:47950/board/" },
     });
@@ -614,16 +618,17 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
       { length: 12 },
       (_, index) => `https://source-${index}.example.test/jobs`,
     );
-    const input = screen.getByLabelText<HTMLInputElement>(
-      "Careers or job-board URL",
+    const input = screen.getByLabelText<HTMLTextAreaElement>(
+      "Careers or job-board URLs",
     );
-    fireEvent.paste(input, {
-      clipboardData: { getData: () => urls.join("\n") },
-    });
+    // The field is a textarea now, so a paste lands as its value directly.
+    fireEvent.change(input, { target: { value: urls.join("\n") } });
     expect(input.checkValidity()).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Add and turn on" }));
     expect(screen.getByText("12 sources")).toBeTruthy();
-    expect(screen.getByText(/Added 12 sources and turned them on/)).toBeTruthy();
+    expect(
+      screen.getByText(/Added 12 sources and turned them on/),
+    ).toBeTruthy();
     const cards = Array.from(
       document.querySelectorAll("[data-profile-setup-source-card]"),
     );
@@ -636,10 +641,8 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
 
   it("rejects a multiline paste containing an invalid address", () => {
     render(<SetupCatalogHarness targets={[]} />);
-    fireEvent.paste(screen.getByLabelText("Careers or job-board URL"), {
-      clipboardData: {
-        getData: () => "https://valid.example.test/jobs\nhttps://",
-      },
+    fireEvent.change(screen.getByLabelText("Careers or job-board URLs"), {
+      target: { value: "https://valid.example.test/jobs\nhttps://" },
     });
     expect(
       screen
@@ -718,10 +721,7 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
             preferencesForm={preferencesForm}
             profileForm={profileForm}
             renderFooter={(options) => (
-              <button
-                onClick={() => options?.onPrimary?.()}
-                type="button"
-              >
+              <button onClick={() => options?.onPrimary?.()} type="button">
                 {options?.nextLabel}
               </button>
             )}
@@ -735,10 +735,13 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
 
     render(<FooterHarness />);
 
-    fireEvent.change(screen.getByLabelText("Source name (optional)"), {
-      target: { value: "Acme careers" },
-    });
-    fireEvent.change(screen.getByLabelText("Careers or job-board URL"), {
+    fireEvent.change(
+      screen.getByLabelText("Source name (optional, for one site)"),
+      {
+        target: { value: "Acme careers" },
+      },
+    );
+    fireEvent.change(screen.getByLabelText("Careers or job-board URLs"), {
       target: { value: "https://acme.example/careers" },
     });
 
@@ -787,10 +790,13 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     }
 
     render(<SourceCheckHarness />);
-    fireEvent.change(screen.getByLabelText("Source name (optional)"), {
-      target: { value: "Acme careers" },
-    });
-    fireEvent.change(screen.getByLabelText("Careers or job-board URL"), {
+    fireEvent.change(
+      screen.getByLabelText("Source name (optional, for one site)"),
+      {
+        target: { value: "Acme careers" },
+      },
+    );
+    fireEvent.change(screen.getByLabelText("Careers or job-board URLs"), {
       target: { value: "https://acme.example/careers" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add and turn on" }));
@@ -807,7 +813,8 @@ it("splits pasted roles using the same semicolon separator as places", () => {
   const input = screen.getByPlaceholderText("Add a target role");
   fireEvent.change(input, {
     target: {
-      value: "Junior Data Analyst; Junior Data Scientist; Working Student Data Analytics",
+      value:
+        "Junior Data Analyst; Junior Data Scientist; Working Student Data Analytics",
     },
   });
   fireEvent.keyDown(input, { key: "Enter" });
@@ -822,7 +829,7 @@ it("splits pasted roles using the same semicolon separator as places", () => {
 
 it("validates and splits URL lists filled without a paste event", () => {
   render(<SetupCatalogHarness targets={[]} />);
-  const field = screen.getByLabelText("Careers or job-board URL");
+  const field = screen.getByLabelText("Careers or job-board URLs");
   fireEvent.change(field, {
     target: { value: "https://one.example/careers https://two.example/jobs" },
   });
