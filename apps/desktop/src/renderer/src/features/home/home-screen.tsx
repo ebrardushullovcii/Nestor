@@ -153,8 +153,8 @@ export function HomeScreen() {
           </Button>
         }
         description={
-          summary.tracker.applying > 0
-            ? `Apply is working on ${plural(summary.tracker.applying, "application")}.`
+          summary.applyWorking > 0
+            ? `Apply is working on ${plural(summary.applyWorking, "application")}.`
             : "Your next step, and how your search is going."
         }
         title="Home"

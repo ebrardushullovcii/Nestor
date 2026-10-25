@@ -146,6 +146,10 @@ export function createHomeStore(store: JobStore) {
           `SELECT COUNT(*) AS n FROM jobs j WHERE j.stage = 'resume'
            AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)`,
         ),
+        applyWorking: count(
+          `SELECT COUNT(*) AS n FROM applications
+           WHERE state IN ('queued', 'running', 'needs_you', 'ready', 'submitting')`,
+        ),
         needsYou: {
           questions: needsYou("question"),
           signIns: needsYou("sign_in"),

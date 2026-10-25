@@ -146,6 +146,27 @@ describe("Home", () => {
     expect(await screen.findByText("Applications opened")).toBeTruthy();
   });
 
+  it("says Apply is working only while an application is unfinished", async () => {
+    createApplicationStore(store).applyJobs({ selection: { ids: [ids[2]!] } });
+    renderHome();
+    expect(
+      await screen.findByText("Apply is working on 1 application."),
+    ).toBeTruthy();
+
+    store
+      .sql(`UPDATE applications SET state = 'stopped' WHERE job_id = ?`)
+      .run(ids[2]!);
+    store.notify({
+      cause: "application",
+      stages: ["resume"],
+      ids: [ids[2]!],
+      searchId: null,
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/Apply is working/)).toBeNull(),
+    );
+  });
+
   it("names site sign-ins as sign-ins and opens Needs you on them", async () => {
     store
       .sql(

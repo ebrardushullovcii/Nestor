@@ -45,6 +45,8 @@ export interface HomeSummary {
   resumes: { writing: number; toReview: number; failed: number };
   /** Approved resumes not yet handed to Apply. */
   readyToApply: number;
+  /** Applications Apply has not finished: queued, running, waiting on the person, or sending. */
+  applyWorking: number;
   /** Open Needs you items: questions for applications, site sign-ins, and CAPTCHA or verification codes. */
   needsYou: { questions: number; signIns: number; checks: number };
   /** Open interviews from the start of today through the next 7 days. */
