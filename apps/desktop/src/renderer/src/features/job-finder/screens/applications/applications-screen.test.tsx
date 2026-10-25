@@ -757,7 +757,7 @@ describe("ApplicationsScreen", () => {
     );
     expect(onStartAutoApplyQueue).toHaveBeenCalledWith(
       records.map((record) => record.jobId),
-      "prepare_only",
+      "confirm_before_submit",
     );
   });
   it.each([false, true])(
