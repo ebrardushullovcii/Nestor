@@ -32,9 +32,9 @@ describe("assistant context capture", () => {
   });
 
   it("reads the focused record from the app's own link shapes", () => {
-    expect(focusFromLocation("/job-finder/discovery", "?jobId=job_9")).toEqual({
+    expect(focusFromLocation("/job-finder/discovery", "?job=9")).toEqual({
       kind: "job",
-      id: "job_9",
+      id: "9",
       label: null,
     });
     expect(
@@ -75,7 +75,7 @@ describe("assistant context capture", () => {
   it("merges screen patches without letting an empty value erase the URL focus", () => {
     const reference = composeContextReference({
       pathname: "/job-finder/discovery",
-      search: "?jobId=job_1",
+      search: "?job=job_1",
       patches: [
         {
           focus: null,

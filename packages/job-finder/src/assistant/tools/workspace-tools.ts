@@ -4,6 +4,11 @@ import type {
 } from "@nestor/contracts";
 import {
   AssistantTaskPlanStepSchema,
+  AssistantJobViewSchema,
+  JobIdSchema,
+  JobDetailSchema,
+  JobStageCountsSchema,
+  JobSearchStatusSchema,
   NonEmptyStringSchema,
 } from "@nestor/contracts";
 import { z } from "zod";
@@ -42,8 +47,22 @@ export const getWorkspaceSummaryTool = defineTool({
   input: z.object({}).passthrough(),
   label: () => "Reading your workspace",
   effect: "read",
-  async execute(_input, { service, ports }) {
+  async execute(_input, context) {
+    const { service, ports } = context;
     const snapshot = await service.getWorkspaceSnapshot();
+    const countsCommand = ports.commands?.find((command) => command.name === "stage_counts");
+    const searchCommand = ports.commands?.find((command) => command.name === "search_status");
+    if (countsCommand && searchCommand) {
+      const [countsResult, searchResult] = await Promise.all([
+        countsCommand.execute({}, context), searchCommand.execute({}, context),
+      ]);
+      const counts = JobStageCountsSchema.parse(countsResult.data);
+      const search = JobSearchStatusSchema.parse(searchResult.data);
+      return {
+        summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
+        data: { jobs: counts, search, profile: { setup: snapshot.profileSetupState.status, name: snapshot.profile.fullName }, applyMode: snapshot.settings.applicationAutomationMode, needsYou: projectWorkspaceAttention(snapshot).count },
+      };
+    }
     const work = readAssistantWorkState(ports, snapshot);
     const applications = snapshot.applicationRecords;
     const byStatus = new Map<string, number>();
@@ -724,9 +743,10 @@ export const openInAppTool = defineTool({
     "Opens a screen or a record in the app for the person. Use screen tracker for saved interviews, reminders and stages, optionally with applicationRecordId. Open screens only when asked to see them.",
   parameters: json.object({
     screen: json.enumOf(Object.keys(APP_ROUTES)),
-    jobId: json.string("Opens that job (its resume when resume is true)."),
+    jobId: json.number("Opens that stored job (its resume when resume is true)."),
     applicationRecordId: json.string(),
     resume: json.boolean(),
+    view: json.looseObject("Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions."),
     section: json.enumOf(
       ["basics", "experience", "background", "preferences", "sources", "files"],
       "Profile tab to show. Languages are in background.",
@@ -736,9 +756,10 @@ export const openInAppTool = defineTool({
     screen: z
       .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
       .optional(),
-    jobId: Id.optional(),
+    jobId: JobIdSchema.optional(),
     applicationRecordId: Id.optional(),
     resume: z.boolean().optional(),
+    view: AssistantJobViewSchema.optional(),
     section: z
       .enum([
         "basics",
@@ -752,7 +773,20 @@ export const openInAppTool = defineTool({
   }),
   label: () => "Opening it in the app",
   effect: "read",
-  async execute(input, { session }) {
+  async execute(input, context) {
+    const { session, ports } = context;
+    let opensResume = Boolean(input.resume || input.screen === "shortlisted");
+    let jobView: z.infer<typeof AssistantJobViewSchema> | undefined;
+    const getJob = ports.commands?.find((command) => command.name === "get_job");
+    if (input.jobId && getJob) {
+      const result = await getJob.execute({ id: input.jobId }, context);
+      if (result.data === null) throw new AssistantToolError("not_found", "That job no longer exists.");
+      const job = JobDetailSchema.parse(result.data);
+      if (!input.screen && !input.resume && ["shortlisted", "resume"].includes(job.stage)) opensResume = true;
+      const stages = opensResume ? ["shortlisted", "resume"] : ["found", "hidden", "shortlisted"];
+      if (!stages.includes(job.stage)) throw new AssistantToolError("invalid_input", "That job belongs to a different screen. Choose its current stage.");
+      jobView = { stage: job.stage, text: "", ...(opensResume ? {} : { minFit: null }) };
+    }
     if (
       input.screen &&
       (input.jobId || input.applicationRecordId) &&
@@ -760,7 +794,7 @@ export const openInAppTool = defineTool({
       input.screen !==
         (input.applicationRecordId
           ? "applications"
-          : input.resume
+          : opensResume
             ? "shortlisted"
             : "find_jobs")
     ) {
@@ -774,15 +808,30 @@ export const openInAppTool = defineTool({
         "invalid_input",
         "A Profile tab requires screen profile.",
       );
-    const route = input.applicationRecordId
+    if (input.view && input.screen !== "find_jobs" && input.screen !== "shortlisted")
+      throw new AssistantToolError("invalid_input", "Job filters and selection require Find jobs or Shortlisted.");
+    if (input.view && input.jobId)
+      throw new AssistantToolError("invalid_input", "Open a job or change the list's filters and selection in separate calls.");
+    if (input.view && input.screen === "shortlisted" &&
+      ((input.view.stage && !["shortlisted", "resume"].includes(input.view.stage)) || input.view.minFit !== undefined || input.view.sort !== undefined))
+      throw new AssistantToolError("invalid_input", "Shortlisted supports its shortlisted/resume stage, text filter and selection.");
+    if (input.view?.stage && input.screen === "find_jobs" && !["found", "hidden", "shortlisted"].includes(input.view.stage))
+      throw new AssistantToolError("invalid_input", "Find jobs shows found, hidden or shortlisted jobs.");
+    let route = input.applicationRecordId
       ? `/job-finder/applications?${input.screen === "tracker" ? "view=tracker&" : ""}applicationRecordId=${encodeURIComponent(input.applicationRecordId)}`
       : input.jobId
-        ? input.resume
+        ? opensResume
           ? `/job-finder/review-queue?jobId=${encodeURIComponent(input.jobId)}`
-          : `/job-finder/discovery?jobId=${encodeURIComponent(input.jobId)}`
+          : `/job-finder/discovery?job=${encodeURIComponent(input.jobId)}`
         : input.screen === "profile" && input.section
           ? `${APP_ROUTES.profile}?section=${input.section}`
           : APP_ROUTES[input.screen ?? "home"];
+    const view = input.view ?? jobView;
+    if (view) {
+      const destination = new URL(route, "https://nestor.local");
+      destination.searchParams.set("jobs", JSON.stringify(view));
+      route = `${destination.pathname}${destination.search}`;
+    }
     const display = await session.openInApp(route);
     return {
       summary:

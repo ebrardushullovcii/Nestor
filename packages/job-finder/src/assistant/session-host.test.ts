@@ -455,7 +455,7 @@ describe("assistant session host", () => {
       context({ screen: "home" }),
     );
     expect(offered[0]).toContain("load_tools");
-    expect(offered[0]).toContain("edit_profile");
+    expect(offered[0]).not.toContain("edit_profile");
     expect(offered[0]).not.toContain("import_resume");
     expect(offered[1]).toContain("import_resume");
     expect(offered[1]).toContain("edit_profile");
@@ -1995,47 +1995,6 @@ describe("assistant session host", () => {
     const notice = reply(view.messages).parts[0];
     expect(notice).toMatchObject({ type: "notice", kind: "outage" });
     expect(JSON.stringify(notice)).not.toMatch(/api key|configure|settings/iu);
-  });
-
-  it("migrates the old chats once, keeping pending proposals actionable", async () => {
-    const { host, harness, repository } = setup();
-    await harness.workspaceService.proposeProfileCopilotChange(
-      "Change my headline to Legacy proposal",
-      {
-        surface: "general",
-      },
-    );
-    const first = await host.migrateLegacyHistory();
-    const second = await host.migrateLegacyHistory();
-    expect(first.messages).toBeGreaterThan(0);
-    expect(second.messages).toBe(0);
-    const archive = await repository.getConversation(
-      "assistant_archive_profile",
-    );
-    expect(archive?.status).toBe("archived");
-    const view = await host.readConversation({
-      conversationId: "assistant_archive_profile",
-    });
-    const proposal = view.messages
-      .flatMap((message) => message.parts.map((part) => ({ message, part })))
-      .find((entry) => entry.part.type === "proposal");
-    expect(proposal?.part).toMatchObject({ status: "pending" });
-    await host.resolveProposal({
-      conversationId: "assistant_archive_profile",
-      messageId: proposal!.message.id,
-      proposalId:
-        proposal!.part.type === "proposal" ? proposal!.part.proposalId : "",
-      action: "reject",
-      itemIds: [],
-    });
-    const after = await host.readConversation({
-      conversationId: "assistant_archive_profile",
-    });
-    expect(
-      after.messages
-        .flatMap((message) => message.parts)
-        .find((part) => part.type === "proposal"),
-    ).toMatchObject({ status: "rejected" });
   });
 
   it("R3-137 waits for the displayed Tracker and rejects wrong sections and covering overlays", async () => {

@@ -6,6 +6,27 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+it("waits for the requested job's actual details, even after the route changes", async () => {
+  const route = "/job-finder/review-queue?jobId=7";
+  document.body.innerHTML = '<main><h1>Shortlisted</h1><section data-job-detail-id="3"></section></main>';
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.querySelector("section")!.setAttribute("data-job-detail-id", "7");
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
+});
+
+it("acknowledges filters and selection only after the list actually applies them", async () => {
+  const view = { stage: "hidden", text: "Engineer", selectedIds: [7], all: false };
+  const route = `/job-finder/discovery?jobs=${encodeURIComponent(JSON.stringify(view))}`;
+  document.body.innerHTML = '<main><h1>Find jobs</h1><div data-job-list-state="{}"></div></main>';
+  const hidden = document.createElement("div");
+  hidden.setAttribute("data-kept-route", "hidden");
+  hidden.innerHTML = '<main><h1>Shortlisted</h1><div data-job-list-state="{}"></div></main>';
+  document.body.prepend(hidden);
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.querySelector("body > main [data-job-list-state]")!.setAttribute("data-job-list-state", JSON.stringify(view));
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
+});
+
 it("acknowledges Tracker only when its mounted heading matches the requested route", async () => {
   document.body.innerHTML = "<main><h1>Resume studio</h1></main>";
   expect(

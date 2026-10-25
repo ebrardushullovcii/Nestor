@@ -31,7 +31,7 @@ export function createResumeCommandRunner(
     save_resume: ({ jobId, draft, expectedUpdatedAt }) =>
       resumes.saveDraft(jobId, draft, expectedUpdatedAt),
     set_resume_level: ({ jobId, level }) => resumes.setLevel(jobId, level),
-    undo_resume_level: ({ jobId }) => resumes.undoLevel(jobId),
+    undo_resume_level: ({ jobId, changeId }) => resumes.undoLevel(jobId, changeId),
     rewrite_resume: ({ jobId }) => resumes.rewrite(jobId),
     approve_resume: ({ jobId }) => resumes.approve(jobId),
   });

@@ -129,13 +129,6 @@ export function getAssistantHost(): Promise<AssistantSessionHost> {
     await host.recover().catch((error: unknown) => {
       console.warn("[assistant] Recovery after restart failed", error);
     });
-    // The two old chats become archived conversations; safe to repeat.
-    void host.migrateLegacyHistory().catch((error: unknown) => {
-      console.warn(
-        "[assistant] Moving the old chats into the history failed",
-        error,
-      );
-    });
     return host;
   })();
   const created = hostPromise;

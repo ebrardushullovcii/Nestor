@@ -139,6 +139,7 @@ export interface AssistantTurnSession {
     targetId: string | null;
     summary: string;
     entries: readonly AssistantChangeEntry[];
+    undoCommand?: AssistantChangeReceipt["undoCommand"];
   }): Promise<{ receipt: AssistantChangeReceipt; part: AssistantMessagePart }>;
   getReceipt(id: string): Promise<AssistantChangeReceipt | null>;
   listReceipts(): Promise<AssistantChangeReceipt[]>;
@@ -214,6 +215,8 @@ export interface AssistantToolDefinition<
   TSchema extends ZodTypeAny = ZodTypeAny,
 > {
   name: string;
+  /** Earlier Assistant executors replaced by this screen command. */
+  replaces?: readonly string[];
   group: AssistantToolGroup;
   description: string;
   /** JSON schema the model sees; the zod schema is the truth. */
@@ -240,7 +243,7 @@ export function defineTool<TSchema extends ZodTypeAny>(
   return definition;
 }
 
-const receiptReplyTools = new Set(["edit_profile", "shortlist_jobs", "remove_from_shortlist", "dismiss_jobs", "restore_jobs", "update_sources", "set_appearance"]);
+const receiptReplyTools = new Set(["edit_profile", "move_jobs", "shortlist_jobs", "remove_from_shortlist", "dismiss_jobs", "restore_jobs", "update_sources", "set_appearance"]);
 const modelDefinitionCache = new WeakMap<AssistantToolDefinition, ConversationTool["definition"]>();
 
 export function assistantModelToolDefinition(definition: AssistantToolDefinition): ConversationTool["definition"] {

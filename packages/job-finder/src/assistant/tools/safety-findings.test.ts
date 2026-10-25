@@ -605,7 +605,7 @@ describe("R3 assistant safety findings", () => {
     expect(result.summary).toContain("not confirmed");
     await expect(
       openInAppTool.execute(
-        { screen: "applications", resume: true, jobId: "job_ready" },
+        { screen: "applications", resume: true, jobId: 7 },
         ctx,
       ),
     ).rejects.toThrow("Choose one destination");

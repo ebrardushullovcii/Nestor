@@ -49,50 +49,19 @@ for (const tool of registeredActionTools) {
 export type AssistantCatalogMode = "flat" | "grouped";
 
 const COMMON_TOOLS = [
-  ...workspaceTools.map((tool) => tool.name),
-  "get_application",
-  "list_applications",
-  "answer_application_question",
-  "read_profile",
-  "edit_profile",
-  "get_job",
-  "query_jobs",
-  "shortlist_jobs",
-  "remove_from_shortlist",
-  "list_sources",
-  "update_sources",
-  "undo_change",
-  "action_read_action_state",
+  "open_in_app", "read_result", "ask_person", "list_needs_you", "undo_change",
+  "get_application", "answer_application_question", "read_profile", "get_job",
+  "list_jobs", "set_default_resume_level",
 ];
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
-  profile: [
-    "finish_profile_setup",
-    "list_documents",
-    "import_resume",
-    "resolve_import_suggestion",
+  profile: ["edit_profile", "finish_profile_setup", "list_documents", "import_resume", "resolve_import_suggestion",
   ],
-  setup: [
-    "finish_profile_setup",
-    "list_documents",
-    "import_resume",
-    "resolve_import_suggestion",
+  setup: ["edit_profile", "finish_profile_setup", "list_documents", "import_resume", "resolve_import_suggestion",
   ],
-  discovery: [
-    "search_for_jobs",
-    "cancel_search",
-    "dismiss_jobs",
-    "restore_jobs",
-    "show_jobs",
+  discovery: ["list_sites", "start_search", "stop_search", "search_status", "move_jobs", "undo_move",
   ],
-  review_queue: [
-    "read_resume",
-    "generate_resumes",
-    "set_resume_level",
-    "record_instruction",
-    "apply_to_jobs",
-    "action_clear_resume_approval",
-    "action_approve_resumes",
+  review_queue: ["list_shortlisted", "get_resume", "save_resume", "set_resume_level", "undo_resume_level", "rewrite_resume", "approve_resume", "record_instruction", "apply_to_jobs",
   ],
   resume_studio: [
     "read_resume",
@@ -163,6 +132,7 @@ export const loadToolsTool = defineTool({
 });
 
 export function buildAssistantToolCatalog(options: {
+  commands?: readonly AssistantToolDefinition[];
   mode: AssistantCatalogMode;
   browserAvailable: boolean;
   screen?: AssistantScreen | null;
@@ -171,12 +141,18 @@ export function buildAssistantToolCatalog(options: {
   loadedToolNames?: readonly string[];
   onLoadToolNames?: (names: readonly string[]) => void;
 }): AssistantToolDefinition[] {
+  const commands = options.commands ?? [];
+  const commandNames = new Set(commands.flatMap((tool) => [tool.name, ...(tool.replaces ?? [])]));
+  const groupTools = (group: AssistantToolGroup) => [
+    ...ASSISTANT_TOOL_GROUPS[group].filter((tool) => !commandNames.has(tool.name)),
+    ...commands.filter((tool) => tool.group === group),
+  ];
   const include = (group: AssistantToolGroup) =>
     group !== "browser" || options.browserAvailable;
   if (options.mode === "flat") {
     return assistantToolGroupValues
       .filter(include)
-      .flatMap((group) => ASSISTANT_TOOL_GROUPS[group]);
+      .flatMap(groupTools);
   }
   const groups = new Set(options.loadedGroups ?? []);
   if (options.screen === "browser") groups.add("browser");
@@ -188,7 +164,7 @@ export function buildAssistantToolCatalog(options: {
   const tools = assistantToolGroupValues
     .filter(include)
     .flatMap((group) =>
-      ASSISTANT_TOOL_GROUPS[group].filter(
+      groupTools(group).filter(
         (tool) => groups.has(group) || initialNames.has(tool.name),
       ),
     );
@@ -200,14 +176,17 @@ export function buildAssistantToolCatalog(options: {
         input: z.infer<typeof loadToolsTool.input>,
         context: AssistantToolContext,
       ) {
-        const unknown = (input.names ?? []).filter(
-          (name) => !listAllAssistantToolNames().includes(name),
-        );
+        const available = new Set(assistantToolGroupValues.filter(include).flatMap(groupTools).map((tool) => tool.name));
+        const unknown = (input.names ?? []).filter((name) => !available.has(name));
         if (unknown.length)
           throw new Error(`Unknown tools: ${unknown.join(", ")}`);
+        const names = [...new Set([
+          ...(input.names ?? []),
+          ...input.groups.flatMap((group) => groupTools(group).map((tool) => tool.name)),
+        ])];
         options.onLoadGroups?.(input.groups);
-        options.onLoadToolNames?.(input.names ?? []);
-        return loadToolsTool.execute(input, context);
+        options.onLoadToolNames?.(names);
+        return loadToolsTool.execute({ groups: [], names }, context);
       },
     },
   ];

@@ -52,7 +52,7 @@ export function focusFromLocation(
   const applicationRecordId = params.get("applicationRecordId");
   if (applicationRecordId)
     return { kind: "application", id: applicationRecordId, label: null };
-  const jobId = params.get("jobId");
+  const jobId = params.get(pathname === "/job-finder/discovery" ? "job" : "jobId");
   if (jobId) return { kind: "job", id: jobId, label: null };
   return null;
 }

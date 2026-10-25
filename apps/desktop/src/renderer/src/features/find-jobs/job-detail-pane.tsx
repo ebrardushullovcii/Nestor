@@ -76,6 +76,7 @@ export function JobDetailPane(props: {
   return (
     <section
       aria-label="Job details"
+      data-job-detail-id={job.id}
       className="surface-panel-shell flex min-h-0 min-w-0 flex-col overflow-hidden rounded-(--radius-panel) border border-(--surface-panel-border) xl:h-full"
       id={LIST_DETAIL_REGION_ID}
     >

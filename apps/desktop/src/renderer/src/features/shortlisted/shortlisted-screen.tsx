@@ -1,6 +1,6 @@
 import type { JobSelectionInput, ShortlistedRow } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
@@ -9,6 +9,7 @@ import { useToast } from "@renderer/components/ui/toast";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
 import { PageHeader } from "@renderer/features/job-finder/components/page-header";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
+import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
 import {
   countSelected,
   isSelected,
@@ -27,6 +28,7 @@ import {
 import { describeResume, LEVEL_LABEL } from "./resume-format";
 import { ResumePane } from "./resume-pane";
 import { describeError, useResume } from "./use-resume";
+import { useAssistantListView } from "../job-lists/use-assistant-list-view";
 
 type Tab = "shortlisted" | "resume";
 
@@ -62,6 +64,8 @@ export function ShortlistedScreen() {
 
   // A job asked for by link (`?jobId=`) stays open in its own tab.
   const [searchParams] = useSearchParams();
+  const navigationKey = useLocation().key;
+
   const linkedJob = Number(searchParams.get("jobId") ?? "");
   const pinnedId = useRef<number | null>(null);
   useEffect(() => {
@@ -73,7 +77,7 @@ export function ShortlistedScreen() {
       setTab(job.stage);
       setText("");
     });
-  }, [linkedJob]);
+  }, [linkedJob, navigationKey]);
 
   // A new list starts with nothing ticked and its first (or linked) job open.
   useEffect(() => {
@@ -85,9 +89,39 @@ export function ShortlistedScreen() {
     if (activeId === null && !list.loading)
       setActiveId(list.rows[0]?.id ?? null);
   }, [activeId, list.loading, list.rows]);
+  useAssistantListView(searchParams.get("jobs"), {
+    requestId: navigationKey,
+    setSelection,
+    current: { stage: tab, text },
+    applyView(view) {
+      const nextTab = view.stage ?? tab;
+      if (nextTab !== "shortlisted" && nextTab !== "resume") return false;
+      const changed = nextTab !== tab || (view.text !== undefined && view.text !== text);
+      setTab(nextTab);
+      if (view.text !== undefined) setText(view.text);
+      return changed;
+    },
+  });
+
 
   const latest = useRef({ list, activeId, view, selection, tab, text });
   latest.current = { list, activeId, view, selection, tab, text };
+  useAssistantContextSource("shortlisted", () => {
+    const { list, activeId, view, selection, tab, text } = latest.current;
+    return {
+      screen: "review_queue",
+      focus: activeId === null ? null : { kind: "job", id: String(activeId), label: view.job?.title ?? null },
+      list: {
+        listKind: "shortlist",
+        selectedIds: list.rows.filter((row) => isSelected(selection, row.id)).map((row) => String(row.id)),
+        displayedIds: list.rows.map((row) => String(row.id)),
+        filteredIds: [],
+        totalFilteredCount: list.total,
+        filterSummary: JSON.stringify({ stage: tab, text, allSelected: selection.all, except: selection.all ? [...selection.ids] : [] }),
+        campaignId: null,
+      },
+    };
+  });
 
   /** The ticked jobs, or the open one when none are ticked. */
   const target = useCallback((): JobSelectionInput | null => {
@@ -301,6 +335,7 @@ export function ShortlistedScreen() {
       }
     >
       <ListDetailLayout
+        state={{ stage: tab, text, selectedIds: [...selection.ids], all: selection.all }}
         detail={
           <ResumePane
             applying={busy === "apply"}
