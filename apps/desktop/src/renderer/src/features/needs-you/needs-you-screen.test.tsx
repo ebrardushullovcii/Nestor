@@ -370,7 +370,7 @@ it("opens on one kind of item from a link, and shows everything again on request
     attempt: row.attempt,
     fieldKey: "account",
     key: "account",
-    scope: {},
+    scope: { siteOrigin: "https://jobs.example.test" },
     prompt: "Sign in to Example careers",
     kind: "sign_in",
     input: "text",
