@@ -37,6 +37,11 @@ import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
+export { createProfileStore, type ProfileStore } from "./profile-store";
+export {
+  createPreferencesStore,
+  type PreferencesStore,
+} from "./preferences-store";
 export { createJobSitesStore, type JobSitesStore } from "./job-sites";
 export { createSourceAccessStore } from "./source-access";
 export { createSearchSourcesStore } from "./search-sources";

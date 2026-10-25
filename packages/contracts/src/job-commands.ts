@@ -1,4 +1,8 @@
 import { RetrySourceInputSchema } from "./source-access";
+import {
+  PROFILE_COMMANDS,
+  type ProfileCommandOutputs,
+} from "./profile-commands";
 import { z } from "zod";
 import type { AppCommandDefinition } from "./app-commands";
 
@@ -37,6 +41,7 @@ const NoInputSchema = z.object({}).strict();
  * descriptions are written for both.
  */
 export const JOB_COMMANDS = {
+  ...PROFILE_COMMANDS,
   list_jobs: {
     effect: "read",
     description:
@@ -150,7 +155,7 @@ export type JobCommandInput<K extends JobCommandName> = z.input<
   (typeof JOB_COMMANDS)[K]["input"]
 >;
 
-export interface JobCommandOutputs {
+export interface JobCommandOutputs extends ProfileCommandOutputs {
   list_jobs: JobListPage;
   get_job: JobDetail | null;
   stage_counts: JobStageCounts;

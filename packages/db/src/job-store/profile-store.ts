@@ -1,0 +1,324 @@
+import {
+  createFreshStartCandidateProfile,
+  ProfileFieldsSchema,
+  ProfileListsSchema,
+  PatchProfileInputSchema,
+  StoredProfileSchema,
+  ProfileOverviewSchema,
+  ResumeSourceDocumentSchema,
+  type PatchProfileInput,
+  type StoredProfile,
+  type ProfileLists,
+  type ResumeSourceDocument,
+  type ProfileOverview,
+  type CandidateWorkEligibility,
+} from "@nestor/contracts";
+import type { JobStore } from "./job-store";
+import {
+  createProfileRecords,
+  PROFILE_RECORDS_SCHEMA,
+} from "./profile-records";
+import {
+  createScalarValues,
+  scalarSchema,
+  flatten,
+  inflate,
+  createProfileItems,
+  PROFILE_ITEMS_SCHEMA,
+  type ScalarTable,
+} from "./profile-values";
+
+const profileFields = Object.keys(ProfileFieldsSchema.shape);
+const PROFILE_TABLE: ScalarTable = {
+  name: "profile",
+  fields: profileFields,
+  booleans: [
+    "workEligibility.requiresVisaSponsorship",
+    "workEligibility.willingToRelocate",
+    "workEligibility.willingToTravel",
+    "workEligibility.remoteEligible",
+  ],
+  numbers: ["yearsExperience", "workEligibility.noticePeriodDays"],
+  optional: profileFields.filter((key) => {
+    const schema =
+      ProfileFieldsSchema.shape[key as keyof typeof ProfileFieldsSchema.shape];
+    return schema.isOptional() && !schema.isNullable();
+  }),
+};
+const sourceFields = [
+  "sourceId",
+  "fileName",
+  "uploadedAt",
+  "storagePath",
+  "sha256",
+  "textUpdatedAt",
+  "extractionStatus",
+  "lastAnalyzedAt",
+  "analysisProviderKind",
+  "analysisProviderLabel",
+  "sourceIdentity.fullName",
+  "sourceIdentity.email",
+  "ownership.acknowledgedSourceFullName",
+  "ownership.acknowledgedSourceEmail",
+  "ownership.acknowledgedAt",
+];
+const RESUME_TABLE: ScalarTable = {
+  name: "profile_resume_source",
+  fields: sourceFields,
+  booleans: [],
+  numbers: [],
+};
+export const PROFILE_SCHEMA = [
+  scalarSchema(PROFILE_TABLE),
+  scalarSchema(RESUME_TABLE),
+  PROFILE_ITEMS_SCHEMA,
+  PROFILE_RECORDS_SCHEMA,
+  `
+ CREATE TABLE IF NOT EXISTS profile_resume_text(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT);
+ CREATE TABLE IF NOT EXISTS profile_identity(id INTEGER PRIMARY KEY CHECK(id=1),profile_id TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS profile_work_permissions(country TEXT NOT NULL,conditions TEXT NOT NULL,requires_future_sponsorship INTEGER,position INTEGER NOT NULL,PRIMARY KEY(country,conditions));
+ CREATE INDEX IF NOT EXISTS profile_work_permissions_country ON profile_work_permissions(country,position);
+ `,
+].join("\n");
+
+export function createProfileStore(store: JobStore) {
+  const empty = StoredProfileSchema.parse(createFreshStartCandidateProfile()),
+    values = createScalarValues(
+      store,
+      PROFILE_TABLE,
+      flatten(empty, profileFields),
+    ),
+    items = createProfileItems(store),
+    records = createProfileRecords(store);
+  const source = createScalarValues(
+    store,
+    RESUME_TABLE,
+    flatten(
+      { ...empty.baseResume, sourceId: empty.baseResume.id },
+      sourceFields,
+    ),
+  );
+  store.transaction(() =>
+    store
+      .sql("INSERT OR IGNORE INTO profile_identity(id,profile_id) VALUES (1,?)")
+      .run(empty.id),
+  );
+  const profileId = () =>
+    (
+      store
+        .sql("SELECT profile_id AS id FROM profile_identity WHERE id=1")
+        .get() as { id: string }
+    ).id;
+  const lists = (): ProfileLists =>
+    ProfileListsSchema.parse(
+      Object.fromEntries(
+        Object.keys(ProfileListsSchema.shape).map((field) => [
+          field,
+          items.values("profile", "1", field),
+        ]),
+      ),
+    );
+  const fields = () => ProfileFieldsSchema.parse(values.read());
+  const permissions = (): NonNullable<
+    CandidateWorkEligibility["limitedWorkPermissions"]
+  > => {
+    const rows = store
+      .sql(
+        "SELECT country,conditions,requires_future_sponsorship AS future FROM profile_work_permissions ORDER BY position,country,conditions",
+      )
+      .all() as {
+      country: string;
+      conditions: string;
+      future: number | null;
+    }[];
+    return rows.map((row) => ({
+      country: row.country,
+      conditions: row.conditions,
+      requiresFutureSponsorship:
+        row.future === null ? null : Boolean(row.future),
+    }));
+  };
+  const readSource = (): ResumeSourceDocument => {
+    const data = inflate(source.read());
+    return ResumeSourceDocumentSchema.parse({
+      ...data,
+      textContent:
+        (
+          store.sql("SELECT body FROM profile_resume_text WHERE id=1").get() as
+            | { body: string | null }
+            | undefined
+        )?.body ?? null,
+      id: data.sourceId,
+      analysisWarnings: items.values("resume", "1", "analysisWarnings"),
+    });
+  };
+  const overview = (): ProfileOverview => {
+    // The list/edit surface never loads the full imported resume text or file path.
+    const metadata = source.read();
+    return ProfileOverviewSchema.parse({
+      hasResumeText: Boolean(
+        (
+          store
+            .sql(
+              "SELECT body IS NOT NULL AS present FROM profile_resume_text WHERE id=1",
+            )
+            .get() as { present: number } | undefined
+        )?.present,
+      ),
+      hasSavedResumeFile: Boolean(metadata.storagePath && metadata.sha256),
+      resumeIdentityOwnership: metadata["ownership.acknowledgedAt"]
+        ? {
+            acknowledgedAt: metadata["ownership.acknowledgedAt"],
+            acknowledgedSourceFullName:
+              metadata["ownership.acknowledgedSourceFullName"],
+            acknowledgedSourceEmail:
+              metadata["ownership.acknowledgedSourceEmail"],
+          }
+        : null,
+      id: profileId(),
+      fields: fields(),
+      lists: lists(),
+      counts: records.counts(),
+      resume: {
+        ...inflate(metadata),
+        id: metadata.sourceId,
+        analysisWarnings: items.values("resume", "1", "analysisWarnings"),
+      },
+      limitedWorkPermissions: permissions(),
+    });
+  };
+  return {
+    overview,
+    records,
+    read(): StoredProfile {
+      const data = inflate({ ...fields(), ...lists() });
+      for (const kind of Object.keys(records.counts()) as (keyof typeof empty &
+        Parameters<typeof records.all>[0])[])
+        data[kind] = records.all(kind).map((row) => row.record);
+      const sourceData = source.read(
+          sourceFields.filter((field) => field.startsWith("ownership.")),
+        ),
+        ack = sourceData["ownership.acknowledgedAt"];
+      return StoredProfileSchema.parse({
+        ...data,
+        id: profileId(),
+        baseResume: readSource(),
+        workEligibility: {
+          ...(data.workEligibility as Record<string, unknown>),
+          limitedWorkPermissions: permissions(),
+        },
+        resumeIdentityOwnership: ack
+          ? {
+              acknowledgedAt: ack,
+              acknowledgedSourceFullName:
+                sourceData["ownership.acknowledgedSourceFullName"],
+              acknowledgedSourceEmail:
+                sourceData["ownership.acknowledgedSourceEmail"],
+            }
+          : null,
+      });
+    },
+    patch(input: PatchProfileInput): ProfileOverview {
+      const patch = PatchProfileInputSchema.parse(input);
+      return store.transaction(() => {
+        let changed = values.patch(patch.fields, patch.expected);
+        for (const [field, value] of Object.entries(patch.lists))
+          if (value !== undefined)
+            changed = items.patch("profile", "1", field, value) || changed;
+        if (changed)
+          store.notify({
+            cause: "profile",
+            stages: [],
+            ids: [],
+            searchId: null,
+          });
+        return overview();
+      });
+    },
+    /** Accepted import facts only; file ownership stays at the main-process import boundary. */
+    setResumeSource(
+      document: ResumeSourceDocument,
+      ownership: StoredProfile["resumeIdentityOwnership"] = null,
+    ): void {
+      const parsed = ResumeSourceDocumentSchema.parse(document);
+      store.transaction(() => {
+        const flat = flatten(
+          {
+            ...parsed,
+            sourceId: parsed.id,
+            ownership: ownership ?? {
+              acknowledgedSourceFullName: null,
+              acknowledgedSourceEmail: null,
+              acknowledgedAt: null,
+            },
+          },
+          sourceFields,
+        );
+        let changed = source.patch(flat);
+        const bodyChanged = store
+          .sql(
+            "INSERT INTO profile_resume_text(id,body) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE body IS NOT excluded.body",
+          )
+          .run(parsed.textContent).changes;
+        changed = Boolean(bodyChanged) || changed;
+        changed =
+          items.patch(
+            "resume",
+            "1",
+            "analysisWarnings",
+            parsed.analysisWarnings,
+          ) || changed;
+        if (changed)
+          store.notify({
+            cause: "profile",
+            stages: [],
+            ids: [],
+            searchId: null,
+          });
+      });
+    },
+    setWorkPermissions(
+      input: NonNullable<CandidateWorkEligibility["limitedWorkPermissions"]>,
+    ): void {
+      store.transaction(() => {
+        const current = permissions(),
+          key = (item: { country: string; conditions: string }) =>
+            JSON.stringify([item.country, item.conditions]),
+          next = new Set(input.map(key));
+        let changed = false;
+        for (const item of current)
+          if (!next.has(key(item))) {
+            store
+              .sql(
+                "DELETE FROM profile_work_permissions WHERE country=? AND conditions=?",
+              )
+              .run(item.country, item.conditions);
+            changed = true;
+          }
+        for (const [position, item] of input.entries()) {
+          const result = store
+            .sql(
+              `INSERT INTO profile_work_permissions(country,conditions,requires_future_sponsorship,position) VALUES (?,?,?,?) ON CONFLICT(country,conditions) DO UPDATE SET requires_future_sponsorship=excluded.requires_future_sponsorship,position=excluded.position WHERE requires_future_sponsorship IS NOT excluded.requires_future_sponsorship OR position<>excluded.position`,
+            )
+            .run(
+              item.country,
+              item.conditions,
+              item.requiresFutureSponsorship === null
+                ? null
+                : Number(item.requiresFutureSponsorship),
+              position,
+            );
+          changed = Boolean(result.changes) || changed;
+        }
+        if (changed)
+          store.notify({
+            cause: "profile",
+            stages: [],
+            ids: [],
+            searchId: null,
+          });
+      });
+    },
+  };
+}
+export type ProfileStore = ReturnType<typeof createProfileStore>;

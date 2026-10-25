@@ -231,6 +231,8 @@ export const JobChangeSchema = z.object({
     "tracker",
     "resume",
     "sites",
+    "profile",
+    "settings",
   ]),
   stages: z.array(JobStageSchema),
   ids: z.array(JobIdSchema).nullable(),

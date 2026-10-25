@@ -1,5 +1,5 @@
 import { getRunningResumeImportProgress } from "@renderer/features/job-finder/lib/profile-resume-panel-utils";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import type {
   CandidateProfile,
@@ -110,6 +110,8 @@ type ProfileScreenPendingActions = {
 };
 
 export function ProfileScreen(props: {
+  recordPaging?: ReactNode;
+  sourceInfo?: {hasResumeText:boolean;hasSavedResumeFile:boolean};
   actionState: { message: string | null };
   discoveryRunFeedback?: DiscoveryRunFeedback | null;
   importResumeGuardMessage: string | null;
@@ -733,6 +735,7 @@ export function ProfileScreen(props: {
                     the tabs whose content the resume actually fills. */}
                 {activeSection === "sources" ? null : (
                   <ProfileResumePanel
+                    {...(props.sourceInfo ? {sourceInfo:props.sourceInfo} : {})}
                     // Keep the resume source/status useful without allowing the
                     // imported-review surface to push the selected profile
                     // editor below the first viewport. The full review surface
@@ -884,6 +887,7 @@ export function ProfileScreen(props: {
                   className="m-0 min-w-0 border-0 p-0 disabled:opacity-80"
                   disabled={resumeAnalysisPending}
                 >
+                  {props.recordPaging}
                   <ProfileActiveSectionContent
                     activeSection={activeSection}
                     requestedFileKind={searchParams.get("kind")}
@@ -934,6 +938,7 @@ export function ProfileScreen(props: {
                     data-profile-resume-review
                   >
                     <ProfileResumePanel
+                    {...(props.sourceInfo ? {sourceInfo:props.sourceInfo} : {})}
                       importDisabledReason={importResumeGuardMessage}
                       isProfileReady={profileSetupState.status === "completed"}
                       isAnalyzeProfilePending={pendingActions.analyzeProfile}
