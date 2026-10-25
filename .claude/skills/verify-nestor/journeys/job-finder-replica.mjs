@@ -232,10 +232,6 @@ const STAGES = {
       })
       .first()
       .click();
-    await form
-      .getByText("Thank you! Your application has been received.")
-      .waitFor({ timeout: 30000 });
-    await shot("jf-send-confirmation", { target: "browser", url: "/apply/" });
     await press("Escape");
     await waitFor("Application submitted", 60, { role: "heading" });
     await shot("jf-application-submitted");

@@ -44,6 +44,7 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
     signal?: AbortSignal,
   ) => Promise<ApplicationPreparationLease>;
 } {
+  const capacity = applicationPreparationConcurrency(String(maxActive));
   type Request = {
     key: string;
     signal?: AbortSignal;
@@ -58,7 +59,7 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
   const drain = (): void => {
     for (const request of requests) {
       if (request.granted || request.signal?.aborted) continue;
-      if (!request.active && running >= maxActive) continue;
+      if (!request.active && running >= capacity) continue;
       if (
         [...requests].some(
           (other) =>
@@ -119,44 +120,67 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
       };
       await waitFor(request, applicationSiteKey(url) ?? "unknown-site");
       let released = false;
+      let tail = Promise.resolve();
+      // Batched form hands can notice the same redirect together. They must
+      // all wait for ownership, rather than one treating a queued site as held.
+      const inOrder = <T>(work: () => Promise<T>): Promise<T> => {
+        const next = tail.then(() => {
+          signal?.throwIfAborted();
+          if (released)
+            throw new Error("Application preparation was released.");
+          return work();
+        });
+        tail = next.then(
+          () => undefined,
+          () => undefined,
+        );
+        return next;
+      };
       return {
-        async moveTo(nextUrl) {
-          if (released)
-            throw new Error("Application preparation was released.");
-          const nextKey = applicationSiteKey(nextUrl) ?? "unknown-site";
-          if (nextKey === request.key) return;
-          // Release both the previous site and the worker slot while waiting
-          // for the destination. An unrelated site can use the idle capacity.
-          if (request.active) {
-            request.active = false;
-            running -= 1;
-          }
-          await waitFor(request, nextKey);
+        moveTo(nextUrl) {
+          return inOrder(async () => {
+            const nextKey = applicationSiteKey(nextUrl) ?? "unknown-site";
+            if (nextKey === request.key) return;
+            // Release both the previous site and the worker slot while waiting
+            // for the destination. An unrelated site can use the idle capacity.
+            if (request.active) {
+              request.active = false;
+              running -= 1;
+            }
+            await waitFor(request, nextKey);
+          });
         },
-        async suspend(work) {
-          if (released)
-            throw new Error("Application preparation was released.");
-          const key = request.key;
-          request.granted = false;
-          request.key = "";
-          if (request.active) {
-            request.active = false;
-            running -= 1;
-          }
-          // Out of the queue while suspended; waitFor puts it back.
-          requests.delete(request);
-          drain();
-          try {
-            return await work();
-          } finally {
-            if (!released) await waitFor(request, key);
-          }
+        suspend(work) {
+          return inOrder(async () => {
+            const key = request.key;
+            request.granted = false;
+            request.key = "";
+            if (request.active) {
+              request.active = false;
+              running -= 1;
+            }
+            // Out of the queue while suspended; waitFor puts it back.
+            requests.delete(request);
+            drain();
+            try {
+              return await work();
+            } finally {
+              if (!released) await waitFor(request, key);
+            }
+          });
         },
         release() {
           if (released) return;
           released = true;
+          if (!request.granted && requests.has(request)) {
+            request.onAbort();
+            return;
+          }
           requests.delete(request);
-          if (request.active) running -= 1;
+          if (request.active) {
+            request.active = false;
+            running -= 1;
+          }
           drain();
         },
       };

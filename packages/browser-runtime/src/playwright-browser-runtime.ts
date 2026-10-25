@@ -1570,8 +1570,8 @@ export function createBrowserAgentRuntime(
     }
   }
 
-  /** Forgets a finished application's page and closes it unless the person has it. */
-  async function releaseApplicationPage(key: string): Promise<boolean> {
+  /** Forgets a finished application's page and closes its exact retained tab. */
+  async function releaseApplicationPage(key: string): Promise<void> {
     await preparedFormStore?.delete(key);
     // Completing an evicted application must not reopen it just to close it.
     if (!formRecovery.get(key)?.snapshot)
@@ -1579,15 +1579,10 @@ export function createBrowserAgentRuntime(
     formRecovery.delete(key);
     recoveryUnavailable.delete(key);
     const page = preparedApplicationPages.get(key);
-    const withPerson = preparedPagesWithPerson.has(key);
     preparedApplicationPages.delete(key);
     markedPreparedApplicationKeys.delete(key);
     preparedPagesWithPerson.delete(key);
-    // The person opened it to finish it themselves: the site's confirmation
-    // stays in front of them until they close the tab.
-    if (withPerson) return false;
     if (page && !page.isClosed()) await page.close().catch(() => undefined);
-    return true;
   }
 
   const getLivePreparedApplicationPages = (): Page[] => [

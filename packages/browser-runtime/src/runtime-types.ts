@@ -371,13 +371,11 @@ export interface BrowserSessionRuntime {
   ): Promise<RawApplyPage | null>;
   /**
    * Close the exact retained page when its owner has finished with it.
-   * Resolves `false` when the person has the page (they opened it to finish
-   * it), which then stays open for them.
    */
   releaseApplicationPageBinding?(
     source: JobSource,
     pageBindingKey: string,
-  ): Promise<boolean | void>;
+  ): Promise<void>;
   /** Move a retained page to a replacement attempt without reloading it. */
   transferApplicationPageBinding?(
     source: JobSource,

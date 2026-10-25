@@ -271,14 +271,12 @@ export function withEmbeddedBrowserActivity(
       );
     },
     async releaseApplicationPageBinding(source, key) {
-      let closed: boolean | void = true;
       try {
-        closed = await runtime.releaseApplicationPageBinding?.(source, key);
+        await runtime.releaseApplicationPageBinding?.(source, key);
       } finally {
         applicationSources.delete(key);
-        browser.releaseOwnedTabs(key, { keepForPerson: closed === false });
+        browser.releaseOwnedTabs(key, { finished: true });
       }
-      return closed;
     },
     ...(runtime.transferApplicationPageBinding
       ? {
@@ -466,9 +464,27 @@ export function withEmbeddedBrowserActivity(
             ),
         } satisfies Partial<BrowserSessionRuntime>)
       : {}),
+    ...(runtime.getApplicationPageState
+      ? {
+          getApplicationPageState: (source: JobSource, key: string) =>
+            browser.getApplicationTabIds(key).length > 0
+              ? Promise.resolve({
+                  resultId: key,
+                  state: "open" as const,
+                  reason: null,
+                })
+              : runtime.getApplicationPageState!(source, key),
+        }
+      : {}),
     ...(runtime.reopenApplicationPage
       ? ({
           async reopenApplicationPage(source, key, onProgress) {
+            const tabs = browser.getApplicationTabIds(key);
+            if (tabs.length === 1 && browser.showTab(tabs[0]!)) {
+              applicationSources.set(key, source);
+              onProgress?.({ resultId: key, phase: "ready" });
+              return { resultId: key, state: "open", reason: null };
+            }
             const state = await runtime.reopenApplicationPage!(
               source,
               key,
@@ -482,12 +498,19 @@ export function withEmbeddedBrowserActivity(
     ...(runtime.hasApplicationPageBinding
       ? ({
           hasApplicationPageBinding: (source, pageBindingKey) =>
-            runtime.hasApplicationPageBinding!(source, pageBindingKey),
+            // A person-held native tab stays live when its automation Page
+            // detaches. A CDP-only check otherwise retires the application
+            // before its own submit can be observed.
+            browser.getApplicationTabIds(pageBindingKey).length > 0
+              ? Promise.resolve(true)
+              : runtime.hasApplicationPageBinding!(source, pageBindingKey),
         } satisfies Partial<BrowserSessionRuntime>)
       : {}),
     ...(runtime.focusApplicationPageBinding
       ? {
           async focusApplicationPageBinding(source: JobSource, key: string) {
+            const tabs = browser.getApplicationTabIds(key);
+            if (tabs.length === 1 && browser.showTab(tabs[0]!)) return true;
             const focused = await runtime.focusApplicationPageBinding!(
               source,
               key,

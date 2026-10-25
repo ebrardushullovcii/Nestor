@@ -4104,7 +4104,7 @@ describe("managed context active service worker gate", () => {
     }
   });
 
-  test("a form the person opened to finish stays open when its application ends", async () => {
+  test("a form the person opened to finish closes when its application ends", async () => {
     const userDataDir = await mkdtemp(join(tmpdir(), "nestor-handed-page-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -4130,8 +4130,8 @@ describe("managed context active service worker gate", () => {
       );
       await expect(
         runtime.releaseApplicationPageBinding!("target_site", "handed_result"),
-      ).resolves.toBe(false);
-      expect(harness.fakePage.close).not.toHaveBeenCalled();
+      ).resolves.toBeUndefined();
+      expect(harness.fakePage.close).toHaveBeenCalledOnce();
       await expect(
         runtime.hasApplicationPageBinding!("target_site", "handed_result"),
       ).resolves.toBe(false);

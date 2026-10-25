@@ -565,7 +565,7 @@ test("Prepare again opens a fresh form when the earlier page cannot accept the a
     },
   });
   const transferApplicationPageBinding = vi.fn(() => Promise.resolve(true));
-  const releaseApplicationPageBinding = vi.fn(() => Promise.resolve(true));
+  const releaseApplicationPageBinding = vi.fn(() => Promise.resolve());
   const harness = createWorkspaceServiceHarness({
     seed,
     browserRuntime: {
