@@ -203,7 +203,11 @@ export function createListingSearchEngine(deps: {
                   cards,
                   pagesRead: 0,
                   complete: result.inventoryCompleteness === "complete",
-                  needsYou: Boolean(result.agentMetadata?.accessBlockerReason),
+                  needsYou:
+                    result.agentMetadata?.accessBlockerReason ===
+                      "auth_required" ||
+                    result.agentMetadata?.accessBlockerReason ===
+                      "site_protection",
                   notes: [
                     result.warning ??
                       `${cards.length} listings collected with browser navigation.`,

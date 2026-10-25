@@ -216,6 +216,23 @@ export function createJobSearchRunner(
       siteDirty = true;
       write(source);
     };
+    const failedSource = (source: SourceWork, message: string) => {
+      if (!current(source)) return;
+      source.row.state = "failed";
+      source.notes.push(message);
+      siteRows.record(
+        Number(source.target.id),
+        {
+          health: "failed",
+          signInState: "unknown",
+          lastSearchedAt: new Date().toISOString(),
+          lane: source.row.lane ?? "browser",
+        },
+        false,
+      );
+      siteDirty = true;
+      write(source);
+    };
     const browserTask = (
       source: SourceWork,
       work: (signal: AbortSignal) => Promise<void>,
@@ -239,9 +256,9 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
-          needsAccess(
+          failedSource(
             source,
-            `This site could not be read. Open it to check sign-in or verification, then Retry. ${errorMessage(error)}`,
+            `This site could not be read: ${errorMessage(error)}`,
           );
           source.collected = true;
           source.processed = source.row.cards;
@@ -297,14 +314,22 @@ export function createJobSearchRunner(
         return;
       }
       source.collected = true;
-      if (inventory.needsYou || !inventory.complete)
+      if (inventory.needsYou)
         needsAccess(
           source,
-          inventory.needsYou
-            ? "Open this site and finish sign-in or verification, then Retry."
-            : "This site could not be read completely. Open it to check access, then Retry.",
+          "Open this site and finish sign-in or verification, then Retry.",
+        );
+      else if (!inventory.complete)
+        failedSource(
+          source,
+          inventory.cards.length
+            ? "Some listings could not be read completely."
+            : "No listings found; this site could not be read completely.",
         );
       else if (source.row.state !== "needs_you") {
+        const signedIn =
+          access.pending(Number(source.target.id)) ||
+          siteRows.get(Number(source.target.id))?.signInState === "signed_in";
         access.complete(Number(source.target.id));
         siteRows.record(
           Number(source.target.id),
@@ -312,7 +337,8 @@ export function createJobSearchRunner(
             lastSearchedAt: new Date().toISOString(),
             health: "healthy",
             lane: inventory.lane ?? lane,
-            signInState: lane === "browser" ? "signed_in" : "not_required",
+            signInState:
+              lane === "browser" && signedIn ? "signed_in" : "not_required",
             ...(inventory.provider ? { provider: inventory.provider } : {}),
           },
           false,

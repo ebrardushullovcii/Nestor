@@ -208,8 +208,21 @@ export async function collectSource(
           return;
         }
         if (!parsed.cards.length) {
-          complete = false;
-          notes.push(`No readable listing cards at ${page.finalUrl}.`);
+          const body = readListingHtml(page.html, "");
+          if (
+            body.text &&
+            (input.lane === "browser" || !body.renderSuggested) &&
+            !/\b(?:loading|please wait|wird geladen)\b/iu.test(body.text) &&
+            !/<(?:a|button|input|select|iframe)\b/iu.test(body.html)
+          ) {
+            recognized = true;
+            notes.push(`No listings found at ${page.finalUrl}.`);
+          } else {
+            complete = false;
+            notes.push(
+              `No listings found at ${page.finalUrl}; browser navigation may be needed.`,
+            );
+          }
           return;
         }
         recognized = true;
@@ -508,7 +521,9 @@ export async function readListings(
           url: card.url,
           reason: error instanceof Error ? error.message : String(error),
           ...(input.lane === "browser"
-            ? { needsYou: true }
+            ? needsYou
+              ? { needsYou: true }
+              : {}
             : { requiresBrowser: true }),
         });
       return null;
