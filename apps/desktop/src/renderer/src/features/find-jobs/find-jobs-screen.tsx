@@ -2,6 +2,7 @@ import {
   JobSearchSettingsSchema,
   PICKY_MIN_FIT,
   type JobFilterInput,
+  type JobRow,
   type JobSearchSettings,
   type JobSort,
   type TriageStage,
@@ -130,9 +131,26 @@ export function FindJobsScreen() {
     setActiveId(pinnedId.current);
     pinnedId.current = null;
   }, [stage, text, floor]);
+  // When the open job leaves this tab from outside the screen (the Assistant
+  // moved it, or another window did), the one after it opens, or nothing when
+  // the tab is empty, as a move on this screen does. A linked job that isn't
+  // among the loaded rows stays open.
+  const shownRows = useRef<readonly JobRow[]>([]);
   useEffect(() => {
-    if (activeId === null && !list.loading)
+    const before = shownRows.current;
+    shownRows.current = list.rows;
+    if (list.loading) return;
+    if (activeId === null) {
       setActiveId(list.rows[0]?.id ?? null);
+      return;
+    }
+    const at = before.findIndex((row) => row.id === activeId);
+    if (at < 0 || list.rows.some((row) => row.id === activeId)) return;
+    const still = new Set(list.rows.map((row) => row.id));
+    const next =
+      before.slice(at + 1).find((row) => still.has(row.id)) ??
+      list.rows[Math.min(at, list.rows.length - 1)];
+    setActiveId(next?.id ?? null);
   }, [activeId, list.loading, list.rows]);
   useAssistantListView(searchParams.get("jobs"), {
     requestId: navigationKey,
@@ -326,11 +344,15 @@ export function FindJobsScreen() {
   const running = status.search?.state === "running";
   const filtered = text.trim() !== "" || (stage === "found" && floor !== null);
   const lastMove = undoStack.current.at(-1) ?? null;
+  // Jobs that left Found (here, in the chat or on another screen) mean the
+  // search has run; "No jobs yet" is only true when no stage has any.
+  const sortedJobs =
+    counts.shortlisted + counts.hidden + counts.resume + counts.applied;
   const emptyMessage =
     stage === "found" && counts.found === 0
       ? running
         ? ["Searching your job sites…", "Jobs show up here as they are found."]
-        : lastMove
+        : sortedJobs > 0
           ? ["All caught up", "Every found job is shortlisted or hidden."]
           : ["No jobs yet", "Pick how to search above and press Search."]
       : filtered && list.total === 0
