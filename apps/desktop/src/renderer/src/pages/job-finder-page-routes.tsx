@@ -8,7 +8,6 @@ import {
   lazy,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,12 +15,8 @@ import {
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
-import { readInspectedSelectionId } from "./use-job-finder-page-controller-helpers";
-import { useLiveFindJobsCounts } from "@renderer/features/job-finder/lib/search-change-feed";
-import {
-  readFullWorkspaceIfBehind,
-  useFindJobsListsCurrent,
-} from "@renderer/features/job-finder/lib/workspace-view-refresh";
+import { useJobStageCounts } from "@renderer/features/find-jobs/use-job-stage-counts";
+import { readFullWorkspaceIfBehind } from "@renderer/features/job-finder/lib/workspace-view-refresh";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
@@ -36,10 +31,7 @@ import {
   useLocation,
   useOutletContext,
 } from "react-router-dom";
-import {
-  consumeFirstSearchRequest,
-  isProfileSetupJustFinished,
-} from "./use-job-finder-page-controller-actions";
+import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
 import {
   markGuidedSetupAutoOpenSpent,
   shouldAutoOpenGuidedSetup,
@@ -50,7 +42,6 @@ import type {
   CampaignRuleFunnelProjection,
   JobFinderRendererWorkspaceSnapshot,
   JobSearchCampaign,
-  JobListRow,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
@@ -58,7 +49,6 @@ import type {
   UserActionRequestState,
 } from "@nestor/contracts";
 import {
-  AiBehaviorPreferenceSchema,
   ApplicationCrmSettingsSchema,
   type ApplicationPageReopenProgress,
   type ApplicationPageState,
@@ -72,7 +62,6 @@ import type {
   FinishInBrowserOutcome,
 } from "@renderer/features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section";
 import { getJobFinderErrorDetail } from "@renderer/features/job-finder/lib/job-finder-error-message";
-import { DiscoveryScreen } from "@renderer/features/job-finder/screens/discovery/discovery-screen";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
 import {
   clearJobFinderContextQuery,
@@ -81,15 +70,8 @@ import {
   selectJobFinderContext,
 } from "@renderer/features/job-finder/lib/job-finder-context-navigation";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
-import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-memo";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
-import {
-  FindJobsLaunch,
-  forgetLaunchClickedJob,
-  selectFindJobsLaunchPage,
-  useLaunchClickedJobId,
-} from "@renderer/features/job-finder/screens/discovery/find-jobs-launch";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
 // Applications) are part of the initial-route bundle so their real headings
@@ -567,25 +549,11 @@ export function JobFinderHomeRoute() {
     });
   };
 
-  // Home reads every collection: on the bootstrap snapshot (no saved search
-  // runs or jobs yet) it told a person with thousands of jobs to "Run your
-  // first search" for several seconds after launch. Its first view (ADR
-  // 0077) has all of them but the Find jobs lists, whose two numbers Home
-  // takes from the database until the lists land. After a view refresh the
-  // lists are only patched, so the numbers come from the same queries.
-  const liveFindJobsCounts = useLiveFindJobsCounts(context.workspace);
-  const findJobsCounts =
-    launchReads.findJobs &&
-    isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])
-      ? {
-          visible: launchReads.findJobs.focused.total,
-          weaker: Math.max(
-            0,
-            launchReads.findJobs.wide.total -
-              launchReads.findJobs.focused.total,
-          ),
-        }
-      : liveFindJobsCounts;
+  // Find jobs' count comes from the job store, which is open at launch.
+  const jobCounts = useJobStageCounts();
+  const findJobsCounts = jobCounts
+    ? { visible: jobCounts.found, weaker: 0 }
+    : null;
   return (
     <JobFinderHydrationGate
       collections={
@@ -1082,387 +1050,6 @@ export function JobFinderProfileSetupRoute() {
         : {})}
       searchPreferences={context.workspace.searchPreferences}
     />
-  );
-}
-
-const selectPlanDiscoveryJobs = createIdentityMemo(
-  (
-    discoveryJobs: readonly JobListRow[],
-    activeCampaignJobIds: readonly string[] | undefined,
-  ) => {
-    const campaignJobIds = new Set(activeCampaignJobIds ?? []);
-    return discoveryJobs.filter((job) => campaignJobIds.has(job.id));
-  },
-);
-
-export function JobFinderDiscoveryRoute() {
-  const context = useJobFinderPageContext();
-  const launchReads = useLaunchReads();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigationContext = readJobFinderNavigationContext(searchParams);
-  const [activityPausePending, setActivityPausePending] = useState(false);
-  const [planSwitchPending, setPlanSwitchPending] = useState(false);
-  const [crossPlanSwitchFailed, setCrossPlanSwitchFailed] = useState(false);
-  const [crossPlanRetry, setCrossPlanRetry] = useState(0);
-  const attemptedCrossPlanJobRef = useRef<{ key: string } | null>(null);
-  const { onRunAgentDiscovery } = context;
-  const checkedFirstSearchRequest = useRef(false);
-
-  // Finishing guided setup lands here with the first search requested: start
-  // it once, the same request Search now sends.
-  useEffect(() => {
-    if (checkedFirstSearchRequest.current) return;
-    checkedFirstSearchRequest.current = true;
-    if (consumeFirstSearchRequest(context.workspace.activeCampaignId)) {
-      onRunAgentDiscovery?.({ intent: "", freshness: "any", sourceIds: "all" });
-    }
-  }, [onRunAgentDiscovery, context.workspace.activeCampaignId]);
-
-  const handleResumeActivity = () => {
-    setActivityPausePending(true);
-    void context.onSetActivityControl({ paused: false }).finally(() => {
-      setActivityPausePending(false);
-    });
-  };
-
-  const activeCampaign = context.workspace.campaigns.find(
-    (campaign) => campaign.id === context.workspace.activeCampaignId,
-  );
-  // A search re-renders this route several times a second; a new list on
-  // every render made the results re-filter and re-sort every job each time.
-  const activeCampaignJobIds = activeCampaign?.jobIds;
-  // Kept across visits too, so an unchanged plan hands Find jobs the same
-  // list and everything it derives from that list is reused.
-  const jobs = selectPlanDiscoveryJobs(
-    context.workspace.discoveryJobs,
-    activeCampaignJobIds,
-  );
-  const requestedJob = navigationContext.jobId
-    ? (jobs.find((job) => job.id === navigationContext.jobId) ?? null)
-    : null;
-  const crossPlanCampaign =
-    navigationContext.jobId &&
-    !requestedJob &&
-    context.workspace.discoveryJobs.some(
-      (job) => job.id === navigationContext.jobId,
-    )
-      ? (context.workspace.campaigns.find((campaign) =>
-          campaign.jobIds.includes(navigationContext.jobId!),
-        ) ?? null)
-      : null;
-  const requestedTarget = navigationContext.targetId
-    ? (context.workspace.searchPreferences.discovery.targets.find(
-        (target) => target.id === navigationContext.targetId,
-      ) ?? null)
-    : null;
-  // Find jobs reads its list, counts and hidden jobs from the database, so it
-  // opens on Home's first view (ADR 0077) instead of waiting for every job.
-  // A link to one job still waits: whether it is in this plan, another plan
-  // or gone is read from the full list.
-  const opensOnFirstView =
-    !navigationContext.jobId &&
-    launchReads.counts !== null &&
-    jobRowsFor(context.workspace).length === 0;
-  // A link to one job checks it against every job, so it waits for a full
-  // read when the lists fell behind (a view refresh only patches them).
-  const listsCurrent = useFindJobsListsCurrent();
-  useEffect(() => {
-    if (navigationContext.jobId) readFullWorkspaceIfBehind();
-  }, [navigationContext.jobId]);
-  const isHydrating =
-    (!opensOnFirstView &&
-      isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])) ||
-    (Boolean(navigationContext.jobId) && !listsCurrent);
-  // On the first view the workspace holds only the jobs past Find jobs, so
-  // the open job is the person's pick, else the one remembered from last
-  // time; the full list keeps both, so nothing moves when it lands.
-  const [firstViewPick, setFirstViewPick] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!navigationContext.jobId || !crossPlanCampaign) {
-      attemptedCrossPlanJobRef.current = null;
-      return;
-    }
-    if (isHydrating) return;
-    const requestKey = `${context.workspace.activeCampaignId}:${navigationContext.jobId}:${crossPlanCampaign.id}:${crossPlanRetry}`;
-    if (attemptedCrossPlanJobRef.current?.key === requestKey) return;
-    const request = { key: requestKey };
-    attemptedCrossPlanJobRef.current = request;
-    setCrossPlanSwitchFailed(false);
-    void context
-      .onSelectCampaign(crossPlanCampaign.id)
-      .then((selected) => {
-        if (attemptedCrossPlanJobRef.current === request && !selected) {
-          setCrossPlanSwitchFailed(true);
-        }
-      })
-      .catch(() => {
-        if (attemptedCrossPlanJobRef.current === request)
-          setCrossPlanSwitchFailed(true);
-      });
-  }, [
-    context.onSelectCampaign,
-    context.workspace.activeCampaignId,
-    crossPlanCampaign,
-    crossPlanRetry,
-    isHydrating,
-    navigationContext.jobId,
-  ]);
-
-  useEffect(() => {
-    if (requestedJob && requestedJob.id !== context.selectedDiscoveryJob?.id) {
-      context.onSelectDiscoveryJob(requestedJob.id);
-    }
-  }, [
-    context.onSelectDiscoveryJob,
-    context.selectedDiscoveryJob?.id,
-    requestedJob,
-  ]);
-
-  // A row clicked on the launch page opens here. Selecting it while the list
-  // still loads makes it the held pick, so the first full render opens it
-  // (the selection only keeps a pick the loaded list still has). Layout
-  // effect: a pick made after the list is ready lands before that paint.
-  const launchClickedJobId = useLaunchClickedJobId();
-  useLayoutEffect(() => {
-    if (launchClickedJobId === null) return;
-    context.onSelectDiscoveryJob(launchClickedJobId);
-    if (!isHydrating) {
-      setFirstViewPick(launchClickedJobId);
-      forgetLaunchClickedJob();
-    }
-  }, [context.onSelectDiscoveryJob, isHydrating, launchClickedJobId]);
-
-  const handleSelectJob = useCallback(
-    (jobId: string) => {
-      setFirstViewPick(jobId);
-      context.onSelectDiscoveryJob(jobId);
-      if (navigationContext.jobId) {
-        setSearchParams(
-          (current) =>
-            clearJobFinderContextQuery(
-              current,
-              JOB_FINDER_CONTEXT_QUERY_KEYS.jobId,
-            ),
-          { replace: true },
-        );
-      }
-    },
-    [context.onSelectDiscoveryJob, navigationContext.jobId, setSearchParams],
-  );
-
-  if (isHydrating) {
-    const launchPage = navigationContext.jobId
-      ? null
-      : selectFindJobsLaunchPage(launchReads);
-    return (
-      <JobFinderHydrationGate
-        collections={["discovery_jobs"]}
-        launchView={launchPage ? <FindJobsLaunch {...launchPage} /> : undefined}
-        workspace={context.workspace}
-      >
-        {null}
-      </JobFinderHydrationGate>
-    );
-  }
-
-  if (navigationContext.jobId && !requestedJob) {
-    if (crossPlanCampaign) {
-      return (
-        <WorkspaceStateScreen
-          {...(crossPlanSwitchFailed
-            ? {
-                action: {
-                  label: `Switch to ${crossPlanCampaign.name}`,
-                  onClick: () => {
-                    setCrossPlanSwitchFailed(false);
-                    setCrossPlanRetry((current) => current + 1);
-                  },
-                },
-              }
-            : {})}
-          kicker="Find jobs"
-          message={
-            crossPlanSwitchFailed
-              ? "The search plan did not change. Switch plans to open this job."
-              : `Opening this job in ${crossPlanCampaign.name}.`
-          }
-          title={
-            crossPlanSwitchFailed ? "Job is in another plan" : "Opening job"
-          }
-        />
-      );
-    }
-    // Workspace search lists every job saved on this device, but Find jobs
-    // shows only the active plan's kept jobs. Say which case this is and
-    // point at the control that changes it instead of a dead "Show all jobs".
-    const savedOutsidePlan = context.workspace.discoveryJobs.some(
-      (job) => job.id === navigationContext.jobId,
-    );
-    return (
-      <WorkspaceStateScreen
-        action={{
-          label: "Show all jobs",
-          onClick: () => context.onNavigateSafely("/job-finder/discovery"),
-        }}
-        kicker="Find jobs"
-        message={
-          savedOutsidePlan
-            ? "This job is saved on this device, but Find jobs keeps only its newest results, so it is not shown here. Search again to bring it back."
-            : "The requested job is no longer in Find jobs, so no other job was selected."
-        }
-        title={savedOutsidePlan ? "Job not shown" : "Job unavailable"}
-      />
-    );
-  }
-
-  if (navigationContext.targetId && !requestedTarget) {
-    return (
-      <WorkspaceStateScreen
-        action={{
-          label: "Show all jobs",
-          onClick: () => context.onNavigateSafely("/job-finder/discovery"),
-        }}
-        kicker="Find jobs"
-        message="The requested job source is no longer configured, so no other source was selected."
-        title="Job source unavailable"
-      />
-    );
-  }
-
-  const firstViewOpenJobId = opensOnFirstView
-    ? (firstViewPick ??
-      launchClickedJobId ??
-      readInspectedSelectionId({
-        storage: window.localStorage,
-        surface: "discovery",
-        campaignId: context.workspace.activeCampaignId,
-      }))
-    : null;
-  const selectedJob = opensOnFirstView
-    ? firstViewOpenJobId
-      ? { id: firstViewOpenJobId }
-      : null
-    : selectJobFinderContext(
-        jobs,
-        navigationContext.jobId,
-        context.selectedDiscoveryJob?.id,
-        (job) => job.id,
-      );
-
-  return (
-    <JobFinderHydrationGate
-      collections={opensOnFirstView ? [] : ["discovery_jobs"]}
-      workspace={context.workspace}
-    >
-      <DiscoveryScreen
-        actionState={context.actionState}
-        activityPaused={context.workspace.activityControl?.paused ?? false}
-        activeRun={context.workspace.activeDiscoveryRun}
-        fitJudgmentProgress={context.workspace.fitJudgmentProgress ?? null}
-        applicationRecords={context.workspace.applicationRecords}
-        reviewQueue={context.workspace.reviewQueue}
-        campaigns={context.workspace.campaigns}
-        safeguardPauses={projectPlanSafeguardPauses(
-          context.workspace.intelligence?.safeguards,
-          context.workspace.campaigns,
-        )}
-        activeCampaignId={context.workspace.activeCampaignId}
-        isPlanSwitchPending={planSwitchPending}
-        onSelectCampaign={(campaignId) => {
-          setPlanSwitchPending(true);
-          void context.onSelectCampaign(campaignId).finally(() => {
-            setPlanSwitchPending(false);
-          });
-        }}
-        browserSession={context.workspace.browserSession}
-        companies={context.workspace.intelligence.companies}
-        discoveryRunFeedback={context.discoveryRunFeedback}
-        isBrowserSessionPending={context.isPending(
-          jobFinderPendingActions.browserSession(),
-        )}
-        isBrowserSessionPendingForTarget={(targetId) =>
-          context.isPending(
-            jobFinderPendingActions.browserSessionTarget(targetId),
-          )
-        }
-        isDiscoveryAllPending={context.isPending(
-          jobFinderPendingActions.discoveryAll(),
-        )}
-        isActivityPausePending={activityPausePending}
-        discoverySessions={context.workspace.discoverySessions}
-        planJobCount={
-          opensOnFirstView ? (launchReads.counts?.all ?? 0) : jobs.length
-        }
-        liveEvents={context.liveDiscoveryEvents}
-        isJobPending={(jobId) =>
-          context.isAnyPending([
-            jobFinderPendingActions.discoveryJob(jobId),
-            jobFinderPendingActions.resumeJob(jobId),
-          ])
-        }
-        isTargetPending={(targetId) =>
-          context.isAnyPending([
-            jobFinderPendingActions.discoveryTarget(targetId),
-            jobFinderPendingActions.sourceDebug(targetId),
-            jobFinderPendingActions.sourceInstruction(targetId),
-          ])
-        }
-        onDismissJob={context.onDismissJob}
-        onPreviewEmployerExclusion={context.onPreviewEmployerExclusion}
-        onRemoveEmployerExclusion={context.onRemoveEmployerExclusion}
-        onRestoreDismissedJob={context.onRestoreDismissedJob}
-        {...(context.onRemoveReviewJobs
-          ? { onRemoveFromShortlist: context.onRemoveReviewJobs }
-          : {})}
-        onOpenBrowserSession={() => {
-          void context.onOpenBrowserSession();
-        }}
-        onResumeActivity={handleResumeActivity}
-        onOpenBrowserSessionForTarget={(targetId) => {
-          void context.onOpenBrowserSession({ targetId });
-        }}
-        onOpenApplication={(recordId) => {
-          context.onSelectApplicationRecord(recordId);
-          context.onNavigateSafely("/job-finder/applications");
-        }}
-        // The listing opens in the app's own browser (ADR 0017): the same
-        // window the search used, so a sign-in it holds carries over.
-        onOpenListing={(url) => {
-          void window.nestor.browser.command({ type: "open", url });
-        }}
-        onAssessJobListing={context.onAssessJobListing}
-        {...(context.onJudgeUnjudgedJobs
-          ? { onJudgeUnjudgedJobs: context.onJudgeUnjudgedJobs }
-          : {})}
-        onQueueJob={context.onQueueJob}
-        {...(context.onQueueJobs ? { onQueueJobs: context.onQueueJobs } : {})}
-        {...(context.onDismissJobs
-          ? { onDismissJobs: context.onDismissJobs }
-          : {})}
-        onRunAgentDiscovery={context.onRunAgentDiscovery}
-        // Parsed through the schema so a workspace that never saved AI
-        // behavior still shows the default the next search will actually use.
-        searchSelectivity={
-          AiBehaviorPreferenceSchema.parse(
-            context.workspace.settings?.aiBehavior ?? {},
-          ).jobSearch.selectivity
-        }
-        {...(context.onCancelDiscovery
-          ? { onCancelDiscovery: context.onCancelDiscovery }
-          : {})}
-        {...(context.onRunDiscoveryForTarget
-          ? { onRunDiscoveryForTarget: context.onRunDiscoveryForTarget }
-          : {})}
-        onSelectJob={handleSelectJob}
-        preserveSelectedJob={Boolean(navigationContext.jobId)}
-        recentRuns={context.workspace.recentDiscoveryRuns}
-        searchPreferences={context.workspace.searchPreferences}
-        selectedSourceTargetId={requestedTarget?.id ?? null}
-        selectedJob={selectedJob}
-        sourceAccessPrompts={context.workspace.sourceAccessPrompts}
-      />
-    </JobFinderHydrationGate>
   );
 }
 

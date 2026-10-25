@@ -1,3 +1,5 @@
+import { findJobsShortcutHelp } from "@renderer/features/find-jobs/find-jobs-shortcuts";
+
 export type JobFinderPlatform = "darwin" | "linux" | "win32";
 
 export type JobFinderShortcutId =
@@ -188,7 +190,8 @@ export interface JobFinderShortcutHelpEntry {
     | "history-forward"
     | "zoom-in"
     | "zoom-out"
-    | "actual-size";
+    | "actual-size"
+    | `find-jobs-${string}`;
   /** Stable row key; an id can appear once per distinct scope. */
   rowId: string;
   label: string;
@@ -229,6 +232,7 @@ export function buildJobFinderShortcutHelp(
   const modifier = platform === "darwin" ? "⌘" : "Ctrl";
   return [
     ...entries.values(),
+    ...findJobsShortcutHelp(modifier),
     {
       id: "history-back",
       rowId: "history-back",

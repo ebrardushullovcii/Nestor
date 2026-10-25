@@ -1,4 +1,6 @@
 import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
+import { requestFirstSearch } from "@renderer/features/find-jobs/first-search";
+import type { JobSearchSettingsInput } from "@nestor/contracts";
 import {
   JOB_FINDER_BROWSER_NAME,
   JOB_FINDER_BROWSER_NAME_SENTENCE_START,
@@ -6,7 +8,6 @@ import {
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { JobFinderActionFailureReporting } from "./job-finder-page-context";
 import {
-  appendDiscoveryLiveActivityEvent,
   evaluateProfileSetupReadiness,
   getProfileSetupReadinessBlockers,
   isRunnableJobDiscoveryTarget,
@@ -17,7 +18,6 @@ import type {
   CandidateProfile,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
-  JobFinderAgentDiscoveryResult,
   JobFinderSearchRequest,
   JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
@@ -49,25 +49,7 @@ import type {
   JobFinderQueuedJobOutcome,
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
-import {
-  formatDiscoveryRunReportLabel,
-  getDiscoveryRunReportCounts,
-  hasDiscoveryRunReportCounts,
-} from "@renderer/features/job-finder/lib/discovery-run-count-label";
-import {
-  createDiscoveryRunAlreadyRunningFeedback,
-  createDiscoveryRunCancelledFeedback,
-  createDiscoveryRunFailedFeedback,
-  createDiscoveryRunInterruptedFeedback,
-  createDiscoveryRunRefreshIncompleteFeedback,
-  createDiscoveryRunRepeatedFeedback,
-  createDiscoveryRunStartedFeedback,
-  createDiscoveryRunSucceededFeedback,
-  getDiscoveryCancelledSavedJobCount,
-  isDiscoveryAlreadyRunningDetail,
-  shouldPresentRepeatedDiscoveryFeedback,
-  type DiscoveryRunFeedback,
-} from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
+import { type DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import {
   getPendingActionGeneration,
   type PendingActionScope,
@@ -75,10 +57,7 @@ import {
   jobFinderPendingActions,
 } from "./job-finder-pending-actions";
 import { getProfileCopilotContextKey } from "@renderer/features/job-finder/lib/profile-copilot-context";
-import {
-  getJobFinderErrorDetail,
-  getJobFinderErrorMessage,
-} from "@renderer/features/job-finder/lib/job-finder-error-message";
+import { getJobFinderErrorMessage } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
 import {
   listApplyQueueWaitingJobIds,
@@ -206,16 +185,6 @@ const handledRefreshErrorTag = Symbol("handledRefreshError");
 
 export const DISCOVERY_PROGRESS_REFRESH_INTERVAL_MS = 250;
 
-/**
- * Single-flight guard for discovery runs. This lives at module scope on
- * purpose: `createPrimaryPageActions` re-runs on every
- * `buildJobFinderPageContext` rebuild (live events, workspace, action state),
- * so a closure-local flag would reset and let a second rapid call launch a
- * duplicate run. The synchronous check-and-set below is atomic because the
- * renderer is single-threaded, and the flag survives every rebuild.
- */
-let isDiscoveryRunActive = false;
-
 // Context rebuilds must not turn one pending bulk click into several IPC writes.
 let isBulkShortlistActive = false;
 
@@ -266,20 +235,6 @@ export function clearProfileSetupJustFinished(): void {
 
 export function isProfileSetupJustFinished(): boolean {
   return profileSetupJustFinished;
-}
-
-let firstSearchRequestedForPlan: string | null = null;
-
-/** Asks Find jobs to start the first search when it next mounts. */
-export function requestFirstSearchOnFindJobs(campaignId: string): void {
-  firstSearchRequestedForPlan = campaignId;
-}
-
-/** True once per request; Find jobs calls it on mount. */
-export function consumeFirstSearchRequest(campaignId?: string | null): boolean {
-  const requested = firstSearchRequestedForPlan;
-  firstSearchRequestedForPlan = null;
-  return requested !== null && requested === campaignId;
 }
 
 /**
@@ -878,7 +833,6 @@ export function createPrimaryPageActions(
     runSaveAction,
     withPendingScope,
     setActionState,
-    setLiveDiscoveryEvents,
     setOptimisticProfileCopilotMessages,
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
@@ -1096,213 +1050,13 @@ export function createPrimaryPageActions(
     }
   };
 
-  const runDiscoveryAction = (
-    targetId?: string,
-    searchRequest?: JobFinderSearchRequest,
-  ) => {
-    if (isDiscoveryRunActive) {
-      return;
-    }
-
-    const target = targetId ? getConfiguredSourceTarget(targetId) : null;
-    const targetLabel = target?.label ?? null;
-    const campaignIdForRun = workspace.activeCampaignId;
-    const hasRunnableSource = targetId
-      ? target !== null && isRunnableJobDiscoveryTarget(target)
-      : workspace.searchPreferences.discovery.targets.some(
-          isRunnableJobDiscoveryTarget,
-        );
-
-    if (!hasRunnableSource) {
-      const feedback = createDiscoveryRunFailedFeedback({
-        detail: targetId
-          ? "This job source is missing, disabled, or does not have a valid public URL."
-          : "Add or enable at least one valid public job-source URL before searching.",
-        targetLabel,
-        targetId: targetId ?? null,
-      });
-      setDiscoveryRunFeedback(feedback);
-      return;
-    }
-
-    isDiscoveryRunActive = true;
-    setLiveDiscoveryEvents([]);
-    setDiscoveryRunFeedback(createDiscoveryRunStartedFeedback(targetLabel));
-
-    let sawDiscoveryProgress = false;
-    // Typed terminal outcome from the discovery IPC return. Main classifies
-    // it authoritatively (service terminal state or an escaped AbortError),
-    // so a user-cancelled run can never fall through to success feedback.
-    let agentDiscoveryResult: JobFinderAgentDiscoveryResult | null = null;
-    // `runAction` only returns a boolean success flag, so keep the final
-    // refreshed workspace here for truthful zero-new / duplicate feedback.
-    let refreshedDiscoverySnapshot: JobFinderRendererWorkspaceSnapshot | null =
-      null;
-
+  // Searches run in the background on the job store; Find jobs shows them.
+  const startJobSearch = (settings: JobSearchSettingsInput) =>
     void runAction(
-      async () => {
-        const refreshCoordinator = createDiscoveryWorkspaceRefreshCoordinator(
-          actions.refreshWorkspace,
-          actions.requestWorkspaceRefresh
-            ? { requestProgressiveRefresh: actions.requestWorkspaceRefresh }
-            : {},
-        );
-
-        try {
-          agentDiscoveryResult = await actions.runAgentDiscovery(
-            (event) => {
-              if (!sawDiscoveryProgress) {
-                refreshCoordinator.notifyRunStarted();
-              }
-              sawDiscoveryProgress = true;
-              setLiveDiscoveryEvents((current) =>
-                appendDiscoveryLiveActivityEvent(current, event),
-              );
-
-              if (event.terminalState === "completed" && event.targetId) {
-                refreshCoordinator.notifySourceCompleted();
-              } else if (
-                !event.terminalState &&
-                event.stage === "persistence" &&
-                (event.jobsPersisted ?? 0) + (event.jobsStaged ?? 0) > 0
-              ) {
-                // Mid-run checkpoint persistence committed usable jobs; refresh
-                // so Results can show them while the source keeps searching.
-                refreshCoordinator.notifyJobsPersisted();
-              }
-            },
-            targetId,
-            searchRequest,
-          );
-
-          // Finish with one authoritative workspace read after any bounded
-          // progressive refresh has settled. A slower snapshot requested for
-          // an earlier source cannot win a race against the completed run.
-          const finalSnapshot = await refreshCoordinator.flushFinal();
-          refreshedDiscoverySnapshot =
-            finalSnapshot &&
-            typeof finalSnapshot === "object" &&
-            finalSnapshot !== null &&
-            "recentDiscoveryRuns" in finalSnapshot
-              ? (finalSnapshot as JobFinderRendererWorkspaceSnapshot)
-              : null;
-          return refreshedDiscoverySnapshot;
-        } finally {
-          refreshCoordinator.dispose();
-          setLiveDiscoveryEvents([]);
-        }
-      },
-      () => undefined,
-      // Discovery terminal copy lives in discoveryRunFeedback only; never
-      // mirror it on the shared route action surface.
-      () => null,
-      {
-        rethrowError: true,
-        scope: targetId
-          ? jobFinderPendingActions.discoveryTarget(targetId)
-          : jobFinderPendingActions.discoveryAll(),
-      },
-    )
-      .then((completed) => {
-        if (agentDiscoveryResult?.outcome === "cancelled") {
-          // The run was stopped deliberately; incrementally committed jobs
-          // stay visible through the final refresh above, and the feedback
-          // must say stopped — never success, never failure.
-          const feedback = createDiscoveryRunCancelledFeedback({
-            savedJobCount: getDiscoveryCancelledSavedJobCount(
-              agentDiscoveryResult.snapshot.recentDiscoveryRuns,
-            ),
-            targetLabel,
-          });
-          setDiscoveryRunFeedback(feedback);
-          return;
-        }
-
-        if (!completed) {
-          // Terminal path for a handled refresh error after the search
-          // itself finished: never leave the started feedback in place.
-          const feedback =
-            createDiscoveryRunRefreshIncompleteFeedback(targetLabel);
-          setDiscoveryRunFeedback(feedback);
-          return;
-        }
-
-        const discoveryRuns =
-          refreshedDiscoverySnapshot?.recentDiscoveryRuns ??
-          agentDiscoveryResult?.snapshot.recentDiscoveryRuns ??
-          [];
-        const newestRun = discoveryRuns
-          .filter((run) => run.campaignId === campaignIdForRun)
-          .sort(
-            (left, right) =>
-              Date.parse(right.startedAt) - Date.parse(left.startedAt),
-          )[0];
-        const validJobsFound = newestRun?.summary.validJobsFound ?? 0;
-        const duplicatesMerged = newestRun?.summary.duplicatesMerged ?? 0;
-        const reportCounts = getDiscoveryRunReportCounts(newestRun);
-        const hasReport = hasDiscoveryRunReportCounts(reportCounts);
-        setDiscoveryRunFeedback(
-          !hasReport &&
-            shouldPresentRepeatedDiscoveryFeedback({
-              duplicatesMerged,
-              validJobsFound,
-            })
-            ? createDiscoveryRunRepeatedFeedback({
-                duplicatesMerged,
-                reviewedListingCount:
-                  newestRun?.summary.changeDigest?.known ?? null,
-                targetLabel,
-              })
-            : createDiscoveryRunSucceededFeedback(
-                targetLabel,
-                hasReport ? formatDiscoveryRunReportLabel(reportCounts) : null,
-                hasReport ? reportCounts.new : null,
-              ),
-        );
-      })
-      .catch((error: unknown) => {
-        // The detail channel, not user copy: `createDiscoveryRun*Feedback`
-        // runs its own classifier over this string to choose the specific
-        // recovery action. Passing it the copy classifier's output would
-        // replace a browser/source/connection cause with a generic sentence,
-        // and the callout would silently fall back to "try again".
-        const detail =
-          getJobFinderErrorDetail(error) ?? "The search failed on this device.";
-        // The service refused a second search because the first one is still
-        // live — a Stop that has not finished yet lands here. That is not a
-        // failure: the run the person already has is still going.
-        if (isDiscoveryAlreadyRunningDetail(detail)) {
-          setDiscoveryRunFeedback(
-            createDiscoveryRunAlreadyRunningFeedback(targetLabel),
-          );
-          void actions.refreshWorkspace().catch(() => undefined);
-          return;
-        }
-        // Progress events prove the run started; only a rejection with no
-        // observed progress may claim the search could not start.
-        const feedback = sawDiscoveryProgress
-          ? createDiscoveryRunInterruptedFeedback({
-              detail,
-              targetLabel,
-              targetId: targetId ?? null,
-            })
-          : createDiscoveryRunFailedFeedback({
-              detail,
-              targetLabel,
-              targetId: targetId ?? null,
-            });
-        setDiscoveryRunFeedback(feedback);
-        // The success path ends with an authoritative refresh; a failed run
-        // is recorded too (Search history, Home, source health) and must not
-        // leave those screens claiming no search ever ran.
-        if (sawDiscoveryProgress) {
-          void actions.refreshWorkspace().catch(() => undefined);
-        }
-      })
-      .finally(() => {
-        isDiscoveryRunActive = false;
-      });
-  };
+      () => window.nestor.jobs.run("start_search", settings),
+      () => navigate("/job-finder/discovery"),
+      "Search started. Jobs show up in Find jobs as they are found.",
+    );
 
   const startAutoFlow = (
     runner: () => Promise<unknown>,
@@ -2022,8 +1776,9 @@ export function createPrimaryPageActions(
         { scope: jobFinderPendingActions.profileMutation() },
       ),
     onRunAgentDiscovery: (searchRequest?: JobFinderSearchRequest) =>
-      runDiscoveryAction(undefined, searchRequest),
-    onRunDiscoveryForTarget: (targetId: string) => runDiscoveryAction(targetId),
+      startJobSearch({ note: searchRequest?.intent ?? "" }),
+    onRunDiscoveryForTarget: (targetId: string) =>
+      startJobSearch({ sourceIds: [targetId] }),
     onCancelDiscovery: async (runId: string) => {
       try {
         const nextWorkspace = await actions.cancelAgentDiscovery({ runId });
@@ -2167,7 +1922,6 @@ export function createPrimaryPageActions(
             : "Saved.");
       let handOffToFindJobs = false;
       let startFirstSearch = false;
-      let firstSearchCampaignId: string | null = null;
 
       return void runSaveAction({
         action: async () => {
@@ -2241,7 +1995,6 @@ export function createPrimaryPageActions(
             // this same step is not in the workspace the handler closed over,
             // so the first search was never requested.
             startFirstSearch = shouldStartFirstSearchAfterSetup(snapshot);
-            firstSearchCampaignId = snapshot.activeCampaignId;
           }
 
           return actions
@@ -2298,9 +2051,7 @@ export function createPrimaryPageActions(
           // the first search itself instead of waiting for a second press of
           // Search now. Only before any search has run. Find jobs starts it
           // once it has mounted, so the hand-off navigation is never raced.
-          if (startFirstSearch && firstSearchCampaignId) {
-            requestFirstSearchOnFindJobs(firstSearchCampaignId);
-          }
+          if (startFirstSearch) requestFirstSearch();
           navigate("/job-finder/discovery", { replace: true });
         }
         if (handOffToFindJobs) {

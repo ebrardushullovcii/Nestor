@@ -36,23 +36,14 @@ function collectProductionSources(dir: URL, prefix = ""): Map<string, string> {
   return sources;
 }
 
-/** Scroll containers, including Find jobs' view during initial loading. */
+/** Scroll containers. Find jobs and Shortlisted use `features/job-lists`. */
 const LIST_PANEL_PATHS = [
   "screens/applications/applications-records-panel.tsx",
-  "screens/discovery/discovery-results-panel.tsx",
-  "screens/discovery/find-jobs-launch.tsx",
 ];
 
-/**
- * Where each of those lists renders its ROW. Find jobs also renders its first
- * query page before the full workspace loads; those rows must use the same
- * treatment too.
- */
+/** Where each of those lists renders its ROW. */
 const LIST_ROW_PATHS = [
   "screens/applications/applications-records-panel.tsx",
-  "screens/discovery/discovery-results-panel.tsx",
-  // The launch page's rows stand in for the results list until it loads.
-  "screens/discovery/find-jobs-launch.tsx",
 ];
 
 describe("Job Finder list rows carry no chrome of their own", () => {

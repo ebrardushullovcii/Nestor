@@ -17,7 +17,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { normalizeUrl, readListingStage, writeFoundJobs } from "./found-jobs";
+import { normalizeUrl, writeFoundJobs } from "./found-jobs";
 import { getJob, listJobs, readStageCounts } from "./job-list";
 import {
   CHANGE_ID_LIMIT,
@@ -62,8 +62,6 @@ export interface JobStore {
 
   listJobs(query: JobListQueryInput): JobListPage;
   getJob(id: number): JobDetail | null;
-  /** The stage of a saved job with this listing link, so a search can skip it. */
-  stageForListing(url: string): JobStage | null;
   stageCounts(): JobStageCounts;
 
   /** Triage: moves jobs between found, hidden and shortlisted, with Undo. */
@@ -266,7 +264,6 @@ export function openJobStore(filePath: string): JobStore {
 
     listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
     getJob: (id) => getJob(sql, id),
-    stageForListing: (url) => readListingStage(sql, url),
     stageCounts: () => readStageCounts(sql),
 
     moveJobs({ selection, to }) {

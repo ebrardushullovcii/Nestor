@@ -3,11 +3,14 @@ import { z } from "zod";
 import {
   JobIdSchema,
   JobListQuerySchema,
+  JobSearchSettingsSchema,
   MoveJobsInputSchema,
   UndoMoveInputSchema,
   type JobChange,
   type JobDetail,
   type JobListPage,
+  type JobSearchStatus,
+  type JobSite,
   type JobStageCounts,
   type MoveJobsResult,
 } from "./jobs";
@@ -44,6 +47,25 @@ export const JOB_COMMANDS = {
       "Puts the jobs of one move back where each was, unless something moved them since.",
     input: UndoMoveInputSchema,
   },
+  list_sites: {
+    description:
+      "The person's job sites a search can use: the ones turned on in Profile. Pass some ids as sourceIds to start_search to search only those.",
+    input: NoInputSchema,
+  },
+  start_search: {
+    description:
+      "Starts a background search of the person's job sites. depth: quick look or thorough; picky: open, balanced or strict; postedWithin: week, month or any; note: anything specific. Jobs appear in found as they are found. Returns at once.",
+    input: JobSearchSettingsSchema,
+  },
+  stop_search: {
+    description: "Stops the running search. Jobs already found stay.",
+    input: NoInputSchema,
+  },
+  search_status: {
+    description:
+      "The running or last search: its choices, counts and per-site progress.",
+    input: NoInputSchema,
+  },
 } as const;
 
 export type JobCommandName = keyof typeof JOB_COMMANDS;
@@ -58,13 +80,18 @@ export interface JobCommandOutputs {
   stage_counts: JobStageCounts;
   move_jobs: MoveJobsResult;
   undo_move: MoveJobsResult;
+  list_sites: { sites: JobSite[] };
+  start_search: JobSearchStatus;
+  stop_search: JobSearchStatus;
+  search_status: JobSearchStatus;
 }
 
 export type JobCommandOutput<K extends JobCommandName> = JobCommandOutputs[K];
 
 export const JOBS_RUN_CHANNEL = "jobs:run";
 export const JOBS_CHANGED_CHANNEL = "jobs:changed";
-/** A window asks once to hear changes. */
+export const JOBS_SEARCH_STATUS_CHANNEL = "jobs:search-status";
+/** A window asks once to hear changes and search progress. */
 export const JOBS_SUBSCRIBE_CHANNEL = "jobs:subscribe";
 
 /** The renderer's typed bridge to the job commands. */
@@ -74,4 +101,5 @@ export interface DesktopJobsBridge {
     input: JobCommandInput<K>,
   ): Promise<JobCommandOutput<K>>;
   onChange(listener: (change: JobChange) => void): () => void;
+  onSearchStatus(listener: (status: JobSearchStatus) => void): () => void;
 }

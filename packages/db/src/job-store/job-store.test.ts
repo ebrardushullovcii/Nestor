@@ -110,12 +110,12 @@ describe("job store", () => {
     expect(result.hidden).toHaveLength(1);
     const hidden = store.listJobs({ stage: "hidden" }).rows[0];
     expect(hidden?.stageNote).toBe("Asks for a pilot licence");
-    expect(store.stageForListing("https://board.example.test/jobs/2/")).toBe(
-      "hidden",
-    );
-    expect(store.stageForListing("https://board.example.test/jobs/9")).toBe(
-      null,
-    );
+    expect(
+      store.findKnownUrls([
+        "https://board.example.test/jobs/2/",
+        "https://board.example.test/jobs/9",
+      ]),
+    ).toEqual(["https://board.example.test/jobs/2/"]);
     // Showing it again clears the reason; Undo brings it back.
     const shown = store.moveJobs({
       selection: { ids: result.hidden },

@@ -42,7 +42,6 @@ const SCROLL_REGION_MARKER = "data-locked-pane-scroll-region";
 /** Route id -> the screen file that renders that route's LockedScreenLayout. */
 const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
   profile: "screens/profile-screen.tsx",
-  discovery: "screens/discovery/discovery-screen.tsx",
   "review-queue": "../shortlisted/shortlisted-screen.tsx",
   applications: "screens/applications/applications-screen.tsx",
 };
@@ -51,7 +50,6 @@ const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
 const ROUTE_OWNERSHIP: readonly (readonly [string, string])[] = [
   ["screens/profile-screen.tsx", "profile"],
   ["components/profile/", "profile"],
-  ["screens/discovery/", "discovery"],
   ["screens/applications/", "applications"],
 ];
 
@@ -245,6 +243,8 @@ describe("locked route bounds", () => {
     expect(lockedScreens.length).toBeGreaterThan(0);
 
     for (const screenId of lockedScreens) {
+      // Find jobs (features/find-jobs) sizes its own list and details panes.
+      if (screenId === "discovery") continue;
       const file = LOCKED_SCREEN_FILES[screenId];
 
       expect(

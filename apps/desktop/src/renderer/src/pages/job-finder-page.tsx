@@ -30,10 +30,7 @@ import {
   useLaunchReads,
 } from "@renderer/features/job-finder/lib/launch-reads";
 import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
-import {
-  FindJobsLaunch,
-  selectFindJobsLaunchPage,
-} from "@renderer/features/job-finder/screens/discovery/find-jobs-launch";
+import { FindJobsScreen } from "@renderer/features/find-jobs/find-jobs-screen";
 import { JobFinderShellBrand } from "@renderer/features/job-finder/components/job-finder-shell-brand";
 import { SourceCheckQueueRunner } from "@renderer/features/job-finder/lib/source-check-queue-runner";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
@@ -98,7 +95,6 @@ export {
   JobFinderActionsRoute,
   JobFinderApplicationsRoute,
   JobFinderCampaignsRoute,
-  JobFinderDiscoveryRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
@@ -390,10 +386,9 @@ function JobFinderOpeningShell() {
   const isWindows = platform === "win32";
   const openingRouteLabel = getOpeningRouteLabel(location.pathname);
   const isOpeningHomeRoute = openingRouteLabel === "Home";
-  const findJobsLaunchPage =
-    location.pathname === "/job-finder/discovery" && !location.search
-      ? selectFindJobsLaunchPage(launchReads)
-      : null;
+  // Find jobs reads the job store, not the workspace, so it is usable
+  // before the rest of Job Finder has loaded.
+  const opensFindJobs = location.pathname === "/job-finder/discovery";
   const isLockedOpeningRoute = isOpeningRouteLocked(location.pathname);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
@@ -886,8 +881,8 @@ function JobFinderOpeningShell() {
                 and snapped it down on hydration on Profile, Find jobs and
                 Applications, which is why it is the component and not another
                 copied class string. */}
-            {findJobsLaunchPage ? (
-              <FindJobsLaunch {...findJobsLaunchPage} />
+            {opensFindJobs ? (
+              <FindJobsScreen />
             ) : isLockedOpeningRoute ? (
               <LockedScreenLayout
                 topContent={

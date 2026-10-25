@@ -2,9 +2,21 @@ import {
   JOB_COMMANDS,
   type JobCommandName,
   type JobCommandOutputs,
+  type JobSearchSettings,
+  type JobSearchStatus,
+  type JobSite,
 } from "@nestor/contracts";
 import type { JobStore } from "@nestor/db/job-store";
 import type { z } from "zod";
+
+/** What the commands need from the search runner. */
+export interface JobSearchControl {
+  start(settings: JobSearchSettings): Promise<unknown>;
+  stop(): void;
+  status(): JobSearchStatus;
+  /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
+  scoreUnscored(): Promise<number>;
+}
 
 type Handlers = {
   [K in JobCommandName]: (
@@ -26,17 +38,57 @@ export class UnknownJobCommandError extends Error {
 /**
  * Runs one job command after checking its input. The preload bridge and the
  * Assistant both call this, so a person and the chat can do the same things.
+ * `search` is resolved on first use: the runner needs the browser and AI.
  */
 export function createJobCommandRunner(deps: {
   store: JobStore;
+  /** Builds or returns the search runner; without it searches cannot start. */
+  search?: () => Promise<JobSearchControl>;
+  /** The runner if it already exists, so status reads never start it. */
+  currentSearch?: () => JobSearchControl | null;
+  /** The sites turned on in Profile. */
+  listSites?: () => Promise<JobSite[]>;
 }): RunJobCommand {
   const { store } = deps;
+  const search = () =>
+    deps.search?.() ??
+    Promise.reject(new Error("Searching is not available here."));
+  const current = () => deps.currentSearch?.() ?? null;
+  const status = (): JobSearchStatus =>
+    current()?.status() ?? {
+      search: store.searches.latest(),
+      sources: [],
+    };
   const handlers: Handlers = {
     list_jobs: (input) => store.listJobs(input),
     get_job: ({ id }) => store.getJob(id),
     stage_counts: () => store.stageCounts(),
-    move_jobs: (input) => store.moveJobs(input),
+    move_jobs: (input) => {
+      const result = store.moveJobs(input);
+      // A job shown again after the search hid it has no fit yet.
+      if (
+        result.moved > 0 &&
+        input.to !== "hidden" &&
+        store.unscoredJobIds(1).length > 0
+      ) {
+        void search()
+          .then((runner) => runner.scoreUnscored())
+          .catch(() => undefined);
+      }
+      return result;
+    },
     undo_move: ({ moveId }) => store.undoMove(moveId),
+    list_sites: async () => ({ sites: (await deps.listSites?.()) ?? [] }),
+    start_search: async (settings) => {
+      const runner = await search();
+      await runner.start(settings);
+      return runner.status();
+    },
+    stop_search: () => {
+      current()?.stop();
+      return status();
+    },
+    search_status: () => status(),
   };
 
   return async (name, input) => {

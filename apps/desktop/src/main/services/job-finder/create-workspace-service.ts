@@ -4,6 +4,8 @@ import {
   createPreparedApplicationFormStore,
 } from "./prepared-application-forms";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { scoreUnscoredJobs, setJobSearchServiceFactory } from "../job-commands";
+import { getJobStore } from "../job-store";
 import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
@@ -46,6 +48,8 @@ import {
 import {
   createDefaultListingHtmlFetcher,
   createJobFinderWorkspaceService,
+  createCurrentSearchEngine,
+  createJobSearchRunner,
 } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
 import { createResumeDraftProcessor } from "../../adapters/resume-draft-processor";
@@ -644,6 +648,42 @@ export async function createJobFinderWorkspaceServiceAsync(
     aiClient,
     desktopTestApiEnabled,
   });
+  // The new background search (Find jobs) runs on the same browser and AI.
+  setJobSearchServiceFactory(() =>
+    Promise.resolve(
+      createJobSearchRunner({
+        store: getJobStore(),
+        engine: createCurrentSearchEngine({
+          browserRuntime,
+          aiClient,
+          openBrowserSession: async (source, target) => {
+            await browserRuntime.openSession(source, {
+              purpose: "automation",
+              targetUrl: target.startingUrl,
+              targetId: target.id,
+            });
+          },
+        }),
+        readContext: async () => {
+          const [profile, searchPreferences, sourceInstructionArtifacts] =
+            await Promise.all([
+              jobFinderRepository.getProfile(),
+              jobFinderRepository.getSearchPreferences(),
+              jobFinderRepository.listSourceInstructionArtifacts(),
+            ]);
+          return {
+            profile,
+            searchPreferences,
+            sources: searchPreferences.discovery.targets,
+            sourceInstructionArtifacts,
+          };
+        },
+      }),
+    ),
+  );
+  if (getJobStore().unscoredJobIds(1).length > 0) {
+    setTimeout(scoreUnscoredJobs, 5_000).unref?.();
+  }
   const resumeDraftProcessor = createResumeDraftProcessor();
   const documentManager = createLocalJobFinderDocumentManager({
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
