@@ -6,12 +6,12 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  ApplyJobResultSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
 } from "@nestor/contracts";
 import { createFileJobFinderRepository } from "@nestor/db";
+import { createApplicationStore } from "@nestor/db/applications";
+import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import {
   executeExactlyOneFinalAction,
   observeApplicationForm,
@@ -133,58 +133,6 @@ async function waitForPostReceived(postReceived: Promise<void>): Promise<void> {
   });
 }
 
-async function seedParents(
-  repository: Awaited<ReturnType<typeof createFileJobFinderRepository>>,
-  origin: string,
-): Promise<void> {
-  await repository.upsertApplicationRecord(
-    ApplicationRecordSchema.parse({
-      id: "application_1",
-      jobId: "job_1",
-      title: "Synthetic application",
-      company: "Synthetic employer",
-      status: "approved",
-      lastActionLabel: "Application prepared",
-      nextActionLabel: "Review the prepared application",
-      lastUpdatedAt: NOW,
-      lastAttemptState: "ready",
-    }),
-  );
-  await repository.upsertApplyJobResult(
-    ApplyJobResultSchema.parse({
-      id: "result_1",
-      runId: "run_1",
-      jobId: "job_1",
-      applicationRecordId: "application_1",
-      state: "submitting",
-      summary: "Synthetic final action is ready.",
-      detail: "The synthetic executor is awaiting a durable outcome.",
-      startedAt: NOW,
-      updatedAt: NOW,
-      privacyReceipt: {
-        generatedAt: NOW,
-        lineage: {
-          runId: "run_1",
-          jobId: "job_1",
-          resultId: "result_1",
-          applicationRecordId: "application_1",
-        },
-        destination: { origin, safePath: "/apply" },
-        resume: {
-          source: "original_upload",
-          sourceDocumentId: "resume_1",
-          exportArtifactId: null,
-          fileName: "resume.pdf",
-          sha256: RESUME_SHA256,
-        },
-        finalSubmitAuthorized: true,
-        finalSubmitOccurred: false,
-        submissionOutcome: null,
-      },
-    }),
-  );
-}
-
 describe("desktop main application submission composition", () => {
   const temporaryDirectories: string[] = [];
 
@@ -202,6 +150,7 @@ describe("desktop main application submission composition", () => {
     );
     temporaryDirectories.push(temporaryDirectory);
     const fixture = await startSubmissionFixtureServer();
+    let jobs: JobStore | null = null;
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
     let repository: Awaited<
@@ -223,13 +172,52 @@ describe("desktop main application submission composition", () => {
         filePath: path.join(temporaryDirectory, "job-finder-state.sqlite"),
         seed: createEmptyJobFinderRepositoryState(),
       });
-      await seedParents(repository, origin);
+      jobs = openJobStore(":memory:");
+      const [jobId] = jobs.saveFoundJobs({
+        searchId: null,
+        jobs: [
+          {
+            title: "Synthetic application",
+            company: "Synthetic employer",
+            location: "Remote",
+            workModes: ["remote"],
+            url: `${origin}/apply`,
+            applyUrl: null,
+            sourceId: "replica",
+            sourceLabel: "Local replica",
+            sourceJobId: "1",
+            postedAt: null,
+            salaryText: null,
+            salaryMin: null,
+            salaryMax: null,
+            salaryCurrency: null,
+            seniority: null,
+            employmentType: null,
+            summary: null,
+            description: "Synthetic submission guard fixture",
+          },
+        ],
+      }).added;
+      jobs.setStage([jobId!], "resume");
+      const applications = createApplicationStore(jobs);
+      applications.applyJobs(
+        { selection: { ids: [jobId!] } },
+        "autonomous_submit",
+      );
+      const application = applications.claimNext()!;
+      const lineage = {
+        runId: `application_run_${application.id}`,
+        jobId: String(application.jobId),
+        resultId: `application_${application.id}_attempt_${application.attempt}`,
+        applicationRecordId: `application_${application.id}`,
+        campaignId: null,
+      };
       const authority = ApplicationAuthorityEnvelopeSchema.parse({
         id: "authority_1",
         mode: "autonomous_submit",
         status: "active",
         revision: 1,
-        scope: { campaignId: "campaign_1", jobIds: ["job_1"] },
+        scope: { campaignId: null, jobIds: [lineage.jobId] },
         maxApplicationsPerRun: 1,
         intermediateMutationsAuthorized: false,
         accountCreationAuthorized: false,
@@ -260,13 +248,7 @@ describe("desktop main application submission composition", () => {
         authorityRevision: authority.revision,
         preflightId: "preflight_1",
         idempotencyKey: "idempotency_1",
-        lineage: {
-          runId: "run_1",
-          jobId: "job_1",
-          resultId: "result_1",
-          applicationRecordId: "application_1",
-          campaignId: "campaign_1",
-        },
+        lineage,
         resumeBytes: RESUME_BYTES,
         answers: { revision: 1, digest: ANSWER_SHA256 },
         capacity: { remainingRunCapacity: 1 },
@@ -278,6 +260,9 @@ describe("desktop main application submission composition", () => {
         now: NOW,
       };
 
+      expect(
+        applications.beginSubmission(application.id, application.attempt),
+      ).toBe(true);
       const first = await runApplicationSubmissionRuntime(input);
       await waitForPostReceived(fixture.postReceived);
 
@@ -290,21 +275,30 @@ describe("desktop main application submission composition", () => {
       ).resolves.toMatchObject([
         { outcome: "outcome_uncertain", retry: { eligible: false } },
       ]);
-      const [projectedResult] = await repository.listApplyJobResults({
-        jobId: "job_1",
+      if (!("outcome" in first) || !first.outcome)
+        throw new Error("Missing uncertain outcome");
+      expect(
+        applications.recordSubmission(
+          application.id,
+          application.attempt,
+          first.outcome,
+        ),
+      ).toBe(true);
+      expect(applications.getApplication(application.id)?.state).toBe(
+        "uncertain",
+      );
+      expect(applications.getSubmissionReceipt(application.id)?.retry).toEqual({
+        eligible: false,
+        blockReason: "outcome_uncertain",
       });
-      expect(projectedResult).toMatchObject({
-        state: "blocked",
-        privacyReceipt: {
-          finalSubmitOccurred: false,
-          submissionOutcome: { outcome: "outcome_uncertain" },
-        },
-      });
-      const [projectedApplication] = await repository.listApplicationRecords();
-      expect(projectedApplication).toMatchObject({
-        lastAttemptState: "paused",
-        latestBlocker: { code: "requires_manual_review" },
-      });
+      expect(
+        applications.applyJobs({ selection: { ids: [application.jobId] } })
+          .queued,
+      ).toBe(0);
+      expect(applications.claimNext()).toBeNull();
+      expect(
+        applications.beginSubmission(application.id, application.attempt),
+      ).toBe(false);
 
       const second = await runApplicationSubmissionRuntime(input);
       expect(second).toMatchObject({
@@ -317,6 +311,7 @@ describe("desktop main application submission composition", () => {
     } finally {
       await context?.close().catch(() => undefined);
       await browser?.close().catch(() => undefined);
+      jobs?.close();
       await repository?.close().catch(() => undefined);
       await fixture.close().catch(() => undefined);
     }

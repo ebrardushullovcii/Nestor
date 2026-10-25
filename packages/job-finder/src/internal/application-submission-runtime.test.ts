@@ -593,15 +593,24 @@ describe("composed application submission runtime", () => {
       reason: "idempotency_outcome_uncertain",
     });
     expect(browser.calls.execute).toBe(1);
-    const [projectedResult] = await harness.repository.listApplyJobResults({
-      jobId: "job_1",
+    await expect(
+      harness.repository.getSubmissionIdempotencyRecord(
+        harness.runtimeInput.idempotencyKey,
+      ),
+    ).resolves.toMatchObject({
+      status: "outcome_uncertain",
+      outcome: "outcome_uncertain",
     });
-    const [projectedApplication] =
-      await harness.repository.listApplicationRecords();
-    expect(projectedResult?.privacyReceipt?.submissionOutcome?.outcome).toBe(
-      "outcome_uncertain",
-    );
-    expect(projectedApplication?.lastAttemptState).toBe("paused");
+    await expect(
+      harness.repository.listSubmissionOutcomeRecords({
+        idempotencyKey: harness.runtimeInput.idempotencyKey,
+      }),
+    ).resolves.toMatchObject([
+      {
+        outcome: "outcome_uncertain",
+        retry: { eligible: false, blockReason: "outcome_uncertain" },
+      },
+    ]);
   });
 });
 

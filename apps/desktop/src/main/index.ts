@@ -22,6 +22,7 @@ import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerTrackerRoutes } from "./routes/tracker";
 import { stopResumeService } from "./services/resumes";
+import { stopApplicationService } from "./services/applications";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -123,7 +124,6 @@ const deferredBackgroundInit = createDeferredBackgroundInitController({
   loadLiveAssistantModule,
   loadInterviewOverlayModule,
   loadInterviewSessionControlsModule,
-  resumeApplyQueueAfterRestart,
   initializeInterviewSurfaces: (overlay, sessionControls) => {
     closeInterviewOverlayWindows = overlay.closeInterviewOverlayWindows;
     disposeInterviewSessionControls =
@@ -308,15 +308,6 @@ void app
 let jobFinderShutdownInFlight = false;
 let quitApprovedByCloseGuard = false;
 
-function resumeApplyQueueAfterRestart(): void {
-  // An Apply queue that was running carries on.
-  void import("./routes/job-finder")
-    .then((routes) => routes.resumeApplyQueueAfterRestart())
-    .catch((error: unknown) => {
-      console.error("Could not carry on the Apply queue.", error);
-    });
-}
-
 async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
   if (!jobFinderServicesPromise) {
     return;
@@ -424,6 +415,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopApplicationService();
   stopResumeService();
   closeJobStore();
   disposeInterviewSessionControls();

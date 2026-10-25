@@ -1,3 +1,4 @@
+import { SubmissionOutcomeRecordSchema } from "@nestor/contracts";
 import type {
   FoundJob,
   JobChange,
@@ -79,6 +80,97 @@ function question(
 }
 
 describe("applications on the job store", () => {
+  it("binds confirmed receipts to one attempt and never requeues a confirmed or uncertain send", () => {
+    const { jobs, applications } = open();
+    const ids = add(jobs, 2);
+    applications.applyJobs({ selection: { ids } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const at = new Date().toISOString();
+    const receipt = SubmissionOutcomeRecordSchema.parse({
+      id: "receipt",
+      preflightId: "preflight",
+      idempotencyKey: "send",
+      authorityEnvelopeId: "permission",
+      authorityRevision: 1,
+      jobId: String(first.jobId),
+      applicationRecordId: `application_${first.id}`,
+      runId: `application_run_${first.id}`,
+      resultId: `application_${first.id}_attempt_${first.attempt}`,
+      outcome: "submitted",
+      attemptedAt: at,
+      verifiedAt: at,
+      evidence: [
+        {
+          id: "employer",
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: {
+            origin: "https://jobs.example.test",
+            safePath: "/thanks",
+          },
+          artifactRefId: null,
+          summary: "The employer confirmed receipt.",
+        },
+      ],
+      retry: { eligible: false, blockReason: "submission_confirmed" },
+    });
+    expect(
+      applications.recordSubmission(first.id, first.attempt, receipt),
+    ).toBe(false);
+    applications.beginSubmission(first.id, first.attempt);
+    expect(() =>
+      applications.recordSubmission(first.id, first.attempt, {
+        ...receipt,
+        resultId: "another_attempt",
+      }),
+    ).toThrow("another application attempt");
+    expect(jobs.getJob(first.jobId)?.stage).toBe("resume");
+    expect(
+      applications.recordSubmission(first.id, first.attempt, receipt),
+    ).toBe(true);
+    expect(
+      applications.recordSubmission(first.id, first.attempt, receipt),
+    ).toBe(false);
+    expect(jobs.getJob(first.jobId)?.stage).toBe("applied");
+    applications.beginSubmission(second.id, second.attempt);
+    applications.submissionUnknown(second.id, second.attempt);
+    expect(applications.applyJobs({ selection: { ids } }).queued).toBe(0);
+    expect(applications.stop(second.id)).toBe(false);
+  });
+
+  it("reads remembered answers only for the questions visible on the current form", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const requested = applications.needsYou.request(
+      question(first.id, first.attempt, { scope: {} }),
+    );
+    if (requested.status !== "needs_you") throw new Error("Missing question");
+    applications.needsYou.answer({
+      id: requested.task.id,
+      answer: "No",
+      remember: true,
+    });
+    expect(
+      applications.needsYou
+        .answersForQuestions(
+          second.id,
+          ["sponsorship"],
+          "https://jobs.example.test",
+        )
+        .map((answer) => answer.answer),
+    ).toEqual(["No"]);
+    expect(
+      applications.needsYou.answersForQuestions(
+        second.id,
+        ["different-question"],
+        "https://jobs.example.test",
+      ),
+    ).toEqual([]);
+  });
+
   it("retains the mode chosen at Apply and accepts a changed mode only on an explicit retry", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 1);

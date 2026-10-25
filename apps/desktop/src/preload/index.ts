@@ -8,6 +8,19 @@ import {
   JobChangeSchema,
   ApplicationStoreDemoInputSchema,
   ApplicationStoreDemoResultSchema,
+  ApplicationTargetSchema,
+  ApplicationsForJobsInputSchema,
+  ApplicationRowSchema,
+  ApplicationDetailsSchema,
+  ApplicationCommandResultSchema,
+  NeedsYouListQuerySchema,
+  NeedsYouPageSchema,
+  AnswerNeedsYouInputSchema,
+  AnswerNeedsYouResultSchema,
+  type ApplicationTarget,
+  type ApplicationsForJobsInput,
+  type NeedsYouListQuery,
+  type AnswerNeedsYouInput,
   type ApplicationListQuery,
   type ApplyJobsInput,
   type JobChange,
@@ -616,6 +629,48 @@ const desktopApi = {
           ApplicationListQuerySchema.parse(input),
         )
         .then((result) => ApplicationListPageSchema.parse(result)),
+    applicationsForJobs: (input: ApplicationsForJobsInput) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:applications-for-jobs",
+          ApplicationsForJobsInputSchema.parse(input),
+        )
+        .then((result) => ApplicationRowSchema.array().parse(result)),
+    getApplicationDetails: (input: ApplicationTarget) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:get-application-details",
+          ApplicationTargetSchema.parse(input),
+        )
+        .then((result) => ApplicationDetailsSchema.nullable().parse(result)),
+    openApplication: (input: ApplicationTarget) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:open-application",
+          ApplicationTargetSchema.parse(input),
+        )
+        .then((result) => ApplicationCommandResultSchema.parse(result)),
+    stopApplication: (input: ApplicationTarget) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:stop-application",
+          ApplicationTargetSchema.parse(input),
+        )
+        .then((result) => ApplicationCommandResultSchema.parse(result)),
+    listNeedsYou: (input: NeedsYouListQuery = {}) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:list-needs-you",
+          NeedsYouListQuerySchema.parse(input),
+        )
+        .then((result) => NeedsYouPageSchema.parse(result)),
+    answerNeedsYou: (input: AnswerNeedsYouInput) =>
+      ipcRenderer
+        .invoke(
+          "job-finder:answer-needs-you",
+          AnswerNeedsYouInputSchema.parse(input),
+        )
+        .then((result) => AnswerNeedsYouResultSchema.parse(result)),
     onApplicationsChange: (listener: (change: JobChange) => void) => {
       const handler = (_event: unknown, value: unknown) =>
         listener(JobChangeSchema.parse(value));

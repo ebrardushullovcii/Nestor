@@ -3,6 +3,14 @@ import type { DesktopTrackerBridge } from "./tracker";
 import type {
   ApplicationListPage,
   ApplicationListQuery,
+  ApplicationRow,
+  ApplicationTarget,
+  ApplicationsForJobsInput,
+  ApplicationDetails,
+  NeedsYouListQuery,
+  NeedsYouPage,
+  AnswerNeedsYouInput,
+  AnswerNeedsYouResult,
   ApplyJobsInput,
   ApplyJobsResult,
   JobChange,
@@ -275,6 +283,18 @@ declare global {
         listApplications: (
           input?: ApplicationListQuery,
         ) => Promise<ApplicationListPage>;
+        applicationsForJobs: (
+          input: ApplicationsForJobsInput,
+        ) => Promise<ApplicationRow[]>;
+        getApplicationDetails: (
+          input: ApplicationTarget,
+        ) => Promise<ApplicationDetails | null>;
+        openApplication: (input: ApplicationTarget) => Promise<boolean>;
+        stopApplication: (input: ApplicationTarget) => Promise<boolean>;
+        listNeedsYou: (input?: NeedsYouListQuery) => Promise<NeedsYouPage>;
+        answerNeedsYou: (
+          input: AnswerNeedsYouInput,
+        ) => Promise<AnswerNeedsYouResult>;
         onApplicationsChange: (
           listener: (change: JobChange) => void,
         ) => () => void;

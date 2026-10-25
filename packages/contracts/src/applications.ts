@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { IsoDateTimeSchema } from "./base";
 import { JobIdSchema, JobSelectionSchema } from "./jobs";
-import { ApplicationApplyModeSchema } from "./application-authority";
+import { ApplicationReviewCardSchema } from "./apply";
+import {
+  ApplicationApplyModeSchema,
+  SubmissionOutcomeRecordSchema,
+} from "./application-authority";
 
 export const ApplyJobsInputSchema = z
   .object({ selection: JobSelectionSchema })
@@ -48,6 +52,26 @@ export const ApplicationRowSchema = z.object({
   error: z.string().nullable(),
 });
 export type ApplicationRow = z.infer<typeof ApplicationRowSchema>;
+export const ApplicationTargetSchema = z
+  .object({ id: ApplicationIdSchema })
+  .strict();
+export type ApplicationTarget = z.infer<typeof ApplicationTargetSchema>;
+export const ApplicationCommandResultSchema = z.boolean();
+export const ApplicationsForJobsInputSchema = z
+  .object({ jobIds: z.array(JobIdSchema).max(200) })
+  .strict();
+export type ApplicationsForJobsInput = z.infer<
+  typeof ApplicationsForJobsInputSchema
+>;
+export const ApplicationDetailsSchema = z.object({
+  application: ApplicationRowSchema,
+  summary: z.string().nullable(),
+  detail: z.string().nullable(),
+  resumeFileName: z.string().nullable(),
+  reviewCard: ApplicationReviewCardSchema.nullable(),
+  receipt: SubmissionOutcomeRecordSchema.nullable(),
+});
+export type ApplicationDetails = z.infer<typeof ApplicationDetailsSchema>;
 export const ApplicationPreparationUpdateSchema = z
   .object({
     id: ApplicationIdSchema,

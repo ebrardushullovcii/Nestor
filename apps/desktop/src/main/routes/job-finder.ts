@@ -125,25 +125,14 @@ import type {
   JobFinderWorkspaceSyncResult,
   JobFinderResumePdfExportReply,
 } from "@nestor/contracts";
-import {
-  JobFinderApplyQueueControlInputSchema,
-  JobFinderRemoveFromApplyQueueInputSchema,
-  JobFinderApproveResumesInputSchema,
-  JobFinderStartApplyQueueInputSchema,
-  type ApplicationAutomationMode,
-  type ApplyQueueSkippedJob,
-} from "@nestor/contracts";
+
 import {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
   resolveTailoredAssetLabel,
   withApplicationAuthorityGate,
 } from "@nestor/job-finder";
-import {
-  createApplyQueueRunner,
-  type ApplyQueueRunner,
-  type ApplyQueueStartedRun,
-} from "../services/job-finder/apply-queue-runner";
+
 import {
   buildPersonalWorkspaceExport,
   personalWorkspaceExportFileName,
@@ -160,10 +149,8 @@ import {
   withJobFinderWorkspaceUpdates,
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
-import type { ApplyQueue } from "@nestor/contracts";
 import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
 import {
-  applyQueueFinishedNotice,
   searchFinishedNotice,
 } from "../setup/finished-work-notices";
 import {
@@ -734,247 +721,6 @@ export async function approveApplicationResumes(
   }
 }
 
-/**
- * Starts a batch for `jobIds` in the saved apply mode, exactly as "Try again
- * for all" does: jobs already in a running batch are left out, resumes are
- * approved, the saved mode's permission is issued, and the press returns once
- * the batch runs. Used to carry applications on after the person hands the
- * browser back.
- */
-export async function startSavedModeApplyBatch(
-  jobIds: readonly string[],
-  onBackgroundSettled: () => void,
-): Promise<void> {
-  const service = await getJobFinderWorkspaceService();
-  const repository = getJobFinderRepositoryForWorkspaceService(service);
-  if (!repository) return;
-  const pendingIds = await listJobsNotInProgress(repository, jobIds);
-  if (pendingIds.length === 0) return;
-  const heldBack = new Set(
-    (
-      await approveApplicationResumes(service, pendingIds, {
-        holdBackResumesAwaitingPerson: true,
-      })
-    ).map((entry) => entry.jobId),
-  );
-  const ids = pendingIds.filter((jobId) => !heldBack.has(jobId));
-  if (ids.length === 0) return;
-  await syncApplicationAuthorityForSavedMode(service, ids);
-  await startApplyBatch({
-    service,
-    runs: repository,
-    jobIds: ids,
-    onBackgroundSettled,
-  });
-}
-
-/**
- * One run of an Apply queue: the same start as "Apply to all" (resumes
- * approved, the mode's permission issued, the press returns once the run is
- * going). Jobs that cannot go now are named with the reason instead of
- * stopping the run: a resume that waits on the person, or one whose PDF
- * could not be made.
- */
-async function startApplyQueueRun(
-  jobIds: readonly string[],
-  mode: ApplicationAutomationMode,
-): Promise<ApplyQueueStartedRun> {
-  const service = await getJobFinderWorkspaceService();
-  const repository = getJobFinderRepositoryForWorkspaceService(service);
-  if (!repository) {
-    throw new Error(
-      "Job Finder could not open the application workspace, so nothing was started.",
-    );
-  }
-  const queue = await repository.getApplyQueue();
-  const { assistantQueuePolicy } =
-    await import("../services/assistant/assistant-service");
-  const policy = queue
-    ? await assistantQueuePolicy(queue, jobIds, mode)
-    : { mode, refused: [] };
-  mode = policy.mode;
-  const refused = new Set(policy.refused.map((entry) => entry.jobId));
-  const pendingIds = await listJobsNotInProgress(
-    repository,
-    jobIds.filter((id) => !refused.has(id)),
-  );
-  const skipped: ApplyQueueSkippedJob[] = [];
-  skipped.push(...policy.refused);
-  let heldBack: Awaited<ReturnType<typeof approveApplicationResumes>>;
-  try {
-    heldBack = await approveApplicationResumes(service, pendingIds, {
-      holdBackResumesAwaitingPerson: true,
-    });
-  } catch {
-    // One job's resume failed the whole call; find which one by itself.
-    heldBack = [];
-    for (const jobId of pendingIds) {
-      try {
-        heldBack.push(
-          ...(await approveApplicationResumes(service, [jobId], {
-            holdBackResumesAwaitingPerson: true,
-          })),
-        );
-      } catch (error: unknown) {
-        skipped.push({
-          jobId,
-          reason: (error instanceof Error
-            ? error.message
-            : String(error)
-          ).slice(0, 500),
-        });
-      }
-    }
-  }
-  skipped.push(
-    ...heldBack.map((entry) => ({
-      jobId: entry.jobId,
-      reason: entry.reason.slice(0, 500),
-    })),
-  );
-  const notGoing = new Set(skipped.map((entry) => entry.jobId));
-  const ids = pendingIds.filter((jobId) => !notGoing.has(jobId));
-  if (ids.length === 0) {
-    return {
-      runId: null,
-      startedJobIds: [],
-      skipped,
-      settled: Promise.resolve(),
-    };
-  }
-  await syncApplicationAuthorityForSavedMode(service, ids, mode);
-  let markSettled!: () => void;
-  const settled = new Promise<void>((resolve) => {
-    markSettled = resolve;
-  });
-  const started = await startApplyBatch({
-    service,
-    runs: repository,
-    jobIds: ids,
-    applicationAutomationMode: mode,
-    onBackgroundSettled: () => {
-      publishJobFinderWorkspaceUpdate();
-      markSettled();
-    },
-  });
-  if (started.startedJobIds.length === 0) markSettled();
-  return {
-    runId: started.runId,
-    startedJobIds: started.startedJobIds,
-    skipped,
-    settled,
-  };
-}
-
-async function requireApplyQueueRepository() {
-  const service = await getJobFinderWorkspaceService();
-  const repository = getJobFinderRepositoryForWorkspaceService(service);
-  if (!repository) {
-    throw new Error("Job Finder could not open the application workspace.");
-  }
-  return { service, repository };
-}
-
-let applyQueueRunner: ApplyQueueRunner | null = null;
-
-/** Shared by the buttons and the registered assistant actions. */
-export async function executeApplyQueueAction(
-  actionId: string,
-  input: unknown,
-  options: { onApproveProgress?: (done: number) => void } = {},
-) {
-  const { service, repository } = await requireApplyQueueRepository();
-  if (actionId === "start-apply-queue") {
-    const value = JobFinderStartApplyQueueInputSchema.parse(input);
-    const mode = value.applicationAutomationMode ?? (await repository.getSettings()).applicationAutomationMode ?? "confirm_before_submit";
-    await getApplyQueueRunner().start(value.jobIds, mode);
-  } else if (actionId === "control-apply-queue") {
-    const value = JobFinderApplyQueueControlInputSchema.parse(input);
-    if (
-      !value.queueId ||
-      (await repository.getApplyQueue())?.id === value.queueId
-    ) {
-      await getApplyQueueRunner().control(value.action);
-    }
-  } else if (actionId === "remove-from-apply-queue") {
-    await getApplyQueueRunner().remove(
-      JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds,
-    );
-  } else if (actionId === "approve-resumes") {
-    await approveApplicationResumes(
-      service,
-      JobFinderApproveResumesInputSchema.parse(input).jobIds,
-      {
-        personApproved: true,
-        ...(options.onApproveProgress
-          ? { onProgress: options.onApproveProgress }
-          : {}),
-      },
-    );
-  } else {
-    throw new Error("Unknown Apply queue action.");
-  }
-  return readWorkspaceProjection(service);
-}
-
-/** A running queue fills the taskbar button; a finished one says so once. */
-function noteApplyQueueOnTaskbar(queue: ApplyQueue | null): void {
-  const notices = getFinishedWorkNotifier();
-  if (queue?.state === "running") {
-    notices.progress(
-      "apply",
-      queue.jobIds.length > 0
-        ? queue.startedJobIds.length / queue.jobIds.length
-        : null,
-    );
-    return;
-  }
-  notices.end(
-    "apply",
-    queue?.state === "done" && queue.startedJobIds.length > 0
-      ? applyQueueFinishedNotice(
-          queue.startedJobIds.length,
-          queue.mode === "autonomous_submit",
-        )
-      : null,
-  );
-}
-
-/** The one Apply queue (Apply to selected, this page or all ready). */
-export function getApplyQueueRunner(): ApplyQueueRunner {
-  applyQueueRunner ??= createApplyQueueRunner({
-    loadQueue: async () =>
-      (await requireApplyQueueRepository()).repository.getApplyQueue(),
-    saveQueue: async (queue) => {
-      await (
-        await requireApplyQueueRepository()
-      ).repository.saveApplyQueue(queue);
-      noteApplyQueueOnTaskbar(queue);
-    },
-    readSavedMode: async () =>
-      (await (await requireApplyQueueRepository()).repository.getSettings())
-        .applicationAutomationMode ?? "confirm_before_submit",
-    isActivityPaused: async () =>
-      (
-        await (
-          await requireApplyQueueRepository()
-        ).repository.getActivityControl()
-      ).paused,
-    startRun: startApplyQueueRun,
-    cancelRun: async (runId) => {
-      const { service } = await requireApplyQueueRepository();
-      await service.cancelApplyRun(runId);
-    },
-    publish: () => publishJobFinderWorkspaceUpdate(),
-  });
-  return applyQueueRunner;
-}
-
-/** At launch: a queue that was running carries on. */
-export async function resumeApplyQueueAfterRestart(): Promise<void> {
-  await getApplyQueueRunner().resumeAfterRestart();
-}
-
 /** Jobs the search that just ended saved for the person to look at. */
 function countNewJobsOfLatestRun(snapshot: {
   recentDiscoveryRuns?: readonly {
@@ -1329,14 +1075,6 @@ export function registerJobFinderRouteHandlers(
       name === "judge-unjudged-jobs"
         ? await withJobFinderWorkspaceUpdates(event.sender, run)
         : await run();
-    if (
-      [
-        "save-settings",
-        "update-application-defaults",
-        "set-activity-control",
-      ].includes(name)
-    )
-      applyQueueRunner?.nudge();
     // Some changes answer with their own record (application details, a
     // recommendation); only a workspace snapshot becomes a sync response.
     const isWorkspaceSnapshot =
@@ -2895,93 +2633,6 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(
         event.sender,
         await readWorkspaceProjection(jobFinderWorkspaceService),
-      );
-    },
-  );
-
-  // One Apply press over many jobs (ADR 0058): runs of ten back to back,
-  // carried on after a restart.
-  ipcMain.handle(
-    "job-finder:start-apply-queue",
-    async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction(
-        "start-apply-queue",
-        payload,
-        {
-          service: await getJobFinderWorkspaceService(),
-          host: executeApplyQueueAction,
-        },
-      );
-      return workspaceMutationResponse(
-        event.sender,
-        snapshot as JobFinderWorkspaceSnapshot,
-      );
-    },
-  );
-
-  // "Approve N resumes": the person's press approves each named resume as
-  // the single Approve does; a line still to decide keeps its resume out.
-  ipcMain.handle(
-    "job-finder:approve-resumes",
-    async (event, payload: unknown) => {
-      // Approvals land on screen ten at a time while the rest finish.
-      const onApproveProgress = (done: number) => {
-        if (done > 0 && done % 10 === 0)
-          publishJobFinderWorkspaceUpdate(event.sender);
-      };
-      const snapshot = await executeJobFinderAction(
-        "approve-resumes",
-        payload,
-        {
-          service: await getJobFinderWorkspaceService(),
-          host: (actionId, input) =>
-            executeApplyQueueAction(actionId, input, { onApproveProgress }),
-        },
-      );
-      return workspaceMutationResponse(
-        event.sender,
-        snapshot as JobFinderWorkspaceSnapshot,
-      );
-    },
-  );
-
-  // Takes waiting jobs out of the queue. Nothing starts or is sent; a job a
-  // run already took stays with that run.
-  ipcMain.handle(
-    "job-finder:remove-from-apply-queue",
-    async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction(
-        "remove-from-apply-queue",
-        payload,
-        {
-          service: await getJobFinderWorkspaceService(),
-          host: executeApplyQueueAction,
-        },
-      );
-      return workspaceMutationResponse(
-        event.sender,
-        snapshot as JobFinderWorkspaceSnapshot,
-      );
-    },
-  );
-
-  // Applications -> Shortlisted for an application nothing was sent for. Its
-  // form closes; nothing is sent or prepared again.
-
-  ipcMain.handle(
-    "job-finder:control-apply-queue",
-    async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction(
-        "control-apply-queue",
-        payload,
-        {
-          service: await getJobFinderWorkspaceService(),
-          host: executeApplyQueueAction,
-        },
-      );
-      return workspaceMutationResponse(
-        event.sender,
-        snapshot as JobFinderWorkspaceSnapshot,
       );
     },
   );

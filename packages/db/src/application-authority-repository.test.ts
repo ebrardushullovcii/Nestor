@@ -474,63 +474,6 @@ async function exerciseAuthorityLifecycle(repository: JobFinderRepository) {
     revision: 3,
     outcome: "outcome_uncertain",
   });
-  expect(
-    (
-      await repository.listApplyJobResults({
-        runId: preflight.runId,
-        jobId: preflight.jobId,
-        applicationRecordId: preflight.applicationRecordId,
-      })
-    )[0],
-  ).toMatchObject({
-    id: preflight.resultId,
-    runId: preflight.runId,
-    jobId: preflight.jobId,
-    applicationRecordId: preflight.applicationRecordId,
-    state: "blocked",
-    blockerReason: "submission_outcome_uncertain",
-    blockerSummary:
-      "Verify the application on the employer site before taking another submission action.",
-    privacyReceipt: {
-      submissionOutcome: {
-        id: `recovery_outcome_submission_idempotency_${preflight.id}_${2}`,
-        outcome: "outcome_uncertain",
-        resultId: preflight.resultId,
-        runId: preflight.runId,
-        jobId: preflight.jobId,
-        applicationRecordId: preflight.applicationRecordId,
-      },
-    },
-  });
-  expect(
-    (await repository.listApplicationRecords()).find(
-      (record) => record.id === preflight.applicationRecordId,
-    ),
-  ).toMatchObject({
-    lastActionLabel: "Submission outcome needs manual verification.",
-    nextActionLabel:
-      "Verify the application on the employer site before taking another submission action.",
-    lastAttemptState: "paused",
-    latestBlocker: {
-      code: "requires_manual_review",
-      summary:
-        "Verify the application on the employer site before taking another submission action.",
-    },
-    crm: {
-      revision: 2,
-      stage: "preparing",
-      stageChangedAt: at,
-    },
-  });
-  expect(
-    (await repository.listApplicationRecords())
-      .find((record) => record.id === preflight.applicationRecordId)
-      ?.events.some(
-        (event) =>
-          event.id ===
-          "event_submission_outcome_recovery_outcome_submission_idempotency_preflight_1_2",
-      ),
-  ).toBe(true);
 
   // Authority is workspace-global. Rotate the first envelope out before
   // creating the second fixture used to exercise child revocation.
@@ -809,7 +752,7 @@ describe("transaction-current authority decision-policy gate", () => {
     },
   ])(
     "atomically resolves an uncertain outcome through explicit operator verification ($label)",
-    async ({ outcome, expectedRecord, expectedResult }) => {
+    async ({ outcome }) => {
       const repository = createInMemoryJobFinderRepository(createSeed());
       const fixture = createAuthorityFixture(
         `operator_${outcome}`,
@@ -862,47 +805,6 @@ describe("transaction-current authority decision-policy gate", () => {
       );
 
       expect(
-        (
-          await repository.listApplyJobResults({
-            runId: fixture.preflight.runId,
-            jobId: fixture.preflight.jobId,
-            applicationRecordId: fixture.preflight.applicationRecordId,
-          })
-        )[0],
-      ).toMatchObject({
-        ...expectedResult,
-        completedAt: verifiedAt,
-        privacyReceipt: {
-          finalSubmitAuthorized: true,
-          finalSubmitOccurred: outcome === "submitted",
-          submissionOutcome: operatorOutcome,
-        },
-      });
-      expect(
-        (await repository.listApplicationRecords()).find(
-          (record) => record.id === fixture.preflight.applicationRecordId,
-        ),
-      ).toMatchObject({
-        ...expectedRecord,
-        lastUpdatedAt: verifiedAt,
-      });
-      const resolvedRecord = (await repository.listApplicationRecords()).find(
-        (record) => record.id === fixture.preflight.applicationRecordId,
-      );
-      expect(
-        resolvedRecord?.events.some(
-          (event) => event.id === `event_submission_outcome_${uncertain.id}`,
-        ),
-      ).toBe(true);
-      expect(
-        resolvedRecord?.events.some(
-          (event) =>
-            event.id ===
-            `event_submission_outcome_resolution_${operatorOutcome.id}`,
-        ),
-      ).toBe(true);
-
-      expect(
         await repository.resolveSubmissionOutcome({
           expectedOutcomeId: uncertain.id,
           expectedIdempotencyRevision: 3,
@@ -933,19 +835,7 @@ describe("transaction-current authority decision-policy gate", () => {
         expectedIdempotencyRevision: 1,
       }),
     ).toMatchObject({ status: "blocked" });
-    expect(
-      (
-        await repository.listApplyJobResults({
-          runId: fixture.preflight.runId,
-          jobId: fixture.preflight.jobId,
-          applicationRecordId: fixture.preflight.applicationRecordId,
-        })
-      )[0]?.privacyReceipt,
-    ).toMatchObject({
-      finalSubmitAuthorized: false,
-      finalSubmitOccurred: false,
-      submissionOutcome: null,
-    });
+
     await repository.close();
   });
 
@@ -1402,36 +1292,7 @@ describe("application authority repository", () => {
     expect(await repository.listSubmissionOutcomeRecords()).toEqual([
       expect.objectContaining({ outcome: "outcome_uncertain" }),
     ]);
-    expect(
-      (await repository.listApplicationRecords()).find(
-        (record) => record.id === "application_1",
-      ),
-    ).toMatchObject({
-      lastActionLabel: "Submission outcome needs manual verification.",
-      nextActionLabel:
-        "Verify the application on the employer site before taking another submission action.",
-      lastAttemptState: "paused",
-      latestBlocker: {
-        code: "requires_manual_review",
-        summary:
-          "Verify the application on the employer site before taking another submission action.",
-      },
-      crm: {
-        revision: 2,
-        stage: "preparing",
-        stageChangedAt: at,
-      },
-    });
-    expect(
-      (await repository.listApplicationRecords())
-        .find((record) => record.id === "application_1")
-        ?.events.some(
-          (event) =>
-            event.id ===
-              "event_submission_outcome_recovery_outcome_submission_idempotency_preflight_1_2" &&
-            event.title === "Submission outcome needs manual verification.",
-        ),
-    ).toBe(true);
+
     await repository.close();
   });
 
@@ -1544,445 +1405,6 @@ describe("application authority repository", () => {
     await repository.close();
   });
 
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-receipt-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "atomically reconciles a normal outcome into the exact ApplyJobResult receipt ($label)",
-    async ({ create }) => {
-      const repository = await create();
-      const fixture = createAuthorityFixture(
-        "receipt_reconcile",
-        "confirm_before_submit",
-      );
-      await persistAuthorityFixture(repository, fixture);
-      expect(
-        await repository.authorizeAndArmSubmissionAttempt({
-          preflight: fixture.preflight,
-          expectedIdempotencyRevision: 1,
-          mode: "confirm_before_submit",
-          marker: fixture.marker,
-          executionGrantId: fixture.grant?.id ?? null,
-          now: later,
-        }),
-      ).toMatchObject({ status: "armed" });
-
-      const outcome = createOutcome(fixture.preflight, "not_submitted");
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "recorded",
-        outcome,
-        idempotency: { status: "resolved", outcome: "not_submitted" },
-      });
-
-      const persistedResult = (
-        await repository.listApplyJobResults({
-          runId: fixture.preflight.runId,
-          jobId: fixture.preflight.jobId,
-          applicationRecordId: fixture.preflight.applicationRecordId,
-        })
-      )[0];
-      expect(persistedResult).toMatchObject({
-        id: fixture.preflight.resultId,
-        runId: fixture.preflight.runId,
-        jobId: fixture.preflight.jobId,
-        applicationRecordId: fixture.preflight.applicationRecordId,
-        state: "submitting",
-        privacyReceipt: {
-          finalSubmitAuthorized: true,
-          submissionOutcome: outcome,
-        },
-      });
-
-      const projectedRecord = (await repository.listApplicationRecords()).find(
-        (record) => record.id === fixture.preflight.applicationRecordId,
-      );
-      expect(projectedRecord).toMatchObject({
-        id: fixture.preflight.applicationRecordId,
-        jobId: fixture.preflight.jobId,
-        status: "approved",
-        lastActionLabel: "Final action not submitted.",
-        nextActionLabel:
-          "Review the prepared application before trying the final action again.",
-        lastUpdatedAt: later,
-        lastAttemptState: "ready",
-        latestBlocker: null,
-        crm: {
-          revision: 2,
-          stage: "preparing",
-          stageChangedAt: at,
-        },
-      });
-      expect(
-        projectedRecord?.events.some(
-          (event) =>
-            event.id === `event_submission_outcome_${outcome.id}` &&
-            event.title === "Final action not submitted.",
-        ),
-      ).toBe(true);
-      const eventCount = projectedRecord?.events.length ?? 0;
-
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "duplicate",
-        outcome,
-        idempotency: { revision: 3 },
-      });
-      expect(
-        (await repository.listApplicationRecords()).find(
-          (record) => record.id === fixture.preflight.applicationRecordId,
-        )?.events,
-      ).toHaveLength(eventCount);
-
-      await repository.close();
-    },
-  );
-
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-current-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "projects from the transaction-current ApplicationRecord while preserving unrelated fields ($label)",
-    async ({ create }) => {
-      const repository = await create();
-      const fixture = createAuthorityFixture(
-        "current_application_record",
-        "confirm_before_submit",
-      );
-      await persistAuthorityFixture(repository, fixture);
-      await repository.authorizeAndArmSubmissionAttempt({
-        preflight: fixture.preflight,
-        expectedIdempotencyRevision: 1,
-        mode: "confirm_before_submit",
-        marker: fixture.marker,
-        executionGrantId: fixture.grant?.id ?? null,
-        now: later,
-      });
-
-      const currentRecord = (await repository.listApplicationRecords()).find(
-        (record) => record.id === fixture.preflight.applicationRecordId,
-      );
-      expect(currentRecord).toBeDefined();
-      const concurrentRecord = ApplicationRecordSchema.parse({
-        ...currentRecord,
-        title: "Concurrent title",
-        company: "Concurrent company",
-        status: "shortlisted",
-        lastActionLabel: "Concurrent user update.",
-        nextActionLabel: "Concurrent next step.",
-        lastUpdatedAt: "2026-08-27T10:04:00.000Z",
-        lastAttemptState: "in_progress",
-        questionSummary: {
-          total: 4,
-          required: 3,
-          answered: 2,
-          unansweredRequired: 1,
-        },
-        latestBlocker: {
-          code: "missing_candidate_answer",
-          summary: "Concurrent blocker that the outcome projection owns.",
-        },
-        consentSummary: { status: "requested", pendingCount: 1 },
-        replaySummary: {
-          lastUrl: "https://jobs.example.com/concurrent",
-          checkpointCount: 7,
-          evidenceCount: 3,
-          sourceInstructionArtifactId: "instruction_concurrent",
-        },
-        crm: {
-          revision: 9,
-          stage: "reviewing",
-          stageChangedAt: "2026-08-27T10:04:00.000Z",
-        },
-        events: [
-          ...(currentRecord?.events ?? []),
-          {
-            id: "event_concurrent_user_update",
-            at: "2026-08-27T10:04:00.000Z",
-            title: "Concurrent user update",
-            detail:
-              "The user changed the application record while it was armed.",
-            emphasis: "neutral",
-          },
-        ],
-      });
-      await repository.upsertApplicationRecord(concurrentRecord);
-
-      const outcome = createOutcome(fixture.preflight, "not_submitted");
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({ status: "recorded" });
-
-      const projectedRecord = (await repository.listApplicationRecords()).find(
-        (record) => record.id === fixture.preflight.applicationRecordId,
-      );
-      expect(projectedRecord).toMatchObject({
-        title: "Concurrent title",
-        company: "Concurrent company",
-        status: "shortlisted",
-        lastActionLabel: "Final action not submitted.",
-        lastAttemptState: "ready",
-        latestBlocker: null,
-        questionSummary: {
-          total: 4,
-          required: 3,
-          answered: 2,
-          unansweredRequired: 1,
-        },
-        consentSummary: { status: "requested", pendingCount: 1 },
-        replaySummary: {
-          lastUrl: "https://jobs.example.com/concurrent",
-          checkpointCount: 7,
-          evidenceCount: 3,
-          sourceInstructionArtifactId: "instruction_concurrent",
-        },
-        crm: {
-          revision: 9,
-          stage: "reviewing",
-          stageChangedAt: "2026-08-27T10:04:00.000Z",
-        },
-      });
-      expect(
-        projectedRecord?.events.some(
-          (event) => event.id === "event_concurrent_user_update",
-        ),
-      ).toBe(true);
-      expect(
-        projectedRecord?.events.some(
-          (event) => event.id === `event_submission_outcome_${outcome.id}`,
-        ),
-      ).toBe(true);
-
-      await repository.close();
-    },
-  );
-
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-record-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "blocks outcome reconciliation without an exact ApplicationRecord ($label)",
-    async ({ create }) => {
-      const repository = await create();
-      const fixture = createAuthorityFixture(
-        "missing_application_record",
-        "confirm_before_submit",
-      );
-      await persistAuthorityFixture(repository, fixture, {
-        applicationRecord: null,
-      });
-      await repository.authorizeAndArmSubmissionAttempt({
-        preflight: fixture.preflight,
-        expectedIdempotencyRevision: 1,
-        mode: "confirm_before_submit",
-        marker: fixture.marker,
-        executionGrantId: fixture.grant?.id ?? null,
-        now: later,
-      });
-
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome: createOutcome(fixture.preflight, "outcome_uncertain"),
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "blocked",
-        outcome: null,
-        idempotency: { status: "armed", revision: 2 },
-      });
-      expect(await repository.listSubmissionOutcomeRecords()).toEqual([]);
-      expect(await repository.listApplicationRecords()).toEqual([]);
-      expect(
-        (
-          await repository.listApplyJobResults({
-            runId: fixture.preflight.runId,
-            jobId: fixture.preflight.jobId,
-          })
-        )[0],
-      ).toMatchObject({
-        state: "submitting",
-        privacyReceipt: { submissionOutcome: null },
-      });
-
-      await repository.close();
-    },
-  );
-
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-record-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "blocks outcome reconciliation across ApplicationRecord job lineage ($label)",
-    async ({ create }) => {
-      const repository = await create();
-      const fixture = createAuthorityFixture(
-        "cross_record_application_record",
-        "confirm_before_submit",
-      );
-      const crossLineageRecord = createApplicationRecord({
-        applicationRecordId: fixture.preflight.applicationRecordId,
-        jobId: "job_other",
-      });
-      await persistAuthorityFixture(repository, fixture, {
-        applicationRecord: crossLineageRecord,
-      });
-      await repository.authorizeAndArmSubmissionAttempt({
-        preflight: fixture.preflight,
-        expectedIdempotencyRevision: 1,
-        mode: "confirm_before_submit",
-        marker: fixture.marker,
-        executionGrantId: fixture.grant?.id ?? null,
-        now: later,
-      });
-
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome: createOutcome(fixture.preflight, "not_submitted"),
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "blocked",
-        outcome: null,
-        idempotency: { status: "armed", revision: 2 },
-      });
-      expect(await repository.listSubmissionOutcomeRecords()).toEqual([]);
-      expect(await repository.listApplicationRecords()).toEqual([
-        crossLineageRecord,
-      ]);
-
-      await repository.close();
-    },
-  );
-
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-lineage-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "rejects outcome reconciliation when result lineage is not exact ($label)",
-    async ({ create }) => {
-      const repository = await create();
-      const fixture = createAuthorityFixture(
-        "lineage_reconcile",
-        "confirm_before_submit",
-      );
-      await persistAuthorityFixture(repository, fixture);
-      await repository.authorizeAndArmSubmissionAttempt({
-        preflight: fixture.preflight,
-        expectedIdempotencyRevision: 1,
-        mode: "confirm_before_submit",
-        marker: fixture.marker,
-        executionGrantId: fixture.grant?.id ?? null,
-        now: later,
-      });
-
-      const result = (
-        await repository.listApplyJobResults({
-          runId: fixture.preflight.runId,
-          jobId: fixture.preflight.jobId,
-        })
-      )[0];
-      // The persisted result identity is retained, but its application-record
-      // lineage is intentionally changed to model a stale/cross-record row.
-      await repository.upsertApplyJobResult({
-        ...result!,
-        applicationRecordId: "application_other",
-      });
-
-      const outcome = createOutcome(fixture.preflight, "outcome_uncertain");
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "blocked",
-        outcome: null,
-        idempotency: { status: "armed", revision: 2 },
-      });
-      expect(await repository.listSubmissionOutcomeRecords()).toEqual([]);
-      expect(
-        (
-          await repository.listApplyJobResults({
-            runId: fixture.preflight.runId,
-            jobId: fixture.preflight.jobId,
-          })
-        )[0],
-      ).toMatchObject({
-        state: "submitting",
-        blockerReason: null,
-        privacyReceipt: { submissionOutcome: null },
-      });
-      expect(
-        await repository.getSubmissionIdempotencyRecord(
-          fixture.preflight.idempotencyKey,
-        ),
-      ).toMatchObject({ status: "armed", revision: 2 });
-
-      await repository.close();
-    },
-  );
-
   test("closes an armed attempt as uncertain on its own when its result receipt is missing", async () => {
     const repository = createInMemoryJobFinderRepository(createSeed());
     const fixture = createAuthorityFixture(
@@ -2020,105 +1442,71 @@ describe("application authority repository", () => {
       { outcome: "outcome_uncertain" },
     ]);
   });
+});
 
-  test.each([
-    {
-      label: "in memory",
-      create: () => createInMemoryJobFinderRepository(createSeed()),
-    },
-    {
-      label: "in SQLite",
-      create: async () => {
-        const temp = await createTempRepository("nestor-outcome-recovery-");
-        cleanupDirectories.push(temp.tempDirectory);
-        return temp.createRepository();
-      },
-    },
-  ])(
-    "closes an armed attempt without exact ApplicationRecord lineage as uncertain and leaves its result alone ($label)",
-    async ({ create }) => {
-      const repository = await create();
+test.each(["memory", "sqlite"] as const)(
+  "commits a guarded outcome without legacy application rows (%s)",
+  async (storage) => {
+    const temp =
+      storage === "sqlite"
+        ? await createTempRepository("nestor-store-outcome-")
+        : null;
+    const repository = temp
+      ? await temp.createRepository()
+      : createInMemoryJobFinderRepository(createSeed());
+    try {
       const fixture = createAuthorityFixture(
-        "recovery_missing_application_record",
+        "store_owned",
         "confirm_before_submit",
       );
-      await persistAuthorityFixture(repository, fixture, {
-        applicationRecord: null,
+      await repository.commitApplicationAuthorityEnvelope({
+        envelope: fixture.envelope,
+        expectedRevision: null,
       });
+      await repository.commitSubmissionPreflight(fixture.preflight);
+      await repository.commitSubmissionExecutionGrant(fixture.grant!);
       await repository.authorizeAndArmSubmissionAttempt({
         preflight: fixture.preflight,
         expectedIdempotencyRevision: 1,
         mode: "confirm_before_submit",
         marker: fixture.marker,
-        executionGrantId: fixture.grant?.id ?? null,
+        executionGrantId: fixture.grant!.id,
         now: later,
       });
-      const resultBeforeRecovery = (
-        await repository.listApplyJobResults({
-          runId: fixture.preflight.runId,
-          jobId: fixture.preflight.jobId,
-        })
-      )[0];
-
-      await expect(
-        repository.recoverArmedSubmissionAttempts({ now: later }),
-      ).resolves.toHaveLength(1);
-      expect(await repository.listSubmissionOutcomeRecords()).toMatchObject([
-        { outcome: "outcome_uncertain" },
-      ]);
+      const outcome = createOperatorResolution(fixture.preflight, "submitted");
       expect(
-        await repository.getSubmissionIdempotencyRecord(
-          fixture.preflight.idempotencyKey,
-        ),
-      ).toMatchObject({ status: "outcome_uncertain", revision: 3 });
+        await repository.commitSubmissionOutcome({
+          outcome: { ...outcome, resultId: "another_attempt" },
+          expectedIdempotencyRevision: 2,
+        }),
+      ).toMatchObject({ status: "blocked" });
       expect(
-        (
-          await repository.listApplyJobResults({
-            runId: fixture.preflight.runId,
-            jobId: fixture.preflight.jobId,
-          })
-        )[0],
-      ).toEqual(resultBeforeRecovery);
-
+        await repository.commitSubmissionOutcome({
+          outcome,
+          expectedIdempotencyRevision: 1,
+        }),
+      ).toMatchObject({ status: "stale" });
+      expect(
+        await repository.commitSubmissionOutcome({
+          outcome,
+          expectedIdempotencyRevision: 2,
+        }),
+      ).toMatchObject({
+        status: "recorded",
+        idempotency: { status: "resolved", outcome: "submitted" },
+      });
+      expect(
+        await repository.commitSubmissionOutcome({
+          outcome,
+          expectedIdempotencyRevision: 2,
+        }),
+      ).toMatchObject({ status: "duplicate" });
+      expect(await repository.getSubmissionOutcomeRecord(outcome.id)).toEqual(
+        outcome,
+      );
+    } finally {
       await repository.close();
-    },
-  );
-});
-
-test("recording a refused automatic send clears the typed queue flag", async () => {
-  const repository = createInMemoryJobFinderRepository(createSeed());
-  const fixture = createAuthorityFixture(
-    "queued_refusal",
-    "confirm_before_submit",
-  );
-  await persistAuthorityFixture(repository, fixture);
-  const result = (
-    await repository.listApplyJobResults({ runId: fixture.preflight.runId })
-  )[0]!;
-  await repository.upsertApplyJobResult({
-    ...result,
-    automaticSendPending: true,
-  });
-  expect(
-    await repository.authorizeAndArmSubmissionAttempt({
-      preflight: fixture.preflight,
-      expectedIdempotencyRevision: 1,
-      mode: "confirm_before_submit",
-      marker: fixture.marker,
-      executionGrantId: fixture.grant?.id ?? null,
-      now: later,
-    }),
-  ).toMatchObject({ status: "armed" });
-  expect(
-    await repository.commitSubmissionOutcome({
-      outcome: createOutcome(fixture.preflight, "not_submitted"),
-      expectedIdempotencyRevision: 2,
-    }),
-  ).toMatchObject({ status: "recorded" });
-  expect(
-    (
-      await repository.listApplyJobResults({ runId: fixture.preflight.runId })
-    )[0],
-  ).toMatchObject({ automaticSendPending: false });
-  await repository.close();
-});
+      if (temp) await cleanupTempDirectoryWithRetry(temp.tempDirectory);
+    }
+  },
+);

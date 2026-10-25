@@ -193,10 +193,11 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    * Records a newly discovered employer ATS origin after the independent move
    * reviewer has accepted the handoff. Returning null keeps navigation
    * available for preparation but does not widen final-submit authority.
+   * True admits only preparation on the reviewed origin, without a send grant.
    */
   authorizeReviewedApplicationOrigin?: (
     origin: string,
-  ) => Promise<ApplicationAuthorityEnvelope | null>;
+  ) => Promise<ApplicationAuthorityEnvelope | true | null>;
   /**
    * Declaration kinds the person approved in advance, from the saved authority
    * document. Anything not on this list pauses for them. Omitted means none.

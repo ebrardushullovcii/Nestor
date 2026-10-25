@@ -393,7 +393,13 @@ async function runMeasuredApplyAgent(
   let currentReusableAnswers = initialReusableAnswers;
   const refreshReusableAnswers = async () => {
     if (!config.readReusableAnswers) return;
-    const shared = await config.readReusableAnswers();
+    const shared = await config.readReusableAnswers(
+      (pageTools.state.observation?.controls ?? []).filter((control) => control.visible && !control.credentialRole).map((control) => ({
+        prompt: questionPrompt(control), kind: control.questionKind,
+        answerControlType: control.answerControlType, answerOptions: control.options,
+        ...(control.inputConstraints ? { inputConstraints: control.inputConstraints } : {}),
+      })),
+    );
     const local = config.sources.reusableAnswers.filter((answer) =>
       answer.id.startsWith("application_"),
     );

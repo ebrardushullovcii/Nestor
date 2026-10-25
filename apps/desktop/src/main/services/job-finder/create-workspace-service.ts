@@ -1,4 +1,5 @@
 import { startResumeService } from "../resumes";
+import { startApplicationService } from "../applications";
 import {
   createApplicationPageAccess,
   createPreparedApplicationFormStore,
@@ -13,7 +14,6 @@ import {
   publishOnApplyStandingChanges,
   publishOnUserActionChanges,
 } from "./user-action-update-push";
-import { continueApplicationsAfterHandback } from "./continue-after-browser-handback";
 import { withEmbeddedBrowserActivity } from "../browser/embedded-browser-runtime";
 import {
   type BrowserVisualAnalysisInput,
@@ -83,7 +83,6 @@ import {
   recoverPendingJobFinderWorkspaceReset,
 } from "./reset-workspace";
 import { getCandidateAssetLibrary } from "./candidate-asset-library-instance";
-import { installAutomaticApplicationAccessResume } from "./automatic-application-access-resume";
 import { installAutomaticSourceAccessResume } from "./automatic-source-access-resume";
 import {
   createSessionListingHtmlFetcher,
@@ -109,7 +108,6 @@ export function getApplicationPageAccessForWorkspaceService(service: object) {
 }
 const repositoryByWorkspaceService = new WeakMap<object, JobFinderRepository>();
 let disposeAutomaticSourceAccessResume: (() => void) | null = null;
-let disposeAutomaticApplicationAccessResume: (() => void) | null = null;
 
 export function getJobFinderRepositoryForWorkspaceService(
   workspaceService: object,
@@ -723,6 +721,16 @@ export async function createJobFinderWorkspaceServiceAsync(
     fetchListingHtml,
     repository: jobFinderRepository,
   });
+  const applicationService = await startApplicationService({
+    repository: jobFinderRepository,
+    browser: browserRuntime,
+    aiClient,
+    documentManager,
+    isHoldingCurrent: async () => {
+      const control = await jobFinderRepository.getActivityControl();
+      return control.paused && control.pauseBehavior !== "finish_current";
+    },
+  });
   const workspaceService = createJobFinderWorkspaceService({
     resumeDraftProcessor,
     aiClient,
@@ -747,6 +755,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     ...(usesEmbeddedBrowser
       ? {
           onActivityControlChanged: (control) => {
+            applicationService.wake();
             // Home pauses new work at the queue boundary. Keep the browser
             // available to the job already being filled; browser takeover
             // still uses the immediate abort path.
@@ -772,7 +781,6 @@ export async function createJobFinderWorkspaceServiceAsync(
   );
   disposeAutomaticSourceAccessResume?.();
   disposeAutomaticSourceAccessResume = null;
-  disposeAutomaticApplicationAccessResume?.();
   // A step confirmed by a watcher (the person signed in) runs its whole
   // continuation in this process, with no renderer call to answer. Keep the
   // screens current while it runs and when it ends, as a press would.
@@ -791,18 +799,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       publishJobFinderWorkspaceUpdate();
     }
   };
-  disposeAutomaticApplicationAccessResume =
-    installAutomaticApplicationAccessResume({
-      ...(usesEmbeddedBrowser ? { browser: getEmbeddedBrowser() } : {}),
-      browserRuntime,
-      repository: jobFinderRepository,
-      performUserAction: performWatchedUserAction,
-      afterCheck: async () => {
-        if ((await workspaceService.recordApplicationsSentByPerson()) > 0) {
-          publishJobFinderWorkspaceUpdate();
-        }
-      },
-    });
   if (usesEmbeddedBrowser) {
     const browser = getEmbeddedBrowser();
     const savedControl = await jobFinderRepository.getActivityControl();
@@ -818,27 +814,10 @@ export async function createJobFinderWorkspaceServiceAsync(
       },
       // Handing back a tab the person stepped into carries on the
       // applications that stepping in stopped, with no Try again to find.
-      handback: async (owners) => {
-        await continueApplicationsAfterHandback({
-          resultIds: owners,
-          repository: jobFinderRepository,
-          startBatch: async (jobIds) => {
-            // The same start as "Try again for all" (saved mode, resumes
-            // approved, permission issued); loaded lazily because the routes
-            // module reads this service.
-            const { startSavedModeApplyBatch } =
-              await import("../../routes/job-finder");
-            await startSavedModeApplyBatch(jobIds, () =>
-              publishJobFinderWorkspaceUpdate(),
-            );
-          },
-        }).catch((error: unknown) => {
-          console.error(
-            "Could not carry on after the browser was handed back.",
-            error,
-          );
-        });
+      handback: (owners) => {
+        applicationService.continueBindings(owners);
         publishJobFinderWorkspaceUpdate();
+        return Promise.resolve();
       },
     });
     disposeAutomaticSourceAccessResume = installAutomaticSourceAccessResume({

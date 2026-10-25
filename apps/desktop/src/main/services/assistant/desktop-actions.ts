@@ -1,3 +1,4 @@
+import { executeApplicationStoreCommand } from "../../routes/application-store";
 import * as C from "@nestor/contracts";
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +9,6 @@ import { getApplicationPageAccessForWorkspaceService } from "../job-finder/creat
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { executeApplicationDocumentAction } from "../../routes/application-documents";
 import {
-  executeApplyQueueAction,
   previewWorkspaceRestore,
   confirmWorkspaceRestore,
 } from "../../routes/job-finder";
@@ -35,6 +35,8 @@ export async function executeDesktopJobFinderAction(
   actionId: string,
   input: unknown,
 ): Promise<unknown> {
+  if (["apply-jobs", "list-applications", "get-application-details", "stop-application", "open-application"].includes(actionId))
+    return executeApplicationStoreCommand(actionId, input);
   if (
     actionId.includes("application-authority-") ||
     actionId === "approve-current-application-answers" ||
@@ -81,16 +83,6 @@ export async function executeDesktopJobFinderAction(
     return { outcome: "revealed" };
   }
   if (actionId === "reset-browser") return resetJobFinderBrowser();
-  if (
-    [
-      "start-apply-queue",
-      "control-apply-queue",
-      "remove-from-apply-queue",
-      "approve-resumes",
-    ].includes(actionId)
-  ) {
-    return executeApplyQueueAction(actionId, input);
-  }
   if (
     [
       "list-application-documents",

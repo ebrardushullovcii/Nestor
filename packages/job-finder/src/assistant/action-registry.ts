@@ -486,34 +486,41 @@ export const JOB_FINDER_ACTIONS = {
       });
     },
   ),
-  "start-apply-queue": desktopAction(
-    "start-apply-queue",
-    C.JobFinderStartApplyQueueInputSchema,
+  "apply-jobs": desktopAction(
+    "apply-jobs",
+    C.ApplyJobsInputSchema,
     "applications",
     "application",
-    "Apply to selected, displayed or all ready jobs using the saved queue.",
+    "Apply to approved jobs selected by ids or a filter.",
     { name: "apply_to_jobs", custom: true },
   ),
-  "control-apply-queue": desktopAction(
-    "control-apply-queue",
-    C.JobFinderApplyQueueControlInputSchema,
+  "list-applications": desktopAction(
+    "list-applications",
+    C.ApplicationListQuerySchema,
+    "applications",
+    "read",
+    "Read one page of application work states.",
+  ),
+  "get-application-details": desktopAction(
+    "get-application-details",
+    C.ApplicationTargetSchema,
+    "applications",
+    "read",
+    "Read the selected application's progress and answer review.",
+  ),
+  "open-application": desktopAction(
+    "open-application",
+    C.ApplicationTargetSchema,
     "applications",
     "local",
-    "Pause, continue or stop the Apply queue, or dismiss its finished notice.",
+    "Open the exact prepared form in the app browser.",
   ),
-  "remove-from-apply-queue": desktopAction(
-    "remove-from-apply-queue",
-    C.JobFinderRemoveFromApplyQueueInputSchema,
+  "stop-application": desktopAction(
+    "stop-application",
+    C.ApplicationTargetSchema,
     "applications",
     "local",
-    "Take waiting jobs out of the Apply queue.",
-  ),
-  "approve-resumes": desktopAction(
-    "approve-resumes",
-    C.JobFinderApproveResumesInputSchema,
-    "resume",
-    "local",
-    "Approve the current resumes for selected jobs; unresolved claims still block approval.",
+    "Stop one application and close its tab.",
   ),
   "get-application-page-states": desktopAction(
     "get-application-page-states",

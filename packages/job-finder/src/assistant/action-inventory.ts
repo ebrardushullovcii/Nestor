@@ -388,21 +388,22 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
 
   // Applications
   {
-    id: "apply.queue",
+    id: "apply.work",
     screen: "Shortlisted / Applications",
-    action:
-      "Queue the whole selection, pause, continue, stop or remove waiting jobs",
+    action: "Apply to approved jobs and read or stop the queued work",
     channels: [
-      "job-finder:start-apply-queue",
-      "job-finder:control-apply-queue",
-      "job-finder:remove-from-apply-queue",
-      "job-finder:approve-resumes",
+      "job-finder:apply-jobs",
+      "job-finder:list-applications",
+      "job-finder:get-application-details",
+      "job-finder:stop-application",
+      "job-finder:open-application",
     ],
     coverage: tools(
       "apply_to_jobs",
-      "action_control_apply_queue",
-      "action_remove_from_apply_queue",
-      "action_approve_resumes",
+      "action_list_applications",
+      "action_get_application_details",
+      "action_stop_application",
+      "action_open_application",
     ),
   },
   {
