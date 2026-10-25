@@ -244,13 +244,7 @@ export const JOB_FINDER_ACTIONS = {
     "Clear a saved application answer.",
     (i, c) => c.service.clearApplicationAnswer(i),
   ),
-  "snooze-grouped-decision": action(
-    C.SnoozeGroupedDecisionInputSchema,
-    "applications",
-    "local",
-    "Snooze a grouped Needs you decision.",
-    (i, c) => c.service.snoozeGroupedDecision(i),
-  ),
+
   "reset-workspace": desktopAction(
     "reset-workspace",
     empty,
