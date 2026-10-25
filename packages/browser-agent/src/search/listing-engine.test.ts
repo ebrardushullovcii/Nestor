@@ -510,6 +510,11 @@ test("a source can be an unlinked single vacancy; its complete page is reused fo
   );
   expect(readPage).toHaveBeenCalledTimes(1);
   expect(fallback).not.toHaveBeenCalled();
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(detail.jobs[0]).toMatchObject({
+    company: "Real Employer",
+    location: "Remote",
+  });
 });
 
 test.each(["http", "browser"] as const)(
@@ -845,5 +850,29 @@ test("uncertain metadata expands only the unresolved listing; full descriptions 
   expect(result.jobs[0]?.company).toBe("Northstar Trellis");
   expect(result.jobs[0]?.description).toContain(description.trim());
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(readPage).toHaveBeenCalledTimes(1);
+});
+
+test("single vacancies also preserve explicitly labelled employer and location after their heading", async () => {
+  const html =
+    '<header>ATS brand</header><main><article><h1>Backend Engineer</h1><p class="company">Hiring Employer</p><p class="job-location">Berlin · Hybrid</p><h2>Responsibilities</h2><p>Build reliable production APIs and maintain scalable data services with a cross-functional engineering team.</p><a href="/apply">Apply</a></article></main>';
+  const readPage = vi.fn(() => Promise.resolve({ html, finalUrl: source.url }));
+  const inventory = await collectSource({ source, readPage });
+  const client = {
+    chatWithTools: vi.fn(() => Promise.reject(Error("No AI metadata needed"))),
+  };
+  const detail = await readListings({
+    cards: inventory.cards,
+    readPage,
+    client,
+  });
+  expect(detail.failures).toEqual([]);
+  expect(detail.jobs[0]).toMatchObject({
+    title: "Backend Engineer",
+    company: "Hiring Employer",
+    location: "Berlin",
+    workModes: ["hybrid"],
+  });
+  expect(client.chatWithTools).not.toHaveBeenCalled();
   expect(readPage).toHaveBeenCalledTimes(1);
 });

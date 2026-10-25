@@ -16,12 +16,22 @@ const LABELS: Record<JobSearchSourceState["state"], string> = {
   stopped: "Stopped",
 };
 /** Only an opened page is read. A search status never transports all 900 sites. */
-export function SiteResults(props: { searchId: string; revision: number }) {
-  const [open, setOpen] = useState(false),
+export function SiteResults(props: {
+  searchId: string;
+  revision: number;
+  showFailures?: boolean;
+}) {
+  const [open, setOpen] = useState(Boolean(props.showFailures)),
     [text, setText] = useState("");
   const [state, setState] = useState<JobSearchSourceState["state"] | null>(
-    null,
+    props.showFailures ? "failed" : null,
   );
+  useEffect(() => {
+    if (props.showFailures) {
+      setOpen(true);
+      setState("failed");
+    }
+  }, [props.searchId, props.showFailures]);
   const [cursors, setCursors] = useState([0]),
     [index, setIndex] = useState(0);
   const [page, setPage] = useState(EMPTY),
@@ -62,6 +72,7 @@ export function SiteResults(props: { searchId: string; revision: number }) {
   }, [open, props.searchId, props.revision, text, state, after]);
   return (
     <details
+      open={open}
       className="text-sm text-foreground-soft"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
@@ -105,7 +116,11 @@ export function SiteResults(props: { searchId: string; revision: number }) {
                 className="rounded border p-3"
                 data-site-result
               >
-                <details>
+                <details
+                  open={
+                    source.state === "failed" || source.state === "needs_you"
+                  }
+                >
                   <summary className="cursor-pointer">
                     <strong>{source.label}</strong> · {LABELS[source.state]} ·{" "}
                     {source.cards} listings · {source.added} new jobs
@@ -123,6 +138,13 @@ export function SiteResults(props: { searchId: string; revision: number }) {
                   </p>
                   {source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
+                  ) : null}
+                  {source.state === "failed" ? (
+                    <p className="mt-2">
+                      Check this URL in Profile → Job sources, then search
+                      again. If a vacancy page cannot be read, try the board’s
+                      main jobs URL.
+                    </p>
                   ) : null}
                 </details>
               </li>

@@ -496,3 +496,17 @@ test("a proven access block becomes one source ticket if browser reading also fa
     "needs_you",
   );
 });
+
+test("an entirely unreadable source set finishes as failed with its per-site reasons", async () => {
+  const { runner, engine, store } = setup();
+  engine.collectSource.mockRejectedValue(Error("The source could not be read"));
+  await runner.start({});
+  const status = await finished(runner);
+  expect(status.search?.state).toBe("failed");
+  expect(status.search?.added).toBe(0);
+  expect(status.search?.error).toContain("2 sites could not be read");
+  expect(status.progress?.failed).toBe(2);
+  expect(
+    createSearchSourcesStore(store).list({ state: "failed" }).rows,
+  ).toHaveLength(2);
+});

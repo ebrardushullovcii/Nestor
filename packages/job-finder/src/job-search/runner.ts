@@ -434,7 +434,18 @@ export function createJobSearchRunner(
         if (!http.active && !browser.active) break;
       }
       signal.throwIfAborted();
-      finish(run, "done", fitError);
+      const failed = resultRows.compact(run.record!.id).progress?.failed ?? 0;
+      const allFailed =
+        run.record!.sourcesTotal > 0 &&
+        failed === run.record!.sourcesTotal &&
+        run.record!.found === 0;
+      finish(
+        run,
+        allFailed ? "failed" : "done",
+        allFailed
+          ? `${failed} sites could not be read. Check each site's results, fix the URL or try the board's main jobs URL, then search again.`
+          : fitError,
+      );
     } catch (error) {
       finish(
         run,
