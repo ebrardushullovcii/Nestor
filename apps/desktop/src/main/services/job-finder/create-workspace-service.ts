@@ -129,6 +129,9 @@ const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
  */
 export const DESKTOP_AUTOMATIC_DATABASE_BACKUP_OPTIONS = {
   inBackground: true,
+  // Copying the whole database at launch competed with the window's first
+  // reads; the daily check starts once launch is over.
+  firstCheckDelayMs: 2 * 60 * 1000,
   beforeReset: true,
 } as const;
 
