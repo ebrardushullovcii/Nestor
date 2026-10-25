@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { afterFirstScreen } from "../lib/after-first-screen";
 import { Button } from "@renderer/components/ui/button";
 import { useBottomRightDock } from "./bounded-floating-surface";
 import { BOTTOM_RIGHT_DOCK_ORDER } from "../lib/bounded-floating-surface";
@@ -75,26 +76,31 @@ export function StartupDatabaseRecoveryNotice() {
   useEffect(() => {
     let cancelled = false;
 
-    try {
-      const recoveryBridge =
-        window.nestor?.jobFinder?.getStartupDatabaseRecovery;
-      recoveryBridge?.()
-        .then((recoveryFact) => {
-          if (
-            !cancelled &&
-            isJobFinderStartupDatabaseRecoveryFact(recoveryFact) &&
-            recoveryFact.status === "restored" &&
-            recoveryFact.dismissedAtIso === null
-          ) {
-            setRestoredFact(recoveryFact);
-          }
-        })
-        .catch(() => {
-          // Stay hidden when the desktop bridge is unavailable.
-        });
-    } catch {
-      // Stay hidden when the desktop bridge is unavailable.
-    }
+    // A recovery notice can wait for the first screen; reading it makes
+    // main load the old route modules.
+    afterFirstScreen(() => {
+      if (cancelled) return;
+      try {
+        const recoveryBridge =
+          window.nestor?.jobFinder?.getStartupDatabaseRecovery;
+        recoveryBridge?.()
+          .then((recoveryFact) => {
+            if (
+              !cancelled &&
+              isJobFinderStartupDatabaseRecoveryFact(recoveryFact) &&
+              recoveryFact.status === "restored" &&
+              recoveryFact.dismissedAtIso === null
+            ) {
+              setRestoredFact(recoveryFact);
+            }
+          })
+          .catch(() => {
+            // Stay hidden when the desktop bridge is unavailable.
+          });
+      } catch {
+        // Stay hidden when the desktop bridge is unavailable.
+      }
+    });
 
     return () => {
       cancelled = true;

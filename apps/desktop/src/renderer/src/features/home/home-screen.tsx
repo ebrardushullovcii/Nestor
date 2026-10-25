@@ -10,6 +10,8 @@ import { plural } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
 
 import { ActivityChart, StandingBar } from "./home-charts";
+import { markFirstScreenShown } from "@renderer/features/job-finder/lib/after-first-screen";
+
 import { useHomeSummary } from "./use-home-summary";
 
 const HOME_SHOWN_MARK = "job-finder:home:numbers-shown";
@@ -117,9 +119,14 @@ export function HomeScreen() {
   const navigate = useNavigate();
   const shown = summary !== null;
   // Launch is measured to this mark: the first frame with Home's numbers.
+  // Main holds its background services until then, so they never compete
+  // with the first screen.
   useEffect(() => {
-    if (shown && performance.getEntriesByName(HOME_SHOWN_MARK).length === 0)
+    if (shown && performance.getEntriesByName(HOME_SHOWN_MARK).length === 0) {
       performance.mark(HOME_SHOWN_MARK);
+      markFirstScreenShown();
+      window.nestor.firstScreenShown?.();
+    }
   }, [shown]);
 
   if (!summary)

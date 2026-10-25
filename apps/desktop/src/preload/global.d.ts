@@ -170,6 +170,8 @@ declare global {
       tracker: DesktopTrackerBridge;
       home: DesktopHomeBridge;
       ping: () => Promise<DesktopPlatformPing>;
+      /** The first screen is usable; main starts its background services. */
+      firstScreenShown: () => void;
       window: {
         close: () => Promise<{ ok: true }>;
         showContextMenu: (

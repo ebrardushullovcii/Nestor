@@ -24,12 +24,16 @@
       "@nestor/ai-providers": ["packages/ai-providers/src/index.ts"],
       "@nestor/browser-agent": ["packages/browser-agent/src/index.ts"],
       "@nestor/browser-agent/listing-detail-extraction": ["packages/browser-agent/src/search/listing-detail-extraction.ts"],
+      "@nestor/browser-runtime/apply-page": [
+        "packages/browser-runtime/src/apply-page-mechanics.ts"
+      ],
       "@nestor/browser-runtime": ["packages/browser-runtime/src/index.ts"],
       "@nestor/contracts": ["packages/contracts/src/index.ts"],
       "@nestor/core": ["packages/core/src/index.ts"],
       "@nestor/db": ["packages/db/src/index.ts"],
       "@nestor/db/job-store": ["packages/db/src/job-store/job-store.ts"],
       "@nestor/db/applications": ["packages/db/src/job-store/applications.ts"],
+      "@nestor/db/workspace-commits": ["packages/db/src/workspace-commits.ts"],
       "@nestor/job-list-policy": ["packages/job-list-policy/src/index.ts"],
       "@nestor/job-list-policy/identity": [
         "packages/job-list-policy/src/job-identity.ts"
@@ -55,6 +59,9 @@
       ],
       "@nestor/job-finder/applications": [
         "packages/job-finder/src/applications/index.ts"
+      ],
+      "@nestor/job-finder/needs-you": [
+        "packages/job-finder/src/applications/needs-you-commands.ts"
       ],
       "@nestor/job-finder/assistant-attention": [
         "packages/job-finder/src/assistant/attention.ts"

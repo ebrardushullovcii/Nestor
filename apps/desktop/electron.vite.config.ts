@@ -116,6 +116,10 @@ const workspaceAliases = {
   "@nestor/ai-providers": aiProvidersPath,
   "@nestor/browser-agent/listing-detail-extraction": path.resolve(currentDir, "../../packages/browser-agent/src/search/listing-detail-extraction.ts"),
   "@nestor/browser-agent": browserAgentPath,
+  "@nestor/browser-runtime/apply-page": path.resolve(
+    currentDir,
+    "../../packages/browser-runtime/src/apply-page-mechanics.ts",
+  ),
   "@nestor/browser-runtime": browserRuntimePath,
   "@nestor/contracts": contractsPath,
   "@nestor/core": corePath,
@@ -126,6 +130,10 @@ const workspaceAliases = {
   "@nestor/db/job-store": path.resolve(
     currentDir,
     "../../packages/db/src/job-store/job-store.ts",
+  ),
+  "@nestor/db/workspace-commits": path.resolve(
+    currentDir,
+    "../../packages/db/src/workspace-commits.ts",
   ),
   "@nestor/db": dbPath,
   "@nestor/live-assistant": liveAssistantPath,
@@ -140,6 +148,10 @@ const workspaceAliases = {
   "@nestor/job-finder/applications": path.resolve(
     currentDir,
     "../../packages/job-finder/src/applications/index.ts",
+  ),
+  "@nestor/job-finder/needs-you": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/applications/needs-you-commands.ts",
   ),
   "@nestor/job-finder/assistant-attention": path.resolve(
     currentDir,

@@ -1,4 +1,4 @@
-import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
+import { createNeedsYouCommandRunner } from "@nestor/job-finder/needs-you";
 import {
   NEEDS_YOU_RUN_CHANNEL,
   type NeedsYouCommandName,
@@ -6,10 +6,22 @@ import {
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import { getApplicationStore } from "../services/job-finder/application-store";
-import { getApplicationService } from "../services/applications";
-import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { runJobCommand } from "../services/job-commands";
+
+/**
+ * Apply's service starts inside the old workspace service; both load on
+ * first use rather than with main.
+ */
+async function applicationService() {
+  const [{ getJobFinderWorkspaceService }, { getApplicationService }] =
+    await Promise.all([
+      import("../services/job-finder/workspace-service"),
+      import("../services/applications"),
+    ]);
+  await getJobFinderWorkspaceService();
+  return getApplicationService();
+}
 
 const run = createNeedsYouCommandRunner(getApplicationStore, {
   retry: async (id) => {
@@ -27,8 +39,7 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
       });
       return true;
     }
-    await getJobFinderWorkspaceService();
-    const service = await getApplicationService();
+    const service = await applicationService();
     for (const application of getApplicationStore().needsYou.details(id)
       ?.applications ?? []) {
       if (await service.open(application.id)) {
@@ -39,8 +50,7 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
     return false;
   },
   check: async (id) => {
-    await getJobFinderWorkspaceService();
-    return (await getApplicationService()).checkAccess(id);
+    return (await applicationService()).checkAccess(id);
   },
 });
 

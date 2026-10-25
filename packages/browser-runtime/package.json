@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./apply-page": "./src/apply-page-mechanics.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

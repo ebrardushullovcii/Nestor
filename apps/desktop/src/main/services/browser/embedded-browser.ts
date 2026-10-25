@@ -1,7 +1,7 @@
 import {
   APPLY_PAGE_SELECTORS,
   collectApplyDocumentSnapshot,
-} from "@nestor/browser-runtime";
+} from "@nestor/browser-runtime/apply-page";
 import {
   measureWaitingFormMemory,
   waitingFormsHaveCapacity,

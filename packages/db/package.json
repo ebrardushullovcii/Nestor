@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./job-store": "./src/job-store/job-store.ts",
-    "./applications": "./src/job-store/applications.ts"
+    "./applications": "./src/job-store/applications.ts",
+    "./workspace-commits": "./src/workspace-commits.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

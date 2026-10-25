@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { afterFirstScreen } from "../lib/after-first-screen";
 import { Button } from "@renderer/components/ui/button";
 import {
   JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_DETAIL,
@@ -45,21 +46,29 @@ export function StartupResetRecoveryBanner() {
   useEffect(() => {
     let cancelled = false;
 
-    try {
-      const recoveryBridge =
-        window.nestor?.jobFinder?.getStartupResetRecovery;
-      recoveryBridge?.()
-        .then((recoveryFact) => {
-          if (!cancelled && isJobFinderStartupResetRecoveryFact(recoveryFact)) {
-            setFact(recoveryFact);
-          }
-        })
-        .catch(() => {
-          // Stay hidden when the desktop bridge is unavailable.
-        });
-    } catch {
-      // Stay hidden when the desktop bridge is unavailable.
-    }
+    // A recovery notice can wait for the first screen; reading it makes
+    // main load the old route modules.
+    afterFirstScreen(() => {
+      if (cancelled) return;
+      try {
+        const recoveryBridge =
+          window.nestor?.jobFinder?.getStartupResetRecovery;
+        recoveryBridge?.()
+          .then((recoveryFact) => {
+            if (
+              !cancelled &&
+              isJobFinderStartupResetRecoveryFact(recoveryFact)
+            ) {
+              setFact(recoveryFact);
+            }
+          })
+          .catch(() => {
+            // Stay hidden when the desktop bridge is unavailable.
+          });
+      } catch {
+        // Stay hidden when the desktop bridge is unavailable.
+      }
+    });
 
     return () => {
       cancelled = true;
