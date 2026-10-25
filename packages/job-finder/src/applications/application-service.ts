@@ -506,18 +506,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       (q) => q.status === "detected" && !q.submittedAnswer,
     )) {
       const known = describeFormQuestion(question, job);
-      const requested = applications.needsYou.request({
-        applicationId: row.id,
-        attempt: row.attempt,
-        fieldKey: question.id,
-        kind: "question",
-        key: known.key,
-        scope: {},
-        prompt: question.prompt,
-        input: known.input,
-        options: known.options,
-        reusePrompt: known.reusePrompt,
-      });
+      const repeated =
+        previous?.execution.questions.some(
+          (earlier) =>
+            earlier.status === "detected" &&
+            describeFormQuestion(earlier, job).key === known.key,
+        ) ?? false;
+      const requested = applications.needsYou.request(
+        {
+          applicationId: row.id,
+          attempt: row.attempt,
+          fieldKey: question.id,
+          kind: "question",
+          key: known.key,
+          scope: {},
+          prompt: question.prompt,
+          input: known.input,
+          options: known.options,
+          reusePrompt: known.reusePrompt,
+        },
+        { reuseAnswers: !repeated },
+      );
       fromMemory ||= requested.status === "answered";
     }
     // The raw engine's typed blockers distinguish access steps from technical failures.
@@ -542,29 +551,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     if (applications.getApplication(row.id)?.state === "needs_you") {
       waiting.set(row.id, row.attempt);
-      return;
-    }
-    if (
-      fromMemory &&
-      previous?.execution.questions.some(
-        (question) =>
-          question.status === "detected" &&
-          result.questions.some(
-            (currentQuestion) =>
-              currentQuestion.status === "detected" &&
-              describeFormQuestion(currentQuestion, job).key ===
-                describeFormQuestion(question, job).key,
-          ),
-      )
-    ) {
-      applications.finishPreparation({
-        id: row.id,
-        attempt: row.attempt,
-        state: "failed",
-        error:
-          "Job Finder could not use the saved answer on this form. Try this application again.",
-      });
-      await closePage(row.id, row.attempt);
       return;
     }
     if (fromMemory) {

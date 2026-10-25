@@ -7,6 +7,21 @@ import type {
   ApplyFormControl,
 } from "./types";
 
+// An answer explicitly supplied for this application is separate from permission
+// to infer pay from the Profile. The reader scopes reused answers to their question.
+function usableSavedAnswer(
+  answer: CandidateReusableAnswer,
+  payDisclosed: boolean,
+) {
+  return (
+    !answer.needsConfirmation &&
+    (payDisclosed ||
+      answer.kind !== "salary_expectation" ||
+      !!answer.applicationScope?.applicationRecordId ||
+      !!answer.applicationScope?.resultId)
+  );
+}
+
 /** Empty strings and lists carry no evidence; preserve explicit unknown, No and zero. */
 export function serializeApplicationData(
   value: Record<string, unknown> | readonly unknown[],
@@ -71,11 +86,7 @@ export function applicationFacts(
         }
       : {}),
     savedAnswers: sources.reusableAnswers
-      .filter(
-        (saved) =>
-          !saved.needsConfirmation &&
-          (options.payDisclosed || saved.kind !== "salary_expectation"),
-      )
+      .filter((saved) => usableSavedAnswer(saved, options.payDisclosed))
       .map((saved) => ({
         id: saved.id,
         kind: saved.kind,
@@ -249,10 +260,9 @@ export function storedFacts(
   }
   for (const saved of sources.reusableAnswers.filter(
     (entry) =>
-      !entry.needsConfirmation &&
+      usableSavedAnswer(entry, options.payDisclosed) &&
       entry.kind !== "work_authorization" &&
-      entry.kind !== "visa_sponsorship" &&
-      (options.payDisclosed || entry.kind !== "salary_expectation"),
+      entry.kind !== "visa_sponsorship",
   )) {
     add(
       saved.answer,

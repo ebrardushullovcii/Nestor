@@ -826,6 +826,62 @@ test("an application sees an answer saved in another open application on its nex
   expect(source.controls[0].value).toBe("Platform team");
 });
 
+test("explicit pay answers for this form remain usable when automatic pay answering is off", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        inputType: "number",
+        label: "Annual salary expectation",
+        value: "",
+      },
+    ],
+  });
+  const input = config(source);
+  input.application.applicationRecordId = "application_1";
+  input.sources.reusableAnswers = [
+    {
+      id: "remembered_pay",
+      kind: "salary_expectation",
+      label: "Annual salary expectation",
+      question: "Annual salary expectation",
+      answer: "50000",
+      roleFamilies: [],
+      proofEntryIds: [],
+      applicationScope: {
+        applicationRecordId: "application_1",
+        resultId: null,
+        location: null,
+      },
+    },
+  ];
+  const model = scriptedModel([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          {
+            tool: "type",
+            ref: "c0",
+            text: "50000",
+            storedFactId: "answerLibrary.remembered_pay",
+          },
+        ],
+        finishWhenReady: true,
+      },
+    },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("prepared");
+  expect(source.controls[0].value).toBe("50000");
+  expect(
+    chat.mock.calls[0]?.[0].find((message) =>
+      message.content?.startsWith("The person's facts"),
+    )?.content,
+  ).toContain('"answer":"50000"');
+});
+
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {
   const input = config(page(), {
     application: {

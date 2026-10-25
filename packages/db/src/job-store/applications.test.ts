@@ -119,6 +119,78 @@ function question(
 }
 
 describe("applications on the job store", () => {
+  it("returns an unusable remembered answer to one shared question and waits for its correction", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const rows = [applications.claimNext()!, applications.claimNext()!];
+    const ask = (id: number, reuseAnswers = true) =>
+      applications.needsYou.request(
+        question(id, 1, {
+          scope: {},
+          key: "salary",
+          fieldKey: "salary",
+          prompt: "Annual salary expectation",
+          input: "number",
+        }),
+        { reuseAnswers },
+      );
+    const first = ask(rows[0]!.id);
+    if (first.status !== "needs_you") throw new Error("Missing question");
+    ask(rows[1]!.id);
+    applications.needsYou.answer({
+      id: first.task.id,
+      answer: "50000",
+      remember: true,
+    });
+    const retry = applications.claimNext()!;
+    const again = applications.needsYou.request(
+      question(retry.id, retry.attempt, {
+        scope: {},
+        key: "salary",
+        fieldKey: "salary",
+        prompt: "Annual salary expectation",
+        input: "number",
+      }),
+      { reuseAnswers: false },
+    );
+    if (again.status !== "needs_you") throw new Error("Missing correction");
+    expect(again.task.id).not.toBe(first.task.id);
+    expect(
+      applications.needsYou.answersForQuestions(
+        retry.id,
+        [
+          {
+            key: "salary",
+            prompt: "Annual salary expectation",
+            reusePrompt: false,
+          },
+        ],
+        "https://jobs.example.test",
+      ),
+    ).toEqual([]);
+    expect(applications.getApplication(retry.id)?.state).toBe("needs_you");
+    applications.needsYou.answer({
+      id: again.task.id,
+      answer: "52000",
+      remember: true,
+    });
+    expect(
+      applications.needsYou
+        .answersForQuestions(
+          retry.id,
+          [
+            {
+              key: "salary",
+              prompt: "Annual salary expectation",
+              reusePrompt: false,
+            },
+          ],
+          "https://jobs.example.test",
+        )
+        .map((row) => row.answer),
+    ).toEqual(["52000"]);
+    expect(applications.getApplication(retry.id)?.state).toBe("queued");
+  });
   it("binds confirmed receipts to one attempt and never requeues a confirmed or uncertain send", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 2);
