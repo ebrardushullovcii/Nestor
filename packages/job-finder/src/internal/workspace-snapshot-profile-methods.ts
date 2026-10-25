@@ -566,6 +566,8 @@ export function createWorkspaceSnapshotProfileMethods(
   | "updateTrackerCrm"
   | "updateAppearanceTheme"
 > & {
+  /** Internal startup work; command writers join it, snapshot readers do not. */
+  discoveryRecoveryReady: Promise<void>;
   /** Internal: the assistant sidebar's profile commit (ADR 0037). */
   applyAssistantProfilePatchGroup: ReturnType<
     typeof createWorkspaceProfileCopilotMethods
@@ -1323,6 +1325,47 @@ export function createWorkspaceSnapshotProfileMethods(
     }
   }
 
+  async function recoverInterruptedSourceDebugOnLoad(
+    discoveryState: JobFinderDiscoveryState,
+  ): Promise<void> {
+    if (ctx.activeSourceDebugExecutionIdRef.current) return;
+    const activeSourceDebugRun = discoveryState.activeSourceDebugRun;
+
+    if (activeSourceDebugRun?.state === "running") {
+      const interruptedRun = SourceDebugRunRecordSchema.parse({
+        ...activeSourceDebugRun,
+        state: "interrupted",
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        activePhase: null,
+        finalSummary:
+          activeSourceDebugRun.finalSummary ??
+          "Source debug run was interrupted before completion.",
+      });
+
+      await ctx.repository.upsertSourceDebugRun(interruptedRun);
+      await ctx.repository.commitDiscoveryStateUpdate((current) => {
+        if (
+          current.activeSourceDebugRun?.id !== interruptedRun.id ||
+          current.activeSourceDebugRun?.state !== "running"
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          activeSourceDebugRun: null,
+          recentSourceDebugRuns: [
+            interruptedRun,
+            ...current.recentSourceDebugRuns.filter(
+              (run) => run.id !== interruptedRun.id,
+            ),
+          ].slice(0, SOURCE_DEBUG_RECENT_HISTORY_LIMIT),
+        };
+      });
+    }
+  }
+
   async function recoverInterruptedDiscoveryStateOnLoad(): Promise<void> {
     if (
       ctx.activeDiscoveryAbortControllerRef.current ||
@@ -1337,9 +1380,8 @@ export function createWorkspaceSnapshotProfileMethods(
     }
 
     const recoveryPromise = (async () => {
-      // Every refresh runs this check. The discovery projection is cached and
-      // answers "was anything running?"; the plan state and search settings
-      // (hundreds of KB with a large search) are read only when it was.
+      // Startup checks once, outside snapshot construction. Canonical writes
+      // below still preserve the transaction-current interrupted checkpoint.
       const discoveryState =
         await ctx.repository.readDiscoveryDisplayProjection();
       if (
@@ -1349,6 +1391,7 @@ export function createWorkspaceSnapshotProfileMethods(
         return;
       }
 
+      await recoverInterruptedSourceDebugOnLoad(discoveryState);
       const activeRun = discoveryState.activeRun;
       if (discoveryState.runState !== "running" && !activeRun) {
         return;
@@ -1477,7 +1520,6 @@ export function createWorkspaceSnapshotProfileMethods(
       },
     );
     await Promise.all([
-      recoverInterruptedDiscoveryStateOnLoad(),
       recoverInterruptedApplyRunsOnLoad(),
       storedResumeDraftSettlement,
     ]);
@@ -1486,49 +1528,6 @@ export function createWorkspaceSnapshotProfileMethods(
 
     // Display reads exclude resume checkpoints before parsing and reuse
     // unchanged state. Canonical snapshots still load the complete state.
-    let unchangedDiscoveryRead: JobFinderDiscoveryState | null = null;
-    if (!ctx.activeSourceDebugExecutionIdRef.current) {
-      const discoveryState =
-        await ctx.repository.readDiscoveryDisplayProjection();
-      const activeSourceDebugRun = discoveryState.activeSourceDebugRun;
-      unchangedDiscoveryRead = discoveryState;
-
-      if (activeSourceDebugRun?.state === "running") {
-        unchangedDiscoveryRead = null;
-        const interruptedRun = SourceDebugRunRecordSchema.parse({
-          ...activeSourceDebugRun,
-          state: "interrupted",
-          updatedAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-          activePhase: null,
-          finalSummary:
-            activeSourceDebugRun.finalSummary ??
-            "Source debug run was interrupted before completion.",
-        });
-
-        await ctx.repository.upsertSourceDebugRun(interruptedRun);
-        await ctx.repository.commitDiscoveryStateUpdate((current) => {
-          if (
-            current.activeSourceDebugRun?.id !== interruptedRun.id ||
-            current.activeSourceDebugRun?.state !== "running"
-          ) {
-            return current;
-          }
-
-          return {
-            ...current,
-            activeSourceDebugRun: null,
-            recentSourceDebugRuns: [
-              interruptedRun,
-              ...current.recentSourceDebugRuns.filter(
-                (run) => run.id !== interruptedRun.id,
-              ),
-            ].slice(0, SOURCE_DEBUG_RECENT_HISTORY_LIMIT),
-          };
-        });
-      }
-    }
-
     const display = borrowValidatedJobs
       ? await ctx.repository.readDisplayCollections?.()
       : undefined;
@@ -1577,8 +1576,7 @@ export function createWorkspaceSnapshotProfileMethods(
       display?.profileRevisions ?? ctx.repository.listProfileRevisions(),
       ctx.repository.getSettings(),
       borrowValidatedJobs
-        ? (unchangedDiscoveryRead ??
-          ctx.repository.readDiscoveryDisplayProjection())
+        ? ctx.repository.readDiscoveryDisplayProjection()
         : ctx.repository.getDiscoveryState(),
       display?.userActionRequests ?? ctx.repository.listUserActionRequests(),
       display?.userActionEvents ?? ctx.repository.listUserActionEvents(),
@@ -2451,7 +2449,21 @@ export function createWorkspaceSnapshotProfileMethods(
     }
   }
 
+  // The bootstrap can paint before background recovery reads historical runs.
+  // Snapshots never start or await this work. Ownership is checked again in the
+  // canonical commit so a live search or a replacement run cannot be recovered.
+  const discoveryRecoveryReady = (async () => {
+    await ctx.backgroundWorkReady;
+    await nextTurn();
+    if (ctx.isWorkspaceClosing?.()) return;
+    await recoverInterruptedDiscoveryStateOnLoad();
+  })();
+  void discoveryRecoveryReady.catch((error: unknown) => {
+    console.warn("[Job Finder] Recovering interrupted discovery failed", error);
+  });
+
   return {
+    discoveryRecoveryReady,
     getWorkspaceSnapshot,
     getWorkspaceProjection: () => getWorkspaceSnapshot(true),
     getWorkspaceBootstrap,

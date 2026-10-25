@@ -825,7 +825,8 @@ export function createJobFinderWorkspaceService(
     ...(fetchListingHtml ? { fetchListingHtml } : {}),
   };
 
-  const snapshotProfileMethods = createWorkspaceSnapshotProfileMethods(context);
+  const { discoveryRecoveryReady, ...snapshotProfileMethods } =
+    createWorkspaceSnapshotProfileMethods(context);
   const assistantEditMethods = createWorkspaceAssistantEditMethods({
     ctx: context,
     applyAssistantProfilePatchGroup:
@@ -1078,6 +1079,7 @@ export function createJobFinderWorkspaceService(
     requestedCampaignId?: string,
     options: { nestedUserActionRecovery?: boolean; commandOnly?: boolean } = {},
   ) {
+    await discoveryRecoveryReady;
     await requireDiscoverySafeguardClearance();
     let campaignState = await repository.getCampaignState();
     if (!campaignState && requestedCampaignId) {
@@ -1901,6 +1903,7 @@ export function createJobFinderWorkspaceService(
     runSourceDebug: (targetId, signal, onProgress) =>
       trackWorkspaceOperation("source debug", async () => {
         await requireActivityEnabled();
+        await discoveryRecoveryReady;
         return sourceDebugMethods.runSourceDebug(targetId, signal, onProgress);
       }),
     verifySourceInstructions: (targetId, instructionId, signal, onProgress) =>

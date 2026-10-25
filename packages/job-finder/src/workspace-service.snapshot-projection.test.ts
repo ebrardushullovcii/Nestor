@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { StatementSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -38,8 +39,12 @@ function service(repository: JobFinderRepository) {
   };
 }
 
-async function fixture(storage: "memory" | "file") {
+async function fixture(storage: "memory" | "file", noRuntimeRefresh = false) {
   const seed = createSeed();
+  if (noRuntimeRefresh)
+    seed.searchPreferences.discovery.targets.forEach((target) => {
+      target.enabled = false;
+    });
   const pending = SavedJobSchema.parse({
     ...seed.savedJobs[0],
     id: "pending_unique",
@@ -111,6 +116,42 @@ async function fixture(storage: "memory" | "file") {
 
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} snapshot display projection`, () => {
+    if (storage === "file")
+      test("a second snapshot does not read discovery storage", async () => {
+        const { repo, close } = await fixture(storage, true);
+        try {
+          const workspace = service(repo);
+          await vi.waitFor(async () =>
+            expect((await repo.getDiscoveryState()).activeRun).toBeNull(),
+          );
+          await workspace.getWorkspaceBootstrap();
+          await workspace.getWorkspaceProjection();
+          const reads: string[] = [];
+          const all = Reflect.get(StatementSync.prototype, "all");
+          const spy = vi
+            .spyOn(StatementSync.prototype, "all")
+            .mockImplementation(function (
+              this: StatementSync,
+              ...args: Parameters<StatementSync["all"]>
+            ) {
+              if (
+                /\bFROM\s+(?:discovery_runs|discovery_ledger|discovery_run_targets|discovery_run_activity|discovery_ledger_observations)\b/i.test(
+                  this.sourceSQL,
+                )
+              )
+                reads.push(this.sourceSQL);
+              return all.apply(this, args);
+            });
+          try {
+            await workspace.getWorkspaceProjection();
+            expect(reads).toEqual([]);
+          } finally {
+            spy.mockRestore();
+          }
+        } finally {
+          await close();
+        }
+      });
     test("company membership edits preserve discovery rows and match canonical company lists", async () => {
       const { repo, close } = await fixture(storage);
       try {
@@ -366,6 +407,9 @@ for (const storage of ["memory", "file"] as const) {
         expect(bootstrap.hydration.phase).toBe("bootstrap");
         expect(readIntelligence).not.toHaveBeenCalled();
         readIntelligence.mockRestore();
+        await vi.waitFor(async () =>
+          expect((await repo.getDiscoveryState()).activeRun).toBeNull(),
+        );
         const canonical = await workspace.getWorkspaceSnapshot();
         const readCanonical = vi.spyOn(repo, "getDiscoveryState");
         const first = await workspace.getWorkspaceProjection();
