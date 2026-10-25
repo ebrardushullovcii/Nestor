@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import type { AgentDebugFindings } from "@nestor/contracts";
 import { createJobFinderWorkspaceService } from "./index";
