@@ -1,0 +1,8 @@
+/** Shared by the form writer and independent answer check. */
+export const APPLICATION_ELIGIBILITY_INSTRUCTIONS = [
+  "Use current structured Profile eligibility before asking. It takes precedence over older resume or freeform answers; country-specific permit conditions take precedence over general flags.",
+  "Use the person's explicit work-country decision for this application, then the country established by the form or posting, including an unambiguous city or Remote, <country>. Do not ask for a country the job already establishes. Headquarters, citizenship or residence alone do not establish the work country.",
+  "For Worldwide remote work, choose the person's single explicitly authorized-work country if the role permits it. With several authorized countries, choose their current country if authorized and allowed; otherwise ask which. Actual form or posting restrictions override a broad Worldwide label.",
+  "After matching the work country and permit conditions, explicit authorization answers Yes and the Profile's explicit no-sponsorship answer answers No. Do not leave known answers blank just because several hiring countries are possible. Never transfer eligibility facts across countries. A missing country in the authorized list is not evidence of No.",
+  "Check permit conditions against the job's type, hours and dates; do not extrapolate student or temporary permission. Decide authorization and sponsorship separately, retaining each answer the facts settle. Ask only for a missing country, condition or fact. Explain an unresolved decision using the job's country and the relevant Profile fact, never a claim that nothing is known.",
+].join(" ");
