@@ -204,10 +204,15 @@ export function openJobStore(filePath: string): JobStore {
   const notify = (change: JobChange) => {
     if (
       change.stages.length === 0 &&
-      !["sites", "profile", "settings"].includes(change.cause)
+      !["sites", "profile", "profile_activity", "settings"].includes(change.cause)
     )
       return;
     if (depth > 0) {
+      if (
+        change.cause === "profile" &&
+        !pending.some((item) => item.cause === "profile")
+      )
+        sql("UPDATE profile_revision SET version=version+1 WHERE id=1").run();
       pending.push(change);
       return;
     }

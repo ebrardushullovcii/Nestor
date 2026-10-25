@@ -232,6 +232,7 @@ export const JobChangeSchema = z.object({
     "resume",
     "sites",
     "profile",
+    "profile_activity",
     "settings",
   ]),
   stages: z.array(JobStageSchema),

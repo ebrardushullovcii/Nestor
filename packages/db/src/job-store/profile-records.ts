@@ -152,6 +152,31 @@ export function createProfileRecords(store: JobStore) {
     );
   return {
     all,
+    reorder(kind: ProfileRecordCollection, ids: readonly string[]): void {
+      const name = table(kind);
+      const rows = store
+        .sql(`SELECT id,seq FROM ${name} ORDER BY seq`)
+        .all() as { id: string; seq: number }[];
+      if (
+        rows.length !== ids.length ||
+        new Set(ids).size !== rows.length ||
+        rows.some((row) => !ids.includes(row.id))
+      )
+        throw new Error(
+          "Profile order must name every current record exactly once.",
+        );
+      const changed = ids.flatMap((id, index) =>
+        rows[index]!.id === id ? [] : [{ id, seq: rows[index]!.seq }],
+      );
+      if (!changed.length) return;
+      store.transaction(() => {
+        for (const row of changed)
+          store.sql(`UPDATE ${name} SET seq=-seq WHERE id=?`).run(row.id);
+        for (const row of changed)
+          store.sql(`UPDATE ${name} SET seq=? WHERE id=?`).run(row.seq, row.id);
+        store.notify({ cause: "profile", ids: [], stages: [], searchId: null });
+      });
+    },
     experienceRequired() {
       const result = store
         .sql(

@@ -178,8 +178,16 @@ export function createPreferencesStore(store: JobStore) {
   };
   return {
     goals: {
+      created: goals.created,
       values: goalValues,
       read: readGoals,
+      replace(input: JobSearchPreferences): void {
+        const next = JobSearchPreferencesSchema.parse(input);
+        this.patch({
+          fields: flatten(next, goalFields),
+          lists: flattenLists(next, Object.keys(GoalListsSchema.shape)),
+        });
+      },
       patch(input: PatchGoalsInput): GoalValues {
         const patch = PatchGoalsInputSchema.parse(input);
         return store.transaction(() => {
@@ -200,8 +208,25 @@ export function createPreferencesStore(store: JobStore) {
       },
     },
     settings: {
+      created: settings.created,
       values: settingValues,
       read: readSettings,
+      replace(input: JobFinderSettings): void {
+        const next = JobFinderSettingsSchema.parse(input);
+        store.transaction(() => {
+          this.patch({
+            fields: flatten(next, settingFields),
+            lists: flattenLists(next, Object.keys(SettingsListsSchema.shape)),
+          });
+          const ids = new Set(
+            (next.applicationCrm?.customStages ?? []).map((stage) => stage.id),
+          );
+          for (const stage of stages())
+            if (!ids.has(stage.id)) this.removeStage(stage.id);
+          for (const stage of next.applicationCrm?.customStages ?? [])
+            this.upsertStage(stage);
+        });
+      },
       patch(input: PatchSettingsInput): SettingsValues {
         const patch = PatchSettingsInputSchema.parse(input);
         return store.transaction(() => {

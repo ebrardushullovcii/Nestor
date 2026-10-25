@@ -6,6 +6,7 @@ import {
   StoredProfileSchema,
   ProfileOverviewSchema,
   ProfileRecordCollectionSchema,
+  ProfileRecordSchema,
   ResumeSourceDocumentSchema,
   type PatchProfileInput,
   type StoredProfile,
@@ -26,6 +27,7 @@ import {
   inflate,
   createProfileItems,
   PROFILE_ITEMS_SCHEMA,
+  flattenLists,
   type ScalarTable,
 } from "./profile-values";
 
@@ -79,6 +81,8 @@ export const PROFILE_SCHEMA = [
  CREATE TABLE IF NOT EXISTS profile_identity(id INTEGER PRIMARY KEY CHECK(id=1),profile_id TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS profile_work_permissions(country TEXT NOT NULL,conditions TEXT NOT NULL,requires_future_sponsorship INTEGER,position INTEGER NOT NULL,PRIMARY KEY(country,conditions));
  CREATE INDEX IF NOT EXISTS profile_work_permissions_country ON profile_work_permissions(country,position);
+ CREATE TABLE IF NOT EXISTS profile_revision(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL DEFAULT 1);
+ INSERT OR IGNORE INTO profile_revision(id,version) VALUES(1,1);
  `,
 ].join("\n");
 
@@ -189,7 +193,8 @@ export function createProfileStore(store: JobStore) {
       limitedWorkPermissions: permissions(),
     });
   };
-  return {
+  const api = {
+    created: values.created,
     overview,
     records,
     read(): StoredProfile {
@@ -217,6 +222,44 @@ export function createProfileStore(store: JobStore) {
                 sourceData["ownership.acknowledgedSourceEmail"],
             }
           : null,
+      });
+    },
+    /** Imports and AI edits reconcile their accepted facts; unchanged rows are untouched. */
+    replace(input: StoredProfile): void {
+      const next = StoredProfileSchema.parse(input);
+      store.transaction(() => {
+        api.patch({
+          fields: flatten(next, profileFields),
+          lists: flattenLists(next, Object.keys(ProfileListsSchema.shape)),
+        });
+        for (const collection of ProfileRecordCollectionSchema.options) {
+          const incoming = new Set(next[collection].map((row) => row.id));
+          for (const row of records.all(collection))
+            if (!incoming.has(row.record.id))
+              records.remove(collection, row.record.id);
+          for (const record of next[collection])
+            records.upsert(ProfileRecordSchema.parse({ collection, record }));
+          records.reorder(
+            collection,
+            next[collection].map((row) => row.id),
+          );
+        }
+        api.setResumeSource(next.baseResume, next.resumeIdentityOwnership);
+        api.setWorkPermissions(
+          next.workEligibility.limitedWorkPermissions ?? [],
+        );
+        const changed = store
+          .sql(
+            "UPDATE profile_identity SET profile_id=? WHERE id=1 AND profile_id<>?",
+          )
+          .run(next.id, next.id).changes;
+        if (changed)
+          store.notify({
+            cause: "profile",
+            stages: [],
+            ids: [],
+            searchId: null,
+          });
       });
     },
     patch(input: PatchProfileInput): ProfileOverview {
@@ -321,5 +364,6 @@ export function createProfileStore(store: JobStore) {
       });
     },
   };
+  return api;
 }
 export type ProfileStore = ReturnType<typeof createProfileStore>;

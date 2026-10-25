@@ -627,6 +627,7 @@ export async function createJobFinderRuntimeAsync(
   let jobFinderRepository: JobFinderRepository;
   try {
     jobFinderRepository = await createFileJobFinderRepository({
+      store: getJobStore(),
       filePath: getJobFinderWorkspaceFilePath(),
       seed: createEmptyJobFinderRepositoryState(),
       deferEvidenceConversion: backgroundEvidenceConversion,

@@ -1,7 +1,9 @@
+import { PROFILE_IMPORT_SCHEMA } from "./profile-import-store";
 import { SEARCH_SOURCES_SCHEMA } from "./search-sources";
 import { SOURCE_ACCESS_SCHEMA } from "./source-access";
 import { PROFILE_SCHEMA } from "./profile-store";
 import { PREFERENCES_SCHEMA } from "./preferences-store";
+import { PROFILE_WORKFLOW_SCHEMA } from "./profile-workspace";
 /**
  * The Job Finder store: one SQLite file, one row per job.
  *
@@ -235,4 +237,6 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   SEARCH_SOURCES_SCHEMA,
   PROFILE_SCHEMA,
   PREFERENCES_SCHEMA,
+  PROFILE_WORKFLOW_SCHEMA,
+  PROFILE_IMPORT_SCHEMA,
 ];

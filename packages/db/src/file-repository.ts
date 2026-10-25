@@ -1,3 +1,6 @@
+import { notifyWorkspaceCommit } from "./workspace-commits";
+import { openJobStore } from "./job-store/job-store";
+import { createProfileWorkspace } from "./job-store/profile-workspace";
 import {
   parseSavedJobsWithPreparation,
   readSavedJobFingerprintBatch,
@@ -22,18 +25,12 @@ import {
   ApplicationReplayCheckpointSchema,
   ApplicationAuthorityEnvelopeSchema,
   ApprovedApplicationAnswerSnapshotSchema,
-  CandidateProfileSchema,
   JobFinderActivityControlSchema,
   ApplyQueueSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
-  JobFinderSettingsSchema,
   JobSearchCampaignCollectionSchema,
-  JobSearchPreferencesSchema,
-  ProfileCopilotMessageSchema,
-  ProfileRevisionSchema,
-  ProfileSetupStateSchema,
   ResumeDraftSchema,
   SavedJobSchema,
   SourceDebugEvidenceRefSchema,
@@ -46,7 +43,6 @@ import {
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
   TailoredAssetSchema,
-  type CandidateProfile,
   type SavedJob,
   type JobFinderRepositoryState,
   readPreparedDiscoveryFingerprints,
@@ -111,9 +107,7 @@ import {
   bootstrapState,
   cloneValue,
   getSingletonValue,
-  getSingletonValueWithRevision,
   hasPersistedState,
-  incrementSingletonRevision,
   listCollectionValues,
   listValues,
   listValuesInChunks,
@@ -125,10 +119,7 @@ import {
   writeState,
   validateWorkspaceSettingsFile,
 } from "./internal/state";
-import {
-  applyProfileCopilotMessagePatchFlags,
-  findProfileCopilotMessageByPatchGroup,
-} from "./profile-copilot-message-flags";
+
 import type {
   ApplicationRecordBatchCommitResult,
   FileJobFinderRepositoryOptions,
@@ -623,8 +614,21 @@ export async function createFileJobFinderRepository(
     }
   }
 
+  const profileStore =
+    options.store ?? openJobStore(`${options.filePath}.jobs.sqlite`);
+  const profileWorkspace = createProfileWorkspace(profileStore, normalizedSeed);
+  const stopProfileUpdates = profileStore.onChange((change) => {
+    if (["profile", "profile_activity", "settings"].includes(change.cause))
+      notifyWorkspaceCommit(database);
+  });
   return {
-    readDisplayCollections,
+    readDisplayCollections: async () => ({
+      ...(await readDisplayCollections()),
+      profileCopilotMessages:
+        await profileWorkspace.methods.listProfileCopilotMessages(),
+      profileRevisions: await profileWorkspace.methods.listProfileRevisions(),
+    }),
+    ...profileWorkspace.methods,
     ...createApplicationAnswerSnapshotRepositoryMethods({
       read: () => readApplicationAuthorityState(),
       mutate: (operation) =>
@@ -876,6 +880,7 @@ export async function createFileJobFinderRepository(
       context,
       approvalFolder.schedule,
       approvalFolder.foldApprovalChanges,
+      profileStore,
     ),
     // These reads need only authority envelopes, not the application/result
     // bodies loaded by the transaction store for preflight/outcome mutations.
@@ -912,12 +917,19 @@ export async function createFileJobFinderRepository(
     ...createFileRepositoryUserActionMethods(context),
     ...createFileRepositoryGroupedManualAnswerMethods(context),
     exportState: () =>
-      Promise.resolve(cloneValue(readState(database, normalizedSeed))),
+      Promise.resolve(
+        cloneValue({
+          ...readState(database, normalizedSeed),
+          ...profileWorkspace.state(),
+        }),
+      ),
     async close() {
+      stopProfileUpdates();
       await approvalFolder.flush();
       await stopBackups();
       await stopWalCheckpoints();
       database.close();
+      if (!options.store) profileStore.close();
       writeCleanCloseMarker(options.filePath);
     },
     async reset(nextSeed) {
@@ -926,6 +938,7 @@ export async function createFileJobFinderRepository(
       );
       await stopBackups();
       try {
+        profileWorkspace.reset(nextState);
         if (automaticBackup.beforeReset) {
           const backup = await createWorkspaceResetDatabaseBackup({
             database,
@@ -967,306 +980,6 @@ export async function createFileJobFinderRepository(
         await removeWorkspaceRecoveryArtifacts(options.filePath);
       } finally {
         stopBackups = startBackups();
-      }
-    },
-    // Singleton reads return their own copy already; only the shared seed
-    // needs copying. Copying twice cost about 10 ms of every refresh.
-    getProfile() {
-      return Promise.resolve(
-        getSingletonValue(database, "profile", CandidateProfileSchema) ??
-          cloneValue(normalizedSeed.profile),
-      );
-    },
-    readProfileProjection() {
-      return Promise.resolve(
-        readSingletonProjection(
-          "profile",
-          CandidateProfileSchema,
-          normalizedSeed.profile,
-        ),
-      );
-    },
-    getProfileWithRevision() {
-      const persisted = getSingletonValueWithRevision(
-        database,
-        "profile",
-        CandidateProfileSchema,
-      );
-      return Promise.resolve(
-        cloneValue({
-          profile: persisted.value ?? normalizedSeed.profile,
-          revision: persisted.revision,
-        }),
-      );
-    },
-    saveProfile(profile) {
-      const normalizedProfile = CandidateProfileSchema.parse(
-        cloneValue(profile),
-      );
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(database, "profile", normalizedProfile);
-      });
-      return secureDatabaseFile(options.filePath);
-    },
-    commitProfileUpdate(updateProfile, casOptions) {
-      try {
-        const outcome = runImmediateTransaction<{
-          status: "applied" | "stale";
-          profile: CandidateProfile;
-          revision: number;
-        }>(database, () => {
-          const persisted = getSingletonValueWithRevision(
-            database,
-            "profile",
-            CandidateProfileSchema,
-          );
-          const currentProfile = persisted.value ?? normalizedSeed.profile;
-          if (
-            casOptions?.expectedRevision !== undefined &&
-            casOptions.expectedRevision !== persisted.revision
-          ) {
-            return {
-              status: "stale" as const,
-              profile: currentProfile,
-              revision: persisted.revision,
-            };
-          }
-
-          const nextProfile = CandidateProfileSchema.parse(
-            cloneValue(updateProfile(cloneValue(currentProfile))),
-          );
-          saveSingletonValue(database, "profile", nextProfile);
-          return {
-            status: "applied" as const,
-            profile: nextProfile,
-            revision: persisted.revision + 1,
-          };
-        });
-        if (outcome.status === "stale") {
-          return Promise.resolve(outcome);
-        }
-        return secureDatabaseFile(options.filePath).then(() => outcome);
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
-    getSearchPreferences() {
-      return Promise.resolve(
-        getSingletonValue(
-          database,
-          "search_preferences",
-          JobSearchPreferencesSchema,
-        ) ?? cloneValue(normalizedSeed.searchPreferences),
-      );
-    },
-    readSearchPreferencesProjection() {
-      return Promise.resolve(
-        readSingletonProjection(
-          "search_preferences",
-          JobSearchPreferencesSchema,
-          normalizedSeed.searchPreferences,
-        ),
-      );
-    },
-    getProfileSetupState() {
-      return Promise.resolve(
-        getSingletonValue(
-          database,
-          "profile_setup_state",
-          ProfileSetupStateSchema,
-        ) ?? cloneValue(normalizedSeed.profileSetupState),
-      );
-    },
-    saveSearchPreferences(searchPreferences) {
-      const normalizedSearchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(
-          database,
-          "search_preferences",
-          normalizedSearchPreferences,
-        );
-        // Preference-only writes advance the shared profile epoch so copilot
-        // commits that captured older preferences fail closed as stale.
-        incrementSingletonRevision(database, "profile");
-      });
-      return secureDatabaseFile(options.filePath);
-    },
-    saveProfileSetupState(profileSetupState) {
-      const normalizedProfileSetupState = ProfileSetupStateSchema.parse(
-        cloneValue(profileSetupState),
-      );
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(
-          database,
-          "profile_setup_state",
-          normalizedProfileSetupState,
-        );
-        // Setup-state-only writes advance the shared profile epoch so copilot
-        // commits that captured older setup state fail closed as stale.
-        incrementSingletonRevision(database, "profile");
-      });
-      return secureDatabaseFile(options.filePath);
-    },
-    saveProfileAndSearchPreferences(profile, searchPreferences) {
-      const normalizedProfile = CandidateProfileSchema.parse(
-        cloneValue(profile),
-      );
-      const normalizedSearchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(database, "profile", normalizedProfile);
-        saveSingletonValue(
-          database,
-          "search_preferences",
-          normalizedSearchPreferences,
-        );
-      });
-      return secureDatabaseFile(options.filePath);
-    },
-    commitProfileCopilotState({
-      profile,
-      searchPreferences,
-      profileSetupState,
-      messages,
-      revisions,
-      messagePatchFlags,
-      expectedProfileRevision,
-    }) {
-      const normalizedProfile = CandidateProfileSchema.parse(
-        cloneValue(profile),
-      );
-      const normalizedSearchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      const normalizedProfileSetupState = ProfileSetupStateSchema.parse(
-        cloneValue(profileSetupState),
-      );
-      const normalizedMessages = ProfileCopilotMessageSchema.array().parse(
-        cloneValue(messages ?? []),
-      );
-      const normalizedRevisions = ProfileRevisionSchema.array().parse(
-        cloneValue(revisions ?? []),
-      );
-      const normalizedMessagePatchFlags = cloneValue(messagePatchFlags ?? []);
-
-      const outcome = runImmediateTransaction<{
-        status: "applied" | "stale";
-        profile: CandidateProfile;
-        revision: number;
-      }>(database, () => {
-        const persisted = getSingletonValueWithRevision(
-          database,
-          "profile",
-          CandidateProfileSchema,
-        );
-        const currentProfile = persisted.value ?? normalizedSeed.profile;
-        if (
-          expectedProfileRevision !== undefined &&
-          expectedProfileRevision !== persisted.revision
-        ) {
-          return {
-            status: "stale" as const,
-            profile: currentProfile,
-            revision: persisted.revision,
-          };
-        }
-
-        saveSingletonValue(database, "profile", normalizedProfile);
-        saveSingletonValue(
-          database,
-          "search_preferences",
-          normalizedSearchPreferences,
-        );
-        saveSingletonValue(
-          database,
-          "profile_setup_state",
-          normalizedProfileSetupState,
-        );
-
-        for (const message of normalizedMessages) {
-          context.writePersistedValue("profile_copilot_messages", message);
-        }
-
-        for (const revision of normalizedRevisions) {
-          context.writePersistedValue("profile_revisions", revision);
-        }
-
-        // Flag deltas resolve against transaction-current rows so sibling
-        // groups changed by a concurrent apply/reject are never reverted.
-        if (normalizedMessagePatchFlags.length > 0) {
-          const currentMessages = listValues(
-            database,
-            "profile_copilot_messages",
-            ProfileCopilotMessageSchema,
-          );
-          for (const message of applyProfileCopilotMessagePatchFlags(
-            currentMessages,
-            normalizedMessagePatchFlags,
-          )) {
-            context.writePersistedValue("profile_copilot_messages", message);
-          }
-        }
-
-        return {
-          status: "applied" as const,
-          profile: normalizedProfile,
-          revision: persisted.revision + 1,
-        };
-      });
-
-      if (outcome.status === "stale") {
-        return Promise.resolve(outcome);
-      }
-
-      return secureDatabaseFile(options.filePath).then(() => outcome);
-    },
-    commitProfileCopilotPatchFlagUpdate({ patchGroupId, applyMode }) {
-      try {
-        const didUpdate = runImmediateTransaction<boolean>(database, () => {
-          const currentMessages = listValues(
-            database,
-            "profile_copilot_messages",
-            ProfileCopilotMessageSchema,
-          );
-          const messageIndex = findProfileCopilotMessageByPatchGroup(
-            currentMessages,
-            { patchGroupId },
-          );
-
-          if (messageIndex < 0) {
-            return false;
-          }
-
-          const [changedMessage] = applyProfileCopilotMessagePatchFlags(
-            currentMessages,
-            [
-              {
-                messageId: currentMessages[messageIndex]!.id,
-                patchGroupId,
-                applyMode,
-              },
-            ],
-          );
-
-          if (changedMessage) {
-            context.writePersistedValue(
-              "profile_copilot_messages",
-              changedMessage,
-            );
-          }
-          return true;
-        });
-        return secureDatabaseFile(options.filePath).then(() => didUpdate);
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
       }
     },
     listSavedJobs(options?: { limit?: number; offset?: number }) {
@@ -1414,16 +1127,9 @@ export async function createFileJobFinderRepository(
           if (normalizedUpserts.some((job) => !job.id))
             throw new Error("Saved job upserts must have an id.");
           if (updateSettings) {
-            const currentSettings =
-              getSingletonValue(
-                database,
-                "settings",
-                JobFinderSettingsSchema,
-              ) ?? normalizedSeed.settings;
-            const nextSettings = JobFinderSettingsSchema.parse(
-              cloneValue(updateSettings(cloneValue(currentSettings))),
+            profileWorkspace.preferences.settings.replace(
+              updateSettings(profileWorkspace.preferences.settings.read()),
             );
-            saveSingletonValue(database, "settings", nextSettings);
           }
 
           const existingJobIds = new Set<string>();
@@ -1565,7 +1271,9 @@ export async function createFileJobFinderRepository(
           writeSavedJobSightings(database, sightings);
           writeSavedJobPlanAssessments(database, planAssessments);
           if (updateDiscoveryState && currentDiscoveryState) {
-            discoveryStorage.update(updateDiscoveryState(currentDiscoveryState));
+            discoveryStorage.update(
+              updateDiscoveryState(currentDiscoveryState),
+            );
           }
         });
       } catch (error) {
@@ -2344,43 +2052,6 @@ export async function createFileJobFinderRepository(
       });
 
       return secureDatabaseFile(options.filePath);
-    },
-    getSettings() {
-      return Promise.resolve(
-        getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
-          cloneValue(normalizedSeed.settings),
-      );
-    },
-    saveSettings(settings) {
-      const normalizedSettings = JobFinderSettingsSchema.parse(
-        cloneValue(settings),
-      );
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(database, "settings", normalizedSettings);
-      });
-      return secureDatabaseFile(options.filePath);
-    },
-    commitSettingsUpdate(update) {
-      try {
-        const nextSettings = runImmediateTransaction(database, () => {
-          const currentSettings =
-            getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
-            normalizedSeed.settings;
-          const nextState = JobFinderSettingsSchema.parse(
-            cloneValue(update(cloneValue(currentSettings))),
-          );
-          saveSingletonValue(database, "settings", nextState);
-          return nextState;
-        });
-
-        return secureDatabaseFile(options.filePath).then(() =>
-          cloneValue(nextSettings),
-        );
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
     },
     readDiscoveryDisplayProjection() {
       return Promise.resolve(
