@@ -25,6 +25,7 @@ const {
   mockGetJobFinderWorkspaceService,
   mockResetWorkspace,
   mockCloseBrowser,
+  mockClearPersonPause,
   mockClearBrowserStorage,
   mockClearBrowserCache,
   mockSetActivityControl,
@@ -50,6 +51,7 @@ const {
   mockGetJobFinderWorkspaceService: vi.fn(),
   mockResetWorkspace: vi.fn(),
   mockCloseBrowser: vi.fn(),
+  mockClearPersonPause: vi.fn(),
   mockClearBrowserStorage: vi.fn(),
   mockClearBrowserCache: vi.fn(),
   mockSetActivityControl: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("../assistant/assistant-service", () => ({
 vi.mock("../browser/embedded-browser", () => ({
   getEmbeddedBrowser: () => ({
     close: mockCloseBrowser,
+    clearPersonPause: mockClearPersonPause,
     getSession: () => ({
       clearStorageData: mockClearBrowserStorage,
       clearCache: mockClearBrowserCache,
@@ -159,6 +162,7 @@ import {
   getJobFinderStartupResetRecoveryFact,
   JobFinderResetFileMoveError,
   recoverPendingJobFinderWorkspaceReset,
+  resetJobFinderBrowser,
   resetJobFinderWorkspace,
   sweepStaleJobFinderResetArtifacts,
 } from "./reset-workspace";
@@ -334,6 +338,32 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+test("browser reset for restore keeps the global pause without latching a person-close pause", async () => {
+  const snapshot = { snapshotMarker: "paused-workspace" };
+  const getWorkspaceSnapshot = vi.fn(() => Promise.resolve(snapshot));
+  mockGetJobFinderWorkspaceService.mockResolvedValueOnce({
+    setActivityControl: mockSetActivityControl,
+    getWorkspaceSnapshot,
+  });
+
+  expect(await resetJobFinderBrowser()).toBe(snapshot);
+  expect(mockSetActivityControl).toHaveBeenCalledExactlyOnceWith({
+    paused: true,
+    reason: "Browser reset",
+  });
+  expect(mockCloseBrowser).toHaveBeenCalledExactlyOnceWith(true);
+  expect(mockClearPersonPause).toHaveBeenCalledOnce();
+  expect(mockClearBrowserStorage).toHaveBeenCalledOnce();
+  expect(mockClearBrowserCache).toHaveBeenCalledOnce();
+  expect(mockSetActivityControl.mock.invocationCallOrder[0]).toBeLessThan(
+    mockCloseBrowser.mock.invocationCallOrder[0]!,
+  );
+  expect(mockClearBrowserCache.mock.invocationCallOrder[0]).toBeLessThan(
+    mockClearPersonPause.mock.invocationCallOrder[0]!,
+  );
+  expect(mockResetWorkspace).not.toHaveBeenCalled();
 });
 
 describe("resetJobFinderWorkspace", () => {

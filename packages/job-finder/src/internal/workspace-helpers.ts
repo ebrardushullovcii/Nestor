@@ -20,9 +20,7 @@ import {
   type SourceInstructionArtifact,
   type TailoredAsset,
 } from "@nestor/contracts";
-import {
-  prefixedLines,
-} from "./source-instructions";
+import { prefixedLines } from "./source-instructions";
 import { normalizeResumeDraftEntryOrdering } from "./resume-entry-ordering";
 import { uniqueStrings } from "./shared";
 import { markValidatedSearchPreferences } from "./validated-search-preferences";
@@ -144,6 +142,9 @@ export function normalizeSearchPreferences(
   return markValidatedSearchPreferences(value);
 }
 
+export const SOURCE_URL_CHANGED_STALE_REASON =
+  "Starting page URL changed. Check this source again before reusing saved guidance.";
+
 export function invalidateChangedSourceGuidance(
   currentSearchPreferences: JobSearchPreferences,
   nextSearchPreferences: JobSearchPreferences,
@@ -175,8 +176,7 @@ export function invalidateChangedSourceGuidance(
           draftInstructionId: null,
           lastDebugRunId: null,
           lastVerifiedAt: null,
-          staleReason:
-            "Starting page URL changed. Check this source again before reusing saved guidance.",
+          staleReason: SOURCE_URL_CHANGED_STALE_REASON,
         };
       }),
     },

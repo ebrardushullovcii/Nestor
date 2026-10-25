@@ -1012,6 +1012,9 @@ export async function resetJobFinderBrowser() {
   const browser = getEmbeddedBrowser();
   await browser.close(true);
   await clearBrowserSession();
+  // Restore/reset replaces the old browser state, including its person-close
+  // latch. Activity stays globally paused until the person resumes it.
+  browser.clearPersonPause();
   return service.getWorkspaceSnapshot();
 }
 

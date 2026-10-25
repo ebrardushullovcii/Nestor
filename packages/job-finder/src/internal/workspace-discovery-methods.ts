@@ -102,6 +102,7 @@ import {
   getActiveDiscoveryTargets,
   resolveActiveSourceInstructionArtifact,
   resolveAdapterKind,
+  SOURCE_URL_CHANGED_STALE_REASON,
 } from "./workspace-helpers";
 import { collectResumeAffectingChangedJobIds } from "./resume-workspace-staleness";
 import {
@@ -4198,6 +4199,28 @@ export function createWorkspaceDiscoveryMethods(
           resumeStaleJobIds.add(jobId);
         await flushResumeStaleness(false);
         await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
+        if (
+          !targetFailed &&
+          !collected.result.warning &&
+          target.staleReason === SOURCE_URL_CHANGED_STALE_REASON
+        ) {
+          // Discovery proves this URL works, not that old guidance still does.
+          // URL edits clear instruction pointers, so check retained artifacts too.
+          const hasSavedGuidance = (
+            await ctx.repository.listSourceInstructionArtifacts()
+          ).some((artifact) => artifact.targetId === target.id);
+          if (!hasSavedGuidance) {
+            await ctx.saveDiscoveryTargetUpdate(target.id, (current) =>
+              current.startingUrl === target.startingUrl &&
+              current.staleReason === SOURCE_URL_CHANGED_STALE_REASON &&
+              !current.validatedInstructionId &&
+              !current.draftInstructionId &&
+              !current.customInstructions?.trim()
+                ? { ...current, staleReason: null }
+                : current,
+            );
+          }
+        }
         const completedExecution = activeRun.targetExecutions.find(
           (execution) => execution.targetId === target.id,
         );
