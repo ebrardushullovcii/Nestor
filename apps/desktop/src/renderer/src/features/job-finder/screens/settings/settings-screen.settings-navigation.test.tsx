@@ -695,16 +695,14 @@ it("puts pay privacy in the Applying section", () => {
   });
 });
 
-it("places workflow timing below both diagnostics columns", () => {
+it("keeps developer timing evidence out of user settings", () => {
   const view = render(
     <MemoryRouter>
       <SettingsScreen {...baseProps} />
     </MemoryRouter>,
   );
-  const timing = view.container.querySelector("[data-settings-timing]");
-  expect(timing?.parentElement?.id).toBe("settings-diagnostics");
-  expect(timing?.previousElementSibling?.className).toContain("xl:grid-cols-");
-  expect(timing?.textContent).toContain("Workflow timing evidence");
+  expect(view.container.querySelector("[data-settings-timing]")).toBeNull();
+  expect(screen.queryByText("Workflow timing evidence")).toBeNull();
 });
 
 it("scrolls the last focused tab fully into view with edge clearance", () => {

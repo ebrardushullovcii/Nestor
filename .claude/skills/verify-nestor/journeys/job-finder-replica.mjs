@@ -52,8 +52,8 @@ const STAGES = {
     await click("Save and continue to Job targets");
     await waitFor("Job targets setup step", 20, { role: "heading" });
 
-    await fill("Source name (optional)", "Replica board");
-    await fill("Careers or job-board URL", new URL("board/", sites.url).href);
+    await fill("Source name (optional, for one site)", "Replica board");
+    await fill("Careers or job-board URLs", new URL("board/", sites.url).href);
     await click("Add and turn on");
     await waitFor("/^Added Replica board/", 15);
     await click("Done adding");

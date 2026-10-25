@@ -7,7 +7,6 @@ import {
   ApplicationAttestationKindSchema,
   ApplicationApplyModeSchema,
   CoverLetterPolicySchema,
-  JobSearchSelectivitySchema,
   ProfileAssistantInitiativeSchema,
   ProfileAssistantReplyStyleSchema,
   UpdateAiBehaviorInputSchema,
@@ -103,7 +102,8 @@ export const readSettingsTool = defineTool({
       summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}, resume level ${snapshot.settings.resumeApplicationMode === "original_resume" ? "original" : snapshot.searchPreferences.tailoringMode}.`,
       data: {
         applyMode:
-          snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
+          snapshot.settings.applicationAutomationMode ??
+          "confirm_before_submit",
         resumeLevel:
           snapshot.settings.resumeApplicationMode === "original_resume"
             ? "original_resume"
@@ -137,9 +137,7 @@ export const updateApplySettingsTool = defineTool({
   description:
     "Changes how applying works by default: fill and leave for the person's click (confirm_before_submit) or send for them (autonomous_submit), resume template, font, cover letter preference, or the default resume level (original_resume or tailored_per_job). Saved with Undo. Only when the person asks to change the default: to send applications they told you to send, use send_applications and leave this alone.",
   parameters: json.object({
-    applicationAutomationMode: json.enumOf(
-      ApplicationApplyModeSchema.options,
-    ),
+    applicationAutomationMode: json.enumOf(ApplicationApplyModeSchema.options),
     resumeTemplateId: json.string(),
     fontPreset: json.string(),
     resumeApplicationMode: json.enumOf(["tailored_per_job", "original_resume"]),
@@ -173,7 +171,7 @@ export const updateAiBehaviorTool = defineTool({
   name: "update_ai_behavior",
   group: "settings",
   description:
-    "Changes Settings › AI behavior: how much the assistant volunteers and how long it talks (aiBehavior.profileAssistant), How picky a search is (aiBehavior.jobSearch.selectivity: best_matches, balanced, wide_net), Count remote jobs as any location (aiBehavior.jobSearch.remoteCountsAsAnyLocation: true or false), how applications are written (aiBehavior.applying), cover letters, and the resume approach (original_resume, conservative, balanced, aggressive). Cast a wide net is selectivity wide_net. Send only the fields to change; omitted fields and declaration approvals stay saved.",
+    "Changes Settings › AI behavior and Applying writing: how much the assistant volunteers and how long it talks (aiBehavior.profileAssistant), Count remote jobs as any location (aiBehavior.jobSearch.remoteCountsAsAnyLocation: true or false), how applications are written (aiBehavior.applying), cover letters, and the resume approach (original_resume, conservative, balanced, aggressive). How picky a search is is not a setting; it is chosen on Find jobs before each search. Send only the fields to change; omitted fields and declaration approvals stay saved.",
   parameters: json.object({
     aiBehavior: json.object({
       profileAssistant: json.object({
@@ -181,7 +179,6 @@ export const updateAiBehaviorTool = defineTool({
         replyStyle: json.enumOf(ProfileAssistantReplyStyleSchema.options),
       }),
       jobSearch: json.object({
-        selectivity: json.enumOf(JobSearchSelectivitySchema.options),
         remoteCountsAsAnyLocation: json.boolean(
           "Count remote jobs as any location. false requires a listing to match a saved place even when it is remote.",
         ),

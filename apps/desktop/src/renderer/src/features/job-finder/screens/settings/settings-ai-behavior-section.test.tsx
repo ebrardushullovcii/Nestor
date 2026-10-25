@@ -20,10 +20,12 @@ import { SettingsAiBehaviorSection } from "./settings-ai-behavior-section";
 /**
  * The AI behavior section, as a person meets it.
  *
- * What matters: every group is there, the defaults are the product's
- * original manner, and each choice saves the whole section at once (Undo
- * rides on the save toast). The resume level is not here; it lives in
- * Profile, under Preferences.
+ * What matters: the groups are there, the defaults are the product's
+ * original manner, and each choice saves this section's slice at once
+ * (Undo rides on the save toast). How picky a search is is not here; it
+ * is chosen on Find jobs before each search. What an application writes
+ * is not here either; it lives under Applying. The resume level lives
+ * in Profile, under Preferences.
  */
 
 function parseSettings(
@@ -77,19 +79,17 @@ describe("SettingsAiBehaviorSection", () => {
     expect(
       screen.queryByRole("radiogroup", { name: "Resume level" }),
     ).toBeNull();
+    // How picky moved to Find jobs; what an application writes moved to
+    // Applying. Neither stays here as a second home.
     expect(
-      within(screen.getByTestId("settings-ai-applying")).getByRole("heading", {
-        name: "Applying",
-      }),
-    ).toBeTruthy();
+      screen.queryByRole("radiogroup", { name: "How picky a search is" }),
+    ).toBeNull();
+    expect(screen.queryByTestId("settings-ai-applying")).toBeNull();
 
     const checked = (name: RegExp) =>
       screen.getByRole("radio", { name }).getAttribute("aria-checked");
     expect(checked(/Suggest a little/)).toBe("true");
     expect(checked(/^Brief/)).toBe("true");
-    expect(checked(/^Balanced/)).toBe("true");
-    expect(checked(/Only when required/)).toBe("true");
-    expect(checked(/^Short/)).toBe("true");
     expect(
       screen
         .getByRole("switch", { name: "Count remote jobs as any location" })
@@ -101,7 +101,7 @@ describe("SettingsAiBehaviorSection", () => {
     ).toBeNull();
   });
 
-  it("sends the whole section with each choice, coalescing choices made while a save runs", async () => {
+  it("sends only this section's slice with each choice, coalescing choices made while a save runs", async () => {
     let finishFirst: (saved: boolean) => void = () => undefined;
     const onUpdateAiBehavior = vi
       .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
@@ -124,22 +124,11 @@ describe("SettingsAiBehaviorSection", () => {
     });
 
     // Choices made while that save runs stay on screen and go out together.
-    fireEvent.click(screen.getByRole("radio", { name: /Cast a wide net/ }));
     fireEvent.click(
       screen.getByRole("switch", { name: "Count remote jobs as any location" }),
     );
-    fireEvent.click(
-      screen.getByRole("radio", { name: /Whenever there is room/ }),
-    );
-    fireEvent.click(screen.getByRole("radio", { name: /^Full/ }));
-    fireEvent.click(screen.getByRole("switch", { name: "Marketing contact" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Site terms" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Conversational/ }));
     expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(
-      screen
-        .getByRole("radio", { name: /Cast a wide net/ })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
 
     await act(() => {
       finishFirst(true);
@@ -147,29 +136,15 @@ describe("SettingsAiBehaviorSection", () => {
     });
 
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    // Only this section's fields: an Applying or cover-letter edit can
+    // never be overwritten by this section's older copy.
     expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toEqual({
       aiBehavior: {
-        profileAssistant: { initiative: "proactive", replyStyle: "brief" },
-        jobSearch: {
-          selectivity: "wide_net",
-          remoteCountsAsAnyLocation: false,
+        profileAssistant: {
+          initiative: "proactive",
+          replyStyle: "conversational",
         },
-        applying: {
-          coverLetterPolicy: "when_possible",
-          writtenAnswerLength: "full",
-          preApprovedDeclarations: [
-            "truthfulness_certification",
-            "privacy_notice_acknowledgement",
-            "background_check_consent",
-            "marketing_contact_consent",
-          ],
-        },
-      },
-      coverLetter: {
-        tone: "plain_professional",
-        length: "standard",
-        language: null,
-        sample: null,
+        jobSearch: { remoteCountsAsAnyLocation: false },
       },
     });
     await waitFor(() =>
@@ -178,38 +153,6 @@ describe("SettingsAiBehaviorSection", () => {
     expect(
       screen.queryByRole("button", { name: "Save AI behavior" }),
     ).toBeNull();
-  });
-
-  it("saves typed text when the person leaves the field, trimmed", async () => {
-    const onUpdateAiBehavior = vi
-      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
-      .mockResolvedValue(true);
-    renderSection(onUpdateAiBehavior);
-
-    const language = screen.getByPlaceholderText(
-      /Leave empty to match the job posting/i,
-    );
-    fireEvent.change(language, { target: { value: "  German  " } });
-    fireEvent.change(
-      screen.getByPlaceholderText(/Paste a letter you wrote yourself/i),
-      { target: { value: "   " } },
-    );
-    // Not on every keystroke.
-    expect(onUpdateAiBehavior).not.toHaveBeenCalled();
-    fireEvent.blur(language);
-
-    expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
-      coverLetter: {
-        tone: "plain_professional",
-        length: "standard",
-        language: "German",
-        sample: null,
-      },
-    });
-    await waitFor(() =>
-      expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
-    );
   });
 
   it("hands the save toast an Undo that saves the earlier choice back", async () => {
@@ -289,46 +232,4 @@ describe("SettingsAiBehaviorSection", () => {
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
   });
-
-  it("shows the saved choice rather than the default", () => {
-    renderSection(
-      vi.fn(() => Promise.resolve(true)),
-      parseSettings({
-        coverLetter: {
-          tone: "direct",
-          length: "short",
-          language: "Dutch",
-          sample: null,
-        },
-      }),
-    );
-
-    expect(screen.getByDisplayValue("Dutch")).toBeTruthy();
-    expect(screen.getByText(/Direct and brief/i)).toBeTruthy();
-  });
-
-  it("hides letter style when letters are off", () => {
-    renderSection(vi.fn(() => Promise.resolve(true)));
-
-    expect(screen.getByTestId("settings-ai-cover-letter-style")).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: /^Never/ }));
-    expect(screen.queryByTestId("settings-ai-cover-letter-style")).toBeNull();
-  });
-});
-
-it("explains default background-check consent and sending without contradicting Applying", () => {
-  renderSection(vi.fn(() => Promise.resolve(true)));
-  expect(
-    screen
-      .getByRole("switch", { name: "Background check" })
-      .getAttribute("aria-checked"),
-  ).toBe("true");
-  expect(
-    screen.getByText(
-      "Ticks background or reference check consent on forms for you. Turn it off to be asked each time.",
-    ),
-  ).toBeTruthy();
-  expect(
-    screen.queryByText(/never approves or sends an application on its own/),
-  ).toBeNull();
 });
