@@ -5,7 +5,6 @@ import type {
   AppearanceTheme,
   ApplyGroupedManualAnswerInput,
   ApplyRunDetails,
-  CampaignRuleFunnelProjection,
   ClearApplicationAnswerCommandInput,
   CandidateProfile,
   DiscoveryActivityEvent,
@@ -30,8 +29,6 @@ import type {
   ResumeImportProgressEvent,
   ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
-  SaveCampaignRuleInput,
-  SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
@@ -210,7 +207,6 @@ export interface JobFinderPageContext {
     command: ProjectGroupedManualAnswerCommand,
   ) => void;
   onProfileSurfaceDirtyChange: (dirty: boolean) => void;
-  onSearchPlanSurfaceDirtyChange: (dirty: boolean) => void;
   /**
    * Reports each user-authored Profile or setup draft edit — including edits
    * made while the surface was already dirty, when no dirty transition
@@ -265,27 +261,6 @@ export interface JobFinderPageContext {
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
   ) => void;
-  onSaveCampaign: (campaign: SaveJobSearchCampaignInput) => Promise<boolean>;
-  onRunCampaignNow: (campaignId?: string | null) => Promise<boolean>;
-  onDeleteCampaign: (campaignId: string) => Promise<boolean>;
-  onMarkCampaignNotificationRead: (notificationId: string) => void;
-  onMarkAllCampaignNotificationsRead: () => void;
-  onSaveCampaignRule: (
-    campaignId: string,
-    rule: SaveCampaignRuleInput,
-  ) => Promise<boolean>;
-  onDeleteCampaignRule: (
-    campaignId: string,
-    ruleId: string,
-  ) => Promise<boolean>;
-  onToggleCampaignRule: (
-    campaignId: string,
-    ruleId: string,
-    enabled: boolean,
-  ) => Promise<boolean>;
-  onProjectCampaignRuleFunnel: (
-    campaignId: string,
-  ) => Promise<CampaignRuleFunnelProjection>;
   onSaveProfile: (profile: CandidateProfile) => void;
   onSaveSearchPreferences: (searchPreferences: JobSearchPreferences) => void;
   onUpdateApplicationDefaults: (
@@ -306,7 +281,6 @@ export interface JobFinderPageContext {
     artifact: EditableSourceInstructionArtifact,
   ) => void;
   onSelectApplicationRecord: (recordId: string) => void;
-  onSelectCampaign: (campaignId: string) => Promise<boolean>;
   onSelectDiscoveryJob: (jobId: string) => void;
   onSelectReviewItem: (jobId: string) => void;
   onSetActivityControl: (

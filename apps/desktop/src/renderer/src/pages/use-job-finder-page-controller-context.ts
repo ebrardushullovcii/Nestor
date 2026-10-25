@@ -6,7 +6,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   ApplicationCrmBulkStageMutationInput,
   ApplyGroupedManualAnswerInput,
-  CampaignRuleFunnelProjection,
   DiscoveryActivityEvent,
   JobFinderResumeWorkspace,
   JobFinderRendererWorkspaceSnapshot,
@@ -16,8 +15,6 @@ import type {
   ResumeImportProgressEvent,
   ResumeAssistantMessage,
   ResumeDraft,
-  SaveCampaignRuleInput,
-  SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
 } from "@nestor/contracts";
@@ -26,14 +23,8 @@ import type {
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import {
-  createDiscoveryRunSucceededFeedback,
   type DiscoveryRunFeedback,
 } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
-import {
-  formatDiscoveryRunReportLabel,
-  getDiscoveryRunReportCounts,
-  hasDiscoveryRunReportCounts,
-} from "@renderer/features/job-finder/lib/discovery-run-count-label";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import type {
   PendingActionScope,
@@ -124,7 +115,6 @@ type BuildJobFinderPageContextArgs = {
   setProfileCopilotBusy: Dispatch<SetStateAction<boolean>>;
   setProfileCopilotPendingContextKey: Dispatch<SetStateAction<string | null>>;
   setProfileSurfaceDirty: Dispatch<SetStateAction<boolean>>;
-  setSearchPlanSurfaceDirty: (dirty: boolean) => void;
   setResumeAssistantMessages: Dispatch<
     SetStateAction<readonly ResumeAssistantMessage[]>
   >;
@@ -192,7 +182,6 @@ export function buildJobFinderPageContext(
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
     setProfileSurfaceDirty,
-    setSearchPlanSurfaceDirty,
     setResumeAssistantMessages,
     setResumeAssistantPending,
     setResumeWorkspace,
@@ -265,7 +254,6 @@ export function buildJobFinderPageContext(
     saveState,
     ...primaryActions,
     onProfileSurfaceDirtyChange: setProfileSurfaceDirty,
-    onSearchPlanSurfaceDirtyChange: setSearchPlanSurfaceDirty,
     onProfileSurfaceDraftEdited,
     onCancelImportResume,
     onSettingsDraftEdited,
@@ -494,98 +482,6 @@ export function buildJobFinderPageContext(
         },
       );
     },
-    onSaveCampaign: (campaign: SaveJobSearchCampaignInput) =>
-      runAction(
-        () => actions.saveCampaign(campaign),
-        () => undefined,
-        campaign.id === null ? "Search plan created." : "Search plan updated.",
-      ),
-    onRunCampaignNow: (campaignId?: string | null) => {
-      const resolvedCampaignId = campaignId ?? workspace.activeCampaignId;
-      return runAction(
-        () => actions.runCampaignNow(campaignId),
-        (snapshot) => {
-          const latestPlanRun = [...(snapshot.recentDiscoveryRuns ?? [])]
-            .filter((run) => run.campaignId === resolvedCampaignId)
-            .sort(
-              (left, right) =>
-                Date.parse(right.startedAt) - Date.parse(left.startedAt),
-            )[0];
-          const report = getDiscoveryRunReportCounts(latestPlanRun);
-          setDiscoveryRunFeedback(
-            createDiscoveryRunSucceededFeedback(
-              null,
-              hasDiscoveryRunReportCounts(report)
-                ? formatDiscoveryRunReportLabel(report)
-                : null,
-              hasDiscoveryRunReportCounts(report) ? report.new : null,
-            ),
-          );
-        },
-        "Search plan run started. Discovery searches and reads listings; it does not fill application forms or perform submits.",
-        {
-          scope: jobFinderPendingActions.campaignRun(resolvedCampaignId),
-          startMessage:
-            "Running this search plan now. Discovery only searches and reads listings, and stops before any final submit control.",
-        },
-      );
-    },
-    onDeleteCampaign: (campaignId: string) =>
-      runAction(
-        () => actions.deleteCampaign(campaignId),
-        () => undefined,
-        // A refused deletion is reported inline by the campaigns screen.
-        (deleted) => (deleted ? "Search plan deleted." : null),
-      ),
-    onMarkCampaignNotificationRead: (notificationId: string) =>
-      void runAction(
-        () => actions.markCampaignNotificationRead(notificationId),
-        () => undefined,
-        "Notification marked as read.",
-        {
-          scope: jobFinderPendingActions.campaignNotification(notificationId),
-        },
-      ),
-    onMarkAllCampaignNotificationsRead: () =>
-      void runAction(
-        () => actions.markAllCampaignNotificationsRead(),
-        () => undefined,
-        "All search plan notifications marked as read.",
-        {
-          scope: jobFinderPendingActions.campaignNotificationAll(),
-        },
-      ),
-    onSaveCampaignRule: (campaignId: string, rule: SaveCampaignRuleInput) =>
-      runAction(
-        () => actions.saveCampaignRule(campaignId, rule),
-        () => undefined,
-        rule.id === null
-          ? "Search plan rule added."
-          : "Search plan rule updated.",
-        { scope: jobFinderPendingActions.campaignRule(campaignId, rule.id) },
-      ),
-    onDeleteCampaignRule: (campaignId: string, ruleId: string) =>
-      runAction(
-        () => actions.deleteCampaignRule(campaignId, ruleId),
-        () => undefined,
-        "Search plan rule removed.",
-        { scope: jobFinderPendingActions.campaignRule(campaignId, ruleId) },
-      ),
-    onToggleCampaignRule: (
-      campaignId: string,
-      ruleId: string,
-      enabled: boolean,
-    ) =>
-      runAction(
-        () => actions.toggleCampaignRule(campaignId, ruleId, enabled),
-        () => undefined,
-        enabled ? "Search plan rule enabled." : "Search plan rule disabled.",
-        { scope: jobFinderPendingActions.campaignRule(campaignId, ruleId) },
-      ),
-    onProjectCampaignRuleFunnel: (
-      campaignId: string,
-    ): Promise<CampaignRuleFunnelProjection> =>
-      actions.projectCampaignRuleFunnel(campaignId),
     onSaveSourceInstructionArtifact: (targetId, artifact) =>
       void runAction(
         () => actions.saveSourceInstructionArtifact(targetId, artifact),
@@ -634,17 +530,6 @@ export function buildJobFinderPageContext(
       );
     },
     onSelectApplicationRecord: setSelectedApplicationRecordId,
-    onSelectCampaign: (campaignId: string) =>
-      confirmLeaveDirtyResumeWorkspace("switch search plans").then(
-        (mayLeave) =>
-          mayLeave
-            ? runAction(
-                () => actions.selectCampaign(campaignId),
-                () => setDiscoveryRunFeedback(null),
-                "Active search plan updated.",
-              )
-            : false,
-      ),
     onSelectDiscoveryJob: setSelectedDiscoveryJobId,
     onSelectReviewItem: setSelectedReviewJobId,
     onSetActivityControl: (input: SetJobFinderActivityControlInput) =>

@@ -1,6 +1,5 @@
 import * as C from "@nestor/contracts";
 import type { z, ZodTypeAny } from "zod";
-
 import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
 import type { AssistantToolGroup } from "./tool-kit";
 
@@ -196,14 +195,6 @@ export const JOB_FINDER_ACTIONS = {
         i.targetId ?? undefined,
         i.searchRequest,
       ),
-    { name: "search_for_jobs", custom: true },
-  ),
-  "run-campaign-now": action(
-    C.RunCampaignNowInputSchema,
-    "jobs",
-    "local",
-    "Run a named search plan without switching the active plan.",
-    (i, c) => c.service.runCampaignNow(i),
     { name: "search_for_jobs", custom: true },
   ),
   "run-source-debug": action(
@@ -428,17 +419,12 @@ export const JOB_FINDER_ACTIONS = {
       if (i.scope === "tracker_settings")
         return snapshot.settings.applicationCrm;
       const values: readonly unknown[] =
-        i.scope === "notifications"
-                ? snapshot.campaignNotifications
-                : snapshot.campaigns
-                    .filter((plan) => !i.id || plan.id === i.id)
-                    .flatMap((plan) => plan.rules);
-      const filtered =
-        i.id && i.scope !== "search_rules"
-          ? values.filter(
-              (v) => v && typeof v === "object" && "id" in v && v.id === i.id,
-            )
-          : values;
+        i.scope === "notifications" ? snapshot.campaignNotifications : [];
+      const filtered = i.id
+        ? values.filter(
+            (v) => v && typeof v === "object" && "id" in v && v.id === i.id,
+          )
+        : values;
       return {
         total: filtered.length,
         rows: filtered.slice(i.cursor, i.cursor + i.limit),
@@ -745,78 +731,6 @@ export const JOB_FINDER_ACTIONS = {
     "Pause or continue background work.",
     (i, c) => c.service.setActivityControl(i),
     { name: "pause_activity", custom: true },
-  ),
-  "save-campaign": action(
-    C.SaveJobSearchCampaignInputSchema,
-    "settings",
-    "local",
-    "Create or edit a named search plan and schedule.",
-    (i, c) => c.service.saveCampaign(i),
-    { name: "save_search_plan", custom: true },
-  ),
-  "select-campaign": action(
-    C.SelectJobSearchCampaignInputSchema,
-    "settings",
-    "local",
-    "Switch the active search plan.",
-    (i, c) => c.service.selectCampaign(i.campaignId),
-    { name: "select_search_plan" },
-  ),
-  "delete-campaign": action(
-    C.DeleteJobSearchCampaignInputSchema,
-    "settings",
-    "confirm",
-    "Delete a search plan; the last plan cannot be deleted.",
-    (i, c) => c.service.deleteCampaign(i),
-  ),
-  "save-campaign-rule": action(
-    C.SaveCampaignRuleRouteInputSchema,
-    "settings",
-    "local",
-    "Create or edit a search plan rule.",
-    (i, c) => c.service.saveCampaignRule(i),
-  ),
-  "delete-campaign-rule": action(
-    C.DeleteCampaignRuleInputSchema,
-    "settings",
-    "confirm",
-    "Delete a search plan rule.",
-    (i, c) => c.service.deleteCampaignRule(i),
-  ),
-  "toggle-campaign-rule": action(
-    C.ToggleCampaignRuleInputSchema,
-    "settings",
-    "local",
-    "Turn a search plan rule on or off.",
-    (i, c) => c.service.toggleCampaignRule(i),
-  ),
-  "project-campaign-rule-funnel": action(
-    C.ProjectCampaignRuleFunnelInputSchema,
-    "settings",
-    "read",
-    "Read the measured effects of a plan's rules.",
-    (i, c) => c.service.projectCampaignRuleFunnel(i),
-  ),
-  "mark-campaign-notification-read": action(
-    C.MarkCampaignNotificationReadInputSchema.omit({ readAt: true }),
-    "workspace",
-    "local",
-    "Mark a notification read.",
-    (i, c) =>
-      c.service.markCampaignNotificationRead({
-        ...i,
-        readAt: new Date().toISOString(),
-      }),
-  ),
-  "mark-all-campaign-notifications-read": action(
-    empty,
-    "workspace",
-    "local",
-    "Mark all notifications read.",
-    (_i, c) =>
-      c.service.markAllCampaignNotificationsRead({
-        readAt: new Date().toISOString(),
-      }),
   ),
   "cancel-discovery-run": action(
     C.JobFinderDiscoveryCancellationInputSchema,

@@ -1,9 +1,9 @@
-import {
-  ASSISTANT_SCREEN_LABELS,
-  type AssistantContextReference,
-  type AssistantEntityRef,
-  type AssistantScreen,
+import type {
+  AssistantContextReference,
+  AssistantEntityRef,
+  AssistantScreen,
 } from "@nestor/contracts";
+import { ASSISTANT_SCREEN_LABELS } from "@nestor/contracts";
 
 /**
  * What "this" means when a message is sent (plan §4). The renderer attaches
@@ -28,7 +28,6 @@ export function screenForPathname(pathname: string): AssistantScreen {
     "review-queue": "review_queue",
     applications: "applications",
     actions: "actions",
-    campaigns: "campaigns",
     settings: "settings",
   };
   return screens[segment] ?? "other";

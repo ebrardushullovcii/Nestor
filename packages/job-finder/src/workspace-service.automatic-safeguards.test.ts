@@ -1,8 +1,4 @@
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
-import {
-  type JobSearchCampaign,
-  type SaveJobSearchCampaignInput,
-} from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -60,62 +56,38 @@ function createAutomaticFailureRuntime(): BrowserSessionRuntime {
   };
 }
 
-function toCampaignInput(
-  campaign: JobSearchCampaign,
-  overrides: Partial<SaveJobSearchCampaignInput> = {},
-): SaveJobSearchCampaignInput {
-  return {
-    id: campaign.id,
-    name: campaign.name,
-    description: campaign.description,
-    mode: campaign.mode,
-    status: campaign.status,
-    searchPreferences: campaign.searchPreferences,
-    sourceTargetIds: campaign.sourceTargetIds,
-    minimumFitScore: campaign.minimumFitScore,
-    limits: campaign.limits,
-    stopRules: campaign.stopRules,
-    applicationPolicy: campaign.applicationPolicy,
-    schedule: campaign.schedule,
-    rules: campaign.rules,
-    latestDigest: campaign.latestDigest,
-    ...overrides,
-  };
-}
-
 async function configureAutomaticFailureThreshold(
   service: WorkspaceService,
   repository: Repository,
   pauseOnFailureRatePercent: number,
 ): Promise<string> {
-  const initialSnapshot = await service.getWorkspaceSnapshot();
-  const activeCampaign = initialSnapshot.campaigns.find(
-    (campaign) => campaign.id === initialSnapshot.activeCampaignId,
+  // Builds the default campaign in the snapshot if the seed has none yet.
+  await service.getWorkspaceSnapshot();
+  const campaignState = await repository.getCampaignState();
+  const activeCampaign = campaignState?.campaigns.find(
+    (campaign) => campaign.id === campaignState.activeCampaignId,
   );
-  if (!activeCampaign) {
+  if (!campaignState || !activeCampaign) {
     throw new Error("Expected an active campaign fixture.");
   }
 
-  await service.saveCampaign(
-    toCampaignInput(activeCampaign, {
-      stopRules: {
-        ...activeCampaign.stopRules,
-        pauseOnFailureRatePercent,
-        failureRateMinimumSample: 1,
-      },
-    }),
-  );
-
-  const campaignState = await repository.getCampaignState();
-  const configuredCampaign = campaignState?.campaigns.find(
-    (campaign) => campaign.id === activeCampaign.id,
-  );
-  if (!configuredCampaign) {
-    throw new Error("Expected the configured campaign to persist.");
-  }
-  return configuredCampaign.id;
+  await repository.saveCampaignState({
+    ...campaignState,
+    campaigns: campaignState.campaigns.map((campaign) =>
+      campaign.id === activeCampaign.id
+        ? {
+            ...campaign,
+            stopRules: {
+              ...campaign.stopRules,
+              pauseOnFailureRatePercent,
+              failureRateMinimumSample: 1,
+            },
+          }
+        : campaign,
+    ),
+  });
+  return activeCampaign.id;
 }
-
 
 describe("workspace service automatic safeguard persistence", () => {
   test("persists source-debug safeguards and keeps one pause across snapshots and reload", async () => {
@@ -192,6 +164,4 @@ describe("workspace service automatic safeguard persistence", () => {
         .abnormalFailurePauses,
     ).toEqual([]);
   });
-
 });
-

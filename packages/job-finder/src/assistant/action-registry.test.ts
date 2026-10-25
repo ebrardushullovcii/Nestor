@@ -1,12 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
-import {
-  executeJobFinderAction,
-  JOB_FINDER_ACTIONS,
-  type JobFinderActionId,
-} from "./action-registry";
+import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import type { JobFinderActionId } from "./action-registry";
+import { executeJobFinderAction, JOB_FINDER_ACTIONS } from "./action-registry";
 import type { AssistantHostPorts } from "./ports";
 import type { AssistantToolContext, AssistantTurnSession } from "./tool-kit";
 import { buildAssistantToolCatalog } from "./tools";
@@ -81,24 +77,6 @@ describe("registered user actions", () => {
       { targetId: "t", instructionId: "i" },
       "verifySourceInstructions",
       ["t", "i"],
-    ],
-    [
-      "delete-campaign",
-      { campaignId: "c" },
-      "deleteCampaign",
-      [{ campaignId: "c" }],
-    ],
-    [
-      "delete-campaign-rule",
-      { campaignId: "c", ruleId: "r" },
-      "deleteCampaignRule",
-      [{ campaignId: "c", ruleId: "r" }],
-    ],
-    [
-      "toggle-campaign-rule",
-      { campaignId: "c", ruleId: "r", enabled: false },
-      "toggleCampaignRule",
-      [{ campaignId: "c", ruleId: "r", enabled: false }],
     ],
     [
       "regenerate-resume-section",
@@ -214,9 +192,18 @@ describe("registered user actions", () => {
   it("applies an explicitly requested reversible resume approval without another confirmation", async () => {
     const executeAction = vi.fn().mockResolvedValue(true);
     const createProposal = vi.fn();
-    const context = { service: {}, ports: { executeAction, publishWorkspaceUpdate: vi.fn() }, session: { assertCurrent: vi.fn(), createProposal } } as unknown as AssistantToolContext;
-    await executeRegisteredAssistantAction({ actionId: "approve-resumes", input: { jobIds: ["j"] } }, context);
-    expect(executeAction).toHaveBeenCalledExactlyOnceWith("approve-resumes", { jobIds: ["j"] });
+    const context = {
+      service: {},
+      ports: { executeAction, publishWorkspaceUpdate: vi.fn() },
+      session: { assertCurrent: vi.fn(), createProposal },
+    } as unknown as AssistantToolContext;
+    await executeRegisteredAssistantAction(
+      { actionId: "approve-resumes", input: { jobIds: ["j"] } },
+      context,
+    );
+    expect(executeAction).toHaveBeenCalledExactlyOnceWith("approve-resumes", {
+      jobIds: ["j"],
+    });
     expect(createProposal).not.toHaveBeenCalled();
   });
 

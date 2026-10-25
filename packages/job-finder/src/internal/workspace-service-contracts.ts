@@ -1,106 +1,96 @@
 import type {
-  JobFinderDiscoveryCommandReply,
-  JobFinderDiscoveryCancellationReply,
-  ResumeDraftProcessor,
-  AddBrowserJobResult,
-  ApplicationDocumentRevision,
-  ApplicationQuestionRecord,
-  ApplicationRecord,
-  ResumeBatchGenerationResult,
-  ResumeBatchGenerationProgress,
-  ResumeBatchProviderBlock,
-  ResumeBatchCheckpoint,
-} from "@nestor/contracts";
-import type {
   JobFinderAiClient,
   ResumeVisionProvider,
 } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type {
+  AddBrowserJobResult,
+  AppearanceTheme,
+  ApplicationAutomationMode,
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportInput,
   ApplicationCrmExportResult,
   ApplicationCrmMutationInput,
   ApplicationCrmSettings,
-  ApplicationAutomationMode,
-  AppearanceTheme,
+  ApplicationDocumentRevision,
   ApplicationPacket,
-  RawApplyPage,
-  CampaignRuleFunnelProjection,
+  ApplicationQuestionRecord,
+  ApplicationRecord,
+  ApplyGroupedManualAnswerInput,
+  ApplyRunDetails,
+  AssistantChangeEntry,
   CandidateAsset,
+  CandidateAssetKind,
   CandidateAssetListInput,
   CandidateAssetListResult,
-  ClearApplicationAnswerCommandInput,
-  ApplyRunDetails,
-  ApplyGroupedManualAnswerInput,
-  DeleteCampaignRuleInput,
-  DeleteJobSearchCampaignInput,
-  DiscoveryRunScope,
-  DiscoveryFeedbackBatchResult,
   CandidateProfile,
+  ClearApplicationAnswerCommandInput,
   DiscoveryActivityEvent,
+  DiscoveryFeedbackBatchResult,
+  DiscoveryRunScope,
   EditableSourceInstructionArtifact,
   EmployerExclusionPreview,
+  JobFinderActivityControl,
   JobFinderApplyCopilotActionInput,
+  JobFinderDiscoveryCancellationReply,
+  JobFinderDiscoveryCommandReply,
   JobFinderDismissDiscoveryJobInput,
-  JobFinderOpenBrowserSessionInput,
-  JobFinderResumePreview,
-  ResumeDocumentBundle,
   JobFinderInterviewFollowUpInput,
-  ResumeImportFieldCandidate,
-  ResumeImportRun,
-  ResumeTimelineRepairAction,
-  ResumeImportVisionArtifact,
-  ResumeApplicationMode,
-  TailoringMode,
-  ResumeSourceDocument,
+  JobFinderOpenBrowserSessionInput,
+  JobFinderPreparedApplicationPageInput,
+  JobFinderResumePreview,
   JobFinderResumeWorkspace,
-  JobFinderSettings,
   JobFinderSearchRequest,
-  JobFinderWorkspaceSnapshot,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSetResumeClaimConfirmationInput,
-  JobSearchPreferences,
+  JobFinderSettings,
+  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
+  JobFinderWorkspaceSnapshot,
+  JobPosting,
   JobSearchCampaignMode,
-  MarkAllCampaignNotificationsReadInput,
-  MarkCampaignNotificationReadInput,
+  JobSearchPreferences,
   ProfileCopilotContext,
-  ProfileSetupState,
+  ProfileCopilotPatchOperation,
   ProfileSetupReviewAction,
   ProfileSetupReviewActionOptions,
-  ProjectCampaignRuleFunnelInput,
+  ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
+  RawApplyPage,
   RemoveEmployerExclusionInput,
-  RunCampaignNowInput,
-  SnoozeGroupedDecisionInput,
+  ResumeApplicationMode,
   ResumeAssistantMessage,
+  ResumeBatchCheckpoint,
+  ResumeBatchGenerationProgress,
+  ResumeBatchGenerationResult,
+  ResumeBatchProviderBlock,
+  ResumeDocumentBundle,
   ResumeDraft,
   ResumeDraftPatch,
+  ResumeDraftProcessor,
+  ResumeImportFieldCandidate,
+  ResumeImportRun,
+  ResumeImportVisionArtifact,
   ResumeResearchArtifact,
-  ResumeTemplateId,
+  ResumeSourceDocument,
   ResumeTemplateDefinition,
-  SavedJob,
-  SaveCampaignRuleRouteInput,
-  SaveJobSearchCampaignInput,
-  JobFinderActivityControl,
-  JobFinderPreparedApplicationPageInput,
-  SetJobFinderActivityControlInput,
+  ResumeTemplateId,
+  ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
+  SavedJob,
+  SaveUserActionAnswerDraftInput,
+  SetJobFinderActivityControlInput,
+  SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-  ToggleCampaignRuleInput,
+  TailoringMode,
+  UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-  UpdateAiBehaviorInput,
-  SaveUserActionAnswerDraftInput,
   UserActionCommandInput,
-  CandidateAssetKind,
-  AssistantChangeEntry,
-  JobPosting,
-  ProfileCopilotPatchOperation,
 } from "@nestor/contracts";
 import type { JobFinderRepository, JobFinderRepositorySeed } from "@nestor/db";
+import type { ListingHtmlFetcher } from "./listing-detail-enrichment";
+import type { ResumeRenderDocument } from "./resume-workspace-structure";
 import type {
   AssistantEditResult,
   AssistantProfileEditResult,
@@ -108,8 +98,6 @@ import type {
 } from "./workspace-assistant-edit-methods";
 import type { ResumeSpecialistResult } from "./workspace-assistant-resume-specialist";
 import type { ResumeExportFileVerifier } from "./workspace-service-context";
-import type { ResumeRenderDocument } from "./resume-workspace-structure";
-import type { ListingHtmlFetcher } from "./listing-detail-enrichment";
 
 export interface JobFinderWorkspaceResetOptions {
   /**
@@ -299,18 +287,6 @@ export interface JobFinderWorkspaceService {
   updateAppearanceTheme(
     appearanceTheme: AppearanceTheme,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  saveCampaign(
-    campaign: SaveJobSearchCampaignInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  selectCampaign(campaignId: string): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Deletes one campaign. Returns `true` when the campaign was removed and
-   * `false` when the id is unknown or the campaign is the last remaining one
-   * (the persisted collection schema requires an existing active campaign).
-   * An active pointer moves to the first remaining non-archived campaign,
-   * mirroring the archive hand-off.
-   */
-  deleteCampaign(input: DeleteJobSearchCampaignInput): Promise<boolean>;
   setActivityControl(
     input: SetJobFinderActivityControlInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
@@ -335,67 +311,6 @@ export interface JobFinderWorkspaceService {
     signal?: AbortSignal,
   ): Promise<JobFinderWorkspaceSnapshot>;
   cancelDiscoveryRun(runId: string): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Runs one discovery cycle for a campaign now (manual trigger). Works
-   * regardless of the campaign schedule's `enabled` flag, but still obeys the
-   * global activity pause and the campaign's own status.
-   */
-  runCampaignNow(
-    input?: RunCampaignNowInput,
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Runs every campaign whose persisted schedule is due at `now` (catch-up
-   * included). Missing `nextRunAt` values are initialized truthfully without
-   * triggering immediate work.
-   */
-  runDueScheduledCampaigns(
-    now?: string,
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Runs due schedules without building a workspace snapshot on an idle tick. */
-  processDueScheduledCampaigns?(
-    now?: string,
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-  ): Promise<boolean>;
-  /**
-   * Marks a single in-app campaign notification read. Unknown ids are a
-   * no-op; the timestamp comes from the caller (main supplies the ISO readAt).
-   */
-  markCampaignNotificationRead(
-    input: MarkCampaignNotificationReadInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Marks every unread in-app campaign notification read. Already-read
-   * notifications keep their original read timestamps; an invalid read
-   * timestamp is a no-op.
-   */
-  markAllCampaignNotificationsRead(
-    input: MarkAllCampaignNotificationsReadInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Creates or updates one campaign rule. New rules start unmeasured;
-   * updates preserve previously measured remove/downgrade counts unless the
-   * caller explicitly replaces them.
-   */
-  saveCampaignRule(
-    input: SaveCampaignRuleRouteInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Removes one campaign rule by id. */
-  deleteCampaignRule(
-    input: DeleteCampaignRuleInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Toggles one campaign rule's enabled/disabled state. */
-  toggleCampaignRule(
-    input: ToggleCampaignRuleInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Read-only projection of rule effects and the funnel, computed only
-   * against the real persisted jobs retained by the campaign.
-   */
-  projectCampaignRuleFunnel(
-    input: ProjectCampaignRuleFunnelInput,
-  ): Promise<CampaignRuleFunnelProjection>;
   runSourceDebug(
     targetId: string,
     signal?: AbortSignal,

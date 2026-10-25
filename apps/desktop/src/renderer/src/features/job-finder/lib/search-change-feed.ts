@@ -1,9 +1,9 @@
-import { useSyncExternalStore } from "react";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   WorkspaceChanges,
   WorkspaceListCounts,
 } from "@nestor/contracts";
+import { useSyncExternalStore } from "react";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 
 /**
@@ -37,7 +37,6 @@ const HOME_PATH = "/job-finder/home";
 const SEARCH_VIEW_PATHS = [
   HOME_PATH,
   JOB_FINDER_ROUTE_PATHS.discovery,
-  JOB_FINDER_ROUTE_PATHS.campaigns,
   JOB_FINDER_ROUTE_PATHS.profile,
 ];
 
@@ -54,7 +53,7 @@ export function isSearchRunning(
   );
 }
 
-/** Home, Find jobs, Search plans and Profile (job sources) show the search. */
+/** Home, Find jobs and Profile (job sources) show the search. */
 export function isSearchViewRoute(route: string): boolean {
   const path = routePath(route);
   return SEARCH_VIEW_PATHS.some(
@@ -234,7 +233,9 @@ export async function publishLiveFindJobsCounts(
   workspace: JobFinderRendererWorkspaceSnapshot,
 ): Promise<void> {
   const queries =
-    typeof window === "undefined" ? undefined : window.nestor?.jobFinder?.queries;
+    typeof window === "undefined"
+      ? undefined
+      : window.nestor?.jobFinder?.queries;
   if (!queries) return;
   const planId = workspace.activeCampaignId;
   try {

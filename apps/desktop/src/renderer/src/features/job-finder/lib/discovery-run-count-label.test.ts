@@ -217,13 +217,13 @@ describe("formatLastSearchSummarySentence", () => {
         keptInPlan: 15,
       }),
     ).toBe(
-      "Your last search: 50 new jobs saved on this device · 15 kept in your current search plan (its 'Jobs to retain' limit; raise it in Search plans → Edit to keep more).",
+      "Your last search: 50 new jobs saved on this device · 15 kept in this search.",
     );
   });
 
   it("gives the two populations different words", () => {
     // Regression: both numbers used to be introduced as "kept" — "50 new jobs
-    // kept" beside "the 15 kept in your current search plan" — so one screen
+    // kept" beside "the 15 kept in this search" — so one screen
     // appeared to contradict itself. "Saved" is the device population and
     // "kept" belongs to the active plan; each number carries exactly one of
     // them, which is also the vocabulary Find jobs prints.
@@ -241,7 +241,7 @@ describe("formatLastSearchSummarySentence", () => {
     expect(sentence).not.toContain("50 new jobs kept");
     expect(sentence).not.toContain("15 saved");
     expect(sentence).toContain("50 new jobs saved on this device");
-    expect(sentence).toContain("15 kept in your current search plan");
+    expect(sentence).toContain("15 kept in this search");
   });
 
   it("reconciles the finished-search status line with the plan count", () => {
@@ -256,7 +256,7 @@ describe("formatLastSearchSummarySentence", () => {
         keptInPlan: 15,
       }),
     ).toBe(
-      "Search finished · 50 new jobs saved on this device · 15 kept in your current search plan (its 'Jobs to retain' limit; raise it in Search plans → Edit to keep more).",
+      "Search finished · 50 new jobs saved on this device · 15 kept in this search.",
     );
 
     // One population, nothing to reconcile: the run's own label stands, so a
@@ -290,7 +290,7 @@ describe("formatLastSearchSummarySentence", () => {
         keptInPlan: 0,
       }),
     ).toBe(
-      "Search finished · 1 new job saved on this device · 0 kept in your current search plan (its 'Jobs to retain' limit; raise it in Search plans → Edit to keep more).",
+      "Search finished · 1 new job saved on this device · 0 kept in this search.",
     );
   });
 
@@ -309,10 +309,10 @@ describe("formatDiscoveryResultBandTotal", () => {
   it("describes the plan population the list actually shows", () => {
     expect(
       formatDiscoveryResultBandTotal({ worthOpening: 1, alsoFound: 14 }),
-    ).toBe("15 jobs kept in this search plan.");
+    ).toBe("15 jobs kept in this search.");
     expect(
       formatDiscoveryResultBandTotal({ worthOpening: 1, alsoFound: 0 }),
-    ).toBe("1 job kept in this search plan.");
+    ).toBe("1 job kept in this search.");
   });
 });
 

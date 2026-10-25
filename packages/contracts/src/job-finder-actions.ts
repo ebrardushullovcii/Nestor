@@ -1,10 +1,8 @@
 import { z } from "zod";
-
 import { NonEmptyStringSchema } from "./base";
 import { JobDiscoveryTargetSchema } from "./discovery";
 
-export const JobFinderEmptyActionInputSchema = z.object({})
-  .strict();
+export const JobFinderEmptyActionInputSchema = z.object({}).strict();
 export const JobFinderThemeActionInputSchema = z
   .object({
     appearanceTheme: z.enum(["light", "dark", "system"]),
@@ -36,12 +34,7 @@ export const JobFinderRemoveSourceInputSchema = z
   .strict();
 export const JobFinderReadActionStateInputSchema = z
   .object({
-    scope: z.enum([
-      "search_rules",
-      "notifications",
-      "apply_queue",
-      "tracker_settings",
-    ]),
+    scope: z.enum(["notifications", "apply_queue", "tracker_settings"]),
     id: NonEmptyStringSchema.optional(),
     cursor: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(25).default(10),
@@ -53,7 +46,6 @@ export const JobFinderAssistantSearchInputSchema = z.object({
   breadth: z.enum(["best_only", "wide"]).optional(),
   freshness: z.enum(["any", "recent"]).default("any"),
   sourceIds: z.array(NonEmptyStringSchema.max(200)).min(1).max(1000).optional(),
-  campaignId: NonEmptyStringSchema.max(200).optional(),
 });
 export const JobFinderZoomInputSchema = z
   .object({ command: z.enum(["in", "out", "reset"]) })

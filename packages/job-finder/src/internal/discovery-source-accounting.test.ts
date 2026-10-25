@@ -1,16 +1,14 @@
-import { expect, it, vi } from "vitest";
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   DiscoveryRunResultSchema,
   JobPostingSchema,
-  SaveJobSearchCampaignInputSchema,
-  JobSearchCampaignCollectionSchema,
   SavedJobSchema,
 } from "@nestor/contracts";
+import { expect, it, vi } from "vitest";
 import {
-  createSeed,
   createAgentAiClient,
   createAgentBrowserRuntime,
+  createSeed,
   createWorkspaceServiceHarness,
 } from "../workspace-service.test-support";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
@@ -140,54 +138,6 @@ it("persists an exclusion reason and reconciles a populated source, including br
   expect(report.found).toBe(3);
   expect(report.new).toBeLessThanOrEqual(report.saved!);
 });
-it("rechecks a shared job for each plan and keeps the first plan's model verdict", async () => {
-  const world = makeWorld();
-  const before = await world.workspaceService.getWorkspaceSnapshot();
-  const first = before.campaigns.find(
-    (plan) => plan.id === before.activeCampaignId,
-  )!;
-  await world.workspaceService.runCampaignNow({ campaignId: first.id });
-  const state = (await world.repository.getCampaignState())!;
-  const jobId = state.campaigns.find((plan) => plan.id === first.id)!
-    .jobIds[0]!;
-  const created = await world.workspaceService.saveCampaign(
-    SaveJobSearchCampaignInputSchema.parse({
-      ...first,
-      id: null,
-      name: "Warehouse",
-      searchPreferences: {
-        ...first.searchPreferences,
-        targetRoles: ["Warehouse lead"],
-      },
-    }),
-  );
-  const second = created.campaigns.find((plan) => plan.name === "Warehouse")!;
-  await world.repository.saveCampaignState(
-    JobSearchCampaignCollectionSchema.parse({
-      ...(await world.repository.getCampaignState()),
-      campaigns: (await world.repository.getCampaignState())!.campaigns.map(
-        (plan) => (plan.id === second.id ? { ...plan, jobIds: [jobId] } : plan),
-      ),
-    }),
-  );
-  await world.workspaceService.runCampaignNow({ campaignId: second.id });
-  const final = (await world.repository.getCampaignState())!;
-  expect(
-    final.campaigns.find((plan) => plan.id === second.id)?.jobIds,
-  ).not.toContain(jobId);
-  const discovery = await world.repository.getDiscoveryState();
-  const job = [
-    ...(await world.repository.listSavedJobs()),
-    ...discovery.pendingDiscoveryJobs,
-  ].find((job) => job.id === jobId)!;
-  expect(job.planAssessments?.[first.id]?.score).toBe(90);
-  expect(job.planAssessments?.[second.id]?.score).toBe(20);
-  expect(
-    world.judge.mock.calls.some(([input]) =>
-      input.searchPreferences.targetRoles.includes("Warehouse lead"),
-    ),
-  ).toBe(true);
-});
 
 it("keeps the plan's own verdict through a search after a profile edit until the job is judged again", async () => {
   const world = makeWorld();
@@ -195,7 +145,7 @@ it("keeps the plan's own verdict through a search after a profile edit until the
   const plan = before.campaigns.find(
     (entry) => entry.id === before.activeCampaignId,
   )!;
-  await world.workspaceService.runCampaignNow({ campaignId: plan.id });
+  await world.workspaceService.runAgentDiscovery();
   const jobId = (await world.repository.getCampaignState())!.campaigns.find(
     (entry) => entry.id === plan.id,
   )!.jobIds[0]!;
@@ -207,7 +157,7 @@ it("keeps the plan's own verdict through a search after a profile edit until the
     summary: `${profile.summary ?? ""} Also leads synthetic design reviews.`,
   });
   world.judge.mockImplementation(() => Promise.resolve([]));
-  await world.workspaceService.runCampaignNow({ campaignId: plan.id });
+  await world.workspaceService.runAgentDiscovery();
   const job = (await world.repository.listSavedJobs()).find(
     (entry) => entry.id === jobId,
   )!;
@@ -376,65 +326,6 @@ it.each([false, true])(
     expect(new Set(judgedIds).size).toBe(judgedIds.length);
   },
 );
-
-it("uses the selected plan's roles when a person assesses a listing", async () => {
-  const world = makeWorld({
-    fetchListingHtml: (url) =>
-      Promise.resolve({
-        status: 200,
-        html: "<main>A complete synthetic job listing</main>",
-        finalUrl: url,
-      }),
-  });
-  const before = await world.workspaceService.getWorkspaceSnapshot();
-  const plan = before.campaigns.find(
-    (plan) => plan.id === before.activeCampaignId,
-  )!;
-  await world.workspaceService.saveCampaign(
-    SaveJobSearchCampaignInputSchema.parse({
-      ...plan,
-      searchPreferences: {
-        ...plan.searchPreferences,
-        targetRoles: ["Warehouse lead"],
-      },
-    }),
-  );
-  const job = SavedJobSchema.parse({
-    ...createSeed().savedJobs[0]!,
-    detailQuality: "card_only",
-    listingDetailFetch: null,
-  });
-  await world.repository.commitSavedJobDelta({ upserts: [job] });
-  vi.spyOn(world.aiClient, "extractJobsFromPage").mockResolvedValue([job]);
-  const assess = vi.spyOn(world.aiClient, "assessJobFit").mockResolvedValue({
-    score: 80,
-    recommendation: "strong_fit",
-    reasons: [],
-    gaps: [],
-    role: "exact",
-    requirements: [
-      {
-        id: "lead",
-        label: "Leadership",
-        category: "experience",
-        importance: "required",
-        status: "supported",
-        explanation: "The saved work history supports it.",
-        jobEvidence: "Lead a team",
-        resumeEvidence: [],
-      },
-    ],
-  });
-  await world.workspaceService.assessJobListing(job.id);
-  expect(assess.mock.calls[0]?.[0].searchPreferences.targetRoles).toEqual([
-    "Warehouse lead",
-  ]);
-  expect(
-    (await world.repository.listSavedJobs()).find(
-      (saved) => saved.id === job.id,
-    )?.planAssessments?.[plan.id],
-  ).toBeDefined();
-});
 
 it("counts the same listing on two sources as one unique job", async () => {
   const world = makeWorld();

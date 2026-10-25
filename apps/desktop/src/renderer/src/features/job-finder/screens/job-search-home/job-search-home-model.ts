@@ -184,7 +184,6 @@ interface JobSearchHomeModel {
   next: HomeNextStep;
   /** Null until the workspace has anything to stand in a pipeline. */
   stages: readonly HomeStage[] | null;
-  showPlanSelector: boolean;
 }
 
 export interface HomeFindJobsCounts {
@@ -2098,6 +2097,5 @@ export function buildJobSearchHomeModel(
     problems: shownProblems,
     next,
     stages,
-    showPlanSelector: !setupIncomplete && workspace.campaigns.length > 1,
   };
 }

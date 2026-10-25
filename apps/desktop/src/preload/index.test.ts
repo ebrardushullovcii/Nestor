@@ -1,13 +1,11 @@
 import type {
-  ResumeBatchGenerationInput,
-  ResumeBatchGenerationResult,
-  ResumeBatchGenerationProgress,
-} from "@nestor/contracts";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
   JobFinderWorkspaceEntityMutationInput,
   JobFinderWorkspaceSyncResult,
+  ResumeBatchGenerationInput,
+  ResumeBatchGenerationProgress,
+  ResumeBatchGenerationResult,
 } from "@nestor/contracts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockExposeInMainWorld,
@@ -77,7 +75,6 @@ type ExposedJobFinderApi = {
   cancelApplyRun: (input: unknown) => Promise<unknown>;
   resolveApplyConsentRequest: (input: unknown) => Promise<unknown>;
   focusPreparedApplicationPage: (input: unknown) => Promise<unknown>;
-  markAllCampaignNotificationsRead: () => Promise<unknown>;
   projectGroupedManualAnswer: (command: unknown) => Promise<unknown>;
   applyGroupedManualAnswer: (input: unknown) => Promise<unknown>;
   snoozeGroupedDecision: (input: unknown) => Promise<unknown>;
@@ -158,18 +155,6 @@ describe("preload jobFinder grouped manual-answer boundary", () => {
     expect(mockInvoke).toHaveBeenCalledWith(
       "job-finder:snooze-grouped-decision",
       input,
-    );
-    expect(result).toEqual(snapshot);
-  });
-
-  it("exposes markAllCampaignNotificationsRead over the typed channel", async () => {
-    const snapshot = { generatedAt: "2026-08-15T10:03:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-
-    const result = await exposedJobFinder.markAllCampaignNotificationsRead();
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:mark-all-campaign-notifications-read",
     );
     expect(result).toEqual(snapshot);
   });

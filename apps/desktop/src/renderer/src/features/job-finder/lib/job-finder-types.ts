@@ -1,4 +1,5 @@
 import type {
+  AppearanceTheme,
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportInput,
   ApplicationCrmFileExportResult,
@@ -6,72 +7,68 @@ import type {
   ApplicationCrmSettings,
   ApplyGroupedManualAnswerInput,
   ApplyRunDetails,
-  AppearanceTheme,
-  CampaignRuleFunnelProjection,
   CandidateAnswerKind,
-  CandidateReusableAnswer,
   CandidateLinkKind,
   CandidateProfile,
+  CandidateReusableAnswer,
   ClearApplicationAnswerCommandInput,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
   EmployerExclusionPreview,
+  JobFinderAgentDiscoveryResult,
   JobFinderApplicationPacketExportResult,
-  ResolveSubmissionOutcomeInput,
-  ResolveSubmissionOutcomeResult,
+  JobFinderApplicationStartTarget,
   JobFinderApplyConsentActionInput,
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
-  JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
-  JobFinderRemoveFromApplyQueueInput,
-  JobFinderReturnApplicationToShortlistInput,
-  JobFinderApproveResumesInput,
-  JobFinderStartApplyQueueInput,
+  JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
-  JobFinderApplicationStartTarget,
-  JobFinderPreparedApplicationPageInput,
-  JobFinderAgentDiscoveryResult,
-  JobFinderSearchRequest,
+  JobFinderApproveResumesInput,
   JobFinderDiscoveryCancellationInput,
   JobFinderOpenBrowserSessionInput,
+  JobFinderPreparedApplicationPageInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderRendererWorkspaceSnapshot,
+  JobFinderResumePdfExportResult,
   JobFinderResumePreview,
   JobFinderResumeWorkspace,
+  JobFinderReturnApplicationToShortlistInput,
+  JobFinderSearchRequest,
   JobFinderSetResumeClaimConfirmationInput,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSettings,
+  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
+  JobFinderStartApplyQueueInput,
   JobSearchPreferences,
-  SaveCampaignRuleInput,
-  SaveJobSearchCampaignInput,
-  SetJobFinderActivityControlInput,
-  JobFinderRendererWorkspaceSnapshot,
   JobSourceAdapterKind,
   ProfileCopilotContext,
   ProfileSetupReviewAction,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
-  ResumeAssistantMessage,
-  ResumeApplicationMode,
-  TailoringMode,
-  JobFinderResumePdfExportResult,
-  ResumePdfExportIntent,
   RemoveEmployerExclusionInput,
-  RevealSavedFileResult,
+  ResolveSubmissionOutcomeInput,
+  ResolveSubmissionOutcomeResult,
+  ResumeApplicationMode,
+  ResumeAssistantMessage,
   ResumeDraft,
   ResumeDraftPatch,
+  ResumePdfExportIntent,
   ResumeTimelineRepairAction,
+  RevealSavedFileResult,
   SaveApplicationAnswerCommandInput,
+  SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceInstructionStatus,
+  TailoringMode,
+  UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-  UpdateAiBehaviorInput,
-  WorkMode,
   UserActionCommandInput,
+  WorkMode,
 } from "@nestor/contracts";
 
 export type JobFinderScreen =
@@ -80,7 +77,6 @@ export type JobFinderScreen =
   | "discovery"
   | "review-queue"
   | "applications"
-  | "campaigns"
   | "actions"
   | "settings";
 
@@ -182,36 +178,6 @@ export interface JobFinderShellActions {
   saveSearchPreferences: (
     searchPreferences: JobSearchPreferences,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveCampaign: (
-    campaign: SaveJobSearchCampaignInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  selectCampaign: (
-    campaignId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  runCampaignNow: (
-    campaignId?: string | null,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  markCampaignNotificationRead: (
-    notificationId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  markAllCampaignNotificationsRead: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveCampaignRule: (
-    campaignId: string,
-    rule: SaveCampaignRuleInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  deleteCampaignRule: (
-    campaignId: string,
-    ruleId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  deleteCampaign: (campaignId: string) => Promise<boolean>;
-  toggleCampaignRule: (
-    campaignId: string,
-    ruleId: string,
-    enabled: boolean,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  projectCampaignRuleFunnel: (
-    campaignId: string,
-  ) => Promise<CampaignRuleFunnelProjection>;
   setActivityControl: (
     input: SetJobFinderActivityControlInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;

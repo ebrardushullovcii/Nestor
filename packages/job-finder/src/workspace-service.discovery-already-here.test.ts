@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-
 import { createSeed } from "./workspace-service.test-fixtures";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 
@@ -49,9 +48,7 @@ describe("what a first search says it already had", () => {
     const before = await harness.workspaceService.getWorkspaceSnapshot();
     expect(before.discoveryJobs).toHaveLength(0);
 
-    await harness.workspaceService.runCampaignNow({
-      campaignId: before.activeCampaignId,
-    });
+    await harness.workspaceService.runDiscovery();
 
     const discovery = await harness.repository.getDiscoveryState();
     const report = discovery.recentRuns[0]?.summary.report;

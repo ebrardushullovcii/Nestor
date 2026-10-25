@@ -24,6 +24,13 @@ import {
   stripActionStateOwner,
   type ActionStateStatusWrite,
 } from "./use-job-finder-page-controller-actions";
+import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
+import {
+  type PendingActionState,
+  clearPendingActionScopes,
+  invalidatePendingActionScope,
+  jobFinderPendingActions,
+} from "./job-finder-pending-actions";
 
 describe("describePreparedApplicationSubmitResult", () => {
   const snapshotWith = (
@@ -61,13 +68,6 @@ describe("describePreparedApplicationSubmitResult", () => {
     ).toContain("did not confirm");
   });
 });
-import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
-import {
-  type PendingActionState,
-  clearPendingActionScopes,
-  invalidatePendingActionScope,
-  jobFinderPendingActions,
-} from "./job-finder-pending-actions";
 
 describe("createActionRunners", () => {
   it("removes route ownership without dropping saved-file action state", () => {
@@ -2331,41 +2331,6 @@ describe("createPrimaryPageActions", () => {
       expect(statusWrites.at(-1)).toMatchObject({
         message: "Saved.",
         ownerPath: "/job-finder/profile",
-      });
-    });
-
-    it("keeps a late completion owned by the start route after an unrelated navigation", async () => {
-      setJobFinderStatusRoute("/job-finder/review-queue");
-      let releaseAction: (value: string) => void = () => undefined;
-      const pendingResult = new Promise<string>((resolve) => {
-        releaseAction = resolve;
-      });
-      const setActionState = vi.fn();
-      const setPendingActionState = vi.fn();
-      const { runAction } = createActionRunners({
-        setActionState,
-        setPendingActionState,
-      });
-      const actionPromise = runAction(
-        () => pendingResult,
-        () => undefined,
-        "Drafts prepared for the campaign.",
-        { scope: jobFinderPendingActions.campaignRun("campaign_1") },
-      );
-
-      // The user navigates to a sibling route while the action is still
-      // running; the committed navigation consumes no status write, so no
-      // navigation hint remains for the late completion.
-      setJobFinderStatusRoute("/job-finder/discovery");
-      clearJobFinderNavigationHint();
-
-      releaseAction("done");
-      await actionPromise;
-
-      const statusWrites = collectStatusWrites(setActionState);
-      expect(statusWrites.at(-1)).toMatchObject({
-        message: "Drafts prepared for the campaign.",
-        ownerPath: "/job-finder/review-queue",
       });
     });
   });

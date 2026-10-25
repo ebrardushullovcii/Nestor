@@ -1,34 +1,33 @@
 // @vitest-environment jsdom
 
+import type {
+  CandidateProfile,
+  JobFinderRendererWorkspaceSnapshot,
+  JobFinderSetResumeClaimConfirmationInput,
+  JobFinderWorkspaceDelta,
+  JobFinderWorkspaceEntityMutationInput,
+  JobFinderWorkspaceSyncResult,
+  ResumeImportProgressEvent,
+} from "@nestor/contracts";
 import {
   createFreshStartCandidateProfile,
   DiscoveryJobViewSchema,
   DiscoveryRunRecordSchema,
-  JobListRowSchema,
   getDefaultCampaignConfiguration,
+  JobFinderRendererWorkspaceSnapshotSchema,
   JobFinderSettingsSchema,
   JobFinderWorkspaceDeltaSchema,
   JobFinderWorkspaceSyncResultSchema,
-  JobFinderRendererWorkspaceSnapshotSchema,
+  JobListRowSchema,
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
-import type {
-  CandidateProfile,
-  JobFinderSetResumeClaimConfirmationInput,
-  JobFinderWorkspaceDelta,
-  JobFinderWorkspaceEntityMutationInput,
-  JobFinderRendererWorkspaceSnapshot,
-  JobFinderWorkspaceSyncResult,
-  ResumeImportProgressEvent,
-} from "@nestor/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { useJobFinderWorkspace } from "./use-job-finder-workspace";
-import { startLaunchReads } from "../lib/launch-reads";
 import { createJobFinderWorkspaceDeltaTracker } from "../../../../../main/services/job-finder/workspace-delta";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
+import { startLaunchReads } from "../lib/launch-reads";
+import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 
 function requireReadyWorkspace(
   value: ReturnType<typeof useJobFinderWorkspace>,
@@ -88,7 +87,6 @@ function createBaseSnapshot(
     jobIds: [],
     minimumFitScore: null,
     ...getDefaultCampaignConfiguration("precision"),
-    schedule: {},
     progress: { lastUpdatedAt: generatedAt },
     history: [],
   });
@@ -1802,7 +1800,6 @@ describe("useJobFinderWorkspace entity mutations", () => {
       );
     }
   });
-
 });
 
 describe("useJobFinderWorkspace concurrency convergence", () => {

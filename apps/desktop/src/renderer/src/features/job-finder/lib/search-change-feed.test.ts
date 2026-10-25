@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceChanges } from "@nestor/contracts";
+import { describe, expect, it, vi } from "vitest";
 import {
   SEARCH_PROGRESS_SYNC_INTERVAL_MS,
   SEARCH_SYNC_INTERVAL_MS,
@@ -57,10 +57,8 @@ describe("search change feed", () => {
   it("knows which screens show a search", () => {
     expect(isSearchViewRoute("/job-finder/discovery")).toBe(true);
     expect(isSearchViewRoute("/job-finder/home")).toBe(true);
-    expect(isSearchViewRoute("/job-finder/campaigns?edit=plan")).toBe(true);
-    expect(isSearchViewRoute("/job-finder/profile?section=sources")).toBe(
-      true,
-    );
+    expect(isSearchViewRoute("/job-finder/campaigns?edit=plan")).toBe(false);
+    expect(isSearchViewRoute("/job-finder/profile?section=sources")).toBe(true);
     expect(isSearchViewRoute("/job-finder/review-queue")).toBe(false);
     expect(isSearchViewRoute("/job-finder/settings")).toBe(false);
   });
@@ -71,9 +69,11 @@ describe("search change feed", () => {
       run: false,
       other: false,
     });
-    expect(
-      classifySearchChanges(batch(["discovery_run_activity"])),
-    ).toEqual({ jobs: false, run: true, other: false });
+    expect(classifySearchChanges(batch(["discovery_run_activity"]))).toEqual({
+      jobs: false,
+      run: true,
+      other: false,
+    });
     expect(classifySearchChanges(batch(["discovery_ledger"]))).toEqual({
       jobs: false,
       run: false,

@@ -1,4 +1,3 @@
-import type { CampaignScheduler } from "../services/job-finder/campaign-scheduler";
 import type * as InterviewOverlayApi from "./interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./interview-session-controls";
 
@@ -14,9 +13,6 @@ export interface DeferredBackgroundInitOptions {
   loadJobFinderServices: () => Promise<{
     getJobFinderWorkspaceService: () => PromiseLike<unknown>;
   }>;
-  loadCampaignSchedulerModule: () => Promise<{
-    createCampaignScheduler: () => CampaignScheduler;
-  }>;
   loadCandidateAssetLibraryModule: () => Promise<{
     getCandidateAssetLibrary: () => {
       enforceLifecycle(): PromiseLike<unknown>;
@@ -29,7 +25,7 @@ export interface DeferredBackgroundInitOptions {
   loadInterviewSessionControlsModule: () => Promise<
     typeof InterviewSessionControlsApi
   >;
-  startCampaignScheduler: (createScheduler: () => CampaignScheduler) => void;
+  resumeApplyQueueAfterRestart: () => void;
   initializeInterviewSurfaces: (
     overlay: typeof InterviewOverlayApi,
     sessionControls: typeof InterviewSessionControlsApi,
@@ -107,12 +103,7 @@ export function createDeferredBackgroundInitController(
         if (quitHasBegun()) {
           return;
         }
-        const { createCampaignScheduler } =
-          await options.loadCampaignSchedulerModule();
-        if (quitHasBegun()) {
-          return;
-        }
-        options.startCampaignScheduler(createCampaignScheduler);
+        options.resumeApplyQueueAfterRestart();
       })
       .catch((error) => {
         options.onError(

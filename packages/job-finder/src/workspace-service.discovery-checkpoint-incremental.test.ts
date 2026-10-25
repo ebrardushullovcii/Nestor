@@ -6,7 +6,6 @@ import type {
 import {
   DiscoveryRunResultSchema,
   JobPostingSchema,
-  SaveJobSearchCampaignInputSchema,
   type DiscoveryActivityEvent,
 } from "@nestor/contracts";
 import { createFileJobFinderRepository } from "@nestor/db";
@@ -1873,37 +1872,5 @@ describe("discovery checkpoint incremental persistence", () => {
       );
     expect(seen[1]).toMatchObject({ stepCount: 2 });
     expect(seen[2]).toBeNull();
-  });
-
-  test("another plan's stopped search never seeds this plan's search", async () => {
-    const seen: unknown[] = [];
-    const { seed } = createHarness();
-    const { workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: stoppedThenFinishingRuntime(seen),
-      aiClient: createAgentAiClient(),
-    });
-    await workspaceService.runDiscoveryForTarget(
-      "target_incremental",
-      () => {},
-      new AbortController().signal,
-    );
-    const before = await workspaceService.getWorkspaceSnapshot();
-    const created = await workspaceService.saveCampaign(
-      SaveJobSearchCampaignInputSchema.parse({
-        ...before.campaigns[0]!,
-        id: null,
-        name: "Another plan",
-      }),
-    );
-    await workspaceService.selectCampaign(
-      created.campaigns.find((plan) => plan.name === "Another plan")!.id,
-    );
-    await workspaceService.runDiscoveryForTarget(
-      "target_incremental",
-      () => {},
-      new AbortController().signal,
-    );
-    expect(seen[1]).toBeNull();
   });
 });

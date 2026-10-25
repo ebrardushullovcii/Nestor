@@ -1,9 +1,9 @@
-import { round3SearchRun } from "./discovery-round3.test-fixture";
 import type {
   DiscoveryRunRecord,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
+import { round3SearchRun } from "./discovery-round3.test-fixture";
 
 import { buildJobFinderTaskCenterModel } from "../components/task-center/job-finder-task-center-model";
 import {
@@ -12,7 +12,6 @@ import {
   getDiscoveryRunReportCounts,
   hasDiscoveryRunReportCounts,
 } from "./discovery-run-count-label";
-import { describePlanRunCounts } from "../screens/campaigns/campaigns-screen";
 
 /**
  * One finished run, read by every surface that describes it. Home, the Find
@@ -44,7 +43,9 @@ function createFinishedRun(
   } as unknown as DiscoveryRunRecord;
 }
 
-function createWorkspace(run: DiscoveryRunRecord): JobFinderRendererWorkspaceSnapshot {
+function createWorkspace(
+  run: DiscoveryRunRecord,
+): JobFinderRendererWorkspaceSnapshot {
   return {
     activeDiscoveryRun: null,
     applicationRecords: [],
@@ -118,7 +119,6 @@ describe("frozen discovery run report", () => {
     const label = formatDiscoveryRunReportLabel(counts);
 
     expect(label).toBe("100 found · 50 new · 15 kept · 4 already here");
-    expect(describePlanRunCounts(counts)).toBe(label);
 
     // Tasks builds its own line from the same helpers.
     const tasks = buildJobFinderTaskCenterModel({
@@ -191,13 +191,6 @@ describe("frozen discovery run report", () => {
   });
 });
 
-test("the plan card keeps new-to-device and retained counts distinct in the shared report", () => {
-  const counts = getDiscoveryRunReportCounts(round3SearchRun());
-  expect(describePlanRunCounts(counts)).toContain(
-    "25 new to you · 22 kept by this plan · 27 duplicates merged",
-  );
-});
-
 test("keeps modern accounting labels when unique inspections are unknown", () => {
   const run = round3SearchRun();
   run.summary.report!.unique = null;
@@ -207,7 +200,4 @@ test("keeps modern accounting labels when unique inspections are unknown", () =>
   // A zero is left out of the line rather than printed.
   expect(label).not.toContain("0 rejected");
   expect(label).not.toContain("already here");
-  expect(describePlanRunCounts(getDiscoveryRunReportCounts(run))).toContain(
-    "52 postings seen",
-  );
 });

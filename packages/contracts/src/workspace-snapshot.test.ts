@@ -171,7 +171,6 @@ describe("contracts workspace snapshot schema", () => {
       },
       sourceTargetIds: [],
       ...getDefaultCampaignConfiguration("precision"),
-      schedule: {},
       progress: { lastUpdatedAt: generatedAt },
     });
     const workspace = JobFinderWorkspaceSnapshotSchema.parse({

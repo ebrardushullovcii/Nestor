@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
-
-import {
-  JobFinderWorkspaceDeltaSchema,
-  JobFinderWorkspaceEntityMutationInputSchema,
-} from "./workspace";
 import {
   JobSearchCampaignSchema,
   getDefaultCampaignConfiguration,
 } from "./job-search-campaigns";
+import {
+  JobFinderWorkspaceDeltaSchema,
+  JobFinderWorkspaceEntityMutationInputSchema,
+} from "./workspace";
 
 function emptySlice() {
   return { upserts: [], removedIds: [] };
@@ -87,7 +86,6 @@ describe("workspace delta contracts", () => {
       },
       sourceTargetIds: [],
       ...getDefaultCampaignConfiguration("precision"),
-      schedule: {},
       progress: { lastUpdatedAt: generatedAt },
     });
     const result = JobFinderWorkspaceDeltaSchema.parse({

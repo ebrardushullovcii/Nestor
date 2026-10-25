@@ -4,7 +4,6 @@ import {
 } from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
-
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAiClient,
@@ -152,9 +151,6 @@ describe("discovery restart recovery", () => {
     expect(recoveredRun?.completedAt).not.toBeNull();
     const recoveredCampaign = recoveredSnapshot.campaigns.find(
       (campaign) => campaign.id === recoveredRun?.campaignId,
-    );
-    expect(recoveredCampaign?.latestDigest?.discoveryRunId).toBe(
-      interruptedRun.id,
     );
     expect(
       recoveredCampaign?.history.some(

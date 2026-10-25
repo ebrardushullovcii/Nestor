@@ -14,7 +14,6 @@ import type {
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { PendingActionState } from "./job-finder-pending-actions";
-import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { buildJobFinderPageContext } from "./use-job-finder-page-controller-context";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
@@ -156,129 +155,6 @@ function buildContext(overrides: {
     generateResumeForBatch,
   };
 }
-
-describe("buildJobFinderPageContext campaign schedule and notifications", () => {
-  it("exposes onRunCampaignNow through the page controller with a pending scope", async () => {
-    const runCampaignNow = vi
-      .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const { context, getPendingActionState, getActionState } = buildContext({
-      actions: { runCampaignNow },
-    });
-
-    const completed = await context.onRunCampaignNow("campaign_b");
-
-    expect(runCampaignNow).toHaveBeenCalledWith("campaign_b");
-    expect(completed).toBe(true);
-    expect(getPendingActionState()).toEqual({});
-    expect(getActionState().message).toMatch(/searches and reads listings/i);
-    expect(getActionState().message).toMatch(
-      /does not fill application forms/i,
-    );
-  });
-
-  it("defaults run-now to the active campaign when no id is supplied", async () => {
-    const runCampaignNow = vi
-      .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const { context } = buildContext({
-      actions: { runCampaignNow },
-      workspace: {
-        activeCampaignId: "campaign_active",
-      } as JobFinderRendererWorkspaceSnapshot,
-    });
-
-    await context.onRunCampaignNow();
-
-    expect(runCampaignNow).toHaveBeenCalledWith(undefined);
-  });
-
-  it("freezes campaign-run feedback from that plan's own completed ledger", async () => {
-    const runCampaignNow = vi
-      .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockResolvedValue({
-        recentDiscoveryRuns: [
-          {
-            id: "run_campaign_b",
-            campaignId: "campaign_b",
-            state: "completed",
-            startedAt: "2026-09-12T10:00:00.000Z",
-            summary: {
-              report: {
-                measuredAt: "2026-09-12T10:01:00.000Z",
-                found: 5,
-                new: 0,
-                retained: 15,
-                duplicates: 5,
-                worthOpening: 5,
-              },
-            },
-          },
-        ],
-      } as unknown as JobFinderRendererWorkspaceSnapshot);
-    const { context, getDiscoveryRunFeedback } = buildContext({
-      actions: { runCampaignNow },
-    });
-
-    await context.onRunCampaignNow("campaign_b");
-
-    expect(getDiscoveryRunFeedback()?.headline).toContain(
-      "5 found · 0 new · 15 kept · 5 already here",
-    );
-  });
-
-  it("keeps the campaign-run scope pending while the action runs", async () => {
-    let resolveRun: () => void = () => undefined;
-    const runCampaignNow = vi
-      .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockImplementation(
-        () =>
-          new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
-            resolveRun = () =>
-              resolve({} as JobFinderRendererWorkspaceSnapshot);
-          }),
-      );
-    const { context, getPendingActionState } = buildContext({
-      actions: { runCampaignNow },
-    });
-
-    const actionPromise = context.onRunCampaignNow("campaign_b");
-    expect(getPendingActionState()).toEqual({
-      [jobFinderPendingActions.campaignRun("campaign_b")]: 1,
-    });
-
-    resolveRun();
-    await actionPromise;
-    expect(getPendingActionState()).toEqual({});
-  });
-
-  it("exposes mark-read and mark-all-read through the page controller", async () => {
-    const markCampaignNotificationRead = vi
-      .fn<JobFinderShellActions["markCampaignNotificationRead"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const markAllCampaignNotificationsRead = vi
-      .fn<JobFinderShellActions["markAllCampaignNotificationsRead"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const { context, getActionState } = buildContext({
-      actions: {
-        markCampaignNotificationRead,
-        markAllCampaignNotificationsRead,
-      },
-    });
-    const pageContext = context;
-
-    pageContext.onMarkCampaignNotificationRead("n_1");
-    await vi.waitFor(() => {
-      expect(markCampaignNotificationRead).toHaveBeenCalledWith("n_1");
-    });
-
-    pageContext.onMarkAllCampaignNotificationsRead();
-    await vi.waitFor(() => {
-      expect(markAllCampaignNotificationsRead).toHaveBeenCalledTimes(1);
-      expect(getActionState().message).toMatch(/marked as read/i);
-    });
-  });
-});
 
 describe("Applications browser hand-off failure reporting", () => {
   /**

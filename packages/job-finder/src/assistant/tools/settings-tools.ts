@@ -1,5 +1,7 @@
-import { readAssistantWorkState } from "../work-state";
-import { stopResumeWork } from "./resume-tools";
+import type {
+  AssistantMessagePart,
+  JobFinderWorkspaceSnapshot,
+} from "@nestor/contracts";
 import {
   AiBehaviorPreferenceSchema,
   ApplicationAttestationKindSchema,
@@ -11,22 +13,16 @@ import {
   UpdateAiBehaviorInputSchema,
   UpdateApplicationDefaultsInputSchema,
   UpdateWorkspaceBehaviorInputSchema,
-  WrittenAnswerLengthSchema,
   collapsesSideMenuWithAssistant,
   writesResumesOnShortlist,
-  type AssistantMessagePart,
-  type JobFinderWorkspaceSnapshot,
+  WrittenAnswerLengthSchema,
 } from "@nestor/contracts";
 import { z } from "zod";
-
 import { diffValues } from "../change-diff";
-import {
-  AssistantToolError,
-  argText,
-  defineTool,
-  json,
-  type AssistantToolContext,
-} from "../tool-kit";
+import type { AssistantToolContext } from "../tool-kit";
+import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
+import { readAssistantWorkState } from "../work-state";
+import { stopResumeWork } from "./resume-tools";
 
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
@@ -96,7 +92,7 @@ export const readSettingsTool = defineTool({
   name: "read_settings",
   group: "settings",
   description:
-    "Reads Settings: apply mode, resume level, template and font, cover letters, AI behavior, search plans and the resume templates available.",
+    "Reads Settings: apply mode, resume level, template and font, cover letters, AI behavior and the resume templates available.",
   parameters: json.object({}),
   input: z.object({}).passthrough(),
   label: () => "Reading your settings",
@@ -125,12 +121,6 @@ export const readSettingsTool = defineTool({
         ),
         writeResumesOnShortlist: writesResumesOnShortlist(snapshot.settings),
         activityPaused: snapshot.activityControl.paused ?? false,
-        searchPlans: snapshot.campaigns.map((campaign) => ({
-          id: campaign.id,
-          name: campaign.name,
-          status: campaign.status,
-          active: campaign.id === snapshot.activeCampaignId,
-        })),
         templates: snapshot.availableResumeTemplates.map((template) => ({
           id: template.id,
           label: template.label,

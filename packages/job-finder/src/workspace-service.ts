@@ -1,105 +1,102 @@
-import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
-import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
 } from "@nestor/browser-runtime";
-import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
-import { writeApplicationDocumentText } from "./internal/application-document-writer";
-import { randomUUID } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
-import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
-import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
-import type { JobFinderRepository } from "@nestor/db";
 import type {
-  JobFinderDiscoveryCommandReply,
+  ApplicationAutomationMode,
+  ApplyJobResult,
+  ApplyRun,
+  FitJudgmentProgress,
+  JobDiscoveryTarget,
   JobFinderDiscoveryCancellationReply,
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryState,
+  JobFinderWorkspaceSnapshot,
+  JobSearchCampaign,
+  JobSearchPreferences,
+  JobSource,
+  SavedJob,
+  SetJobFinderActivityControlInput,
+  SourceDebugRunRecord,
 } from "@nestor/contracts";
 import {
   ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
-  JobFinderDiscoveryCancellationInputSchema,
   JobFinderActivityControlSchema,
+  JobFinderDiscoveryCancellationInputSchema,
   JobSearchCampaignCollectionSchema,
-  SetJobFinderActivityControlInputSchema,
   jobSourceValues,
   SavedJobSchema,
-  type ApplyJobResult,
-  type ApplyRun,
-  type ApplicationAutomationMode,
-  type JobFinderDiscoveryState,
-  type JobFinderWorkspaceSnapshot,
-  type FitJudgmentProgress,
-  type JobDiscoveryTarget,
-  type JobSearchCampaign,
-  type JobSearchPreferences,
-  type JobSource,
-  type SavedJob,
-  type SetJobFinderActivityControlInput,
-  type SourceDebugRunRecord,
+  SetJobFinderActivityControlInputSchema,
 } from "@nestor/contracts";
-import { mergeSessionStates } from "./internal/workspace-service-helpers";
-import {
-  getPreferredSessionAdapter,
-  updateDiscoveryTarget,
-} from "./internal/workspace-helpers";
-import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
-import type {
-  ApplicationPreparationCapacityToken,
-  WorkspaceServiceContext,
-} from "./internal/workspace-service-context";
-import {
-  buildStaleResumeDraft,
-  hasResumeAffectingJobChange,
-} from "./internal/resume-workspace-staleness";
-import {
-  type CampaignRunContext,
-  type CreateJobFinderWorkspaceServiceOptions,
-  type JobFinderWorkspaceService,
-  type JobFinderWorkspaceResetOptions,
-} from "./internal/workspace-service-contracts";
-import { createWorkspaceSnapshotProfileMethods } from "./internal/workspace-snapshot-profile-methods";
-import { createWorkspaceAssistantEditMethods } from "./internal/workspace-assistant-edit-methods";
-import { runResumeRevisionSpecialist } from "./internal/workspace-assistant-resume-specialist";
-import {
-  extractJobsFromPageText,
-  saveJobsFromPage,
-} from "./internal/workspace-assistant-page-jobs";
-import { createWorkspaceDiscoveryMethods } from "./internal/workspace-discovery-methods";
-import { createWorkspaceSourceDebugMethods } from "./internal/workspace-source-debug-methods";
-import { createWorkspaceApplicationMethods } from "./internal/workspace-application-methods";
-import { createWorkspaceApplyRunStoreMethods } from "./internal/workspace-apply-run-store-methods";
-import {
-  recoverInterruptedApplyJobResult,
-  recoverInterruptedApplyRun,
-  recoverInterruptedExactLineageProjections,
-  isSafelyParkedApplyQueue,
-} from "./internal/workspace-apply-run-recovery";
-import { createWorkspaceApplicationAnswerMethods } from "./internal/workspace-application-answer-methods";
-import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
-import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
-import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
-import {
-  createWorkspaceUserActionMethods,
-  isWorkspaceActivityPaused,
-} from "./internal/workspace-user-action-methods";
-import { toDiscoverySessionState } from "./internal/discovery-state";
-import { uniqueStrings } from "./internal/shared";
-import { buildDiscoveryJobs } from "./internal/matching-review-queue";
-import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
-import {
-  createWorkspaceCampaignMethods,
-  recordCampaignDiscoveryResult,
-} from "./internal/workspace-campaign-methods";
-import {
-  assertCampaignCanRun,
-  searchPreferencesForCampaignRun,
-} from "./internal/campaign-dashboard";
-import { ensureCampaignState } from "./internal/campaign-dashboard";
+import type { JobFinderRepository } from "@nestor/db";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { writeApplicationDocumentText } from "./internal/application-document-writer";
 import {
   localDateKey,
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
 } from "./internal/application-preparation-capacity";
+import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
+import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
+import {
+  assertCampaignCanRun,
+  ensureCampaignState,
+  searchPreferencesForCampaignRun,
+} from "./internal/campaign-dashboard";
+import { toDiscoverySessionState } from "./internal/discovery-state";
+import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
+import { buildDiscoveryJobs } from "./internal/matching-review-queue";
+import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
+import {
+  buildStaleResumeDraft,
+  hasResumeAffectingJobChange,
+} from "./internal/resume-workspace-staleness";
+import { uniqueStrings } from "./internal/shared";
+import { createWorkspaceApplicationAnswerMethods } from "./internal/workspace-application-answer-methods";
+import { createWorkspaceApplicationMethods } from "./internal/workspace-application-methods";
+import {
+  isSafelyParkedApplyQueue,
+  recoverInterruptedApplyJobResult,
+  recoverInterruptedApplyRun,
+  recoverInterruptedExactLineageProjections,
+} from "./internal/workspace-apply-run-recovery";
+import { createWorkspaceApplyRunStoreMethods } from "./internal/workspace-apply-run-store-methods";
+import { createWorkspaceAssistantEditMethods } from "./internal/workspace-assistant-edit-methods";
+import {
+  extractJobsFromPageText,
+  saveJobsFromPage,
+} from "./internal/workspace-assistant-page-jobs";
+import { runResumeRevisionSpecialist } from "./internal/workspace-assistant-resume-specialist";
+import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
+import { recordCampaignDiscoveryResult } from "./internal/workspace-campaign-methods";
+import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
+import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
+import { createWorkspaceDiscoveryMethods } from "./internal/workspace-discovery-methods";
+import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
+import {
+  getPreferredSessionAdapter,
+  updateDiscoveryTarget,
+} from "./internal/workspace-helpers";
+import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
+import type {
+  ApplicationPreparationCapacityToken,
+  WorkspaceServiceContext,
+} from "./internal/workspace-service-context";
+import type {
+  CampaignRunContext,
+  CreateJobFinderWorkspaceServiceOptions,
+  JobFinderWorkspaceResetOptions,
+  JobFinderWorkspaceService,
+} from "./internal/workspace-service-contracts";
+import { mergeSessionStates } from "./internal/workspace-service-helpers";
+import { createWorkspaceSnapshotProfileMethods } from "./internal/workspace-snapshot-profile-methods";
+import { createWorkspaceSourceDebugMethods } from "./internal/workspace-source-debug-methods";
+import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
+import {
+  createWorkspaceUserActionMethods,
+  isWorkspaceActivityPaused,
+} from "./internal/workspace-user-action-methods";
 
 const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
   "question_capture",
@@ -188,8 +185,8 @@ export {
 } from "./internal/workspace-defaults";
 
 export type {
-  CreateJobFinderWorkspaceServiceOptions,
   CandidateAssetResolver,
+  CreateJobFinderWorkspaceServiceOptions,
   JobFinderDocumentManager,
   JobFinderWorkspaceResetOptions,
   JobFinderWorkspaceService,
@@ -986,16 +983,6 @@ export function createJobFinderWorkspaceService(
   const sourceDebugMethods = createWorkspaceSourceDebugMethods(context);
   context.runSourceDebugWorkflow = sourceDebugMethods.runSourceDebugWorkflow;
   const discoveryMethods = createWorkspaceDiscoveryMethods(context);
-  const campaignMethods = createWorkspaceCampaignMethods({
-    ctx: context,
-    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
-    runCampaignDiscovery: async (campaignContext, onActivity) => {
-      await requireDiscoverySafeguardClearance();
-      return discoveryMethods.runCampaignDiscovery(campaignContext, onActivity);
-    },
-    afterCampaignRun: () => getWorkspaceSnapshot(true),
-  });
-
   function runCampaignScopedDiscovery(
     executor: (
       campaign: CampaignRunContext,
@@ -1626,19 +1613,6 @@ export function createJobFinderWorkspaceService(
       await requireActivityEnabled();
       return snapshotProfileMethods.openBrowserSession(input);
     },
-    ...campaignMethods,
-    runCampaignNow: (input, onActivity) =>
-      trackWorkspaceOperation("discovery", () =>
-        campaignMethods.runCampaignNow(input, onActivity),
-      ),
-    runDueScheduledCampaigns: (now, onActivity) =>
-      trackWorkspaceOperation("discovery", () =>
-        campaignMethods.runDueScheduledCampaigns(now, onActivity),
-      ),
-    processDueScheduledCampaigns: (now, onActivity) =>
-      trackWorkspaceOperation("scheduled discovery", () =>
-        campaignMethods.processDueScheduledCampaigns(now, onActivity),
-      ),
     setActivityControl,
     getWorkspaceSnapshot: () =>
       workspaceResetInProgress

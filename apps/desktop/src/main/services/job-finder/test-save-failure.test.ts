@@ -108,7 +108,7 @@ describe("job finder synthetic save failure", () => {
   });
 
   test("covers every protected surface with at least one owned channel", () => {
-    for (const surface of ["profile", "answers", "settings", "resume", "campaign"]) {
+    for (const surface of ["profile", "answers", "settings", "resume"]) {
       armJobFinderTestSaveFailure(surface, enabledEnv);
       const failures = jobFinderSaveChannels.filter((channel) => {
         try {

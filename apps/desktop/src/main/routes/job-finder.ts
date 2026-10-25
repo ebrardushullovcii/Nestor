@@ -102,8 +102,6 @@ import {
   JobFinderTailoredAssetDetailSchema,
   JobFinderWorkspaceSyncInputSchema,
   JobFinderWorkspaceHeldRevisionSchema,
-  RunCampaignNowInputSchema,
-  MarkCampaignNotificationReadInputSchema,
   ResumeImportBenchmarkReportSchema,
   ResumeImportBenchmarkCaseSchema,
   ResumeDocumentBundleSchema,
@@ -789,11 +787,16 @@ async function startApplyQueueRun(
     );
   }
   const queue = await repository.getApplyQueue();
-  const { assistantQueuePolicy } = await import("../services/assistant/assistant-service");
-  const policy = queue ? await assistantQueuePolicy(queue, jobIds, mode) : { mode, refused: [] };
+  const { assistantQueuePolicy } =
+    await import("../services/assistant/assistant-service");
+  const policy = queue
+    ? await assistantQueuePolicy(queue, jobIds, mode)
+    : { mode, refused: [] };
   mode = policy.mode;
   const refused = new Set(policy.refused.map((entry) => entry.jobId));
-  const pendingIds = await listJobsNotInProgress(repository, jobIds.filter((id) => !refused.has(id)),
+  const pendingIds = await listJobsNotInProgress(
+    repository,
+    jobIds.filter((id) => !refused.has(id)),
   );
   const skipped: ApplyQueueSkippedJob[] = [];
   skipped.push(...policy.refused);
@@ -887,17 +890,26 @@ export async function executeApplyQueueAction(
     await getApplyQueueRunner().start(value.jobIds, mode);
   } else if (actionId === "control-apply-queue") {
     const value = JobFinderApplyQueueControlInputSchema.parse(input);
-    if (!value.queueId || (await repository.getApplyQueue())?.id === value.queueId) {
+    if (
+      !value.queueId ||
+      (await repository.getApplyQueue())?.id === value.queueId
+    ) {
       await getApplyQueueRunner().control(value.action);
     }
   } else if (actionId === "remove-from-apply-queue") {
-    await getApplyQueueRunner().remove(JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds,
+    await getApplyQueueRunner().remove(
+      JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds,
     );
   } else if (actionId === "approve-resumes") {
-    await approveApplicationResumes(service, JobFinderApproveResumesInputSchema.parse(input).jobIds, {
-      personApproved: true,
-      ...(options.onApproveProgress ? { onProgress: options.onApproveProgress } : {}),
-    },
+    await approveApplicationResumes(
+      service,
+      JobFinderApproveResumesInputSchema.parse(input).jobIds,
+      {
+        personApproved: true,
+        ...(options.onApproveProgress
+          ? { onProgress: options.onApproveProgress }
+          : {}),
+      },
     );
   } else {
     throw new Error("Unknown Apply queue action.");
@@ -1353,7 +1365,6 @@ export function registerJobFinderRouteHandlers(
   for (const name of [
     "save-profile",
     "save-search-preferences",
-    "save-campaign",
     "save-profile-setup-state",
     "save-settings",
     "update-application-defaults",
@@ -1372,12 +1383,6 @@ export function registerJobFinderRouteHandlers(
   }
   for (const name of [
     "analyze-profile-from-resume",
-    "select-campaign",
-    "delete-campaign",
-    "save-campaign-rule",
-    "delete-campaign-rule",
-    "toggle-campaign-rule",
-    "project-campaign-rule-funnel",
     "set-activity-control",
     "apply-profile-setup-review-action",
     "apply-resume-timeline-repair-action",
@@ -1573,58 +1578,6 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(event.sender, snapshot);
     },
   );
-
-  ipcMain.handle(
-    "job-finder:run-campaign-now",
-    async (event, payload: unknown) => {
-      const input = RunCampaignNowInputSchema.parse(payload ?? {});
-      const service = await getJobFinderWorkspaceService();
-      // A run that refuses to start still writes a terminal run record — a
-      // plan whose sources are gone records a failed run and then throws the
-      // reason. Publishing only on success left the renderer holding the
-      // snapshot from before the attempt, so the plan card, its history and
-      // Home all kept an older run's success as the newest thing the app had
-      // said about this plan.
-      try {
-        const snapshot = await service.runCampaignNow(
-          input,
-          createSearchProgressPublisher(event.sender),
-        );
-        return workspaceMutationResponse(event.sender, snapshot);
-      } finally {
-        publishJobFinderWorkspaceUpdate(event.sender);
-      }
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:mark-campaign-notification-read",
-    async (event, payload: unknown) => {
-      const { notificationId } = MarkCampaignNotificationReadInputSchema.omit({
-        readAt: true,
-      }).parse(payload);
-      const service = await getJobFinderWorkspaceService();
-      const snapshot = await service.markCampaignNotificationRead({
-        notificationId,
-        readAt: new Date().toISOString(),
-      });
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:mark-all-campaign-notifications-read",
-    async (event) => {
-      const service = await getJobFinderWorkspaceService();
-      const snapshot = await service.markAllCampaignNotificationsRead({
-        readAt: new Date().toISOString(),
-      });
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
   // The old chat is retired (ADR 0037): the assistant sidebar is the only
   // writer. Archived histories stay readable through the assistant.
   ipcMain.handle("job-finder:send-profile-copilot-message", () =>

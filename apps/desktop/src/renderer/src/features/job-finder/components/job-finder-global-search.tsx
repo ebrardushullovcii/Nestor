@@ -1,7 +1,8 @@
+import { Input } from "@renderer/components/ui/input";
 import {
   useCallback,
-  useEffect,
   useDeferredValue,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -9,18 +10,16 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { Input } from "@renderer/components/ui/input";
 import {
   searchJobFinderEntries,
   type JobFinderGlobalSearchEntry,
   type JobFinderGlobalSearchKind,
 } from "../lib/job-finder-global-search";
-import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
+import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 
 const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
   application: "Applications",
-  campaign: "Search plans",
   company: "Companies",
   document: "Resumes",
   job: "Jobs and companies",
@@ -187,8 +186,7 @@ export function JobFinderGlobalSearch(props: {
         {JOB_FINDER_GLOBAL_SEARCH_LABEL}
       </label>
       <p className="sr-only" id={scopeHelpId}>
-        Everything saved on this device is searchable. Jobs outside the current
-        search plan say so in their description.
+        Everything saved on this device is searchable.
       </p>
       <Input
         aria-activedescendant={activeOptionId}
@@ -200,7 +198,7 @@ export function JobFinderGlobalSearch(props: {
         id={inputId}
         onChange={(event) => handleQueryChange(event.target.value)}
         onKeyDown={handleInputKeyDown}
-        placeholder="Search jobs, applications, plans, resumes, or a screen"
+        placeholder="Search jobs, applications, resumes, or a screen"
         role="combobox"
         type="search"
         value={query}

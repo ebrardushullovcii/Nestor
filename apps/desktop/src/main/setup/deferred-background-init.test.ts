@@ -4,7 +4,6 @@ import {
   DEFERRED_BACKGROUND_INIT_DELAY_MS,
   type DeferredBackgroundInitOptions,
 } from "./deferred-background-init";
-import type { CampaignScheduler } from "../services/job-finder/campaign-scheduler";
 import type * as InterviewOverlayApi from "./interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./interview-session-controls";
 
@@ -21,20 +20,17 @@ const flushMicrotasks = () => vi.advanceTimersByTimeAsync(0);
 
 function createOptions() {
   const calls: string[] = [];
-  const startedSchedulerFactories: Array<() => CampaignScheduler> = [];
+  const queueResumptions: boolean[] = [];
   const surfaceInitializations: boolean[] = [];
   const errors: Array<{ message: string; error: unknown }> = [];
   const counts = {
     jobFinderServices: 0,
-    campaignSchedulerModule: 0,
     candidateAssetLibrary: 0,
     liveAssistant: 0,
     interviewOverlay: 0,
     interviewSessionControls: 0,
   };
 
-  const schedulerFactory =
-    (() => ({})) as unknown as () => CampaignScheduler;
   const overlayModuleStub = {} as unknown as typeof InterviewOverlayApi;
   const sessionControlsStub =
     {} as unknown as typeof InterviewSessionControlsApi;
@@ -49,10 +45,6 @@ function createOptions() {
           return Promise.resolve(undefined);
         },
       });
-    },
-    loadCampaignSchedulerModule: () => {
-      counts.campaignSchedulerModule += 1;
-      return Promise.resolve({ createCampaignScheduler: schedulerFactory });
     },
     loadCandidateAssetLibraryModule: () => {
       counts.candidateAssetLibrary += 1;
@@ -82,13 +74,11 @@ function createOptions() {
       counts.interviewSessionControls += 1;
       return Promise.resolve(sessionControlsStub);
     },
-    startCampaignScheduler: (createScheduler) => {
-      startedSchedulerFactories.push(createScheduler);
+    resumeApplyQueueAfterRestart: () => {
+      queueResumptions.push(true);
     },
     initializeInterviewSurfaces: (overlay, sessionControls) => {
-      surfaceInitializations.push(
-        Boolean(overlay) && Boolean(sessionControls),
-      );
+      surfaceInitializations.push(Boolean(overlay) && Boolean(sessionControls));
     },
     onDiagnostic: (message) => {
       calls.push(`diagnostic:${message}`);
@@ -102,7 +92,7 @@ function createOptions() {
     options,
     calls,
     counts,
-    startedSchedulerFactories,
+    queueResumptions,
     surfaceInitializations,
     errors,
   };
@@ -119,7 +109,7 @@ describe("deferred background initialization", () => {
       options,
       calls,
       counts,
-      startedSchedulerFactories,
+      queueResumptions,
       surfaceInitializations,
       errors,
     } = createOptions();
@@ -136,7 +126,7 @@ describe("deferred background initialization", () => {
     expect(calls).toContain("workspace");
     expect(calls).toContain("asset-lifecycle");
     expect(calls).toContain("live-assistant");
-    expect(startedSchedulerFactories).toHaveLength(1);
+    expect(queueResumptions).toHaveLength(1);
     expect(surfaceInitializations).toEqual([true]);
     expect(errors).toEqual([]);
   });
@@ -192,31 +182,7 @@ describe("deferred background initialization", () => {
     });
     await flushMicrotasks();
 
-    expect(counts.campaignSchedulerModule).toBe(0);
-  });
-
-  test("does not start or recreate the scheduler when quit begins after the workspace exists", async () => {
-    vi.useFakeTimers();
-    const { options, startedSchedulerFactories } = createOptions();
-    const schedulerLoad =
-      createManualPromise<{ createCampaignScheduler: () => CampaignScheduler }>();
-    options.loadCampaignSchedulerModule = () => schedulerLoad.promise;
-    const controller = createDeferredBackgroundInitController(options);
-
-    controller.schedule();
-    await vi.advanceTimersByTimeAsync(DEFERRED_BACKGROUND_INIT_DELAY_MS);
-    await flushMicrotasks();
-
-    // The chain reached the scheduler step before quit began.
-    expect(schedulerLoad.promise).toBeDefined();
-    controller.beginQuitTeardown();
-    schedulerLoad.resolve({
-      createCampaignScheduler:
-        (() => ({})) as unknown as () => CampaignScheduler,
-    });
-    await flushMicrotasks();
-
-    expect(startedSchedulerFactories).toHaveLength(0);
+    expect(counts.jobFinderServices).toBe(0);
   });
 
   test("gates candidate-asset retention enforcement behind quit too", async () => {
@@ -295,12 +261,7 @@ describe("deferred background initialization", () => {
   describe("aborted quit latch release", () => {
     test("an early-startup cancel releases the latch and runs initialization exactly once", async () => {
       vi.useFakeTimers();
-      const {
-        options,
-        counts,
-        startedSchedulerFactories,
-        errors,
-      } = createOptions();
+      const { options, counts, queueResumptions, errors } = createOptions();
       const controller = createDeferredBackgroundInitController(options);
 
       // Quit begins during the startup window, before the timer ever fires.
@@ -317,13 +278,13 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(startedSchedulerFactories).toHaveLength(1);
+      expect(queueResumptions).toHaveLength(1);
       expect(errors).toEqual([]);
     });
 
     test("a repeated cancel cycle never duplicates the initialization", async () => {
       vi.useFakeTimers();
-      const { options, counts, startedSchedulerFactories } = createOptions();
+      const { options, counts, queueResumptions } = createOptions();
       const controller = createDeferredBackgroundInitController(options);
 
       controller.schedule();
@@ -334,7 +295,7 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(startedSchedulerFactories).toHaveLength(1);
+      expect(queueResumptions).toHaveLength(1);
 
       // A later quit/abort cycle after completion re-arms nothing.
       controller.beginQuitTeardown();
@@ -343,7 +304,7 @@ describe("deferred background initialization", () => {
       await flushMicrotasks();
 
       expect(counts.jobFinderServices).toBe(1);
-      expect(startedSchedulerFactories).toHaveLength(1);
+      expect(queueResumptions).toHaveLength(1);
     });
 
     test("release is ignored once actual teardown has committed", async () => {

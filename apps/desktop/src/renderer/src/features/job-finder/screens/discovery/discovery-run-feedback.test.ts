@@ -776,5 +776,5 @@ it("says a completed run is partial in both its headline and toast", () => {
 
 it("describes new jobs as saved rather than promising all are visible matches", () => {
   const feedback = createDiscoveryRunSucceededFeedback(null, null, 3);
-  expect(feedback.toast?.description).toBe("3 new jobs saved to this plan.");
+  expect(feedback.toast?.description).toBe("3 new jobs saved.");
 });

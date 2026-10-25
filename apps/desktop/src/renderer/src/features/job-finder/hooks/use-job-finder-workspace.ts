@@ -1,89 +1,87 @@
-import { clearJobDetailCache } from "./use-job-detail";
-import { clearTailoredAssetDetailCache } from "./use-tailored-asset-detail";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AppearanceTheme,
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportInput,
   ApplicationCrmMutationInput,
   ApplicationCrmSettings,
-  AppearanceTheme,
   ApplyGroupedManualAnswerInput,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
+  JobFinderAgentDiscoveryReply,
+  JobFinderAgentDiscoveryResult,
+  JobFinderApplicationStartTarget,
   JobFinderApplyConsentActionInput,
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
-  JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
-  JobFinderRemoveFromApplyQueueInput,
-  JobFinderReturnApplicationToShortlistInput,
-  JobFinderApproveResumesInput,
-  JobFinderStartApplyQueueInput,
+  JobFinderApplyRunActionInput,
   JobFinderApplyRunDetailsQuery,
-  JobFinderApplicationStartTarget,
-  JobFinderPreparedApplicationPageInput,
-  JobFinderOpenBrowserSessionInput,
-  JobFinderSetResumeClaimConfirmationInput,
-  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  JobFinderSettings,
-  JobFinderSearchRequest,
-  JobFinderAgentDiscoveryReply,
-  JobFinderAgentDiscoveryResult,
+  JobFinderApproveResumesInput,
   JobFinderJobDetail,
+  JobFinderOpenBrowserSessionInput,
+  JobFinderPreparedApplicationPageInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
+  JobFinderReturnApplicationToShortlistInput,
+  JobFinderSearchRequest,
+  JobFinderSetResumeClaimConfirmationInput,
+  JobFinderSettings,
+  JobFinderSetWorkHistoryReviewAcknowledgmentInput,
+  JobFinderStartApplyQueueInput,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
-  ResolveSubmissionOutcomeInput,
-  SaveCampaignRuleInput,
-  SaveJobSearchCampaignInput,
-  SetJobFinderActivityControlInput,
-  WorkspaceRevision,
   ProfileCopilotContext,
   ProfileSetupReviewAction,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
-  ResumeImportProgressEvent,
+  ResolveSubmissionOutcomeInput,
   ResumeApplicationMode,
-  TailoringMode,
-  ResumePdfExportIntent,
-  ResumeTimelineRepairAction,
   ResumeDraft,
   ResumeDraftPatch,
+  ResumeImportProgressEvent,
+  ResumePdfExportIntent,
+  ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
+  SetJobFinderActivityControlInput,
   SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
+  TailoringMode,
+  UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-  UpdateAiBehaviorInput,
   UserActionCommandInput,
+  WorkspaceRevision,
 } from "@nestor/contracts";
-import type { JobFinderShellActions } from "../lib/job-finder-types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  JobFinderStartupDatabaseRecoveryBlockedFact,
+  JobFinderStartupDatabaseRecoveryFact,
+} from "../../../../../shared/job-finder-startup-db-recovery";
+import { isJobFinderStartupDatabaseRecoveryFact } from "../../../../../shared/job-finder-startup-db-recovery";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
+import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { whenLaunchReadsSettled } from "../lib/launch-reads";
+import type { SearchChangeFeedFollower } from "../lib/search-change-feed";
 import {
   createSearchChangeFeedFollower,
   isSearchRunning,
   publishLiveFindJobsCounts,
   publishSearchLiveCounts,
-  type SearchChangeFeedFollower,
 } from "../lib/search-change-feed";
 import {
   markFindJobsListsBehind,
-  patchFindJobsLists,
   PATCHED_JOBS_LIMIT,
+  patchFindJobsLists,
   registerFullWorkspaceRead,
 } from "../lib/workspace-view-refresh";
-import {
-  isJobFinderStartupDatabaseRecoveryFact,
-  type JobFinderStartupDatabaseRecoveryBlockedFact,
-  type JobFinderStartupDatabaseRecoveryFact,
-} from "../../../../../shared/job-finder-startup-db-recovery";
+import { clearJobDetailCache } from "./use-job-detail";
+import { clearTailoredAssetDetailCache } from "./use-tailored-asset-detail";
 
 /** How long update-driven syncs rest, as a multiple of the last sync. */
 const UPDATE_SYNC_REST_FACTOR = 2;
@@ -1183,66 +1181,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.saveSearchPreferences(searchPreferences),
         ),
-      saveCampaign: (campaign: SaveJobSearchCampaignInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveCampaign(campaign),
-        ),
-      selectCampaign: (campaignId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.selectCampaign(campaignId),
-        ),
-      runCampaignNow: (campaignId?: string | null) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.runCampaignNow(
-            campaignId ? { campaignId } : undefined,
-          ),
-        ),
-      markCampaignNotificationRead: (notificationId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.markCampaignNotificationRead(notificationId),
-        ),
-      markAllCampaignNotificationsRead: () =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.markAllCampaignNotificationsRead(),
-        ),
-      saveCampaignRule: (campaignId: string, rule: SaveCampaignRuleInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveCampaignRule(campaignId, rule),
-        ),
-      deleteCampaignRule: (campaignId: string, ruleId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.deleteCampaignRule(campaignId, ruleId),
-        ),
-      deleteCampaign: async (campaignId: string) => {
-        const deleted =
-          await window.nestor.jobFinder.deleteJobSearchCampaign(campaignId);
-        // A refused or failed deletion must leave the local snapshot alone.
-        // Only a confirmed delete follows the canonical sync path so the
-        // removed campaign disappears immediately and the backend-selected
-        // fallback active campaign becomes authoritative. The sync fences its
-        // commit through the workspace request sequence, so a slow refresh
-        // can never overwrite a newer snapshot.
-        if (!deleted) {
-          return false;
-        }
-
-        await syncWorkspace();
-        return true;
-      },
-      toggleCampaignRule: (
-        campaignId: string,
-        ruleId: string,
-        enabled: boolean,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.toggleCampaignRule(
-            campaignId,
-            ruleId,
-            enabled,
-          ),
-        ),
-      projectCampaignRuleFunnel: (campaignId: string) =>
-        window.nestor.jobFinder.projectCampaignRuleFunnel(campaignId),
       setActivityControl: (input: SetJobFinderActivityControlInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.setActivityControl(input),

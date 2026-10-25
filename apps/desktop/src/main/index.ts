@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, powerMonitor } from "electron";
+import { app, BrowserWindow, Menu, ipcMain } from "electron";
 import { appendFileSync, existsSync, statSync, truncateSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,8 +25,6 @@ import { stopResumeService } from "./services/resumes";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
-import type { CampaignScheduler } from "./services/job-finder/campaign-scheduler";
-import type * as CampaignSchedulerApi from "./services/job-finder/campaign-scheduler";
 import type * as JobFinderServicesApi from "./services/job-finder";
 import type * as LiveAssistantApi from "./services/live-assistant";
 
@@ -61,15 +59,12 @@ const jobFinderShutdownTimeoutMs = 15_000;
 const advancedInterviewSurfacesEnabled = areAdvancedInterviewSurfacesEnabled();
 
 type JobFinderServices = typeof JobFinderServicesApi;
-type CampaignSchedulerModule = typeof CampaignSchedulerApi;
 type CandidateAssetLibraryModule = typeof CandidateAssetLibraryApi;
 type LiveAssistantModule = typeof LiveAssistantApi;
 type InterviewOverlayModule = typeof InterviewOverlayApi;
 type InterviewSessionControlsModule = typeof InterviewSessionControlsApi;
 
 let jobFinderServicesPromise: Promise<JobFinderServices> | null = null;
-let campaignSchedulerModulePromise: Promise<CampaignSchedulerModule> | null =
-  null;
 let candidateAssetLibraryModulePromise: Promise<CandidateAssetLibraryModule> | null =
   null;
 let liveAssistantModulePromise: Promise<LiveAssistantModule> | null = null;
@@ -81,12 +76,6 @@ let interviewSessionControlsModulePromise: Promise<InterviewSessionControlsModul
 function loadJobFinderServices() {
   jobFinderServicesPromise ??= import("./services/job-finder");
   return jobFinderServicesPromise;
-}
-
-function loadCampaignSchedulerModule() {
-  campaignSchedulerModulePromise ??=
-    import("./services/job-finder/campaign-scheduler");
-  return campaignSchedulerModulePromise;
 }
 
 function loadCandidateAssetLibraryModule() {
@@ -130,12 +119,11 @@ const deferredBackgroundInit = createDeferredBackgroundInitController({
   scheduleDelayMs: 150,
   advancedInterviewSurfacesEnabled,
   loadJobFinderServices,
-  loadCampaignSchedulerModule,
   loadCandidateAssetLibraryModule,
   loadLiveAssistantModule,
   loadInterviewOverlayModule,
   loadInterviewSessionControlsModule,
-  startCampaignScheduler,
+  resumeApplyQueueAfterRestart,
   initializeInterviewSurfaces: (overlay, sessionControls) => {
     closeInterviewOverlayWindows = overlay.closeInterviewOverlayWindows;
     disposeInterviewSessionControls =
@@ -320,37 +308,13 @@ void app
 let jobFinderShutdownInFlight = false;
 let quitApprovedByCloseGuard = false;
 
-let campaignScheduler: CampaignScheduler | null = null;
-const onPowerSuspend = () => campaignScheduler?.suspend();
-const onPowerResume = () => campaignScheduler?.resume();
-
-function startCampaignScheduler(
-  createScheduler: CampaignSchedulerModule["createCampaignScheduler"],
-): void {
-  if (campaignScheduler) {
-    return;
-  }
-  campaignScheduler = createScheduler();
-  powerMonitor.on("suspend", onPowerSuspend);
-  powerMonitor.on("resume", onPowerResume);
-  campaignScheduler.start();
+function resumeApplyQueueAfterRestart(): void {
   // An Apply queue that was running carries on.
   void import("./routes/job-finder")
     .then((routes) => routes.resumeApplyQueueAfterRestart())
     .catch((error: unknown) => {
       console.error("Could not carry on the Apply queue.", error);
     });
-}
-
-async function stopCampaignScheduler(): Promise<void> {
-  const scheduler = campaignScheduler;
-  campaignScheduler = null;
-  if (!scheduler) {
-    return;
-  }
-  powerMonitor.removeListener("suspend", onPowerSuspend);
-  powerMonitor.removeListener("resume", onPowerResume);
-  await scheduler.stop();
 }
 
 async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
@@ -431,7 +395,7 @@ app.on("before-quit", (event) => {
         beginJobFinderWorkspaceShutdown();
       }
       await Promise.all([
-        stopCampaignScheduler().then(shutdownJobFinderServicesIfLoaded),
+        shutdownJobFinderServicesIfLoaded(),
         shutdownLiveAssistantIfLoaded(),
       ]);
     },

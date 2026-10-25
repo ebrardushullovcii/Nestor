@@ -1,26 +1,27 @@
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
-import { projectWorkspaceAttention } from "../attention";
-import { readAssistantWorkState, runningSearchState } from "../work-state";
+import type {
+  AssistantTaskPlan,
+  JobFinderWorkspaceSnapshot,
+} from "@nestor/contracts";
 import {
   AssistantTaskPlanStepSchema,
   NonEmptyStringSchema,
-  type AssistantTaskPlan,
-  type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { z } from "zod";
-
-import { AssistantToolError, argText, defineTool, json } from "../tool-kit";
+import { projectWorkspaceAttention } from "../attention";
+import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import {
   getAssistantSavedSearch,
   getAssistantSearchReadiness,
 } from "../prompt";
+import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
+import { readAssistantWorkState, runningSearchState } from "../work-state";
 import {
   allJobs,
   compactApplication,
   compactJob,
+  outstandingReviews,
   plural,
   trackerAgenda,
-  outstandingReviews,
 } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
@@ -69,13 +70,6 @@ export const getWorkspaceSummaryTool = defineTool({
       }`,
       data: {
         ...work,
-        searchPlanCapabilities: {
-          namedPlans: true,
-          recurringSchedules: true,
-          assistantCanCreate: true,
-          manageWith: "save_search_plan",
-          screen: "search_plans",
-        },
         profile: {
           setup: snapshot.profileSetupState.status,
           name: snapshot.profile.fullName,
@@ -721,14 +715,13 @@ const APP_ROUTES = {
   tracker: "/job-finder/applications?view=tracker",
   needs_you: "/job-finder/actions",
   settings: "/job-finder/settings",
-  search_plans: "/job-finder/campaigns",
 } as const;
 
 export const openInAppTool = defineTool({
   name: "open_in_app",
   group: "workspace",
   description:
-    "Opens a screen or a record in the app for the person. Use screen tracker for saved interviews, reminders and stages, optionally with applicationRecordId. Create or schedule a named search plan with save_search_plan, then open search_plans if they ask to see it. Open screens only when asked to see them.",
+    "Opens a screen or a record in the app for the person. Use screen tracker for saved interviews, reminders and stages, optionally with applicationRecordId. Open screens only when asked to see them.",
   parameters: json.object({
     screen: json.enumOf(Object.keys(APP_ROUTES)),
     jobId: json.string("Opens that job (its resume when resume is true)."),

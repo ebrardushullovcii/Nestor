@@ -1,13 +1,6 @@
 import { z } from "zod";
-
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
-import {
-  CampaignDigestSchema,
-  CampaignNotificationSchema,
-  CampaignPauseWindowSchema,
-  CampaignRuleSchema,
-  CampaignRunFactsSchema,
-} from "./campaign-operations";
+import { CampaignNotificationSchema } from "./campaign-operations";
 import {
   DISCOVERY_RUN_JOB_BUDGET_MAX,
   JobSearchPreferencesSchema,
@@ -91,23 +84,6 @@ export type JobSearchCampaignApplicationPolicy = z.infer<
   typeof JobSearchCampaignApplicationPolicySchema
 >;
 
-export const JobSearchCampaignScheduleSchema = z.object({
-  mode: z.enum(["manual", "daily", "selected_days"]).default("manual"),
-  enabled: z.boolean().default(false),
-  daysOfWeek: z.array(z.number().int().min(0).max(6)).default([]),
-  localStartTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
-    .nullable()
-    .default(null),
-  timeZone: NonEmptyStringSchema.nullable().default(null),
-  pauseWindows: z.array(CampaignPauseWindowSchema).max(100).default([]),
-  runFacts: CampaignRunFactsSchema.default({}),
-});
-export type JobSearchCampaignSchedule = z.infer<
-  typeof JobSearchCampaignScheduleSchema
->;
-
 export const JobSearchCampaignProgressSchema = z.object({
   jobsFound: z.number().int().nonnegative().default(0),
   jobsRetained: z.number().int().nonnegative().default(0),
@@ -161,9 +137,6 @@ export const JobSearchCampaignSchema = z.object({
   limits: JobSearchCampaignLimitsSchema,
   stopRules: JobSearchCampaignStopRulesSchema,
   applicationPolicy: JobSearchCampaignApplicationPolicySchema,
-  rules: z.array(CampaignRuleSchema).max(200).default([]),
-  schedule: JobSearchCampaignScheduleSchema.default({}),
-  latestDigest: CampaignDigestSchema.nullable().default(null),
   progress: JobSearchCampaignProgressSchema,
   history: z.array(JobSearchCampaignHistoryEntrySchema).default([]),
 });
@@ -208,27 +181,6 @@ export const JobSearchCampaignCollectionSchema = z
   });
 export type JobSearchCampaignCollection = z.infer<
   typeof JobSearchCampaignCollectionSchema
->;
-
-export const SaveJobSearchCampaignInputSchema = JobSearchCampaignSchema.omit({
-  createdAt: true,
-  updatedAt: true,
-  progress: true,
-  history: true,
-  jobIds: true,
-}).extend({
-  id: NonEmptyStringSchema.nullable().default(null),
-  expectedUpdatedAt: IsoDateTimeSchema.optional(),
-});
-export type SaveJobSearchCampaignInput = z.infer<
-  typeof SaveJobSearchCampaignInputSchema
->;
-
-export const SelectJobSearchCampaignInputSchema = z.object({
-  campaignId: NonEmptyStringSchema,
-});
-export type SelectJobSearchCampaignInput = z.infer<
-  typeof SelectJobSearchCampaignInputSchema
 >;
 
 export const JobFinderActivityControlSchema = z.object({
