@@ -1,12 +1,11 @@
 import type { ApplyPageSession } from "@nestor/contracts";
-import type { Page } from "playwright";
 import type { ApplicationPreparationLease } from "./application-preparation-scheduler";
 
 /** Check site ownership at every hand before another form operation starts. */
 export function guardApplicationPreparationSession(
   session: ApplyPageSession,
-  page: Page,
   lease: ApplicationPreparationLease,
+  waitForReady: () => Promise<void>,
   signal?: AbortSignal,
 ): ApplyPageSession {
   const guard = async <T>(
@@ -14,13 +13,14 @@ export function guardApplicationPreparationSession(
     destination?: string,
   ): Promise<T> => {
     signal?.throwIfAborted();
-    await lease.moveTo(destination ?? page.url());
+    await waitForReady();
+    if (destination) await lease.moveTo(destination);
     try {
       return await work();
     } finally {
       // A click, popup adoption, or site redirect may change the account
       // session. Wait for that site's turn before the workflow can act again.
-      await lease.moveTo(page.url());
+      await waitForReady();
       signal?.throwIfAborted();
     }
   };

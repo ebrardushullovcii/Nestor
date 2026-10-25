@@ -38,12 +38,22 @@ export interface ApplicationPreparationLease {
   release: () => void;
 }
 
-export function createApplicationPreparationScheduler(maxActive = 2): {
+export interface ApplicationPreparationScheduler {
   acquire: (
     url: string,
     signal?: AbortSignal,
   ) => Promise<ApplicationPreparationLease>;
-} {
+  /** Records a site's response; returns its earliest retry time when limited. */
+  recordResponse: (
+    url: string,
+    status: number,
+    retryAfter: string | null,
+  ) => number | null;
+}
+
+export function createApplicationPreparationScheduler(
+  maxActive = 2,
+): ApplicationPreparationScheduler {
   const capacity = applicationPreparationConcurrency(String(maxActive));
   type Request = {
     key: string;
@@ -54,11 +64,22 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
     onAbort: () => void;
   };
   const requests = new Set<Request>();
+  const sites = new Map<string, { until: number; failures: number }>();
   let running = 0;
+  let wake: ReturnType<typeof setTimeout> | undefined;
+  const pausedUntil = (key: string) => sites.get(key)?.until ?? 0;
 
   const drain = (): void => {
+    clearTimeout(wake);
+    wake = undefined;
+    let nextWake = Infinity;
     for (const request of requests) {
       if (request.granted || request.signal?.aborted) continue;
+      const until = pausedUntil(request.key);
+      if (until > Date.now()) {
+        nextWake = Math.min(nextWake, until);
+        continue;
+      }
       if (!request.active && running >= capacity) continue;
       if (
         [...requests].some(
@@ -73,6 +94,15 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
       }
       request.granted = true;
       request.resolve();
+    }
+    if (Number.isFinite(nextWake)) {
+      // Node timers overflow after about 25 days. Long server waits keep their
+      // full deadline and wake in chunks; they are never shortened to a cap.
+      wake = setTimeout(
+        drain,
+        Math.min(2_147_483_647, Math.max(1, nextWake - Date.now())),
+      );
+      wake.unref();
     }
   };
 
@@ -109,6 +139,32 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
   };
 
   return {
+    recordResponse(url, status, retryAfter) {
+      const key = applicationSiteKey(url);
+      if (!key) return null;
+      const previous = sites.get(key) ?? { until: 0, failures: 0 };
+      if (status !== 429 && !(status === 503 && retryAfter !== null)) {
+        if (status >= 200 && status < 400 && previous.failures > 0) {
+          // Successful responses restore normal speed, but an in-flight success
+          // cannot cancel a wait another response has already asked for.
+          sites.set(key, { ...previous, failures: 0 });
+        }
+        return null;
+      }
+      const now = Date.now();
+      const value = retryAfter?.trim() ?? "";
+      const hint = /^\d+(?:\.\d+)?$/u.test(value)
+        ? Number(value) * 1_000
+        : Date.parse(value) - now;
+      const delay =
+        Number.isFinite(hint) && hint > 0
+          ? hint
+          : Math.min(60_000, 1_000 * 2 ** Math.min(previous.failures, 6));
+      const until = Math.max(previous.until, now + delay);
+      sites.set(key, { until, failures: previous.failures + 1 });
+      drain();
+      return until;
+    },
     async acquire(url, signal) {
       const request: Request = {
         key: "",
@@ -140,7 +196,8 @@ export function createApplicationPreparationScheduler(maxActive = 2): {
         moveTo(nextUrl) {
           return inOrder(async () => {
             const nextKey = applicationSiteKey(nextUrl) ?? "unknown-site";
-            if (nextKey === request.key) return;
+            if (nextKey === request.key && pausedUntil(nextKey) <= Date.now())
+              return;
             // Release both the previous site and the worker slot while waiting
             // for the destination. An unrelated site can use the idle capacity.
             if (request.active) {

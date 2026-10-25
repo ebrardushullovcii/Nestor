@@ -71,6 +71,7 @@ import {
   type ApplicationPreparationLease,
 } from "./application-preparation-scheduler";
 import { guardApplicationPreparationSession } from "./application-preparation-session";
+import { createApplicationSitePacing } from "./application-site-pacing";
 import {
   buildPreparationResult,
   createApplicationRunServiceWorkerSentinel,
@@ -1353,6 +1354,9 @@ export function createBrowserAgentRuntime(
     ),
   );
   const usesEmbeddedBrowserHost = Boolean(options.browserHost);
+  const applicationSitePacing = createApplicationSitePacing(
+    applicationPreparationScheduler,
+  );
   const hostTabCount = options.browserHost?.openTabCount?.bind(
     options.browserHost,
   );
@@ -2735,7 +2739,7 @@ export function createBrowserAgentRuntime(
           if (page.isClosed())
             throw new Error("The prepared application page was closed.");
           const currentUrl = page.url();
-          await lease.moveTo(currentUrl);
+          await applicationSitePacing.waitForReady(page, lease, signal);
           if (applicationSiteKey(page.url()) === applicationSiteKey(currentUrl))
             break;
           if (attempt === 2)
@@ -3015,6 +3019,7 @@ export function createBrowserAgentRuntime(
                     : {}),
                   ...(options?.signal ? { signal: options.signal } : {}),
                   onPageResolved: async (page) => {
+                    applicationSitePacing.observe(page);
                     releaseReservedTab?.();
                     releaseReservedTab = null;
                     workingPage = page;
@@ -3036,7 +3041,11 @@ export function createBrowserAgentRuntime(
                     );
                   },
                 });
-                await preparationLease.moveTo(prepared.page.url());
+                await applicationSitePacing.waitForReady(
+                  prepared.page,
+                  preparationLease,
+                  options?.signal,
+                );
                 applicationPageForVisuals = prepared.page;
                 if (input.applicationPageBindingKey) {
                   bindPreparedApplicationPage(
@@ -3075,8 +3084,12 @@ export function createBrowserAgentRuntime(
                       page: prepared.page,
                       sentinel: runSentinel,
                     }),
-                    prepared.page,
                     preparationLease,
+                    () => applicationSitePacing.waitForReady(
+                      prepared.page,
+                      preparationLease,
+                      options?.signal,
+                    ),
                     options?.signal,
                   );
                   if (input.prepareTaskLocalCredentials) {
