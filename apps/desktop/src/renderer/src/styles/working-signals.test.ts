@@ -14,7 +14,6 @@ const globalsCss = read("./globals.css");
 // window draw every frame for as long as the work ran.
 const longLivedSignals = [
   ["../features/job-finder/assistant/assistant-toggle.tsx", "{assistant.working && !assistant.open ? ("],
-  ["../features/job-finder/components/apply-queue-strip.tsx", "view.active"],
   ["../components/ui/progress-bar.tsx", "data-progress-indeterminate"],
 ] as const;
 
