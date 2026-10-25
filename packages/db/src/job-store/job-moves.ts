@@ -3,11 +3,16 @@ import type { JobSelection, JobStage, TriageStage } from "@nestor/contracts";
 import { toFilterSql } from "./job-list";
 import type { Statements } from "./statements";
 
-/** Where triage may take a job from, by where it goes. */
+/**
+ * Where triage may take a job from, by where it goes. An approved job can go
+ * back to Find jobs: leaving `resume` is what takes its approval away (Apply
+ * and the Approved list read the stage), while the resume keeps its approval
+ * and PDF so Undo puts both back.
+ */
 const TRIAGE_FROM: Record<TriageStage, readonly JobStage[]> = {
   shortlisted: ["found", "hidden"],
   hidden: ["found", "shortlisted"],
-  found: ["hidden", "shortlisted"],
+  found: ["hidden", "shortlisted", "resume"],
 };
 
 /** Undo reaches this many moves back. */
@@ -84,6 +89,14 @@ export function writeMove(
     `UPDATE jobs SET stage = ?, stage_at = ?, stage_note = NULL
      WHERE id IN (SELECT job_id FROM job_move_items WHERE move_id = ?)`,
   ).run(to, now, moveId);
+  // Shortlisted again, a resume approved before it went back starts over at
+  // review instead of reading as approved in To review.
+  if (to === "shortlisted")
+    sql(
+      `UPDATE resumes SET approved_at = NULL, pdf_path = NULL
+       WHERE approved_at IS NOT NULL
+         AND job_id IN (SELECT job_id FROM job_move_items WHERE move_id = ?)`,
+    ).run(moveId);
   sql("DELETE FROM job_moves WHERE id <= ?").run(moveId - KEPT_MOVES);
   return { moveId, moved, stages, ids: readMovedIds(sql, moveId, moved) };
 }

@@ -188,6 +188,51 @@ describe("job store", () => {
     expect(store.stageCounts()).toMatchObject({ found: 4, shortlisted: 0 });
   });
 
+  it("moves an approved job back to Find jobs, and Undo makes it approved again", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({
+      searchId: "s1",
+      jobs: [found(1), found(2)],
+    });
+    const [a, b] = added as [number, number];
+    store.setStage([a, b], "resume");
+    for (const id of [a, b])
+      store
+        .sql(
+          `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path)
+           VALUES (?, 'tailored', 'ready', 1, 1, ?)`,
+        )
+        .run(id, `C:/generated/${id}/resume.pdf`);
+    // Apply had started on b and was stopped.
+    store
+      .sql(
+        `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
+         VALUES (?, 'confirm_before_submit', 'stopped', 1, 1)`,
+      )
+      .run(b);
+    const approval = (id: number) =>
+      store
+        .sql("SELECT approved_at, pdf_path FROM resumes WHERE job_id = ?")
+        .get(id) as { approved_at: number | null; pdf_path: string | null };
+
+    const back = store.moveJobs({ selection: { ids: [a, b] }, to: "found" });
+    expect(back.moved).toBe(2);
+    expect(back.counts).toMatchObject({ found: 2, resume: 0 });
+
+    store.undoMove(back.moveId!);
+    expect(store.getJob(a)?.stage).toBe("resume");
+    expect(store.getJob(b)?.stage).toBe("resume");
+    expect(approval(a)).toEqual({
+      approved_at: 1,
+      pdf_path: `C:/generated/${a}/resume.pdf`,
+    });
+
+    // Back in Find jobs and shortlisted again, the resume waits for review.
+    store.moveJobs({ selection: { ids: [a] }, to: "found" });
+    store.moveJobs({ selection: { ids: [a] }, to: "shortlisted" });
+    expect(approval(a)).toEqual({ approved_at: null, pdf_path: null });
+  });
+
   it("pages through a stage in fit order with filters and counts", () => {
     const store = open();
     const { added } = store.saveFoundJobs({

@@ -57,7 +57,7 @@ export const JOB_COMMANDS = {
   move_jobs: {
     effect: "local_write",
     description:
-      "Shortlist, hide or move back to Find jobs: some jobs by id, or every job a filter matches except some. Only jobs in found, hidden or shortlisted move. Returns a moveId for undo_move.",
+      "Shortlist, hide or move back to Find jobs: some jobs by id, or every job a filter matches except some. Only jobs in found, hidden or shortlisted move, plus approved jobs moving back to Find jobs, which takes their approval away until undo_move. Returns a moveId for undo_move.",
     input: MoveJobsInputSchema,
   },
   undo_move: {
