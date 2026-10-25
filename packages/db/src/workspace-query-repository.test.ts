@@ -564,41 +564,6 @@ describe("independent workspace queries", () => {
         .rows.map((row) => row.id),
     ).toEqual(["labeled"]);
   });
-  test("pending intake reads real missing-employer body facts and retains curated rows", async () => {
-    const { writer, reader } = await fixture();
-    const empty = assessedJob({
-      id: "empty-pending",
-      title: "Opportunities",
-      company: "Unknown",
-      description: "Opportunities",
-      canonicalUrl: "https://example.test/catalog",
-    });
-    const real = assessedJob({
-      ...empty,
-      id: "real-pending",
-      description:
-        "An actual role with responsibilities and a complete application path.",
-    });
-    const curated = assessedJob({
-      ...empty,
-      id: "curated-pending",
-      status: "shortlisted",
-    });
-    await writer.commitDiscoveryStateUpdate((current) => ({
-      ...current,
-      pendingDiscoveryJobs: [empty, real, curated],
-    }));
-    expect(
-      reader
-        .queryJobList({ list: "discovery", filters: { planId: null } })
-        .rows.map((row) => row.id)
-        .sort(),
-    ).toEqual(["curated-pending", "real-pending"]);
-    expect(reader.getListCounts({ planId: null }).discovery).toBe(2);
-    expect(
-      reader.queryJobList({ list: "all", filters: { planId: null } }).total,
-    ).toBe(3);
-  });
   test("Find jobs bands keep unjudged work visible and exclude decided and weaker jobs by default", async () => {
     const { writer, reader } = await fixture();
     const base = createSavedJob({
@@ -822,23 +787,6 @@ describe("independent workspace queries", () => {
     } finally {
       await temp.cleanup();
     }
-  });
-  test("pending rows retain their location before promotion", async () => {
-    const { writer, reader } = await fixture();
-    await writer.commitDiscoveryStateUpdate((current) => ({
-      ...current,
-      pendingDiscoveryJobs: [
-        createSavedJob({
-          id: "pending-location",
-          status: "discovered",
-          location: "Remote, Europe",
-        }),
-      ],
-    }));
-    expect(
-      reader.queryJobList({ list: "all", filters: { planId: null } }).rows[0]
-        ?.location,
-    ).toBe("Remote, Europe");
   });
   test("commit callbacks see committed rows without a polling timer and never see rollbacks", async () => {
     const { filePath, writer, reader } = await fixture();

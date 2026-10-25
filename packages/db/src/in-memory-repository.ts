@@ -2447,32 +2447,11 @@ export function createInMemoryJobFinderRepository(
     readDiscoveryBootstrapProjection() {
       return Promise.resolve(toDiscoveryBootstrapProjection(state.discovery));
     },
-    readDiscoveryRunStates() {
-      return Promise.resolve(
-        [state.discovery.activeRun, ...state.discovery.recentRuns].flatMap(
-          (run, index) =>
-            run
-              ? [
-                  {
-                    state: run.state,
-                    runPhase: run.runPhase,
-                    isActive: index === 0,
-                  },
-                ]
-              : [],
-        ),
-      );
-    },
     readDiscoveryHomeProjection(jobIds, planId = null) {
       const display = toDiscoveryDisplayProjection(state.discovery);
       const selected = new Set(jobIds);
       const savedIds = new Set(state.savedJobs.map((job) => job.id));
-      const jobs = [
-        ...state.savedJobs,
-        ...state.discovery.pendingDiscoveryJobs.filter(
-          (job) => !savedIds.has(job.id),
-        ),
-      ].map((job) => ({
+      const jobs = state.savedJobs.map((job) => ({
         ...job,
         matchAssessment:
           (planId ? job.planAssessments?.[planId] : null) ??
@@ -2485,9 +2464,6 @@ export function createInMemoryJobFinderRepository(
       });
       return Promise.resolve({
         sessions: display.sessions,
-        runState: display.runState,
-        activeRun: display.activeRun,
-        recentRuns: display.recentRuns,
         activeSourceDebugRun: display.activeSourceDebugRun,
         recentSourceDebugRuns: display.recentSourceDebugRuns,
         listingActivities: projected

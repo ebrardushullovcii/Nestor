@@ -90,8 +90,8 @@ describe("getSingletonValue invalid-row handling", () => {
     const database = openWorkspace();
     try {
       writeDiscoveryBlob(database, {
-        recentRuns: "not-an-array",
-        activeRun: 7,
+        sessions: "not-an-array",
+        activeSourceDebugRun: 7,
       });
 
       expect(() =>
@@ -109,8 +109,8 @@ describe("getSingletonValue invalid-row handling", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       writeDiscoveryBlob(database, {
-        recentRuns: "not-an-array",
-        activeRun: 7,
+        sessions: "not-an-array",
+        activeSourceDebugRun: 7,
       });
 
       expect(

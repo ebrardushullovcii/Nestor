@@ -139,27 +139,6 @@ export function applyJobFinderWorkspaceDelta(input: {
     return { status: "gap" };
   }
 
-  // A running search sends only the activity after what this window holds.
-  let activeDiscoveryRun = input.delta.activeDiscoveryRun;
-  const activityFrom = input.delta.activeDiscoveryRunActivityFrom ?? null;
-  if (activeDiscoveryRun && activityFrom !== null) {
-    const held = input.workspace.activeDiscoveryRun;
-    if (
-      !held ||
-      held.id !== activeDiscoveryRun.id ||
-      held.activity.length < activityFrom
-    ) {
-      return { status: "gap" };
-    }
-    activeDiscoveryRun = {
-      ...activeDiscoveryRun,
-      activity: [
-        ...held.activity.slice(0, activityFrom),
-        ...activeDiscoveryRun.activity,
-      ],
-    };
-  }
-
   const discoveryJobs = applyEntitySlice(
     input.workspace.discoveryJobs,
     input.delta.discoveryJobs.upserts,
@@ -192,9 +171,6 @@ export function applyJobFinderWorkspaceDelta(input: {
       ...input.workspace,
       ...input.delta.replaced,
       generatedAt: input.delta.generatedAt,
-      discoveryRunState: input.delta.discoveryRunState,
-      fitJudgmentProgress: input.delta.fitJudgmentProgress ?? null,
-      activeDiscoveryRun,
       // Absent means unchanged: the sender leaves out what did not change.
       discoverySessions:
         input.delta.discoverySessions ?? input.workspace.discoverySessions,
@@ -214,22 +190,10 @@ export function applyJobFinderWorkspaceDelta(input: {
         input.delta.activityControl ?? input.workspace.activityControl,
       intelligence: input.delta.intelligence ?? input.workspace.intelligence,
       discoveryJobs,
-      dismissedDiscoveryJobs: applyEntitySlice(
-        input.workspace.dismissedDiscoveryJobs,
-        input.delta.dismissedDiscoveryJobs.upserts,
-        input.delta.dismissedDiscoveryJobs.removedIds,
-        (value) => value.id,
-      ),
       companyJobs: applyEntitySlice(
         input.workspace.companyJobs,
         input.delta.companyJobs.upserts,
         input.delta.companyJobs.removedIds,
-        (value) => value.id,
-      ),
-      recentDiscoveryRuns: applyEntitySlice(
-        input.workspace.recentDiscoveryRuns,
-        input.delta.recentDiscoveryRuns.upserts,
-        input.delta.recentDiscoveryRuns.removedIds,
         (value) => value.id,
       ),
       reviewQueue,

@@ -29,9 +29,6 @@ export interface WorkspaceJobListingActivity {
 export type DiscoveryHomeState = Pick<
   JobFinderDiscoveryState,
   | "sessions"
-  | "runState"
-  | "activeRun"
-  | "recentRuns"
   | "activeSourceDebugRun"
   | "recentSourceDebugRuns"
 > & { listingActivities: WorkspaceJobListingActivity[] };

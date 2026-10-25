@@ -9,12 +9,7 @@ export async function readJobFinderJobDetail(
   input: JobFinderJobDetailQuery,
 ): Promise<JobFinderJobDetail> {
   if (!repository) throw new Error("Job detail storage is unavailable.");
-  const [saved] = await repository.listSavedJobsByIds([input.jobId]);
-  const job =
-    saved ??
-    (
-      await repository.readDiscoveryDisplayProjection()
-    ).pendingDiscoveryJobs.find((entry) => entry.id === input.jobId);
+  const [job] = await repository.listSavedJobsByIds([input.jobId]);
   if (!job) throw new Error("This job is no longer in your workspace.");
   const assessment = input.planId ? job.planAssessments?.[input.planId] : null;
   return {

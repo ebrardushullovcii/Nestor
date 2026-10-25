@@ -419,32 +419,13 @@ export function toRendererWorkspaceSnapshot(
   queryLists = process.env.NESTOR_QUERY_LISTS === "1",
 ): JobFinderRendererWorkspaceSnapshot {
   const discoveryJobs = queryLists ? [] : toRendererJobs(snapshot.discoveryJobs);
-  const dismissedDiscoveryJobs = queryLists ? [] : toRendererJobs(
-    snapshot.dismissedDiscoveryJobs,
-  );
   const companyJobs = queryLists ? [] : toRendererJobs(snapshot.companyJobs);
-  const activeDiscoveryRun = snapshot.activeDiscoveryRun
-    ? toRendererRun(snapshot.activeDiscoveryRun)
-    : null;
-  const trimmedRecentRuns = snapshot.recentDiscoveryRuns.map((run) =>
-    toRendererRun(run, {
-      finished: run.id !== snapshot.activeDiscoveryRun?.id,
-    }),
-  );
-  const recentDiscoveryRuns = trimmedRecentRuns.every(
-    (run, index) => run === snapshot.recentDiscoveryRuns[index],
-  )
-    ? snapshot.recentDiscoveryRuns
-    : trimmedRecentRuns;
   return {
     ...snapshot,
     tailoredAssets: toRendererAssets(snapshot.tailoredAssets ?? []),
     applyJobResults: toRendererResults(snapshot.applyJobResults),
     applicationAttempts: toRendererAttempts(snapshot.applicationAttempts),
     discoveryJobs,
-    dismissedDiscoveryJobs,
     companyJobs,
-    activeDiscoveryRun,
-    recentDiscoveryRuns,
   };
 }

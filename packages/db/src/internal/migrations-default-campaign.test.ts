@@ -123,10 +123,6 @@ describe("default campaign migration", () => {
           .prepare("SELECT name FROM schema_migrations WHERE version = 10")
           .get(),
       ).toEqual({ name: "job_search_campaigns" });
-      // The legacy discovery history the deferral protected is still mapped.
-      expect(JSON.stringify(readCampaignState(database))).toContain(
-        "campaign_history_discovery_run_legacy_1",
-      );
     } finally {
       database.close();
     }

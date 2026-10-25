@@ -62,13 +62,11 @@ export function buildJobFinderDiagnosticExport(input: {
     build: input.build,
     state: {
       profileSetupStatus: input.workspace.profileSetupState.status,
-      discoveryRunState: input.workspace.discoveryRunState,
       browserStatus: input.workspace.browserSession.status,
       counts: {
         configuredSources:
           input.workspace.searchPreferences.discovery.targets.length,
         visibleJobs: input.workspace.discoveryJobs.length,
-        hiddenJobs: input.workspace.dismissedDiscoveryJobs.length,
         shortlistedJobs: input.workspace.reviewQueue.length,
         applications: input.workspace.applicationRecords.length,
         unresolvedActions: input.workspace.userActionRequests.filter(
@@ -125,7 +123,6 @@ export function buildJobFinderDiagnosticExport(input: {
       accountCreationAuthorized: false,
     },
     evidence: {
-      discoveryRuns: input.workspace.recentDiscoveryRuns.length,
       sourceDebugRuns: input.workspace.recentSourceDebugRuns.length,
       resumeImports: input.workspace.latestResumeImportRun ? 1 : 0,
       applicationAttempts: input.workspace.applicationAttempts.length,

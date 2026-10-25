@@ -26,13 +26,11 @@ const secretCorpus = [
 function createWorkspace(): JobFinderWorkspaceSnapshot {
   return {
     profileSetupState: { status: "completed" },
-    discoveryRunState: "completed",
     browserSession: { status: "ready", detail: secretCorpus[6] },
     searchPreferences: {
       discovery: { targets: [{ secret: secretCorpus[2] }] },
     },
     discoveryJobs: [{ description: secretCorpus[3] }],
-    dismissedDiscoveryJobs: [],
     reviewQueue: [],
     applicationRecords: [],
     applicationAttempts: [
@@ -57,7 +55,6 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     },
     resumeExportArtifacts: [{ filePath: secretCorpus[1] }],
     applyJobResults: [{}],
-    recentDiscoveryRuns: [{}],
     recentSourceDebugRuns: [{}],
   } as unknown as JobFinderWorkspaceSnapshot;
 }

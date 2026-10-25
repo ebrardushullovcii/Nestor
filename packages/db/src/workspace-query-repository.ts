@@ -116,9 +116,7 @@ const applicationMember = `EXISTS (SELECT 1 FROM workspace_entity_index e
 // plain shortlisted status used when a job is moved back to Find jobs.
 const shortlistMember = `i.status IN ('drafting','ready_for_review','approved')`;
 const discoveryMember = `i.visible = 1 AND i.feedback = 0 AND i.status IN ('discovered','shortlisted')
-  AND (i.origin='saved_jobs' OR EXISTS (SELECT 1 FROM discovery_pending_jobs pending WHERE pending.id=i.id
-    AND workspace_pending_visible(pending.id,json_extract(pending.value,'$.title'),json_extract(pending.value,'$.company'),
-      json_extract(pending.value,'$.canonicalUrl'),json_extract(pending.value,'$.status'))=1))`;
+  AND i.origin='saved_jobs'`;
 function membership(list: WorkspaceJobList): string {
   switch (list) {
     case "discovery":
@@ -147,8 +145,6 @@ const allLists: WorkspaceJobList[] = [
 ];
 function affectedLists(table: string, id: string): WorkspaceJobList[] {
   if (
-    table === "discovery_ledger" ||
-    table === "discovery_ledger_observations" ||
     table === "application_attempts" ||
     table === "job_sources" ||
     table === "search_preference_sources" ||
@@ -158,7 +154,6 @@ function affectedLists(table: string, id: string): WorkspaceJobList[] {
     return allLists;
   if (
     table === "saved_jobs" ||
-    table === "discovery_pending_jobs" ||
     table === "plan_job_memberships" ||
     (table === "singleton_state" && id === "campaign_state")
   )
@@ -599,9 +594,9 @@ export function createWorkspaceQueryRepository(
       return read(() => {
         const row = database
           .prepare(
-            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id = ? UNION ALL SELECT value FROM discovery_pending_jobs WHERE id = ? LIMIT 1`,
+            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id = ?`,
           )
-          .get(jobId, jobId);
+          .get(jobId);
         if (!row) return null;
         const job = raw(row.value) as SavedJob;
         if (planId && job.planAssessments?.[planId])

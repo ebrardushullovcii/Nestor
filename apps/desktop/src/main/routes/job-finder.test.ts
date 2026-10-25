@@ -490,13 +490,9 @@ function createEmptyWorkspace(generatedAt: string) {
     },
     sourceAccessPrompts: [],
     discoverySessions: [],
-    discoveryRunState: "idle",
-    activeDiscoveryRun: null,
-    recentDiscoveryRuns: [],
     activeSourceDebugRun: null,
     recentSourceDebugRuns: [],
     discoveryJobs: [],
-    dismissedDiscoveryJobs: [],
     selectedDiscoveryJobId: null,
     reviewQueue: [],
     selectedReviewJobId: null,
@@ -1734,66 +1730,6 @@ describe("local persisted job detail route", () => {
     expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
     expect(assessJobListing).not.toHaveBeenCalled();
   });
-  it("reads a selected pending job's full body from the immutable display projection without enrichment", async () => {
-    const pending = Object.freeze(
-      SavedJobSchema.parse({
-        id: "pending-1",
-        source: "target_site",
-        sourceJobId: "pending-1",
-        canonicalUrl: "https://example.test/pending-1",
-        title: "Engineer",
-        company: "Example",
-        location: "Remote",
-        workMode: ["remote"],
-        applyPath: "external_redirect",
-        easyApplyEligible: false,
-        salaryText: null,
-        description: "Complete pending listing text. ".repeat(400),
-        responsibilities: ["Complete pending narrative evidence"],
-        discoveredAt: "2026-10-13T00:00:00.000Z",
-        status: "discovered",
-        matchAssessment: { score: 80 },
-        planAssessments: { "pending-plan": { score: 20 } },
-      }),
-    );
-    const listSavedJobsByIds = vi.fn().mockResolvedValue([]);
-    const readDiscoveryDisplayProjection = vi.fn().mockResolvedValue(
-      Object.freeze({
-        pendingDiscoveryJobs: Object.freeze([pending]),
-      }),
-    );
-    const getDiscoveryState = vi.fn();
-    const getWorkspaceSnapshot = vi.fn();
-    const assessJobListing = vi.fn();
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      getWorkspaceSnapshot,
-      assessJobListing,
-    });
-    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
-      listSavedJobsByIds,
-      readDiscoveryDisplayProjection,
-      getDiscoveryState,
-    } as never);
-    const result = await handler()(
-      { sender: {} },
-      { jobId: pending.id, planId: "pending-plan" },
-    );
-    expect(result).toMatchObject({
-      planId: "pending-plan",
-      job: {
-        id: pending.id,
-        description: pending.description,
-        responsibilities: pending.responsibilities,
-        matchAssessment: { score: 20 },
-      },
-    });
-    expect(listSavedJobsByIds).toHaveBeenCalledExactlyOnceWith([pending.id]);
-    expect(readDiscoveryDisplayProjection).toHaveBeenCalledTimes(1);
-    expect(getDiscoveryState).not.toHaveBeenCalled();
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
-    expect(assessJobListing).not.toHaveBeenCalled();
-    expect(pending.matchAssessment.score).toBe(80);
-  });
   it("rejects malformed and missing detail targets", async () => {
     const read = handler();
     mockGetJobFinderWorkspaceService.mockClear();
@@ -1806,7 +1742,7 @@ describe("local persisted job detail route", () => {
       listSavedJobsByIds: vi.fn().mockResolvedValue([]),
       readDiscoveryDisplayProjection: vi
         .fn()
-        .mockResolvedValue({ pendingDiscoveryJobs: [] }),
+        .mockResolvedValue({}),
     } as never);
     await expect(
       read({ sender: {} }, { jobId: "missing", planId: null }),

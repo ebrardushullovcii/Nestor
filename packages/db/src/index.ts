@@ -50,11 +50,6 @@ export type {
 } from "./application-authority-repository-types";
 export { createInMemoryJobFinderRepository } from "./in-memory-repository";
 export {
-  patchDiscoveryLedger,
-  readDiscoveryLedgerChanges,
-  type DiscoveryLedgerChange,
-} from "./internal/discovery-ledger-patch";
-export {
   createFileJobFinderRepository,
   WorkspaceDatabaseRecoveryRequiredError,
 } from "./file-repository";

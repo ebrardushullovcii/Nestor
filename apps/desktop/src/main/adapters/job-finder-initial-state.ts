@@ -90,13 +90,8 @@ export function createEmptyJobFinderRepositoryState(): JobFinderRepositoryState 
     }),
     discovery: {
       sessions: [],
-      runState: "idle",
-      activeRun: null,
-      recentRuns: [],
       activeSourceDebugRun: null,
       recentSourceDebugRuns: [],
-      discoveryLedger: [],
-      pendingDiscoveryJobs: [],
     },
     campaigns: [],
     activeCampaignId: null,

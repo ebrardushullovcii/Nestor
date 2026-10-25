@@ -57,10 +57,7 @@ function job() {
 function workspaceWith(discoveryJobs = [job()]): JobFinderWorkspaceSnapshot {
   return {
     discoveryJobs,
-    dismissedDiscoveryJobs: discoveryJobs,
     companyJobs: discoveryJobs,
-    activeDiscoveryRun: null,
-    recentDiscoveryRuns: [],
     reviewQueue: [],
     tailoredAssets: [],
     applyRuns: [],
@@ -73,20 +70,6 @@ function workspaceWith(discoveryJobs = [job()]): JobFinderWorkspaceSnapshot {
 }
 
 describe("renderer workspace list projection", () => {
-  it("omits queried inventories per response without changing another window's legacy projection", () => {
-    const workspace = workspaceWith();
-    workspace.companyJobs = workspace.discoveryJobs;
-    workspace.dismissedDiscoveryJobs = workspace.discoveryJobs;
-    const queried = toRendererWorkspaceSnapshot(workspace, true);
-    expect(queried.discoveryJobs).toEqual([]);
-    expect(queried.companyJobs).toEqual([]);
-    expect(queried.dismissedDiscoveryJobs).toEqual([]);
-    const legacy = toRendererWorkspaceSnapshot(workspace, false);
-    expect(legacy.discoveryJobs).toHaveLength(1);
-    expect(legacy.companyJobs).toHaveLength(1);
-    expect(legacy.dismissedDiscoveryJobs).toHaveLength(1);
-    expect(workspace.discoveryJobs).toHaveLength(1);
-  });
   it("does not open lazy listing or provenance bodies when sending list rows", () => {
     const full = job();
     const lazy = Object.freeze({
@@ -191,47 +174,6 @@ describe("renderer workspace list projection", () => {
     expect(again.tailoredAssets).toBe(warm.tailoredAssets);
     expect(again.applyJobResults).toBe(warm.applyJobResults);
     expect(again.applicationAttempts).toBe(warm.applicationAttempts);
-  });
-  it("keeps full evidence in main and sends only list fields in every collection", () => {
-    const workspace = workspaceWith();
-    const sent = toRendererWorkspaceSnapshot(workspace);
-    for (const rows of [
-      sent.discoveryJobs,
-      sent.dismissedDiscoveryJobs,
-      sent.companyJobs,
-    ]) {
-      expect(JobListRowSchema.safeParse(rows[0]).success).toBe(true);
-      expect(rows[0]).toMatchObject({
-        id: "job-1",
-        title: "Engineer",
-        matchAssessment: { score: 80 },
-      });
-      for (const field of [
-        "description",
-        "summary",
-        "responsibilities",
-        "minimumQualifications",
-        "preferredQualifications",
-        "keySkills",
-        "screeningHints",
-        "sourceIntelligence",
-        "keywordSignals",
-        "benefits",
-        "planAssessments",
-        "latestMatchAssessmentAudit",
-      ])
-        expect(rows[0]).not.toHaveProperty(field);
-      expect(rows[0]?.provenance[0]).not.toHaveProperty("listingFacts");
-      expect(JSON.stringify(rows)).not.toContain(body);
-    }
-    expect(workspace.discoveryJobs[0]?.description).toBe(body);
-    expect(
-      workspace.discoveryJobs[0]?.provenance[0]?.listingFacts?.description,
-    ).toBe(body);
-    expect(workspace.discoveryJobs[0]?.planAssessments?.plan_b?.score).toBe(20);
-    expect(JSON.stringify(sent.discoveryJobs).length).toBeLessThan(
-      JSON.stringify(workspace.discoveryJobs).length / 5,
-    );
   });
 
   it("retains unchanged row references and invalidates detail on body-only changes", () => {
@@ -385,44 +327,5 @@ describe("renderer workspace list projection", () => {
     expect(toRendererJob(updated).provenance[0]).not.toHaveProperty(
       "listingFacts",
     );
-  });
-
-  it("keeps each source's resume checkpoint and job id lists in main", () => {
-    const run = {
-      id: "run-1",
-      targetExecutions: [
-        {
-          targetId: "board",
-          agentCheckpoint: { revision: 2, collectedJobs: [{ title: "A" }] },
-          inspectedJobIds: ["job-1", "job-2"],
-          encounteredJobIds: ["job-1"],
-          jobsInspected: 2,
-        },
-        { targetId: "other", agentCheckpoint: null, encounteredJobIds: [] },
-      ],
-    };
-    const workspace = {
-      ...workspaceWith([]),
-      activeDiscoveryRun: run,
-      recentDiscoveryRuns: [run],
-    } as unknown as JobFinderWorkspaceSnapshot;
-    const sent = toRendererWorkspaceSnapshot(workspace);
-    expect(
-      sent.activeDiscoveryRun?.targetExecutions.map(
-        (entry) => entry.agentCheckpoint,
-      ),
-    ).toEqual([null, null]);
-    expect(
-      sent.recentDiscoveryRuns[0]?.targetExecutions[0]?.agentCheckpoint,
-    ).toBeNull();
-    const board = sent.activeDiscoveryRun?.targetExecutions[0];
-    expect(board?.inspectedJobIds).toBeUndefined();
-    expect(board?.encounteredJobIds).toEqual([]);
-    expect(board?.jobsInspected).toBe(2);
-    expect(sent.activeDiscoveryRun?.targetExecutions[1]).toBe(
-      run.targetExecutions[1],
-    );
-    expect(run.targetExecutions[0]?.agentCheckpoint).not.toBeNull();
-    expect(run.targetExecutions[0]?.encounteredJobIds).toEqual(["job-1"]);
   });
 });

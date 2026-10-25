@@ -23,7 +23,6 @@ import type {
   JobFinderDiscoveryState,
   DiscoveryBootstrapState,
   DiscoveryHomeState,
-  DiscoveryRunStateProjection,
   JobFinderActivityControl,
   ApplyQueue,
   JobFinderRepositoryState,
@@ -665,7 +664,6 @@ export interface JobFinderRepository
     jobIds: readonly string[],
     planId?: string | null,
   ): Promise<DiscoveryHomeState>;
-  readDiscoveryRunStates(): Promise<readonly DiscoveryRunStateProjection[]>;
   /**
    * Atomically applies a synchronous transform to the currently stored
    * discovery state. The updater borrows frozen canonical rows and must return

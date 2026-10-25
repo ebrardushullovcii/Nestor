@@ -1959,11 +1959,7 @@ export function createWorkspaceSnapshotProfileMethods(
         savedJobs.map((job) => job.id),
         campaigns.activeCampaignId,
       );
-    const discovery: JobFinderDiscoveryState = {
-      ...facts,
-      discoveryLedger: [],
-      pendingDiscoveryJobs: [],
-    };
+    const discovery: JobFinderDiscoveryState = facts;
     return {
       savedJobs,
       campaigns,
