@@ -32,9 +32,7 @@ import type {
   UserActionCommandInput,
 } from "@nestor/contracts";
 import type { PendingActionScope } from "./job-finder-pending-actions";
-import type {
-  ActionState,
-} from "@renderer/features/job-finder/lib/job-finder-types";
+import type { ActionState } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { JobFinderSaveState } from "./job-finder-save-state";
 import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
 import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";

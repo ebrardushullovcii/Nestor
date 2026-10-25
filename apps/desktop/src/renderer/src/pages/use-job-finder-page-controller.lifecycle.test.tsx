@@ -194,6 +194,4 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     expect(harness.current?.context?.actionState.message).toBeNull();
     expect(screen.getAllByText("Activity resumed.")).toHaveLength(1);
   });
-
-  });
 });

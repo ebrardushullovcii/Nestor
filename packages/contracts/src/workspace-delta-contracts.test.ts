@@ -29,7 +29,6 @@ describe("workspace delta contracts", () => {
     ).toBe(false);
   });
   it("parses the bounded entity mutation commands with their base revision", () => {
-    expect(
   });
 
   it("carries current selection IDs in every schema-validated delta", () => {

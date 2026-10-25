@@ -267,7 +267,15 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Shortlisted",
     action: "Read, edit, level, rewrite and approve a resume, with Undo",
     channels: ["resumes:run", "resumes:preview", "resumes:export-pdf"],
-    coverage: tools("list_shortlisted", "get_resume", "save_resume", "set_resume_level", "undo_resume_level", "rewrite_resume", "approve_resume"),
+    coverage: tools(
+      "list_shortlisted",
+      "get_resume",
+      "save_resume",
+      "set_resume_level",
+      "undo_resume_level",
+      "rewrite_resume",
+      "approve_resume",
+    ),
   },
 
   // Apply's shared store commands; tracker statuses have their own catalog.

@@ -129,9 +129,7 @@ import {
   isInterruptedApplyJobState,
   selectReusableBatchApproval,
 } from "./workspace-apply-run-recovery";
-import {
-  assertResumeProfileRevisionCurrent,
-} from "./workspace-application-resume-support";
+import { assertResumeProfileRevisionCurrent } from "./workspace-application-resume-support";
 import { createApplicationUserActionResumer } from "./workspace-application-user-action-resumption";
 import {
   PERSON_TOOK_OVER_SUMMARY,
@@ -199,7 +197,6 @@ function buildRecoveryInstructions(input: {
     ),
   );
 }
-
 
 function getApplyResultSortTime(input: {
   completedAt: string | null;
@@ -300,7 +297,6 @@ type WorkspaceApplicationMethods = Omit<
     taskLocalCredentials?: TaskLocalApplicationCredentials,
   ): Promise<void>;
 };
-
 
 /**
  * True when the only change between two profiles is answers the person saved
@@ -1483,9 +1479,6 @@ export function createWorkspaceApplicationMethods(
 
   const resumeDraftTransitionTails = new Map<string, Promise<void>>();
 
-
-
-
   async function withResumeDraftTransition<T>(
     jobId: string,
     operation: () => Promise<T>,
@@ -1510,7 +1503,6 @@ export function createWorkspaceApplicationMethods(
   }
   // Assistant edits queue on the same per-job transition tail.
   ctx.withResumeDraftTransition = withResumeDraftTransition;
-
 
   const consentResolutionTails = new Map<string, Promise<void>>();
 
@@ -1537,7 +1529,6 @@ export function createWorkspaceApplicationMethods(
     }
   }
 
-
   function validateApplyTemplate(input: {
     templateId: string;
     templates: readonly ResumeTemplateDefinition[];
@@ -1553,8 +1544,6 @@ export function createWorkspaceApplicationMethods(
       );
     }
   }
-
-
 
   async function verifyResumeFileIntegrity(input: {
     expectedSha256: string | null | undefined;
@@ -1967,7 +1956,6 @@ export function createWorkspaceApplicationMethods(
       ),
     });
   }
-
 
   function buildApplyVisualExecutionOptions(input: {
     enabled: boolean;
@@ -3642,8 +3630,6 @@ export function createWorkspaceApplicationMethods(
     resolveJobApplyPrerequisites,
   });
 
-
-
   function feedbackFence(options?: DiscoveryFeedbackBatchOptions): () => void {
     const generation = listingGeneration();
     return () => {
@@ -3900,8 +3886,6 @@ export function createWorkspaceApplicationMethods(
       { borrowUnchangedState: true },
     );
   }
-
-
 
   return {
     resumeApplicationUserAction,

@@ -160,7 +160,6 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Make text larger, smaller or restore actual size using the View menu's zoom command.",
   ),
-  ),
   "run-source-debug": action(
     C.JobFinderSourceDebugActionInputSchema,
     "jobs",
@@ -489,7 +488,6 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Move a shortlisted job back to Find jobs.",
     (i, c) => c.service.removeJobFromReview(i.jobId),
-  ),
   ),
   "snooze-grouped-decision": action(
     C.SnoozeGroupedDecisionInputSchema,

@@ -7,16 +7,7 @@ import {
   buildProfileDigest,
   plainFieldName,
 } from "../prompt";
-import type { AssistantTurnSession } from "../tool-kit";
 import { listDocumentsTool } from "./profile-tools";
-
-const session = {
-  assertCurrent: () => undefined,
-  assertPersonAnswerAuthority: () => Promise.resolve(),
-  createId: () => "id_1",
-  watchRun: () => Promise.resolve(),
-  grants: { list: () => Promise.resolve([]) },
-} as unknown as AssistantTurnSession;
 
 describe("what the model is told (R1, R4, R5)", () => {
   it("knows attached files are used for applications", async () => {
