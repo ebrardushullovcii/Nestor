@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { WorkspaceStartupContext } from "@nestor/contracts";
+import type { LaunchContext } from "@nestor/contracts";
 
 /**
  * Settings and setup state for the first frame, read straight from the
@@ -7,7 +7,7 @@ import type { WorkspaceStartupContext } from "@nestor/contracts";
  * redirect use them before any screen loads the old workspace.
  */
 export interface LaunchReads {
-  context: WorkspaceStartupContext | null;
+  context: LaunchContext | null;
 }
 
 let reads: LaunchReads = { context: null };
@@ -18,13 +18,10 @@ const listeners = new Set<() => void>();
 export function startLaunchReads(): void {
   if (started) return;
   started = true;
-  const queries =
-    typeof window === "undefined"
-      ? undefined
-      : window.nestor?.jobFinder?.queries;
-  if (!queries) return;
-  void queries
-    .getStartupContext()
+  const read =
+    typeof window === "undefined" ? undefined : window.nestor?.launchContext;
+  if (!read) return;
+  void read()
     .then((context) => {
       reads = { context };
       for (const listener of listeners) listener();

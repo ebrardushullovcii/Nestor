@@ -36,9 +36,9 @@ import type {
   DesktopWindowControlsState,
   JobFinderRendererWorkspaceSnapshot,
   JobStageCounts,
+  LaunchContext,
   ResumeImportProgressEvent,
   SuiteModule,
-  WorkspaceStartupContext,
 } from "@nestor/contracts";
 import { collapsesSideMenuWithAssistant } from "@nestor/contracts";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -106,7 +106,7 @@ interface JobFinderShellProps {
   stageCounts?: JobStageCounts | null;
   needsYouCount?: number;
   /** Settings and setup state read at launch, before any old workspace. */
-  startupContext?: WorkspaceStartupContext | null;
+  startupContext?: LaunchContext | null;
   /** The old whole workspace, once a screen that needs it has loaded it. */
   workspace: JobFinderRendererWorkspaceSnapshot | null;
 }

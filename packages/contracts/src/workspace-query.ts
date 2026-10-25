@@ -9,16 +9,23 @@ import type { ApplicationStatus } from "./base";
 import type {
   SavedJob,
   JobFinderJobDetail,
-  JobSearchPreferences,
   ListingActivity,
 } from "./discovery";
-import type { JobSearchCampaign } from "./job-search-campaigns";
-import type { CandidateProfile } from "./profile";
 import type { CompanyEntity } from "./job-finder-intelligence";
-import type {
-  JobFinderDiscoveryState,
-  JobFinderRendererWorkspaceSnapshot,
-} from "./workspace";
+import type { ProfileSetupState } from "./profile-setup";
+import type { JobFinderDiscoveryState, JobFinderSettings } from "./workspace";
+
+/**
+ * The two facts the first frame needs from the old workspace: the person's
+ * settings (theme, side menu) and where guided setup stands. Both are null
+ * before a workspace exists.
+ */
+export interface LaunchContext {
+  settings: JobFinderSettings | null;
+  profileSetupState: ProfileSetupState | null;
+}
+
+export const LAUNCH_CONTEXT_CHANNEL = "launch:context";
 
 export interface WorkspaceJobListingActivity {
   jobId: string;
@@ -28,9 +35,7 @@ export interface WorkspaceJobListingActivity {
 /** Home's discovery facts; listing bodies, pending jobs and ledger are absent. */
 export type DiscoveryHomeState = Pick<
   JobFinderDiscoveryState,
-  | "sessions"
-  | "activeSourceDebugRun"
-  | "recentSourceDebugRuns"
+  "sessions" | "activeSourceDebugRun" | "recentSourceDebugRuns"
 > & { listingActivities: WorkspaceJobListingActivity[] };
 
 export const WorkspaceJobListSchema = z.enum([
@@ -233,54 +238,11 @@ export interface WorkspaceChanges {
   hasMore: boolean;
   lists: WorkspaceJobList[];
 }
-export type WorkspaceStartupContext = Omit<
-  Pick<
-    JobFinderRendererWorkspaceSnapshot,
-    | "profile"
-    | "searchPreferences"
-    | "profileSetupState"
-    | "settings"
-    | "campaigns"
-    | "activeCampaignId"
-    | "activityControl"
-  >,
-  "searchPreferences" | "campaigns" | "profile"
-> & {
-  profile: Pick<
-    CandidateProfile,
-    | "id"
-    | "fullName"
-    | "firstName"
-    | "lastName"
-    | "headline"
-    | "currentLocation"
-  > & { hasResume: boolean };
-  searchPreferences: Omit<JobSearchPreferences, "discovery"> & {
-    discovery: Omit<JobSearchPreferences["discovery"], "targets">;
-  };
-  campaigns: Array<
-    Pick<
-      JobSearchCampaign,
-      | "id"
-      | "name"
-      | "description"
-      | "mode"
-      | "status"
-      | "minimumFitScore"
-      | "progress"
-    > & { jobCount: number; sourceCount: number }
-  >;
-  sourceCount: number;
-};
 
 export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal("setQueryUpdates"),
     input: z.object({ active: z.boolean() }).strict(),
-  }),
-  z.object({
-    method: z.literal("getStartupContext"),
-    input: z.object({}).strict(),
   }),
   z.object({
     method: z.literal("queryJobList"),
@@ -343,12 +305,11 @@ type WorkspaceQueryValue = Awaited<
 export type WorkspaceReaderControl =
   | { type: "initialize"; filePath: string }
   | {
-      type: "context-ready" | "queries-ready" | "changed" | "attach" | "close";
+      type: "queries-ready" | "changed" | "attach" | "close";
     };
 
 export interface WorkspaceQueryApi {
   setQueryUpdates(active: boolean): Promise<void>;
-  getStartupContext(): Promise<WorkspaceStartupContext>;
   queryJobList(input: QueryJobListInput): Promise<QueryJobListResult>;
   getJobDetail(
     jobId: string,

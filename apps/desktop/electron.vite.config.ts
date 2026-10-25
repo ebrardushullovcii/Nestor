@@ -131,6 +131,10 @@ const workspaceAliases = {
     currentDir,
     "../../packages/db/src/job-store/job-store.ts",
   ),
+  "@nestor/db/launch-context": path.resolve(
+    currentDir,
+    "../../packages/db/src/launch-context.ts",
+  ),
   "@nestor/db/workspace-commits": path.resolve(
     currentDir,
     "../../packages/db/src/workspace-commits.ts",

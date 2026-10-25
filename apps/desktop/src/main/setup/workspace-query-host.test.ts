@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   subscribe: vi.fn(),
   unsubscribe: vi.fn(),
   screenReady: vi.fn(() => Promise.resolve()),
-  contextReady: vi.fn(() => Promise.resolve()),
   setMode: vi.fn(),
   exists: vi.fn(() => true),
   service: vi.fn(() => Promise.resolve()),
@@ -46,7 +45,6 @@ vi.mock("../services/job-finder", () => ({
 }));
 vi.mock("./workspace-database-startup", () => ({
   prepareWorkspaceScreenReads: mocks.screenReady,
-  prepareWorkspaceStartupContextReads: mocks.contextReady,
   waitForWorkspaceDatabaseMigrations: () => Promise.resolve(),
 }));
 import { createWorkspaceQueryHost } from "./workspace-query-host";
@@ -60,7 +58,6 @@ beforeEach(() => {
   mocks.subscribe.mockReturnValue(mocks.unsubscribe);
   mocks.whenReady.mockReturnValue(Promise.resolve());
   mocks.screenReady.mockReturnValue(Promise.resolve());
-  mocks.contextReady.mockReturnValue(Promise.resolve());
   mocks.exists.mockReturnValue(true);
 });
 const flush = async () => {
@@ -120,7 +117,7 @@ test("only the attached main frame receives the private read port or changes que
   f.read(f.event, { method: "setQueryUpdates", input: { active: true } });
   expect(mocks.setMode).toHaveBeenCalledWith(1, true);
   expect(() =>
-    f.read(f.event, { method: "getStartupContext", input: {} }),
+    f.read(f.event, { method: "getListCounts", input: {} }),
   ).toThrow("preload connection");
   expect(() =>
     f.read(f.event, { method: "setQueryUpdates", input: { active: "yes" } }),
@@ -129,18 +126,19 @@ test("only the attached main frame receives the private read port or changes que
   exit();
   await stop;
 });
-test("the header is released before inventory preparation without opening a reader in main", async () => {
+test("the reader process starts when a window first connects, then gets its read gate", async () => {
   let release!: () => void;
   mocks.screenReady.mockReturnValue(
     new Promise<void>((resolve) => {
       release = resolve;
     }),
   );
-  const { host } = fixture();
+  const f = fixture();
   await flush();
-  expect(mocks.child.postMessage).toHaveBeenCalledWith({
-    type: "context-ready",
-  });
+  expect(mocks.fork).not.toHaveBeenCalled();
+  f.connect(f.event);
+  await flush();
+  expect(mocks.fork).toHaveBeenCalledOnce();
   expect(mocks.child.postMessage).not.toHaveBeenCalledWith({
     type: "queries-ready",
   });
@@ -150,12 +148,13 @@ test("the header is released before inventory preparation without opening a read
   expect(mocks.child.postMessage).toHaveBeenCalledWith({
     type: "queries-ready",
   });
-  const stop = host.close();
+  const stop = f.host.close();
   exit();
   await stop;
 });
 test("shutdown waits for the reader to release WAL and sends close once", async () => {
-  const { host } = fixture();
+  const { host, connect, event } = fixture();
+  connect(event);
   await flush();
   const stopped = vi.fn();
   const first = host.close().then(stopped);
@@ -187,9 +186,10 @@ test("quitting before Electron ready does not spawn a process or open services",
   expect(mocks.fork).not.toHaveBeenCalled();
   expect(mocks.service).not.toHaveBeenCalled();
 });
-test("a new workspace is initialized once before both read gates are released", async () => {
+test("a new workspace is initialized once before the read gate is released", async () => {
   mocks.exists.mockReturnValue(false);
-  const { host } = fixture();
+  const { host, connect, event } = fixture();
+  connect(event);
   await vi.waitFor(() =>
     expect(mocks.child.postMessage).toHaveBeenCalledWith({
       type: "queries-ready",
@@ -197,9 +197,6 @@ test("a new workspace is initialized once before both read gates are released", 
   );
   expect(mocks.service).toHaveBeenCalledOnce();
   expect(mocks.prepare).toHaveBeenCalledOnce();
-  expect(mocks.child.postMessage).toHaveBeenCalledWith({
-    type: "context-ready",
-  });
   expect(mocks.child.postMessage).toHaveBeenCalledWith({
     type: "queries-ready",
   });

@@ -3,7 +3,6 @@ import {
   workModeValues,
   QueryJobListInputSchema,
   QueryCompaniesInputSchema,
-  type WorkspaceStartupContext,
   type WorkspaceJobListRow,
   type WorkspaceEntitySummary,
   type SavedJob,
@@ -39,7 +38,6 @@ import {
 } from "@nestor/job-list-policy/tie-break-reason";
 
 export interface WorkspaceQueryRepository {
-  getStartupContext(): WorkspaceStartupContext;
   queryJobList(input: QueryJobListInput): QueryJobListResult;
   getJobDetail(
     jobId: string,
@@ -267,88 +265,6 @@ export function createWorkspaceQueryRepository(
       .all(table, ...ids) as unknown as WorkspaceEntitySummary[];
   }
   return {
-    getStartupContext() {
-      return read(() => {
-        const values = new Map(
-          database
-            .prepare(
-              "SELECT key, value FROM singleton_state WHERE key IN ('profile_setup_state', 'settings', 'activity_control')",
-            )
-            .all()
-            .map((row) => [String(row.key), raw(row.value)]),
-        );
-        const normalized = !!database
-          .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
-          .get();
-        const preferenceRow = normalized
-          ? database
-              .prepare(
-                "SELECT p.id, p.value FROM singleton_state s JOIN search_preference_sets p ON p.id = json_extract(s.value, '$.preferenceId') WHERE s.key = 'search_preferences'",
-              )
-              .get()
-          : database
-              .prepare(
-                "SELECT json_remove(value, '$.discovery.targets') AS value FROM singleton_state WHERE key = 'search_preferences'",
-              )
-              .get();
-        const sourceCount = normalized
-          ? Number(
-              database
-                .prepare(
-                  "SELECT count(*) AS n FROM search_preference_sources WHERE preference_id = ?",
-                )
-                .get(String(preferenceRow?.id))!.n,
-            )
-          : Number(
-              database
-                .prepare(
-                  "SELECT COALESCE(json_array_length(value, '$.discovery.targets'),0) AS n FROM singleton_state WHERE key = 'search_preferences'",
-                )
-                .get()?.n ?? 0,
-            );
-        const planValue = (
-          value: string,
-        ) => `json_object('id', json_extract(${value}, '$.id'), 'name', json_extract(${value}, '$.name'),
-          'description', json_extract(${value}, '$.description'), 'mode', json_extract(${value}, '$.mode'), 'status', json_extract(${value}, '$.status'),
-          'minimumFitScore', json_extract(${value}, '$.minimumFitScore'), 'progress', json_extract(${value}, '$.progress'))`;
-        const planRows = normalized
-          ? database
-              .prepare(
-                `SELECT ${planValue("p.value")} AS value, (SELECT count(*) FROM plan_job_memberships j WHERE j.plan_id = p.id) AS job_count,
-            (SELECT count(*) FROM plan_sources s WHERE s.plan_id = p.id) AS source_count FROM job_search_plans p ORDER BY position, id`,
-              )
-              .all()
-          : database
-              .prepare(
-                `SELECT ${planValue("c.value")} AS value,
-            json_array_length(c.value, '$.jobIds') AS job_count, json_array_length(c.value, '$.sourceTargetIds') AS source_count
-            FROM singleton_state s, json_each(s.value, '$.campaigns') c WHERE s.key = 'campaign_state'`,
-              )
-              .all();
-        const profile = database
-          .prepare(
-            `SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.fullName') AS fullName,
-          json_extract(value, '$.firstName') AS firstName, json_extract(value, '$.lastName') AS lastName,
-          json_extract(value, '$.headline') AS headline, json_extract(value, '$.currentLocation') AS currentLocation,
-          json_extract(value, '$.baseResume.id') IS NOT NULL AS hasResume FROM singleton_state WHERE key = 'profile'`,
-          )
-          .get();
-        return {
-          profile: { ...profile, hasResume: profile?.hasResume === 1 },
-          searchPreferences: preferenceRow ? raw(preferenceRow.value) : null,
-          profileSetupState: values.get("profile_setup_state"),
-          settings: values.get("settings"),
-          campaigns: planRows.map((row) => ({
-            ...(raw(row.value) as object),
-            jobCount: Number(row.job_count),
-            sourceCount: Number(row.source_count),
-          })),
-          activeCampaignId: activePlan(),
-          sourceCount,
-          activityControl: values.get("activity_control"),
-        } as WorkspaceStartupContext;
-      });
-    },
     queryJobList(input) {
       const query = QueryJobListInputSchema.parse(input);
       return read(() => {

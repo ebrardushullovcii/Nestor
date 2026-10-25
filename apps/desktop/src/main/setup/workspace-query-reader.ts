@@ -15,11 +15,7 @@ const ports = new Set<Electron.MessagePortMain>();
 let filePath = "";
 let repository: WorkspaceQueryRepository | undefined;
 let cursor = 0;
-let resolveContext!: () => void;
 let resolveQueries!: () => void;
-const contextReady = new Promise<void>((resolve) => {
-  resolveContext = resolve;
-});
 const queriesReady = new Promise<void>((resolve) => {
   resolveQueries = resolve;
 });
@@ -32,8 +28,6 @@ function read(request: WorkspaceReadRequest) {
     cursor = repository.getChanges(Number.MAX_SAFE_INTEGER).revision;
   }
   switch (request.method) {
-    case "getStartupContext":
-      return repository.getStartupContext();
     case "queryJobList":
       return repository.queryJobList(request.input);
     case "getJobDetail":
@@ -67,9 +61,6 @@ parent.on("message", (event) => {
   switch (message.type) {
     case "initialize":
       filePath = message.filePath;
-      break;
-    case "context-ready":
-      resolveContext();
       break;
     case "queries-ready":
       resolveQueries();
@@ -108,9 +99,7 @@ parent.on("message", (event) => {
         const { id, request } = parsed.data;
         // Post the result in the gate's continuation. An extra async read/then
         // hop let a later page build delay an already-computed Home reply.
-        void (
-          request.method === "getStartupContext" ? contextReady : queriesReady
-        )
+        void queriesReady
           .then(() => {
             const value = read(request);
             send(port, { type: "reply", id, ok: true, value });
