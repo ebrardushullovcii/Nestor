@@ -6,6 +6,7 @@ import {
 } from "parse5";
 import type { ListingCard } from "@nestor/contracts";
 import { createHash } from "node:crypto";
+import { htmlToPlainText } from "./listing-detail-extraction";
 
 type Node = Tree.Node;
 type Element = Tree.Element;
@@ -68,6 +69,90 @@ const clean = (value: string): string =>
     .replace(/\n{3,}/gu, "\n\n")
     .trim();
 const text = (node: Node): string => clean(textOf(node));
+function excluded(node: Element, excludeForms = true): boolean {
+  for (
+    let parent: Node | undefined = node;
+    parent;
+    parent =
+      "parentNode" in parent ? (parent.parentNode ?? undefined) : undefined
+  ) {
+    if (
+      element(parent) &&
+      ((ignored.has(parent.tagName) &&
+        (parent.tagName !== "form" || excludeForms)) ||
+        attr(parent, "role") === "navigation" ||
+        parent.attrs.some((a) => a.name === "hidden") ||
+        attr(parent, "aria-hidden") === "true")
+    )
+      return true;
+  }
+  return false;
+}
+
+/** A login widget or script on a public page is not an access wall. */
+export function listingSignInRequired(html: string): boolean {
+  const nodes = descendants(parse(html));
+  if (
+    !nodes.some(
+      (node) =>
+        node.tagName === "input" &&
+        attr(node, "type") === "password" &&
+        !excluded(node, false),
+    )
+  )
+    return false;
+  const heading = nodes.find((node) => node.tagName === "h1");
+  const body =
+    nodes.find((node) => node.tagName === "main") ??
+    nodes.find((node) => node.tagName === "body");
+  return (
+    /^(?:sign in|log in|login|authenticate|verify your)/iu.test(
+      heading ? text(heading) : "",
+    ) || Boolean(body && text(body).length < 1800)
+  );
+}
+
+/** Read literal JSON arrays, never execute a site's JavaScript. */
+function embeddedJobs(script: string): Record<string, unknown>[] {
+  const jobs: Record<string, unknown>[] = [];
+  for (const match of script.matchAll(
+    /\b(?:const|var|let)\s+[\w$]+\s*=\s*(?=\[)/gu,
+  )) {
+    const start = match.index + match[0].length;
+    let depth = 0,
+      quoted = false,
+      escaped = false;
+    for (let at = start; at < script.length; at++) {
+      const c = script[at];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === "[") depth++;
+      else if (c === "]" && --depth === 0) {
+        try {
+          const rows: unknown = JSON.parse(script.slice(start, at + 1));
+          if (Array.isArray(rows))
+            for (const row of rows)
+              if (
+                row &&
+                typeof row === "object" &&
+                "title" in row &&
+                ("internal_job_id" in row ||
+                  "employmentType" in row ||
+                  "openings" in row)
+              )
+                jobs.push(row as Record<string, unknown>);
+        } catch {
+          /* Non-JSON application code needs the browser. */
+        }
+        break;
+      }
+    }
+  }
+  return jobs;
+}
 function link(node: Element, base: string): string | null {
   try {
     const url = new URL(attr(node, "href"), base);
@@ -85,12 +170,55 @@ export function readInventoryHtml(
 ): {
   cards: ListingCard[];
   next: string[];
+  portals: string[];
   needsInteraction: boolean;
 } {
   const doc = parse(html);
   const nodes = descendants(doc);
   const cards = new Map<string, ListingCard>();
   const published: Record<string, unknown>[] = [];
+  for (const script of nodes.filter((node) => node.tagName === "script")) {
+    for (const job of embeddedJobs(
+      script.childNodes
+        .map((child) =>
+          child.nodeName === "#text" ? (child as Tree.TextNode).value : "",
+        )
+        .join(""),
+    )) {
+      const address =
+        job.absolute_url ?? job.jobUrl ?? job.hostedUrl ?? job.href;
+      if (typeof job.title !== "string" || typeof address !== "string")
+        continue;
+      let href: string;
+      try {
+        href = new URL(address, url).href;
+      } catch {
+        continue;
+      }
+      if (!/^https?:/u.test(href)) continue;
+      const listingText = htmlToPlainText(
+        typeof job.content === "string"
+          ? job.content
+          : typeof job.description === "string"
+            ? job.description
+            : "",
+      );
+      if (!listingText) continue;
+      cards.set(href, {
+        url: href,
+        title: job.title,
+        text: job.title,
+        listingText,
+        sourceId: source.id,
+        sourceLabel: source.label,
+        cardFingerprint: fingerprint(job.title.trim().toLowerCase()),
+        sourceJobId:
+          typeof job.id === "string" || typeof job.id === "number"
+            ? String(job.id)
+            : href,
+      });
+    }
+  }
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
       value.forEach(visit);
@@ -156,6 +284,7 @@ export function readInventoryHtml(
     });
   }
   for (const node of nodes) {
+    if (excluded(node)) continue;
     if (
       !(
         node.tagName === "article" ||
@@ -177,6 +306,22 @@ export function readInventoryHtml(
       title = text(heading),
       body = text(node);
     if (!href || !title || body === title) continue;
+    // Editorial/product cards use the same article/heading markup. Require
+    // observed vacancy semantics, never just a heading inside navigation.
+    if (
+      !/(?:job|position|vacanc|opening|posting)/iu.test(
+        [href, attr(node, "class"), attr(node, "data-testid")].join(" "),
+      ) &&
+      !children.some((child) =>
+        /(?:company|employer|location|job-location)/iu.test(
+          attr(child, "class"),
+        ),
+      ) &&
+      !/\b(?:remote|hybrid|on.?site|full.time|part.time|contract)\b/iu.test(
+        body,
+      )
+    )
+      continue;
     const paragraphs = children.filter((child) => child.tagName === "p");
     const companyNode =
       paragraphs.find((child) =>
@@ -323,7 +468,24 @@ export function readInventoryHtml(
       (node.tagName === "button" || attr(node, "role") === "button") &&
       /^(?:load more|show more|more jobs|next(?: page)?)$/iu.test(text(node)),
   );
-  return { cards: [...cards.values()], next: [...next], needsInteraction };
+  const portals = nodes
+    .filter(
+      (node) =>
+        node.tagName === "a" &&
+        /^(?:(?:view|see|explore|browse|search|find|check out)\s+)?(?:(?:all|our|current|available|open)\s+)*(?:open\s+)?(?:jobs|roles|positions|opportunities|vacancies)(?:\s+(?:here|now|at\b.*))?$/iu.test(
+          text(node).trim(),
+        ),
+    )
+    .flatMap((node) => {
+      const href = link(node, url);
+      return href && href !== url ? [href] : [];
+    });
+  return {
+    cards: [...cards.values()],
+    next: [...next],
+    portals: [...new Set(portals)],
+    needsInteraction,
+  };
 }
 
 /** Preserve the whole semantic listing, including requirements outside JSON-LD. */

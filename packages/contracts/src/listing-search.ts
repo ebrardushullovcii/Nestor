@@ -24,6 +24,17 @@ export interface ListingCard {
   sourceJobId?: string;
   postedAt?: string;
   closed?: boolean;
+  /** Authoritative provider fields, mechanically read with its complete body. */
+  providerFacts?: Pick<
+    FoundJob,
+    | "company"
+    | "location"
+    | "workModes"
+    | "employmentType"
+    | "salaryText"
+    | "applyUrl"
+    | "postedAt"
+  >;
 }
 
 export interface SeenListingCard {

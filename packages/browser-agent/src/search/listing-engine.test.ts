@@ -11,6 +11,8 @@ import {
   readListings,
   screenCards,
 } from "./listing-engine";
+import { readInventoryHtml, listingSignInRequired } from "./listing-html";
+import { htmlToPlainText } from "./listing-detail-extraction";
 import { listingClosedReason } from "./listing-status";
 import { publicBoardFeed } from "./public-board-feed";
 import type { LLMClient } from "../agent/contracts";
@@ -56,7 +58,7 @@ test("screens titles in one call, retains senior variants and skips saved and re
   ];
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"unrelated":[1]}' }),
+      Promise.resolve({ content: '{"related":[0,1]}' }),
     ),
   };
   const goals = {
@@ -96,9 +98,7 @@ test("a changing age badge does not make a rejected listing cost another model c
       html: `<article><p>Employer</p><h2><a href="/jobs/nurse">Nurse</a></h2><p>Berlin</p><span class="age">${age}</span></article>`,
     });
   const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"unrelated":[0]}' }),
-    ),
+    chatWithTools: vi.fn(() => Promise.resolve({ content: '{"related":[]}' })),
   };
   const goals = {
     targetRoles: ["Data Analyst"],
@@ -348,8 +348,9 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     },
   };
   const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.resolve({
+    chatWithTools: vi.fn((...args: Parameters<LLMClient["chatWithTools"]>) => {
+      void args;
+      return Promise.resolve({
         content: JSON.stringify({
           fits: {
             "1": {
@@ -364,8 +365,8 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
             },
           },
         }),
-      }),
-    ),
+      });
+    }),
   };
   const fits = await fitJobs({
     client,
@@ -385,6 +386,14 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     }),
   ).toEqual([]);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  const fitInput = JSON.parse(
+    client.chatWithTools.mock.calls[0][0][1].content,
+  ) as { passages: string[]; listings: { passages: number[] }[] };
+  expect(
+    fitInput.listings[0].passages
+      .map((id) => fitInput.passages[id])
+      .join("\n\n"),
+  ).toBe(job.description);
   const fit = {
     id: 1,
     s: verdict.score,
@@ -522,3 +531,99 @@ test.each(["http", "browser"] as const)(
     expect(fallback).not.toHaveBeenCalled();
   },
 );
+
+test("follows an observed jobs portal without counting the surrounding navigation or product cards", async () => {
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: url.endsWith("/careers")
+        ? '<nav><article><h2><a href="/products">Infrastructure</a></h2><p>Our products</p></article></nav><main><article><h2><a href="/blog">Engineering stories</a></h2><p>Meet the team</p></article><a href="https://portal.example/openings">View open roles</a></main>'
+        : '<main><article class="job"><h2><a href="/jobs/1">Data Analyst</a></h2><p>Berlin</p></article></main>',
+    }),
+  );
+  const result = await collectSource({
+    source: { ...source, url: "https://company.example/careers" },
+    readPage,
+  });
+  expect(result.cards.map((row) => row.title)).toEqual(["Data Analyst"]);
+  expect(result.complete).toBe(true);
+  expect(readPage.mock.calls.map(([url]) => url)).toEqual([
+    "https://company.example/careers",
+    "https://portal.example/openings",
+  ]);
+});
+
+test("a script-only portal reports incomplete coverage, and a public login widget is not an access wall", async () => {
+  const html =
+    "<main><h1>Careers</h1><p>" +
+    "Learn about our work. ".repeat(200) +
+    '</p></main><aside><form><input type="password"></form></aside>';
+  expect(listingSignInRequired(html)).toBe(false);
+  expect(
+    listingSignInRequired(
+      '<main><h1>Sign in</h1><form><input type="password"></form></main>',
+    ),
+  ).toBe(true);
+  const result = await collectSource({
+    source,
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: '<div id="app"></div><script src="/app.js"></script>',
+      }),
+  });
+  expect(result.cards).toEqual([]);
+  expect(result.complete).toBe(false);
+  expect(result.needsYou).toBeUndefined();
+});
+
+test("reads public embedded vacancy JSON and encoded provider descriptions without executing scripts or using AI", async () => {
+  const content =
+    "&lt;div&gt;&lt;p&gt;Build &lt;strong&gt;SQL reports&lt;/strong&gt; &amp; dashboards.&lt;/p&gt;&lt;/div&gt;";
+  expect(htmlToPlainText(content)).toBe("Build SQL reports & dashboards.");
+  const embedded = readInventoryHtml(
+    `<script>const publicJobs = ${JSON.stringify([{ id: 1, internal_job_id: 2, title: "Data Analyst", href: "/jobs/1", content }])};</script>`,
+    source.url,
+    source,
+  );
+  expect(embedded.cards[0]?.listingText).toBe(
+    "Build SQL reports & dashboards.",
+  );
+  const feedSource = { ...source, url: "https://boards.greenhouse.io/sample" };
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: JSON.stringify(
+        url.includes("content=true")
+          ? {
+              jobs: [
+                {
+                  id: 1,
+                  title: "Data Analyst",
+                  absolute_url: "https://boards.greenhouse.io/sample/jobs/1",
+                  location: { name: "Remote" },
+                  content,
+                },
+              ],
+            }
+          : { name: "Hiring Employer" },
+      ),
+    }),
+  );
+  const cards = (await collectSource({ source: feedSource, readPage })).cards;
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(Error("Provider already publishes these fields")),
+    ),
+  };
+  const result = await readListings({ cards, readPage, client });
+  expect(result.jobs[0]).toMatchObject({
+    company: "Hiring Employer",
+    location: "Remote",
+  });
+  expect(result.jobs[0]?.description).toContain(
+    "Build SQL reports & dashboards.",
+  );
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(readPage).toHaveBeenCalledTimes(2);
+});

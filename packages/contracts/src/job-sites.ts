@@ -120,6 +120,7 @@ export type AddJobSitesInput = z.input<typeof AddJobSitesInputSchema>;
 export const AddJobSitesResultSchema = z.object({
   added: z.number().int().nonnegative(),
   duplicates: z.number().int().nonnegative(),
+  duplicateUrls: z.array(z.string()),
   invalid: z.array(z.string()),
   firstAddedId: z.number().int().positive().nullable(),
 });
@@ -161,11 +162,13 @@ export function parseJobSiteUrls(input: string): {
   urls: string[];
   invalid: string[];
   duplicates: number;
+  duplicateUrls: string[];
 } {
   const urls: string[] = [];
   const invalid: string[] = [];
   const seen = new Set<string>();
   let duplicates = 0;
+  const duplicateUrls = new Set<string>();
 
   for (const rawValue of input.split(/[\n,]+/u)) {
     const value = rawValue.trim();
@@ -192,7 +195,10 @@ export function parseJobSiteUrls(input: string): {
         if (!seen.has(address)) {
           seen.add(address);
           urls.push(address);
-        } else duplicates++;
+        } else {
+          duplicates++;
+          duplicateUrls.add(address);
+        }
       }
       flushInvalid();
       continue;
@@ -205,13 +211,14 @@ export function parseJobSiteUrls(input: string): {
     const key = url;
     if (seen.has(key)) {
       duplicates++;
+      duplicateUrls.add(url);
       continue;
     }
     seen.add(key);
     urls.push(url);
   }
 
-  return { urls, invalid, duplicates };
+  return { urls, invalid, duplicates, duplicateUrls: [...duplicateUrls] };
 }
 
 export const SetJobSitesEnabledInputSchema = JobSiteListQuerySchema.pick({

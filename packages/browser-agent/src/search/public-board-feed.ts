@@ -1,5 +1,5 @@
 import type { ListingCard, ListingSearchReader } from "@nestor/contracts";
-import { htmlToPlainText, listingPageText } from "./listing-detail-extraction";
+import { htmlToPlainText } from "./listing-detail-extraction";
 import { fingerprint } from "./listing-html";
 
 /** Provider protocols live here; orchestration never contains individual board rules. */
@@ -89,9 +89,15 @@ export async function collectPublicFeed(
   }
   const companyEvidence = feed.metadata
     ? (await input.readPage(feed.metadata, { signal: input.signal })).html
-    : listingPageText(
-        (await input.readPage(input.source.url, { signal: input.signal })).html,
-      ).slice(0, 3000);
+    : ((
+        await input.readPage(input.source.url, { signal: input.signal })
+      ).html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "");
+  const company = feed.metadata
+    ? string(object(JSON.parse(companyEvidence)).name)
+    : htmlToPlainText(companyEvidence)
+        .split("\n")[0]
+        ?.replace(/\s*(?:[|–-]\s*)?(?:Jobs|Careers)\s*$/iu, "")
+        .trim();
   return rows
     .filter((row) => object(row).isListed !== false)
     .map((row) => {
@@ -144,6 +150,38 @@ export async function collectPublicFeed(
         text,
         listingText,
         cardFingerprint: fingerprint(title.trim().toLowerCase()),
+        ...(company && !/^(?:greenhouse|lever|ashby)$/iu.test(company)
+          ? {
+              providerFacts: {
+                company,
+                location:
+                  string(location.name) ||
+                  string(job.location) ||
+                  string(categories.location),
+                workModes:
+                  /remote/iu.test(string(job.workplaceType)) ||
+                  job.isRemote === true
+                    ? ["remote" as const]
+                    : /hybrid/iu.test(string(job.workplaceType))
+                      ? ["hybrid" as const]
+                      : [],
+                employmentType:
+                  string(job.employmentType) ||
+                  string(categories.commitment) ||
+                  null,
+                salaryText:
+                  htmlToPlainText(
+                    string(object(job.salaryRange).description),
+                  ) || null,
+                applyUrl: string(job.applyUrl) || null,
+                postedAt:
+                  string(job.publishedAt) ||
+                  (typeof job.createdAt === "number"
+                    ? new Date(job.createdAt).toISOString()
+                    : null),
+              },
+            }
+          : {}),
         sourceId: input.source.id,
         sourceLabel: input.source.label,
         ...(typeof job.id === "string" || typeof job.id === "number"
