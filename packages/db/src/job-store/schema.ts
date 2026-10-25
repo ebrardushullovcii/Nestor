@@ -10,13 +10,15 @@
  */
 import { APPLICATION_SCHEMA } from "./application-schema";
 
-export const JOB_STORE_VERSION = 1;
+export const JOB_STORE_VERSION = 2;
 
 const JOBS = `
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
   stage TEXT NOT NULL CHECK (stage IN ('found', 'hidden', 'shortlisted', 'resume', 'applied')),
   stage_at INTEGER NOT NULL,
+  -- why it is in its stage when the app put it there (a search hid it)
+  stage_note TEXT,
   title TEXT NOT NULL,
   company TEXT NOT NULL,
   location TEXT NOT NULL,
@@ -122,9 +124,28 @@ CREATE TABLE IF NOT EXISTS job_move_items (
   job_id INTEGER NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
   from_stage TEXT NOT NULL,
   from_stage_at INTEGER NOT NULL,
+  from_stage_note TEXT,
   PRIMARY KEY (move_id, job_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS job_move_items_by_job ON job_move_items (job_id);
+`;
+
+const SEARCHES = `
+CREATE TABLE IF NOT EXISTS searches (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK (state IN ('running', 'done', 'stopped', 'failed')),
+  settings_json TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  sources_total INTEGER NOT NULL DEFAULT 0,
+  sources_done INTEGER NOT NULL DEFAULT 0,
+  found INTEGER NOT NULL DEFAULT 0,
+  added INTEGER NOT NULL DEFAULT 0,
+  merged INTEGER NOT NULL DEFAULT 0,
+  scored INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS searches_by_start ON searches (started_at DESC);
 `;
 
 /**
@@ -149,6 +170,7 @@ CREATE INDEX IF NOT EXISTS resumes_by_state ON resumes (state, updated_at);
 
 export const JOB_STORE_SCHEMA: readonly string[] = [
   JOBS,
+  SEARCHES,
   RESUMES,
   APPLICATION_SCHEMA,
 ];

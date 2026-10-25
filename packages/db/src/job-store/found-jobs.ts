@@ -121,6 +121,7 @@ export function writeFoundJobs(
   now: number,
 ): SaveFoundJobsResult & { mergedStages: Set<JobStage> } {
   const added: number[] = [];
+  const hidden: number[] = [];
   const merged = new Set<number>();
   const mergedStages = new Set<JobStage>();
   const findKey = sql(
@@ -139,9 +140,9 @@ export function writeFoundJobs(
        apply_url = coalesce(excluded.apply_url, apply_url)`,
   );
   const insertJob = sql(
-    `INSERT INTO jobs (stage, stage_at, title, company, location, work_modes,
+    `INSERT INTO jobs (stage, stage_at, stage_note, title, company, location, work_modes,
        salary_text, posted_at, found_at, seen_at, found_by, source_label, url, apply_url)
-     VALUES ('found', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertDetails = sql(
     `INSERT INTO job_details (job_id, description, summary, seniority, employment_type,
@@ -189,7 +190,9 @@ export function writeFoundJobs(
     if (!match) {
       id = Number(
         insertJob.run(
+          job.hiddenReason ? "hidden" : "found",
           now,
+          job.hiddenReason?.trim() || null,
           job.title,
           job.company,
           job.location,
@@ -215,7 +218,8 @@ export function writeFoundJobs(
         job.salaryCurrency,
         JSON.stringify(job.facts ?? {}),
       );
-      added.push(id);
+      if (job.hiddenReason) hidden.push(id);
+      else added.push(id);
     }
     addSighting.run(
       id,
@@ -254,6 +258,17 @@ export function writeFoundJobs(
     }
   }
   // A job new in this batch and seen again later in it is still just new.
-  for (const id of added) merged.delete(id);
-  return { added, merged: [...merged], mergedStages };
+  for (const id of [...added, ...hidden]) merged.delete(id);
+  return { added, hidden, merged: [...merged], mergedStages };
+}
+
+/** The stage of the saved job with this listing or apply link, if any. */
+export function readListingStage(
+  sql: Statements,
+  url: string,
+): JobStage | null {
+  const row = sql(
+    "SELECT j.stage FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
+  ).get(`url:${normalizeUrl(url)}`) as { stage: JobStage } | undefined;
+  return row?.stage ?? null;
 }

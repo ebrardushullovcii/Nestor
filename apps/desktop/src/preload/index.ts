@@ -33,6 +33,7 @@ import {
 } from "electron";
 import { browserBridge } from "./browser";
 import { createAssistantBridge } from "./assistant";
+import { createJobsBridge } from "./jobs";
 import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
   PersonalWorkspaceRestorePreview,
@@ -399,9 +400,21 @@ const assistantBridge = createAssistantBridge({
   pathForFile: (file) => webUtils.getPathForFile(file),
 });
 
+const jobsBridge = createJobsBridge({
+  invoke: (channel, ...args) =>
+    nativeIpcRenderer.invoke(channel, ...args) as Promise<unknown>,
+  on: (channel, listener) => {
+    nativeIpcRenderer.on(channel, listener);
+  },
+  removeListener: (channel, listener) => {
+    nativeIpcRenderer.removeListener(channel, listener);
+  },
+});
+
 const desktopApi = {
   browser: browserBridge,
   assistant: assistantBridge,
+  jobs: jobsBridge,
   resumes: createResumesBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   window: {

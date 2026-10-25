@@ -47,6 +47,9 @@
         "packages/job-list-policy/src/tie-break-reason.ts"
       ],
       "@nestor/knowledge-base": ["packages/knowledge-base/src/index.ts"],
+      "@nestor/job-finder/job-commands": [
+        "packages/job-finder/src/job-commands.ts"
+      ],
       "@nestor/job-finder/resumes": [
         "packages/job-finder/src/resumes/index.ts"
       ],

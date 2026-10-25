@@ -1,0 +1,173 @@
+import type { JobChange, JobStageCounts } from "@nestor/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/** One page of any store-backed list: `list_jobs`, `list_shortlisted`, … */
+export interface StoreListPage<Row> {
+  rows: Row[];
+  nextCursor: string | null;
+  total: number;
+  totalCapped: boolean;
+  counts: JobStageCounts;
+}
+
+export interface StoreListState<Row> extends StoreListPage<Row> {
+  /** True until the first page of this list arrives. */
+  loading: boolean;
+  error: string | null;
+}
+
+export const LIST_PAGE_SIZE = 50;
+/** A refresh reloads what is on screen, up to this many rows. */
+const REFRESH_MAX = 200;
+/** Changes arrive in bursts during a search; refetch at most this often. */
+const REFRESH_GAP_MS = 400;
+
+const EMPTY_COUNTS: JobStageCounts = {
+  found: 0,
+  hidden: 0,
+  shortlisted: 0,
+  resume: 0,
+  applied: 0,
+};
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : "Could not load the list.";
+}
+
+/**
+ * Any list read from the job store: the first page, more pages as the person
+ * scrolls, and a quiet refetch of what is on screen when a `jobs:changed`
+ * event touches it. Rows a move takes away leave at once (`removeRows`).
+ *
+ * `key` names the list's query; a new key starts the list over. `load`
+ * fetches one page from a cursor. `refreshOn` decides which changes matter
+ * (default: any change that names a stage, since the counts move too).
+ */
+export function useStoreList<Row extends { id: number }>(options: {
+  key: string;
+  load: (page: {
+    cursor: string | null;
+    limit: number;
+  }) => Promise<StoreListPage<Row>>;
+  refreshOn?: (change: JobChange) => boolean;
+}) {
+  const { key } = options;
+  const loadRef = useRef(options.load);
+  loadRef.current = options.load;
+  const refreshOnRef = useRef(options.refreshOn);
+  refreshOnRef.current = options.refreshOn;
+
+  const [state, setState] = useState<StoreListState<Row>>({
+    rows: [],
+    nextCursor: null,
+    total: 0,
+    totalCapped: false,
+    counts: EMPTY_COUNTS,
+    loading: true,
+    error: null,
+  });
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const generation = useRef(0);
+  const loadingMore = useRef(false);
+
+  const apply = useCallback(
+    (page: StoreListPage<Row>, rows: Row[]) =>
+      setState({
+        rows,
+        nextCursor: page.nextCursor,
+        total: page.total,
+        totalCapped: page.totalCapped,
+        counts: page.counts,
+        loading: false,
+        error: null,
+      }),
+    [],
+  );
+
+  const refresh = useCallback(async () => {
+    const current = generation.current;
+    const limit = Math.min(
+      REFRESH_MAX,
+      Math.max(LIST_PAGE_SIZE, stateRef.current.rows.length),
+    );
+    try {
+      const page = await loadRef.current({ cursor: null, limit });
+      if (current === generation.current) apply(page, page.rows);
+    } catch (error) {
+      if (current === generation.current)
+        setState((s) => ({ ...s, loading: false, error: describe(error) }));
+    }
+    // `key` restarts the list; the loader itself is read from a ref.
+  }, [apply, key]);
+
+  useEffect(() => {
+    generation.current += 1;
+    setState((s) => ({ ...s, rows: [], loading: true, error: null }));
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let last = 0;
+    const schedule = () => {
+      if (timer) return;
+      const wait = Math.max(0, last + REFRESH_GAP_MS - Date.now());
+      timer = setTimeout(() => {
+        timer = null;
+        last = Date.now();
+        void refresh();
+      }, wait);
+    };
+    const unsubscribe = window.nestor.jobs.onChange((change) => {
+      const matters = refreshOnRef.current ?? ((c) => c.stages.length > 0);
+      if (matters(change)) schedule();
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, [refresh]);
+
+  const loadMore = useCallback(async () => {
+    const { nextCursor } = stateRef.current;
+    if (!nextCursor || loadingMore.current) return;
+    loadingMore.current = true;
+    const current = generation.current;
+    try {
+      const page = await loadRef.current({
+        cursor: nextCursor,
+        limit: LIST_PAGE_SIZE,
+      });
+      if (current !== generation.current) return;
+      const seen = new Set(stateRef.current.rows.map((row) => row.id));
+      apply(page, [
+        ...stateRef.current.rows,
+        ...page.rows.filter((row) => !seen.has(row.id)),
+      ]);
+    } catch (error) {
+      if (current === generation.current)
+        setState((s) => ({ ...s, error: describe(error) }));
+    } finally {
+      loadingMore.current = false;
+    }
+  }, [apply]);
+
+  /** Takes rows out at once after a move; the next refetch confirms it. */
+  const removeRows = useCallback((moved: (id: number) => boolean) => {
+    setState((s) => {
+      const rows = s.rows.filter((row) => !moved(row.id));
+      return {
+        ...s,
+        rows,
+        total: Math.max(0, s.total - (s.rows.length - rows.length)),
+      };
+    });
+  }, []);
+
+  return { ...state, loadMore, refresh, removeRows };
+}
+
+export type StoreList<Row extends { id: number }> = ReturnType<
+  typeof useStoreList<Row>
+>;

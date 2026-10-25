@@ -59,7 +59,7 @@ export const JobFilterSchema = z
     stage: JobStageSchema,
     /** Only jobs this search found first. */
     searchId: z.string().min(1).max(200).nullable().default(null),
-    /** Only jobs scored at least this fit. */
+    /** Only jobs scored at least this fit, plus jobs not scored yet. */
     minFit: z.number().int().min(0).max(100).nullable().default(null),
     /** Words that must appear in the title, company or location. */
     text: z.string().max(200).default(""),
@@ -84,6 +84,8 @@ export const JobRowSchema = z.object({
   id: JobIdSchema,
   stage: JobStageSchema,
   stageChangedAt: z.string(),
+  /** Why the app put it in this stage, e.g. why a search hid it. */
+  stageNote: z.string().nullable(),
   title: z.string(),
   company: z.string(),
   location: z.string(),
@@ -107,7 +109,7 @@ export type JobRow = z.infer<typeof JobRowSchema>;
 export const JobListPageSchema = z.object({
   rows: z.array(JobRowSchema),
   nextCursor: z.string().nullable(),
-  /** Jobs matching the filter, counted up to `JOB_TOTAL_CAP`. */
+  /** Jobs matching the filter. Beyond the stage alone, counted up to `JOB_TOTAL_CAP`. */
   total: z.number().int().nonnegative(),
   totalCapped: z.boolean(),
   counts: JobStageCountsSchema,
@@ -247,11 +249,15 @@ export interface FoundJob {
   summary: string | null;
   description: string;
   facts?: JobListingFactsInput;
+  /** Set when the search decided not to keep it: saved hidden, with this reason. */
+  hiddenReason?: string;
 }
 
 export interface SaveFoundJobsResult {
   /** New jobs, in input order. They start in `found`. */
   added: number[];
+  /** New jobs the search did not keep; saved hidden with their reason. */
+  hidden: number[];
   /** Jobs already saved that this batch saw again. Their stage is kept. */
   merged: number[];
 }
@@ -260,3 +266,94 @@ export interface JobFitUpdate extends Omit<JobFit, "scoredAt"> {
   id: number;
   scoredAt?: string;
 }
+
+/**
+ * The few choices made before each search. `depth`: how long each site gets
+ * (quick look or full search). `picky`: how close a fit the search looks for
+ * and the list shows first. `postedWithin`: what to keep by listing age.
+ */
+export const JobSearchSettingsSchema = z
+  .object({
+    depth: z.enum(["quick", "thorough"]).default("quick"),
+    sourceIds: z
+      .union([
+        z.literal("all"),
+        z.array(z.string().min(1).max(200)).min(1).max(2000),
+      ])
+      .default("all"),
+    picky: z.enum(["open", "balanced", "strict"]).default("balanced"),
+    postedWithin: z.enum(["week", "month", "any"]).default("month"),
+    /** Anything specific for this search, in the person's words. */
+    note: z.string().trim().max(500).default(""),
+  })
+  .strict();
+export type JobSearchSettings = z.infer<typeof JobSearchSettingsSchema>;
+export type JobSearchSettingsInput = z.input<typeof JobSearchSettingsSchema>;
+
+/** The lowest fit each pickiness shows first. */
+export const PICKY_MIN_FIT: Record<JobSearchSettings["picky"], number | null> =
+  { open: null, balanced: 50, strict: 70 };
+
+export const jobSearchStateValues = [
+  "running",
+  "done",
+  "stopped",
+  "failed",
+] as const;
+export const JobSearchStateSchema = z.enum(jobSearchStateValues);
+export type JobSearchState = z.infer<typeof JobSearchStateSchema>;
+
+export const JobSearchRecordSchema = z.object({
+  id: z.string(),
+  state: JobSearchStateSchema,
+  settings: JobSearchSettingsSchema,
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  sourcesTotal: z.number().int().nonnegative(),
+  sourcesDone: z.number().int().nonnegative(),
+  /** Listings read, before merging. */
+  found: z.number().int().nonnegative(),
+  /** New jobs saved. */
+  added: z.number().int().nonnegative(),
+  /** Listings that were jobs already saved. */
+  merged: z.number().int().nonnegative(),
+  scored: z.number().int().nonnegative(),
+  error: z.string().nullable(),
+});
+export type JobSearchRecord = z.infer<typeof JobSearchRecordSchema>;
+
+export const JobSearchSourceStateSchema = z.object({
+  sourceId: z.string(),
+  label: z.string(),
+  state: z.enum([
+    "waiting",
+    "searching",
+    "done",
+    "failed",
+    "needs_you",
+    "stopped",
+  ]),
+  found: z.number().int().nonnegative(),
+  added: z.number().int().nonnegative(),
+  /** New listings the search did not keep (saved hidden). */
+  hidden: z.number().int().nonnegative(),
+  /** What it is doing or why it stopped, in a few words. */
+  message: z.string().nullable(),
+});
+export type JobSearchSourceState = z.infer<typeof JobSearchSourceStateSchema>;
+
+/** A job site a search can use: one the person turned on in Profile. */
+export const JobSiteSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  url: z.string(),
+});
+export type JobSite = z.infer<typeof JobSiteSchema>;
+
+/** What a screen shows about the running or last search. */
+export const JobSearchStatusSchema = z.object({
+  search: JobSearchRecordSchema.nullable(),
+  /** Per-site progress while running; empty otherwise. */
+  sources: z.array(JobSearchSourceStateSchema),
+});
+export type JobSearchStatus = z.infer<typeof JobSearchStatusSchema>;

@@ -19,6 +19,7 @@ import type {
 import type {
   DesktopAssistantBridge,
   DesktopBrowserBridge,
+  DesktopJobsBridge,
   ApplicationAuthorityEnvelope,
   ApplicationAuthorityEnvelopeMutationResult,
   ApplicationAuthorityReadiness,
@@ -177,6 +178,7 @@ declare global {
     nestor: {
       browser: DesktopBrowserBridge;
       assistant: DesktopAssistantBridge;
+      jobs: DesktopJobsBridge;
       resumes: DesktopResumesBridge;
       ping: () => Promise<DesktopPlatformPing>;
       window: {
