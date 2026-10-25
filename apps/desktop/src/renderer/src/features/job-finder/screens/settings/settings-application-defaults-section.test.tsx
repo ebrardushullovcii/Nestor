@@ -47,7 +47,7 @@ describe("SettingsApplicationDefaultsSection", () => {
     vi.clearAllMocks();
   });
 
-  it("owns only the look of a tailored resume; the approach lives under AI behavior", () => {
+  it("owns only the look of a tailored resume; the resume level lives in Profile", () => {
     render(
       <SettingsApplicationDefaultsSection
         availableResumeTemplates={[]}
@@ -58,7 +58,7 @@ describe("SettingsApplicationDefaultsSection", () => {
     );
 
     expect(screen.getByText("Resume look")).toBeTruthy();
-    expect(screen.getByText(/set under AI behavior/)).toBeTruthy();
+    expect(screen.getByText(/resume level lives in Profile/)).toBeTruthy();
     // The pointer to where the resume itself lives sits with the section it
     // concerns, not in the page header.
     expect(
@@ -71,10 +71,12 @@ describe("SettingsApplicationDefaultsSection", () => {
       screen.getByRole("group", { name: "Default resume template" }),
     ).toBeTruthy();
     // Nothing to save: no button.
-    expect(screen.queryByRole("button", { name: "Save resume look" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save resume look" }),
+    ).toBeNull();
   });
 
-  it("sends only template and font and reports saved status", async () => {
+  it("saves template and font as soon as one is picked", async () => {
     const onUpdateApplicationDefaults = vi.fn<
       (input: UpdateApplicationDefaultsInput) => Promise<void>
     >(() => Promise.resolve());
@@ -87,15 +89,8 @@ describe("SettingsApplicationDefaultsSection", () => {
       { wrapper: MemoryRouter },
     );
 
+    // Picking saves; there is no staged Save step anymore.
     chooseDisplayFont();
-    expect(
-      screen.getByText("You have unsaved resume look changes."),
-    ).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "Save resume look",
-      }),
-    );
 
     await waitFor(() =>
       expect(onUpdateApplicationDefaults).toHaveBeenCalledTimes(1),
@@ -105,18 +100,17 @@ describe("SettingsApplicationDefaultsSection", () => {
       resumeTemplateId: "classic_ats",
     });
     await waitFor(() =>
-      expect(
-        screen.getByText("Resume look saved."),
-      ).toBeTruthy(),
+      expect(screen.getByText("Resume look saved.")).toBeTruthy(),
     );
     expect(screen.queryByText("No unsaved changes.")).toBeNull();
   });
 
-  it("resets staged drafts when the persisted settings prop refreshes", () => {
-    const onUpdateApplicationDefaults = vi.fn<
-      (input: UpdateApplicationDefaultsInput) => Promise<void>
-    >(() => Promise.resolve());
-    const view = render(
+  it("keeps a failed pick on screen and retries it", async () => {
+    const onUpdateApplicationDefaults = vi
+      .fn<(input: UpdateApplicationDefaultsInput) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    render(
       <SettingsApplicationDefaultsSection
         availableResumeTemplates={[]}
         onUpdateApplicationDefaults={onUpdateApplicationDefaults}
@@ -126,22 +120,19 @@ describe("SettingsApplicationDefaultsSection", () => {
     );
 
     chooseDisplayFont();
-    expect(
-      screen.getByText("You have unsaved resume look changes."),
-    ).toBeTruthy();
-
-    view.rerender(
-      <SettingsApplicationDefaultsSection
-        availableResumeTemplates={[]}
-        onUpdateApplicationDefaults={onUpdateApplicationDefaults}
-        settings={parseSettings({ fontPreset: "space_grotesk_display" })}
-      />,
+    const retry = await screen.findByRole("button", {
+      name: "Retry resume look",
+    });
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(onUpdateApplicationDefaults).toHaveBeenCalledTimes(2),
     );
-
-    // Nothing to save: no button.
-    expect(screen.queryByRole("button", { name: "Save resume look" })).toBeNull();
-    expect(
-      screen.queryByText("You have unsaved resume look changes."),
-    ).toBeNull();
+    expect(onUpdateApplicationDefaults).toHaveBeenLastCalledWith({
+      fontPreset: "space_grotesk_display",
+      resumeTemplateId: "classic_ats",
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Resume look saved.")).toBeTruthy(),
+    );
   });
 });

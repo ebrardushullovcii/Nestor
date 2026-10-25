@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import type { ReactNode } from "react";
 import {
   APPLY_MODE_OPTIONS,
   ChoiceCards,
@@ -55,6 +56,8 @@ export function SettingsApplyModeSection(props: {
     value: ApplicationSalaryDisclosureRule,
   ) => Promise<void>;
   isSaving?: boolean;
+  /** What an application writes, rendered inside this one Applying panel. */
+  children?: ReactNode;
 }) {
   const { headingId, isSaving = false, mode, onSave } = props;
   const payId = useId();
@@ -195,6 +198,8 @@ export function SettingsApplyModeSection(props: {
           </p>
         ) : null}
       </div>
+
+      {props.children}
     </section>
   );
-    }
+}

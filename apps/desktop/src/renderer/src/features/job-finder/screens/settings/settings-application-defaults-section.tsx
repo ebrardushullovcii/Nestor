@@ -21,7 +21,9 @@ import {
  *
  * Whether a job gets a tailored resume at all, and how far the rewrite may
  * go, is an AI behavior choice and lives in that section. This one only
- * decides what the PDF looks like once it is written.
+ * decides what the PDF looks like once it is written. Picking a template
+ * or font saves it at once, like every other Settings choice; the Save
+ * button remains only to retry a failed save.
  */
 
 export const SETTINGS_RESUME_LOOK_LABEL = "Resume look";
@@ -79,9 +81,11 @@ export function SettingsApplicationDefaultsSection({
   }, [settings.resumeTemplateId]);
 
   const isSavePending = saveState.status === "saving";
+  // Picks save at once; only a failed save is left outstanding to retry.
   const hasUnsavedChanges =
-    draftFontPreset !== settings.fontPreset ||
-    draftResumeTemplateId !== settings.resumeTemplateId;
+    saveState.status === "failed" &&
+    (draftFontPreset !== settings.fontPreset ||
+      draftResumeTemplateId !== settings.resumeTemplateId);
   const isFontPresetOption = (
     value: string,
   ): value is JobFinderSettings["fontPreset"] =>
@@ -93,28 +97,37 @@ export function SettingsApplicationDefaultsSection({
   const selectedFontPreset = fontPresetOptions.find(
     (fontPreset) => fontPreset.value === draftFontPreset,
   );
-  const updateStagedDrafts = (updater: () => void) => {
+  const saveResumeLook = (
+    fontPreset = draftFontPreset,
+    resumeTemplateId = draftResumeTemplateId,
+  ) => {
     if (isSavePending) {
-      return;
-    }
-    updater();
-    resetSectionSave();
-    onSettingsDraftEdited?.();
-  };
-  const saveResumeLook = () => {
-    if (!hasUnsavedChanges || isSavePending) {
       return;
     }
     void runSectionSave({
       execute: () =>
         onUpdateApplicationDefaults({
-          fontPreset: draftFontPreset,
-          resumeTemplateId: draftResumeTemplateId,
+          fontPreset,
+          resumeTemplateId,
         }),
       failedMessage:
         "Resume look was not saved. Retry before leaving this page.",
       savedMessage: "Resume look saved.",
     });
+  };
+  const pickFontPreset = (value: string) => {
+    if (isSavePending || !isFontPresetOption(value)) return;
+    setDraftFontPreset(value);
+    resetSectionSave();
+    onSettingsDraftEdited?.();
+    saveResumeLook(value, draftResumeTemplateId);
+  };
+  const pickResumeTemplate = (value: string) => {
+    if (isSavePending || !isResumeTemplateOption(value)) return;
+    setDraftResumeTemplateId(value);
+    resetSectionSave();
+    onSettingsDraftEdited?.();
+    saveResumeLook(draftFontPreset, value);
   };
 
   useRegisterSettingsDirtySection({
@@ -122,7 +135,7 @@ export function SettingsApplicationDefaultsSection({
     isDirty: hasOutstandingSectionChanges(hasUnsavedChanges, saveState),
     isSaving: isSavePending,
     label: SETTINGS_RESUME_LOOK_LABEL,
-    onSave: saveResumeLook,
+    onSave: () => saveResumeLook(),
     order: 2,
     saveLabel: "Save resume look",
   });
@@ -137,8 +150,9 @@ export function SettingsApplicationDefaultsSection({
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
             The template is the default for new tailored resumes. The font
             applies to all generated resumes; changing it requires approving
-            existing drafts again. Resume rewriting is set under AI behavior.
-            Your resume and any extra files for applications are managed in{" "}
+            existing drafts again. The resume level lives in Profile, under
+            Preferences. Your resume and any extra files for applications are
+            managed in{" "}
             <Link
               className="text-(--link) underline underline-offset-2 hover:text-(--link-hover)"
               to={JOB_FINDER_ROUTE_PATHS.profile}
@@ -150,7 +164,7 @@ export function SettingsApplicationDefaultsSection({
         </div>
         <SettingsSectionSaveControl
           hasUnsavedChanges={hasUnsavedChanges}
-          onSave={saveResumeLook}
+          onSave={() => saveResumeLook()}
           saveState={saveState}
           subject="resume look"
           effect="Template changes apply to new drafts. Font changes apply to all generated resumes."
@@ -168,13 +182,7 @@ export function SettingsApplicationDefaultsSection({
           <ResumeThemePicker
             disabled={isSavePending}
             labelledBy={resumeTemplateLabelId}
-            onChange={(value) =>
-              updateStagedDrafts(() =>
-                setDraftResumeTemplateId(
-                  isResumeTemplateOption(value) ? value : draftResumeTemplateId,
-                ),
-              )
-            }
+            onChange={pickResumeTemplate}
             selectedThemeId={draftResumeTemplateId}
             themes={availableResumeTemplates}
           />
@@ -186,13 +194,7 @@ export function SettingsApplicationDefaultsSection({
           <FieldLabel htmlFor={fontPresetId}>Resume font</FieldLabel>
           <FormSelect
             disabled={isSavePending}
-            onValueChange={(value) =>
-              updateStagedDrafts(() =>
-                setDraftFontPreset(
-                  isFontPresetOption(value) ? value : draftFontPreset,
-                ),
-              )
-            }
+            onValueChange={pickFontPreset}
             options={fontPresetOptions.map((fontPreset) => ({
               label: fontPreset.label,
               value: fontPreset.value,
@@ -217,17 +219,6 @@ export function SettingsApplicationDefaultsSection({
           </p>
         </div>
       </div>
-
-      {hasUnsavedChanges && saveState.status !== "saving" ? (
-        <p
-          className="min-h-[1.5rem] min-w-0 text-sm leading-6 text-(--warning-text)"
-          role="status"
-        >
-          You have unsaved resume look changes.
-        </p>
-      ) : (
-        <div className="min-h-[1.5rem]" />
-      )}
     </section>
   );
 }

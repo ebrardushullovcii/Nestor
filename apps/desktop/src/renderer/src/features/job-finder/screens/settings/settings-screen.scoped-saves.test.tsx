@@ -265,9 +265,11 @@ describe("SettingsScreen scoped section saves", () => {
       expect.any(Function) as unknown,
     );
     // No whole JobFinderSettings payload and no workspace fields leaked.
+    // The AI behavior section sends only its own slice now; cover letters
+    // travel with the Applying writing controls.
     const payload = callbacks.onUpdateAiBehavior.mock
       .calls[0]?.[0] as UpdateAiBehaviorInput;
-    expect(Object.keys(payload).sort()).toEqual(["aiBehavior", "coverLetter"]);
+    expect(Object.keys(payload).sort()).toEqual(["aiBehavior"]);
     expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
     expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
 
