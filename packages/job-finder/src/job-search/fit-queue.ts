@@ -65,10 +65,10 @@ export function createFitQueue(
     }
     while (
       active.size < limit &&
-      (pending.length >= 24 ||
+      (pending.length >= 48 ||
         ((drainers > 0 || flushCount > 0) && pending.length > 0))
     ) {
-      const batch = pending.splice(0, 24);
+      const batch = pending.splice(0, 48);
       flushCount = Math.max(0, flushCount - batch.length);
       const task = judge(batch)
         .catch((error: unknown) => {

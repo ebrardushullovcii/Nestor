@@ -12,9 +12,9 @@ export const modelReasoningEfforts = [
 export type ModelReasoningEffort = (typeof modelReasoningEfforts)[number];
 
 export const DEFAULT_OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
-// Product routes on OpenCode Go: Muse Spark 1.3 at xhigh for every text and
-// vision task, DeepSeek V4.1 Flash at high only for aggressive resume
-// tailoring. Model ids are verified against /models on the gateway.
+// Primary text and vision use Muse Spark 1.3; title screening uses GPT-6
+// Luna without reasoning. Aggressive resume tailoring uses DeepSeek V4.1
+// Flash. Model ids are verified against /models on the gateway.
 export const DEFAULT_TEXT_MODEL = "muse-spark-1.3-contributor";
 export const DEFAULT_TEXT_MODEL_API_MODE: ModelApiMode = "responses";
 export const DEFAULT_TEXT_MODEL_REASONING_EFFORT: ModelReasoningEffort =
@@ -85,6 +85,7 @@ export type ChatCompletionsPayload = {
 export type ResponsesPayload = {
   output?: Array<{
     type?: string;
+    phase?: string;
     call_id?: string;
     name?: string;
     arguments?: string;
@@ -176,17 +177,15 @@ function extractJsonString(rawContent: string): string {
 function normalizeResponsesPayload(
   payload: ResponsesPayload,
 ): ChatCompletionsPayload {
+  const messages = payload.output?.filter((item) => item.type === "message");
+  const answer =
+    messages?.filter((item) => item.phase === "final_answer").at(-1) ??
+    messages?.at(-1);
   const content =
-    payload.output_text?.trim() ||
-    payload.output
-      ?.flatMap((item) =>
-        item.type === "message"
-          ? (item.content ?? []).flatMap((part) =>
-              typeof part.text === "string" ? [part.text] : [],
-            )
-          : [],
-      )
+    answer?.content
+      ?.flatMap((part) => (typeof part.text === "string" ? [part.text] : []))
       .join("\n") ||
+    payload.output_text?.trim() ||
     undefined;
   const toolCalls = payload.output?.flatMap((item) => {
     if (

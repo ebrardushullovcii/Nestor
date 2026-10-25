@@ -239,14 +239,21 @@ export function createJobSearchRunner(
     ) => {
       if (!current(source)) return;
       source.row.lane = "browser";
-      source.row.phase = "browser";
-      source.row.state = "waiting";
+      if (source.row.state !== "failed" && source.row.state !== "needs_you") {
+        source.row.phase = "browser";
+        source.row.state = "waiting";
+      }
       write(source);
       void browser
         .run(new URL(source.target.startingUrl).hostname, signal, async () => {
           if (!current(source)) return;
-          source.row.state = "searching";
-          source.row.phase = "browser";
+          if (
+            source.row.state !== "failed" &&
+            source.row.state !== "needs_you"
+          ) {
+            source.row.state = "searching";
+            source.row.phase = "browser";
+          }
           write(source);
           const deadline = AbortSignal.any([
             signal,

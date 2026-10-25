@@ -150,6 +150,18 @@ function isStableFitRoute(route: {
   );
 }
 
+/** These OpenCode Responses routes were exercised with required keyed output. */
+function supportsStrictResponseSchema(
+  route: Parameters<typeof isStableFitRoute>[0],
+): boolean {
+  return (
+    isStableFitRoute(route) ||
+    (route.apiMode === "responses" &&
+      route.model === "gpt-6-luna" &&
+      isOpenCodeBaseUrl(route.baseUrl))
+  );
+}
+
 /** Token usage in one shape whatever API reported it. */
 export function normalizeModelUsage(usage: ModelUsagePayload): {
   inputTokens: number;
@@ -859,7 +871,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
             ...(options?.jsonOutput ? { jsonOutput: true } : {}),
             ...(options?.jsonSchema &&
-            isStableFitRoute({ ...validatedOptions, apiMode })
+            supportsStrictResponseSchema({ ...validatedOptions, apiMode })
               ? { jsonSchema: options.jsonSchema }
               : {}),
             reasoningSummary: streamingEnabled,
@@ -1278,6 +1290,26 @@ export function createJobFinderAiClientFromEnvironment(
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
     ...parsedResilience,
   });
+  // Profession classification does not need a reasoning transcript. On Go,
+  // Luna at none spends fewer tokens per decision than Muse's minimum effort.
+  const screeningClient = isStableFitRoute(primaryRoute)
+    ? createOpenAiCompatibleJobFinderAiClient({
+        apiKey,
+        baseUrl: primaryRoute.baseUrl,
+        model: "gpt-6-luna",
+        apiMode: "responses",
+        reasoningEffort: "none",
+        taskReasoningEfforts: {
+          listing_screen:
+            parseModelReasoningEffort(
+              env.NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT,
+            ) ?? "none",
+        },
+        label: "Job title screening",
+        requestTimeoutMs: parsedRequestTimeoutMs,
+        ...parsedResilience,
+      })
+    : primaryClient;
   // Aggressive resume tailoring uses its own model route rather than the
   // primary provider. DeepSeek V4.1 Flash is text-only, so it uses Chat
   // Completions; reasoning effort is read from its own env var so it is
@@ -1691,7 +1723,11 @@ export function createJobFinderAiClientFromEnvironment(
     },
     async chatWithTools(messages, tools, options?: ChatWithToolsOptions) {
       try {
-        return await primaryClient.chatWithTools(messages, tools, options);
+        return await (
+          options?.reasoningTask === "listing_screen"
+            ? screeningClient
+            : primaryClient
+        ).chatWithTools(messages, tools, options);
       } catch (error) {
         logFallbackError("chatWithTools", error);
         throw error;

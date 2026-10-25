@@ -59,7 +59,7 @@ test("screens titles in one call, retains senior variants and skips saved and re
   ];
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"unrelated":[2]}' }),
+      Promise.resolve({ content: '{"keep":{"0":0}}' }),
     ),
   };
   const goals = {
@@ -100,7 +100,7 @@ test("a changing age badge does not make a rejected listing cost another model c
     });
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"unrelated":[0]}' }),
+      Promise.resolve({ content: '{"keep":{"0":0}}' }),
     ),
   };
   const goals = {
@@ -172,8 +172,8 @@ test("returns full visible requirements beyond sparse JSON-LD and reads metadata
   ).toBe(true);
   expect(result.jobs[0].company).toBe("Real Employer");
   expect(readPage).toHaveBeenCalledTimes(2);
-  // Each large body remains whole; batching limits payload size without truncation.
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  // Full bodies are retained; metadata excerpts let both fit in one read call.
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("provider endpoints are reusable across boards and never claimed from lookalike hosts", () => {
@@ -650,16 +650,200 @@ test("a truncated screen batch is left retryable while other title batches compl
       strategy: "target_roles",
     },
     client: {
-      chatWithTools: vi.fn(() =>
-        ++count === 1
-          ? Promise.reject(Error("incomplete response"))
-          : Promise.resolve({ content: '{"unrelated":[]}' }),
+      chatWithTools: vi.fn(
+        (messages: Parameters<LLMClient["chatWithTools"]>[0]) =>
+          ++count === 1
+            ? Promise.reject(Error("incomplete response"))
+            : Promise.resolve({
+                content: JSON.stringify({
+                  keep: Object.fromEntries(
+                    (
+                      JSON.parse(messages[1].content) as { titles: unknown[] }
+                    ).titles.map((_, index) => [String(index), 1]),
+                  ),
+                }),
+              }),
       ),
     },
   });
-  expect(result.failed).toHaveLength(250);
+  expect(result.failed).toHaveLength(120);
   expect(result.seen).toEqual([]);
-  expect(result.related.map((row) => row.title)).toEqual([
-    "Analyst specialty 250",
+  expect(result.related.map((row) => row.title)).toEqual(
+    cards.slice(120).map((row) => row.title),
+  );
+});
+
+test("clear requested role variants need no model; ambiguous professions still use compact evidence", async () => {
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"keep":{"0":0}}' }),
+    ),
+  };
+  const goals = {
+    targetRoles: ["Senior Backend Engineer"],
+    relatedRoles: ["Platform Engineer"],
+    strategy: "related_roles" as const,
+  };
+  const first = await screenCards({
+    client,
+    goals,
+    cards: [
+      card("Staff Backend Engineer"),
+      card("Senior Platform Engineer - hybrid Manchester"),
+    ],
+  });
+  expect(first.related).toHaveLength(2);
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+  const ambiguous = {
+    ...card("Solutions Engineer"),
+    text: JSON.stringify({
+      title: "Solutions Engineer",
+      categories: { team: "Pre-sales" },
+      location: "x".repeat(5000),
+      companyEvidence: "y".repeat(5000),
+    }),
+  };
+  const second = await screenCards({ client, goals, cards: [ambiguous] });
+  expect(second.related).toEqual([]);
+  expect(client.chatWithTools.mock.calls).toHaveLength(1);
+});
+
+test("follows counted opening directories without counting categories or navigation as vacancies", async () => {
+  const directory =
+    '<nav><h3>Jobs by teams</h3><ul><li><a href="/bogus1">Product 3</a></li><li><a href="/bogus2">News 4</a></li></ul></nav><main><h3>Openings By Teams</h3><ul><li><a href="/engineering"><span>Engineering</span><span>2</span></a></li><li><a href="/design">Design (1)</a></li></ul></main>';
+  const parsed = readInventoryHtml(directory, source.url, source);
+  expect(parsed.cards).toEqual([]);
+  expect(parsed.portals).toEqual([
+    "https://board.example/engineering",
+    "https://board.example/design",
   ]);
+  expect(listingInventoryReady(directory, source.url)).toBe(true);
+  const result = await collectSource({
+    source,
+    lane: "browser",
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html:
+          url === source.url
+            ? directory
+            : '<main><a href="/jobs/1"><h4>Data Analyst</h4><p>London</p></a></main>',
+      }),
+  });
+  expect(result.cards.map((c) => c.title)).toEqual(["Data Analyst"]);
+  expect(result.complete).toBe(true);
+});
+
+test("malformed screening retries only its unfinished titles in small groups", async () => {
+  let calls = 0;
+  const cards = Array.from({ length: 121 }, (_, i) =>
+    card(`Analyst specialty ${i}`),
+  );
+  const result = await screenCards({
+    cards,
+    goals: {
+      targetRoles: ["Analyst"],
+      relatedRoles: [],
+      strategy: "target_roles",
+    },
+    client: {
+      chatWithTools: vi.fn(
+        (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
+          const data = JSON.parse(messages[1].content) as { titles: unknown[] };
+          calls++;
+          return Promise.resolve({
+            content:
+              calls === 1
+                ? "broken"
+                : JSON.stringify({
+                    keep: Object.fromEntries(
+                      data.titles.map((_, index) => [String(index), 1]),
+                    ),
+                  }),
+          });
+        },
+      ),
+    },
+  });
+  expect(result.failed).toEqual([]);
+  expect(result.related).toHaveLength(121);
+  expect(calls).toBe(8);
+});
+
+test("negative titles get a second look when cached full text names requested duties", async () => {
+  const listing = {
+    ...card("Software Engineer - Marketplaces"),
+    listingText: "Our team develops and operates backend services.",
+  };
+  const client = {
+    chatWithTools: vi.fn(
+      (messages: Parameters<LLMClient["chatWithTools"]>[0]) =>
+        Promise.resolve({
+          content: JSON.stringify({
+            keep: {
+              0: messages[1].content.includes("Role-duty evidence") ? 1 : 0,
+            },
+          }),
+        }),
+    ),
+  };
+  const result = await screenCards({
+    client,
+    cards: [listing],
+    goals: {
+      targetRoles: ["Backend Engineer"],
+      relatedRoles: [],
+      strategy: "target_roles",
+    },
+  });
+  expect(result.related).toEqual([listing]);
+  expect(result.seen).toEqual([]);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("uncertain metadata expands only the unresolved listing; full descriptions stay intact", async () => {
+  const description =
+    "Useful duties. ".repeat(1000) +
+    "Northstar Trellis" +
+    "Useful duties. ".repeat(1000);
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: `<main><h1>Data Analyst</h1><p>${description}</p></main>`,
+    }),
+  );
+  const client = {
+    chatWithTools: vi.fn(
+      (messages: Parameters<LLMClient["chatWithTools"]>[0]) =>
+        Promise.resolve({
+          content: JSON.stringify({
+            jobs: [
+              {
+                id: 0,
+                title: "Data Analyst",
+                company: messages[1].content.includes("Northstar Trellis")
+                  ? "Northstar Trellis"
+                  : "",
+                location: "Berlin",
+                workModes: [],
+                sourceJobId: null,
+                employmentType: null,
+                seniority: null,
+                salaryText: null,
+                closed: false,
+              },
+            ],
+          }),
+        }),
+    ),
+  };
+  const result = await readListings({
+    client,
+    cards: [card("Data Analyst")],
+    readPage,
+  });
+  expect(result.jobs[0]?.company).toBe("Northstar Trellis");
+  expect(result.jobs[0]?.description).toContain(description.trim());
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(readPage).toHaveBeenCalledTimes(1);
 });

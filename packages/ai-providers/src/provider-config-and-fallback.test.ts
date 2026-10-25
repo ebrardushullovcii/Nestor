@@ -505,7 +505,11 @@ describe("ai provider config and fallback behavior", () => {
 
   test("escalates to the agent reader when a present experience section reads empty", async () => {
     const candidate = {
-      target: { section: "experience", key: "record", recordId: "experience_1" },
+      target: {
+        section: "experience",
+        key: "record",
+        recordId: "experience_1",
+      },
       label: "Senior Frontend Engineer at Northstar Parcel Software",
       value: {
         companyName: "Northstar Parcel Software",
@@ -523,7 +527,10 @@ describe("ai provider config and fallback behavior", () => {
     };
     const bodies: string[] = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = ((
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       bodies.push(typeof init?.body === "string" ? init.body : "");
       const payload =
         bodies.length === 1
@@ -1377,4 +1384,55 @@ describe("ai provider config and fallback behavior", () => {
       capture.restore();
     }
   });
+});
+
+test("uses the verified no-reasoning title route while keeping fit on the primary model", async () => {
+  const capture = mockCapturingJsonFetch({
+    output: [
+      {
+        type: "message",
+        content: [{ type: "output_text", text: '{"keep":{"0":1}}' }],
+      },
+    ],
+  });
+  try {
+    const client = createJobFinderAiClientFromEnvironment({
+      NESTOR_AI_API_KEY: "test-key",
+      NESTOR_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
+      NESTOR_AI_MODEL: "muse-spark-1.3-contributor",
+      NESTOR_AI_API_MODE: "responses",
+      NESTOR_AI_STREAMING: "false",
+    });
+    await client.chatWithTools!(
+      [{ role: "user", content: "Classify title" }],
+      [],
+      {
+        reasoningTask: "listing_screen",
+        jsonSchema: {
+          name: "screen",
+          schema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+    );
+    expect(JSON.parse(capture.getCapturedBody())).toMatchObject({
+      model: "gpt-6-luna",
+      reasoning: { effort: "none" },
+      text: { format: { type: "json_schema", strict: true } },
+    });
+    await client.chatWithTools!(
+      [{ role: "user", content: "Fit evidence" }],
+      [],
+      { reasoningTask: "fit_batch" },
+    );
+    expect(JSON.parse(capture.getCapturedBody())).toMatchObject({
+      model: "muse-spark-1.3-contributor",
+      reasoning: { effort: "low" },
+    });
+  } finally {
+    capture.restore();
+  }
 });

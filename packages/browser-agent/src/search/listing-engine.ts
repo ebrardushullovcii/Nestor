@@ -1,3 +1,8 @@
+import {
+  clearRoleMatch,
+  professionEvidence,
+  roleDutyEvidence,
+} from "./listing-screening";
 import { listingClosedReason } from "./listing-status";
 import { z } from "zod";
 import { DiscoveryPageReadError, JOB_FIT_BANDS } from "@nestor/contracts";
@@ -32,7 +37,7 @@ import { collectPublicFeed, publicBoardFeed } from "./public-board-feed";
 export interface ListingEngineModel {
   client: LLMClient;
   signal?: AbortSignal;
-  onUsage?: (usage: ModelTokenUsage) => void;
+  onUsage?: (usage: ModelTokenUsage, stage: BrowserAgentReasoningTask) => void;
 }
 
 async function mapConcurrent<T, R>(
@@ -110,7 +115,7 @@ async function ask<Output, Input>(
       ...(jsonSchema ? { jsonSchema } : {}),
     },
   );
-  if (reply.usage) model.onUsage?.(reply.usage);
+  if (reply.usage) model.onUsage?.(reply.usage, reasoningTask);
   const raw = (reply.content ?? "")
     .trim()
     .replace(/^```(?:json)?\s*/iu, "")
@@ -122,7 +127,7 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    4,
+    5,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
@@ -295,7 +300,7 @@ export async function collectSource(
     };
   }
   notes.push(
-    `${cards.size} listings collected from ${visited.size} HTTP pages; ${complete && recognized ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected from ${visited.size} pages; ${complete && recognized ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],
@@ -345,42 +350,105 @@ export async function screenCards(
     title.toLowerCase().replace(/\s+/gu, " ").trim();
   const allTitles = [...new Set(fresh.map((card) => titleKey(card.title)))];
   const decisions = input.decisions ?? new Map<string, boolean>();
+  for (const title of allTitles)
+    if (!decisions.has(title) && clearRoleMatch(title, input.goals))
+      decisions.set(title, true);
   const titles = allTitles.filter((title) => !decisions.has(title));
+  const evidence = new Map(
+    fresh.map((card) => [titleKey(card.title), professionEvidence(card)]),
+  );
   const unrelated = new Set(
     allTitles.filter((title) => decisions.get(title) === false),
   );
   const failedTitles = new Map<string, string>();
-  await mapConcurrent(batches(titles, 250), 3, async (titles) => {
+  const judge = async (titles: string[], repair = true): Promise<void> => {
     try {
       const answer = await ask(
         input,
-        'Screen actual professions against the requested kinds of work; reject only clear mismatches. Return {"unrelated":[integer title indices]} for ONLY clearly different professions. Every omitted title remains a plausible match for full-text fit. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the requested related work and genuinely overlapping functions (Fullstack includes Backend duties; Business Intelligence includes Data Analysis), wide_net also adds genuinely transferable neighboring professions. Apply profession examples ONLY when that profession is requested. If the goals include Backend or Platform Engineering, generic Software Engineer and Engineering Lead titles are ambiguous matches to keep for reading, and distributed systems, storage, cloud infrastructure, SRE and DevOps overlap. If the goals are Data Analyst or Business Intelligence, generic Software Engineer, infrastructure engineering and software-management roles are different professions and must be rejected unless the card explicitly describes analytical/reporting duties. A broad word such as data, analytics or research does not by itself establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
+        'Classify each title by actual day-to-day profession, then compare it to the requested work. Return {"keep":{"0":1,"1":0,...}}, every title index exactly once: 1 for the requested profession, overlapping duties or genuinely ambiguous titles; 0 for clearly different functions. target_roles includes synonyms; related_roles also includes the requested related professions; wide_net adds transferable neighbors. Shared industry or technology is not shared duties. Backend/platform includes backend software, fullstack, APIs, distributed systems/storage, cloud infrastructure, SRE/DevOps and ambiguous software engineer titles. A product, domain or team name alone does not establish a different engineering function; do not infer frontend merely from an app/product name. Explicit graphics/frontend/mobile/embedded/kernel/hardware/QA, helpdesk, presales, evangelism and people-management functions are different unless the title/card shows overlapping backend/platform duties. Software maintenance/sustaining and distributed-systems software testing can contain backend duties. Engineering Lead is ambiguous; Engineering Manager normally manages people rather than doing IC work. Data Analyst/BI includes hands-on reporting/analytics in operations, sales/revenue, finance or people analytics, and analytics engineering/data science where duties overlap; infrastructure/software engineering, research scientists developing ML/AI models, and executive/department leadership are different functions. An analytics manager can still analyze; a broad word data/analytics/research alone does not establish overlap. These examples apply only to their respective requested professions. Unknown/generic roles go to full-text judgment. Never discard for location, work mode, pay, hours, contract, seniority or low expected fit. Senior Data Analyst is the same profession as Data Analyst. Judge languages naturally. No explanations.',
+
         {
           goals: input.goals,
           titles: titles.map((title, index) => [
             index,
             title,
-            fresh
-              .find((card) => titleKey(card.title) === title)
-              ?.text.slice(0, 700) ?? "",
+            evidence.get(title) || undefined,
           ]),
         },
-        z.object({ unrelated: z.array(z.number().int().nonnegative()) }),
+        z.object({
+          keep: z.record(z.union([z.literal(0), z.literal(1)])),
+        }),
         2000,
         "listing_screen",
+        {
+          name: "role_screen",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["keep"],
+            properties: {
+              keep: {
+                type: "object",
+                additionalProperties: false,
+                required: titles.map((_, index) => String(index)),
+                properties: Object.fromEntries(
+                  titles.map((_, index) => [
+                    String(index),
+                    { type: "integer", enum: [0, 1] },
+                  ]),
+                ),
+              },
+            },
+          },
+        },
       );
-      for (const index of answer.unrelated) {
-        const title = titles[index];
-        if (!title) throw new Error("Role screen returned an unknown title.");
-        unrelated.add(title);
+      if (
+        Object.keys(answer.keep).length !== titles.length ||
+        titles.some((_, index) => answer.keep[index] === undefined)
+      )
+        throw new z.ZodError([
+          {
+            code: "custom",
+            path: ["keep"],
+            message: "Role screen did not cover every title exactly once.",
+          },
+        ]);
+      for (const [index, keep] of Object.entries(answer.keep)) {
+        if (!keep) unrelated.add(titles[Number(index)]);
+        else unrelated.delete(titles[Number(index)]);
       }
       for (const title of titles) decisions.set(title, !unrelated.has(title));
     } catch (error) {
       input.signal?.throwIfAborted();
+      if (
+        repair &&
+        titles.length > 20 &&
+        (error instanceof SyntaxError || error instanceof z.ZodError)
+      ) {
+        await mapConcurrent(batches(titles, 20), 2, (batch) =>
+          judge(batch, false),
+        );
+        return;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       for (const title of titles) failedTitles.set(title, reason);
     }
+  };
+  await mapConcurrent(batches(titles, 120), 3, (batch) => judge(batch));
+  const secondLook = titles.filter((title) => {
+    if (!unrelated.has(title)) return false;
+    const body = fresh
+      .filter((card) => titleKey(card.title) === title)
+      .map((card) => roleDutyEvidence(card, input.goals))
+      .find(Boolean);
+    if (!body) return false;
+    evidence.set(
+      title,
+      `Role-duty evidence from the full provider listing: ${body}`,
+    );
+    return true;
   });
+  await mapConcurrent(batches(secondLook, 40), 2, (batch) => judge(batch));
   const seen = fresh
     .filter((card) => unrelated.has(titleKey(card.title)))
     .map((card) => ({
@@ -404,6 +472,22 @@ export async function screenCards(
     seen,
     skipped: input.cards.length - fresh.length,
   };
+}
+
+function sharedPassages() {
+  const passages: string[] = [],
+    indices = new Map<string, number>();
+  const encode = (text: string) =>
+    text.split(/\n\s*\n/u).map((paragraph) => {
+      let id = indices.get(paragraph);
+      if (id === undefined) {
+        id = passages.length;
+        passages.push(paragraph);
+        indices.set(paragraph, id);
+      }
+      return id;
+    });
+  return { passages, encode };
 }
 
 const fieldsSchema = z.object({
@@ -465,6 +549,17 @@ export async function readListings(
               : await input.readPage(candidate.url, {
                   signal: input.signal,
                   rendered: input.lane === "browser",
+                  ...(input.lane === "browser"
+                    ? {
+                        ready: (html: string) => {
+                          const body = readListingHtml(html, candidate.title);
+                          return (
+                            body.detailHeading &&
+                            body.text.length > candidate.title.length + 80
+                          );
+                        },
+                      }
+                    : {}),
                 }));
           if (!page || !blockedByCheck(alternative.html)) {
             card = candidate;
@@ -677,38 +772,65 @@ export async function readListings(
       salaryText: read.structured?.salaryText ?? null,
     });
   }
-  await mapConcurrent(
-    batches(uncertain, 20, (read) => read.body.text.length, 50000),
-    3,
-    async (batch) => {
-      const answer = await ask(
-        input,
-        'Read listing metadata faithfully. A sign-in page, talent pool or results list is not one vacancy: return empty title and company for those. A closed vacancy is still a listing: set closed=true only for explicit evidence that applications have ended, in any language. Do not confuse an old posting date with closure. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean}]}. Use one result for every id. Unknown fields are null or empty strings/arrays. Listing card and full page are evidence; preserve employer and reference/requisition numbers exactly. Do not assess fit and do not summarize the body.',
-        {
-          listings: batch.map((read, id) => ({
-            id,
-            title: read.card.title,
-            card: read.card.text,
-            fullText: read.body.text,
-            published: read.structured,
-          })),
-        },
-        z.object({ jobs: z.array(fieldsSchema) }),
-        Math.max(2000, batch.length * 220),
-        "page_read",
+  const metadataEvidence = (text: string): string => {
+    const paragraphs = text.split(/\n\s*\n/u);
+    const facts = paragraphs.filter(
+      (line) =>
+        line.length <= 800 &&
+        /(?:company|employer|join|location|remote|hybrid|on.?site|salary|compensation|pay range|requisition|reference|full.time|part.time|contract|closed|applications|standort|gehalt|arbeitgeber)/iu.test(
+          line,
+        ),
+    );
+    return [
+      ...new Set([text.slice(0, 1600), ...facts, text.slice(-1000)]),
+    ].join("\n\n");
+  };
+  const readMetadata = async (batch: Read[], full = false): Promise<void> => {
+    const { passages, encode } = sharedPassages();
+    const answer = await ask(
+      input,
+      'Read listing metadata faithfully from these excerpts and published facts. Each listing references the shared passages array by index, in order. Do not invent missing identity: return empty company when the actual hiring employer is unclear, so the complete text can be checked. A sign-in page, talent pool or results list is not one vacancy: return empty title and company. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Do not assess fit or summarize the body.',
+      {
+        passages,
+        listings: batch.map((read, id) => ({
+          id,
+          title: read.card.title,
+          url: read.card.url,
+          card: full ? read.card.text : read.card.text.slice(0, 800),
+          passages: encode(
+            full ? read.body.text : metadataEvidence(read.body.text),
+          ),
+          published: read.structured
+            ? {
+                title: read.structured.title,
+                company: read.structured.company,
+                location: read.structured.location,
+                workModeHints: read.structured.workModeHints,
+                employmentType: read.structured.employmentType,
+                salaryText: read.structured.salaryText,
+              }
+            : null,
+        })),
+      },
+      z.object({ jobs: z.array(fieldsSchema) }),
+      Math.max(2000, batch.length * 220),
+      "page_read",
+    );
+    const byId = new Map(answer.jobs.map((job) => [job.id, job]));
+    if (
+      byId.size !== batch.length ||
+      answer.jobs.length !== batch.length ||
+      answer.jobs.some((job) => !batch[job.id])
+    )
+      throw new Error(
+        "Metadata response did not cover each listing exactly once.",
       );
-      const byId = new Map(answer.jobs.map((job) => [job.id, job]));
-      if (
-        byId.size !== batch.length ||
-        answer.jobs.length !== batch.length ||
-        answer.jobs.some((job) => !batch[job.id])
-      )
-        throw new Error(
-          "Metadata response did not cover each listing exactly once.",
-        );
-      for (const [id, read] of batch.entries()) {
-        const fields = byId.get(id);
-        if (!fields || !fields.title || !fields.company) {
+    const missing: Read[] = [];
+    for (const [id, read] of batch.entries()) {
+      const fields = byId.get(id)!;
+      if (!fields.title || !fields.company) {
+        if (!full) missing.push(read);
+        else
           failures.push({
             url: read.card.url,
             reason: read.needsYou
@@ -716,21 +838,31 @@ export async function readListings(
               : "The listing's title or hiring employer could not be read.",
             ...(read.needsYou ? { needsYou: true } : {}),
           });
-          continue;
-        }
-        append(read, {
-          title: fields.title,
-          company: fields.company,
-          location: fields.location,
-          workModes: fields.workModes,
-          sourceJobId: fields.sourceJobId,
-          employmentType: fields.employmentType,
-          seniority: fields.seniority,
-          salaryText: fields.salaryText,
-          closed: fields.closed,
-        });
+        continue;
       }
-    },
+      append(read, {
+        title: fields.title,
+        company: fields.company,
+        location: fields.location,
+        workModes: fields.workModes,
+        sourceJobId: fields.sourceJobId,
+        employmentType: fields.employmentType,
+        seniority: fields.seniority,
+        salaryText: fields.salaryText,
+        closed: fields.closed,
+      });
+    }
+    if (missing.length) await readMetadata(missing, true);
+  };
+  await mapConcurrent(
+    batches(
+      uncertain,
+      32,
+      (read) => metadataEvidence(read.body.text).length,
+      40000,
+    ),
+    3,
+    (batch) => readMetadata(batch),
   );
   return { jobs, failures };
 }
@@ -783,6 +915,32 @@ function fitResponseSchema(ids: readonly number[]) {
   };
 }
 
+const storageFields = new Set([
+  "id",
+  "isDraft",
+  "companyUrl",
+  "projectUrl",
+  "repositoryUrl",
+  "caseStudyUrl",
+]);
+/** Empty schema defaults and storage ids carry no candidate evidence. */
+function compactFacts(value: unknown): unknown {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (Array.isArray(value)) {
+    const items = value.map(compactFacts).filter((item) => item !== undefined);
+    return items.length ? items : undefined;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value).flatMap(([key, fact]) => {
+      if (storageFields.has(key)) return [];
+      const compact = compactFacts(fact);
+      return compact === undefined ? [] : [[key, compact]];
+    });
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+  return value;
+}
+
 /** Caller passes merged rows with no fit. One complete judgment, reused by shortlist and resume writing. */
 export async function fitJobs(
   input: ListingEngineModel & SearchFitInput,
@@ -811,27 +969,16 @@ export async function fitJobs(
   await mapConcurrent(
     batches(
       input.jobs.filter((job) => job.fit === null),
-      32,
+      48,
       (job) => job.description.length,
-      180000,
+      360000,
     ),
     6,
     async (batch) => {
       const judge = async (batch: JobDetail[]) => {
         // Lossless dictionary: repeated company/legal paragraphs and identical
         // descriptions across locations are sent once, never cut from the job.
-        const passages: string[] = [],
-          indices = new Map<string, number>();
-        const fullText = (text: string) =>
-          text.split(/\n\s*\n/u).map((paragraph) => {
-            let id = indices.get(paragraph);
-            if (id === undefined) {
-              id = passages.length;
-              passages.push(paragraph);
-              indices.set(paragraph, id);
-            }
-            return id;
-          });
+        const { passages, encode: fullText } = sharedPassages();
         const listings = batch.map((job) => ({
           id: job.id,
           title: job.title,
@@ -847,7 +994,7 @@ export async function fitJobs(
           input,
           `Judge each job once from the full listing and candidate evidence. Each listing references the shared passages array by index, in order; together they are its complete unabridged text. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON with one key per job id: {"fits":{"123":{"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}}}. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
           {
-            person,
+            person: compactFacts(person),
             goals: input.goals,
             request: input.request,
             passages,
