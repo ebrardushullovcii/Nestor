@@ -168,11 +168,7 @@ describe("ProfileListEditor", () => {
       parseProfileLocationDraft(
         "Chicago, IL; Manchester, England\nPrishtina, Kosovo",
       ),
-    ).toEqual([
-      "Chicago, IL",
-      "Manchester, England",
-      "Prishtina, Kosovo",
-    ]);
+    ).toEqual(["Chicago, IL", "Manchester, England", "Prishtina, Kosovo"]);
   });
 
   it("adds multiple locations without turning the region into another place", () => {

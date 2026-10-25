@@ -95,7 +95,9 @@ test("editing one generated line has only that line checked again", async () => 
     profile: seed.profile,
   });
 
-  expect(check.mock.calls.map(([input]) => input.claims.length)).toEqual([3, 1]);
+  expect(check.mock.calls.map(([input]) => input.claims.length)).toEqual([
+    3, 1,
+  ]);
   expect(check.mock.calls[1]?.[0].claims.map((claim) => claim.text)).toEqual([
     "Per-line cost synthetic line two, edited by the person.",
   ]);
@@ -228,9 +230,9 @@ test("the live preview asks the model nothing; saving checks the new wording onc
       editBullet(saved, 0, "Preview-cost typed abc, final."),
     );
     expect(check.mock.calls.length).toBe(callsAfterSave + 1);
-    expect(check.mock.calls.at(-1)?.[0].claims.map((claim) => claim.text)).toEqual([
-      "Preview-cost typed abc, final.",
-    ]);
+    expect(
+      check.mock.calls.at(-1)?.[0].claims.map((claim) => claim.text),
+    ).toEqual(["Preview-cost typed abc, final."]);
   } finally {
     await workspaceService.shutdown();
   }

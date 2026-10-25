@@ -34,7 +34,8 @@ test("recomputes every time while an element can still change", () => {
 
 type Row = { readonly id: string; readonly score: number };
 const byScoreThenId = (left: Row, right: Row) =>
-  right.score - left.score || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  right.score - left.score ||
+  (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 
 test("merges a few changed rows into the last order exactly as a full sort would", () => {
   let seed = 7;
@@ -74,7 +75,9 @@ test("sorts in full when many rows changed or rows can still change", () => {
   );
   const rank = memoizeSortedBySameElements(byScoreThenId);
   rank(rows);
-  const replaced = rows.map((item) => Object.freeze({ ...item, score: 9 - item.score }));
+  const replaced = rows.map((item) =>
+    Object.freeze({ ...item, score: 9 - item.score }),
+  );
   expect(rank(replaced)).toEqual([...replaced].sort(byScoreThenId));
   const editable = rows.map((item) => ({ ...item }));
   expect(rank(editable)).toEqual([...editable].sort(byScoreThenId));

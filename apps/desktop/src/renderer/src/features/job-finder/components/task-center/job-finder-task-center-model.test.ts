@@ -1582,7 +1582,9 @@ describe("buildJobFinderTaskCenterModel", () => {
       "2026-08-28T10:03:00.000Z",
       "outcome_uncertain",
     );
-    const build = (results: JobFinderRendererWorkspaceSnapshot["applyJobResults"]) =>
+    const build = (
+      results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
+    ) =>
       buildJobFinderTaskCenterModel({
         workspace: createWorkspace({ applyJobResults: results }),
         isDiscoveryPending: false,

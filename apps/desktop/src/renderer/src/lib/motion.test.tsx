@@ -22,10 +22,7 @@ function List(props: { ids: readonly string[] }) {
 
 const animate = vi.fn();
 function setReducedMotion(reduce: boolean) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockReturnValue({ matches: reduce }),
-  );
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: reduce }));
 }
 function animatedRows() {
   return (animate.mock.contexts as Element[]).map((element) =>

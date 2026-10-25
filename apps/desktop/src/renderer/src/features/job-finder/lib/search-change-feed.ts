@@ -234,7 +234,9 @@ export async function publishLiveFindJobsCounts(
   workspace: JobFinderRendererWorkspaceSnapshot,
 ): Promise<void> {
   const queries =
-    typeof window === "undefined" ? undefined : window.nestor?.jobFinder?.queries;
+    typeof window === "undefined"
+      ? undefined
+      : window.nestor?.jobFinder?.queries;
   if (!queries) return;
   const planId = workspace.activeCampaignId;
   try {

@@ -171,8 +171,7 @@ describe("apply job result lineage conformance", () => {
       // The file repository keeps the invariant across a reopen.
       const reopenedRepository = await temp.createRepository();
       try {
-        const reopenedResults =
-          await reopenedRepository.listApplyJobResults();
+        const reopenedResults = await reopenedRepository.listApplyJobResults();
         expect(reopenedResults).toEqual(fileOutcome.results);
       } finally {
         await reopenedRepository.close();

@@ -21,7 +21,8 @@ function largeSyntheticProfile() {
   );
   const experiences = Array.from({ length: 10 }, (_, index) => ({
     id: `experience_${index}`,
-    title: index === 0 ? "Working Student, Data Analytics" : `Data Analyst ${index}`,
+    title:
+      index === 0 ? "Working Student, Data Analytics" : `Data Analyst ${index}`,
     companyName: `Example Analytics ${index} GmbH`,
     location: "Berlin, Germany",
     startDate: `${2014 + index}-01`,
@@ -105,7 +106,10 @@ function largeSyntheticProfile() {
     })),
     targetRoles: ["Data Analyst", "Junior Data Scientist"],
     locations: ["Berlin, Germany"],
-    skills: Array.from({ length: 40 }, (_, index) => `Analytics skill ${index}`),
+    skills: Array.from(
+      { length: 40 },
+      (_, index) => `Analytics skill ${index}`,
+    ),
     experiences,
     education: [
       {
@@ -224,7 +228,9 @@ test("the search prompt leaves out the resume and role write-ups and shares one 
   expect(first.system).not.toContain("Built report 0");
   expect(first.system).not.toContain("Owned the weekly reporting cycle");
   // What fit needs to cast the net stays.
-  expect(first.system).toContain("Data Analyst 1 · at Example Analytics 1 GmbH");
+  expect(first.system).toContain(
+    "Data Analyst 1 · at Example Analytics 1 GmbH",
+  );
   expect(first.system).toContain("Data analyst and data science student");
   expect(first.system).toContain("EU Blue Card");
   expect(first.system).toContain('"Part-time analytics roles"');

@@ -286,7 +286,8 @@ describe("selectDiscoveryBudgetPostings recency parity", () => {
   });
 
   test("keeps the preferred-source tie-break ahead of recency", () => {
-    const preferredUrl = "https://example.com/jobs/preferred-recently-discovered";
+    const preferredUrl =
+      "https://example.com/jobs/preferred-recently-discovered";
     const selected = selectIds({
       postings: [
         makePosting({

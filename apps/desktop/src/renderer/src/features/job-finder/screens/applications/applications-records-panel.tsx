@@ -575,22 +575,22 @@ export function ApplicationsRecordsPanel({
                     tone: "warning" as const,
                   }
                 : applyState
-                ? {
-                    label: applyState.title,
-                    tone:
-                      applyState.kind === "applied"
-                        ? ("positive" as const)
-                        : applyState.cancelledByPerson
-                          ? ("muted" as const)
-                          : applyState.formClosed
-                            ? ("warning" as const)
-                            : applyState.kind === "could_not_apply"
-                              ? ("critical" as const)
-                              : applyState.kind === "needs_you"
-                                ? ("warning" as const)
-                                : ("active" as const),
-                  }
-                : getApplicationStagePresentation(record);
+                  ? {
+                      label: applyState.title,
+                      tone:
+                        applyState.kind === "applied"
+                          ? ("positive" as const)
+                          : applyState.cancelledByPerson
+                            ? ("muted" as const)
+                            : applyState.formClosed
+                              ? ("warning" as const)
+                              : applyState.kind === "could_not_apply"
+                                ? ("critical" as const)
+                                : applyState.kind === "needs_you"
+                                  ? ("warning" as const)
+                                  : ("active" as const),
+                    }
+                  : getApplicationStagePresentation(record);
             // One status word per row. The stage badge is it; a second badge
             // restating the same state a different way ("Needs follow-up"
             // beside "Needs you") is the duplicate pill that made every row

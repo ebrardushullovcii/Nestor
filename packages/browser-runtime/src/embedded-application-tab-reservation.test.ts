@@ -196,7 +196,13 @@ test("taking a tab never waits and counts what is already taken", () => {
   // The host has room while working tabs plus taken tabs stay under 16.
   const hasCapacity = (reserved: number) => working + reserved < 16;
   const take = (spare = 0) =>
-    takeEmbeddedApplicationTab(context, () => working, () => working, hasCapacity, spare);
+    takeEmbeddedApplicationTab(
+      context,
+      () => working,
+      () => working,
+      hasCapacity,
+      spare,
+    );
   const first = take();
   expect(first).toBeTypeOf("function");
   expect(take()).toBeNull();

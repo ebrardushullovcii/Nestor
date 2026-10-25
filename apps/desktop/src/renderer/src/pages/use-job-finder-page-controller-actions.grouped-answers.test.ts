@@ -38,8 +38,9 @@ describe("buildJobFinderPageContext grouped manual-answer handlers", () => {
   it("projects a grouped answer through the action runner with its own pending scope", async () => {
     const projectGroupedManualAnswer =
       vi.fn<JobFinderShellActions["projectGroupedManualAnswer"]>();
-    let resolveProject: (value: JobFinderRendererWorkspaceSnapshot) => void = () =>
-      undefined;
+    let resolveProject: (
+      value: JobFinderRendererWorkspaceSnapshot,
+    ) => void = () => undefined;
     projectGroupedManualAnswer.mockReturnValue(
       new Promise((resolve) => {
         resolveProject = resolve;

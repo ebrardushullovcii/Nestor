@@ -13,9 +13,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  DISCOVERY_RESULTS_PAGE_SIZE,
-} from "./discovery-results-panel";
+import { DISCOVERY_RESULTS_PAGE_SIZE } from "./discovery-results-panel";
 import {
   DiscoveryResultsPanelWithJobs,
   flushFindJobsQueries,
@@ -253,7 +251,10 @@ describe("DiscoveryResultsPanel workspace scale", () => {
       },
     });
 
-    const { container } = await renderResults([catalogJob, authoritativeJob], null);
+    const { container } = await renderResults(
+      [catalogJob, authoritativeJob],
+      null,
+    );
 
     expect(screen.getByLabelText("Overall fit: not assessed")).toBeTruthy();
     expect(screen.getByText("Fit not assessed")).toBeTruthy();

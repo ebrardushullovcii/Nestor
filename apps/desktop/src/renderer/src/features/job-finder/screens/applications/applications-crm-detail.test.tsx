@@ -251,7 +251,9 @@ describe("ApplicationsCrmDetail", () => {
       screen
         .getByRole("button", { name: "Export this application (CSV)" })
         .getAttribute("title"),
-    ).toContain("Exports contain these tracking facts, not submission evidence");
+    ).toContain(
+      "Exports contain these tracking facts, not submission evidence",
+    );
     fireEvent.change(screen.getByLabelText("Stage"), {
       target: { value: "applied" },
     });

@@ -446,7 +446,10 @@ export function DiscoveryFiltersPanel({
       className="surface-panel-shell relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-(--radius-panel) border border-(--surface-panel-border) xl:h-full xl:min-h-0"
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-(--surface-panel-border) px-4 py-2">
-        <h2 className="py-1 text-(--text-headline)" id={searchControlsHeadingId}>
+        <h2
+          className="py-1 text-(--text-headline)"
+          id={searchControlsHeadingId}
+        >
           What this search looks for
         </h2>
         {headerAction}

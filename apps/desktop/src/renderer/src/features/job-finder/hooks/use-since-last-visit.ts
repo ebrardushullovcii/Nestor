@@ -56,8 +56,7 @@ export function useSinceLastVisit(
       const next = readVisit(key);
       setPreviousVisitEnd((current) =>
         jobsRef.current.every(
-          (job) =>
-            isNewSinceVisit(job, current) === isNewSinceVisit(job, next),
+          (job) => isNewSinceVisit(job, current) === isNewSinceVisit(job, next),
         )
           ? current
           : next,

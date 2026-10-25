@@ -4166,8 +4166,7 @@ assert(
         .JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES === "0" &&
       testerHardening.env
         .JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC === "0" &&
-      testerHardening.env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
-        "0",
+      testerHardening.env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES === "0",
     "Production tester environment must isolate user data and force browser agent/live AI/intermediate writes/ATS writes/diagnostics off.",
   );
   assert(
@@ -4627,9 +4626,7 @@ assert(
   );
   assert(
     testerEnvironmentSource.length > 0 &&
-      testerEnvironmentSource.includes(
-        "delete env.NESTOR_ENABLE_TEST_API",
-      ) &&
+      testerEnvironmentSource.includes("delete env.NESTOR_ENABLE_TEST_API") &&
       !testerEnvironmentSource.includes('NESTOR_ENABLE_TEST_API = "1"') &&
       !testerEnvironmentSource.includes("NESTOR_AI_API_KEY"),
     "Production tester environment builder must prove test API and provider keys stay absent by construction.",

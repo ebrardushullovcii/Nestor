@@ -7,17 +7,15 @@ describe("outcome event source lineage migration", () => {
   test("backfills the saved source from job lineage and names the unknown rest", () => {
     const database = new DatabaseSync(":memory:");
     runMigrations(database);
-    database
-      .prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)")
-      .run(
-        "job_1",
-        JSON.stringify({
-          id: "job_1",
-          provenance: [
-            { targetId: "target_boards", startingUrl: "https://example.test" },
-          ],
-        }),
-      );
+    database.prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)").run(
+      "job_1",
+      JSON.stringify({
+        id: "job_1",
+        provenance: [
+          { targetId: "target_boards", startingUrl: "https://example.test" },
+        ],
+      }),
+    );
     database
       .prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)")
       .run("job_2", JSON.stringify({ id: "job_2", provenance: [] }));
@@ -71,15 +69,13 @@ describe("outcome event source lineage migration", () => {
   test("leaves an already recorded source lineage alone", () => {
     const database = new DatabaseSync(":memory:");
     runMigrations(database);
-    database
-      .prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)")
-      .run(
-        "job_1",
-        JSON.stringify({
-          id: "job_1",
-          provenance: [{ targetId: "target_new" }],
-        }),
-      );
+    database.prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)").run(
+      "job_1",
+      JSON.stringify({
+        id: "job_1",
+        provenance: [{ targetId: "target_new" }],
+      }),
+    );
     database
       .prepare("INSERT INTO singleton_state (key, value) VALUES (?, ?)")
       .run(

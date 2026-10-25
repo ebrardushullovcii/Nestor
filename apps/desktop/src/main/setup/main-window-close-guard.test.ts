@@ -14,8 +14,10 @@ interface SentRequest {
 
 function createTarget(id: number, sentLog: SentRequest[]) {
   const state = { destroyed: false, sendError: null as Error | null };
-  const directSends: Array<{ channel: string; request: { requestId: string } }> =
-    [];
+  const directSends: Array<{
+    channel: string;
+    request: { requestId: string };
+  }> = [];
   const target: MainWindowCloseTarget = {
     id,
     isDestroyed: () => state.destroyed,
@@ -47,9 +49,7 @@ function createHarness(options?: { watchdogTimeoutMs?: number }) {
     sendCloseRequest: (target, request) => {
       target.send(MAIN_WINDOW_CLOSE_REQUEST_CHANNEL, request);
     },
-    ...(watchdogTimeoutMs === undefined
-      ? {}
-      : { watchdogTimeoutMs }),
+    ...(watchdogTimeoutMs === undefined ? {} : { watchdogTimeoutMs }),
   });
   const sentRequests: SentRequest[] = [];
   let current: ReturnType<typeof createTarget> | null = null;

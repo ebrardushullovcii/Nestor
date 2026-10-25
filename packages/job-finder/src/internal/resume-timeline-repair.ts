@@ -74,9 +74,7 @@ function normalizedIdentity(record: CandidateExperience): string {
 
 function comparableRecord(record: CandidateExperience): string {
   return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(record).filter(([key]) => key !== "id"),
-    ),
+    Object.fromEntries(Object.entries(record).filter(([key]) => key !== "id")),
   );
 }
 
@@ -181,7 +179,9 @@ function canMergeSplitRecords(
     "peopleManagementScope",
     "ownershipScope",
   ];
-  return scalarKeys.every((key) => JSON.stringify(left[key]) === JSON.stringify(right[key]));
+  return scalarKeys.every(
+    (key) => JSON.stringify(left[key]) === JSON.stringify(right[key]),
+  );
 }
 
 function mergeSplitRecords(
@@ -265,7 +265,11 @@ export function deriveResumeTimelineRepairProposals(input: {
   }
 
   for (let leftIndex = 0; leftIndex < sources.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < sources.length; rightIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < sources.length;
+      rightIndex += 1
+    ) {
       const left = sources[leftIndex];
       const right = sources[rightIndex];
       if (!left || !right) {
@@ -306,16 +310,22 @@ export function deriveResumeTimelineRepairProposals(input: {
       (source) =>
         parseIsoMonth(source.record.startDate) !== null &&
         parseIsoMonth(source.record.endDate) !== null &&
-        parseIsoMonth(source.record.startDate)! <= parseIsoMonth(source.record.endDate)!,
+        parseIsoMonth(source.record.startDate)! <=
+          parseIsoMonth(source.record.endDate)!,
     )
     .sort(
       (left, right) =>
-        parseIsoMonth(left.record.startDate)! - parseIsoMonth(right.record.startDate)!,
+        parseIsoMonth(left.record.startDate)! -
+        parseIsoMonth(right.record.startDate)!,
     );
   for (let index = 1; index < chronological.length; index += 1) {
     const previous = chronological[index - 1];
     const current = chronological[index];
-    if (!previous || !current || normalizedIdentity(previous.record) === normalizedIdentity(current.record)) {
+    if (
+      !previous ||
+      !current ||
+      normalizedIdentity(previous.record) === normalizedIdentity(current.record)
+    ) {
       continue;
     }
     const previousEnd = parseIsoMonth(previous.record.endDate)!;
@@ -386,7 +396,9 @@ function applyExperienceDelta(input: {
     }
     const current = next[currentIndex]!;
     const patched: Record<string, unknown> = { ...current };
-    for (const key of Object.keys(fromRecord) as Array<keyof CandidateExperience>) {
+    for (const key of Object.keys(fromRecord) as Array<
+      keyof CandidateExperience
+    >) {
       if (sameValue(fromRecord[key], toRecord[key])) {
         continue;
       }
@@ -428,7 +440,9 @@ export function applyResumeTimelineRepairAction(input: {
   profile: CandidateProfile;
   proposals: ResumeTimelineRepairProposal[];
 } {
-  const proposal = input.proposals.find((entry) => entry.id === input.proposalId);
+  const proposal = input.proposals.find(
+    (entry) => entry.id === input.proposalId,
+  );
   if (!proposal) {
     throw new Error(`Unknown timeline repair proposal '${input.proposalId}'.`);
   }
@@ -439,7 +453,9 @@ export function applyResumeTimelineRepairAction(input: {
 
   if (input.action === "accept") {
     if (proposal.status !== "pending") {
-      throw new Error(`Timeline proposal '${proposal.title}' must be pending before it can be accepted.`);
+      throw new Error(
+        `Timeline proposal '${proposal.title}' must be pending before it can be accepted.`,
+      );
     }
     nextProfile = CandidateProfileSchema.parse({
       ...nextProfile,
@@ -454,13 +470,17 @@ export function applyResumeTimelineRepairAction(input: {
     resolvedAt = input.occurredAt;
   } else if (input.action === "reject") {
     if (proposal.status !== "pending") {
-      throw new Error(`Timeline proposal '${proposal.title}' must be pending before it can be rejected.`);
+      throw new Error(
+        `Timeline proposal '${proposal.title}' must be pending before it can be rejected.`,
+      );
     }
     nextStatus = "rejected";
     resolvedAt = input.occurredAt;
   } else {
     if (proposal.status === "pending") {
-      throw new Error(`Timeline proposal '${proposal.title}' has no action to undo.`);
+      throw new Error(
+        `Timeline proposal '${proposal.title}' has no action to undo.`,
+      );
     }
     if (proposal.status === "accepted") {
       nextProfile = CandidateProfileSchema.parse({

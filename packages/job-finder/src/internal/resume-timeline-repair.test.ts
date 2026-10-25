@@ -73,16 +73,66 @@ describe("resume timeline repair", () => {
   test("derives evidence-cited proposals for every planned timeline issue without inventing uncertain dates", () => {
     const records = [
       experience("reversed", { startDate: "2024-06", endDate: "2023-01" }),
-      experience("ambiguous", { companyName: "Beta", startDate: "03/04/2020", endDate: "05/06/2021" }),
-      experience("missing_employer", { companyName: null, title: "Designer", startDate: "2017-01", endDate: "2018-01" }),
-      experience("missing_title", { companyName: "Gamma", title: null, startDate: "2018-03", endDate: "2019-03" }),
-      experience("duplicate_a", { companyName: "Delta", title: "Lead", startDate: "2021-01", endDate: "2022-01", achievements: ["Led launch"] }),
-      experience("duplicate_b", { companyName: "Delta", title: "Lead", startDate: "2021-01", endDate: "2022-01", achievements: ["Led launch"] }),
-      experience("split_a", { companyName: "Echo", title: "Manager", startDate: "2022-02", endDate: "2023-02", achievements: ["Built team"] }),
-      experience("split_b", { companyName: "Echo", title: "Manager", startDate: "2022-02", endDate: "2023-02", achievements: ["Shipped platform"] }),
-      experience("early", { companyName: "Foxtrot", startDate: "2010-01", endDate: "2011-01" }),
-      experience("late", { companyName: "Golf", startDate: "2013-01", endDate: "2014-01" }),
-      experience("overlap", { companyName: "Hotel", startDate: "2013-06", endDate: "2015-01" }),
+      experience("ambiguous", {
+        companyName: "Beta",
+        startDate: "03/04/2020",
+        endDate: "05/06/2021",
+      }),
+      experience("missing_employer", {
+        companyName: null,
+        title: "Designer",
+        startDate: "2017-01",
+        endDate: "2018-01",
+      }),
+      experience("missing_title", {
+        companyName: "Gamma",
+        title: null,
+        startDate: "2018-03",
+        endDate: "2019-03",
+      }),
+      experience("duplicate_a", {
+        companyName: "Delta",
+        title: "Lead",
+        startDate: "2021-01",
+        endDate: "2022-01",
+        achievements: ["Led launch"],
+      }),
+      experience("duplicate_b", {
+        companyName: "Delta",
+        title: "Lead",
+        startDate: "2021-01",
+        endDate: "2022-01",
+        achievements: ["Led launch"],
+      }),
+      experience("split_a", {
+        companyName: "Echo",
+        title: "Manager",
+        startDate: "2022-02",
+        endDate: "2023-02",
+        achievements: ["Built team"],
+      }),
+      experience("split_b", {
+        companyName: "Echo",
+        title: "Manager",
+        startDate: "2022-02",
+        endDate: "2023-02",
+        achievements: ["Shipped platform"],
+      }),
+      experience("early", {
+        companyName: "Foxtrot",
+        startDate: "2010-01",
+        endDate: "2011-01",
+      }),
+      experience("late", {
+        companyName: "Golf",
+        startDate: "2013-01",
+        endDate: "2014-01",
+      }),
+      experience("overlap", {
+        companyName: "Hotel",
+        startDate: "2013-06",
+        endDate: "2015-01",
+      }),
     ];
 
     const proposals = deriveResumeTimelineRepairProposals({
@@ -104,11 +154,16 @@ describe("resume timeline repair", () => {
         "missing_title",
       ]),
     );
-    expect(proposals.every((proposal) => proposal.evidence.length > 0)).toBe(true);
+    expect(proposals.every((proposal) => proposal.evidence.length > 0)).toBe(
+      true,
+    );
     expect(
       proposals.every((proposal) =>
         proposal.evidence.every(
-          (entry) => entry.candidateId && entry.excerpt && entry.sourceBlockIds.length > 0,
+          (entry) =>
+            entry.candidateId &&
+            entry.excerpt &&
+            entry.sourceBlockIds.length > 0,
         ),
       ),
     ).toBe(true);
@@ -117,7 +172,9 @@ describe("resume timeline repair", () => {
       (proposal) => proposal.issueKind === "ambiguous_dates",
     );
     expect(ambiguous?.certainty).toBe("review_only");
-    expect(ambiguous?.proposedExperiences).toEqual(ambiguous?.beforeExperiences);
+    expect(ambiguous?.proposedExperiences).toEqual(
+      ambiguous?.beforeExperiences,
+    );
 
     const reversed = proposals.find(
       (proposal) => proposal.issueKind === "reversed_dates",
@@ -186,12 +243,21 @@ describe("resume timeline repair", () => {
       action: "accept",
       occurredAt: "2026-07-31T10:02:00.000Z",
     });
-    expect(accepted.profile.experiences.find((entry) => entry.id === "reversed")).toMatchObject({
+    expect(
+      accepted.profile.experiences.find((entry) => entry.id === "reversed"),
+    ).toMatchObject({
       startDate: "2023-01",
       endDate: "2024-06",
     });
-    expect(accepted.proposals.find((entry) => entry.id === reversedProposal!.id)?.status).toBe("accepted");
-    expect(accepted.proposals.find((entry) => entry.id === missingEmployerProposal!.id)?.status).toBe("pending");
+    expect(
+      accepted.proposals.find((entry) => entry.id === reversedProposal!.id)
+        ?.status,
+    ).toBe("accepted");
+    expect(
+      accepted.proposals.find(
+        (entry) => entry.id === missingEmployerProposal!.id,
+      )?.status,
+    ).toBe("pending");
 
     const rejected = applyResumeTimelineRepairAction({
       profile: accepted.profile,
@@ -200,7 +266,11 @@ describe("resume timeline repair", () => {
       action: "reject",
       occurredAt: "2026-07-31T10:03:00.000Z",
     });
-    expect(rejected.proposals.find((entry) => entry.id === missingEmployerProposal!.id)?.status).toBe("rejected");
+    expect(
+      rejected.proposals.find(
+        (entry) => entry.id === missingEmployerProposal!.id,
+      )?.status,
+    ).toBe("rejected");
 
     const undoRejected = applyResumeTimelineRepairAction({
       profile: rejected.profile,
@@ -209,7 +279,11 @@ describe("resume timeline repair", () => {
       action: "undo",
       occurredAt: "2026-07-31T10:04:00.000Z",
     });
-    expect(undoRejected.proposals.find((entry) => entry.id === missingEmployerProposal!.id)?.status).toBe("pending");
+    expect(
+      undoRejected.proposals.find(
+        (entry) => entry.id === missingEmployerProposal!.id,
+      )?.status,
+    ).toBe("pending");
 
     const undoAccepted = applyResumeTimelineRepairAction({
       profile: undoRejected.profile,
@@ -218,12 +292,21 @@ describe("resume timeline repair", () => {
       action: "undo",
       occurredAt: "2026-07-31T10:05:00.000Z",
     });
-    expect(undoAccepted.profile.experiences.find((entry) => entry.id === "reversed")).toMatchObject({
+    expect(
+      undoAccepted.profile.experiences.find((entry) => entry.id === "reversed"),
+    ).toMatchObject({
       startDate: "2024-06",
       endDate: "2023-01",
     });
-    expect(undoAccepted.proposals.find((entry) => entry.id === reversedProposal!.id)?.status).toBe("pending");
-    expect(undoAccepted.proposals.find((entry) => entry.id === reversedProposal!.id)?.actionHistory.map((entry) => entry.action)).toEqual(["accept", "undo"]);
+    expect(
+      undoAccepted.proposals.find((entry) => entry.id === reversedProposal!.id)
+        ?.status,
+    ).toBe("pending");
+    expect(
+      undoAccepted.proposals
+        .find((entry) => entry.id === reversedProposal!.id)
+        ?.actionHistory.map((entry) => entry.action),
+    ).toEqual(["accept", "undo"]);
   });
 
   test("refuses to overwrite a field changed after the proposal was created", () => {

@@ -25,9 +25,7 @@ describe("describeApplicationDefaultsSave", () => {
       fontPreset: "inter_requisite",
     });
 
-    expect(copy.savedMessage).toBe(
-      "Resume look saved.",
-    );
+    expect(copy.savedMessage).toBe("Resume look saved.");
     expect(copy.label).toBe("Resume look");
   });
 

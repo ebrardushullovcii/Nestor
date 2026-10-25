@@ -395,7 +395,8 @@ export function mergeExperienceRecords(
           existingEntry.companyName,
           existingEntry.title,
           existingEntry.startDate,
-        ]) === key || areEquivalentExperienceRecords(existingEntry, entry),
+        ]) === key ||
+        areEquivalentExperienceRecords(existingEntry, entry),
     );
     const match = matchIndex === -1 ? null : (merged[matchIndex] ?? null);
     const nextEntry = {
@@ -476,7 +477,9 @@ export function mergeEducationRecords(
       ]
         .map((part) => normalizeText(part ?? ""))
         .join("|");
-    return Boolean(left.degree || left.fieldOfStudy) && key(left) === key(right);
+    return (
+      Boolean(left.degree || left.fieldOfStudy) && key(left) === key(right)
+    );
   };
 
   extracted.forEach((entry, index) => {

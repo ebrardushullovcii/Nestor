@@ -323,7 +323,9 @@ describe("equal displayed fit ordering", () => {
           ? [`Stack overlap includes ${input.stackOverlap}.`]
           : [],
         gaps: input.seniorityConflict
-          ? ["The listing seniority conflicts with the saved seniority preferences."]
+          ? [
+              "The listing seniority conflicts with the saved seniority preferences.",
+            ]
           : [],
       },
     } as unknown as SavedJob;
@@ -331,9 +333,21 @@ describe("equal displayed fit ordering", () => {
 
   it("breaks a 54 percent tie by the model's role verdict, then recency", () => {
     const jobs = [
-      tiedCandidate({ id: "adjacent", titleFamilyMatch: "adjacent", postedAt: "2026-09-13" }),
-      tiedCandidate({ id: "older-exact", titleFamilyMatch: "same_family", postedAt: "2026-09-10" }),
-      tiedCandidate({ id: "newer-exact", titleFamilyMatch: "same_family", postedAt: "2026-09-12" }),
+      tiedCandidate({
+        id: "adjacent",
+        titleFamilyMatch: "adjacent",
+        postedAt: "2026-09-13",
+      }),
+      tiedCandidate({
+        id: "older-exact",
+        titleFamilyMatch: "same_family",
+        postedAt: "2026-09-10",
+      }),
+      tiedCandidate({
+        id: "newer-exact",
+        titleFamilyMatch: "same_family",
+        postedAt: "2026-09-12",
+      }),
     ];
 
     expect(jobs.sort(compareDiscoveryJobs).map((job) => job.id)).toEqual([

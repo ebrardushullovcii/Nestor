@@ -1796,9 +1796,7 @@ describe("requested listing assessment", () => {
         />
       </MemoryRouter>,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Judge fit" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Judge fit" }));
     await waitFor(() =>
       expect(
         screen.getByText(
@@ -1926,9 +1924,9 @@ it("puts the verdict, the deciding facts and the triage actions above the listin
   const summary = screen.getByTestId("discovery-detail-primary-action");
   const verdict = screen.getByTestId("discovery-detail-verdict");
   expect(summary.contains(verdict)).toBe(true);
-  expect(summary.contains(screen.getByTestId("discovery-detail-key-facts"))).toBe(
-    true,
-  );
+  expect(
+    summary.contains(screen.getByTestId("discovery-detail-key-facts")),
+  ).toBe(true);
   // One verdict, at the top: the scroll area does not repeat it.
   expect(screen.getAllByTestId("discovery-detail-why-it-fits")).toHaveLength(1);
   expect(
@@ -1945,9 +1943,9 @@ it("puts the verdict, the deciding facts and the triage actions above the listin
   expect(onNotInterested).toHaveBeenCalledTimes(1);
   expect(onSkip).toHaveBeenCalledTimes(1);
   // Not interested is offered once; the form below adds only the employer.
-  expect(screen.getAllByRole("button", { name: /Not interested/ })).toHaveLength(
-    1,
-  );
+  expect(
+    screen.getAllByRole("button", { name: /Not interested/ }),
+  ).toHaveLength(1);
   expect(
     screen.getByRole("button", { name: "Hide this employer…" }),
   ).toBeTruthy();

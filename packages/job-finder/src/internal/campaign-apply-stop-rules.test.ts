@@ -47,7 +47,9 @@ describe("campaign apply stop rules", () => {
       ),
     ).toBe(true);
     expect(
-      isQuestionHandoffPauseReason(evaluate("auth_required", { processedCount: 1 })),
+      isQuestionHandoffPauseReason(
+        evaluate("auth_required", { processedCount: 1 }),
+      ),
     ).toBe(false);
     expect(
       isQuestionHandoffPauseReason(

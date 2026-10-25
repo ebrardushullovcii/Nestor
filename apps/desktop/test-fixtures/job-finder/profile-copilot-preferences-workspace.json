@@ -74,12 +74,8 @@
       "softSkills": [],
       "highlightedSkills": []
     },
-    "targetRoles": [
-      "Senior Full-Stack Software Engineer"
-    ],
-    "locations": [
-      "Berlin, Germany"
-    ],
+    "targetRoles": ["Senior Full-Stack Software Engineer"],
+    "locations": ["Berlin, Germany"],
     "skills": [],
     "experiences": [
       {
@@ -89,9 +85,7 @@
         "title": "Senior Full-Stack Software Engineer",
         "employmentType": null,
         "location": "Berlin, Germany",
-        "workMode": [
-          "remote"
-        ],
+        "workMode": ["remote"],
         "startDate": "2023-07",
         "endDate": null,
         "isCurrent": true,
@@ -111,13 +105,9 @@
     "spokenLanguages": []
   },
   "searchPreferences": {
-    "targetRoles": [
-      "Senior Full-Stack Software Engineer"
-    ],
+    "targetRoles": ["Senior Full-Stack Software Engineer"],
     "jobFamilies": [],
-    "locations": [
-      "Berlin, Germany"
-    ],
+    "locations": ["Berlin, Germany"],
     "excludedLocations": [],
     "workModes": [],
     "seniorityLevels": [],

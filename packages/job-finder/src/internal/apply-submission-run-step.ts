@@ -79,7 +79,10 @@ export const NOT_SENT_SUMMARY_PREFIX = "Not sent";
  * words. This used to come back as nothing at all, and the application sat
  * on "ready to send" with no word about why Send did nothing.
  */
-export function notSentAttempt(reason: string, detail: string): ApplySendAttempt {
+export function notSentAttempt(
+  reason: string,
+  detail: string,
+): ApplySendAttempt {
   return {
     sent: false,
     confirmedSubmitted: false,
@@ -155,7 +158,10 @@ export async function recordPreparedApplicationNotSent(input: {
 
 /** The name of the site the kept form lives on, from the prepared result. */
 async function resolvePreparedFormSiteLabel(input: {
-  repository: Pick<WorkspaceServiceContext["repository"], "listApplyJobResults">;
+  repository: Pick<
+    WorkspaceServiceContext["repository"],
+    "listApplyJobResults"
+  >;
   lineage: SubmissionPreflightLineageFacts;
   fallback: string;
 }): Promise<string> {

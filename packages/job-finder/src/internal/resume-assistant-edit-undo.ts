@@ -40,15 +40,15 @@ function stripVolatile(value: Json): Json {
 }
 
 function sameContent(left: Json, right: Json): boolean {
-  return JSON.stringify(stripVolatile(left)) === JSON.stringify(stripVolatile(right));
+  return (
+    JSON.stringify(stripVolatile(left)) === JSON.stringify(stripVolatile(right))
+  );
 }
 
 function isIdentifiedArray(value: Json): value is Array<{ id: string }> {
   return (
     Array.isArray(value) &&
-    value.every(
-      (item) => isPlainObject(item) && typeof item.id === "string",
-    )
+    value.every((item) => isPlainObject(item) && typeof item.id === "string")
   );
 }
 
@@ -117,14 +117,18 @@ function mergeIdentifiedArrays(
     JSON.stringify(afterOrder) === JSON.stringify(currentOrder)
   ) {
     const beforeIndex = new Map(idsOf(before).map((id, index) => [id, index]));
-    const originalIndex = new Map(idsOf(result).map((id, index) => [id, index]));
+    const originalIndex = new Map(
+      idsOf(result).map((id, index) => [id, index]),
+    );
     result.sort((left, right) => {
       const leftIndex = beforeIndex.get(left.id);
       const rightIndex = beforeIndex.get(right.id);
       if (leftIndex !== undefined && rightIndex !== undefined) {
         return leftIndex - rightIndex;
       }
-      return (originalIndex.get(left.id) ?? 0) - (originalIndex.get(right.id) ?? 0);
+      return (
+        (originalIndex.get(left.id) ?? 0) - (originalIndex.get(right.id) ?? 0)
+      );
     });
   }
 
@@ -149,16 +153,27 @@ export function mergeRevertingAssistantEdit(
   if (sameContent(after, current)) {
     return before;
   }
-  if (isIdentifiedArray(before) && isIdentifiedArray(after) && isIdentifiedArray(current)) {
+  if (
+    isIdentifiedArray(before) &&
+    isIdentifiedArray(after) &&
+    isIdentifiedArray(current)
+  ) {
     return mergeIdentifiedArrays(before, after, current);
   }
   if (isPlainObject(before) && isPlainObject(after) && isPlainObject(current)) {
     const result: Record<string, Json> = { ...current };
-    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    for (const key of new Set([
+      ...Object.keys(before),
+      ...Object.keys(after),
+    ])) {
       if (VOLATILE_KEYS.has(key)) {
         continue;
       }
-      result[key] = mergeRevertingAssistantEdit(before[key], after[key], current[key]);
+      result[key] = mergeRevertingAssistantEdit(
+        before[key],
+        after[key],
+        current[key],
+      );
     }
     return result;
   }

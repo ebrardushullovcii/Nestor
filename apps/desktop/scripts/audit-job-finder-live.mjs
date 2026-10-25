@@ -192,7 +192,8 @@ function compareInventories(inventories, appJobs) {
     const found = relevantJobs
       .map((providerJob) => ({
         providerJob,
-        appJob: appJobsByUrl.get(normalizeUrl(providerJob.canonicalUrl)) ?? null,
+        appJob:
+          appJobsByUrl.get(normalizeUrl(providerJob.canonicalUrl)) ?? null,
       }))
       .filter((entry) => entry.appJob);
     const missed = relevantJobs

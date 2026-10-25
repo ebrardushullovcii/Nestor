@@ -163,9 +163,7 @@ export function createDiscoveryDisplayProjectionReader(
       }
       rowCache.dirty.clear();
       for (const row of database
-        .prepare(
-          "SELECT table_name, run_id, id FROM discovery_display_changes",
-        )
+        .prepare("SELECT table_name, run_id, id FROM discovery_display_changes")
         .all()) {
         const scope = discoveryRowScope(
           String(row.table_name),

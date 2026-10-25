@@ -101,7 +101,10 @@ export const ProposeApplicationDocumentInputSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.documentId === undefined) !== (value.expectedRevision === undefined)) {
+    if (
+      (value.documentId === undefined) !==
+      (value.expectedRevision === undefined)
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["expectedRevision"],

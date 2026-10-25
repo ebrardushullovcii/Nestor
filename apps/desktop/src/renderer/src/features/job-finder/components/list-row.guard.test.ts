@@ -73,9 +73,9 @@ describe("Job Finder list rows carry no chrome of their own", () => {
       sources.has("screens/applications/applications-records-panel.tsx"),
     ).toBe(true);
     expect(sources.has("components/ui/selectable-row.tsx")).toBe(true);
-    expect(
-      sources.has("features/live-assistant/live-assistant-page.tsx"),
-    ).toBe(true);
+    expect(sources.has("features/live-assistant/live-assistant-page.tsx")).toBe(
+      true,
+    );
 
     const rowSources = [...sources.entries()].filter(([, source]) =>
       source.includes("<SelectableRow"),

@@ -142,8 +142,7 @@ export default async function fixesHarness(qa) {
       "function",
   );
   await qa.page.evaluate(
-    (input) =>
-      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+    (input) => window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: site(`/${board}/`),
       applicationUrl: site(`/${board}/apply/3`),
@@ -613,9 +612,7 @@ export default async function fixesHarness(qa) {
       // already saved (under another company name) and then skipped.
       await qa.page
         .evaluate(() =>
-          window.nestor.jobFinder.dismissDiscoveryJob("job_found_5", [
-            "role",
-          ]),
+          window.nestor.jobFinder.dismissDiscoveryJob("job_found_5", ["role"]),
         )
         .catch(() => undefined);
       const skippedBefore = await qa.page.evaluate(async () => {

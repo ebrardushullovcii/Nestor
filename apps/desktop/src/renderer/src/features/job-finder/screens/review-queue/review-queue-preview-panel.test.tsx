@@ -440,9 +440,7 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
           "This is the resume as it stands. Edit it if you like; Apply approves it.",
         ),
       ).toBeNull();
-      expect(
-        document.querySelector("[data-resume-preview-card]"),
-      ).toBeTruthy();
+      expect(document.querySelector("[data-resume-preview-card]")).toBeTruthy();
     },
   );
 

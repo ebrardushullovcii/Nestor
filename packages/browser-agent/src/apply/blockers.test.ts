@@ -95,7 +95,12 @@ describe("detectApplyBlocker", () => {
       bodyText: "Use a made-up email and password.",
       controls: [
         { ...checkbox(false), label: "Password", kind: "text" },
-        { ...checkbox(false), ref: "f1", label: "Verify password", kind: "text" },
+        {
+          ...checkbox(false),
+          ref: "f1",
+          label: "Verify password",
+          kind: "text",
+        },
       ],
       actions: [
         {

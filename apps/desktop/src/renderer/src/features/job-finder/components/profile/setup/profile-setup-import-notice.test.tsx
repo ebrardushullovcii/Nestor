@@ -105,7 +105,10 @@ describe("what the last import left behind, on whichever step setup opens", () =
       failureKind: "interrupted",
     });
     expect(
-      buildProfileSetupImportNotice({ latestResumeImportRun: olderRun, profile }),
+      buildProfileSetupImportNotice({
+        latestResumeImportRun: olderRun,
+        profile,
+      }),
     ).toMatchObject({
       kind: "interrupted",
       // Today's sentence, not the one the old run saved.

@@ -1831,19 +1831,16 @@ describe("playwright browser runtime", () => {
     "runAgentDiscovery reviews a usable catalog without its missing landing page (dedicatedPage=%s)",
     async (dedicatedPage) => {
       const userDataDir = await mkdtemp(
-        join(
-          tmpdir(),
-          "nestor-browser-runtime-agent-catalog-missing-page-",
-        ),
+        join(tmpdir(), "nestor-browser-runtime-agent-catalog-missing-page-"),
       );
       vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
         ...(await importOriginal<typeof browserAgent>()),
         runJobSearchAgent: vi.fn((input: browserAgent.JobSearchAgentInput) => {
           const result = {
-          jobs: [createTestJob()],
-          steps: 3,
-          incomplete: false,
-          transcriptMessageCount: 4,
+            jobs: [createTestJob()],
+            steps: 3,
+            incomplete: false,
+            transcriptMessageCount: 4,
           };
           input.resultCache?.write(input.config, result);
           return Promise.resolve(result);
@@ -1950,102 +1947,122 @@ describe("playwright browser runtime", () => {
     },
   );
 
-  test.each([false, true])("runAgentDiscovery keeps page-reader goals and rejections after a starting navigation (timeout=%s)", async (timeout) => {
-    vi.resetModules();
-    const userDataDir = await mkdtemp(
-      join(tmpdir(), "nestor-browser-runtime-agent-selection-context-"),
-    );
-    let readBack: Awaited<
-      ReturnType<browserAgent.JobExtractor["extractJobsFromPage"]>
-    > = [];
-    vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
-      ...(await importOriginal<typeof browserAgent>()),
-      runJobSearchAgent: vi.fn(async (input: browserAgent.JobSearchAgentInput) => {
-        readBack = await input.jobExtractor.extractJobsFromPage({
-          pageText: "Senior Engineer at Example",
-          pageUrl: "https://example.com/jobs",
-          pageType: "search_results",
-          maxJobs: 12,
-          selectionContext: '{"targetRoles":["Engineer"]}',
+  test.each([false, true])(
+    "runAgentDiscovery keeps page-reader goals and rejections after a starting navigation (timeout=%s)",
+    async (timeout) => {
+      vi.resetModules();
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-browser-runtime-agent-selection-context-"),
+      );
+      let readBack: Awaited<
+        ReturnType<browserAgent.JobExtractor["extractJobsFromPage"]>
+      > = [];
+      vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
+        ...(await importOriginal<typeof browserAgent>()),
+        runJobSearchAgent: vi.fn(
+          async (input: browserAgent.JobSearchAgentInput) => {
+            readBack = await input.jobExtractor.extractJobsFromPage({
+              pageText: "Senior Engineer at Example",
+              pageUrl: "https://example.com/jobs",
+              pageType: "search_results",
+              maxJobs: 12,
+              selectionContext: '{"targetRoles":["Engineer"]}',
+            });
+            return {
+              jobs: [],
+              steps: 1,
+              incomplete: false,
+              transcriptMessageCount: 2,
+            };
+          },
+        ),
+      }));
+      try {
+        const chromeExecutablePath = join(userDataDir, "chrome.exe");
+        await writeFile(chromeExecutablePath, "", "utf8");
+        const debugPort = await reserveFreePort();
+        let pageUrl = "about:blank";
+        const page = {
+          bringToFront: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          evaluate: vi.fn().mockResolvedValue(200),
+          goto: vi.fn().mockImplementation((url: string) => {
+            pageUrl = url;
+            return timeout
+              ? Promise.reject(
+                  Object.assign(new Error("Navigation timed out"), {
+                    name: "TimeoutError",
+                  }),
+                )
+              : Promise.resolve({ status: () => 200 });
+          }),
+          isClosed: () => false,
+          url: () => pageUrl,
+        };
+        const fakeContext = {
+          newPage: vi.fn().mockResolvedValue(page),
+          pages: () => [page],
+        };
+        const fakeBrowser = {
+          close: vi.fn(),
+          contexts: () => [fakeContext],
+          isConnected: () => true,
+          once: vi.fn(() => fakeBrowser),
+        };
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({}),
+          } as Response),
+        );
+        execFileMock.mockImplementation((...args: unknown[]) => {
+          maybeInvokeExecFileCallback(args);
         });
-        return { jobs: [], steps: 1, incomplete: false, transcriptMessageCount: 2 };
-      }),
-    }));
-    try {
-      const chromeExecutablePath = join(userDataDir, "chrome.exe");
-      await writeFile(chromeExecutablePath, "", "utf8");
-      const debugPort = await reserveFreePort();
-      let pageUrl = "about:blank";
-      const page = {
-        bringToFront: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-        evaluate: vi.fn().mockResolvedValue(200),
-        goto: vi.fn().mockImplementation((url: string) => { pageUrl = url; return timeout
-          ? Promise.reject(Object.assign(new Error("Navigation timed out"), { name: "TimeoutError" }))
-          : Promise.resolve({ status: () => 200 }); }),
-        isClosed: () => false,
-        url: () => pageUrl,
-      };
-      const fakeContext = {
-        newPage: vi.fn().mockResolvedValue(page),
-        pages: () => [page],
-      };
-      const fakeBrowser = {
-        close: vi.fn(),
-        contexts: () => [fakeContext],
-        isConnected: () => true,
-        once: vi.fn(() => fakeBrowser),
-      };
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({}),
-        } as Response),
-      );
-      execFileMock.mockImplementation((...args: unknown[]) => {
-        maybeInvokeExecFileCallback(args);
-      });
-      spawnMock.mockReturnValue(createMockChildProcess({ pid: 54649 }));
-      connectOverCDPMock.mockResolvedValue(fakeBrowser);
-      const rejected = {
-        ...createTestJob(),
-        searchRejection: { category: "place" as const, reason: "US only." },
-      };
-      const jobExtractor = vi.fn().mockResolvedValue([rejected]);
-      const { createBrowserAgentRuntime } =
-        await import("./playwright-browser-runtime");
-      const runtime = createBrowserAgentRuntime({
-        userDataDir,
-        chromeExecutablePath,
-        debugPort,
-        jobExtractor,
-      });
-      const discoveryResult = await runtime.runAgentDiscovery!("target_site", {
-        maxSteps: 3,
-        targetJobCount: 1,
-        userProfile: createTestProfile(),
-        searchPreferences: { targetRoles: [], locations: [] },
-        startingUrls: ["https://example.com/jobs"],
-        navigationHostnames: ["example.com"],
-        siteLabel: "Example Jobs",
-      });
-      expect(discoveryResult.warning).toBeNull();
-      expect(page.goto).toHaveBeenCalled();
-      expect(jobExtractor).toHaveBeenCalledWith(
-        expect.objectContaining({
-          selectionContext: '{"targetRoles":["Engineer"]}',
-        }),
-      );
-      expect(readBack[0]?.searchRejection).toEqual({
-        category: "place",
-        reason: "US only.",
-      });
-    } finally {
-      vi.doUnmock("@nestor/browser-agent");
-      await rm(userDataDir, { recursive: true, force: true });
-    }
-  });
+        spawnMock.mockReturnValue(createMockChildProcess({ pid: 54649 }));
+        connectOverCDPMock.mockResolvedValue(fakeBrowser);
+        const rejected = {
+          ...createTestJob(),
+          searchRejection: { category: "place" as const, reason: "US only." },
+        };
+        const jobExtractor = vi.fn().mockResolvedValue([rejected]);
+        const { createBrowserAgentRuntime } =
+          await import("./playwright-browser-runtime");
+        const runtime = createBrowserAgentRuntime({
+          userDataDir,
+          chromeExecutablePath,
+          debugPort,
+          jobExtractor,
+        });
+        const discoveryResult = await runtime.runAgentDiscovery!(
+          "target_site",
+          {
+            maxSteps: 3,
+            targetJobCount: 1,
+            userProfile: createTestProfile(),
+            searchPreferences: { targetRoles: [], locations: [] },
+            startingUrls: ["https://example.com/jobs"],
+            navigationHostnames: ["example.com"],
+            siteLabel: "Example Jobs",
+          },
+        );
+        expect(discoveryResult.warning).toBeNull();
+        expect(page.goto).toHaveBeenCalled();
+        expect(jobExtractor).toHaveBeenCalledWith(
+          expect.objectContaining({
+            selectionContext: '{"targetRoles":["Engineer"]}',
+          }),
+        );
+        expect(readBack[0]?.searchRejection).toEqual({
+          category: "place",
+          reason: "US only.",
+        });
+      } finally {
+        vi.doUnmock("@nestor/browser-agent");
+        await rm(userDataDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("runAgentDiscovery reuses an already-open matching page instead of navigating a blank tab", async () => {
     const userDataDir = await mkdtemp(
@@ -3409,63 +3426,79 @@ describe("managed context active service worker gate", () => {
   test.each([
     ["different sites", "https://beta.test/apply/second", true],
     ["the same site", "https://jobs.example.com/apply/second", false],
-  ])("application preparation overlaps only for %s", async (_label, secondUrl, overlaps) => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-apply-overlap-"));
-    try {
-      const debugPort = await reserveFreePort();
-      const harness = createGateHarness({ activeServiceWorkers: () => [] });
-      const runtime = await createGatedRuntime({
-        userDataDir,
-        debugPort,
-        browser: harness.fakeBrowser,
-      });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
-      await writeFile(approvedResumePath, "approved resume", "utf8");
-      const stub = createStubFormPreparer();
-      let releaseFirst!: () => void;
-      let firstEntered!: () => void;
-      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-      const entered = new Promise<void>((resolve) => { firstEntered = resolve; });
-      const firstRun = runtime.executeApplicationFlow("target_site", {
-        ...prepareInput,
-        applicationPageBindingKey: "first_bound_page",
-        prepareApplicationForm: async (args) => {
-          firstEntered();
-          await firstGate;
-          return stub(args);
-        },
-      });
-      await entered;
-      let secondEntered = false;
-      const secondRun = runtime.executeApplicationFlow("target_site", {
-        ...prepareInput,
-        applicationPageBindingKey: "second_bound_page",
-        job: { ...prepareInput.job, applicationUrl: secondUrl },
-        prepareApplicationForm: (args) => {
-          secondEntered = true;
-          return stub(args);
-        },
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(secondEntered).toBe(overlaps);
-      if (overlaps) {
-        expect(harness.secondaryPage.goto).toHaveBeenCalledWith(secondUrl, expect.anything());
-        expect(harness.fakePage.close).not.toHaveBeenCalled();
-        await secondRun;
+  ])(
+    "application preparation overlaps only for %s",
+    async (_label, secondUrl, overlaps) => {
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-runtime-apply-overlap-"),
+      );
+      try {
+        const debugPort = await reserveFreePort();
+        const harness = createGateHarness({ activeServiceWorkers: () => [] });
+        const runtime = await createGatedRuntime({
+          userDataDir,
+          debugPort,
+          browser: harness.fakeBrowser,
+        });
+        const { approvedResumePath, prepareInput } = createPrepareInput({
+          userDataDir,
+        });
+        await writeFile(approvedResumePath, "approved resume", "utf8");
+        const stub = createStubFormPreparer();
+        let releaseFirst!: () => void;
+        let firstEntered!: () => void;
+        const firstGate = new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        const entered = new Promise<void>((resolve) => {
+          firstEntered = resolve;
+        });
+        const firstRun = runtime.executeApplicationFlow("target_site", {
+          ...prepareInput,
+          applicationPageBindingKey: "first_bound_page",
+          prepareApplicationForm: async (args) => {
+            firstEntered();
+            await firstGate;
+            return stub(args);
+          },
+        });
+        await entered;
+        let secondEntered = false;
+        const secondRun = runtime.executeApplicationFlow("target_site", {
+          ...prepareInput,
+          applicationPageBindingKey: "second_bound_page",
+          job: { ...prepareInput.job, applicationUrl: secondUrl },
+          prepareApplicationForm: (args) => {
+            secondEntered = true;
+            return stub(args);
+          },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(secondEntered).toBe(overlaps);
+        if (overlaps) {
+          expect(harness.secondaryPage.goto).toHaveBeenCalledWith(
+            secondUrl,
+            expect.anything(),
+          );
+          expect(harness.fakePage.close).not.toHaveBeenCalled();
+          await secondRun;
+        }
+        releaseFirst();
+        await firstRun;
+        if (!overlaps) {
+          await secondRun;
+          expect(secondEntered).toBe(true);
+        }
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true });
       }
-      releaseFirst();
-      await firstRun;
-      if (!overlaps) {
-        await secondRun;
-        expect(secondEntered).toBe(true);
-      }
-    } finally {
-      await rm(userDataDir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   test("cancelling a same-site waiter does not touch the active form", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-apply-abort-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-runtime-apply-abort-"),
+    );
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3474,13 +3507,19 @@ describe("managed context active service worker gate", () => {
         debugPort,
         browser: harness.fakeBrowser,
       });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const stub = createStubFormPreparer();
       let releaseFirst!: () => void;
       let firstEntered!: () => void;
-      const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-      const entered = new Promise<void>((resolve) => { firstEntered = resolve; });
+      const gate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        firstEntered = resolve;
+      });
       const firstRun = runtime.executeApplicationFlow("target_site", {
         ...prepareInput,
         prepareApplicationForm: async (args) => {
@@ -3493,7 +3532,13 @@ describe("managed context active service worker gate", () => {
       const controller = new AbortController();
       const waitingRun = runtime.executeApplicationFlow(
         "target_site",
-        { ...prepareInput, job: { ...prepareInput.job, applicationUrl: "https://jobs.example.com/second" } },
+        {
+          ...prepareInput,
+          job: {
+            ...prepareInput.job,
+            applicationUrl: "https://jobs.example.com/second",
+          },
+        },
         { signal: controller.signal },
       );
       controller.abort();
@@ -3508,26 +3553,38 @@ describe("managed context active service worker gate", () => {
   });
 
   test("a redirect into another active application's site waits before form work", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-redirect-lock-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-runtime-redirect-lock-"),
+    );
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       const firstGoto = harness.fakePage.goto.getMockImplementation()!;
       const secondGoto = harness.secondaryPage.goto.getMockImplementation()!;
-      harness.fakePage.goto.mockImplementation(() => firstGoto("https://account.shared.example/form/first"));
-      harness.secondaryPage.goto.mockImplementation(() => secondGoto("https://account.shared.example/form/second"));
+      harness.fakePage.goto.mockImplementation(() =>
+        firstGoto("https://account.shared.example/form/first"),
+      );
+      harness.secondaryPage.goto.mockImplementation(() =>
+        secondGoto("https://account.shared.example/form/second"),
+      );
       const runtime = await createGatedRuntime({
         userDataDir,
         debugPort,
         browser: harness.fakeBrowser,
       });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const stub = createStubFormPreparer();
       let releaseFirst!: () => void;
       let firstEntered!: () => void;
-      const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-      const entered = new Promise<void>((resolve) => { firstEntered = resolve; });
+      const gate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        firstEntered = resolve;
+      });
       const firstRun = runtime.executeApplicationFlow("target_site", {
         ...prepareInput,
         applicationPageBindingKey: "redirect_first",
@@ -3542,7 +3599,10 @@ describe("managed context active service worker gate", () => {
       const secondRun = runtime.executeApplicationFlow("target_site", {
         ...prepareInput,
         applicationPageBindingKey: "redirect_second",
-        job: { ...prepareInput.job, applicationUrl: "https://other.test/apply/second" },
+        job: {
+          ...prepareInput.job,
+          applicationUrl: "https://other.test/apply/second",
+        },
         prepareApplicationForm: (args) => {
           secondEntered = true;
           return stub(args);
@@ -3560,11 +3620,14 @@ describe("managed context active service worker gate", () => {
   });
 
   test("a final page operation waits for same-site preparation while another site proceeds", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-final-site-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-runtime-final-site-"),
+    );
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
-      const originalNewPage = harness.fakeContext.newPage.getMockImplementation()!;
+      const originalNewPage =
+        harness.fakeContext.newPage.getMockImplementation()!;
       const originalPages = harness.fakeContext.pages;
       let thirdUrl = "about:blank";
       let thirdAdded = false;
@@ -3592,7 +3655,9 @@ describe("managed context active service worker gate", () => {
         debugPort,
         browser: harness.fakeBrowser,
       });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const stub = createStubFormPreparer();
       await runtime.executeApplicationFlow("target_site", {
@@ -3602,12 +3667,19 @@ describe("managed context active service worker gate", () => {
 
       let releaseSameSite!: () => void;
       let sameSiteEntered!: () => void;
-      const gate = new Promise<void>((resolve) => { releaseSameSite = resolve; });
-      const entered = new Promise<void>((resolve) => { sameSiteEntered = resolve; });
+      const gate = new Promise<void>((resolve) => {
+        releaseSameSite = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        sameSiteEntered = resolve;
+      });
       const sameSiteRun = runtime.executeApplicationFlow("target_site", {
         ...prepareInput,
         applicationPageBindingKey: "same_site_busy",
-        job: { ...prepareInput.job, applicationUrl: "https://jobs.example.com/second" },
+        job: {
+          ...prepareInput.job,
+          applicationUrl: "https://jobs.example.com/second",
+        },
         prepareApplicationForm: async (args) => {
           sameSiteEntered();
           await gate;
@@ -3635,7 +3707,10 @@ describe("managed context active service worker gate", () => {
       const otherSiteRun = runtime.executeApplicationFlow("target_site", {
         ...prepareInput,
         applicationPageBindingKey: "other_site_ready",
-        job: { ...prepareInput.job, applicationUrl: "https://elsewhere.test/apply" },
+        job: {
+          ...prepareInput.job,
+          applicationUrl: "https://elsewhere.test/apply",
+        },
         prepareApplicationForm: (args) => {
           otherSiteEntered = true;
           return stub(args);
@@ -3723,7 +3798,9 @@ describe("managed context active service worker gate", () => {
   }, 15000);
 
   test("embedded tab headroom waits abortably without closing existing tabs", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-headroom-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-runtime-tab-headroom-"),
+    );
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       // A form page, not the idle startup tab (that one may be closed for room).
@@ -3736,7 +3813,8 @@ describe("managed context active service worker gate", () => {
       Object.assign(harness.fakeContext, {
         pages: () => [harness.fakePage, ...otherPages],
       });
-      const { createBrowserAgentRuntime } = await import("./playwright-browser-runtime");
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
       const runtime = createBrowserAgentRuntime({
         userDataDir,
         browserHost: {
@@ -3746,7 +3824,9 @@ describe("managed context active service worker gate", () => {
           assertAutomationSafe: () => undefined,
         },
       });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const controller = new AbortController();
       const run = runtime.executeApplicationFlow("target_site", prepareInput, {
@@ -3757,21 +3837,26 @@ describe("managed context active service worker gate", () => {
       controller.abort();
       await expect(run).rejects.toMatchObject({ name: "AbortError" });
       expect(harness.fakePage.close).not.toHaveBeenCalled();
-      expect(otherPages.every((page) => page.close.mock.calls.length === 0)).toBe(true);
+      expect(
+        otherPages.every((page) => page.close.mock.calls.length === 0),
+      ).toBe(true);
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
     }
   });
 
   test("concurrent embedded tab openings reserve popup headroom atomically", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-reservation-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-runtime-tab-reservation-"),
+    );
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       // A blank tab can belong to another worker still opening its page.
       await harness.fakePage.goto("https://held.example/primary");
       const otherPages = Array.from({ length: 5 }, (_, index) => ({
         isClosed: () => false,
-        url: () => index === 0 ? "about:blank" : `https://held.example/${index}`,
+        url: () =>
+          index === 0 ? "about:blank" : `https://held.example/${index}`,
         close: vi.fn().mockResolvedValue(undefined),
       }));
       let resolveNewPage!: (page: typeof harness.secondaryPage) => void;
@@ -3779,7 +3864,9 @@ describe("managed context active service worker gate", () => {
       const opening = new Promise<typeof harness.secondaryPage>((resolve) => {
         resolveNewPage = resolve;
       });
-      const started = new Promise<void>((resolve) => { newPageStarted = resolve; });
+      const started = new Promise<void>((resolve) => {
+        newPageStarted = resolve;
+      });
       Object.assign(harness.fakeContext, {
         pages: () => [harness.fakePage, ...otherPages],
         newPage: vi.fn(() => {
@@ -3787,7 +3874,8 @@ describe("managed context active service worker gate", () => {
           return opening;
         }),
       });
-      const { createBrowserAgentRuntime } = await import("./playwright-browser-runtime");
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
       const runtime = createBrowserAgentRuntime({
         userDataDir,
         browserHost: {
@@ -3797,14 +3885,22 @@ describe("managed context active service worker gate", () => {
           assertAutomationSafe: () => undefined,
         },
       });
-      const { approvedResumePath, prepareInput } = createPrepareInput({ userDataDir });
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const first = runtime.executeApplicationFlow("target_site", prepareInput);
       await started;
       const controller = new AbortController();
       const second = runtime.executeApplicationFlow(
         "target_site",
-        { ...prepareInput, job: { ...prepareInput.job, applicationUrl: "https://other.test/apply" } },
+        {
+          ...prepareInput,
+          job: {
+            ...prepareInput.job,
+            applicationUrl: "https://other.test/apply",
+          },
+        },
         { signal: controller.signal },
       );
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -3814,7 +3910,9 @@ describe("managed context active service worker gate", () => {
       resolveNewPage(harness.secondaryPage);
       await first;
       expect(harness.fakePage.close).not.toHaveBeenCalled();
-      expect(otherPages.every((page) => page.close.mock.calls.length === 0)).toBe(true);
+      expect(
+        otherPages.every((page) => page.close.mock.calls.length === 0),
+      ).toBe(true);
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
     }

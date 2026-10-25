@@ -71,10 +71,7 @@ function parseAmountToken(
 function extractSalaryTokens(text: string): SalaryToken[] {
   return [...text.matchAll(/(?:US\$|[$€£])?\s*(\d[\d,.]*)\s*(k|m)?\b/gi)]
     .map((match) => {
-      const amount = parseAmountToken(
-        match[1] ?? "",
-        match[2]?.toLowerCase(),
-      );
+      const amount = parseAmountToken(match[1] ?? "", match[2]?.toLowerCase());
 
       return amount === null
         ? null
@@ -117,9 +114,7 @@ export function detectSalaryInterval(
   if (/\b(?:per\s+|a\s+|\/\s*)?(?:day|daily)\b/i.test(request)) {
     return "day";
   }
-  if (
-    /\b(?:per\s+|an\s+|\/\s*)?(?:hour|hourly|\/?hrs?)\b/i.test(request)
-  ) {
+  if (/\b(?:per\s+|an\s+|\/\s*)?(?:hour|hourly|\/?hrs?)\b/i.test(request)) {
     return "hour";
   }
 
@@ -208,7 +203,9 @@ function extractMinimumIntent(
   return { amount, start: match.index, end: match.index + match[0].length };
 }
 
-function parseSalaryAmounts(normalizedRequest: string): ParsedSalaryAmounts | null {
+function parseSalaryAmounts(
+  normalizedRequest: string,
+): ParsedSalaryAmounts | null {
   const conversationalRange = normalizedRequest.match(
     /\b(?:might\s+)?consider\s+(?:US\$|[$€£])?\s*([\d,.]+)\s*(k|m)?(?:\s+(?:per|a|each)\s+(?:hour|day|week|month|year))?\s*,?\s*(?:but\s+)?(?:really\s+)?(?:i\s+)?(?:want|target|expect)\s+(?:US\$|[$€£])?\s*([\d,.]+)\s*(k|m)?\b/,
   );
@@ -433,9 +430,7 @@ function resolveCurrencyFields(
   return { currency: null, currencyStatus: "needs_clarification" };
 }
 
-function summarizeSalaryIntent(
-  intent: ParsedSalaryAmounts["intent"],
-): string {
+function summarizeSalaryIntent(intent: ParsedSalaryAmounts["intent"]): string {
   if (intent === "range") {
     return "Update minimum and expected salary";
   }
@@ -467,8 +462,7 @@ function clarification(question: string): SalaryCommandOutcome {
  */
 function extractSalaryClause(request: string): string {
   const clause = segmentCommandClauses(request, fieldDescriptors).find(
-    (candidate) =>
-      candidate.family === "salary" && candidate.isAcceptedCommand,
+    (candidate) => candidate.family === "salary" && candidate.isAcceptedCommand,
   );
 
   return clause?.text ?? request;

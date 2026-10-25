@@ -150,17 +150,17 @@ export function ApplicationsDetailFactStrip(props: {
                         ? "Form closed"
                         : visibleApplyResult?.state === "failed"
                           ? "Could not apply"
-                        : visibleRunIsActive &&
-                            !selectedAttemptBelongsToVisibleRun
-                          ? "In progress"
-                          : isResolvedAwaitingReview
-                            ? "Ready to send"
-                            : visibleApplyResult?.state === "blocked" ||
-                                (visibleApplyResult?.state ===
-                                  "awaiting_review" &&
-                                  visibleApplyResult.blockerReason)
-                              ? "Needs you"
-                              : fallbackAttemptLabel;
+                          : visibleRunIsActive &&
+                              !selectedAttemptBelongsToVisibleRun
+                            ? "In progress"
+                            : isResolvedAwaitingReview
+                              ? "Ready to send"
+                              : visibleApplyResult?.state === "blocked" ||
+                                  (visibleApplyResult?.state ===
+                                    "awaiting_review" &&
+                                    visibleApplyResult.blockerReason)
+                                ? "Needs you"
+                                : fallbackAttemptLabel;
   // The person's own tracker record wins over the run's last state, short of
   // a verified send: they sent it, or withdrew it, themselves.
   const personRecordedLabel =

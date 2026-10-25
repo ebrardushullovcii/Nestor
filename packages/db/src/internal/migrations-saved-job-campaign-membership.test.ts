@@ -11,7 +11,9 @@ describe("saved job campaign membership migration", () => {
       .prepare("INSERT INTO saved_jobs (id, value) VALUES (?, ?)")
       .run("shared", JSON.stringify({ id: "shared", title: "Shared job" }));
     database
-      .prepare("INSERT OR REPLACE INTO singleton_state (key, value) VALUES (?, ?)")
+      .prepare(
+        "INSERT OR REPLACE INTO singleton_state (key, value) VALUES (?, ?)",
+      )
       .run(
         "campaign_state",
         JSON.stringify({

@@ -73,7 +73,9 @@ export function requestUrlCarriesPreparedValue(
 }
 
 /** Generic telemetry/monitoring request shapes that never represent a form submission. */
-export function isTelemetryRequestUrl(value: string | null | undefined): boolean {
+export function isTelemetryRequestUrl(
+  value: string | null | undefined,
+): boolean {
   if (!value) return false;
   let parsed: URL;
   try {
@@ -83,9 +85,8 @@ export function isTelemetryRequestUrl(value: string | null | undefined): boolean
   }
   const hostname = parsed.hostname.toLowerCase();
   const pathname = parsed.pathname.toLowerCase();
-  const telemetrySubdomain = /^(?:analytics|beacon|metrics|rum|sa|telemetry)\./u.test(
-    hostname,
-  );
+  const telemetrySubdomain =
+    /^(?:analytics|beacon|metrics|rum|sa|telemetry)\./u.test(hostname);
   const trackingPixel = /(?:^|\/)(?:pixel|simple)(?:\.gif)?$/u.test(pathname);
   const pageViewSignal =
     parsed.searchParams.has("page_id") ||

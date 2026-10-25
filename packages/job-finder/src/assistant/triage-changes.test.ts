@@ -14,7 +14,12 @@ import { recordTriageChange } from "./triage-changes";
 import type { AssistantToolContext, AssistantTurnSession } from "./tool-kit";
 import type { AssistantHostPorts } from "./ports";
 import { undoReceipt } from "./tools/profile-tools";
-import { queryJobsTool, updateSourcesTool, shortlistJobsTool, removeFromShortlistTool } from "./tools/jobs-tools";
+import {
+  queryJobsTool,
+  updateSourcesTool,
+  shortlistJobsTool,
+  removeFromShortlistTool,
+} from "./tools/jobs-tools";
 
 function harness() {
   const seed = createSeed();
@@ -73,12 +78,33 @@ describe("assistant move receipts", () => {
     const shortlist = shortlistJobsTool.input.parse({ jobIds: [id] });
     await shortlistJobsTool.execute(shortlist, context);
     await removeFromShortlistTool.execute({ jobIds: [id] }, context);
-    expect((await service.getWorkspaceSnapshot()).reviewQueue.some(job => job.jobId === id)).toBe(false);
-    session.createResultSet = input => Promise.resolve(AssistantResultSetSchema.parse({ ...input, id: "result", conversationId: "conversation", createdAt: "2026-10-24T00:00:00.000Z" }));
-    const found = await queryJobsTool.execute(queryJobsTool.input.parse({ scope: "found", onlyIds: [id], show: false }), context);
+    expect(
+      (await service.getWorkspaceSnapshot()).reviewQueue.some(
+        (job) => job.jobId === id,
+      ),
+    ).toBe(false);
+    session.createResultSet = (input) =>
+      Promise.resolve(
+        AssistantResultSetSchema.parse({
+          ...input,
+          id: "result",
+          conversationId: "conversation",
+          createdAt: "2026-10-24T00:00:00.000Z",
+        }),
+      );
+    const found = await queryJobsTool.execute(
+      queryJobsTool.input.parse({ scope: "found", onlyIds: [id], show: false }),
+      context,
+    );
     expect(found.data).toMatchObject({ jobs: [{ id, inShortlist: false }] });
-    expect((await shortlistJobsTool.execute(shortlist, context)).summary).toContain("Shortlisted 1 job");
-    expect((await service.getWorkspaceSnapshot()).reviewQueue.some(job => job.jobId === id)).toBe(true);
+    expect(
+      (await shortlistJobsTool.execute(shortlist, context)).summary,
+    ).toContain("Shortlisted 1 job");
+    expect(
+      (await service.getWorkspaceSnapshot()).reviewQueue.some(
+        (job) => job.jobId === id,
+      ),
+    ).toBe(true);
   });
   it("undoes a shortlist without overwriting a later profile edit", async () => {
     const { service, session, context, receipts } = harness();

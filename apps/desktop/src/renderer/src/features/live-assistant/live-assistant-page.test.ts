@@ -196,9 +196,7 @@ describe("Job Finder route recorder installation", () => {
       "/job-finder/companies/acme",
     );
     expect(
-      secondStorage.getItem(
-        "nestor.live-assistant.last-job-finder-route",
-      ),
+      secondStorage.getItem("nestor.live-assistant.last-job-finder-route"),
     ).toBeNull();
     expect(forwardedUrls).toEqual(["#/job-finder/companies/acme"]);
   });

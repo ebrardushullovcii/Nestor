@@ -118,13 +118,20 @@ export function scheduleWalCheckpoints(
       // Backfill is completed checkpoint work, even if another connection did
       // it. A pinned reader cannot cause the same frames to request endlessly;
       // another cap's worth of new frames may retry while it remains pinned.
-      urgent = (progress.frames - Math.max(urgentFrame, progress.backfilled)) * progress.frameBytes >= WAL_CHECKPOINT_MAX_BYTES;
+      urgent =
+        (progress.frames - Math.max(urgentFrame, progress.backfilled)) *
+          progress.frameBytes >=
+        WAL_CHECKPOINT_MAX_BYTES;
       if (urgent) urgentFrame = progress.frames;
     } else {
       // Missing/unpublished WAL-index headers are only a scheduling failure.
       // Retain idle checkpoints and bound further physical file growth.
       let bytes = 0;
-      try { bytes = statSync(walPath).size; } catch { /* No WAL yet. */ }
+      try {
+        bytes = statSync(walPath).size;
+      } catch {
+        /* No WAL yet. */
+      }
       if (bytes < fallbackHighWater) fallbackHighWater = bytes;
       urgent = bytes - fallbackHighWater >= WAL_CHECKPOINT_MAX_BYTES;
       if (urgent) fallbackHighWater = bytes;

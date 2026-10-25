@@ -22,124 +22,443 @@
         --accent: #d9ca91;
       }
 
-      * { box-sizing: border-box; }
-      html { scroll-behavior: smooth; }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
       body {
         margin: 0;
         background:
-          radial-gradient(circle at 80% 0%, rgba(142, 224, 181, 0.08), transparent 28rem),
+          radial-gradient(
+            circle at 80% 0%,
+            rgba(142, 224, 181, 0.08),
+            transparent 28rem
+          ),
           linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+          linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.022) 1px,
+            transparent 1px
+          ),
           var(--bg);
-        background-size: auto, 32px 32px, 32px 32px, auto;
+        background-size:
+          auto,
+          32px 32px,
+          32px 32px,
+          auto;
         color: var(--text);
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
         line-height: 1.55;
       }
 
-      a { color: inherit; }
-      main { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 80px; }
-      header, section { border: 1px solid var(--line); background: rgba(17, 20, 17, 0.95); }
-      header { padding: clamp(28px, 5vw, 66px); }
-      section { margin-top: 18px; padding: clamp(22px, 3.5vw, 40px); }
-      h1, h2, h3, p { margin-top: 0; }
-      h1 { max-width: 1040px; margin-bottom: 18px; font-size: clamp(42px, 7vw, 88px); line-height: 0.95; letter-spacing: -0.055em; }
-      h2 { margin-bottom: 18px; font-size: clamp(26px, 3vw, 40px); letter-spacing: -0.035em; }
-      h3 { margin-bottom: 8px; font-size: 18px; }
-      p:last-child { margin-bottom: 0; }
-      .eyebrow, th, .badge, .label { text-transform: uppercase; letter-spacing: 0.13em; font-size: 11px; font-weight: 800; }
-      .eyebrow { margin-bottom: 14px; color: var(--accent); }
-      .lede { max-width: 900px; color: var(--muted); font-size: clamp(17px, 2vw, 20px); }
-      .quiet { color: var(--muted); }
-      .small { font-size: 13px; }
-      .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
-      .badge { display: inline-flex; align-items: center; min-height: 29px; padding: 5px 10px; border: 1px solid var(--line); background: var(--panel-raised); }
-      .badge.good { color: var(--sol); border-color: rgba(142, 224, 181, 0.45); }
-      .badge.warn { color: var(--warning); border-color: rgba(240, 200, 121, 0.45); }
-      .badge.bad { color: var(--danger); border-color: rgba(255, 152, 144, 0.45); }
-      .hero-metrics, .lane-grid, .decision-grid, .definitions, .two-col { display: grid; gap: 14px; }
-      .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 34px; }
-      .hero-metric, .lane, .decision, .definition, .callout { border: 1px solid var(--line); background: var(--panel-raised); padding: 18px; }
-      .hero-metric strong { display: block; font-size: clamp(30px, 4vw, 44px); letter-spacing: -0.045em; }
-      .hero-metric span, .lane p, .decision p, .definition p, td, li { color: var(--muted); }
-      .verdict { border-left: 5px solid var(--sol); }
-      .verdict strong { color: var(--sol); }
-      .warning { border-left: 5px solid var(--warning); }
-      .danger { border-left: 5px solid var(--danger); }
-      .lane-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .lane { position: relative; overflow: hidden; }
-      .lane::before { content: ""; position: absolute; inset: 0 0 auto; height: 4px; background: var(--lane-color); }
-      .lane.high { --lane-color: var(--high); }
-      .lane.max { --lane-color: var(--max); }
-      .lane.sol { --lane-color: var(--sol); border-color: rgba(142, 224, 181, 0.55); }
-      .lane-name { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-      .lane-name h3 { font-size: 23px; }
-      .lane-name span { color: var(--lane-color); font-weight: 800; }
-      .lane-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      .lane-stat { padding-top: 10px; border-top: 1px solid var(--line); }
-      .lane-stat strong { display: block; font-size: 24px; }
-      .lane-stat span { color: var(--muted); font-size: 12px; }
-      .bar-group { margin-top: 28px; }
-      .bar-row { display: grid; grid-template-columns: 116px 1fr 80px; gap: 12px; align-items: center; margin: 12px 0; }
-      .bar-track { height: 15px; border: 1px solid var(--line); background: #0b0d0b; overflow: hidden; }
-      .bar { height: 100%; width: var(--width); background: var(--bar-color); }
-      .bar-row.high { --bar-color: var(--high); }
-      .bar-row.max { --bar-color: var(--max); }
-      .bar-row.sol { --bar-color: var(--sol); }
-      .bar-value { text-align: right; font-variant-numeric: tabular-nums; }
-      .definitions { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 18px; }
-      .definition strong { display: block; margin-bottom: 4px; }
-      .table-wrap { overflow-x: auto; border: 1px solid var(--line); }
-      table { width: 100%; border-collapse: collapse; min-width: 980px; font-size: 14px; }
-      th, td { padding: 13px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
-      th { position: sticky; top: 0; background: #191d19; color: var(--text); }
-      tr:last-child td { border-bottom: 0; }
-      td:first-child { color: var(--text); font-weight: 750; }
-      td:nth-child(2), td:nth-child(3) { white-space: nowrap; font-variant-numeric: tabular-nums; }
-      .winner { color: var(--sol); font-weight: 800; }
-      .specialist { color: var(--max); font-weight: 800; }
-      .none { color: var(--warning); font-weight: 800; }
-      .decision-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .decision strong { color: var(--sol); }
-      .decision.special strong { color: var(--max); }
-      .decision.hold strong { color: var(--warning); }
-      .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      ul { margin: 0; padding-left: 21px; }
-      li + li { margin-top: 8px; }
-      code { color: #d9e7d6; background: #0a0c0a; border: 1px solid var(--line); padding: 1px 5px; }
-      pre { overflow-x: auto; margin: 14px 0 0; padding: 16px; border: 1px solid var(--line); background: #090b09; color: #d9e7d6; }
-      pre code { border: 0; padding: 0; }
-      .footnote { margin-top: 18px; color: var(--dim); font-size: 13px; }
+      a {
+        color: inherit;
+      }
+      main {
+        width: min(1320px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0 80px;
+      }
+      header,
+      section {
+        border: 1px solid var(--line);
+        background: rgba(17, 20, 17, 0.95);
+      }
+      header {
+        padding: clamp(28px, 5vw, 66px);
+      }
+      section {
+        margin-top: 18px;
+        padding: clamp(22px, 3.5vw, 40px);
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        max-width: 1040px;
+        margin-bottom: 18px;
+        font-size: clamp(42px, 7vw, 88px);
+        line-height: 0.95;
+        letter-spacing: -0.055em;
+      }
+      h2 {
+        margin-bottom: 18px;
+        font-size: clamp(26px, 3vw, 40px);
+        letter-spacing: -0.035em;
+      }
+      h3 {
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+      p:last-child {
+        margin-bottom: 0;
+      }
+      .eyebrow,
+      th,
+      .badge,
+      .label {
+        text-transform: uppercase;
+        letter-spacing: 0.13em;
+        font-size: 11px;
+        font-weight: 800;
+      }
+      .eyebrow {
+        margin-bottom: 14px;
+        color: var(--accent);
+      }
+      .lede {
+        max-width: 900px;
+        color: var(--muted);
+        font-size: clamp(17px, 2vw, 20px);
+      }
+      .quiet {
+        color: var(--muted);
+      }
+      .small {
+        font-size: 13px;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 26px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 29px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        background: var(--panel-raised);
+      }
+      .badge.good {
+        color: var(--sol);
+        border-color: rgba(142, 224, 181, 0.45);
+      }
+      .badge.warn {
+        color: var(--warning);
+        border-color: rgba(240, 200, 121, 0.45);
+      }
+      .badge.bad {
+        color: var(--danger);
+        border-color: rgba(255, 152, 144, 0.45);
+      }
+      .hero-metrics,
+      .lane-grid,
+      .decision-grid,
+      .definitions,
+      .two-col {
+        display: grid;
+        gap: 14px;
+      }
+      .hero-metrics {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 34px;
+      }
+      .hero-metric,
+      .lane,
+      .decision,
+      .definition,
+      .callout {
+        border: 1px solid var(--line);
+        background: var(--panel-raised);
+        padding: 18px;
+      }
+      .hero-metric strong {
+        display: block;
+        font-size: clamp(30px, 4vw, 44px);
+        letter-spacing: -0.045em;
+      }
+      .hero-metric span,
+      .lane p,
+      .decision p,
+      .definition p,
+      td,
+      li {
+        color: var(--muted);
+      }
+      .verdict {
+        border-left: 5px solid var(--sol);
+      }
+      .verdict strong {
+        color: var(--sol);
+      }
+      .warning {
+        border-left: 5px solid var(--warning);
+      }
+      .danger {
+        border-left: 5px solid var(--danger);
+      }
+      .lane-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .lane {
+        position: relative;
+        overflow: hidden;
+      }
+      .lane::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 4px;
+        background: var(--lane-color);
+      }
+      .lane.high {
+        --lane-color: var(--high);
+      }
+      .lane.max {
+        --lane-color: var(--max);
+      }
+      .lane.sol {
+        --lane-color: var(--sol);
+        border-color: rgba(142, 224, 181, 0.55);
+      }
+      .lane-name {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .lane-name h3 {
+        font-size: 23px;
+      }
+      .lane-name span {
+        color: var(--lane-color);
+        font-weight: 800;
+      }
+      .lane-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .lane-stat {
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      .lane-stat strong {
+        display: block;
+        font-size: 24px;
+      }
+      .lane-stat span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .bar-group {
+        margin-top: 28px;
+      }
+      .bar-row {
+        display: grid;
+        grid-template-columns: 116px 1fr 80px;
+        gap: 12px;
+        align-items: center;
+        margin: 12px 0;
+      }
+      .bar-track {
+        height: 15px;
+        border: 1px solid var(--line);
+        background: #0b0d0b;
+        overflow: hidden;
+      }
+      .bar {
+        height: 100%;
+        width: var(--width);
+        background: var(--bar-color);
+      }
+      .bar-row.high {
+        --bar-color: var(--high);
+      }
+      .bar-row.max {
+        --bar-color: var(--max);
+      }
+      .bar-row.sol {
+        --bar-color: var(--sol);
+      }
+      .bar-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .definitions {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 18px;
+      }
+      .definition strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 980px;
+        font-size: 14px;
+      }
+      th,
+      td {
+        padding: 13px 12px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        position: sticky;
+        top: 0;
+        background: #191d19;
+        color: var(--text);
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      td:first-child {
+        color: var(--text);
+        font-weight: 750;
+      }
+      td:nth-child(2),
+      td:nth-child(3) {
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .winner {
+        color: var(--sol);
+        font-weight: 800;
+      }
+      .specialist {
+        color: var(--max);
+        font-weight: 800;
+      }
+      .none {
+        color: var(--warning);
+        font-weight: 800;
+      }
+      .decision-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .decision strong {
+        color: var(--sol);
+      }
+      .decision.special strong {
+        color: var(--max);
+      }
+      .decision.hold strong {
+        color: var(--warning);
+      }
+      .two-col {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      ul {
+        margin: 0;
+        padding-left: 21px;
+      }
+      li + li {
+        margin-top: 8px;
+      }
+      code {
+        color: #d9e7d6;
+        background: #0a0c0a;
+        border: 1px solid var(--line);
+        padding: 1px 5px;
+      }
+      pre {
+        overflow-x: auto;
+        margin: 14px 0 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: #090b09;
+        color: #d9e7d6;
+      }
+      pre code {
+        border: 0;
+        padding: 0;
+      }
+      .footnote {
+        margin-top: 18px;
+        color: var(--dim);
+        font-size: 13px;
+      }
 
       @media (max-width: 980px) {
-        .hero-metrics, .definitions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .lane-grid, .decision-grid { grid-template-columns: 1fr; }
+        .hero-metrics,
+        .definitions {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .lane-grid,
+        .decision-grid {
+          grid-template-columns: 1fr;
+        }
       }
 
       @media (max-width: 640px) {
-        main { width: min(100% - 18px, 1320px); padding-top: 18px; }
-        header, section { padding: 20px; }
-        .hero-metrics, .definitions, .two-col { grid-template-columns: 1fr; }
-        .bar-row { grid-template-columns: 90px 1fr 62px; gap: 8px; }
+        main {
+          width: min(100% - 18px, 1320px);
+          padding-top: 18px;
+        }
+        header,
+        section {
+          padding: 20px;
+        }
+        .hero-metrics,
+        .definitions,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+        .bar-row {
+          grid-template-columns: 90px 1fr 62px;
+          gap: 8px;
+        }
       }
 
       @media print {
-        :root { color-scheme: light; --bg: #fff; --panel: #fff; --panel-raised: #f5f6f3; --line: #c9cec6; --text: #111; --muted: #4c534b; }
-        body { background: #fff; }
-        main { width: 100%; padding: 0; }
-        header, section { break-inside: avoid; background: #fff; }
+        :root {
+          color-scheme: light;
+          --bg: #fff;
+          --panel: #fff;
+          --panel-raised: #f5f6f3;
+          --line: #c9cec6;
+          --text: #111;
+          --muted: #4c534b;
+        }
+        body {
+          background: #fff;
+        }
+        main {
+          width: 100%;
+          padding: 0;
+        }
+        header,
+        section {
+          break-inside: avoid;
+          background: #fff;
+        }
       }
     </style>
   </head>
   <body>
     <main>
       <header>
-        <p class="eyebrow">UnEmployed · configured AI evaluation · 12 August 2026</p>
+        <p class="eyebrow">
+          UnEmployed · configured AI evaluation · 12 August 2026
+        </p>
         <h1>Which model should power each AI capability?</h1>
         <p class="lede">
-          A complete synthetic comparison of Luna High, Luna Max, and Sol Low across eleven real
-          product capabilities. This report separates model output from deterministic fallback so
-          polished recovery behavior is never mistaken for model quality.
+          A complete synthetic comparison of Luna High, Luna Max, and Sol Low
+          across eleven real product capabilities. This report separates model
+          output from deterministic fallback so polished recovery behavior is
+          never mistaken for model quality.
         </p>
         <div class="meta">
           <span class="badge good">330 / 330 outcomes complete</span>
@@ -149,10 +468,18 @@
           <span class="badge warn">Synthetic evidence only</span>
         </div>
         <div class="hero-metrics" aria-label="Benchmark summary">
-          <div class="hero-metric"><strong>Sol Low</strong><span>aggregate benchmark winner</span></div>
-          <div class="hero-metric"><strong>9.86s</strong><span>best overall median latency</span></div>
-          <div class="hero-metric"><strong>75</strong><span>most direct workflow successes</span></div>
-          <div class="hero-metric"><strong>25</strong><span>fewest deterministic fallbacks</span></div>
+          <div class="hero-metric">
+            <strong>Sol Low</strong><span>aggregate benchmark winner</span>
+          </div>
+          <div class="hero-metric">
+            <strong>9.86s</strong><span>best overall median latency</span>
+          </div>
+          <div class="hero-metric">
+            <strong>75</strong><span>most direct workflow successes</span>
+          </div>
+          <div class="hero-metric">
+            <strong>25</strong><span>fewest deterministic fallbacks</span>
+          </div>
         </div>
       </header>
 
@@ -161,27 +488,37 @@
         <div class="callout verdict">
           <h2>Benchmark winner: <strong>Sol Low</strong>.</h2>
           <p>
-            Sol Low delivered the strongest combined operational result: the most direct successes,
-            the fewest fallbacks and guarded rejections, the best aggregate objective scores, and the
-            lowest median latency. This does not mean it is universally smarter; it means it worked
+            Sol Low delivered the strongest combined operational result: the
+            most direct successes, the fewest fallbacks and guarded rejections,
+            the best aggregate objective scores, and the lowest median latency.
+            This does not mean it is universally smarter; it means it worked
             with the current product contracts more reliably and efficiently.
           </p>
         </div>
-        <div class="callout" style="margin-top: 14px; border-left: 5px solid var(--high)">
-          <h3 style="color: var(--high)">Final product decision: Luna High for all compatible text and vision work.</h3>
+        <div
+          class="callout"
+          style="margin-top: 14px; border-left: 5px solid var(--high)"
+        >
+          <h3 style="color: var(--high)">
+            Final product decision: Luna High for all compatible text and vision
+            work.
+          </h3>
           <p>
-            After reviewing the completed benchmark, the product owner selected Luna High because
-            its price is materially preferable and its quality is sufficient. This accepted cost-and-product
-            choice supersedes the benchmark's default-routing recommendation without rewriting the
-            empirical result. Audio transcription remains local Whisper or another audio-capable model.
+            After reviewing the completed benchmark, the product owner selected
+            Luna High because its price is materially preferable and its quality
+            is sufficient. This accepted cost-and-product choice supersedes the
+            benchmark's default-routing recommendation without rewriting the
+            empirical result. Audio transcription remains local Whisper or
+            another audio-capable model.
           </p>
         </div>
         <div class="callout warning" style="margin-top: 14px">
           <h3>Do not make Luna Max the default.</h3>
           <p>
-            Luna Max took 2.34× as long at the median as Sol Low, reached a 124.72-second p95, and
-            produced no overall quality or reliability gain. Its only reviewed win was a narrow
-            specialist advantage on Interview screenshot vision.
+            Luna Max took 2.34× as long at the median as Sol Low, reached a
+            124.72-second p95, and produced no overall quality or reliability
+            gain. Its only reviewed win was a narrow specialist advantage on
+            Interview screenshot vision.
           </p>
         </div>
       </section>
@@ -191,82 +528,293 @@
         <h2>Overall lane comparison</h2>
         <div class="lane-grid">
           <article class="lane high">
-            <div class="lane-name"><h3>Luna High</h3><span>balanced Luna</span></div>
+            <div class="lane-name">
+              <h3>Luna High</h3>
+              <span>balanced Luna</span>
+            </div>
             <div class="lane-stats">
-              <div class="lane-stat"><strong>67</strong><span>direct successes</span></div>
-              <div class="lane-stat"><strong>33</strong><span>fallbacks</span></div>
-              <div class="lane-stat"><strong>10</strong><span>hard failures</span></div>
-              <div class="lane-stat"><strong>58</strong><span>guarded/rejected</span></div>
-              <div class="lane-stat"><strong>10.45s</strong><span>median latency</span></div>
-              <div class="lane-stat"><strong>42.32s</strong><span>p95 latency</span></div>
+              <div class="lane-stat">
+                <strong>67</strong><span>direct successes</span>
+              </div>
+              <div class="lane-stat">
+                <strong>33</strong><span>fallbacks</span>
+              </div>
+              <div class="lane-stat">
+                <strong>10</strong><span>hard failures</span>
+              </div>
+              <div class="lane-stat">
+                <strong>58</strong><span>guarded/rejected</span>
+              </div>
+              <div class="lane-stat">
+                <strong>10.45s</strong><span>median latency</span>
+              </div>
+              <div class="lane-stat">
+                <strong>42.32s</strong><span>p95 latency</span>
+              </div>
             </div>
           </article>
           <article class="lane max">
-            <div class="lane-name"><h3>Luna Max</h3><span>deep reasoning</span></div>
+            <div class="lane-name">
+              <h3>Luna Max</h3>
+              <span>deep reasoning</span>
+            </div>
             <div class="lane-stats">
-              <div class="lane-stat"><strong>66</strong><span>direct successes</span></div>
-              <div class="lane-stat"><strong>33</strong><span>fallbacks</span></div>
-              <div class="lane-stat"><strong>11</strong><span>hard failures</span></div>
-              <div class="lane-stat"><strong>55</strong><span>guarded/rejected</span></div>
-              <div class="lane-stat"><strong>23.05s</strong><span>median latency</span></div>
-              <div class="lane-stat"><strong>124.72s</strong><span>p95 latency</span></div>
+              <div class="lane-stat">
+                <strong>66</strong><span>direct successes</span>
+              </div>
+              <div class="lane-stat">
+                <strong>33</strong><span>fallbacks</span>
+              </div>
+              <div class="lane-stat">
+                <strong>11</strong><span>hard failures</span>
+              </div>
+              <div class="lane-stat">
+                <strong>55</strong><span>guarded/rejected</span>
+              </div>
+              <div class="lane-stat">
+                <strong>23.05s</strong><span>median latency</span>
+              </div>
+              <div class="lane-stat">
+                <strong>124.72s</strong><span>p95 latency</span>
+              </div>
             </div>
           </article>
           <article class="lane sol">
-            <div class="lane-name"><h3>Sol Low</h3><span>overall winner</span></div>
+            <div class="lane-name">
+              <h3>Sol Low</h3>
+              <span>overall winner</span>
+            </div>
             <div class="lane-stats">
-              <div class="lane-stat"><strong>75</strong><span>direct successes</span></div>
-              <div class="lane-stat"><strong>25</strong><span>fallbacks</span></div>
-              <div class="lane-stat"><strong>10</strong><span>hard failures</span></div>
-              <div class="lane-stat"><strong>49</strong><span>guarded/rejected</span></div>
-              <div class="lane-stat"><strong>9.86s</strong><span>median latency</span></div>
-              <div class="lane-stat"><strong>46.76s</strong><span>p95 latency</span></div>
+              <div class="lane-stat">
+                <strong>75</strong><span>direct successes</span>
+              </div>
+              <div class="lane-stat">
+                <strong>25</strong><span>fallbacks</span>
+              </div>
+              <div class="lane-stat">
+                <strong>10</strong><span>hard failures</span>
+              </div>
+              <div class="lane-stat">
+                <strong>49</strong><span>guarded/rejected</span>
+              </div>
+              <div class="lane-stat">
+                <strong>9.86s</strong><span>median latency</span>
+              </div>
+              <div class="lane-stat">
+                <strong>46.76s</strong><span>p95 latency</span>
+              </div>
             </div>
           </article>
         </div>
 
         <div class="bar-group" aria-label="Median latency comparison">
           <h3>Median time per case — shorter is better</h3>
-          <div class="bar-row high"><strong>Luna High</strong><div class="bar-track"><div class="bar" style="--width: 45.3%"></div></div><span class="bar-value">10.45s</span></div>
-          <div class="bar-row max"><strong>Luna Max</strong><div class="bar-track"><div class="bar" style="--width: 100%"></div></div><span class="bar-value">23.05s</span></div>
-          <div class="bar-row sol"><strong>Sol Low</strong><div class="bar-track"><div class="bar" style="--width: 42.8%"></div></div><span class="bar-value">9.86s</span></div>
+          <div class="bar-row high">
+            <strong>Luna High</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 45.3%"></div>
+            </div>
+            <span class="bar-value">10.45s</span>
+          </div>
+          <div class="bar-row max">
+            <strong>Luna Max</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 100%"></div>
+            </div>
+            <span class="bar-value">23.05s</span>
+          </div>
+          <div class="bar-row sol">
+            <strong>Sol Low</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 42.8%"></div>
+            </div>
+            <span class="bar-value">9.86s</span>
+          </div>
         </div>
         <div class="bar-group" aria-label="Direct success comparison">
           <h3>Direct workflow successes — longer is better</h3>
-          <div class="bar-row high"><strong>Luna High</strong><div class="bar-track"><div class="bar" style="--width: 89.3%"></div></div><span class="bar-value">67 / 110</span></div>
-          <div class="bar-row max"><strong>Luna Max</strong><div class="bar-track"><div class="bar" style="--width: 88%"></div></div><span class="bar-value">66 / 110</span></div>
-          <div class="bar-row sol"><strong>Sol Low</strong><div class="bar-track"><div class="bar" style="--width: 100%"></div></div><span class="bar-value">75 / 110</span></div>
+          <div class="bar-row high">
+            <strong>Luna High</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 89.3%"></div>
+            </div>
+            <span class="bar-value">67 / 110</span>
+          </div>
+          <div class="bar-row max">
+            <strong>Luna Max</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 88%"></div>
+            </div>
+            <span class="bar-value">66 / 110</span>
+          </div>
+          <div class="bar-row sol">
+            <strong>Sol Low</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 100%"></div>
+            </div>
+            <span class="bar-value">75 / 110</span>
+          </div>
         </div>
 
         <div class="definitions">
-          <div class="definition"><strong>Direct</strong><p>The model contribution reached the workflow without deterministic replacement.</p></div>
-          <div class="definition"><strong>Fallback</strong><p>The app recovered with deterministic behavior. Useful product output, but not model quality.</p></div>
-          <div class="definition"><strong>Hard failure</strong><p>The case completed without a direct or fallback success.</p></div>
-          <div class="definition"><strong>Guarded/rejected</strong><p>The model returned something, but a safety or typed-contract guard rejected it.</p></div>
+          <div class="definition">
+            <strong>Direct</strong>
+            <p>
+              The model contribution reached the workflow without deterministic
+              replacement.
+            </p>
+          </div>
+          <div class="definition">
+            <strong>Fallback</strong>
+            <p>
+              The app recovered with deterministic behavior. Useful product
+              output, but not model quality.
+            </p>
+          </div>
+          <div class="definition">
+            <strong>Hard failure</strong>
+            <p>The case completed without a direct or fallback success.</p>
+          </div>
+          <div class="definition">
+            <strong>Guarded/rejected</strong>
+            <p>
+              The model returned something, but a safety or typed-contract guard
+              rejected it.
+            </p>
+          </div>
         </div>
       </section>
 
       <section>
         <p class="eyebrow">All capability results</p>
         <h2>Quality, reliability, and time by product surface</h2>
-        <p class="quiet">Outcome columns use <strong>direct / fallback / failed</strong>. Every cell represents ten cases.</p>
+        <p class="quiet">
+          Outcome columns use <strong>direct / fallback / failed</strong>. Every
+          cell represents ten cases.
+        </p>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Capability</th><th>Outcomes<br />High · Max · Sol</th><th>Median seconds<br />High · Max · Sol</th><th>Reviewed result</th></tr>
+              <tr>
+                <th>Capability</th>
+                <th>Outcomes<br />High · Max · Sol</th>
+                <th>Median seconds<br />High · Max · Sol</th>
+                <th>Reviewed result</th>
+              </tr>
             </thead>
             <tbody>
-              <tr><td>Résumé text import</td><td>10/0/0 · 10/0/0 · 10/0/0</td><td>34.1 · 111.2 · 26.5</td><td><span class="winner">Sol Low</span> — best reviewed fact recall and complete chronology. Approximate expected-fact recall: 62/71 High, 53/71 Max, 69/71 Sol.</td></tr>
-              <tr><td>Résumé vision</td><td>10/0/0 · 10/0/0 · 10/0/0</td><td>14.2 · 36.0 · 13.0</td><td><span class="none">No product winner</span> — candidates were mostly rejected by the product contract. Sol was the most conservative raw diagnostic lane; Max timed out once.</td></tr>
-              <tr><td>Résumé generation</td><td>0/10/0 · 0/10/0 · 0/10/0</td><td>8.7 · 18.2 · 6.6</td><td><span class="none">No winner</span> — all 30 attempts fell back and shared synthetic facts contaminated case-specific rewrites.</td></tr>
-              <tr><td>Guided résumé edits</td><td>10/0/0 · 10/0/0 · 10/0/0</td><td>10.1 · 20.4 · 5.9</td><td><span class="winner">Sol Low, qualified</span> — strongest supported edit and fabricated-metric abstention, but most patches in every lane were schema-rejected.</td></tr>
-              <tr><td>Profile Copilot</td><td>6/4/0 · 7/3/0 · 7/3/0</td><td>8.6 · 23.6 · 7.1</td><td><span class="winner">Sol Low</span> — similar or better usefulness with the best latency. All lanes still produced malformed edit shapes in some cases.</td></tr>
-              <tr><td>Job-page extraction</td><td>10/0/0 · 9/1/0 · 10/0/0</td><td>7.4 · 13.0 · 6.9</td><td><span class="winner">Sol Low, slight</span> — High was close; Sol normalized fields more consistently. Every lane missed the visible relative apply URL.</td></tr>
-              <tr><td>Agentic job discovery</td><td>1/0/9 · 0/0/10 · 1/0/9</td><td>22.0 · 21.8 · 28.3</td><td><span class="none">No defensible winner</span> — extraction and the six-step tool budget dominated. Only guest search succeeded for High and Sol.</td></tr>
-              <tr><td>Source-debug guidance</td><td>0/9/1 · 0/9/1 · 7/2/1</td><td>40.2 · 49.4 · 46.1</td><td><span class="winner">Sol Low, decisive</span> — seven direct reviewed instructions; both Luna lanes aborted nine final-review calls and fell back.</td></tr>
-              <tr><td>Browser visual analysis</td><td>0/10/0 · 0/10/0 · 0/10/0</td><td>11.1 · 22.3 · 10.7</td><td><span class="none">No product winner</span> — all 30 observations failed the safe schema. Luna High was marginally cleanest in raw review only.</td></tr>
-              <tr><td>Interview cues</td><td>10/0/0 · 10/0/0 · 10/0/0</td><td>8.9 · 23.8 · 11.5</td><td><span class="winner">Sol Low for quality/default</span>; Luna High for lowest interactive latency. All lanes occasionally overstated outcomes in one fixture.</td></tr>
-              <tr><td>Interview screenshot vision</td><td>10/0/0 · 10/0/0 · 10/0/0</td><td>4.0 · 5.3 · 4.9</td><td><span class="specialist">Luna Max, narrow specialist win</span> — safest metrics and sensitive-evidence interpretation; too small an advantage to justify Max elsewhere.</td></tr>
+              <tr>
+                <td>Résumé text import</td>
+                <td>10/0/0 · 10/0/0 · 10/0/0</td>
+                <td>34.1 · 111.2 · 26.5</td>
+                <td>
+                  <span class="winner">Sol Low</span> — best reviewed fact
+                  recall and complete chronology. Approximate expected-fact
+                  recall: 62/71 High, 53/71 Max, 69/71 Sol.
+                </td>
+              </tr>
+              <tr>
+                <td>Résumé vision</td>
+                <td>10/0/0 · 10/0/0 · 10/0/0</td>
+                <td>14.2 · 36.0 · 13.0</td>
+                <td>
+                  <span class="none">No product winner</span> — candidates were
+                  mostly rejected by the product contract. Sol was the most
+                  conservative raw diagnostic lane; Max timed out once.
+                </td>
+              </tr>
+              <tr>
+                <td>Résumé generation</td>
+                <td>0/10/0 · 0/10/0 · 0/10/0</td>
+                <td>8.7 · 18.2 · 6.6</td>
+                <td>
+                  <span class="none">No winner</span> — all 30 attempts fell
+                  back and shared synthetic facts contaminated case-specific
+                  rewrites.
+                </td>
+              </tr>
+              <tr>
+                <td>Guided résumé edits</td>
+                <td>10/0/0 · 10/0/0 · 10/0/0</td>
+                <td>10.1 · 20.4 · 5.9</td>
+                <td>
+                  <span class="winner">Sol Low, qualified</span> — strongest
+                  supported edit and fabricated-metric abstention, but most
+                  patches in every lane were schema-rejected.
+                </td>
+              </tr>
+              <tr>
+                <td>Profile Copilot</td>
+                <td>6/4/0 · 7/3/0 · 7/3/0</td>
+                <td>8.6 · 23.6 · 7.1</td>
+                <td>
+                  <span class="winner">Sol Low</span> — similar or better
+                  usefulness with the best latency. All lanes still produced
+                  malformed edit shapes in some cases.
+                </td>
+              </tr>
+              <tr>
+                <td>Job-page extraction</td>
+                <td>10/0/0 · 9/1/0 · 10/0/0</td>
+                <td>7.4 · 13.0 · 6.9</td>
+                <td>
+                  <span class="winner">Sol Low, slight</span> — High was close;
+                  Sol normalized fields more consistently. Every lane missed the
+                  visible relative apply URL.
+                </td>
+              </tr>
+              <tr>
+                <td>Agentic job discovery</td>
+                <td>1/0/9 · 0/0/10 · 1/0/9</td>
+                <td>22.0 · 21.8 · 28.3</td>
+                <td>
+                  <span class="none">No defensible winner</span> — extraction
+                  and the six-step tool budget dominated. Only guest search
+                  succeeded for High and Sol.
+                </td>
+              </tr>
+              <tr>
+                <td>Source-debug guidance</td>
+                <td>0/9/1 · 0/9/1 · 7/2/1</td>
+                <td>40.2 · 49.4 · 46.1</td>
+                <td>
+                  <span class="winner">Sol Low, decisive</span> — seven direct
+                  reviewed instructions; both Luna lanes aborted nine
+                  final-review calls and fell back.
+                </td>
+              </tr>
+              <tr>
+                <td>Browser visual analysis</td>
+                <td>0/10/0 · 0/10/0 · 0/10/0</td>
+                <td>11.1 · 22.3 · 10.7</td>
+                <td>
+                  <span class="none">No product winner</span> — all 30
+                  observations failed the safe schema. Luna High was marginally
+                  cleanest in raw review only.
+                </td>
+              </tr>
+              <tr>
+                <td>Interview cues</td>
+                <td>10/0/0 · 10/0/0 · 10/0/0</td>
+                <td>8.9 · 23.8 · 11.5</td>
+                <td>
+                  <span class="winner">Sol Low for quality/default</span>; Luna
+                  High for lowest interactive latency. All lanes occasionally
+                  overstated outcomes in one fixture.
+                </td>
+              </tr>
+              <tr>
+                <td>Interview screenshot vision</td>
+                <td>10/0/0 · 10/0/0 · 10/0/0</td>
+                <td>4.0 · 5.3 · 4.9</td>
+                <td>
+                  <span class="specialist"
+                    >Luna Max, narrow specialist win</span
+                  >
+                  — safest metrics and sensitive-evidence interpretation; too
+                  small an advantage to justify Max elsewhere.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -276,13 +824,42 @@
         <p class="eyebrow">Benchmark-informed routing evidence</p>
         <h2>Evidence-based routing versus the accepted configuration</h2>
         <div class="decision-grid">
-          <article class="decision"><h3><strong>Sol Low</strong> — default</h3><p>Résumé text import, Guided Edits, Profile Copilot, job-page extraction, source-debug review, and ordinary Interview cues.</p></article>
-          <article class="decision special"><h3><strong>Luna specialists</strong></h3><p>Luna High is reasonable when the lowest Interview cue latency matters. Luna Max has only a narrow Interview screenshot-vision advantage.</p></article>
-          <article class="decision hold"><h3><strong>Hold routing decisions</strong></h3><p>Résumé vision, résumé generation, browser visual analysis, and agentic discovery need integration fixes before a model contest is meaningful.</p></article>
+          <article class="decision">
+            <h3><strong>Sol Low</strong> — default</h3>
+            <p>
+              Résumé text import, Guided Edits, Profile Copilot, job-page
+              extraction, source-debug review, and ordinary Interview cues.
+            </p>
+          </article>
+          <article class="decision special">
+            <h3><strong>Luna specialists</strong></h3>
+            <p>
+              Luna High is reasonable when the lowest Interview cue latency
+              matters. Luna Max has only a narrow Interview screenshot-vision
+              advantage.
+            </p>
+          </article>
+          <article class="decision hold">
+            <h3><strong>Hold routing decisions</strong></h3>
+            <p>
+              Résumé vision, résumé generation, browser visual analysis, and
+              agentic discovery need integration fixes before a model contest is
+              meaningful.
+            </p>
+          </article>
         </div>
-        <div class="callout" style="margin-top: 14px; border-left: 5px solid var(--high)">
-          <h3 style="color: var(--high)">Configured now: Luna High across compatible capabilities</h3>
-          <p>The table above remains useful evidence for future pricing or model changes. It is not the current production routing policy; ADR 0009 records the accepted Luna High decision.</p>
+        <div
+          class="callout"
+          style="margin-top: 14px; border-left: 5px solid var(--high)"
+        >
+          <h3 style="color: var(--high)">
+            Configured now: Luna High across compatible capabilities
+          </h3>
+          <p>
+            The table above remains useful evidence for future pricing or model
+            changes. It is not the current production routing policy; ADR 0009
+            records the accepted Luna High decision.
+          </p>
         </div>
       </section>
 
@@ -293,25 +870,54 @@
           <div class="callout danger">
             <h3>Typed output and attribution</h3>
             <ul>
-              <li>Résumé-vision candidates do not reliably satisfy the product contract.</li>
-              <li>Résumé generation returned partial contributions and fell back in all 30 cases.</li>
-              <li>Guided Edits and Profile Copilot often produced unsupported mutation shapes.</li>
-              <li>All browser visual outputs failed the safe observation schema.</li>
-              <li>One Luna Max vision fallback was incorrectly labeled as a direct success.</li>
+              <li>
+                Résumé-vision candidates do not reliably satisfy the product
+                contract.
+              </li>
+              <li>
+                Résumé generation returned partial contributions and fell back
+                in all 30 cases.
+              </li>
+              <li>
+                Guided Edits and Profile Copilot often produced unsupported
+                mutation shapes.
+              </li>
+              <li>
+                All browser visual outputs failed the safe observation schema.
+              </li>
+              <li>
+                One Luna Max vision fallback was incorrectly labeled as a direct
+                success.
+              </li>
             </ul>
           </div>
           <div class="callout danger">
             <h3>Browser and evidence handling</h3>
             <ul>
-              <li>Discovery usually exhausted its six-step budget or failed extraction.</li>
+              <li>
+                Discovery usually exhausted its six-step budget or failed
+                extraction.
+              </li>
               <li>Every lane missed a visible relative apply URL.</li>
-              <li>Luna source-debug final-review calls repeatedly aborted while Sol completed.</li>
-              <li>Interview cues need tighter grounding against outcome inflation.</li>
-              <li>Screenshot vision missed part of the cropped-error accessibility signal.</li>
+              <li>
+                Luna source-debug final-review calls repeatedly aborted while
+                Sol completed.
+              </li>
+              <li>
+                Interview cues need tighter grounding against outcome inflation.
+              </li>
+              <li>
+                Screenshot vision missed part of the cropped-error accessibility
+                signal.
+              </li>
             </ul>
           </div>
         </div>
-        <p class="footnote">These failures should not be “fixed” by selecting a more expensive model. The product boundary must first accept, validate, and attribute outputs correctly.</p>
+        <p class="footnote">
+          These failures should not be “fixed” by selecting a more expensive
+          model. The product boundary must first accept, validate, and attribute
+          outputs correctly.
+        </p>
       </section>
 
       <section>
@@ -319,17 +925,37 @@
         <h2>Why Luna Max lost despite deeper reasoning</h2>
         <div class="callout warning">
           <p>
-            Luna Max produced twelve raw HTTP failures: nine aborted source-debug final-review calls,
-            one 180-second résumé-vision timeout, one 35-second job-extraction timeout, and one
-            35-second agentic-discovery timeout. Résumé text import alone had a 111.2-second median,
-            compared with 34.1 seconds for High and 26.5 seconds for Sol.
+            Luna Max produced twelve raw HTTP failures: nine aborted
+            source-debug final-review calls, one 180-second résumé-vision
+            timeout, one 35-second job-extraction timeout, and one 35-second
+            agentic-discovery timeout. Résumé text import alone had a
+            111.2-second median, compared with 34.1 seconds for High and 26.5
+            seconds for Sol.
           </p>
         </div>
         <div class="bar-group" aria-label="Summed case time comparison">
           <h3>Summed case duration</h3>
-          <div class="bar-row high"><strong>Luna High</strong><div class="bar-track"><div class="bar" style="--width: 45%"></div></div><span class="bar-value">29.43m</span></div>
-          <div class="bar-row max"><strong>Luna Max</strong><div class="bar-track"><div class="bar" style="--width: 100%"></div></div><span class="bar-value">65.36m</span></div>
-          <div class="bar-row sol"><strong>Sol Low</strong><div class="bar-track"><div class="bar" style="--width: 44.1%"></div></div><span class="bar-value">28.84m</span></div>
+          <div class="bar-row high">
+            <strong>Luna High</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 45%"></div>
+            </div>
+            <span class="bar-value">29.43m</span>
+          </div>
+          <div class="bar-row max">
+            <strong>Luna Max</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 100%"></div>
+            </div>
+            <span class="bar-value">65.36m</span>
+          </div>
+          <div class="bar-row sol">
+            <strong>Sol Low</strong>
+            <div class="bar-track">
+              <div class="bar" style="--width: 44.1%"></div>
+            </div>
+            <span class="bar-value">28.84m</span>
+          </div>
         </div>
       </section>
 
@@ -341,21 +967,51 @@
             <h3>Strong evidence</h3>
             <ul>
               <li>Exactly 330 unique outcomes out of 330 expected.</li>
-              <li>Ten behavior-backed synthetic cases per capability and model lane.</li>
-              <li>Raw provider contribution separated from guarded product output and fallback.</li>
-              <li>Seed-balanced schedules, serial execution within each lane, and resumable artifacts.</li>
-              <li>Independent qualitative review across all lanes and every capability.</li>
-              <li>No personal profile, résumé, credentials, authenticated state, or application actions.</li>
+              <li>
+                Ten behavior-backed synthetic cases per capability and model
+                lane.
+              </li>
+              <li>
+                Raw provider contribution separated from guarded product output
+                and fallback.
+              </li>
+              <li>
+                Seed-balanced schedules, serial execution within each lane, and
+                resumable artifacts.
+              </li>
+              <li>
+                Independent qualitative review across all lanes and every
+                capability.
+              </li>
+              <li>
+                No personal profile, résumé, credentials, authenticated state,
+                or application actions.
+              </li>
             </ul>
           </div>
           <div>
             <h3>Important limits</h3>
             <ul>
-              <li>One full synthetic run per lane; no repeated-trial confidence intervals yet.</li>
-              <li>Model family and reasoning effort are paired, so they are not independently causal.</li>
-              <li>Typed-contract and browser orchestration failures confound several capabilities.</li>
-              <li>Objective scores are triage signals, not a replacement for raw-output review.</li>
-              <li>Synthetic evidence does not establish live-site or private-résumé generalization.</li>
+              <li>
+                One full synthetic run per lane; no repeated-trial confidence
+                intervals yet.
+              </li>
+              <li>
+                Model family and reasoning effort are paired, so they are not
+                independently causal.
+              </li>
+              <li>
+                Typed-contract and browser orchestration failures confound
+                several capabilities.
+              </li>
+              <li>
+                Objective scores are triage signals, not a replacement for
+                raw-output review.
+              </li>
+              <li>
+                Synthetic evidence does not establish live-site or
+                private-résumé generalization.
+              </li>
             </ul>
           </div>
         </div>
@@ -365,13 +1021,30 @@
         <p class="eyebrow">Preserved follow-up</p>
         <h2>What should be improved next</h2>
         <ul>
-          <li>Repair typed provider contracts for résumé vision/generation, Guided Edits, Profile Copilot, and browser visual analysis.</li>
-          <li>Fix discovery extraction and tool-budget failures, then repeat only the affected discovery cases.</li>
-          <li>Add relative apply-URL resolution and a focused extraction regression.</li>
-          <li>Make fallback attribution exact so deterministic recovery can never count as direct model success.</li>
-          <li>Strengthen source-debug abort diagnostics and Interview cue/screenshot grounding.</li>
+          <li>
+            Repair typed provider contracts for résumé vision/generation, Guided
+            Edits, Profile Copilot, and browser visual analysis.
+          </li>
+          <li>
+            Fix discovery extraction and tool-budget failures, then repeat only
+            the affected discovery cases.
+          </li>
+          <li>
+            Add relative apply-URL resolution and a focused extraction
+            regression.
+          </li>
+          <li>
+            Make fallback attribution exact so deterministic recovery can never
+            count as direct model success.
+          </li>
+          <li>
+            Strengthen source-debug abort diagnostics and Interview
+            cue/screenshot grounding.
+          </li>
           <li>Add runner, prompt, fixture, and grader hashes to manifests.</li>
-          <li>Repeat seeds for variance only after integration defects are fixed.</li>
+          <li>
+            Repeat seeds for variance only after integration defects are fixed.
+          </li>
         </ul>
       </section>
 
@@ -379,14 +1052,21 @@
         <p class="eyebrow">Artifacts and reproduction</p>
         <h2>How to inspect or repeat it</h2>
         <p class="quiet">
-          Ignored raw artifacts are under <code>.tmp/ai-evals/full_v2_b09aba7db2da/</code>.
-          The machine-readable aggregate is <code>full-report.json</code>. Each case preserves raw
-          provider and guarded-product evidence. Authorization headers were not captured.
+          Ignored raw artifacts are under
+          <code>.tmp/ai-evals/full_v2_b09aba7db2da/</code>. The machine-readable
+          aggregate is <code>full-report.json</code>. Each case preserves raw
+          provider and guarded-product evidence. Authorization headers were not
+          captured.
         </p>
         <pre><code>pnpm ai:benchmark plan
 pnpm ai:benchmark full &lt;lane&gt;
 pnpm ai:benchmark full-report</code></pre>
-        <p class="footnote">Run ID: <code>full_v2_b09aba7db2da</code> · Corpus digest: <code>b09aba7db2daa197dbd0837d8d1cddc7f750a4130f150e2e646ce40584e3afd8</code></p>
+        <p class="footnote">
+          Run ID: <code>full_v2_b09aba7db2da</code> · Corpus digest:
+          <code
+            >b09aba7db2daa197dbd0837d8d1cddc7f750a4130f150e2e646ce40584e3afd8</code
+          >
+        </p>
       </section>
     </main>
   </body>

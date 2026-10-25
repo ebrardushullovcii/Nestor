@@ -161,9 +161,7 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
       setDraft("");
       for (const image of pendingImages) URL.revokeObjectURL(image.previewUrl);
       setPendingImages([]);
-      props.onWorkspaceChange(
-        await window.nestor.liveAssistant.getWorkspace(),
-      );
+      props.onWorkspaceChange(await window.nestor.liveAssistant.getWorkspace());
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -179,9 +177,7 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
     setErrorMessage(null);
     try {
       props.onWorkspaceChange(
-        await window.nestor.liveAssistant.performAction(
-          "capture_screenshot",
-        ),
+        await window.nestor.liveAssistant.performAction("capture_screenshot"),
       );
     } catch (error) {
       setErrorMessage(

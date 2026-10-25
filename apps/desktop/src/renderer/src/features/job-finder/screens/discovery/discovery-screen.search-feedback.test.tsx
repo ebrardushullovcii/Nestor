@@ -73,9 +73,8 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
     DiscoveryResultsPanel: (
       props: Parameters<typeof useFixtureListReport>[0] & {

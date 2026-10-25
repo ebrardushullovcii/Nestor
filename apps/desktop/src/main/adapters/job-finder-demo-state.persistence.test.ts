@@ -28,9 +28,7 @@ afterEach(async () => {
 });
 
 async function createTemporaryWorkspaceFilePath(): Promise<string> {
-  const directory = await mkdtemp(
-    path.join(os.tmpdir(), "nestor-demo-state-"),
-  );
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nestor-demo-state-"));
   temporaryDirectories.push(directory);
   return path.join(directory, "job-finder-state.sqlite");
 }

@@ -93,7 +93,11 @@ function recoverLegacySettings(
     if (source.applicationCrm !== undefined) {
       const crm = source.applicationCrm;
       const defaults = ApplicationCrmSettingsSchema.parse({});
-      recovered.applicationCrm = recoverFields(ApplicationCrmSettingsSchema, crm, defaults);
+      recovered.applicationCrm = recoverFields(
+        ApplicationCrmSettingsSchema,
+        crm,
+        defaults,
+      );
       if (crm && typeof crm === "object" && !Array.isArray(crm)) {
         const fields = crm as Record<string, unknown>;
         recovered.applicationCrm.noResponseAutomation = recoverFields(
@@ -102,10 +106,13 @@ function recoverLegacySettings(
           defaults.noResponseAutomation,
         );
         if (Array.isArray(fields.customStages)) {
-          recovered.applicationCrm.customStages = fields.customStages.flatMap((stage: unknown) => {
-            const parsedStage = ApplicationCrmStageDefinitionSchema.safeParse(stage);
-            return parsedStage.success ? [parsedStage.data] : [];
-          });
+          recovered.applicationCrm.customStages = fields.customStages.flatMap(
+            (stage: unknown) => {
+              const parsedStage =
+                ApplicationCrmStageDefinitionSchema.safeParse(stage);
+              return parsedStage.success ? [parsedStage.data] : [];
+            },
+          );
         }
       }
     }

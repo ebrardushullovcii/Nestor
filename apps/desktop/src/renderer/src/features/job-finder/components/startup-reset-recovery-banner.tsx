@@ -46,8 +46,7 @@ export function StartupResetRecoveryBanner() {
     let cancelled = false;
 
     try {
-      const recoveryBridge =
-        window.nestor?.jobFinder?.getStartupResetRecovery;
+      const recoveryBridge = window.nestor?.jobFinder?.getStartupResetRecovery;
       recoveryBridge?.()
         .then((recoveryFact) => {
           if (!cancelled && isJobFinderStartupResetRecoveryFact(recoveryFact)) {

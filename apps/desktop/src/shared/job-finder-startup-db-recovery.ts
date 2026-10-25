@@ -1,8 +1,6 @@
 import { JobFinderStartupDatabaseRecoveryFactSchema } from "@nestor/contracts";
 import type { JobFinderStartupDatabaseRecoveryFact } from "@nestor/contracts";
-import type {
-  JobFinderStartupDatabaseRecoveryOutcome,
-} from "@nestor/contracts";
+import type { JobFinderStartupDatabaseRecoveryOutcome } from "@nestor/contracts";
 
 export type {
   JobFinderStartupDatabaseRecoveryBlockedCandidate,

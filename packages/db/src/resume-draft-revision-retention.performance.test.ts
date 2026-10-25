@@ -18,7 +18,10 @@ import { MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT } from "./resume-draft-revision-re
 const PERFORMANCE_SAMPLE_COUNT = 20;
 const GENEROUS_P95_HOST_GATE_MS = 750;
 
-function percentile(samples: readonly number[], percentileValue: number): number {
+function percentile(
+  samples: readonly number[],
+  percentileValue: number,
+): number {
   const sorted = [...samples].sort((left, right) => left - right);
   const index = Math.max(
     0,
@@ -220,9 +223,7 @@ describe("resume revision SQLite performance", () => {
       const finalRevisions = await repository.listResumeDraftRevisions(
         currentDraft.id,
       );
-      expect(finalRevisions).toHaveLength(
-        MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT,
-      );
+      expect(finalRevisions).toHaveLength(MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT);
       expect(finalRevisions[0]).toEqual(
         expect.objectContaining({
           id: parentRevisionId,

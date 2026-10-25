@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  ReviewQueueItem,
-  WorkspaceJobListRow,
-} from "@nestor/contracts";
+import type { ReviewQueueItem, WorkspaceJobListRow } from "@nestor/contracts";
 import type { JobFinderQueuedJobOutcome } from "../../lib/job-finder-types";
 import { prefetchJobDetail } from "../../hooks/use-job-detail";
 import { hasOpenJobFinderOverlays } from "../../lib/job-finder-overlay-ownership";
@@ -277,7 +274,8 @@ export function useDiscoveryTriage(input: {
     setReopenJobId(null);
   }, [onSelectJob, reopenJobId, reopenRowListed]);
   const canUndo =
-    last !== null && (last.kind === "hide" || Boolean(input.onRemoveFromShortlist));
+    last !== null &&
+    (last.kind === "hide" || Boolean(input.onRemoveFromShortlist));
 
   // The keys read the latest handlers without re-subscribing every render.
   const handlersRef = useRef({ shortlist, notInterested, skip, back, undo });
@@ -356,14 +354,14 @@ export function useDiscoveryTriage(input: {
     onSkip: nextId ? skip : null,
     undo:
       canUndo && last
-      ? {
-          label:
-            last.kind === "hide"
-              ? `Undo: show ${last.title} again`
-              : `Undo: take ${last.title} off the shortlist`,
-          onUndo: undo,
-        }
-      : null,
+        ? {
+            label:
+              last.kind === "hide"
+                ? `Undo: show ${last.title} again`
+                : `Undo: take ${last.title} off the shortlist`,
+            onUndo: undo,
+          }
+        : null,
     failure,
   };
 }

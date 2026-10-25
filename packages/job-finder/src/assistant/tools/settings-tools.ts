@@ -378,10 +378,6 @@ export const pauseActivityTool = defineTool({
   },
 });
 
-
-
-
-
 export const setDefaultResumeLevelTool = defineTool({
   name: "set_default_resume_level",
   group: "settings",

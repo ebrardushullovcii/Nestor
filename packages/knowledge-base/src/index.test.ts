@@ -58,7 +58,9 @@ describe("createLocalKnowledgeIndex", () => {
       },
     );
 
-    const allResults = index.search("workflow incident operations", { limit: 3 });
+    const allResults = index.search("workflow incident operations", {
+      limit: 3,
+    });
     const profileOnlyResults = index.search("workflow admin engineering", {
       tags: ["profile"],
       limit: 3,

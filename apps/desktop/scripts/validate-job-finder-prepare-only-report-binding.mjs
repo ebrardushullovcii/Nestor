@@ -497,8 +497,7 @@ const authorizedDiagnostic = smokeModule.buildChildLaunchEnv({
   sourceEnv: pollutedEnv,
 });
 assert(
-  authorizedDiagnostic.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
-    "1" &&
+  authorizedDiagnostic.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES === "1" &&
     authorizedDiagnostic.NESTOR_TEST_API_USE_LIVE_AI === "1" &&
     smokeModule.childEnvAuthorizesIntermediateWrites(authorizedDiagnostic) ===
       true,

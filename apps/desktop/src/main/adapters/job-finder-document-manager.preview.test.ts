@@ -75,7 +75,11 @@ test("uses the host renderer's HTML for both preview and page counting", async (
     settings: input.settings,
     templateId: input.templateId,
   });
-  expect(mocks.write).toHaveBeenCalledWith(expect.any(String), "<html>Worker printable document</html>", "utf8");
+  expect(mocks.write).toHaveBeenCalledWith(
+    expect.any(String),
+    "<html>Worker printable document</html>",
+    "utf8",
+  );
 });
 beforeEach(() => {
   vi.resetAllMocks();

@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { OpenBrowserSessionOptions } from "@nestor/browser-runtime";
-import { createDesktopBrowserRuntime, createDesktopJobFinderAiClient, createDesktopResumeVisionProvider } from "./create-workspace-service";
+import {
+  createDesktopBrowserRuntime,
+  createDesktopJobFinderAiClient,
+  createDesktopResumeVisionProvider,
+} from "./create-workspace-service";
 import {
   getDesktopTestDelayMs,
   getResumePreviewTestMode,
@@ -16,7 +20,10 @@ import {
 
 describe("createDesktopJobFinderAiClient", () => {
   test.each([
-    ["with an API key present", { NESTOR_ENABLE_TEST_API: "1", NESTOR_AI_API_KEY: "test-api-key" }],
+    [
+      "with an API key present",
+      { NESTOR_ENABLE_TEST_API: "1", NESTOR_AI_API_KEY: "test-api-key" },
+    ],
     ["without an API key configured", { NESTOR_ENABLE_TEST_API: "1" }],
   ])(
     "keeps the deterministic client when the desktop test API is enabled %s",
@@ -222,22 +229,18 @@ describe("isBrowserAgentEnabled", () => {
       .mockImplementation(() => undefined);
 
     expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "" })).toBe(true);
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "   " })).toBe(
-      true,
-    );
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "   " })).toBe(true);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
   test("ignores the removed LinkedIn-specific alias when the generic flag is unset", () => {
-    expect(
-      isBrowserAgentEnabled({ NESTOR_LINKEDIN_BROWSER_AGENT: "0" }),
-    ).toBe(true);
+    expect(isBrowserAgentEnabled({ NESTOR_LINKEDIN_BROWSER_AGENT: "0" })).toBe(
+      true,
+    );
   });
 
   test("disables only for explicit false values", () => {
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "0" })).toBe(
-      false,
-    );
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "0" })).toBe(false);
     expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "false" })).toBe(
       false,
     );
@@ -252,15 +255,9 @@ describe("isBrowserAgentEnabled", () => {
       .mockImplementation(() => undefined);
 
     expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "1" })).toBe(true);
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "TRUE" })).toBe(
-      true,
-    );
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "yes" })).toBe(
-      true,
-    );
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "yes" })).toBe(
-      true,
-    );
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "TRUE" })).toBe(true);
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "yes" })).toBe(true);
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "yes" })).toBe(true);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       '[desktop test-api] Unrecognized NESTOR_BROWSER_AGENT value: "yes". Falling back to the default enabled behavior.',
@@ -272,12 +269,8 @@ describe("isBrowserAgentEnabled", () => {
       .spyOn(console, "warn")
       .mockImplementation(() => undefined);
 
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: " yes " })).toBe(
-      true,
-    );
-    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "YES" })).toBe(
-      true,
-    );
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: " yes " })).toBe(true);
+    expect(isBrowserAgentEnabled({ NESTOR_BROWSER_AGENT: "YES" })).toBe(true);
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
@@ -339,7 +332,9 @@ describe("getTestBrowserSessionStatus", () => {
 
     expect(getTestBrowserSessionStatus({})).toBeNull();
     expect(
-      getTestBrowserSessionStatus({ NESTOR_TEST_BROWSER_SESSION_STATUS: "   " }),
+      getTestBrowserSessionStatus({
+        NESTOR_TEST_BROWSER_SESSION_STATUS: "   ",
+      }),
     ).toBeNull();
     expect(warnSpy).not.toHaveBeenCalled();
   });
@@ -422,22 +417,34 @@ describe("getResumePreviewTestMode", () => {
   });
 
   test("defaults to ok when unset or blank", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
 
     expect(getResumePreviewTestMode({})).toBe("ok");
-    expect(getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "   " })).toBe("ok");
+    expect(
+      getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "   " }),
+    ).toBe("ok");
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
   test("accepts fail_once override", () => {
-    expect(getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "fail_once" })).toBe("fail_once");
+    expect(
+      getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "fail_once" }),
+    ).toBe("fail_once");
   });
 
   test("warns once and falls back to ok for invalid overrides", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
 
-    expect(getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "broken" })).toBe("ok");
-    expect(getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "broken" })).toBe("ok");
+    expect(
+      getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "broken" }),
+    ).toBe("ok");
+    expect(
+      getResumePreviewTestMode({ NESTOR_TEST_RESUME_PREVIEW: "broken" }),
+    ).toBe("ok");
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       '[desktop test-api] Unrecognized NESTOR_TEST_RESUME_PREVIEW value: "broken". Falling back to the default "ok" behavior.',

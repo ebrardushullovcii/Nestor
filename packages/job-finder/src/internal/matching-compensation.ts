@@ -25,7 +25,25 @@ function isCompactRangeSeparator(text: string): boolean {
   return /^\s*[-–—/]\s*[$€£]?\s*$/.test(text);
 }
 
-const knownCompensationPeriods = new Set(["yr", "year", "years", "annual", "annum", "mo", "month", "months", "wk", "week", "weeks", "day", "days", "hr", "hrs", "hour", "hours"]);
+const knownCompensationPeriods = new Set([
+  "yr",
+  "year",
+  "years",
+  "annual",
+  "annum",
+  "mo",
+  "month",
+  "months",
+  "wk",
+  "week",
+  "weeks",
+  "day",
+  "days",
+  "hr",
+  "hrs",
+  "hour",
+  "hours",
+]);
 const compensationPeriodAliases: Record<string, string> = {
   hourly: "hour",
   daily: "day",
@@ -54,8 +72,10 @@ const annualCompensationMultipliers: Record<string, number> = {
   hours: 2080,
 };
 const salaryNumberPattern = /(\d[\d,]*(?:\.\d+)?)(?:\s*([km])\b)?/gi;
-const secondaryCompensationBeforePattern = /\b(bonus|commission|sign[- ]?on|equity|ote)\b/i;
-const secondaryCompensationAfterPattern = /^(?:[:-]\s*)?(bonus|commission|sign[- ]?on|equity|ote)\b/i;
+const secondaryCompensationBeforePattern =
+  /\b(bonus|commission|sign[- ]?on|equity|ote)\b/i;
+const secondaryCompensationAfterPattern =
+  /^(?:[:-]\s*)?(bonus|commission|sign[- ]?on|equity|ote)\b/i;
 
 /** Currency codes a listing may state beside its numbers. */
 const STATED_CURRENCY_CODE_PATTERN =
@@ -158,16 +178,33 @@ export function parseSalaryFloor(salaryText: string | null): number | null {
       const currentIndex = match.index ?? 0;
       const nextMatch = matches[index + 1];
       const nextIndex = nextMatch?.index ?? -1;
-      const betweenText = nextMatch ? salaryText.slice(currentIndex + match[0].length, nextIndex) : "";
-      const suffix = !rawSuffix && nextMatch?.[2] && isCompactRangeSeparator(betweenText)
-        ? nextMatch[2].toLowerCase()
-        : rawSuffix;
-      const periodUnit = readPeriodUnit(salaryText, currentIndex + match[0].length, knownCompensationPeriods)
-        ?? (nextMatch && isCompactRangeSeparator(betweenText)
-          ? readPeriodUnit(salaryText, (nextMatch.index ?? 0) + nextMatch[0].length, knownCompensationPeriods)
+      const betweenText = nextMatch
+        ? salaryText.slice(currentIndex + match[0].length, nextIndex)
+        : "";
+      const suffix =
+        !rawSuffix && nextMatch?.[2] && isCompactRangeSeparator(betweenText)
+          ? nextMatch[2].toLowerCase()
+          : rawSuffix;
+      const periodUnit =
+        readPeriodUnit(
+          salaryText,
+          currentIndex + match[0].length,
+          knownCompensationPeriods,
+        ) ??
+        (nextMatch && isCompactRangeSeparator(betweenText)
+          ? readPeriodUnit(
+              salaryText,
+              (nextMatch.index ?? 0) + nextMatch[0].length,
+              knownCompensationPeriods,
+            )
           : null);
-      const precedingText = salaryText.slice(Math.max(0, currentIndex - 24), currentIndex).toLowerCase();
-      const followingText = salaryText.slice(currentIndex + match[0].length).trimStart().toLowerCase();
+      const precedingText = salaryText
+        .slice(Math.max(0, currentIndex - 24), currentIndex)
+        .toLowerCase();
+      const followingText = salaryText
+        .slice(currentIndex + match[0].length)
+        .trimStart()
+        .toLowerCase();
 
       if (!Number.isFinite(baseValue) || baseValue <= 0) {
         return null;
@@ -180,7 +217,10 @@ export function parseSalaryFloor(salaryText: string | null): number | null {
       const trailingContext = followingText.slice(0, 24);
       const leadingContext = precedingText.trim().split(/\s+/).at(-1) ?? "";
 
-      if (secondaryCompensationBeforePattern.test(leadingContext) || secondaryCompensationAfterPattern.test(trailingContext)) {
+      if (
+        secondaryCompensationBeforePattern.test(leadingContext) ||
+        secondaryCompensationAfterPattern.test(trailingContext)
+      ) {
         return null;
       }
 
@@ -188,11 +228,12 @@ export function parseSalaryFloor(salaryText: string | null): number | null {
         return null;
       }
 
-      const scaledValue = suffix === "k"
-        ? baseValue * 1000
-        : suffix === "m"
-          ? baseValue * 1_000_000
-          : baseValue;
+      const scaledValue =
+        suffix === "k"
+          ? baseValue * 1000
+          : suffix === "m"
+            ? baseValue * 1_000_000
+            : baseValue;
 
       return periodUnit
         ? scaledValue * (annualCompensationMultipliers[periodUnit] ?? 1)
@@ -236,9 +277,18 @@ export function parseNormalizedCompensation(
         !rawSuffix && nextMatch?.[2] && isCompactRangeSeparator(betweenText)
           ? nextMatch[2].toLowerCase()
           : rawSuffix;
-      const periodUnit = readPeriodUnit(salaryText, currentIndex + match[0].length, knownCompensationPeriods)
-        ?? (nextMatch && isCompactRangeSeparator(betweenText)
-          ? readPeriodUnit(salaryText, (nextMatch.index ?? 0) + nextMatch[0].length, knownCompensationPeriods)
+      const periodUnit =
+        readPeriodUnit(
+          salaryText,
+          currentIndex + match[0].length,
+          knownCompensationPeriods,
+        ) ??
+        (nextMatch && isCompactRangeSeparator(betweenText)
+          ? readPeriodUnit(
+              salaryText,
+              (nextMatch.index ?? 0) + nextMatch[0].length,
+              knownCompensationPeriods,
+            )
           : null);
       const precedingText = salaryText
         .slice(Math.max(0, currentIndex - 24), currentIndex)
@@ -248,7 +298,11 @@ export function parseNormalizedCompensation(
         .trimStart()
         .toLowerCase();
 
-      if (!Number.isFinite(baseValue) || baseValue <= 0 || followingText.startsWith("%")) {
+      if (
+        !Number.isFinite(baseValue) ||
+        baseValue <= 0 ||
+        followingText.startsWith("%")
+      ) {
         return null;
       }
 
@@ -285,7 +339,9 @@ export function parseNormalizedCompensation(
     );
   const maxAmount = openEnded ? null : (parsedValues.at(-1) ?? minAmount);
   const interval = detectCompensationInterval(salaryText);
-  const multiplier = interval ? (annualCompensationMultipliers[interval] ?? 1) : null;
+  const multiplier = interval
+    ? (annualCompensationMultipliers[interval] ?? 1)
+    : null;
   const currency = detectCurrencyCode(salaryText);
   const hasComparableUsdEvidence = currency === "USD" && multiplier !== null;
 
@@ -421,7 +477,8 @@ export function evaluateCompensationFit(
       minimumSalaryUsd,
       listingMinimumAnnualUsd: null,
       listingCurrency: normalized.currency,
-      explanation: "The listing compensation interval could not be normalized safely.",
+      explanation:
+        "The listing compensation interval could not be normalized safely.",
     };
   }
 
@@ -485,7 +542,9 @@ export function reconcileSalaryTextWithListingBody(
   description: string,
 ): string | null {
   return reconcileSalaryTextWithPreparedBody(
-    salaryText, extractSalaryRangeFromListingBody(description), () => description,
+    salaryText,
+    extractSalaryRangeFromListingBody(description),
+    () => description,
   );
 }
 

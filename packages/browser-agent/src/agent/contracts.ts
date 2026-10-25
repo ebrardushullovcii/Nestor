@@ -1,8 +1,8 @@
-import type { JobPosting } from '@nestor/contracts'
-import type { AgentLoopToolDefinition } from '@nestor/agent-runtime'
-import type { AgentMessage, ToolCall } from '../types'
+import type { JobPosting } from "@nestor/contracts";
+import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
+import type { AgentMessage, ToolCall } from "../types";
 
-export type AgentExtractorPageType = 'search_results' | 'job_detail'
+export type AgentExtractorPageType = "search_results" | "job_detail";
 
 // Both collaborators are injected plain functions that never read `this`, so
 // they are declared as function-typed properties rather than methods. The
@@ -13,23 +13,23 @@ export type AgentExtractorPageType = 'search_results' | 'job_detail'
  * thinks: search and source-check turns, form-filling turns, and fact checks
  * of written answers.
  */
-export type BrowserAgentReasoningTask = 'search' | 'apply' | 'claim_check'
+export type BrowserAgentReasoningTask = "search" | "apply" | "claim_check";
 
 export interface LLMClient {
   chatWithTools: (
     messages: AgentMessage[],
     tools: AgentLoopToolDefinition[],
     options?: {
-      signal?: AbortSignal
-      parallelToolCalls?: boolean
-      maxOutputTokens?: number
-      reasoningTask?: BrowserAgentReasoningTask
-    }
+      signal?: AbortSignal;
+      parallelToolCalls?: boolean;
+      maxOutputTokens?: number;
+      reasoningTask?: BrowserAgentReasoningTask;
+    },
   ) => Promise<{
-    content?: string
-    toolCalls?: ToolCall[]
-    reasoning?: string
-  }>
+    content?: string;
+    toolCalls?: ToolCall[];
+    reasoning?: string;
+  }>;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface LLMClient {
  */
 export function withReasoningTask(
   client: LLMClient,
-  reasoningTask: BrowserAgentReasoningTask
+  reasoningTask: BrowserAgentReasoningTask,
 ): LLMClient {
   return {
     chatWithTools: (messages, tools, options) =>
@@ -46,51 +46,54 @@ export function withReasoningTask(
         ...options,
         reasoningTask: options?.reasoningTask ?? reasoningTask,
       }),
-  }
+  };
 }
 
 export interface JobExtractor {
   extractJobsFromPage: (input: {
-    pageText: string
-    pageUrl: string
-    pageType: AgentExtractorPageType
-    maxJobs: number
-    selectionContext?: string
-    signal?: AbortSignal
-  }) => Promise<Array<
-    Pick<
-      JobPosting,
-      | 'sourceJobId'
-      | 'canonicalUrl'
-      | 'title'
-      | 'company'
-      | 'location'
-      | 'description'
-      | 'salaryText'
-      | 'summary'
-      | 'postedAt'
-      | 'workMode'
-      | 'applyPath'
-      | 'easyApplyEligible'
-      | 'keySkills'
-    > & Partial<
+    pageText: string;
+    pageUrl: string;
+    pageType: AgentExtractorPageType;
+    maxJobs: number;
+    selectionContext?: string;
+    signal?: AbortSignal;
+  }) => Promise<
+    Array<
       Pick<
         JobPosting,
-        | 'applicationUrl'
-        | 'postedAtText'
-        | 'providerUpdatedAt'
-        | 'responsibilities'
-        | 'minimumQualifications'
-        | 'preferredQualifications'
-        | 'seniority'
-        | 'employmentType'
-        | 'department'
-        | 'team'
-        | 'employerWebsiteUrl'
-        | 'employerDomain'
-        | 'benefits'
-        | 'searchRejection'
-      >
+        | "sourceJobId"
+        | "canonicalUrl"
+        | "title"
+        | "company"
+        | "location"
+        | "description"
+        | "salaryText"
+        | "summary"
+        | "postedAt"
+        | "workMode"
+        | "applyPath"
+        | "easyApplyEligible"
+        | "keySkills"
+      > &
+        Partial<
+          Pick<
+            JobPosting,
+            | "applicationUrl"
+            | "postedAtText"
+            | "providerUpdatedAt"
+            | "responsibilities"
+            | "minimumQualifications"
+            | "preferredQualifications"
+            | "seniority"
+            | "employmentType"
+            | "department"
+            | "team"
+            | "employerWebsiteUrl"
+            | "employerDomain"
+            | "benefits"
+            | "searchRejection"
+          >
+        >
     >
-  >>
+  >;
 }

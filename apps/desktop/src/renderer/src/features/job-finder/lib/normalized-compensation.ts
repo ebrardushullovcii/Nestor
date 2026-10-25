@@ -37,7 +37,9 @@ export function formatNormalizedCompensation(
   const annualizedRange =
     annualizedValues.length === 1 && compensation.maxAnnualUsd === null
       ? `USD ${annualizedValues[0]!.toLocaleString()}+`
-      : annualizedValues.map((value) => `USD ${value.toLocaleString()}`).join(" – ");
+      : annualizedValues
+          .map((value) => `USD ${value.toLocaleString()}`)
+          .join(" – ");
 
   return annualizedRange ? `${annualizedRange} annualized` : null;
 }
@@ -52,7 +54,10 @@ export function formatNormalizedCompensation(
  * absence label instead.
  */
 export function formatStatedNormalizedCompensation(
-  job: Pick<JobListRow, "salaryText" | "normalizedCompensation"> | null | undefined,
+  job:
+    | Pick<JobListRow, "salaryText" | "normalizedCompensation">
+    | null
+    | undefined,
 ): string | null {
   return job?.salaryText
     ? formatNormalizedCompensation(job.normalizedCompensation)

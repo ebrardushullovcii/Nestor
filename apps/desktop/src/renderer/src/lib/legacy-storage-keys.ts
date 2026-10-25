@@ -17,10 +17,11 @@ export function migrateLegacyStorageKeys(storage: Storage): void {
     }
 
     for (const legacyKey of legacyKeys) {
-      const key = `${CURRENT_PREFIX}${legacyKey.slice(legacyPrefix.length)}`.replace(
-        "interview-helper",
-        "live-assistant",
-      );
+      const key =
+        `${CURRENT_PREFIX}${legacyKey.slice(legacyPrefix.length)}`.replace(
+          "interview-helper",
+          "live-assistant",
+        );
       const value = storage.getItem(legacyKey);
       if (value !== null && storage.getItem(key) === null) {
         storage.setItem(key, value);

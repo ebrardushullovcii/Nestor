@@ -32,9 +32,7 @@ import {
   isDesktopResumeImportActive,
 } from "../job-finder/import-resume";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
-import {
-  listJobsNotInProgress,
-} from "../job-finder/start-apply-batch";
+import { listJobsNotInProgress } from "../job-finder/start-apply-batch";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
 import {
   createSearchProgressPublisher,
@@ -226,14 +224,19 @@ export function createAssistantHostPorts(input: {
   const library = getCandidateAssetLibrary();
   const ports: AssistantHostPorts = {
     async readJobDetail(jobId, planId) {
-      const { readJobFinderJobDetail } = await import("../job-finder/read-job-detail");
+      const { readJobFinderJobDetail } =
+        await import("../job-finder/read-job-detail");
       const service = await getJobFinderWorkspaceService();
       const repository = getJobFinderRepositoryForWorkspaceService(service);
-      const activePlan = planId ?? (await repository?.getCampaignState())?.activeCampaignId ?? null;
+      const activePlan =
+        planId ??
+        (await repository?.getCampaignState())?.activeCampaignId ??
+        null;
       return readJobFinderJobDetail(repository, { jobId, planId: activePlan });
     },
     async executeAction(actionId, input) {
-      const { executeDesktopJobFinderAction } = await import("./desktop-actions");
+      const { executeDesktopJobFinderAction } =
+        await import("./desktop-actions");
       return executeDesktopJobFinderAction(actionId, input);
     },
     isResumeImportActive: isDesktopResumeImportActive,
@@ -260,26 +263,62 @@ export function createAssistantHostPorts(input: {
     async startSearch({ searchRequest, targetId, campaignId }) {
       const service = await getJobFinderWorkspaceService();
       const before = await readWorkspaceProjection(service);
-      if (before.activeDiscoveryRun?.state === "running") return { runId: before.activeDiscoveryRun.id, message: "A search is already running." };
+      if (before.activeDiscoveryRun?.state === "running")
+        return {
+          runId: before.activeDiscoveryRun.id,
+          message: "A search is already running.",
+        };
       const startedAt = new Date().toISOString();
       let complete!: (runId: string | null) => void;
-      const started = new Promise<string | null>((resolve) => { complete = resolve; });
+      const started = new Promise<string | null>((resolve) => {
+        complete = resolve;
+      });
       let failure: unknown;
       const publishProgress = createSearchProgressPublisher();
       const activity = (event: DiscoveryActivityEvent) => {
         complete(event.runId);
         publishProgress();
       };
-      const work = campaignId ? service.runCampaignNow({ campaignId }, activity)
-        : service.runAgentDiscovery(activity, undefined, targetId ?? undefined, searchRequest);
-      void work.then((snapshot) => {
-        const run = snapshot.activeDiscoveryRun ?? snapshot.recentDiscoveryRuns.find((entry) => entry.startedAt >= startedAt);
-        complete(run?.id ?? null);
-      }, (error: unknown) => { failure = error; complete(null); }).finally(() => publishJobFinderWorkspaceUpdate());
+      const work = campaignId
+        ? service.runCampaignNow({ campaignId }, activity)
+        : service.runAgentDiscovery(
+            activity,
+            undefined,
+            targetId ?? undefined,
+            searchRequest,
+          );
+      void work
+        .then(
+          (snapshot) => {
+            const run =
+              snapshot.activeDiscoveryRun ??
+              snapshot.recentDiscoveryRuns.find(
+                (entry) => entry.startedAt >= startedAt,
+              );
+            complete(run?.id ?? null);
+          },
+          (error: unknown) => {
+            failure = error;
+            complete(null);
+          },
+        )
+        .finally(() => publishJobFinderWorkspaceUpdate());
       const timer = setTimeout(() => complete(null), SEARCH_START_TIMEOUT_MS);
       let runId: string | null;
-      try { runId = await started; } finally { clearTimeout(timer); }
-      return runId ? { runId, message: "The search started." } : { runId: null, message: failure instanceof Error ? failure.message : "The search did not start. Check that at least one job source is on." };
+      try {
+        runId = await started;
+      } finally {
+        clearTimeout(timer);
+      }
+      return runId
+        ? { runId, message: "The search started." }
+        : {
+            runId: null,
+            message:
+              failure instanceof Error
+                ? failure.message
+                : "The search did not start. Check that at least one job source is on.",
+          };
     },
     async cancelSearch(runId) {
       const service = await getJobFinderWorkspaceService();
@@ -289,20 +328,35 @@ export function createAssistantHostPorts(input: {
     async startApplications({ jobIds, mode, conversationId, onQueued }) {
       const service = await getJobFinderWorkspaceService();
       const repository = getJobFinderRepositoryForWorkspaceService(service);
-      if (!repository) throw new Error("The application workspace is not open, so nothing was started.");
+      if (!repository)
+        throw new Error(
+          "The application workspace is not open, so nothing was started.",
+        );
       const pending = await listJobsNotInProgress(repository, jobIds);
-      if (!pending.length) return { startedJobIds: [], heldBack: [], runId: null };
+      if (!pending.length)
+        return { startedJobIds: [], heldBack: [], runId: null };
       const { getApplyQueueRunner } = await import("../../routes/job-finder");
-      const queue = await getApplyQueueRunner().start(pending, mode, async (saved) => {
-        if (conversationId) saved.assistantScopes = [...(saved.assistantScopes ?? []), { conversationId, jobIds: pending }];
-        await onQueued?.(saved.id);
-      });
+      const queue = await getApplyQueueRunner().start(
+        pending,
+        mode,
+        async (saved) => {
+          if (conversationId)
+            saved.assistantScopes = [
+              ...(saved.assistantScopes ?? []),
+              { conversationId, jobIds: pending },
+            ];
+          await onQueued?.(saved.id);
+        },
+      );
       const wanted = new Set(pending);
       return {
         startedJobIds: queue.startedJobIds.filter((id) => wanted.has(id)),
         queuedJobIds: queue.jobIds.filter((id) => wanted.has(id)),
-        heldBack: queue.skipped.filter((entry) => wanted.has(entry.jobId)).map((entry) => ({ ...entry, title: entry.jobId })),
-        queueId: queue.id, runId: queue.activeRunId,
+        heldBack: queue.skipped
+          .filter((entry) => wanted.has(entry.jobId))
+          .map((entry) => ({ ...entry, title: entry.jobId })),
+        queueId: queue.id,
+        runId: queue.activeRunId,
       };
     },
     async sendPreparedApplications({ jobIds }) {

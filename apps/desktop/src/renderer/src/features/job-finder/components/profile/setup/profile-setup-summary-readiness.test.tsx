@@ -159,7 +159,9 @@ describe("guided setup readiness, stated once", () => {
       draftSearchPreferences: searchPreferencesWithoutWorkMode,
     });
     // The work mode is a hint on Job targets, no longer a gate.
-    expect(blocked.text).toBe("Everything required is in. You can finish setup.");
+    expect(blocked.text).toBe(
+      "Everything required is in. You can finish setup.",
+    );
 
     // The two eligibility answers are: without them the first application
     // stopped on "Are you authorized to work here?".

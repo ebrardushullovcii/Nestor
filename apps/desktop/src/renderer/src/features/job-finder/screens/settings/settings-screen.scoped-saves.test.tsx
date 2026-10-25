@@ -200,9 +200,9 @@ describe("SettingsScreen scoped section saves", () => {
     );
     await waitFor(() =>
       expect(
-        within(appDevice)
-          .getByRole<HTMLButtonElement>("button", { name: "Dark" })
-          .disabled,
+        within(appDevice).getByRole<HTMLButtonElement>("button", {
+          name: "Dark",
+        }).disabled,
       ).toBe(false),
     );
 

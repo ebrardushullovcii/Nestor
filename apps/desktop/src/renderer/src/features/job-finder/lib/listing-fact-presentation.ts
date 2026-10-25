@@ -104,7 +104,10 @@ export function splitListingLocationValues(
   const seen = new Set<string>();
   const kept: string[] = [];
   for (const part of (value ?? "").split(/\s*(?:[;/|•·]|\bor\b)\s*/iu)) {
-    const place = part.replace(/\s+/gu, " ").trim().replace(/[,;]+$/u, "");
+    const place = part
+      .replace(/\s+/gu, " ")
+      .trim()
+      .replace(/[,;]+$/u, "");
     const key = toComparableWords(place);
     if (!key || seen.has(key)) {
       continue;

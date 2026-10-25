@@ -57,7 +57,10 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:mark-campaign-notification-read",
       "job-finder:mark-all-campaign-notifications-read",
     ],
-    coverage: tools("action_mark_campaign_notification_read", "action_mark_all_campaign_notifications_read"),
+    coverage: tools(
+      "action_mark_campaign_notification_read",
+      "action_mark_all_campaign_notifications_read",
+    ),
   },
 
   // Profile
@@ -136,7 +139,14 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:candidate-assets:restore",
       "job-finder:candidate-assets:delete",
     ],
-    coverage: tools("list_documents", "read_document", "action_candidate_assets_import", "action_candidate_assets_open", "action_candidate_assets_restore", "action_candidate_assets_list"),
+    coverage: tools(
+      "list_documents",
+      "read_document",
+      "action_candidate_assets_import",
+      "action_candidate_assets_open",
+      "action_candidate_assets_restore",
+      "action_candidate_assets_list",
+    ),
   },
   {
     id: "profile.files_delete",
@@ -150,7 +160,12 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Profile › Sources",
     action: "Add sources, turn them on or off",
     channels: ["job-finder:save-search-preferences"],
-    coverage: tools("list_sources", "update_sources", "action_edit_source", "action_remove_source"),
+    coverage: tools(
+      "list_sources",
+      "update_sources",
+      "action_edit_source",
+      "action_remove_source",
+    ),
   },
   {
     id: "profile.source_check",
@@ -166,7 +181,16 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:accept-source-instruction-draft",
       "job-finder:verify-source-instructions",
     ],
-    coverage: tools("check_source", "list_sources", "action_cancel_source_debug", "action_get_source_debug_run_details", "action_list_source_debug_runs", "action_save_source_instruction_artifact", "action_accept_source_instruction_draft", "action_verify_source_instructions"),
+    coverage: tools(
+      "check_source",
+      "list_sources",
+      "action_cancel_source_debug",
+      "action_get_source_debug_run_details",
+      "action_list_source_debug_runs",
+      "action_save_source_instruction_artifact",
+      "action_accept_source_instruction_draft",
+      "action_verify_source_instructions",
+    ),
   },
   {
     id: "profile.legacy_copilot",
@@ -282,7 +306,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:toggle-campaign-rule",
       "job-finder:project-campaign-rule-funnel",
     ],
-    coverage: tools("action_save_campaign_rule", "action_delete_campaign_rule", "action_toggle_campaign_rule", "action_project_campaign_rule_funnel", "action_delete_campaign"),
+    coverage: tools(
+      "action_save_campaign_rule",
+      "action_delete_campaign_rule",
+      "action_toggle_campaign_rule",
+      "action_project_campaign_rule_funnel",
+      "action_delete_campaign",
+    ),
   },
   {
     id: "campaigns.run_now",
@@ -372,7 +402,12 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:clear-resume-approval",
       "job-finder:reveal-saved-file",
     ],
-    coverage: tools("export_resume", "action_approve_resume", "action_clear_resume_approval", "action_reveal_saved_file"),
+    coverage: tools(
+      "export_resume",
+      "action_approve_resume",
+      "action_clear_resume_approval",
+      "action_reveal_saved_file",
+    ),
   },
   {
     id: "resume.lines_to_confirm",
@@ -423,21 +458,34 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:recommend-resume-strategy",
       "job-finder:set-campaign-resume-strategy-default",
     ],
-    coverage: tools("action_read_action_state", "action_save_resume_strategy", "action_select_resume_strategy", "action_disable_resume_strategy", "action_recommend_resume_strategy", "action_set_campaign_resume_strategy_default"),
+    coverage: tools(
+      "action_read_action_state",
+      "action_save_resume_strategy",
+      "action_select_resume_strategy",
+      "action_disable_resume_strategy",
+      "action_recommend_resume_strategy",
+      "action_set_campaign_resume_strategy_default",
+    ),
   },
 
   // Applications
   {
     id: "apply.queue",
     screen: "Shortlisted / Applications",
-    action: "Queue the whole selection, pause, continue, stop or remove waiting jobs",
+    action:
+      "Queue the whole selection, pause, continue, stop or remove waiting jobs",
     channels: [
       "job-finder:start-apply-queue",
       "job-finder:control-apply-queue",
       "job-finder:remove-from-apply-queue",
       "job-finder:approve-resumes",
     ],
-    coverage: tools("apply_to_jobs", "action_control_apply_queue", "action_remove_from_apply_queue", "action_approve_resumes"),
+    coverage: tools(
+      "apply_to_jobs",
+      "action_control_apply_queue",
+      "action_remove_from_apply_queue",
+      "action_approve_resumes",
+    ),
   },
   {
     id: "apply.move_back",
@@ -447,7 +495,10 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:return-application-to-shortlist",
       "job-finder:undo-return-application-to-shortlist",
     ],
-    coverage: tools("action_return_application_to_shortlist", "action_undo_return_application_to_shortlist"),
+    coverage: tools(
+      "action_return_application_to_shortlist",
+      "action_undo_return_application_to_shortlist",
+    ),
   },
   {
     id: "apply.reopen",
@@ -457,7 +508,10 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:get-application-page-states",
       "job-finder:reopen-application-page",
     ],
-    coverage: tools("action_get_application_page_states", "action_reopen_application_page"),
+    coverage: tools(
+      "action_get_application_page_states",
+      "action_reopen_application_page",
+    ),
   },
   {
     id: "apply.start",
@@ -503,7 +557,10 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:approve-apply-run",
       "job-finder:resolve-apply-consent-request",
     ],
-    coverage: tools("action_approve_apply_run", "action_resolve_apply_consent_request"),
+    coverage: tools(
+      "action_approve_apply_run",
+      "action_resolve_apply_consent_request",
+    ),
   },
   {
     id: "apply.details",
@@ -547,7 +604,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:edit-application-document",
       "job-finder:export-application-document",
     ],
-    coverage: tools("action_list_application_documents", "action_propose_application_document", "action_edit_application_document", "action_approve_application_document", "action_export_application_document"),
+    coverage: tools(
+      "action_list_application_documents",
+      "action_propose_application_document",
+      "action_edit_application_document",
+      "action_approve_application_document",
+      "action_export_application_document",
+    ),
   },
   {
     id: "apply.authority",
@@ -562,7 +625,18 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:update-application-authority-envelope",
       "job-finder:revoke-application-authority-envelope",
     ],
-    coverage: tools("action_get_application_authority_readiness", "action_approve_current_application_answers", "action_list_application_authority_envelopes", "action_get_application_authority_envelope", "action_create_application_authority_envelope", "action_update_application_authority_envelope", "action_revoke_application_authority_envelope", "record_instruction", "update_instruction", "update_apply_settings"),
+    coverage: tools(
+      "action_get_application_authority_readiness",
+      "action_approve_current_application_answers",
+      "action_list_application_authority_envelopes",
+      "action_get_application_authority_envelope",
+      "action_create_application_authority_envelope",
+      "action_update_application_authority_envelope",
+      "action_revoke_application_authority_envelope",
+      "record_instruction",
+      "update_instruction",
+      "update_apply_settings",
+    ),
   },
   {
     id: "apply.uncertain",
@@ -639,7 +713,10 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:run-application-no-response-automation",
       "job-finder:update-tracker-crm",
     ],
-    coverage: tools("action_update_tracker_crm", "action_run_application_no_response_automation"),
+    coverage: tools(
+      "action_update_tracker_crm",
+      "action_run_application_no_response_automation",
+    ),
   },
 
   // Companies
@@ -659,7 +736,12 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:review-company-merge",
       "job-finder:refresh-company-intelligence",
     ],
-    coverage: tools("action_read_action_state", "action_mutate_company_intelligence", "action_review_company_merge", "action_refresh_company_intelligence"),
+    coverage: tools(
+      "action_read_action_state",
+      "action_mutate_company_intelligence",
+      "action_review_company_merge",
+      "action_refresh_company_intelligence",
+    ),
   },
 
   // Settings
@@ -721,7 +803,18 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:get-startup-database-recovery",
       "job-finder:dismiss-startup-database-recovery-notice",
     ],
-    coverage: tools("action_export_diagnostics", "action_get_performance_snapshot", "action_reset_workspace", "action_reset_browser", "action_get_startup_reset_recovery", "action_get_startup_database_recovery", "action_dismiss_startup_database_recovery_notice", "action_export_personal_workspace", "action_preview_personal_workspace_restore", "action_confirm_personal_workspace_restore"),
+    coverage: tools(
+      "action_export_diagnostics",
+      "action_get_performance_snapshot",
+      "action_reset_workspace",
+      "action_reset_browser",
+      "action_get_startup_reset_recovery",
+      "action_get_startup_database_recovery",
+      "action_dismiss_startup_database_recovery_notice",
+      "action_export_personal_workspace",
+      "action_preview_personal_workspace_restore",
+      "action_confirm_personal_workspace_restore",
+    ),
   },
   {
     id: "settings.clipboard",

@@ -291,9 +291,7 @@ describe("applications status helpers", () => {
     expect(getApplicationLatestActivityLabel(record)).toBe(
       "Submitted via apply copilot.",
     );
-    expect(getApplicationNextStepLabel(record)).toBe(
-      "View application",
-    );
+    expect(getApplicationNextStepLabel(record)).toBe("View application");
   });
 
   it("uses terminal unsupported copy ahead of consent-approved fallback copy", () => {
@@ -762,15 +760,15 @@ describe("one pending-question list for both screens", () => {
     ).toEqual(["q_current"]);
   });
 
-it("reads View application on a sent application with no saved next step", () => {
-  // Sent during a batch run, the record carries no label of its own.
-  const record = createRecord({
-    status: "submitted",
-    lastAttemptState: "submitted",
-    nextActionLabel: null,
+  it("reads View application on a sent application with no saved next step", () => {
+    // Sent during a batch run, the record carries no label of its own.
+    const record = createRecord({
+      status: "submitted",
+      lastAttemptState: "submitted",
+      nextActionLabel: null,
+    });
+    expect(getApplicationNextStepLabel(record)).toBe("View application");
   });
-  expect(getApplicationNextStepLabel(record)).toBe("View application");
-});
 });
 
 describe("an application the person cancelled", () => {
@@ -787,7 +785,6 @@ describe("an application the person cancelled", () => {
     ).toBe(true);
   });
 });
-
 
 it("ignores legacy Prepare again next steps after the application was sent", () => {
   expect(

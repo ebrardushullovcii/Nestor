@@ -138,48 +138,114 @@ function indexJobSql(table: string, where = "", startup = false): string {
 }
 
 /** A typed provenance write publishes its completed relations without a fake root UPDATE. */
-export function refreshSavedJobReadIndex(database: DatabaseSync, id: string): void {
-  if (!database.prepare("SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'").get()) return;
+export function refreshSavedJobReadIndex(
+  database: DatabaseSync,
+  id: string,
+): void {
+  if (
+    !database
+      .prepare("SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'")
+      .get()
+  )
+    return;
   database.prepare(indexJobSql("saved_jobs", "WHERE j.id = ?")).run(id);
-  database.prepare("INSERT INTO workspace_changes(table_name,item_id,operation) VALUES ('saved_jobs',?,'upsert')").run(id);
+  database
+    .prepare(
+      "INSERT INTO workspace_changes(table_name,item_id,operation) VALUES ('saved_jobs',?,'upsert')",
+    )
+    .run(id);
 }
 
 // Body inputs used by workspaceJobIndexSelectSql; evidence-only fields do not
 // rebuild list facts. Relational dates have their own narrow trigger below.
 const jobIndexBodyFields = [
-  "status", "source", "workMode", "title", "company", "location", "canonicalUrl",
-  "sourceJobId", "applicationUrl", "postedAt", "postedAtText", "discoveredAt",
-  "firstSeenAt", "lastSeenAt", "lastVerifiedActiveAt", "discoveryFeedback",
-  "discoveryMethod", "detailQuality", "salaryText", "resumeApplicationMode",
-  "resumeTailoringMode", "providerUpdatedAt", "applyPath", "rescoredAfterListingRead",
-  "providerKey", "providerBoardToken", "providerIdentifier", "seniority",
-  "matchAssessment", "planAssessments", "provenance", "campaignIds",
+  "status",
+  "source",
+  "workMode",
+  "title",
+  "company",
+  "location",
+  "canonicalUrl",
+  "sourceJobId",
+  "applicationUrl",
+  "postedAt",
+  "postedAtText",
+  "discoveredAt",
+  "firstSeenAt",
+  "lastSeenAt",
+  "lastVerifiedActiveAt",
+  "discoveryFeedback",
+  "discoveryMethod",
+  "detailQuality",
+  "salaryText",
+  "resumeApplicationMode",
+  "resumeTailoringMode",
+  "providerUpdatedAt",
+  "applyPath",
+  "rescoredAfterListingRead",
+  "providerKey",
+  "providerBoardToken",
+  "providerIdentifier",
+  "seniority",
+  "matchAssessment",
+  "planAssessments",
+  "provenance",
+  "campaignIds",
 ];
 
-function ensureTrigger(database: DatabaseSync, name: string, sql: string): void {
-  const existing = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql;
+function ensureTrigger(
+  database: DatabaseSync,
+  name: string,
+  sql: string,
+): void {
+  const existing = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?")
+    .get(name)?.sql;
   const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
-  if (typeof existing === "string" && normalize(existing) === normalize(sql)) return;
+  if (typeof existing === "string" && normalize(existing) === normalize(sql))
+    return;
   database.exec(`DROP TRIGGER IF EXISTS ${name}`);
   database.exec(sql);
 }
 
 function installJobIndexTriggers(database: DatabaseSync): void {
-  for (const table of jobTables) for (const operation of ["insert", "update", "delete"] as const) {
-    const name = `workspace_job_index_${table}_${operation}`;
-    const columns = table === "saved_jobs"
-      ? ["id", "value", "assessment_id", "has_plan_assessments", "list_visible", "display_company", "display_location"]
-      : ["id", "value"];
-    const bodyChanged = jobIndexBodyFields.map(field => `(json_type(OLD.value,'$.${field}') IS NOT json_type(NEW.value,'$.${field}') OR json_extract(OLD.value,'$.${field}') IS NOT json_extract(NEW.value,'$.${field}'))`).join(" OR ");
-    const changed = columns.filter(column => column !== "value").map(column => `OLD.${column} IS NOT NEW.${column}`).join(" OR ");
-    ensureTrigger(database, name, `CREATE TRIGGER ${name} AFTER ${operation === "update" ? `UPDATE OF ${columns.join(",")}` : operation.toUpperCase()} ON ${table}
+  for (const table of jobTables)
+    for (const operation of ["insert", "update", "delete"] as const) {
+      const name = `workspace_job_index_${table}_${operation}`;
+      const columns =
+        table === "saved_jobs"
+          ? [
+              "id",
+              "value",
+              "assessment_id",
+              "has_plan_assessments",
+              "list_visible",
+              "display_company",
+              "display_location",
+            ]
+          : ["id", "value"];
+      const bodyChanged = jobIndexBodyFields
+        .map(
+          (field) =>
+            `(json_type(OLD.value,'$.${field}') IS NOT json_type(NEW.value,'$.${field}') OR json_extract(OLD.value,'$.${field}') IS NOT json_extract(NEW.value,'$.${field}'))`,
+        )
+        .join(" OR ");
+      const changed = columns
+        .filter((column) => column !== "value")
+        .map((column) => `OLD.${column} IS NOT NEW.${column}`)
+        .join(" OR ");
+      ensureTrigger(
+        database,
+        name,
+        `CREATE TRIGGER ${name} AFTER ${operation === "update" ? `UPDATE OF ${columns.join(",")}` : operation.toUpperCase()} ON ${table}
       ${operation === "update" ? `WHEN ${changed} OR (OLD.value IS NOT NEW.value AND CASE WHEN json_valid(OLD.value) AND json_valid(NEW.value) THEN ${bodyChanged} ELSE 1 END)` : ""} BEGIN
       ${operation === "update" ? `DELETE FROM workspace_job_index WHERE origin='${table}' AND id=OLD.id AND OLD.id IS NOT NEW.id;` : ""}
       DELETE FROM workspace_job_index WHERE origin = '${table}' AND id = ${operation === "delete" ? "OLD" : "NEW"}.id
         ${operation === "delete" ? "" : table === "saved_jobs" ? "AND plan_id != '' AND plan_id NOT IN (SELECT plan_id FROM plan_job_memberships WHERE item_id = NEW.id)" : "AND plan_id NOT IN (SELECT value FROM json_each(json_insert(COALESCE(json_extract(NEW.value, '$.campaignIds'), '[]'), '$[#]', '')))"};
       ${operation === "delete" ? "" : indexJobSql(table, "WHERE j.id = NEW.id")}
-    END`);
-  }
+    END`,
+      );
+    }
 }
 
 export const workspaceEntityIndexColumns =
@@ -306,22 +372,30 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
     }
     installJobIndexTriggers(database);
     ensureActivityRevision(database);
-    ensureTrigger(database, "workspace_sighting_dates", `CREATE TRIGGER workspace_sighting_dates AFTER UPDATE OF first_seen_at, last_seen_at, last_verified_active_at ON saved_jobs
+    ensureTrigger(
+      database,
+      "workspace_sighting_dates",
+      `CREATE TRIGGER workspace_sighting_dates AFTER UPDATE OF first_seen_at, last_seen_at, last_verified_active_at ON saved_jobs
       WHEN OLD.first_seen_at IS NOT NEW.first_seen_at OR OLD.last_seen_at IS NOT NEW.last_seen_at OR OLD.last_verified_active_at IS NOT NEW.last_verified_active_at BEGIN
       UPDATE workspace_job_index SET first_seen_at = NEW.first_seen_at,
         last_seen_at = NEW.last_seen_at, last_verified_active_at = NEW.last_verified_active_at,
         seen = COALESCE(NEW.last_seen_at, json_extract(NEW.value, '$.discoveredAt'), ''),
         recency = COALESCE(json_extract(NEW.value, '$.postedAt'), NEW.first_seen_at, json_extract(NEW.value, '$.discoveredAt'), '')
       WHERE origin = 'saved_jobs' AND id = NEW.id;
-    END`);
+    END`,
+    );
     for (const operation of ["insert", "update", "delete"] as const) {
       const ref = operation === "delete" ? "OLD" : "NEW";
-      ensureTrigger(database, `workspace_plan_assessment_${operation}`, `CREATE TRIGGER workspace_plan_assessment_${operation}
+      ensureTrigger(
+        database,
+        `workspace_plan_assessment_${operation}`,
+        `CREATE TRIGGER workspace_plan_assessment_${operation}
         AFTER ${operation === "update" ? "UPDATE OF job_id,plan_id,value" : operation.toUpperCase()} ON job_plan_assessments
         ${operation === "update" ? "WHEN OLD.job_id IS NOT NEW.job_id OR OLD.plan_id IS NOT NEW.plan_id OR OLD.value IS NOT NEW.value" : ""} BEGIN
           ${indexJobSql("saved_jobs", `WHERE j.id = ${ref}.job_id`)}
           INSERT INTO workspace_changes(table_name,item_id,operation) VALUES ('saved_jobs',${ref}.job_id,'upsert');
-        END`);
+        END`,
+      );
     }
     database.exec(
       "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
@@ -387,11 +461,15 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       database.exec(companies);
     }
     for (const operation of ["insert", "update", "delete"]) {
-      ensureTrigger(database, `workspace_companies_${operation}`, `CREATE TRIGGER workspace_companies_${operation}
+      ensureTrigger(
+        database,
+        `workspace_companies_${operation}`,
+        `CREATE TRIGGER workspace_companies_${operation}
         AFTER ${operation === "update" ? "UPDATE OF key,value" : operation.toUpperCase()} ON singleton_state
         WHEN ${operation === "delete" ? "OLD" : "NEW"}.key = 'intelligence_state'
           ${operation === "update" ? "AND (OLD.key IS NOT NEW.key OR json_extract(OLD.value,'$.companies') IS NOT json_extract(NEW.value,'$.companies'))" : ""}
-        BEGIN ${companies} END`);
+        BEGIN ${companies} END`,
+      );
     }
     // Persistent triggers cover ordinary writes, reset/import, side metadata,
     // and writes made by an older build on a shared data folder. No payloads or
@@ -415,11 +493,15 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
           keys.length === 1
             ? `CAST(${ref}.${String(keys[0]!.name)} AS TEXT)`
             : `json_array(${keys.map((column) => `${ref}.${String(column.name)}`).join(", ")})`;
-        ensureTrigger(database, `workspace_feed_${table}_${operation}`, `CREATE TRIGGER workspace_feed_${table}_${operation}
+        ensureTrigger(
+          database,
+          `workspace_feed_${table}_${operation}`,
+          `CREATE TRIGGER workspace_feed_${table}_${operation}
           AFTER ${operation.toUpperCase()} ON ${table}
-          ${operation === "update" ? `WHEN ${columns.map(column => `OLD.${String(column.name)} IS NOT NEW.${String(column.name)}`).join(" OR ")}` : ""}
+          ${operation === "update" ? `WHEN ${columns.map((column) => `OLD.${String(column.name)} IS NOT NEW.${String(column.name)}`).join(" OR ")}` : ""}
           BEGIN INSERT INTO workspace_changes(table_name, item_id, operation)
-            VALUES ('${table}', ${key}, '${operation === "delete" ? "delete" : "upsert"}'); END`);
+            VALUES ('${table}', ${key}, '${operation === "delete" ? "delete" : "upsert"}'); END`,
+        );
       }
     }
     if (ownTransaction) database.exec("COMMIT");

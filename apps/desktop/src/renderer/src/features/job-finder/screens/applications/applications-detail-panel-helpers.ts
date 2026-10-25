@@ -24,7 +24,9 @@ export { TECHNICAL_DETAILS_LABEL };
 export type QueueEntry = {
   jobId: string;
   label: string;
-  runResult: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
+  runResult:
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+    | null;
   includeInRecovery: boolean;
 };
 
@@ -280,7 +282,10 @@ export function getApplyResultDestinationUrl(
 }
 
 const APPLY_RUN_STATE_LABELS: Partial<
-  Record<JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"], string>
+  Record<
+    JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"],
+    string
+  >
 > = {
   paused_for_user_review: "Paused for your review",
   paused_for_consent: "Paused — needs something from you",
@@ -288,7 +293,10 @@ const APPLY_RUN_STATE_LABELS: Partial<
 };
 
 const APPLY_RUN_MODE_LABELS: Partial<
-  Record<JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["mode"], string>
+  Record<
+    JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["mode"],
+    string
+  >
 > = {
   // "Guided preparation" is a name used nowhere else in the product; every
   // other surface says preparation or "Fill it in".
@@ -597,7 +605,9 @@ export function getApplyDetailsStatusBadge(
 }
 
 export function getQueueRecoveryTone(
-  state: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]["state"] | null,
+  state:
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]["state"]
+    | null,
 ) {
   if (state === "awaiting_review" || state === "submitted") {
     return "positive" as const;

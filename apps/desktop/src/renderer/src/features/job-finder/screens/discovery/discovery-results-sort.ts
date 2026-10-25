@@ -51,7 +51,10 @@ export function readPersistedSort(): DiscoveryResultsSort {
     // that, so a direction persisted by the older flip control is ignored:
     // "Best match, lowest first" is not a view anyone asked for.
     return isSortField(parsed.field)
-      ? { direction: DEFAULT_DIRECTION_BY_FIELD[parsed.field], field: parsed.field }
+      ? {
+          direction: DEFAULT_DIRECTION_BY_FIELD[parsed.field],
+          field: parsed.field,
+        }
       : DISCOVERY_RESULTS_DEFAULT_SORT;
   } catch {
     // Unreadable preferences fall back to the shipped fit ranking.

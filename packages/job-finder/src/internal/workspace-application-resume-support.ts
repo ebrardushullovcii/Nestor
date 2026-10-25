@@ -499,13 +499,14 @@ export async function loadResumeWorkspaceState(
   const templates = ctx.documentManager.listResumeTemplates();
   const profilePromise = ctx.repository.getProfileWithRevision();
   if (yieldBetweenReads) await yieldToEventLoop();
-  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] = await Promise.all([
-    profilePromise,
-    ctx.repository.getSettings(),
-    ctx.repository.listSavedJobsByIds([jobId]),
-    ctx.repository.getTailoredAssetByJobId(jobId),
-    ctx.repository.getResumeDraftByJobId(jobId),
-  ]);
+  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] =
+    await Promise.all([
+      profilePromise,
+      ctx.repository.getSettings(),
+      ctx.repository.listSavedJobsByIds([jobId]),
+      ctx.repository.getTailoredAssetByJobId(jobId),
+      ctx.repository.getResumeDraftByJobId(jobId),
+    ]);
   if (yieldBetweenReads) await yieldToEventLoop();
   const settings = normalizeJobFinderSettings(rawSettings, templates);
   const job = savedJobs.find((entry) => entry.id === jobId);

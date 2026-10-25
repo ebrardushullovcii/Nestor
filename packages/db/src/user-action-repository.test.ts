@@ -317,9 +317,7 @@ describe("user action repository persistence", () => {
     await resolvedRepository.close();
   });
   test("repairs a legacy database missing user-action tables without changing workspace data", async () => {
-    const fixture = await createTempRepository(
-      "nestor-user-actions-legacy-",
-    );
+    const fixture = await createTempRepository("nestor-user-actions-legacy-");
     temporaryDirectories.push(fixture.tempDirectory);
     const firstRepository = await fixture.createRepository();
     const profileBeforeMigration = await firstRepository.getProfile();

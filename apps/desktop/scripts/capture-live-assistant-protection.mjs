@@ -88,9 +88,7 @@ async function waitForOverlayWindows(app) {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  throw new Error(
-    "Timed out waiting for two Live Assistant overlay windows.",
-  );
+  throw new Error("Timed out waiting for two Live Assistant overlay windows.");
 }
 
 async function waitForWorkspaceState(
@@ -303,8 +301,7 @@ async function runCaptureProtection() {
     env: {
       ...process.env,
       NESTOR_ENABLE_TEST_API: "1",
-      NESTOR_TEST_SYSTEM_THEME:
-        process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+      NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
       NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });

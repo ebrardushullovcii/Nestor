@@ -55,7 +55,7 @@ function createAwaitingApprovalDetails(): ApplyRunDetails {
     artifactRefs: [],
     checkpoints: [],
     consentRequests: [],
-  reviewCard: null,
+    reviewCard: null,
   };
 }
 
@@ -81,9 +81,7 @@ describe("ApplicationsDetailPanelSubmitApprovalSection", () => {
       /approve|revoke|submit approval|apply copilot|restage/i,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply now" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply now" }));
     expect(onApproveApplyRun).toHaveBeenCalledWith({
       runId: "run_1",
       jobId: "job-1",

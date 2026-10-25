@@ -287,7 +287,11 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("proposal"),
       proposalId: IdSchema,
-      kind: z.enum(["profile_operations", "resume_patches", "job_finder_action"]),
+      kind: z.enum([
+        "profile_operations",
+        "resume_patches",
+        "job_finder_action",
+      ]),
       summary: NonEmptyStringSchema.max(400),
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
       targetId: IdSchema.nullable().default(null),
@@ -682,7 +686,7 @@ export const AssistantRunRefSchema = z
     kind: z.enum([
       "discovery",
       "apply_batch",
-          "apply_queue",
+      "apply_queue",
       "apply_run",
       "resume_generation",
       "source_check",

@@ -36,7 +36,9 @@ describe("extractResearchSignals", () => {
       ].join(" "),
     );
 
-    expect(result.companyNotes).toContain("Signal Systems builds workflow automation");
+    expect(result.companyNotes).toContain(
+      "Signal Systems builds workflow automation",
+    );
     expect(result.domainVocabulary).toEqual(
       expect.arrayContaining(["automation", "compliance", "workflow"]),
     );

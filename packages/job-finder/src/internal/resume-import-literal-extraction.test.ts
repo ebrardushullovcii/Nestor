@@ -86,9 +86,7 @@ describe("literal resume header work-mode extraction", () => {
     );
 
     expect(
-      candidates.find(
-        (candidate) => candidate.target.key === "workModes",
-      ),
+      candidates.find((candidate) => candidate.target.key === "workModes"),
     ).toBeUndefined();
   });
 
@@ -103,9 +101,7 @@ describe("literal resume header work-mode extraction", () => {
     );
 
     expect(
-      candidates.find(
-        (candidate) => candidate.target.key === "workModes",
-      ),
+      candidates.find((candidate) => candidate.target.key === "workModes"),
     ).toBeUndefined();
   });
 
@@ -119,9 +115,7 @@ describe("literal resume header work-mode extraction", () => {
     );
 
     expect(
-      candidates.find(
-        (candidate) => candidate.target.key === "workModes",
-      ),
+      candidates.find((candidate) => candidate.target.key === "workModes"),
     ).toBeUndefined();
   });
 
@@ -133,9 +127,8 @@ describe("literal resume header work-mode extraction", () => {
     );
 
     expect(
-      candidates.find(
-        (candidate) => candidate.target.key === "workModes",
-      )?.value,
+      candidates.find((candidate) => candidate.target.key === "workModes")
+        ?.value,
     ).toEqual(["remote"]);
   });
 });

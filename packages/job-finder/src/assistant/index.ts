@@ -24,7 +24,11 @@ export {
   type AssistantCatalogMode,
 } from "./tools";
 export { decideUnderGrants, checkGrantTargets, narrowGrant } from "./grants";
-export { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId } from "./action-registry";
+export {
+  JOB_FINDER_ACTIONS,
+  executeJobFinderAction,
+  type JobFinderActionId,
+} from "./action-registry";
 export { diffValues, undoChangeEntries } from "./change-diff";
 export {
   PROFILE_ARCHIVE_CONVERSATION_ID,

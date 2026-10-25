@@ -48,11 +48,15 @@ describe("job finder timestamp clocks", () => {
         currentCountry: "Portugal",
       }),
     ).toEqual({ timeZone: "Europe/Lisbon", source: "profile" });
-    expect(inferProfileTimeZone({ currentLocation: "Philadelphia, PA" })).toEqual({
+    expect(
+      inferProfileTimeZone({ currentLocation: "Philadelphia, PA" }),
+    ).toEqual({
       timeZone: "America/New_York",
       source: "profile",
     });
-    expect(inferProfileTimeZone({ currentLocation: "Prishtina, Kosovo" })).toEqual({
+    expect(
+      inferProfileTimeZone({ currentLocation: "Prishtina, Kosovo" }),
+    ).toEqual({
       timeZone: "Europe/Belgrade",
       source: "profile",
     });

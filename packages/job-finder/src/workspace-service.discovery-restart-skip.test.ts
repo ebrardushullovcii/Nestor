@@ -50,8 +50,11 @@ function seedWithTwoBoards() {
 }
 
 const searchedBoards = (fetched: readonly string[]) =>
-  [...new Set(fetched.map((url) => (url.includes("alpha") ? "alpha" : "beta")))]
-    .sort();
+  [
+    ...new Set(
+      fetched.map((url) => (url.includes("alpha") ? "alpha" : "beta")),
+    ),
+  ].sort();
 
 test("a search started again after it stopped skips the sources it already finished", async () => {
   const { seed, fetched } = seedWithTwoBoards();

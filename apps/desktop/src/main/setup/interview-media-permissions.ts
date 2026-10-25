@@ -1,87 +1,87 @@
-import { desktopCapturer, session, type WebContents } from 'electron'
+import { desktopCapturer, session, type WebContents } from "electron";
 
 function isTrustedInterviewMediaUrl(value: string) {
-  if (value.startsWith('file://')) {
-    return true
+  if (value.startsWith("file://")) {
+    return true;
   }
 
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL;
   if (!rendererUrl) {
-    return false
+    return false;
   }
 
   try {
-    return new URL(value).origin === new URL(rendererUrl).origin
+    return new URL(value).origin === new URL(rendererUrl).origin;
   } catch {
-    return false
+    return false;
   }
 }
 
 function isTrustedWebContents(webContents: WebContents | null) {
   if (!webContents || webContents.isDestroyed()) {
-    return false
+    return false;
   }
 
-  return isTrustedInterviewMediaUrl(webContents.getURL())
+  return isTrustedInterviewMediaUrl(webContents.getURL());
 }
 
 function isTrustedOrigin(origin: string) {
-  if (origin === 'file://') {
-    return true
+  if (origin === "file://") {
+    return true;
   }
 
-  return isTrustedInterviewMediaUrl(origin)
+  return isTrustedInterviewMediaUrl(origin);
 }
 
 export function configureInterviewMediaPermissions() {
-  const defaultSession = session.defaultSession
+  const defaultSession = session.defaultSession;
 
   defaultSession.setPermissionCheckHandler(
     (webContents, permission, requestingOrigin) => {
-      if (permission !== 'media') {
-        return false
+      if (permission !== "media") {
+        return false;
       }
 
       return (
         isTrustedWebContents(webContents) || isTrustedOrigin(requestingOrigin)
-      )
+      );
     },
-  )
+  );
 
   defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback) => {
       callback(
-        (permission === 'media' || permission === 'display-capture') &&
+        (permission === "media" || permission === "display-capture") &&
           isTrustedWebContents(webContents),
-      )
+      );
     },
-  )
+  );
 
   defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!isTrustedOrigin(request.securityOrigin)) {
-      callback({})
-      return
+      callback({});
+      return;
     }
 
     void (async () => {
       try {
         const sources = await desktopCapturer.getSources({
-          types: ['screen'],
+          types: ["screen"],
           thumbnailSize: { width: 0, height: 0 },
-        })
-        const screenSource = sources[0]
+        });
+        const screenSource = sources[0];
 
         callback({
           ...(request.videoRequested && screenSource
             ? { video: { id: screenSource.id, name: screenSource.name } }
             : {}),
-          ...(request.audioRequested && process.platform === 'win32'
-            ? { audio: 'loopback' as const }
+          ...(request.audioRequested && process.platform === "win32"
+            ? { audio: "loopback" as const }
             : {}),
-        })
+        });
       } catch {
-        callback({})
+        callback({});
       }
-    })()
-  })
+    })();
+  });
 }

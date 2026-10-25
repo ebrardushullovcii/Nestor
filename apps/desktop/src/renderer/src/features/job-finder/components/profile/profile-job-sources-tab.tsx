@@ -54,7 +54,10 @@ const sourceFilterOptions: ReadonlyArray<{
   { id: "all", label: "All" },
   { id: "enabled", label: "Enabled" },
   { id: "disabled", label: "Disabled" },
-  { id: SOURCES_NEEDING_ATTENTION_FILTER, label: SOURCES_NEEDING_ATTENTION_LABEL },
+  {
+    id: SOURCES_NEEDING_ATTENTION_FILTER,
+    label: SOURCES_NEEDING_ATTENTION_LABEL,
+  },
 ];
 
 function parseSourceFilter(value: string | null | undefined): SourceFilter {
@@ -255,7 +258,8 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     parseSourceFilter(props.requestedFilter),
   );
   useEffect(() => {
-    if (props.requestedFilter) setFilter(parseSourceFilter(props.requestedFilter));
+    if (props.requestedFilter)
+      setFilter(parseSourceFilter(props.requestedFilter));
   }, [props.requestedFilter]);
   const [page, setPage] = useState(0);
   const [expandedTargetId, setExpandedTargetId] = useState<string | null>(null);
@@ -397,9 +401,7 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
   const parsedSourceDraft = parseJobSourceUrls(sourceUrlDraft);
   const existingSourceUrls = new Set(
     discoveryTargets
-      .map((target) =>
-        canonicalSourceUrl(target.startingUrl),
-      )
+      .map((target) => canonicalSourceUrl(target.startingUrl))
       .filter((value): value is string => Boolean(value)),
   );
   const newSourceUrls = parsedSourceDraft.urls.filter(
@@ -576,7 +578,10 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                 >
                   {option.label}
                   {option.id === "all" ? null : (
-                    <span aria-hidden="true" className="tabular-nums opacity-75">
+                    <span
+                      aria-hidden="true"
+                      className="tabular-nums opacity-75"
+                    >
                       {filterCounts[option.id]}
                     </span>
                   )}

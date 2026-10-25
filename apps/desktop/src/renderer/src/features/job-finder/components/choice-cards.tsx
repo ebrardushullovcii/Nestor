@@ -34,36 +34,34 @@ export function ChoiceCards<Id extends string>(props: {
 }) {
   const groupRef = useRef<HTMLDivElement | null>(null);
   const size = props.size ?? "regular";
-  const columns = props.columns ?? Math.min(4, Math.max(2, props.options.length));
+  const columns =
+    props.columns ?? Math.min(4, Math.max(2, props.options.length));
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
-      const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      if (!forward && !backward) {
-        return;
-      }
-      const buttons = [
-        ...(groupRef.current?.querySelectorAll<HTMLButtonElement>(
-          "button[role='radio']:not([disabled])",
-        ) ?? []),
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
+    if (!forward && !backward) {
+      return;
+    }
+    const buttons = [
+      ...(groupRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button[role='radio']:not([disabled])",
+      ) ?? []),
+    ];
+    const activeIndex = buttons.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    if (buttons.length < 2 || activeIndex === -1) {
+      return;
+    }
+    event.preventDefault();
+    const next =
+      buttons[
+        (activeIndex + (forward ? 1 : -1) + buttons.length) % buttons.length
       ];
-      const activeIndex = buttons.indexOf(
-        document.activeElement as HTMLButtonElement,
-      );
-      if (buttons.length < 2 || activeIndex === -1) {
-        return;
-      }
-      event.preventDefault();
-      const next =
-        buttons[
-          (activeIndex + (forward ? 1 : -1) + buttons.length) % buttons.length
-        ];
-      next?.focus();
-      next?.click();
-    },
-    [],
-  );
+    next?.focus();
+    next?.click();
+  }, []);
 
   return (
     <div

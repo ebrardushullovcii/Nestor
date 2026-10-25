@@ -2,7 +2,11 @@ import { JobFinderDiscoveryCancellationInputSchema } from "@nestor/contracts";
 import { holdDiscoveryWorkspaceUpdates } from "../services/job-finder/workspace-updates";
 import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-exports";
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
-import { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId } from "@nestor/job-finder";
+import {
+  JOB_FINDER_ACTIONS,
+  executeJobFinderAction,
+  type JobFinderActionId,
+} from "@nestor/job-finder";
 import {
   ApplicationPageStatesInputSchema,
   ApplicationPageStatesSchema,
@@ -794,11 +798,17 @@ async function startApplyQueueRun(
     );
   }
   const queue = await repository.getApplyQueue();
-  const { assistantQueuePolicy } = await import("../services/assistant/assistant-service");
-  const policy = queue ? await assistantQueuePolicy(queue, jobIds, mode) : { mode, refused: [] };
+  const { assistantQueuePolicy } =
+    await import("../services/assistant/assistant-service");
+  const policy = queue
+    ? await assistantQueuePolicy(queue, jobIds, mode)
+    : { mode, refused: [] };
   mode = policy.mode;
   const refused = new Set(policy.refused.map((entry) => entry.jobId));
-  const pendingIds = await listJobsNotInProgress(repository, jobIds.filter((id) => !refused.has(id)));
+  const pendingIds = await listJobsNotInProgress(
+    repository,
+    jobIds.filter((id) => !refused.has(id)),
+  );
   const skipped: ApplyQueueSkippedJob[] = [];
   skipped.push(...policy.refused);
   let heldBack: Awaited<ReturnType<typeof approveApplicationResumes>>;
@@ -887,20 +897,34 @@ export async function executeApplyQueueAction(
   const { service, repository } = await requireApplyQueueRepository();
   if (actionId === "start-apply-queue") {
     const value = JobFinderStartApplyQueueInputSchema.parse(input);
-    const mode = value.applicationAutomationMode ?? (await repository.getSettings()).applicationAutomationMode ?? "prepare_only";
+    const mode =
+      value.applicationAutomationMode ??
+      (await repository.getSettings()).applicationAutomationMode ??
+      "prepare_only";
     await getApplyQueueRunner().start(value.jobIds, mode);
   } else if (actionId === "control-apply-queue") {
     const value = JobFinderApplyQueueControlInputSchema.parse(input);
-    if (!value.queueId || (await repository.getApplyQueue())?.id === value.queueId) {
+    if (
+      !value.queueId ||
+      (await repository.getApplyQueue())?.id === value.queueId
+    ) {
       await getApplyQueueRunner().control(value.action);
     }
   } else if (actionId === "remove-from-apply-queue") {
-    await getApplyQueueRunner().remove(JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds);
+    await getApplyQueueRunner().remove(
+      JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds,
+    );
   } else if (actionId === "approve-resumes") {
-    await approveApplicationResumes(service, JobFinderApproveResumesInputSchema.parse(input).jobIds, {
-      personApproved: true,
-      ...(options.onApproveProgress ? { onProgress: options.onApproveProgress } : {}),
-    });
+    await approveApplicationResumes(
+      service,
+      JobFinderApproveResumesInputSchema.parse(input).jobIds,
+      {
+        personApproved: true,
+        ...(options.onApproveProgress
+          ? { onProgress: options.onApproveProgress }
+          : {}),
+      },
+    );
   } else {
     throw new Error("Unknown Apply queue action.");
   }
@@ -1137,108 +1161,118 @@ export const RETIRED_CHAT_MESSAGE =
   "The old Profile and Resume chats are retired. Use the assistant in the side chat; old conversations stay readable there.";
 
 const pendingWorkspaceRestores = new Map<
-    number | "assistant",
-    { token: string; backup: PersonalWorkspaceExport }
-  >();
+  number | "assistant",
+  { token: string; backup: PersonalWorkspaceExport }
+>();
 let workspaceRestorePending = false;
-export async function previewWorkspaceRestore(event: IpcMainInvokeEvent | null = null) {
-      const browserWindow = event ? BrowserWindow.fromWebContents(event.sender) : null;
-      const picker: OpenDialogOptions = {
-        title: "Restore from a workspace export",
-        properties: ["openFile"],
-        filters: [{ name: "Nestor workspace export", extensions: ["json"] }],
-      };
-      const picked = browserWindow
-        ? await dialog.showOpenDialog(browserWindow, picker)
-        : await dialog.showOpenDialog(picker);
-      pendingWorkspaceRestores.delete((event?.sender.id ?? "assistant"));
-      if (picked.canceled || !picked.filePaths[0]) return null;
-      const backup = parsePersonalWorkspaceExport(
-        await readFile(picked.filePaths[0], "utf8"),
+export async function previewWorkspaceRestore(
+  event: IpcMainInvokeEvent | null = null,
+) {
+  const browserWindow = event
+    ? BrowserWindow.fromWebContents(event.sender)
+    : null;
+  const picker: OpenDialogOptions = {
+    title: "Restore from a workspace export",
+    properties: ["openFile"],
+    filters: [{ name: "Nestor workspace export", extensions: ["json"] }],
+  };
+  const picked = browserWindow
+    ? await dialog.showOpenDialog(browserWindow, picker)
+    : await dialog.showOpenDialog(picker);
+  pendingWorkspaceRestores.delete(event?.sender.id ?? "assistant");
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  const backup = parsePersonalWorkspaceExport(
+    await readFile(picked.filePaths[0], "utf8"),
+  );
+  const token = randomUUID();
+  pendingWorkspaceRestores.set(event?.sender.id ?? "assistant", {
+    token,
+    backup,
+  });
+  return PersonalWorkspaceRestorePreviewSchema.parse({
+    token,
+    profileName: backup.repositoryState.profile.fullName ?? "Your profile",
+    exportedAt: backup.exportedAt,
+    jobs: backup.repositoryState.savedJobs.length,
+    applications: backup.repositoryState.applicationRecords.length,
+    answers:
+      backup.repositoryState.applicationAnswerRecords.length +
+      backup.repositoryState.profile.answerBank.customAnswers.length,
+    documents: backup.files.length,
+    chats: backup.assistantHistory.length,
+  });
+}
+
+export async function confirmWorkspaceRestore(
+  payload: unknown,
+  event: IpcMainInvokeEvent | null = null,
+) {
+  const { token } = ConfirmPersonalWorkspaceRestoreSchema.parse(payload);
+  const prepared = pendingWorkspaceRestores.get(
+    event?.sender.id ?? "assistant",
+  );
+  if (!prepared || prepared.token !== token)
+    throw new Error("Choose the export again before restoring.");
+  if (workspaceRestorePending)
+    throw new Error(
+      "A workspace restore is already running. Wait for it to finish.",
+    );
+  workspaceRestorePending = true;
+  const safetyExportPath = path.join(
+    app.getPath("documents"),
+    `nestor-before-restore-${Date.now()}-${randomUUID()}.json`,
+  );
+  try {
+    const service = await getJobFinderWorkspaceService();
+    const repository = getJobFinderRepositoryForWorkspaceService(service);
+    if (!repository)
+      throw new Error(
+        "Your workspace could not be restored. Nothing was changed.",
       );
-      const token = randomUUID();
-      pendingWorkspaceRestores.set((event?.sender.id ?? "assistant"), { token, backup });
-      return PersonalWorkspaceRestorePreviewSchema.parse({
-        token,
-        profileName: backup.repositoryState.profile.fullName ?? "Your profile",
-        exportedAt: backup.exportedAt,
-        jobs: backup.repositoryState.savedJobs.length,
-        applications: backup.repositoryState.applicationRecords.length,
-        answers:
-          backup.repositoryState.applicationAnswerRecords.length +
-          backup.repositoryState.profile.answerBank.customAnswers.length,
-        documents: backup.files.length,
-        chats: backup.assistantHistory.length,
+    const {
+      exportAssistantHistory,
+      restoreAssistantHistory,
+      stopAssistantForWorkspaceRestore,
+    } = await import("../services/assistant/assistant-service");
+    await service.withWorkspaceRestore(async () => {
+      invalidateUiResumeBatch();
+      await stopAssistantForWorkspaceRestore();
+      await restorePersonalWorkspace({
+        backup: prepared.backup,
+        repository,
+        roots: new Map([
+          ["resumes", getJobFinderDocumentsDirectory()],
+          ["attachments", getCandidateAssetsDirectory()],
+          ["application-documents", getApplicationDocumentsDirectory()],
+        ]),
+        safetyExportPath,
+        buildSafetyExport: async () =>
+          buildPersonalWorkspaceExport({
+            workspace: await service.getWorkspaceSnapshot(),
+            repositoryState: await repository.exportState(),
+            assistantHistory: await exportAssistantHistory(),
+            applicationQuestions:
+              await repository.listApplicationQuestionRecords(),
+            applicationAnswers: await repository.listApplicationAnswerRecords(),
+          }),
+        beforeReplace: async () => {
+          await resetJobFinderBrowser();
+        },
+        readChats: exportAssistantHistory,
+        restoreChats: restoreAssistantHistory,
       });
-    }
-
-export async function confirmWorkspaceRestore(payload: unknown, event: IpcMainInvokeEvent | null = null) {
-      const { token } = ConfirmPersonalWorkspaceRestoreSchema.parse(payload);
-      const prepared = pendingWorkspaceRestores.get((event?.sender.id ?? "assistant"));
-      if (!prepared || prepared.token !== token)
-        throw new Error("Choose the export again before restoring.");
-      if (workspaceRestorePending)
-        throw new Error(
-          "A workspace restore is already running. Wait for it to finish.",
-        );
-      workspaceRestorePending = true;
-      const safetyExportPath = path.join(
-        app.getPath("documents"),
-        `nestor-before-restore-${Date.now()}-${randomUUID()}.json`,
-      );
-      try {
-        const service = await getJobFinderWorkspaceService();
-        const repository = getJobFinderRepositoryForWorkspaceService(service);
-        if (!repository)
-          throw new Error(
-            "Your workspace could not be restored. Nothing was changed.",
-          );
-        const {
-          exportAssistantHistory,
-          restoreAssistantHistory,
-          stopAssistantForWorkspaceRestore,
-        } = await import("../services/assistant/assistant-service");
-        await service.withWorkspaceRestore(async () => {
-          invalidateUiResumeBatch();
-          await stopAssistantForWorkspaceRestore();
-          await restorePersonalWorkspace({
-            backup: prepared.backup,
-            repository,
-            roots: new Map([
-              ["resumes", getJobFinderDocumentsDirectory()],
-              ["attachments", getCandidateAssetsDirectory()],
-              ["application-documents", getApplicationDocumentsDirectory()],
-            ]),
-            safetyExportPath,
-            buildSafetyExport: async () =>
-              buildPersonalWorkspaceExport({
-                workspace: await service.getWorkspaceSnapshot(),
-                repositoryState: await repository.exportState(),
-                assistantHistory: await exportAssistantHistory(),
-                applicationQuestions:
-                  await repository.listApplicationQuestionRecords(),
-                applicationAnswers:
-                  await repository.listApplicationAnswerRecords(),
-              }),
-            beforeReplace: async () => {
-              await resetJobFinderBrowser();
-            },
-            readChats: exportAssistantHistory,
-            restoreChats: restoreAssistantHistory,
-          });
-        });
-        pendingWorkspaceRestores.delete((event?.sender.id ?? "assistant"));
-        await service.setActivityControl({
-          paused: true,
-          reason: "Workspace restored. Resume activity when you are ready.",
-        });
-        publishJobFinderWorkspaceUpdate();
-        return PersonalWorkspaceRestoreResultSchema.parse({ safetyExportPath });
-      } finally {
-        workspaceRestorePending = false;
-      }
-    }
-
+    });
+    pendingWorkspaceRestores.delete(event?.sender.id ?? "assistant");
+    await service.setActivityControl({
+      paused: true,
+      reason: "Workspace restored. Resume activity when you are ready.",
+    });
+    publishJobFinderWorkspaceUpdate();
+    return PersonalWorkspaceRestoreResultSchema.parse({ safetyExportPath });
+  } finally {
+    workspaceRestorePending = false;
+  }
+}
 
 export function registerJobFinderRouteHandlers(
   ipcMain: IpcMain,
@@ -1255,8 +1289,11 @@ export function registerJobFinderRouteHandlers(
     sender: object | null | undefined,
     snapshot: JobFinderWorkspaceSnapshot,
   ): JobFinderWorkspaceSyncResult => {
-    const queryLists = sender && "id" in sender &&
-      typeof sender.id === "number" && usesWorkspaceQueryUpdates(sender.id);
+    const queryLists =
+      sender &&
+      "id" in sender &&
+      typeof sender.id === "number" &&
+      usesWorkspaceQueryUpdates(sender.id);
     return workspaceDeltaTracker.respond(
       sender,
       rendererSnapshotResponse(snapshot, queryLists ? true : undefined),
@@ -1289,7 +1326,12 @@ export function registerJobFinderRouteHandlers(
     "job-finder:get-job-detail",
     async (_event, payload: unknown) => {
       const input = JobFinderJobDetailQuerySchema.parse(payload);
-      return readJobFinderJobDetail(getJobFinderRepositoryForWorkspaceService(await getJobFinderWorkspaceService()), input);
+      return readJobFinderJobDetail(
+        getJobFinderRepositoryForWorkspaceService(
+          await getJobFinderWorkspaceService(),
+        ),
+        input,
+      );
     },
   );
 
@@ -1327,36 +1369,134 @@ export function registerJobFinderRouteHandlers(
   }
 
   // Registered actions share their input and service call with the assistant.
-  const runRegisteredAction = async (name: JobFinderActionId, event: IpcMainInvokeEvent, payload: unknown) => {
-    const value = name === "disable-resume-strategy" ? { strategyId: payload }
-      : name === "update-appearance-theme" ? { appearanceTheme: payload } : payload ?? {};
+  const runRegisteredAction = async (
+    name: JobFinderActionId,
+    event: IpcMainInvokeEvent,
+    payload: unknown,
+  ) => {
+    const value =
+      name === "disable-resume-strategy"
+        ? { strategyId: payload }
+        : name === "update-appearance-theme"
+          ? { appearanceTheme: payload }
+          : (payload ?? {});
     const service = await getJobFinderWorkspaceService();
     const run = () => executeJobFinderAction(name, value, { service });
     // Minutes of model calls: keep scores arriving on screen meanwhile.
-    const result = name === "judge-unjudged-jobs"
-      ? await withJobFinderWorkspaceUpdates(event.sender, run) : await run();
-    if (["save-settings", "update-application-defaults", "set-activity-control"].includes(name)) applyQueueRunner?.nudge();
+    const result =
+      name === "judge-unjudged-jobs"
+        ? await withJobFinderWorkspaceUpdates(event.sender, run)
+        : await run();
+    if (
+      [
+        "save-settings",
+        "update-application-defaults",
+        "set-activity-control",
+      ].includes(name)
+    )
+      applyQueueRunner?.nudge();
     // Some changes answer with their own record (application details, a
     // recommendation); only a workspace snapshot becomes a sync response.
     const isWorkspaceSnapshot =
-      typeof result === "object" && result !== null &&
+      typeof result === "object" &&
+      result !== null &&
       (result as { module?: unknown }).module === "job-finder";
     // A change answered with its delta needs no second sync of the whole
     // workspace in this window; main's listeners still hear of it. Shortlist
     // starts a draft and Stop ends a search, so those keep the follow-up.
     if (JOB_FINDER_ACTIONS[name].safety !== "read") {
-      if (!isWorkspaceSnapshot || name === "queue-job-for-review" || name === "cancel-discovery-run")
+      if (
+        !isWorkspaceSnapshot ||
+        name === "queue-job-for-review" ||
+        name === "cancel-discovery-run"
+      )
         publishJobFinderWorkspaceUpdate(event.sender);
       else notifyJobFinderWorkspaceListeners();
     }
     return JOB_FINDER_ACTIONS[name].safety === "read" || !isWorkspaceSnapshot
-      ? result : workspaceMutationResponse(event.sender, result as JobFinderWorkspaceSnapshot);
+      ? result
+      : workspaceMutationResponse(
+          event.sender,
+          result as JobFinderWorkspaceSnapshot,
+        );
   };
-  for (const name of ["save-profile","save-search-preferences","save-campaign","save-profile-setup-state","save-settings","update-application-defaults","update-workspace-behavior","update-ai-behavior","update-appearance-theme","update-tracker-crm","save-resume-draft","restore-resume-draft-revision","undo-resume-assistant-edit","apply-resume-patch"] as const) {
-    handleJobFinderSaveRoute(`job-finder:${name}`, (event, payload: unknown) => runRegisteredAction(name, event, payload));
+  for (const name of [
+    "save-profile",
+    "save-search-preferences",
+    "save-campaign",
+    "save-profile-setup-state",
+    "save-settings",
+    "update-application-defaults",
+    "update-workspace-behavior",
+    "update-ai-behavior",
+    "update-appearance-theme",
+    "update-tracker-crm",
+    "save-resume-draft",
+    "restore-resume-draft-revision",
+    "undo-resume-assistant-edit",
+    "apply-resume-patch",
+  ] as const) {
+    handleJobFinderSaveRoute(`job-finder:${name}`, (event, payload: unknown) =>
+      runRegisteredAction(name, event, payload),
+    );
   }
-  for (const name of ["analyze-profile-from-resume","select-campaign","delete-campaign","save-campaign-rule","delete-campaign-rule","toggle-campaign-rule","project-campaign-rule-funnel","set-activity-control","mutate-rapid-review","record-outcome","save-resume-strategy","disable-resume-strategy","select-resume-strategy","recommend-resume-strategy","set-campaign-resume-strategy-default","refresh-company-intelligence","set-company-preference","review-company-merge","mutate-company-intelligence","set-outcome-suggestion-enabled","mutate-safeguards","apply-profile-setup-review-action","apply-resume-timeline-repair-action","undo-profile-revision","judge-unjudged-jobs","cancel-discovery-run","cancel-source-debug","get-source-debug-run","get-source-debug-run-details","save-source-instruction-artifact","list-source-debug-runs","accept-source-instruction-draft","queue-job-for-review","set-job-resume-application-mode","remove-job-from-review","preview-employer-exclusion","remove-employer-exclusion","dismiss-discovery-job","restore-dismissed-discovery-job","get-apply-run-details","clear-application-answer","snooze-grouped-decision","mutate-application-crm","mutate-application-crm-bulk-stage","get-resume-workspace","regenerate-resume-section","approve-resume","clear-resume-approval","set-work-history-review-acknowledgment","set-resume-claim-confirmation","return-application-to-shortlist","undo-return-application-to-shortlist"] as const) {
-    ipcMain.handle(`job-finder:${name}`, (event, payload: unknown) => runRegisteredAction(name, event, payload));
+  for (const name of [
+    "analyze-profile-from-resume",
+    "select-campaign",
+    "delete-campaign",
+    "save-campaign-rule",
+    "delete-campaign-rule",
+    "toggle-campaign-rule",
+    "project-campaign-rule-funnel",
+    "set-activity-control",
+    "mutate-rapid-review",
+    "record-outcome",
+    "save-resume-strategy",
+    "disable-resume-strategy",
+    "select-resume-strategy",
+    "recommend-resume-strategy",
+    "set-campaign-resume-strategy-default",
+    "refresh-company-intelligence",
+    "set-company-preference",
+    "review-company-merge",
+    "mutate-company-intelligence",
+    "set-outcome-suggestion-enabled",
+    "mutate-safeguards",
+    "apply-profile-setup-review-action",
+    "apply-resume-timeline-repair-action",
+    "undo-profile-revision",
+    "judge-unjudged-jobs",
+    "cancel-discovery-run",
+    "cancel-source-debug",
+    "get-source-debug-run",
+    "get-source-debug-run-details",
+    "save-source-instruction-artifact",
+    "list-source-debug-runs",
+    "accept-source-instruction-draft",
+    "queue-job-for-review",
+    "set-job-resume-application-mode",
+    "remove-job-from-review",
+    "preview-employer-exclusion",
+    "remove-employer-exclusion",
+    "dismiss-discovery-job",
+    "restore-dismissed-discovery-job",
+    "get-apply-run-details",
+    "clear-application-answer",
+    "snooze-grouped-decision",
+    "mutate-application-crm",
+    "mutate-application-crm-bulk-stage",
+    "get-resume-workspace",
+    "regenerate-resume-section",
+    "approve-resume",
+    "clear-resume-approval",
+    "set-work-history-review-acknowledgment",
+    "set-resume-claim-confirmation",
+    "return-application-to-shortlist",
+    "undo-return-application-to-shortlist",
+  ] as const) {
+    ipcMain.handle(`job-finder:${name}`, (event, payload: unknown) =>
+      runRegisteredAction(name, event, payload),
+    );
   }
 
   ipcMain.handle(
@@ -2462,9 +2602,8 @@ export function registerJobFinderRouteHandlers(
       });
     },
   );
-  ipcMain.handle(
-    "job-finder:preview-personal-workspace-restore",
-    (event) => previewWorkspaceRestore(event),
+  ipcMain.handle("job-finder:preview-personal-workspace-restore", (event) =>
+    previewWorkspaceRestore(event),
   );
   ipcMain.handle(
     "job-finder:confirm-personal-workspace-restore",
@@ -2496,7 +2635,10 @@ export function registerJobFinderRouteHandlers(
     const filePath = result.filePath.toLowerCase().endsWith(".json")
       ? result.filePath
       : `${result.filePath}.json`;
-    await writeFile(filePath, exported.content, { encoding: "utf8", mode: 0o600 });
+    await writeFile(filePath, exported.content, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     return ApplicationCrmFileExportResultSchema.parse({
       status: "saved",
       exportedCount: exported.exportedCount,
@@ -2529,11 +2671,7 @@ export function registerJobFinderRouteHandlers(
     const outputPath = saveResult.filePath.toLowerCase().endsWith(".json")
       ? saveResult.filePath
       : saveResult.filePath + ".json";
-    await writeFile(
-      outputPath,
-      diagnostic.content,
-      "utf8",
-    );
+    await writeFile(outputPath, diagnostic.content, "utf8");
     return JobFinderDiagnosticExportResultSchema.parse({ status: "saved" });
   });
   ipcMain.handle(
@@ -2911,10 +3049,18 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:start-apply-queue",
     async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction("start-apply-queue", payload, {
-        service: await getJobFinderWorkspaceService(), host: executeApplyQueueAction,
-      });
-      return workspaceMutationResponse(event.sender, snapshot as JobFinderWorkspaceSnapshot);
+      const snapshot = await executeJobFinderAction(
+        "start-apply-queue",
+        payload,
+        {
+          service: await getJobFinderWorkspaceService(),
+          host: executeApplyQueueAction,
+        },
+      );
+      return workspaceMutationResponse(
+        event.sender,
+        snapshot as JobFinderWorkspaceSnapshot,
+      );
     },
   );
 
@@ -2925,13 +3071,22 @@ export function registerJobFinderRouteHandlers(
     async (event, payload: unknown) => {
       // Approvals land on screen ten at a time while the rest finish.
       const onApproveProgress = (done: number) => {
-        if (done > 0 && done % 10 === 0) publishJobFinderWorkspaceUpdate(event.sender);
+        if (done > 0 && done % 10 === 0)
+          publishJobFinderWorkspaceUpdate(event.sender);
       };
-      const snapshot = await executeJobFinderAction("approve-resumes", payload, {
-        service: await getJobFinderWorkspaceService(),
-        host: (actionId, input) => executeApplyQueueAction(actionId, input, { onApproveProgress }),
-      });
-      return workspaceMutationResponse(event.sender, snapshot as JobFinderWorkspaceSnapshot);
+      const snapshot = await executeJobFinderAction(
+        "approve-resumes",
+        payload,
+        {
+          service: await getJobFinderWorkspaceService(),
+          host: (actionId, input) =>
+            executeApplyQueueAction(actionId, input, { onApproveProgress }),
+        },
+      );
+      return workspaceMutationResponse(
+        event.sender,
+        snapshot as JobFinderWorkspaceSnapshot,
+      );
     },
   );
 
@@ -2940,10 +3095,18 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:remove-from-apply-queue",
     async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction("remove-from-apply-queue", payload, {
-        service: await getJobFinderWorkspaceService(), host: executeApplyQueueAction,
-      });
-      return workspaceMutationResponse(event.sender, snapshot as JobFinderWorkspaceSnapshot);
+      const snapshot = await executeJobFinderAction(
+        "remove-from-apply-queue",
+        payload,
+        {
+          service: await getJobFinderWorkspaceService(),
+          host: executeApplyQueueAction,
+        },
+      );
+      return workspaceMutationResponse(
+        event.sender,
+        snapshot as JobFinderWorkspaceSnapshot,
+      );
     },
   );
 
@@ -2953,10 +3116,18 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:control-apply-queue",
     async (event, payload: unknown) => {
-      const snapshot = await executeJobFinderAction("control-apply-queue", payload, {
-        service: await getJobFinderWorkspaceService(), host: executeApplyQueueAction,
-      });
-      return workspaceMutationResponse(event.sender, snapshot as JobFinderWorkspaceSnapshot);
+      const snapshot = await executeJobFinderAction(
+        "control-apply-queue",
+        payload,
+        {
+          service: await getJobFinderWorkspaceService(),
+          host: executeApplyQueueAction,
+        },
+      );
+      return workspaceMutationResponse(
+        event.sender,
+        snapshot as JobFinderWorkspaceSnapshot,
+      );
     },
   );
 

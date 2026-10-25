@@ -34,7 +34,9 @@ import {
   type PlannedApplyStanding,
 } from "./applications-recovery-state";
 
-type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
+type ApplyResult =
+  | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+  | null;
 
 /** The only button an apply state is ever allowed to draw. */
 export type ApplyStateAction = "none" | "open_browser" | "try_again";

@@ -304,9 +304,7 @@ async function captureSourceSignInPrompts() {
         );
       }
 
-      return window.nestor.jobFinder.test.resetWorkspaceState(
-        workspaceState,
-      );
+      return window.nestor.jobFinder.test.resetWorkspaceState(workspaceState);
     }, state);
 
     await page.reload();

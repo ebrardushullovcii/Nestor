@@ -8,5 +8,5 @@ export {
   isDesktopTestApiEnabled,
   parseResumeImportPathPayload,
   resetJobFinderWorkspace,
-  type ResumeImportPathPayload
-} from './services/job-finder'
+  type ResumeImportPathPayload,
+} from "./services/job-finder";

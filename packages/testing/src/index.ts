@@ -1,2 +1,1 @@
-export const testingPackageReady = true
-
+export const testingPackageReady = true;

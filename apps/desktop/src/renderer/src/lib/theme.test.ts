@@ -1,44 +1,50 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
-import { getSystemPrefersDark, resolveAppearanceTheme } from './theme'
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { getSystemPrefersDark, resolveAppearanceTheme } from "./theme";
 
-describe('theme helpers', () => {
+describe("theme helpers", () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+    vi.unstubAllGlobals();
+  });
 
-  test('defaults system preference fallback to dark when matchMedia is unavailable', () => {
-    vi.stubGlobal('window', {})
+  test("defaults system preference fallback to dark when matchMedia is unavailable", () => {
+    vi.stubGlobal("window", {});
 
-    expect(getSystemPrefersDark()).toBe(true)
-    expect(resolveAppearanceTheme('system', getSystemPrefersDark())).toBe('dark')
-  })
+    expect(getSystemPrefersDark()).toBe(true);
+    expect(resolveAppearanceTheme("system", getSystemPrefersDark())).toBe(
+      "dark",
+    );
+  });
 
-  test('resolves system preference from the current media query when available', () => {
-    vi.stubGlobal('window', {
+  test("resolves system preference from the current media query when available", () => {
+    vi.stubGlobal("window", {
       matchMedia: vi.fn().mockReturnValue({
-        matches: false
-      })
-    })
+        matches: false,
+      }),
+    });
 
-    expect(getSystemPrefersDark()).toBe(false)
-    expect(resolveAppearanceTheme('system', getSystemPrefersDark())).toBe('light')
-  })
+    expect(getSystemPrefersDark()).toBe(false);
+    expect(resolveAppearanceTheme("system", getSystemPrefersDark())).toBe(
+      "light",
+    );
+  });
 
-  test('prefers explicit override when provided for desktop test flows', () => {
-    vi.stubGlobal('window', {
+  test("prefers explicit override when provided for desktop test flows", () => {
+    vi.stubGlobal("window", {
       nestor: {
         jobFinder: {
           test: {
-            getSystemThemeOverride: () => 'dark',
+            getSystemThemeOverride: () => "dark",
           },
         },
       },
       matchMedia: vi.fn().mockReturnValue({
-        matches: false
-      })
-    })
+        matches: false,
+      }),
+    });
 
-    expect(getSystemPrefersDark()).toBe(true)
-    expect(resolveAppearanceTheme('system', getSystemPrefersDark())).toBe('dark')
-  })
-})
+    expect(getSystemPrefersDark()).toBe(true);
+    expect(resolveAppearanceTheme("system", getSystemPrefersDark())).toBe(
+      "dark",
+    );
+  });
+});

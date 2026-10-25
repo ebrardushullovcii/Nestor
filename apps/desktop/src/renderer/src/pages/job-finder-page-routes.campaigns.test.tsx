@@ -85,7 +85,11 @@ describe("JobFinderCampaignsRoute", () => {
           <Route element={<Outlet context={context} />}>
             <Route
               path="/job-finder/campaigns"
-              element={<Suspense fallback={null}><JobFinderCampaignsRoute /></Suspense>}
+              element={
+                <Suspense fallback={null}>
+                  <JobFinderCampaignsRoute />
+                </Suspense>
+              }
             />
           </Route>
         </Routes>

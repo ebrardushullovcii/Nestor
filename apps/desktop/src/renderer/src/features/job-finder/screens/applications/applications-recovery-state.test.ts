@@ -13,7 +13,8 @@ import {
   resolveApplicationRecoveryPresentation,
 } from "./applications-recovery-state";
 
-type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult =
+  JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {
@@ -442,9 +443,9 @@ describe("resolveApplicationRecoveryPresentation", () => {
     expect(formatQuestionPrompt("Phone — Mobile number")).toBe(
       "Phone — Mobile number",
     );
-    expect(
-      formatQuestionPrompt("Step 2 of 5: Contact details — Phone *"),
-    ).toBe("Step 2 of 5: Contact details — Phone");
+    expect(formatQuestionPrompt("Step 2 of 5: Contact details — Phone *")).toBe(
+      "Step 2 of 5: Contact details — Phone",
+    );
     expect(formatQuestionPrompt("Notice period:")).toBe("Notice period");
 
     const presentation = resolveApplicationRecoveryPresentation({

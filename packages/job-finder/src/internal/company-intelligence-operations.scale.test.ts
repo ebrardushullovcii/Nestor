@@ -495,7 +495,8 @@ describe("company reconciliation evidence at scale", () => {
     expect(reconcileCompanies(input).ok).toBe(true);
     // Ownership does not validate unused listing fields on our typed rows.
     job.keySkills.push(42 as unknown as string);
-    job.provenance[0]!.listingUrl = "https://changed-employer.example.test/role";
+    job.provenance[0]!.listingUrl =
+      "https://changed-employer.example.test/role";
     const next = reconcileCompanies(input);
     expect(next.ok).toBe(true);
     // A new row is a carrier-free control; mutable sighting links must not

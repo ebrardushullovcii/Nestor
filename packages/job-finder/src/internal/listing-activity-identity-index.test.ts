@@ -40,12 +40,10 @@ test("ledger identity indexing never opens listing bodies", async () => {
   const index = createListingActivityIdentityIndex();
   await index.warm([job]);
   expect(
-    index
-      .sync([job])
-      .resolve({
-        source: job.source,
-        sourceJobId: job.sourceJobId,
-        canonicalUrl: job.canonicalUrl,
-      }).status,
+    index.sync([job]).resolve({
+      source: job.source,
+      sourceJobId: job.sourceJobId,
+      canonicalUrl: job.canonicalUrl,
+    }).status,
   ).toBe("matched");
 });

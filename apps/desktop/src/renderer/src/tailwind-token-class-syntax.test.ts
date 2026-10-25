@@ -44,9 +44,9 @@ describe("tailwind custom-property class syntax", () => {
     expect(
       sources.has("features/job-finder/components/job-finder-shell-brand.tsx"),
     ).toBe(true);
-    expect(
-      sources.has("features/live-assistant/live-assistant-page.tsx"),
-    ).toBe(true);
+    expect(sources.has("features/live-assistant/live-assistant-page.tsx")).toBe(
+      true,
+    );
     expect(sources.size).toBeGreaterThan(100);
 
     const offenders = [...sources.entries()]

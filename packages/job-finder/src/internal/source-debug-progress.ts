@@ -19,7 +19,8 @@ import { formatStatusLabel } from "./source-instructions";
  */
 const SOURCE_DEBUG_PHASE_PLAIN_LABELS: Record<SourceDebugPhase, string> = {
   access_auth_probe: "Checking whether this site lets Job Finder in",
-  site_structure_mapping: "Learning how this site works: where the jobs are, how search behaves, and how applying starts",
+  site_structure_mapping:
+    "Learning how this site works: where the jobs are, how search behaves, and how applying starts",
   search_filter_probe: "Trying this site's own search and filters",
   job_detail_validation: "Opening a job to check what it shows",
   apply_path_validation: "Following the apply button to see where it leads",

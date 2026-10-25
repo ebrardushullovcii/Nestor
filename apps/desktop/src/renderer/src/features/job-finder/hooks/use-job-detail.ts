@@ -75,8 +75,10 @@ export function clearJobDetailCache() {
  * What the detail reads are keyed by: the job, the revision of its stored
  * facts, and any list facts newer than the detail (Shortlisted's rows).
  */
-export type JobDetailRow = { id: string; detailRevision?: string | undefined } &
-  Partial<Omit<JobListRow, "id" | "detailRevision">>;
+export type JobDetailRow = {
+  id: string;
+  detailRevision?: string | undefined;
+} & Partial<Omit<JobListRow, "id" | "detailRevision">>;
 
 export function prefetchJobDetail(row: JobDetailRow, planId: string | null) {
   const key = JSON.stringify([

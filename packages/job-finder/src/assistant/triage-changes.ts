@@ -12,7 +12,11 @@ function states(snapshot: JobFinderWorkspaceSnapshot) {
   return (id: string) => ({
     hidden: hidden.has(id),
     shortlisted: shortlisted.has(id),
-    label: hidden.has(id) ? "Hidden" : shortlisted.has(id) ? "Shortlisted" : "Find jobs",
+    label: hidden.has(id)
+      ? "Hidden"
+      : shortlisted.has(id)
+        ? "Shortlisted"
+        : "Find jobs",
   });
 }
 

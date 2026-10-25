@@ -240,10 +240,23 @@ export function defineTool<TSchema extends ZodTypeAny>(
   return definition;
 }
 
-const receiptReplyTools = new Set(["edit_profile", "shortlist_jobs", "remove_from_shortlist", "dismiss_jobs", "restore_jobs", "update_sources", "set_appearance"]);
-const modelDefinitionCache = new WeakMap<AssistantToolDefinition, ConversationTool["definition"]>();
+const receiptReplyTools = new Set([
+  "edit_profile",
+  "shortlist_jobs",
+  "remove_from_shortlist",
+  "dismiss_jobs",
+  "restore_jobs",
+  "update_sources",
+  "set_appearance",
+]);
+const modelDefinitionCache = new WeakMap<
+  AssistantToolDefinition,
+  ConversationTool["definition"]
+>();
 
-export function assistantModelToolDefinition(definition: AssistantToolDefinition): ConversationTool["definition"] {
+export function assistantModelToolDefinition(
+  definition: AssistantToolDefinition,
+): ConversationTool["definition"] {
   const cached = modelDefinitionCache.get(definition);
   if (cached) return cached;
   const result: ConversationTool["definition"] = {
@@ -251,10 +264,21 @@ export function assistantModelToolDefinition(definition: AssistantToolDefinition
     function: {
       name: definition.name,
       description: definition.description,
-      get parameters() { return receiptReplyTools.has(definition.name) ? {
-        ...definition.parameters,
-        properties: { ...definition.parameters.properties, complete: { type: "boolean", description: "True only when this single action completes the person's entire request. Its verified receipt becomes the reply. Leave false for advice, multiple steps or a requested explanation." } },
-      } : definition.parameters; },
+      get parameters() {
+        return receiptReplyTools.has(definition.name)
+          ? {
+              ...definition.parameters,
+              properties: {
+                ...definition.parameters.properties,
+                complete: {
+                  type: "boolean",
+                  description:
+                    "True only when this single action completes the person's entire request. Its verified receipt becomes the reply. Leave false for advice, multiple steps or a requested explanation.",
+                },
+              },
+            }
+          : definition.parameters;
+      },
     },
   };
   modelDefinitionCache.set(definition, result);
@@ -323,7 +347,17 @@ const RESULT_DATA_LIMIT_CHARS = 12_000;
 
 function renderResult(result: AssistantToolResult): string {
   const lines = [result.summary];
-  const changes = result.parts?.flatMap((part) => part.type === "change" ? [{ receiptId: part.receiptId, summary: part.summary, status: part.status }] : []);
+  const changes = result.parts?.flatMap((part) =>
+    part.type === "change"
+      ? [
+          {
+            receiptId: part.receiptId,
+            summary: part.summary,
+            status: part.status,
+          },
+        ]
+      : [],
+  );
   if (changes?.length) lines.push(JSON.stringify({ changes }));
   if (result.data !== undefined) {
     let data = JSON.stringify(result.data);
@@ -463,7 +497,8 @@ export function toConversationTool(
           ? { ...(parsedJson as Record<string, unknown>) }
           : {};
       delete record.status;
-      const complete = record.complete === true && receiptReplyTools.has(definition.name);
+      const complete =
+        record.complete === true && receiptReplyTools.has(definition.name);
       delete record.complete;
       try {
         await resolvePageJobReferences(definition.name, record, context);
@@ -510,8 +545,21 @@ export function toConversationTool(
             data: result.data,
           };
         }
-        if (complete && result.canFinish && (!result.status || result.status === "done")) {
-          return { kind: "finish", finish: { reason: result.summary, output: renderResult(result), stuck: false, needsPerson: false, data: {} } };
+        if (
+          complete &&
+          result.canFinish &&
+          (!result.status || result.status === "done")
+        ) {
+          return {
+            kind: "finish",
+            finish: {
+              reason: result.summary,
+              output: renderResult(result),
+              stuck: false,
+              needsPerson: false,
+              data: {},
+            },
+          };
         }
         return {
           kind: "ok",

@@ -477,31 +477,84 @@ describe("assistant session host", () => {
     ).not.toBe("Synthetic engineer");
   });
 
-  it.each(["candidate-assets:delete", "reset-workspace"])("accepts %s once, with confirmation saved before a workspace replacement", async (actionId) => {
-    const { host, repository, ports } = setup();
-    const conversation = await host.createConversation();
-    const proposal = AssistantProposalSchema.parse({ id: "proposal", conversationId: conversation.id, messageId: "proposal_message", kind: "job_finder_action", summary: "Confirm action", items: [{ id: "item", label: "Confirm action", payload: { actionId, input: actionId === "reset-workspace" ? {} : { assetId: "asset" } } }], createdAt: new Date().toISOString() });
-    await repository.upsertProposal(proposal);
-    await repository.upsertMessage(AssistantMessageSchema.parse({ id: "proposal_message", conversationId: conversation.id, role: "assistant", origin: "sidebar", parts: [{ type: "proposal", proposalId: proposal.id, kind: proposal.kind, summary: proposal.summary, status: "pending", source: { store: "assistant" } }], createdAt: new Date().toISOString() }));
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const execute = vi.fn(async () => {
-      if (actionId === "reset-workspace") expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
-      await gate;
-      return true;
-    });
-    ports.executeAction = execute;
-    const input = { conversationId: conversation.id, messageId: "proposal_message", proposalId: proposal.id, action: "accept" as const };
-    const first = host.resolveProposal(input);
-    const second = host.resolveProposal(input);
-    await waitFor(() => execute.mock.calls.length, (count) => count === 1);
-    release();
-    await Promise.all([first, second]);
-    expect(execute).toHaveBeenCalledTimes(1);
-    await host.resolveProposal(input);
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect((await repository.getProposal(proposal.id))?.status).toBe("applied");
-  });
+  it.each(["candidate-assets:delete", "reset-workspace"])(
+    "accepts %s once, with confirmation saved before a workspace replacement",
+    async (actionId) => {
+      const { host, repository, ports } = setup();
+      const conversation = await host.createConversation();
+      const proposal = AssistantProposalSchema.parse({
+        id: "proposal",
+        conversationId: conversation.id,
+        messageId: "proposal_message",
+        kind: "job_finder_action",
+        summary: "Confirm action",
+        items: [
+          {
+            id: "item",
+            label: "Confirm action",
+            payload: {
+              actionId,
+              input: actionId === "reset-workspace" ? {} : { assetId: "asset" },
+            },
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      });
+      await repository.upsertProposal(proposal);
+      await repository.upsertMessage(
+        AssistantMessageSchema.parse({
+          id: "proposal_message",
+          conversationId: conversation.id,
+          role: "assistant",
+          origin: "sidebar",
+          parts: [
+            {
+              type: "proposal",
+              proposalId: proposal.id,
+              kind: proposal.kind,
+              summary: proposal.summary,
+              status: "pending",
+              source: { store: "assistant" },
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const execute = vi.fn(async () => {
+        if (actionId === "reset-workspace")
+          expect((await repository.getProposal(proposal.id))?.status).toBe(
+            "applied",
+          );
+        await gate;
+        return true;
+      });
+      ports.executeAction = execute;
+      const input = {
+        conversationId: conversation.id,
+        messageId: "proposal_message",
+        proposalId: proposal.id,
+        action: "accept" as const,
+      };
+      const first = host.resolveProposal(input);
+      const second = host.resolveProposal(input);
+      await waitFor(
+        () => execute.mock.calls.length,
+        (count) => count === 1,
+      );
+      release();
+      await Promise.all([first, second]);
+      expect(execute).toHaveBeenCalledTimes(1);
+      await host.resolveProposal(input);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect((await repository.getProposal(proposal.id))?.status).toBe(
+        "applied",
+      );
+    },
+  );
 
   it("persists the exact proposed summary on its review card", async () => {
     let calls = 0;

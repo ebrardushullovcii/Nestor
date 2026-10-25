@@ -18,10 +18,9 @@ describe("page-owned read policy", () => {
       ),
     ).toBe(true);
     expect(
-      requestUrlCarriesPreparedValue(
-        "https://site.test/chevron.svg?223234",
-        ["223234"],
-      ),
+      requestUrlCarriesPreparedValue("https://site.test/chevron.svg?223234", [
+        "223234",
+      ]),
     ).toBe(false);
   });
 

@@ -4,4 +4,4 @@ export {
   renderResumeTemplateCatalogPreviewHtml,
   renderResumeTemplateHtml,
   sanitizeSegment,
-} from '../../shared/job-finder-resume-renderer'
+} from "../../shared/job-finder-resume-renderer";

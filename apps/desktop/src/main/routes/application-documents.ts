@@ -73,9 +73,13 @@ async function selectExportPath(
 ) {
   if (!event) {
     const directory = isDesktopTestApiEnabled()
-      ? path.join(getJobFinderUserDataDirectory(), "exports") : app.getPath("downloads");
+      ? path.join(getJobFinderUserDataDirectory(), "exports")
+      : app.getPath("downloads");
     await mkdir(directory, { recursive: true });
-    return path.join(directory, `${Date.now()}_${path.basename(defaultFileName)}`);
+    return path.join(
+      directory,
+      `${Date.now()}_${path.basename(defaultFileName)}`,
+    );
   }
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const options = {
@@ -130,8 +134,17 @@ export function createApplicationDocumentOperations(
     },
   },
 ) {
-  const operations = new Map<string, (event: IpcMainInvokeEvent | null, payload: unknown) => Promise<unknown>>();
-  const add = (name: string, operation: (event: IpcMainInvokeEvent | null, payload: unknown) => Promise<unknown>) => operations.set(name, operation);
+  const operations = new Map<
+    string,
+    (event: IpcMainInvokeEvent | null, payload: unknown) => Promise<unknown>
+  >();
+  const add = (
+    name: string,
+    operation: (
+      event: IpcMainInvokeEvent | null,
+      payload: unknown,
+    ) => Promise<unknown>,
+  ) => operations.set(name, operation);
   // A listing needs one job, its record and its newest result. Reading them
   // by id kept opening Applications from rebuilding all saved jobs.
   const readApplicationDocumentContext = async (
@@ -165,259 +178,256 @@ export function createApplicationDocumentOperations(
     };
   };
 
-  add(
-    "job-finder:list-application-documents",
-    async (_event, payload) => {
-      try {
-        const input = ListApplicationDocumentsInputSchema.parse(payload);
-        const listed = await dependencies.library.list(input);
-        const context = await readApplicationDocumentContext(
-          input.jobId,
-          input.applicationRecordId,
-        ).catch(() => null);
-        if (!context) return ApplicationDocumentListResultSchema.parse(listed);
-        const { job, applicationRecord } = context;
-        const result = context.latestResult;
-        const letter = result?.reviewCard?.letter;
-        const documentId =
-          result && letter
-            ? `attached_letter_${result.id}_${createHash("sha256").update(letter.text).digest("hex").slice(0, 16)}`
-            : null;
-        // A letter already kept here, such as the approved one going on the
-        // form, is not saved again as another proposed copy.
-        if (
-          job &&
-          applicationRecord &&
-          letter &&
-          documentId &&
-          ![...listed.documents, ...(listed.approvedRevisions ?? [])].some(
-            (entry) =>
-              entry.id === documentId ||
-              entry.content.trim() === letter.text.trim(),
-          )
-        ) {
-          try {
-            await dependencies.library.propose({
-              createDocumentId: documentId,
-              reviewReason: letter.reviewReason ?? null,
-              kind: "cover_letter",
-              writtenContent: letter.text,
-              grounding: {
-                profile: context.profile,
-                job,
-                applicationRecord,
-                question: null,
-              },
-            });
-          } catch {
-            // A failed background capture must never hide existing drafts.
-            return ApplicationDocumentListResultSchema.parse(listed);
-          }
-          return ApplicationDocumentListResultSchema.parse(
-            await dependencies.library.list(input),
-          );
-        }
-        return ApplicationDocumentListResultSchema.parse(listed);
-      } catch (error) {
-        return wrapStorageError(error);
-      }
-    },
-  );
-
-  add(
-    "job-finder:propose-application-document",
-    async (_event, payload) => {
-      try {
-        const input = ProposeApplicationDocumentInputSchema.parse(payload);
-        const snapshot = await dependencies.getWorkspaceProjection();
-        const job = snapshot.discoveryJobs.find(
-          (entry) => entry.id === input.jobId,
-        );
-        const applicationRecord = snapshot.applicationRecords.find(
-          (entry) => entry.id === input.applicationRecordId,
-        );
-        if (!job || !applicationRecord || applicationRecord.jobId !== job.id) {
-          throw new ApplicationDocumentLibraryError(
-            "The selected application no longer matches this job.",
-          );
-        }
-        let question: ApplicationQuestionRecord | null = null;
-        if (input.question) {
-          const details = await dependencies.getApplyRunDetails(
-            input.question.runId,
-            job.id,
-            applicationRecord.id,
-          );
-          const result = details.result;
-          const hasExactRunResultLineage =
-            details.run.id === input.question.runId &&
-            details.run.jobIds.includes(job.id) &&
-            result?.runId === input.question.runId &&
-            result.jobId === job.id &&
-            result.applicationRecordId === applicationRecord.id;
-          question = hasExactRunResultLineage
-            ? (details.questionRecords.find(
-                (entry) =>
-                  entry.id === input.question?.questionId &&
-                  entry.runId === input.question.runId &&
-                  entry.jobId === job.id &&
-                  entry.applicationRecordId === applicationRecord.id &&
-                  entry.resultId === result?.id,
-              ) ?? null)
-            : null;
-          if (!question) {
-            throw new ApplicationDocumentLibraryError(
-              "The selected attachment question is stale or belongs to another application.",
-            );
-          }
-        }
-        const priorText = input.documentId
-          ? ((
-              await dependencies.library.list({
-                jobId: job.id,
-                applicationRecordId: applicationRecord.id,
-              })
-            ).documents.find((entry) => entry.id === input.documentId)
-              ?.content ?? null)
+  add("job-finder:list-application-documents", async (_event, payload) => {
+    try {
+      const input = ListApplicationDocumentsInputSchema.parse(payload);
+      const listed = await dependencies.library.list(input);
+      const context = await readApplicationDocumentContext(
+        input.jobId,
+        input.applicationRecordId,
+      ).catch(() => null);
+      if (!context) return ApplicationDocumentListResultSchema.parse(listed);
+      const { job, applicationRecord } = context;
+      const result = context.latestResult;
+      const letter = result?.reviewCard?.letter;
+      const documentId =
+        result && letter
+          ? `attached_letter_${result.id}_${createHash("sha256").update(letter.text).digest("hex").slice(0, 16)}`
           : null;
-        let writtenContent: string | null = null;
-        let reviewReason: string | null = null;
-        if (dependencies.writeDocumentText) {
-          try {
-            writtenContent = await dependencies.writeDocumentText({
-              jobId: job.id,
-              kind: input.kind,
-              questionPrompt: question?.prompt ?? null,
-              priorText,
-            });
-          } catch (error) {
-            if (!(error instanceof ApplicationLetterGroundingError)) {
-              throw new ApplicationDocumentLibraryError(
-                "Job Finder could not write this draft right now. Try again.",
-              );
-            }
-            writtenContent = error.draftText;
-            reviewReason = error.message;
-          }
-        }
-        if (dependencies.writeDocumentText && !writtenContent?.trim()) {
-          throw new ApplicationDocumentLibraryError(
-            "Job Finder could not write and check this document. Try again; no draft was kept.",
-          );
-        }
-        return ApplicationDocumentRevisionSchema.parse(
+      // A letter already kept here, such as the approved one going on the
+      // form, is not saved again as another proposed copy.
+      if (
+        job &&
+        applicationRecord &&
+        letter &&
+        documentId &&
+        ![...listed.documents, ...(listed.approvedRevisions ?? [])].some(
+          (entry) =>
+            entry.id === documentId ||
+            entry.content.trim() === letter.text.trim(),
+        )
+      ) {
+        try {
           await dependencies.library.propose({
-            writtenContent,
-            reviewReason,
-            kind: input.kind,
-            ...(input.documentId ? { documentId: input.documentId } : {}),
-            ...(input.expectedRevision
-              ? { expectedRevision: input.expectedRevision }
-              : {}),
+            createDocumentId: documentId,
+            reviewReason: letter.reviewReason ?? null,
+            kind: "cover_letter",
+            writtenContent: letter.text,
             grounding: {
-              profile: snapshot.profile,
+              profile: context.profile,
               job,
               applicationRecord,
-              question,
+              question: null,
             },
-          }),
-        );
-      } catch (error) {
-        return wrapStorageError(error);
-      }
-    },
-  );
-
-  add(
-    "job-finder:approve-application-document",
-    async (event, payload) => {
-      try {
-        const input = ApproveApplicationDocumentInputSchema.parse(payload);
-        const approved = await dependencies.library.approve(
-          input.documentId,
-          input.expectedRevision,
-        );
-        if (dependencies.refreshApprovedLetter) {
-          if (event) {
-            await withJobFinderWorkspaceUpdates(event.sender, () => dependencies.refreshApprovedLetter!(approved));
-          } else {
-            await dependencies.refreshApprovedLetter(approved);
-          }
-        }
-        return ApplicationDocumentRevisionSchema.parse(approved);
-      } catch (error) {
-        return wrapStorageError(error);
-      }
-    },
-  );
-
-  add(
-    "job-finder:edit-application-document",
-    async (_event, payload) => {
-      try {
-        const input = EditApplicationDocumentInputSchema.parse(payload);
-        return ApplicationDocumentRevisionSchema.parse(
-          await dependencies.library.edit(
-            input.documentId,
-            input.expectedRevision,
-            input.content,
-          ),
-        );
-      } catch (error) {
-        return wrapStorageError(error);
-      }
-    },
-  );
-
-  add(
-    "job-finder:export-application-document",
-    async (event, payload) => {
-      try {
-        const input = ExportApplicationDocumentInputSchema.parse(payload);
-        const document = await dependencies.library.getApproved(
-          input.documentId,
-          input.expectedRevision,
-        );
-        const filePath = await dependencies.selectExportPath(
-          event,
-          dependencies.library.buildDefaultFileName(document),
-        );
-        if (!filePath) {
-          return ApplicationDocumentExportResultSchema.parse({
-            status: "cancelled",
           });
+        } catch {
+          // A failed background capture must never hide existing drafts.
+          return ApplicationDocumentListResultSchema.parse(listed);
         }
-        const bytes = Buffer.from(document.content, "utf8");
-        await writeFile(filePath, bytes, { flag: "w", mode: 0o600 });
-        const updated = await dependencies.library.recordExport(
+        return ApplicationDocumentListResultSchema.parse(
+          await dependencies.library.list(input),
+        );
+      }
+      return ApplicationDocumentListResultSchema.parse(listed);
+    } catch (error) {
+      return wrapStorageError(error);
+    }
+  });
+
+  add("job-finder:propose-application-document", async (_event, payload) => {
+    try {
+      const input = ProposeApplicationDocumentInputSchema.parse(payload);
+      const snapshot = await dependencies.getWorkspaceProjection();
+      const job = snapshot.discoveryJobs.find(
+        (entry) => entry.id === input.jobId,
+      );
+      const applicationRecord = snapshot.applicationRecords.find(
+        (entry) => entry.id === input.applicationRecordId,
+      );
+      if (!job || !applicationRecord || applicationRecord.jobId !== job.id) {
+        throw new ApplicationDocumentLibraryError(
+          "The selected application no longer matches this job.",
+        );
+      }
+      let question: ApplicationQuestionRecord | null = null;
+      if (input.question) {
+        const details = await dependencies.getApplyRunDetails(
+          input.question.runId,
+          job.id,
+          applicationRecord.id,
+        );
+        const result = details.result;
+        const hasExactRunResultLineage =
+          details.run.id === input.question.runId &&
+          details.run.jobIds.includes(job.id) &&
+          result?.runId === input.question.runId &&
+          result.jobId === job.id &&
+          result.applicationRecordId === applicationRecord.id;
+        question = hasExactRunResultLineage
+          ? (details.questionRecords.find(
+              (entry) =>
+                entry.id === input.question?.questionId &&
+                entry.runId === input.question.runId &&
+                entry.jobId === job.id &&
+                entry.applicationRecordId === applicationRecord.id &&
+                entry.resultId === result?.id,
+            ) ?? null)
+          : null;
+        if (!question) {
+          throw new ApplicationDocumentLibraryError(
+            "The selected attachment question is stale or belongs to another application.",
+          );
+        }
+      }
+      const priorText = input.documentId
+        ? ((
+            await dependencies.library.list({
+              jobId: job.id,
+              applicationRecordId: applicationRecord.id,
+            })
+          ).documents.find((entry) => entry.id === input.documentId)?.content ??
+          null)
+        : null;
+      let writtenContent: string | null = null;
+      let reviewReason: string | null = null;
+      if (dependencies.writeDocumentText) {
+        try {
+          writtenContent = await dependencies.writeDocumentText({
+            jobId: job.id,
+            kind: input.kind,
+            questionPrompt: question?.prompt ?? null,
+            priorText,
+          });
+        } catch (error) {
+          if (!(error instanceof ApplicationLetterGroundingError)) {
+            throw new ApplicationDocumentLibraryError(
+              "Job Finder could not write this draft right now. Try again.",
+            );
+          }
+          writtenContent = error.draftText;
+          reviewReason = error.message;
+        }
+      }
+      if (dependencies.writeDocumentText && !writtenContent?.trim()) {
+        throw new ApplicationDocumentLibraryError(
+          "Job Finder could not write and check this document. Try again; no draft was kept.",
+        );
+      }
+      return ApplicationDocumentRevisionSchema.parse(
+        await dependencies.library.propose({
+          writtenContent,
+          reviewReason,
+          kind: input.kind,
+          ...(input.documentId ? { documentId: input.documentId } : {}),
+          ...(input.expectedRevision
+            ? { expectedRevision: input.expectedRevision }
+            : {}),
+          grounding: {
+            profile: snapshot.profile,
+            job,
+            applicationRecord,
+            question,
+          },
+        }),
+      );
+    } catch (error) {
+      return wrapStorageError(error);
+    }
+  });
+
+  add("job-finder:approve-application-document", async (event, payload) => {
+    try {
+      const input = ApproveApplicationDocumentInputSchema.parse(payload);
+      const approved = await dependencies.library.approve(
+        input.documentId,
+        input.expectedRevision,
+      );
+      if (dependencies.refreshApprovedLetter) {
+        if (event) {
+          await withJobFinderWorkspaceUpdates(event.sender, () =>
+            dependencies.refreshApprovedLetter!(approved),
+          );
+        } else {
+          await dependencies.refreshApprovedLetter(approved);
+        }
+      }
+      return ApplicationDocumentRevisionSchema.parse(approved);
+    } catch (error) {
+      return wrapStorageError(error);
+    }
+  });
+
+  add("job-finder:edit-application-document", async (_event, payload) => {
+    try {
+      const input = EditApplicationDocumentInputSchema.parse(payload);
+      return ApplicationDocumentRevisionSchema.parse(
+        await dependencies.library.edit(
           input.documentId,
           input.expectedRevision,
-        );
+          input.content,
+        ),
+      );
+    } catch (error) {
+      return wrapStorageError(error);
+    }
+  });
+
+  add("job-finder:export-application-document", async (event, payload) => {
+    try {
+      const input = ExportApplicationDocumentInputSchema.parse(payload);
+      const document = await dependencies.library.getApproved(
+        input.documentId,
+        input.expectedRevision,
+      );
+      const filePath = await dependencies.selectExportPath(
+        event,
+        dependencies.library.buildDefaultFileName(document),
+      );
+      if (!filePath) {
         return ApplicationDocumentExportResultSchema.parse({
-          status: "exported",
-          document: updated,
-          fileName: path.basename(filePath),
-          sha256: createHash("sha256").update(bytes).digest("hex"),
-          byteSize: bytes.byteLength,
+          status: "cancelled",
         });
-      } catch (error) {
-        return wrapStorageError(error);
       }
-    },
-  );
+      const bytes = Buffer.from(document.content, "utf8");
+      await writeFile(filePath, bytes, { flag: "w", mode: 0o600 });
+      const updated = await dependencies.library.recordExport(
+        input.documentId,
+        input.expectedRevision,
+      );
+      return ApplicationDocumentExportResultSchema.parse({
+        status: "exported",
+        document: updated,
+        fileName: path.basename(filePath),
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        byteSize: bytes.byteLength,
+      });
+    } catch (error) {
+      return wrapStorageError(error);
+    }
+  });
   return operations;
 }
 
 export function registerApplicationDocumentRouteHandlers(
-  ipcMain: IpcMain, dependencies?: ApplicationDocumentRouteDependencies,
+  ipcMain: IpcMain,
+  dependencies?: ApplicationDocumentRouteDependencies,
 ) {
-  for (const [name, operation] of createApplicationDocumentOperations(dependencies)) {
-    ipcMain.handle(name, (event, payload: unknown) => operation(event, payload));
+  for (const [name, operation] of createApplicationDocumentOperations(
+    dependencies,
+  )) {
+    ipcMain.handle(name, (event, payload: unknown) =>
+      operation(event, payload),
+    );
   }
 }
 
-export async function executeApplicationDocumentAction(actionId: string, input: unknown): Promise<unknown> {
-  const operation = createApplicationDocumentOperations().get(`job-finder:${actionId}`);
+export async function executeApplicationDocumentAction(
+  actionId: string,
+  input: unknown,
+): Promise<unknown> {
+  const operation = createApplicationDocumentOperations().get(
+    `job-finder:${actionId}`,
+  );
   if (!operation) throw new Error("Unknown application document action.");
   return operation(null, input);
 }

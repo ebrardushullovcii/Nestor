@@ -12,28 +12,28 @@ The light palette is ink `#20262D`, stone blue `#3E5979` and stone sage `#839889
 
 ## Choose the file for the surface
 
-| Use | File | Background |
-| --- | --- | --- |
-| Website header or in-app branding | `in-app/wordmark.svg` | Transparent |
-| Header on a dark surface | `in-app/wordmark-on-dark.svg` | Transparent; white lettering |
-| Standalone symbol | `in-app/mark.svg` | Transparent, including the gaps between the ring and stones |
-| Symbol on a dark surface | `in-app/mark-on-dark.svg` | Transparent; lighter foreground |
-| Monochrome printing or tinting | `in-app/mark-monochrome.svg`, `in-app/wordmark-monochrome.svg` | Transparent |
-| Browser favicon | `web/favicon.svg`, `web/favicon.ico` | Transparent; SVG adapts to light/dark mode |
-| PNG favicon fallback | `web/favicon-16.png` through `favicon-128.png` | Transparent |
-| iPhone/iPad home-screen shortcut | `web/apple-touch-icon.png` | Opaque white square, 180 × 180; system clips corners |
-| Web app icon | `web/icon-192.png`, `web/icon-512.png` | Rounded white tile; outside corners transparent |
-| Web app maskable icon | `web/icon-maskable-192.png`, `web/icon-maskable-512.png` | Fully opaque white square; mark inside safe zone |
-| Windows executable, taskbar, shortcuts or installer | `desktop/windows/icon.ico` | White tile; outside corners transparent |
-| macOS Electron app / Dock / Finder | `desktop/macos/icon.icns` | White tile; outside corners transparent |
-| macOS source representations | `desktop/macos/Nestor.iconset/` | 1× and 2× sizes through 1024 pixels |
-| Apple app-store image | `desktop/macos/apple-app-store-1024.png` | Opaque white square; no baked corner mask |
-| Apple Icon Composer inputs | `desktop/macos/icon-composer-background.png`, `icon-composer-foreground.png` | Separate opaque background and transparent foreground |
-| Linux launcher icon | `desktop/linux/` | PNG sizes 16–1024; transparent outside tile |
-| Electron/macOS menu-bar template | `in-app/tray-template.png`, `tray-template@2x.png` | Black monochrome with transparent background; use as template image |
-| Windows/Linux tray on dark backgrounds | `in-app/tray-white-16.png`, `tray-white-32.png` | White monochrome with transparent background |
-| Social link preview | `social/og-image.jpg` or `og-image.png` | Opaque ivory, 1200 × 630; centered NESTOR wordmark |
-| Square social image | `social/square.png` | Opaque ivory, 1080 × 1080; centered NESTOR wordmark |
+| Use                                                 | File                                                                         | Background                                                          |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Website header or in-app branding                   | `in-app/wordmark.svg`                                                        | Transparent                                                         |
+| Header on a dark surface                            | `in-app/wordmark-on-dark.svg`                                                | Transparent; white lettering                                        |
+| Standalone symbol                                   | `in-app/mark.svg`                                                            | Transparent, including the gaps between the ring and stones         |
+| Symbol on a dark surface                            | `in-app/mark-on-dark.svg`                                                    | Transparent; lighter foreground                                     |
+| Monochrome printing or tinting                      | `in-app/mark-monochrome.svg`, `in-app/wordmark-monochrome.svg`               | Transparent                                                         |
+| Browser favicon                                     | `web/favicon.svg`, `web/favicon.ico`                                         | Transparent; SVG adapts to light/dark mode                          |
+| PNG favicon fallback                                | `web/favicon-16.png` through `favicon-128.png`                               | Transparent                                                         |
+| iPhone/iPad home-screen shortcut                    | `web/apple-touch-icon.png`                                                   | Opaque white square, 180 × 180; system clips corners                |
+| Web app icon                                        | `web/icon-192.png`, `web/icon-512.png`                                       | Rounded white tile; outside corners transparent                     |
+| Web app maskable icon                               | `web/icon-maskable-192.png`, `web/icon-maskable-512.png`                     | Fully opaque white square; mark inside safe zone                    |
+| Windows executable, taskbar, shortcuts or installer | `desktop/windows/icon.ico`                                                   | White tile; outside corners transparent                             |
+| macOS Electron app / Dock / Finder                  | `desktop/macos/icon.icns`                                                    | White tile; outside corners transparent                             |
+| macOS source representations                        | `desktop/macos/Nestor.iconset/`                                              | 1× and 2× sizes through 1024 pixels                                 |
+| Apple app-store image                               | `desktop/macos/apple-app-store-1024.png`                                     | Opaque white square; no baked corner mask                           |
+| Apple Icon Composer inputs                          | `desktop/macos/icon-composer-background.png`, `icon-composer-foreground.png` | Separate opaque background and transparent foreground               |
+| Linux launcher icon                                 | `desktop/linux/`                                                             | PNG sizes 16–1024; transparent outside tile                         |
+| Electron/macOS menu-bar template                    | `in-app/tray-template.png`, `tray-template@2x.png`                           | Black monochrome with transparent background; use as template image |
+| Windows/Linux tray on dark backgrounds              | `in-app/tray-white-16.png`, `tray-white-32.png`                              | White monochrome with transparent background                        |
+| Social link preview                                 | `social/og-image.jpg` or `og-image.png`                                      | Opaque ivory, 1200 × 630; centered NESTOR wordmark                  |
+| Square social image                                 | `social/square.png`                                                          | Opaque ivory, 1080 × 1080; centered NESTOR wordmark                 |
 
 Prefer SVG for page headers and in-app marks. PNG exports are included for applications that require raster images. Do not use the desktop tile as a replacement for the transparent wordmark.
 

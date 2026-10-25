@@ -13,10 +13,19 @@ const globalsCss = read("./globals.css");
 // Signals that can show for minutes. An endless loop on any of them made the
 // window draw every frame for as long as the work ran.
 const longLivedSignals = [
-  ["../features/job-finder/assistant/assistant-toggle.tsx", "{assistant.working && !assistant.open ? ("],
+  [
+    "../features/job-finder/assistant/assistant-toggle.tsx",
+    "{assistant.working && !assistant.open ? (",
+  ],
   ["../features/job-finder/components/apply-queue-strip.tsx", "view.active"],
-  ["../features/job-finder/screens/job-search-home/job-search-home-screen.tsx", "item.active === false"],
-  ["../features/job-finder/screens/discovery/discovery-results-panel.tsx", "{resultsStatusLine.busy ? ("],
+  [
+    "../features/job-finder/screens/job-search-home/job-search-home-screen.tsx",
+    "item.active === false",
+  ],
+  [
+    "../features/job-finder/screens/discovery/discovery-results-panel.tsx",
+    "{resultsStatusLine.busy ? (",
+  ],
   ["../components/ui/progress-bar.tsx", "data-progress-indeterminate"],
 ] as const;
 
@@ -24,8 +33,12 @@ describe("working signals rest", () => {
   it("the browser badge ripples and nudges a few times, not forever", () => {
     const rule = (selector: string) =>
       browserPeekCss.slice(browserPeekCss.indexOf(selector)).split("}")[0];
-    expect(rule(".browser-peek-trigger.is-working .browser-trigger-badge::after {")).toMatch(/browser-ripple 1\.6s ease-out 3;/);
-    expect(rule(".browser-peek-trigger.is-needs-you .browser-trigger-icon {")).toMatch(/browser-nudge [^;]* 3;/);
+    expect(
+      rule(".browser-peek-trigger.is-working .browser-trigger-badge::after {"),
+    ).toMatch(/browser-ripple 1\.6s ease-out 3;/);
+    expect(
+      rule(".browser-peek-trigger.is-needs-you .browser-trigger-icon {"),
+    ).toMatch(/browser-nudge [^;]* 3;/);
   });
 
   it("the brief pulse and spin stop after three turns", () => {

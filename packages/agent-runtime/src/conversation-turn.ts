@@ -405,8 +405,17 @@ export async function runConversationTurn(
     const toolCalls = response.toolCalls ?? [];
     const content = response.content?.trim() ?? "";
     if (!toolCalls.length && !content) {
-      if (++emptyReplies > 1) return result("model_failed", { error: new Error("The model returned no reply or executable tool call.") });
-      turnMessages.push({ role: "user", content: "[System note] The last response had no text or executable tool call. Use an offered tool or answer plainly. Do not claim work completed without a result." });
+      if (++emptyReplies > 1)
+        return result("model_failed", {
+          error: new Error(
+            "The model returned no reply or executable tool call.",
+          ),
+        });
+      turnMessages.push({
+        role: "user",
+        content:
+          "[System note] The last response had no text or executable tool call. Use an offered tool or answer plainly. Do not claim work completed without a result.",
+      });
       continue;
     }
     emptyReplies = 0;
@@ -577,15 +586,26 @@ export async function runConversationTurn(
           toolCallId: toolCall.id,
           content: outcome.finish.output ?? outcome.finish.reason,
         });
-        await emit({ type: "tool_finished", toolCallId: toolCall.id, toolName: toolCall.function.name, label, outcome: "done", summary: outcome.finish.reason.slice(0, 300) });
+        await emit({
+          type: "tool_finished",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          label,
+          outcome: "done",
+          summary: outcome.finish.reason.slice(0, 300),
+        });
         // A completion request never drops other calls or hides an earlier failure.
         if (batchSucceeded && index === toolCalls.length - 1) {
-          turnMessages.push({ role: "assistant", content: outcome.finish.reason });
+          turnMessages.push({
+            role: "assistant",
+            content: outcome.finish.reason,
+          });
           return result("replied", { reply: outcome.finish.reason });
         }
         continue;
       }
-      if (outcome.status === "failed" || outcome.status === "refused") batchSucceeded = false;
+      if (outcome.status === "failed" || outcome.status === "refused")
+        batchSucceeded = false;
       let content = outcome.content;
       if (content.length > resultLimit) {
         const note = options.storeOverflow

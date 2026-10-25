@@ -20,4 +20,3 @@ export {
   type ReadablePageResult,
   type ResearchSignalResult,
 } from "./research";
-

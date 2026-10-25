@@ -87,7 +87,9 @@ const identity = (index: number) => ({
 });
 
 test("a stored ledger that changed a few entries reuses the last index instead of rebuilding it", () => {
-  const first = Object.freeze(Array.from({ length: 300 }, (_, index) => entry(index)));
+  const first = Object.freeze(
+    Array.from({ length: 300 }, (_, index) => entry(index)),
+  );
   build.mockClear();
   expect(findDiscoveryLedgerEntry(first, identity(5))).toBe(first[5]);
   expect(build).toHaveBeenCalledOnce();

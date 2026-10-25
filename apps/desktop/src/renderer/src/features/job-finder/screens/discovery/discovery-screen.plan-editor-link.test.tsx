@@ -44,9 +44,8 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
     DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
     DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
@@ -158,7 +157,9 @@ describe("Find jobs links to the selected plan's editor", () => {
   // General setup lives on Profile; result recovery edits this plan's places.
   it("points the search-setup panel's places link at Profile preferences", async () => {
     await renderScreen([]);
-    fireEvent.click(screen.getByRole("button", { name: "Roles, places & sources" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Roles, places & sources" }),
+    );
 
     expect(
       screen.getByTestId("filters-plan-editor-link").getAttribute("href"),

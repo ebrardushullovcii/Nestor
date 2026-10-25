@@ -44,6 +44,8 @@ describe("agent compaction contracts", () => {
 
     expect(snapshot.triggerKind).toBe("token_budget");
     expect(snapshot.estimatedTokensBefore).toBeDefined();
-    expect(snapshot.estimatedTokensAfter).toBeLessThan(snapshot.estimatedTokensBefore!);
+    expect(snapshot.estimatedTokensAfter).toBeLessThan(
+      snapshot.estimatedTokensBefore!,
+    );
   });
 });

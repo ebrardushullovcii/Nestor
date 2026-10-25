@@ -196,9 +196,7 @@ describe("ApplyCopilotVisualCheckpointDialog consent hierarchy", () => {
         name: /Take temporary screenshots while it works/,
       }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onResolve).toHaveBeenCalledTimes(1);
     expect(onResolve).toHaveBeenCalledWith(true);

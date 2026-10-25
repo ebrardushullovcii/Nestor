@@ -131,7 +131,9 @@ describe("compound profile copilot requests never absorb later clauses", () => {
       currency: "EUR",
       currencyStatus: "explicit",
     });
-    expect(findFieldOperation(reply.patchGroups, "yearsExperience")?.value).toEqual({
+    expect(
+      findFieldOperation(reply.patchGroups, "yearsExperience")?.value,
+    ).toEqual({
       yearsExperience: 7,
     });
   });

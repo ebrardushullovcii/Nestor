@@ -171,5 +171,4 @@ describe("createJobFinderWorkspaceService", () => {
       ),
     ).toBe(false);
   });
-
 });

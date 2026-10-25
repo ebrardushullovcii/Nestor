@@ -41,10 +41,7 @@ export function stabilizeFindJobsPage(input: {
     });
     const keptIds = new Set(kept.map((row) => row.id));
     const added = input.rows.filter((row) => !keptIds.has(row.id));
-    rows = [...kept, ...added].slice(
-      0,
-      Math.max(input.pageSize, kept.length),
-    );
+    rows = [...kept, ...added].slice(0, Math.max(input.pageSize, kept.length));
   }
   const held = input.heldJobId;
   if (held && previous && !rows.some((row) => row.id === held)) {

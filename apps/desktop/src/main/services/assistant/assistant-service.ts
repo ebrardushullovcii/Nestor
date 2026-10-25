@@ -1,4 +1,8 @@
-import type { ApplicationAutomationMode, ApplyQueue, AssistantMessage } from "@nestor/contracts";
+import type {
+  ApplicationAutomationMode,
+  ApplyQueue,
+  AssistantMessage,
+} from "@nestor/contracts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -36,21 +40,47 @@ let unsubscribeWorkspaceUpdates: (() => void) | null = null;
 
 /** A queue rechecks its frozen bindings and current grants before each run. */
 export async function assistantQueuePolicy(
-  queue: Pick<ApplyQueue, "assistantScopes">, jobIds: readonly string[], mode: ApplicationAutomationMode,
+  queue: Pick<ApplyQueue, "assistantScopes">,
+  jobIds: readonly string[],
+  mode: ApplicationAutomationMode,
 ) {
   const bindings = queue.assistantScopes ?? [];
   if (!bindings.length) return { mode, refused: [], boundJobIds: [] };
-  repository ??= createAssistantRepository({ filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite") });
+  repository ??= createAssistantRepository({
+    filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite"),
+  });
   const bound = new Set<string>();
   const refused: { jobId: string; reason: string }[] = [];
-  const modes = { prepare_only: 0, confirm_before_submit: 1, autonomous_submit: 2 } as const;
-  for (const conversationId of new Set(bindings.map((set) => set.conversationId))) {
-    const ids = jobIds.filter((id) => bindings.some((set) => set.conversationId === conversationId && set.jobIds.includes(id)));
+  const modes = {
+    prepare_only: 0,
+    confirm_before_submit: 1,
+    autonomous_submit: 2,
+  } as const;
+  for (const conversationId of new Set(
+    bindings.map((set) => set.conversationId),
+  )) {
+    const ids = jobIds.filter((id) =>
+      bindings.some(
+        (set) =>
+          set.conversationId === conversationId && set.jobIds.includes(id),
+      ),
+    );
     if (!ids.length) continue;
     for (const id of ids) bound.add(id);
-    for (const decision of decideUnderGrants({ grants: await repository.listGrants(conversationId), jobIds: ids, action: "prepare", savedMode: mode })) {
-      if (!decision.allowed) refused.push({ jobId: decision.jobId, reason: decision.reason ?? "The instruction no longer covers this job." });
-      else if (decision.mode && modes[decision.mode] < modes[mode]) mode = decision.mode;
+    for (const decision of decideUnderGrants({
+      grants: await repository.listGrants(conversationId),
+      jobIds: ids,
+      action: "prepare",
+      savedMode: mode,
+    })) {
+      if (!decision.allowed)
+        refused.push({
+          jobId: decision.jobId,
+          reason:
+            decision.reason ?? "The instruction no longer covers this job.",
+        });
+      else if (decision.mode && modes[decision.mode] < modes[mode])
+        mode = decision.mode;
     }
   }
   return { mode, refused, boundJobIds: [...bound] };
@@ -69,10 +99,7 @@ export function resolveAssistantModel(
     isDesktopTestApiEnabled(env) &&
     !isEnabled(env.NESTOR_TEST_API_USE_LIVE_AI)
   ) {
-    const delay = Number.parseInt(
-      env.NESTOR_TEST_ASSISTANT_DELAY_MS ?? "",
-      10,
-    );
+    const delay = Number.parseInt(env.NESTOR_TEST_ASSISTANT_DELAY_MS ?? "", 10);
     return {
       kind: "ready",
       handle: createScriptedAssistantModelHandle(

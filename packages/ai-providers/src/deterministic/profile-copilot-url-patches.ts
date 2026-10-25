@@ -10,7 +10,10 @@ import {
   inferIdentityUrlField,
 } from "./profile-copilot-helpers";
 
-function buildUrlPatchGroup(input: ReviseCandidateProfileInput, url: string): ProfileCopilotPatchGroup | null {
+function buildUrlPatchGroup(
+  input: ReviseCandidateProfileInput,
+  url: string,
+): ProfileCopilotPatchGroup | null {
   const field = inferIdentityUrlField(input.request, url);
 
   if (!field || input.profile[field] === url) {

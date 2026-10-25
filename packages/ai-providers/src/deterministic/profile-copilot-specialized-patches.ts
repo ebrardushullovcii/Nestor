@@ -34,8 +34,7 @@ function extractSpecialistClauseText(
   family: ForeignCommandFamily,
 ): string | null {
   const clause = segmentCommandClauses(input.request, fieldDescriptors).find(
-    (candidate) =>
-      candidate.family === family && candidate.isAcceptedCommand,
+    (candidate) => candidate.family === family && candidate.isAcceptedCommand,
   );
 
   return clause?.text ?? null;

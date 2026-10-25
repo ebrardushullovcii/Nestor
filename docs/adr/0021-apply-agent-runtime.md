@@ -27,7 +27,7 @@ Stall handling is warn-then-stop with a generous window — twelve steps that fi
 
 ### What was removed, and why
 
-- **`resolveApplyEntry` / `findApplyEntry` and the pre-loop gate.** They decided, before the agent was consulted, whether a page was already a form and which link was the way in. On a board listing carrying a search box and an AI chat input they concluded the page *was* the form and reported "no application form or apply button" while a person could see the Apply button plainly. The same code refused `target="_blank"` links as a hand-off, which is how a large share of boards link to the employer's form.
+- **`resolveApplyEntry` / `findApplyEntry` and the pre-loop gate.** They decided, before the agent was consulted, whether a page was already a form and which link was the way in. On a board listing carrying a search box and an AI chat input they concluded the page _was_ the form and reported "no application form or apply button" while a person could see the Apply button plainly. The same code refused `target="_blank"` links as a hand-off, which is how a large share of boards link to the employer's form.
 - **The deterministic pre-fill pass.** Filling every field the sources answered before the agent had looked made the agent's picture of the page wrong from the first turn, and made the run unable to explain what it had done.
 - **Phrase lists in the observation.** Deciding what counted as an action, an apply link, or a form control by matching words is what made the harness blind to buttons a person could see.
 

@@ -16,7 +16,8 @@ function buildMissingResumeBlockerClearance(
   record: ApplicationRecord,
   detectedAt: string,
 ): ApplicationRecord {
-  const wasResumeReview = record.latestBlocker?.code === "requires_manual_review";
+  const wasResumeReview =
+    record.latestBlocker?.code === "requires_manual_review";
   return ApplicationRecordSchema.parse({
     ...record,
     latestBlocker: null,
@@ -32,10 +33,9 @@ function buildMissingResumeBlockerClearance(
         title: wasResumeReview
           ? "Resume review completed"
           : "Tailored resume approved",
-        detail:
-          wasResumeReview
-            ? "The resume-review blocker cleared after the reviewed resume was approved and became ready for apply."
-            : "The missing-resume blocker cleared after resume approval became ready for apply.",
+        detail: wasResumeReview
+          ? "The resume-review blocker cleared after the reviewed resume was approved and became ready for apply."
+          : "The missing-resume blocker cleared after resume approval became ready for apply.",
         emphasis: "positive",
       },
     ]),

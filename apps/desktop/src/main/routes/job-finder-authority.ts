@@ -36,8 +36,17 @@ export function createJobFinderAuthorityOperations(
     service: getJobFinderApplicationAuthorityService(),
   },
 ) {
-  const operations = new Map<string, (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>>();
-  const add = (name: string, operation: (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>) => operations.set(name, operation);
+  const operations = new Map<
+    string,
+    (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>
+  >();
+  const add = (
+    name: string,
+    operation: (
+      event: IpcMainInvokeEvent | null,
+      input: unknown,
+    ) => Promise<unknown>,
+  ) => operations.set(name, operation);
   add(
     "job-finder:get-application-authority-readiness",
     async (_event, payload: unknown) => {
@@ -121,13 +130,20 @@ export function createJobFinderAuthorityOperations(
   return operations;
 }
 
-export function registerJobFinderAuthorityRouteHandlers(ipcMain: IpcMain, dependencies?: JobFinderAuthorityRouteDependencies): void {
-  for (const [name, operation] of createJobFinderAuthorityOperations(dependencies)) {
+export function registerJobFinderAuthorityRouteHandlers(
+  ipcMain: IpcMain,
+  dependencies?: JobFinderAuthorityRouteDependencies,
+): void {
+  for (const [name, operation] of createJobFinderAuthorityOperations(
+    dependencies,
+  )) {
     ipcMain.handle(name, (event, input: unknown) => operation(event, input));
   }
 }
 export async function executeAuthorityAction(id: string, input: unknown) {
-  const operation = createJobFinderAuthorityOperations().get(`job-finder:${id}`);
+  const operation = createJobFinderAuthorityOperations().get(
+    `job-finder:${id}`,
+  );
   if (!operation) throw new Error("Unknown application authority action.");
   return operation(null, input);
 }

@@ -6,9 +6,21 @@ describe("describePreparedApplicationsSendResult", () => {
   it("says how many of a Send all press went out", () => {
     const snapshot = {
       applyJobResults: [
-        { jobId: "a", state: "submitted", updatedAt: "2026-09-25T01:00:00.000Z" },
-        { jobId: "b", state: "awaiting_review", updatedAt: "2026-09-25T01:00:00.000Z" },
-        { jobId: "c", state: "submitted", updatedAt: "2026-09-25T01:00:00.000Z" },
+        {
+          jobId: "a",
+          state: "submitted",
+          updatedAt: "2026-09-25T01:00:00.000Z",
+        },
+        {
+          jobId: "b",
+          state: "awaiting_review",
+          updatedAt: "2026-09-25T01:00:00.000Z",
+        },
+        {
+          jobId: "c",
+          state: "submitted",
+          updatedAt: "2026-09-25T01:00:00.000Z",
+        },
       ],
     } as unknown as JobFinderRendererWorkspaceSnapshot;
     expect(describePreparedApplicationsSendResult(snapshot, ["a", "c"])).toBe(

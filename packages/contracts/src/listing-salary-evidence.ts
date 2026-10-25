@@ -19,4 +19,3 @@ export function extractSalaryRangeFromListingBody(
     return labelled;
   return explicitAmount.exec(description)?.[0]?.trim() ?? null;
 }
-

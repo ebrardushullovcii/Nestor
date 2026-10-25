@@ -328,7 +328,9 @@ describe("source-generic application browser hands", () => {
 
   test("reports not sent when the site refused the connection and nothing answered", async () => {
     const closed = http.createServer();
-    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      closed.listen(0, "127.0.0.1", resolve),
+    );
     const closedPort = (closed.address() as AddressInfo).port;
     await new Promise<void>((resolve) => closed.close(() => resolve()));
     const { page } = await createPage(
@@ -407,7 +409,9 @@ describe("source-generic application browser hands", () => {
       facts: { actionIssued: true, actionCompleted: true },
     });
     expect(
-      server.requests.filter((request) => request.includes("/submit-confirmed")),
+      server.requests.filter((request) =>
+        request.includes("/submit-confirmed"),
+      ),
     ).toHaveLength(1);
   });
 

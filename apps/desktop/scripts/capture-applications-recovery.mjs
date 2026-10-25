@@ -205,7 +205,9 @@ async function approveResumeForReadyJob(window) {
     .waitFor({ timeout: 10000 });
 
   await window
-    .getByRole("button", { name: /Edit resume|Open the resume|Review the resume/i })
+    .getByRole("button", {
+      name: /Edit resume|Open the resume|Review the resume/i,
+    })
     .first()
     .click();
   await window

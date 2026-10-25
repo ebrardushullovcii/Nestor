@@ -19,9 +19,7 @@ function assertInvariant(condition, message) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() =>
-    window.nestor.liveAssistant.getWorkspace(),
-  );
+  return window.evaluate(() => window.nestor.liveAssistant.getWorkspace());
 }
 
 async function waitForOverlayWindows(app) {
@@ -251,8 +249,7 @@ async function run() {
       advancedOverlayWindowCount: overlayWindows.length,
       popupVisibility,
       assistantResponseVisible:
-        (await window.getByText("Live Assistant", { exact: true }).count()) >
-        0,
+        (await window.getByText("Live Assistant", { exact: true }).count()) > 0,
       attachedImageVisible:
         (await window.getByText("architecture.png", { exact: true }).count()) >
         0,

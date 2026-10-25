@@ -8,7 +8,12 @@ describe("logFallbackError", () => {
     });
 
     try {
-      expect(() => logFallbackError("Resume import stage experience", new Error("offline"))).not.toThrow();
+      expect(() =>
+        logFallbackError(
+          "Resume import stage experience",
+          new Error("offline"),
+        ),
+      ).not.toThrow();
     } finally {
       errorSpy.mockRestore();
     }

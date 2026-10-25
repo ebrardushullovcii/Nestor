@@ -49,10 +49,13 @@ test("destroyed pages never receive deferred lifecycle commands", async () => {
 
 test("a failed wake is retried by the next wake instead of failing every later read", async () => {
   let failWake = true;
-  const sendCommand = vi.fn((method: string, params: Record<string, unknown>) =>
-    method === "Page.setWebLifecycleState" && params.state === "active" && failWake
-      ? Promise.reject(new Error("Target closed"))
-      : Promise.resolve(),
+  const sendCommand = vi.fn(
+    (method: string, params: Record<string, unknown>) =>
+      method === "Page.setWebLifecycleState" &&
+      params.state === "active" &&
+      failWake
+        ? Promise.reject(new Error("Target closed"))
+        : Promise.resolve(),
   );
   const contents = {
     id: 1,
@@ -61,7 +64,9 @@ test("a failed wake is retried by the next wake instead of failing every later r
   } as unknown as WebContents;
   const lifecycle = new TabLifecycle();
   await lifecycle.setFrozen(contents, true);
-  await expect(lifecycle.setFrozen(contents, false)).rejects.toThrow("Target closed");
+  await expect(lifecycle.setFrozen(contents, false)).rejects.toThrow(
+    "Target closed",
+  );
   failWake = false;
   await lifecycle.setFrozen(contents, false);
   expect(

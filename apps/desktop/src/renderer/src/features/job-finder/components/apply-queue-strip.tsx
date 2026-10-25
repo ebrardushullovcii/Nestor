@@ -44,7 +44,9 @@ export function ApplyQueueStrip(props: {
             aria-hidden="true"
             className={cn(
               "mr-2 inline-block size-2 rounded-full align-middle",
-              view.active ? "motion-safe:animate-pulse-brief bg-primary" : "bg-foreground-muted",
+              view.active
+                ? "motion-safe:animate-pulse-brief bg-primary"
+                : "bg-foreground-muted",
             )}
           />
           {view.title}

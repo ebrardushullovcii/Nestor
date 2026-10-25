@@ -9,19 +9,22 @@ Operations manager with 14 years in warehousing and last-mile delivery. I run te
 ## Experience
 
 ### Operations Manager — Atlântico Logística, Porto
-*January 2019 – Present*
+
+_January 2019 – Present_
 
 - Run a 22,000 m² fulfilment centre with 110 staff across two shifts.
 - Cut order-to-dispatch time from 26 to 9 hours with a new picking layout.
 - Lowered staff turnover from 38% to 17% by fixing shift planning.
 
 ### Shift Supervisor — Norte Express, Matosinhos
-*March 2013 – December 2018*
+
+_March 2013 – December 2018_
 
 - Supervised 40 drivers and sorters; introduced route sheets that cut late deliveries by a third.
 
 ### Warehouse Associate — Norte Express, Matosinhos
-*June 2010 – February 2013*
+
+_June 2010 – February 2013_
 
 ## Education
 

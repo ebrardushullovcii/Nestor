@@ -21,5 +21,7 @@ export function parseSearchPreferencesOnce(
   value: JobSearchPreferences,
 ): JobSearchPreferences {
   if (validated.has(value)) return value;
-  return markValidatedSearchPreferences(JobSearchPreferencesSchema.parse(value));
+  return markValidatedSearchPreferences(
+    JobSearchPreferencesSchema.parse(value),
+  );
 }

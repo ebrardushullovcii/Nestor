@@ -133,7 +133,9 @@ export function buildResumeCoverageComparisonRows(
       const sharesSource = removed.sourceAchievementIds?.some((id) =>
         added.sourceAchievementIds?.includes(id),
       );
-      const score = sharesSource ? 2 : scoreClaimOverlap(removed.text, added.text);
+      const score = sharesSource
+        ? 2
+        : scoreClaimOverlap(removed.text, added.text);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -186,7 +188,11 @@ export function buildResumeCoverageComparisonRows(
   });
 
   for (const removed of trulyRemoved) {
-    rows.push({ kind: "removed", originalLines: [removed], tailoredLine: null });
+    rows.push({
+      kind: "removed",
+      originalLines: [removed],
+      tailoredLine: null,
+    });
   }
 
   return {

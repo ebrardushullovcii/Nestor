@@ -390,9 +390,8 @@ describe("singleton_state revision migration", () => {
     const database = new DatabaseSync(filePath);
     try {
       expect(
-        database
-          .prepare("SELECT COUNT(*) AS count FROM discovery_ledger")
-          .get()?.count,
+        database.prepare("SELECT COUNT(*) AS count FROM discovery_ledger").get()
+          ?.count,
       ).toBe(0);
       database.exec(`
         BEGIN;

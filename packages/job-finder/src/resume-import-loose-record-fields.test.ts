@@ -241,7 +241,8 @@ describe("loose record fields from the model", () => {
       id: "updated_school",
       target: { section: "education", key: "record", recordId: "school" },
       sourceKind: "model_background",
-      evidenceText: "Certificate in Hospitality Operations | Example Community College | 2019",
+      evidenceText:
+        "Certificate in Hospitality Operations | Example Community College | 2019",
       value: { ...education, endDate: "2019" },
     });
     const [review] = reconcileCandidates(profile, seed.searchPreferences, [

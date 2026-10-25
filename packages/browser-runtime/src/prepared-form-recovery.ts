@@ -79,14 +79,22 @@ export async function capturePreparedForm(
         const shadow = element.shadowRoot;
         return Boolean(
           shadow &&
-            (shadow.querySelector(
-              `${selector},[contenteditable],[role=textbox],[role=combobox],[role=spinbutton],[role=slider]`,
-            ) ||
-              hidesFields(shadow)),
+          (shadow.querySelector(
+            `${selector},[contenteditable],[role=textbox],[role=combobox],[role=spinbutton],[role=slider]`,
+          ) ||
+            hidesFields(shadow)),
         );
       });
     if (hidesFields(document)) return null;
-    const native = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "FIELDSET", "OUTPUT", "OBJECT"]);
+    const native = new Set([
+      "INPUT",
+      "TEXTAREA",
+      "SELECT",
+      "BUTTON",
+      "FIELDSET",
+      "OUTPUT",
+      "OBJECT",
+    ]);
     if (
       [...document.forms].some((form) =>
         [...form.elements].some((element) => !native.has(element.tagName)),
@@ -100,8 +108,7 @@ export async function capturePreparedForm(
       area = area.parentElement;
     if (
       [...(area ?? document.documentElement).querySelectorAll("*")].some(
-        (element) =>
-          element.localName.includes("-") && !element.shadowRoot,
+        (element) => element.localName.includes("-") && !element.shadowRoot,
       )
     )
       return null;

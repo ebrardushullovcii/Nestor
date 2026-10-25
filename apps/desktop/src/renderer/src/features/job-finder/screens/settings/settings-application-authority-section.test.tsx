@@ -82,9 +82,7 @@ function applied(
   return { envelope: value, status: "applied" };
 }
 
-function installApi(
-  overrides: Partial<Window["nestor"]["jobFinder"]> = {},
-) {
+function installApi(overrides: Partial<Window["nestor"]["jobFinder"]> = {}) {
   const api = {
     getApplicationAuthorityReadiness: vi.fn(() => Promise.resolve(readiness)),
     approveCurrentApplicationAnswers: vi.fn(),
@@ -249,9 +247,7 @@ describe("SettingsApplicationAuthoritySection", () => {
     ).toBeTruthy();
     expect(screen.queryAllByText(/Not available yet/i)).toHaveLength(0);
     // Declarations only appear once a sending choice is made.
-    expect(
-      screen.queryByText(/Things forms ask you to declare/i),
-    ).toBeNull();
+    expect(screen.queryByText(/Things forms ask you to declare/i)).toBeNull();
     expect(screen.getByDisplayValue(origin)).toBeTruthy();
   });
 
@@ -374,9 +370,7 @@ describe("SettingsApplicationAuthoritySection", () => {
       target: { value: "2026-08-28T12:00" },
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(api.createApplicationAuthorityEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -406,9 +400,7 @@ describe("SettingsApplicationAuthoritySection", () => {
     fireEvent.change(screen.getByLabelText("Maximum applications per run"), {
       target: { value: "2" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(api.updateApplicationAuthorityEnvelope).toHaveBeenCalledWith(
@@ -431,7 +423,9 @@ describe("SettingsApplicationAuthoritySection", () => {
       ).toBeTruthy(),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Go back to fill-and-stop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Go back to fill-and-stop" }),
+    );
     expect(api.revokeApplicationAuthorityEnvelope).not.toHaveBeenCalled();
     expect(
       screen.getByText(/go back to filling applications in and stopping/i),
@@ -480,7 +474,9 @@ describe("SettingsApplicationAuthoritySection", () => {
     ).toBe(true);
 
     // Nothing here can switch it back on, and it cannot be taken back twice.
-    expect(screen.queryByRole("button", { name: "Go back to fill-and-stop" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Go back to fill-and-stop" }),
+    ).toBeNull();
     expect(api.revokeApplicationAuthorityEnvelope).not.toHaveBeenCalled();
   });
 
@@ -493,7 +489,9 @@ describe("SettingsApplicationAuthoritySection", () => {
     });
     const api = installApi({
       getApplicationAuthorityEnvelope: vi.fn(() => Promise.resolve(sending)),
-      listApplicationAuthorityEnvelopes: vi.fn(() => Promise.resolve([sending])),
+      listApplicationAuthorityEnvelopes: vi.fn(() =>
+        Promise.resolve([sending]),
+      ),
     });
     render(<SettingsApplicationAuthoritySection />);
 
@@ -586,9 +584,7 @@ describe("SettingsApplicationAuthoritySection", () => {
     // Fill-and-stop writes nothing on any site and prepares with no website
     // named, so there is no website step to be missing.
     await screen.findByTestId("application-automation-outcome");
-    expect(
-      screen.queryByRole("button", { name: "Add a website" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a website" })).toBeNull();
 
     fireEvent.click(
       screen.getByRole("radio", { name: /Fill them in and send them/ }),

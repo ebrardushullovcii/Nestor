@@ -1,13 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 
-<html class="dark" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>NESTOR | DISCOVERY_OPS</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
+<html class="dark" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>NESTOR | DISCOVERY_OPS</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
         theme: {
@@ -24,11 +31,11 @@
               "tertiary-dim": "#c2def0",
               "surface-tint": "#c6c6c7",
               "secondary-container": "#3a3c3c",
-              "outline": "#767575",
+              outline: "#767575",
               "on-tertiary-fixed-variant": "#486372",
-              "surface": "#0e0e0e",
+              surface: "#0e0e0e",
               "outline-variant": "#484848",
-              "secondary": "#9e9e9e",
+              secondary: "#9e9e9e",
               "on-error": "#490106",
               "surface-bright": "#2b2c2c",
               "tertiary-fixed-dim": "#c2def0",
@@ -37,13 +44,13 @@
               "surface-container-lowest": "#000000",
               "inverse-primary": "#5e5f60",
               "surface-container": "#191a1a",
-              "tertiary": "#eff8ff",
+              tertiary: "#eff8ff",
               "on-surface": "#e7e5e5",
               "inverse-on-surface": "#565555",
               "surface-dim": "#0e0e0e",
-              "background": "#0e0e0e",
+              background: "#0e0e0e",
               "tertiary-container": "#d0ecff",
-              "primary": "#c6c6c7",
+              primary: "#c6c6c7",
               "inverse-surface": "#fcf9f8",
               "secondary-fixed-dim": "#d5d4d4",
               "on-error-container": "#ff9993",
@@ -60,238 +67,461 @@
               "on-primary-fixed-variant": "#5a5c5c",
               "secondary-dim": "#9e9e9e",
               "primary-fixed-dim": "#d4d4d4",
-              "error": "#ee7d77",
+              error: "#ee7d77",
               "on-secondary-fixed": "#3e3f40",
               "surface-container-highest": "#252626",
-              "on-primary": "#3f4041"
+              "on-primary": "#3f4041",
             },
             fontFamily: {
-              "headline": ["Space Grotesk"],
-              "body": ["Inter"],
-              "label": ["Inter"],
-              "mono": ["JetBrains Mono"]
+              headline: ["Space Grotesk"],
+              body: ["Inter"],
+              label: ["Inter"],
+              mono: ["JetBrains Mono"],
             },
-            borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
+            borderRadius: {
+              DEFAULT: "0px",
+              lg: "0px",
+              xl: "0px",
+              full: "9999px",
+            },
           },
         },
-      }
+      };
     </script>
-<style>
+    <style>
       .material-symbols-outlined {
-        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        font-variation-settings:
+          "FILL" 0,
+          "wght" 400,
+          "GRAD" 0,
+          "opsz" 24;
       }
-      ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-track { background: #0e0e0e; }
-      ::-webkit-scrollbar-thumb { background: #484848; }
-      ::-webkit-scrollbar-thumb:hover { background: #c6c6c7; }
+      ::-webkit-scrollbar {
+        width: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0e0e0e;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #484848;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #c6c6c7;
+      }
       .scanline {
-        background: linear-gradient(to bottom, transparent 50%, rgba(198, 198, 199, 0.05) 50%);
+        background: linear-gradient(
+          to bottom,
+          transparent 50%,
+          rgba(198, 198, 199, 0.05) 50%
+        );
         background-size: 100% 4px;
       }
       @keyframes spin-slow {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
       }
       .animate-spin-slow {
         animation: spin-slow 20s linear infinite;
       }
     </style>
-</head>
-<body class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary">
-<!-- Top Navigation Bar (Selection Console v2 Style) -->
-<nav class="fixed top-0 z-50 w-full h-14 bg-[#0e0e0e] flex justify-between items-center px-6 border-b border-[#484848]/20">
-<div class="flex items-center gap-8">
-<span class="text-xl font-black text-[#c6c6c7] tracking-tighter font-headline">NESTOR</span>
-<div class="hidden md:flex gap-6">
-<span class="text-[#c6c6c7] border-b border-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold cursor-default">SESSION_ACTIVE</span>
-<span class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1">PROXY_LHR_01</span>
-<span class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1">BROWSER_SYNCED</span>
-</div>
-</div>
-<div class="flex items-center gap-4">
-<span class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1">notifications</span>
-<span class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1">terminal</span>
-<div class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 flex items-center justify-center">
-<img alt="OPERATOR_AVATAR" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ39vfrySZWB_iqXxYbinuBv0h0ImiBZaMqHmaIHgE-pC2tpWJQCifd9FxRrciwagppdf8Vg5eiU3FVB0mbR9IqFSvfgM0-e78KnaRks8s_d80dYbxZm58AzUQgpQl3ZBwV7xX1MKGpGvlwhAJBmicQ7wriJ3kJu9ID-R1l7yAub7iNiLVDkPltnGmliJs8Dx1z6ORGROq9yMHnSd8hbih1y8fF5b4o-paqmzQq3hYIGznVJpKjiNn3DVgbS_Aj0x930GNYWK5xq0-"/>
-</div>
-</div>
-</nav>
-<!-- Side Navigation Bar (Selection Console v2 Style) -->
-<aside class="fixed left-0 top-0 h-screen w-64 bg-[#131313] flex flex-col border-r border-[#484848]/20 z-40 pt-14">
-<div class="p-6 border-b border-[#484848]/20">
-<div class="flex items-center gap-3 mb-2">
-<div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
-<span class="font-headline font-medium text-[11px] tracking-widest text-primary">NESTOR_OPS</span>
-</div>
-<span class="font-mono text-[9px] text-outline tracking-tight">STATUS: COMMAND_READY</span>
-</div>
-<nav class="flex-1 py-4 overflow-y-auto">
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">grid_view</span> DASHBOARD
+  </head>
+  <body
+    class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary"
+  >
+    <!-- Top Navigation Bar (Selection Console v2 Style) -->
+    <nav
+      class="fixed top-0 z-50 w-full h-14 bg-[#0e0e0e] flex justify-between items-center px-6 border-b border-[#484848]/20"
+    >
+      <div class="flex items-center gap-8">
+        <span
+          class="text-xl font-black text-[#c6c6c7] tracking-tighter font-headline"
+          >NESTOR</span
+        >
+        <div class="hidden md:flex gap-6">
+          <span
+            class="text-[#c6c6c7] border-b border-[#c6c6c7] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold cursor-default"
+            >SESSION_ACTIVE</span
+          >
+          <span
+            class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1"
+            >PROXY_LHR_01</span
+          >
+          <span
+            class="text-[#767575] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold hover:bg-[#1f2020] transition-colors cursor-pointer px-1"
+            >BROWSER_SYNCED</span
+          >
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <span
+          class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1"
+          >notifications</span
+        >
+        <span
+          class="material-symbols-outlined text-[#c6c6c7] cursor-pointer hover:bg-[#1f2020] p-1"
+          >terminal</span
+        >
+        <div
+          class="w-8 h-8 bg-surface-container-high border border-outline-variant/30 flex items-center justify-center"
+        >
+          <img
+            alt="OPERATOR_AVATAR"
+            class="w-full h-full object-cover"
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ39vfrySZWB_iqXxYbinuBv0h0ImiBZaMqHmaIHgE-pC2tpWJQCifd9FxRrciwagppdf8Vg5eiU3FVB0mbR9IqFSvfgM0-e78KnaRks8s_d80dYbxZm58AzUQgpQl3ZBwV7xX1MKGpGvlwhAJBmicQ7wriJ3kJu9ID-R1l7yAub7iNiLVDkPltnGmliJs8Dx1z6ORGROq9yMHnSd8hbih1y8fF5b4o-paqmzQq3hYIGznVJpKjiNn3DVgbS_Aj0x930GNYWK5xq0-"
+          />
+        </div>
+      </div>
+    </nav>
+    <!-- Side Navigation Bar (Selection Console v2 Style) -->
+    <aside
+      class="fixed left-0 top-0 h-screen w-64 bg-[#131313] flex flex-col border-r border-[#484848]/20 z-40 pt-14"
+    >
+      <div class="p-6 border-b border-[#484848]/20">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
+          <span
+            class="font-headline font-medium text-[11px] tracking-widest text-primary"
+            >NESTOR_OPS</span
+          >
+        </div>
+        <span class="font-mono text-[9px] text-outline tracking-tight"
+          >STATUS: COMMAND_READY</span
+        >
+      </div>
+      <nav class="flex-1 py-4 overflow-y-auto">
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">grid_view</span>
+          DASHBOARD
         </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">account_circle</span> PROFILE
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">account_circle</span>
+          PROFILE
         </a>
-<a class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">explore</span> DISCOVERY
+        <a
+          class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">explore</span>
+          DISCOVERY
         </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">fact_check</span> REVIEW_QUEUE
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">fact_check</span>
+          REVIEW_QUEUE
         </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">description</span> APPLICATIONS
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">description</span>
+          APPLICATIONS
         </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150" href="#">
-<span class="material-symbols-outlined text-sm">settings</span> SETTINGS
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150"
+          href="#"
+        >
+          <span class="material-symbols-outlined text-sm">settings</span>
+          SETTINGS
         </a>
-</nav>
-<div class="p-4 border-t border-[#484848]/20">
-<button class="w-full bg-primary text-on-primary py-3 font-headline font-bold text-[11px] tracking-widest uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
-<span class="material-symbols-outlined text-sm">add</span> NEW_SEARCH
+      </nav>
+      <div class="p-4 border-t border-[#484848]/20">
+        <button
+          class="w-full bg-primary text-on-primary py-3 font-headline font-bold text-[11px] tracking-widest uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+        >
+          <span class="material-symbols-outlined text-sm">add</span> NEW_SEARCH
         </button>
-</div>
-</aside>
-<!-- Main Content Canvas -->
-<main class="ml-64 pt-14 pb-8 min-h-screen flex bg-surface">
-<!-- Left Panel: Search & Filter (Workspace Logic) -->
-<section class="w-72 border-r border-outline-variant/10 p-6 flex flex-col gap-6 bg-surface-container-low shrink-0 overflow-y-auto">
-<div class="flex items-center justify-between mb-2">
-<h3 class="font-headline text-[10px] font-bold tracking-[0.2em] text-primary uppercase">QUERY_FILTERS</h3>
-<span class="text-[10px] font-mono text-outline">[MOD_V2.4]</span>
-</div>
-<div class="space-y-6">
-<label class="block">
-<span class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-2 block">POSITION_TARGET</span>
-<input class="w-full bg-surface-container-highest border-b border-outline-variant px-3 py-2 font-mono text-xs focus:outline-none focus:border-primary text-on-background placeholder:text-outline/40" placeholder="e.g. SYSTEMS_ENGINEER" type="text"/>
-</label>
-<label class="block">
-<span class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-2 block">GEOGRAPHIC_RADIUS</span>
-<input class="w-full bg-surface-container-highest border-b border-outline-variant px-3 py-2 font-mono text-xs focus:outline-none focus:border-primary text-on-background placeholder:text-outline/40" placeholder="LAT_LONG_OR_ISO" type="text" value="REMOTE_ONLY"/>
-</label>
-<div>
-<div class="flex justify-between text-[10px] font-headline text-outline mb-2">
-<span>COMPENSATION_THRESHOLD</span>
-<span class="text-primary font-mono">$180K+</span>
-</div>
-<div class="h-1 bg-surface-container-highest w-full relative">
-<div class="absolute top-0 left-0 h-full w-[65%] bg-primary"></div>
-<div class="absolute top-1/2 -translate-y-1/2 left-[65%] w-3 h-3 bg-primary ring-4 ring-primary/20"></div>
-</div>
-</div>
-<div>
-<div class="flex justify-between text-[10px] font-headline text-outline mb-2">
-<span>EXPERIENCE_QUOTA</span>
-<span class="text-primary font-mono">SENIOR+</span>
-</div>
-<div class="grid grid-cols-4 gap-1">
-<div class="h-2 bg-primary"></div>
-<div class="h-2 bg-primary"></div>
-<div class="h-2 bg-primary"></div>
-<div class="h-2 bg-surface-container-highest"></div>
-</div>
-</div>
-<div>
-<span class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-3 block">REQUIRED_STACK</span>
-<div class="flex flex-wrap gap-2">
-<div class="px-2 py-1 bg-surface-container-high border border-primary/20 text-[9px] font-mono text-primary flex items-center gap-2">
-                        RUST <span class="material-symbols-outlined text-[10px] cursor-pointer">close</span>
-</div>
-<div class="px-2 py-1 bg-surface-container-high border border-primary/20 text-[9px] font-mono text-primary flex items-center gap-2">
-                        K8S <span class="material-symbols-outlined text-[10px] cursor-pointer">close</span>
-</div>
-<button class="px-2 py-1 border border-dashed border-outline-variant text-[9px] font-mono text-outline hover:text-primary hover:border-primary transition-colors uppercase">
-                        + ADD_TAG
-                    </button>
-</div>
-</div>
-</div>
-<div class="mt-auto pt-6">
-<button class="w-full py-4 bg-primary text-on-primary font-headline font-black text-xs tracking-[0.15em] uppercase hover:opacity-90 active:scale-95 transition-all">
-                EXECUTE_SCAN
-            </button>
-</div>
-</section>
-<!-- Middle Panel: Stream Results (Empty State) -->
-<section class="flex-1 min-w-0 border-r border-outline-variant/10 overflow-hidden relative flex flex-col bg-surface">
-<!-- Scanline Overlay Effect -->
-<div class="absolute inset-0 scanline opacity-30 pointer-events-none z-0"></div>
-<header class="h-12 border-b border-outline-variant/10 flex items-center justify-between px-6 bg-surface-container-low/40 backdrop-blur-md z-10 sticky top-0">
-<div class="flex items-center gap-3">
-<span class="text-[10px] font-headline font-bold text-primary tracking-widest uppercase">STREAM_01</span>
-<span class="w-1 h-1 bg-outline rounded-full"></span>
-<span class="text-[10px] font-mono text-outline">RESULTS: 000</span>
-</div>
-<div class="flex items-center gap-4">
-<span class="material-symbols-outlined text-outline text-sm cursor-pointer hover:text-primary">filter_list</span>
-<span class="material-symbols-outlined text-outline text-sm cursor-pointer hover:text-primary">refresh</span>
-</div>
-</header>
-<!-- Empty State Content -->
-<div class="flex-1 flex flex-col items-center justify-center p-12 text-center relative z-10">
-<div class="w-24 h-24 mb-8 relative">
-<!-- Tech UI Decoration -->
-<div class="absolute inset-0 border border-outline-variant/30 animate-spin-slow"></div>
-<div class="absolute inset-2 border border-outline-variant/10"></div>
-<div class="absolute inset-0 flex items-center justify-center">
-<span class="material-symbols-outlined text-4xl text-outline/40">search_off</span>
-</div>
-</div>
-<h1 class="font-headline text-2xl font-bold tracking-[0.2em] text-on-background mb-4 uppercase">RESULTS_STREAM: EMPTY</h1>
-<p class="font-mono text-xs text-outline tracking-wider max-w-md mb-8 uppercase">
-                NO MATCHING RECORDS FOUND FOR CURRENT PARAMETERS. 
-                <span class="text-error block mt-2">[ERROR_CODE: ZERO_YIELD_EXCEPTION]</span>
-</p>
-<div class="bg-surface-container-low border border-outline-variant/20 p-6 max-w-sm text-left">
-<div class="flex items-center gap-2 mb-3">
-<span class="material-symbols-outlined text-tertiary text-sm">info</span>
-<span class="font-headline text-[10px] font-bold text-tertiary uppercase tracking-widest">SYSTEM_SUGGESTION</span>
-</div>
-<p class="text-xs text-on-surface-variant leading-relaxed">
-                    Consider broadening your <span class="text-on-background font-mono underline decoration-primary/40">location filter</span> or <span class="text-on-background font-mono underline decoration-primary/40">target seniority</span> to increase extraction yield. Current constraints may be too narrow for the available data pool.
-                </p>
-</div>
-<!-- Background Grid Artifacts -->
-<div class="absolute top-1/4 left-1/4 w-32 h-32 border-l border-t border-outline-variant/10 pointer-events-none"></div>
-<div class="absolute bottom-1/4 right-1/4 w-32 h-32 border-r border-b border-outline-variant/10 pointer-events-none"></div>
-</div>
-</section>
-<!-- Right Panel: Assessment Detail (Placeholder) -->
-<section class="w-[450px] border-l border-outline-variant/10 bg-surface-container-low flex flex-col shrink-0">
-<div class="p-6 border-b border-outline-variant/10 bg-surface-container-high/30">
-<div class="text-[10px] font-headline font-bold text-outline uppercase tracking-widest mb-1">MODULE: ASSESSMENT_UNIT</div>
-<div class="h-1 w-12 bg-primary"></div>
-</div>
-<div class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-surface-container-lowest">
-<div class="p-4 border border-outline-variant/20 mb-6 bg-surface-container-low">
-<span class="material-symbols-outlined text-3xl text-outline/20">terminal</span>
-</div>
-<div class="font-mono text-[11px] text-outline/60 leading-relaxed uppercase tracking-tighter">
-                SELECT_RECORD_TO_INITIALIZE_ASSESSMENT
+      </div>
+    </aside>
+    <!-- Main Content Canvas -->
+    <main class="ml-64 pt-14 pb-8 min-h-screen flex bg-surface">
+      <!-- Left Panel: Search & Filter (Workspace Logic) -->
+      <section
+        class="w-72 border-r border-outline-variant/10 p-6 flex flex-col gap-6 bg-surface-container-low shrink-0 overflow-y-auto"
+      >
+        <div class="flex items-center justify-between mb-2">
+          <h3
+            class="font-headline text-[10px] font-bold tracking-[0.2em] text-primary uppercase"
+          >
+            QUERY_FILTERS
+          </h3>
+          <span class="text-[10px] font-mono text-outline">[MOD_V2.4]</span>
+        </div>
+        <div class="space-y-6">
+          <label class="block">
+            <span
+              class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-2 block"
+              >POSITION_TARGET</span
+            >
+            <input
+              class="w-full bg-surface-container-highest border-b border-outline-variant px-3 py-2 font-mono text-xs focus:outline-none focus:border-primary text-on-background placeholder:text-outline/40"
+              placeholder="e.g. SYSTEMS_ENGINEER"
+              type="text"
+            />
+          </label>
+          <label class="block">
+            <span
+              class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-2 block"
+              >GEOGRAPHIC_RADIUS</span
+            >
+            <input
+              class="w-full bg-surface-container-highest border-b border-outline-variant px-3 py-2 font-mono text-xs focus:outline-none focus:border-primary text-on-background placeholder:text-outline/40"
+              placeholder="LAT_LONG_OR_ISO"
+              type="text"
+              value="REMOTE_ONLY"
+            />
+          </label>
+          <div>
+            <div
+              class="flex justify-between text-[10px] font-headline text-outline mb-2"
+            >
+              <span>COMPENSATION_THRESHOLD</span>
+              <span class="text-primary font-mono">$180K+</span>
             </div>
-<div class="mt-8 w-full space-y-4">
-<div class="h-[1px] bg-gradient-to-r from-transparent via-outline-variant/30 to-transparent w-full"></div>
-<div class="space-y-2 opacity-20">
-<div class="h-2 bg-outline-variant w-3/4 mx-auto"></div>
-<div class="h-2 bg-outline-variant w-1/2 mx-auto"></div>
-<div class="h-2 bg-outline-variant w-2/3 mx-auto"></div>
-</div>
-</div>
-</div>
-<div class="p-6 bg-surface-container-high/30 border-t border-outline-variant/10">
-<div class="flex justify-between items-center text-[10px] font-mono text-outline uppercase">
-<span>SECURE_LINK: OFFLINE</span>
-<span>v0.4.1</span>
-</div>
-</div>
-</section>
-</main>
-<!-- Global Footer (Selection Console v2 Style) -->
-<footer class="fixed bottom-0 left-0 w-full h-8 bg-[#000000] flex justify-between items-center px-4 border-t border-[#484848]/30 z-50">
-<span class="text-[#eff8ff] font-mono text-[9px] tracking-widest">v1.0.4_STABLE</span>
-<div class="flex gap-6">
-<span class="text-[#eff8ff] animate-pulse font-mono text-[9px] tracking-widest cursor-default">LOG_STREAM</span>
-<span class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default">LATENCY:14ms</span>
-<span class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default">MEM:42%</span>
-</div>
-</footer>
-</body></html>
+            <div class="h-1 bg-surface-container-highest w-full relative">
+              <div
+                class="absolute top-0 left-0 h-full w-[65%] bg-primary"
+              ></div>
+              <div
+                class="absolute top-1/2 -translate-y-1/2 left-[65%] w-3 h-3 bg-primary ring-4 ring-primary/20"
+              ></div>
+            </div>
+          </div>
+          <div>
+            <div
+              class="flex justify-between text-[10px] font-headline text-outline mb-2"
+            >
+              <span>EXPERIENCE_QUOTA</span>
+              <span class="text-primary font-mono">SENIOR+</span>
+            </div>
+            <div class="grid grid-cols-4 gap-1">
+              <div class="h-2 bg-primary"></div>
+              <div class="h-2 bg-primary"></div>
+              <div class="h-2 bg-primary"></div>
+              <div class="h-2 bg-surface-container-highest"></div>
+            </div>
+          </div>
+          <div>
+            <span
+              class="text-[10px] font-headline font-bold text-outline uppercase tracking-wider mb-3 block"
+              >REQUIRED_STACK</span
+            >
+            <div class="flex flex-wrap gap-2">
+              <div
+                class="px-2 py-1 bg-surface-container-high border border-primary/20 text-[9px] font-mono text-primary flex items-center gap-2"
+              >
+                RUST
+                <span
+                  class="material-symbols-outlined text-[10px] cursor-pointer"
+                  >close</span
+                >
+              </div>
+              <div
+                class="px-2 py-1 bg-surface-container-high border border-primary/20 text-[9px] font-mono text-primary flex items-center gap-2"
+              >
+                K8S
+                <span
+                  class="material-symbols-outlined text-[10px] cursor-pointer"
+                  >close</span
+                >
+              </div>
+              <button
+                class="px-2 py-1 border border-dashed border-outline-variant text-[9px] font-mono text-outline hover:text-primary hover:border-primary transition-colors uppercase"
+              >
+                + ADD_TAG
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="mt-auto pt-6">
+          <button
+            class="w-full py-4 bg-primary text-on-primary font-headline font-black text-xs tracking-[0.15em] uppercase hover:opacity-90 active:scale-95 transition-all"
+          >
+            EXECUTE_SCAN
+          </button>
+        </div>
+      </section>
+      <!-- Middle Panel: Stream Results (Empty State) -->
+      <section
+        class="flex-1 min-w-0 border-r border-outline-variant/10 overflow-hidden relative flex flex-col bg-surface"
+      >
+        <!-- Scanline Overlay Effect -->
+        <div
+          class="absolute inset-0 scanline opacity-30 pointer-events-none z-0"
+        ></div>
+        <header
+          class="h-12 border-b border-outline-variant/10 flex items-center justify-between px-6 bg-surface-container-low/40 backdrop-blur-md z-10 sticky top-0"
+        >
+          <div class="flex items-center gap-3">
+            <span
+              class="text-[10px] font-headline font-bold text-primary tracking-widest uppercase"
+              >STREAM_01</span
+            >
+            <span class="w-1 h-1 bg-outline rounded-full"></span>
+            <span class="text-[10px] font-mono text-outline">RESULTS: 000</span>
+          </div>
+          <div class="flex items-center gap-4">
+            <span
+              class="material-symbols-outlined text-outline text-sm cursor-pointer hover:text-primary"
+              >filter_list</span
+            >
+            <span
+              class="material-symbols-outlined text-outline text-sm cursor-pointer hover:text-primary"
+              >refresh</span
+            >
+          </div>
+        </header>
+        <!-- Empty State Content -->
+        <div
+          class="flex-1 flex flex-col items-center justify-center p-12 text-center relative z-10"
+        >
+          <div class="w-24 h-24 mb-8 relative">
+            <!-- Tech UI Decoration -->
+            <div
+              class="absolute inset-0 border border-outline-variant/30 animate-spin-slow"
+            ></div>
+            <div
+              class="absolute inset-2 border border-outline-variant/10"
+            ></div>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span class="material-symbols-outlined text-4xl text-outline/40"
+                >search_off</span
+              >
+            </div>
+          </div>
+          <h1
+            class="font-headline text-2xl font-bold tracking-[0.2em] text-on-background mb-4 uppercase"
+          >
+            RESULTS_STREAM: EMPTY
+          </h1>
+          <p
+            class="font-mono text-xs text-outline tracking-wider max-w-md mb-8 uppercase"
+          >
+            NO MATCHING RECORDS FOUND FOR CURRENT PARAMETERS.
+            <span class="text-error block mt-2"
+              >[ERROR_CODE: ZERO_YIELD_EXCEPTION]</span
+            >
+          </p>
+          <div
+            class="bg-surface-container-low border border-outline-variant/20 p-6 max-w-sm text-left"
+          >
+            <div class="flex items-center gap-2 mb-3">
+              <span class="material-symbols-outlined text-tertiary text-sm"
+                >info</span
+              >
+              <span
+                class="font-headline text-[10px] font-bold text-tertiary uppercase tracking-widest"
+                >SYSTEM_SUGGESTION</span
+              >
+            </div>
+            <p class="text-xs text-on-surface-variant leading-relaxed">
+              Consider broadening your
+              <span
+                class="text-on-background font-mono underline decoration-primary/40"
+                >location filter</span
+              >
+              or
+              <span
+                class="text-on-background font-mono underline decoration-primary/40"
+                >target seniority</span
+              >
+              to increase extraction yield. Current constraints may be too
+              narrow for the available data pool.
+            </p>
+          </div>
+          <!-- Background Grid Artifacts -->
+          <div
+            class="absolute top-1/4 left-1/4 w-32 h-32 border-l border-t border-outline-variant/10 pointer-events-none"
+          ></div>
+          <div
+            class="absolute bottom-1/4 right-1/4 w-32 h-32 border-r border-b border-outline-variant/10 pointer-events-none"
+          ></div>
+        </div>
+      </section>
+      <!-- Right Panel: Assessment Detail (Placeholder) -->
+      <section
+        class="w-[450px] border-l border-outline-variant/10 bg-surface-container-low flex flex-col shrink-0"
+      >
+        <div
+          class="p-6 border-b border-outline-variant/10 bg-surface-container-high/30"
+        >
+          <div
+            class="text-[10px] font-headline font-bold text-outline uppercase tracking-widest mb-1"
+          >
+            MODULE: ASSESSMENT_UNIT
+          </div>
+          <div class="h-1 w-12 bg-primary"></div>
+        </div>
+        <div
+          class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-surface-container-lowest"
+        >
+          <div
+            class="p-4 border border-outline-variant/20 mb-6 bg-surface-container-low"
+          >
+            <span class="material-symbols-outlined text-3xl text-outline/20"
+              >terminal</span
+            >
+          </div>
+          <div
+            class="font-mono text-[11px] text-outline/60 leading-relaxed uppercase tracking-tighter"
+          >
+            SELECT_RECORD_TO_INITIALIZE_ASSESSMENT
+          </div>
+          <div class="mt-8 w-full space-y-4">
+            <div
+              class="h-[1px] bg-gradient-to-r from-transparent via-outline-variant/30 to-transparent w-full"
+            ></div>
+            <div class="space-y-2 opacity-20">
+              <div class="h-2 bg-outline-variant w-3/4 mx-auto"></div>
+              <div class="h-2 bg-outline-variant w-1/2 mx-auto"></div>
+              <div class="h-2 bg-outline-variant w-2/3 mx-auto"></div>
+            </div>
+          </div>
+        </div>
+        <div
+          class="p-6 bg-surface-container-high/30 border-t border-outline-variant/10"
+        >
+          <div
+            class="flex justify-between items-center text-[10px] font-mono text-outline uppercase"
+          >
+            <span>SECURE_LINK: OFFLINE</span>
+            <span>v0.4.1</span>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!-- Global Footer (Selection Console v2 Style) -->
+    <footer
+      class="fixed bottom-0 left-0 w-full h-8 bg-[#000000] flex justify-between items-center px-4 border-t border-[#484848]/30 z-50"
+    >
+      <span class="text-[#eff8ff] font-mono text-[9px] tracking-widest"
+        >v1.0.4_STABLE</span
+      >
+      <div class="flex gap-6">
+        <span
+          class="text-[#eff8ff] animate-pulse font-mono text-[9px] tracking-widest cursor-default"
+          >LOG_STREAM</span
+        >
+        <span
+          class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default"
+          >LATENCY:14ms</span
+        >
+        <span
+          class="text-[#484848] hover:text-[#c6c6c7] font-mono text-[9px] tracking-widest cursor-default"
+          >MEM:42%</span
+        >
+      </div>
+    </footer>
+  </body>
+</html>

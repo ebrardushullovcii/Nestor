@@ -92,7 +92,9 @@ const fileDialogOptions: OpenDialogOptions = {
 };
 
 async function selectCandidateAssetFile(event: IpcMainInvokeEvent | null) {
-  const parentWindow = event ? BrowserWindow.fromWebContents(event.sender) : null;
+  const parentWindow = event
+    ? BrowserWindow.fromWebContents(event.sender)
+    : null;
   const selection = parentWindow
     ? await dialog.showOpenDialog(parentWindow, fileDialogOptions)
     : await dialog.showOpenDialog(fileDialogOptions);
@@ -127,129 +129,128 @@ export function createCandidateAssetOperations(
     },
   },
 ) {
-  const operations = new Map<string, (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>>();
-  const add = (name: string, operation: (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>) => operations.set(name, operation);
-  add(
-    "job-finder:candidate-assets:list",
-    async (_event, payload) => {
-      const input = CandidateAssetListInputSchema.parse(payload ?? {});
-      const result = await runAssetOperation(() =>
-        dependencies.library.list(input),
-      );
-      if (!input.resumeSourceId)
-        return CandidateAssetListResultSchema.parse(result);
-      const source = await dependencies.getResumeSource?.();
-      let originalResumeFile = null;
-      if (source?.id === input.resumeSourceId && source.storagePath) {
-        try {
-          const info = await stat(source.storagePath);
-          if (info.isFile())
-            originalResumeFile = {
-              id: source.id,
-              fileName: source.fileName,
-              fileType:
-                path.extname(source.fileName).slice(1).toUpperCase() || "File",
-              byteSize: info.size,
-              importedAt: source.uploadedAt,
-            };
-        } catch {
-          /* The source was removed from disk. */
-        }
+  const operations = new Map<
+    string,
+    (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>
+  >();
+  const add = (
+    name: string,
+    operation: (
+      event: IpcMainInvokeEvent | null,
+      input: unknown,
+    ) => Promise<unknown>,
+  ) => operations.set(name, operation);
+  add("job-finder:candidate-assets:list", async (_event, payload) => {
+    const input = CandidateAssetListInputSchema.parse(payload ?? {});
+    const result = await runAssetOperation(() =>
+      dependencies.library.list(input),
+    );
+    if (!input.resumeSourceId)
+      return CandidateAssetListResultSchema.parse(result);
+    const source = await dependencies.getResumeSource?.();
+    let originalResumeFile = null;
+    if (source?.id === input.resumeSourceId && source.storagePath) {
+      try {
+        const info = await stat(source.storagePath);
+        if (info.isFile())
+          originalResumeFile = {
+            id: source.id,
+            fileName: source.fileName,
+            fileType:
+              path.extname(source.fileName).slice(1).toUpperCase() || "File",
+            byteSize: info.size,
+            importedAt: source.uploadedAt,
+          };
+      } catch {
+        /* The source was removed from disk. */
       }
-      return CandidateAssetListResultSchema.parse({
-        ...result,
-        originalResumeFile,
-      });
-    },
-  );
+    }
+    return CandidateAssetListResultSchema.parse({
+      ...result,
+      originalResumeFile,
+    });
+  });
 
-  add(
-    "job-finder:candidate-assets:import",
-    async (event, payload) => {
-      const input = CandidateAssetImportInputSchema.parse(payload);
-      const sourcePath = await dependencies.selectFile(event);
-      if (!sourcePath) {
-        return CandidateAssetImportResultSchema.parse({ status: "cancelled" });
-      }
-      const result = await runAssetOperation(async () =>
-        CandidateAssetImportResultSchema.parse(
-          await dependencies.library.importFromSourcePath(sourcePath, input),
-        ),
-      );
-      if (result.status === "imported") {
-        notifyApplicationFileAvailable(dependencies, result.asset);
-      }
-      return result;
-    },
-  );
+  add("job-finder:candidate-assets:import", async (event, payload) => {
+    const input = CandidateAssetImportInputSchema.parse(payload);
+    const sourcePath = await dependencies.selectFile(event);
+    if (!sourcePath) {
+      return CandidateAssetImportResultSchema.parse({ status: "cancelled" });
+    }
+    const result = await runAssetOperation(async () =>
+      CandidateAssetImportResultSchema.parse(
+        await dependencies.library.importFromSourcePath(sourcePath, input),
+      ),
+    );
+    if (result.status === "imported") {
+      notifyApplicationFileAvailable(dependencies, result.asset);
+    }
+    return result;
+  });
 
-  add(
-    "job-finder:candidate-assets:delete",
-    async (_event, payload) => {
-      const input = CandidateAssetDeleteInputSchema.parse(payload);
-      return runAssetOperation(async () =>
-        CandidateAssetDeleteResultSchema.parse(
-          await dependencies.library.softDelete(input.assetId),
-        ),
-      );
-    },
-  );
+  add("job-finder:candidate-assets:delete", async (_event, payload) => {
+    const input = CandidateAssetDeleteInputSchema.parse(payload);
+    return runAssetOperation(async () =>
+      CandidateAssetDeleteResultSchema.parse(
+        await dependencies.library.softDelete(input.assetId),
+      ),
+    );
+  });
 
   // Opens a read-only copy in the default app, so the person can see what an
   // application would attach without hunting for Job Finder's private folder.
-  add(
-    "job-finder:candidate-assets:open",
-    async (_event, payload) => {
-      const input = CandidateAssetOpenInputSchema.parse(payload);
-      let viewingPath: string;
-      try {
-        viewingPath = await dependencies.library.writeViewingCopy(
-          input.assetId,
-          path.join(os.tmpdir(), "nestor-file-views"),
-        );
-      } catch {
-        const source = await dependencies.getResumeSource?.();
-        if (source?.id !== input.assetId || !source.storagePath) {
-          return CandidateAssetOpenResultSchema.parse({ outcome: "not_found" });
-        }
-        try {
-          const directory = await mkdtemp(
-            path.join(os.tmpdir(), "nestor-resume-view-"),
-          );
-          viewingPath = path.join(directory, path.basename(source.fileName));
-          await copyFile(source.storagePath, viewingPath);
-          // Same as Profile › Files: the person views a copy they cannot
-          // change by accident.
-          await chmod(viewingPath, 0o400);
-        } catch {
-          return CandidateAssetOpenResultSchema.parse({ outcome: "not_found" });
-        }
-      }
-      const failure = await shell.openPath(viewingPath);
-      return CandidateAssetOpenResultSchema.parse({
-        outcome: failure ? "failed" : "opened",
-      });
-    },
-  );
-
-  add(
-    "job-finder:candidate-assets:restore",
-    async (_event, payload) => {
-      const input = CandidateAssetRestoreInputSchema.parse(payload);
-      const result = await runAssetOperation(async () =>
-        CandidateAssetRestoreResultSchema.parse(
-          await dependencies.library.restore(input),
-        ),
+  add("job-finder:candidate-assets:open", async (_event, payload) => {
+    const input = CandidateAssetOpenInputSchema.parse(payload);
+    let viewingPath: string;
+    try {
+      viewingPath = await dependencies.library.writeViewingCopy(
+        input.assetId,
+        path.join(os.tmpdir(), "nestor-file-views"),
       );
-      notifyApplicationFileAvailable(dependencies, result.asset);
-      return result;
-    },
-  );
+    } catch {
+      const source = await dependencies.getResumeSource?.();
+      if (source?.id !== input.assetId || !source.storagePath) {
+        return CandidateAssetOpenResultSchema.parse({ outcome: "not_found" });
+      }
+      try {
+        const directory = await mkdtemp(
+          path.join(os.tmpdir(), "nestor-resume-view-"),
+        );
+        viewingPath = path.join(directory, path.basename(source.fileName));
+        await copyFile(source.storagePath, viewingPath);
+        // Same as Profile › Files: the person views a copy they cannot
+        // change by accident.
+        await chmod(viewingPath, 0o400);
+      } catch {
+        return CandidateAssetOpenResultSchema.parse({ outcome: "not_found" });
+      }
+    }
+    const failure = await shell.openPath(viewingPath);
+    return CandidateAssetOpenResultSchema.parse({
+      outcome: failure ? "failed" : "opened",
+    });
+  });
+
+  add("job-finder:candidate-assets:restore", async (_event, payload) => {
+    const input = CandidateAssetRestoreInputSchema.parse(payload);
+    const result = await runAssetOperation(async () =>
+      CandidateAssetRestoreResultSchema.parse(
+        await dependencies.library.restore(input),
+      ),
+    );
+    notifyApplicationFileAvailable(dependencies, result.asset);
+    return result;
+  });
   return operations;
 }
 
-export function registerCandidateAssetRouteHandlers(ipcMain: IpcMain, dependencies?: CandidateAssetRouteDependencies) {
-  for (const [name, operation] of createCandidateAssetOperations(dependencies)) {
+export function registerCandidateAssetRouteHandlers(
+  ipcMain: IpcMain,
+  dependencies?: CandidateAssetRouteDependencies,
+) {
+  for (const [name, operation] of createCandidateAssetOperations(
+    dependencies,
+  )) {
     ipcMain.handle(name, (event, input: unknown) => operation(event, input));
   }
 }

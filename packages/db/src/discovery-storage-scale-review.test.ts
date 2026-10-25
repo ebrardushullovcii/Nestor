@@ -311,7 +311,8 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
     const after = await read();
     const valueQueries = queries.mock.calls.filter(
       ([query]) =>
-        /^SELECT id, /.test(query) && query.includes("AS value FROM discovery_ledger"),
+        /^SELECT id, /.test(query) &&
+        query.includes("AS value FROM discovery_ledger"),
     );
     expect(valueQueries).toHaveLength(1);
     expect(valueQueries[0]![0]).toContain(

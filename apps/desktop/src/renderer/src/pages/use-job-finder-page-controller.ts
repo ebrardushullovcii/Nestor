@@ -69,8 +69,9 @@ import {
 } from "./job-finder-page-selection";
 
 const EMPTY_RESUME_ASSISTANT_MESSAGES: readonly ResumeAssistantMessage[] = [];
-const EMPTY_REVIEW_QUEUE: Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]> =
-  [];
+const EMPTY_REVIEW_QUEUE: Readonly<
+  JobFinderRendererWorkspaceSnapshot["reviewQueue"]
+> = [];
 
 export type ApplyCopilotVisualCheckpointRequest = {
   jobId: string;
@@ -522,7 +523,9 @@ export function useJobFinderPageController() {
   const tailoredDraftPreparationStopRequestedRef = useRef(false);
   const tailoredDraftPreparationDisposedRef = useRef(false);
   const sourceDebugRunIdRef = useRef(0);
-  const latestWorkspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(null);
+  const latestWorkspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(
+    null,
+  );
   const activeResumeWorkspaceJobId = getActiveResumeWorkspaceJobId(
     location.pathname,
   );
@@ -1162,7 +1165,9 @@ export function useJobFinderPageController() {
     // The review pass reads the next resume ahead; showing it at once keeps
     // "Approve and next" from flashing a loading card. The read below still
     // runs and replaces it.
-    const prefetched = takePrefetchedResumeWorkspace(activeResumeWorkspaceJobId);
+    const prefetched = takePrefetchedResumeWorkspace(
+      activeResumeWorkspaceJobId,
+    );
     if (prefetched) {
       applyResumeWorkspaceSnapshot(prefetched);
       setResumeAssistantMessages(prefetched.assistantMessages);

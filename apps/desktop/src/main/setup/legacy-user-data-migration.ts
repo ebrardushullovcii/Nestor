@@ -29,8 +29,14 @@ const LEGACY_ENTRY_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["interview-helper-workspace.json", "live-assistant-workspace.json"],
   ["interview-helper-screenshots", "live-assistant-screenshots"],
   // The embedded browser's sign-ins live in its persistent partition.
-  [path.join("Partitions", "nordri-browser"), path.join("Partitions", "nestor-browser")],
-  [path.join("Partitions", "unemployed-browser"), path.join("Partitions", "nestor-browser")],
+  [
+    path.join("Partitions", "nordri-browser"),
+    path.join("Partitions", "nestor-browser"),
+  ],
+  [
+    path.join("Partitions", "unemployed-browser"),
+    path.join("Partitions", "nestor-browser"),
+  ],
 ];
 
 export type LegacyUserDataMigrationResult = {
@@ -40,7 +46,9 @@ export type LegacyUserDataMigrationResult = {
 };
 
 function isEmptyDirectory(directory: string): boolean {
-  return statSync(directory).isDirectory() && readdirSync(directory).length === 0;
+  return (
+    statSync(directory).isDirectory() && readdirSync(directory).length === 0
+  );
 }
 
 export function migrateLegacyDesktopUserData(

@@ -129,8 +129,7 @@ async function captureScreens() {
     env: {
       ...process.env,
       NESTOR_ENABLE_TEST_API: "1",
-      NESTOR_TEST_SYSTEM_THEME:
-        process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+      NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
       NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });

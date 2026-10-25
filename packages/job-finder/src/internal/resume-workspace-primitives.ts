@@ -56,20 +56,18 @@ export function toSectionKind(label: string): ResumeDraftSection["kind"] {
   return "experience";
 }
 
-export function createSection(
-  input: {
-    id: string;
-    kind: ResumeDraftSection["kind"];
-    label: string;
-    text?: string | null;
-    bullets?: readonly string[];
-    entries?: readonly ResumeDraftEntry[];
-    updatedAt: string;
-    origin: ResumeDraftSection["origin"];
-    sortOrder: number;
-    sourceRefs?: readonly ResumeDraftSourceRef[];
-  },
-): ResumeDraftSection {
+export function createSection(input: {
+  id: string;
+  kind: ResumeDraftSection["kind"];
+  label: string;
+  text?: string | null;
+  bullets?: readonly string[];
+  entries?: readonly ResumeDraftEntry[];
+  updatedAt: string;
+  origin: ResumeDraftSection["origin"];
+  sortOrder: number;
+  sourceRefs?: readonly ResumeDraftSourceRef[];
+}): ResumeDraftSection {
   return {
     id: input.id,
     kind: input.kind,
@@ -109,7 +107,9 @@ export function createSourceRef(
   };
 }
 
-export function normalizeNullableText(value: string | null | undefined): string | null {
+export function normalizeNullableText(
+  value: string | null | undefined,
+): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed === "" ? null : trimmed;
 }
@@ -118,7 +118,10 @@ function tokenSet(value: string): Set<string> {
   return new Set(normalizeText(value).split(" ").filter(Boolean));
 }
 
-function tokenOverlap(leftTokens: Set<string>, rightTokens: Set<string>): number {
+function tokenOverlap(
+  leftTokens: Set<string>,
+  rightTokens: Set<string>,
+): number {
   if (leftTokens.size === 0 || rightTokens.size === 0) {
     return 0;
   }
@@ -139,10 +142,15 @@ function dedupeLongResumeLines(lines: readonly string[]): string[] {
   for (const line of uniqueStrings(lines)) {
     const candidateTokens = tokenSet(line);
     const tokenCount = candidateTokens.size;
-    const duplicatesExisting = tokenCount >= 7 && kept.some((existing) => {
-      const existingTokenCount = existing.tokens.size;
-      return existingTokenCount >= 7 && tokenOverlap(candidateTokens, existing.tokens) >= 0.62;
-    });
+    const duplicatesExisting =
+      tokenCount >= 7 &&
+      kept.some((existing) => {
+        const existingTokenCount = existing.tokens.size;
+        return (
+          existingTokenCount >= 7 &&
+          tokenOverlap(candidateTokens, existing.tokens) >= 0.62
+        );
+      });
 
     if (!duplicatesExisting) {
       kept.push({ text: line, tokens: candidateTokens });

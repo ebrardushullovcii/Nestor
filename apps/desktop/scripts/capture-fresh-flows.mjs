@@ -778,8 +778,7 @@ async function collectWordmarkEvidence(page) {
     if (!visible) failures.push("wordmark is not visibly rendered");
     if (!insideViewport)
       failures.push("wordmark is clipped outside the viewport");
-    if (text !== "NESTOR")
-      failures.push(`unexpected wordmark text: ${text}`);
+    if (text !== "NESTOR") failures.push(`unexpected wordmark text: ${text}`);
     return {
       collapsed,
       failures,

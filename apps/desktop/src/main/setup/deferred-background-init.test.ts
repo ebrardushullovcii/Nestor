@@ -33,8 +33,7 @@ function createOptions() {
     interviewSessionControls: 0,
   };
 
-  const schedulerFactory =
-    (() => ({})) as unknown as () => CampaignScheduler;
+  const schedulerFactory = (() => ({})) as unknown as () => CampaignScheduler;
   const overlayModuleStub = {} as unknown as typeof InterviewOverlayApi;
   const sessionControlsStub =
     {} as unknown as typeof InterviewSessionControlsApi;
@@ -86,9 +85,7 @@ function createOptions() {
       startedSchedulerFactories.push(createScheduler);
     },
     initializeInterviewSurfaces: (overlay, sessionControls) => {
-      surfaceInitializations.push(
-        Boolean(overlay) && Boolean(sessionControls),
-      );
+      surfaceInitializations.push(Boolean(overlay) && Boolean(sessionControls));
     },
     onDiagnostic: (message) => {
       calls.push(`diagnostic:${message}`);
@@ -198,8 +195,9 @@ describe("deferred background initialization", () => {
   test("does not start or recreate the scheduler when quit begins after the workspace exists", async () => {
     vi.useFakeTimers();
     const { options, startedSchedulerFactories } = createOptions();
-    const schedulerLoad =
-      createManualPromise<{ createCampaignScheduler: () => CampaignScheduler }>();
+    const schedulerLoad = createManualPromise<{
+      createCampaignScheduler: () => CampaignScheduler;
+    }>();
     options.loadCampaignSchedulerModule = () => schedulerLoad.promise;
     const controller = createDeferredBackgroundInitController(options);
 
@@ -295,12 +293,8 @@ describe("deferred background initialization", () => {
   describe("aborted quit latch release", () => {
     test("an early-startup cancel releases the latch and runs initialization exactly once", async () => {
       vi.useFakeTimers();
-      const {
-        options,
-        counts,
-        startedSchedulerFactories,
-        errors,
-      } = createOptions();
+      const { options, counts, startedSchedulerFactories, errors } =
+        createOptions();
       const controller = createDeferredBackgroundInitController(options);
 
       // Quit begins during the startup window, before the timer ever fires.

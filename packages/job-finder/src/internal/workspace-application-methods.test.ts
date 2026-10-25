@@ -287,10 +287,11 @@ describe("apply prerequisites resolve the resume path the verifier actually read
       ...unapprovedSeed.settings,
       applicationAutomationMode: "autonomous_submit",
     };
-    unapprovedSeed.tailoredAssets = unapprovedSeed.tailoredAssets.map((asset) =>
-      asset.jobId === "job_ready"
-        ? { ...asset, status: "ready", storagePath: draftPath }
-        : asset,
+    unapprovedSeed.tailoredAssets = unapprovedSeed.tailoredAssets.map(
+      (asset) =>
+        asset.jobId === "job_ready"
+          ? { ...asset, status: "ready", storagePath: draftPath }
+          : asset,
     );
     unapprovedSeed.resumeDrafts = [
       {
@@ -382,7 +383,9 @@ describe("apply prerequisites resolve the resume path the verifier actually read
     await workspaceService.startApplyCopilotRun("job_ready");
 
     expect(listAssets).toHaveBeenCalledWith({ includeDeleted: false });
-    expect(executeApplicationFlow.mock.calls[0]?.[1].applicationAttachments).toEqual([
+    expect(
+      executeApplicationFlow.mock.calls[0]?.[1].applicationAttachments,
+    ).toEqual([
       {
         assetId: asset.id,
         assetKind: "portfolio",

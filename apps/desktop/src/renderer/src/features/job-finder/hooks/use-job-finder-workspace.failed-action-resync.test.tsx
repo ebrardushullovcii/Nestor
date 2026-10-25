@@ -55,7 +55,8 @@ describe("useJobFinderWorkspace after a failed action", () => {
     >();
   const generateResume =
     vi.fn<(jobId: string) => Promise<JobFinderRendererWorkspaceSnapshot>>();
-  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  const getWorkspace =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
     vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 

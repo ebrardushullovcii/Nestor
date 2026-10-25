@@ -162,9 +162,7 @@ export function InterviewVisibleChat(props: InterviewVisibleChatProps) {
       setDraft("");
       for (const image of pendingImages) URL.revokeObjectURL(image.previewUrl);
       setPendingImages([]);
-      props.onWorkspaceChange(
-        await window.nestor.liveAssistant.getWorkspace(),
-      );
+      props.onWorkspaceChange(await window.nestor.liveAssistant.getWorkspace());
     } catch (error) {
       setErrorMessage(
         error instanceof Error

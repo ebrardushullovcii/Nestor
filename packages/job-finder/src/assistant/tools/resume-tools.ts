@@ -1060,8 +1060,6 @@ export const setResumeTemplateTool = defineTool({
   },
 });
 
-
-
 export const resumeTools = [
   readResumeTool,
   editResumeTool,

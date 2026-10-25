@@ -1,350 +1,572 @@
-<!DOCTYPE html>
+<!doctype html>
 
-<html class="dark" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>NESTOR // APPLICATIONS_TRACKER</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        "on-tertiary": "#466170",
-                        "on-secondary": "#1f2021",
-                        "secondary-fixed": "#e3e2e2",
-                        "on-primary-fixed": "#3e4040",
-                        "surface-variant": "#252626",
-                        "primary-fixed": "#e2e2e2",
-                        "on-background": "#e7e5e5",
-                        "primary-dim": "#b8b9b9",
-                        "tertiary-dim": "#c2def0",
-                        "surface-tint": "#c6c6c7",
-                        "secondary-container": "#3a3c3c",
-                        "outline": "#767575",
-                        "on-tertiary-fixed-variant": "#486372",
-                        "surface": "#0e0e0e",
-                        "outline-variant": "#484848",
-                        "secondary": "#9e9e9e",
-                        "on-error": "#490106",
-                        "surface-bright": "#2b2c2c",
-                        "tertiary-fixed-dim": "#c2def0",
-                        "surface-container-high": "#1f2020",
-                        "on-surface-variant": "#acabaa",
-                        "surface-container-lowest": "#000000",
-                        "inverse-primary": "#5e5f60",
-                        "surface-container": "#191a1a",
-                        "tertiary": "#eff8ff",
-                        "on-surface": "#e7e5e5",
-                        "inverse-on-surface": "#565555",
-                        "surface-dim": "#0e0e0e",
-                        "background": "#0e0e0e",
-                        "tertiary-container": "#d0ecff",
-                        "primary": "#c6c6c7",
-                        "inverse-surface": "#fcf9f8",
-                        "secondary-fixed-dim": "#d5d4d4",
-                        "on-error-container": "#ff9993",
-                        "error-dim": "#bb5551",
-                        "primary-container": "#454747",
-                        "on-secondary-container": "#bfbfbf",
-                        "error-container": "#7f2927",
-                        "on-tertiary-container": "#3e5968",
-                        "tertiary-fixed": "#d0ecff",
-                        "surface-container-low": "#131313",
-                        "on-primary-container": "#d0d0d0",
-                        "on-tertiary-fixed": "#2b4655",
-                        "on-secondary-fixed-variant": "#5b5c5c",
-                        "on-primary-fixed-variant": "#5a5c5c",
-                        "secondary-dim": "#9e9e9e",
-                        "primary-fixed-dim": "#d4d4d4",
-                        "error": "#ee7d77",
-                        "on-secondary-fixed": "#3e3f40",
-                        "surface-container-highest": "#252626",
-                        "on-primary": "#3f4041"
-                    },
-                    fontFamily: {
-                        "headline": ["Space Grotesk"],
-                        "body": ["Inter"],
-                        "label": ["Inter"]
-                    },
-                    borderRadius: { "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px" },
-                },
+<html class="dark" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>NESTOR // APPLICATIONS_TRACKER</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-tertiary": "#466170",
+              "on-secondary": "#1f2021",
+              "secondary-fixed": "#e3e2e2",
+              "on-primary-fixed": "#3e4040",
+              "surface-variant": "#252626",
+              "primary-fixed": "#e2e2e2",
+              "on-background": "#e7e5e5",
+              "primary-dim": "#b8b9b9",
+              "tertiary-dim": "#c2def0",
+              "surface-tint": "#c6c6c7",
+              "secondary-container": "#3a3c3c",
+              outline: "#767575",
+              "on-tertiary-fixed-variant": "#486372",
+              surface: "#0e0e0e",
+              "outline-variant": "#484848",
+              secondary: "#9e9e9e",
+              "on-error": "#490106",
+              "surface-bright": "#2b2c2c",
+              "tertiary-fixed-dim": "#c2def0",
+              "surface-container-high": "#1f2020",
+              "on-surface-variant": "#acabaa",
+              "surface-container-lowest": "#000000",
+              "inverse-primary": "#5e5f60",
+              "surface-container": "#191a1a",
+              tertiary: "#eff8ff",
+              "on-surface": "#e7e5e5",
+              "inverse-on-surface": "#565555",
+              "surface-dim": "#0e0e0e",
+              background: "#0e0e0e",
+              "tertiary-container": "#d0ecff",
+              primary: "#c6c6c7",
+              "inverse-surface": "#fcf9f8",
+              "secondary-fixed-dim": "#d5d4d4",
+              "on-error-container": "#ff9993",
+              "error-dim": "#bb5551",
+              "primary-container": "#454747",
+              "on-secondary-container": "#bfbfbf",
+              "error-container": "#7f2927",
+              "on-tertiary-container": "#3e5968",
+              "tertiary-fixed": "#d0ecff",
+              "surface-container-low": "#131313",
+              "on-primary-container": "#d0d0d0",
+              "on-tertiary-fixed": "#2b4655",
+              "on-secondary-fixed-variant": "#5b5c5c",
+              "on-primary-fixed-variant": "#5a5c5c",
+              "secondary-dim": "#9e9e9e",
+              "primary-fixed-dim": "#d4d4d4",
+              error: "#ee7d77",
+              "on-secondary-fixed": "#3e3f40",
+              "surface-container-highest": "#252626",
+              "on-primary": "#3f4041",
             },
-        }
+            fontFamily: {
+              headline: ["Space Grotesk"],
+              body: ["Inter"],
+              label: ["Inter"],
+            },
+            borderRadius: {
+              DEFAULT: "0px",
+              lg: "0px",
+              xl: "0px",
+              full: "9999px",
+            },
+          },
+        },
+      };
     </script>
-<style>
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-            font-size: 18px;
-        }
-        body {
-            background-color: #0e0e0e;
-            color: #e7e5e5;
-        }
-        ::-webkit-scrollbar {
-            width: 4px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #0e0e0e;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #484848;
-        }
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings:
+          "FILL" 0,
+          "wght" 400,
+          "GRAD" 0,
+          "opsz" 24;
+        font-size: 18px;
+      }
+      body {
+        background-color: #0e0e0e;
+        color: #e7e5e5;
+      }
+      ::-webkit-scrollbar {
+        width: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0e0e0e;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #484848;
+      }
     </style>
-</head>
-<body class="font-body selection:bg-primary selection:text-on-primary overflow-hidden">
-<!-- TOP NAV BAR -->
-<header class="bg-[#0e0e0e] dark:bg-[#0e0e0e] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold border-b border-[#484848]/20 docked full-width top-0 z-50 flat no shadows flex justify-between items-center w-full px-6 h-14 fixed">
-<div class="flex items-center gap-8">
-<span class="text-xl font-black text-[#c6c6c7] tracking-tighter">NESTOR</span>
-<nav class="hidden md:flex items-center gap-6">
-<a class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1" href="#">SESSION_ACTIVE</a>
-<a class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1" href="#">PROXY_LHR_01</a>
-<a class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1" href="#">BROWSER_SYNCED</a>
-</nav>
-</div>
-<div class="flex items-center gap-4">
-<span class="material-symbols-outlined text-[#c6c6c7]">notifications</span>
-<span class="material-symbols-outlined text-[#c6c6c7]">terminal</span>
-<div class="w-8 h-8 bg-surface-container-high border border-outline-variant flex items-center justify-center">
-<img alt="OPERATOR_AVATAR" class="w-full h-full object-cover" data-alt="Avatar of the system operator" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBVJZXnT8Nvqx5ouBQ5nvmkQD7XfcXkFBZqiRPMEopXhs7R5DXMGClxxld7xE8fK9CEEu-6Fc34gUJ17fQ0pOMDu-R83I4oFw1dNfscGah4UKQPZRPyY7QDIix9A-GwW9MlTdJuiCup63lVNODohHjA_HZYyXDpIzdQ631gta0MAuF-2Mk5KM4VO5HXw6uyXiwMhhfQhw1lL2RgYdZo4PrETrSIgVkB-RoKZWG9TeTcvwK-x8YcMwkWhJYY9nhLluH7OFHsQmQiIleR"/>
-</div>
-</div>
-</header>
-<!-- SIDE NAV BAR -->
-<aside class="bg-[#131313] dark:bg-[#131313] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium border-r border-[#484848]/20 docked left-0 h-full w-64 0px-corners flat no shadows fixed left-0 top-0 h-screen flex flex-col pt-20">
-<div class="px-6 mb-8">
-<h2 class="text-[#c6c6c7] font-bold text-sm tracking-widest">NESTOR_OPS</h2>
-<p class="text-[#767575] text-[9px] mt-1">STATUS: COMMAND_READY</p>
-</div>
-<nav class="flex-1">
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">grid_view</span> DASHBOARD
-            </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">account_circle</span> PROFILE
-            </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">explore</span> DISCOVERY
-            </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">fact_check</span> REVIEW_QUEUE
-            </a>
-<a class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">description</span> APPLICATIONS
-            </a>
-<a class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined">settings</span> SETTINGS
-            </a>
-</nav>
-<div class="p-4 border-t border-outline-variant/10">
-<button class="w-full bg-primary text-on-primary py-3 font-bold tracking-tighter hover:opacity-90 transition-opacity">NEW_SEARCH</button>
-</div>
-</aside>
-<!-- MAIN CONTENT CANVAS -->
-<main class="ml-64 pt-14 h-screen flex flex-col">
-<!-- Header Info Bar -->
-<div class="h-16 flex items-center justify-between px-8 border-b border-outline-variant/10 bg-surface-container-low">
-<div class="flex items-center gap-4">
-<h1 class="font-headline text-lg font-bold tracking-wider text-primary">APPLICATIONS_LOG</h1>
-<span class="text-[10px] bg-tertiary-container/10 text-tertiary px-2 py-0.5 border border-tertiary/20 font-mono">COUNT: 14_ACTIVE</span>
-</div>
-<div class="flex items-center gap-2">
-<div class="flex bg-surface-container-lowest border border-outline-variant/20 p-0.5">
-<button class="px-3 py-1 text-[10px] font-bold bg-primary text-on-primary">ALL</button>
-<button class="px-3 py-1 text-[10px] font-bold text-outline hover:text-on-surface">INTERVIEW</button>
-<button class="px-3 py-1 text-[10px] font-bold text-outline hover:text-on-surface">PENDING</button>
-</div>
-<div class="w-[1px] h-4 bg-outline-variant/30 mx-2"></div>
-<button class="material-symbols-outlined text-outline hover:text-primary">filter_list</button>
-<button class="material-symbols-outlined text-outline hover:text-primary">search</button>
-</div>
-</div>
-<!-- Two-Panel Layout -->
-<div class="flex-1 flex overflow-hidden">
-<!-- Left Panel: High-Density Table -->
-<section class="flex-[3] border-r border-outline-variant/10 overflow-y-auto bg-surface">
-<table class="w-full text-left border-collapse">
-<thead class="sticky top-0 bg-surface z-10">
-<tr class="text-[10px] font-bold text-outline-variant tracking-widest uppercase border-b border-outline-variant/20">
-<th class="px-6 py-4 font-medium">ID_STAMP</th>
-<th class="px-6 py-4 font-medium">POSITION_ENTITY</th>
-<th class="px-6 py-4 font-medium">LAST_ACTION</th>
-<th class="px-6 py-4 font-medium">STATUS</th>
-</tr>
-</thead>
-<tbody class="text-[11px] font-medium text-on-surface">
-<!-- Active Item -->
-<tr class="bg-surface-container-high border-l-2 border-primary group cursor-pointer">
-<td class="px-6 py-5 font-mono text-outline">#093-XLR</td>
-<td class="px-6 py-5">
-<div class="font-bold text-primary group-hover:underline">SENIOR_SYSTEMS_OPERATOR</div>
-<div class="text-[10px] text-outline mt-0.5">NEURAL_NET_SOLUTIONS</div>
-</td>
-<td class="px-6 py-5 font-mono text-on-surface-variant">2023.10.24 // 14:02</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-tertiary">
-<span class="w-1.5 h-1.5 bg-tertiary animate-pulse"></span>
-                                    INTERVIEWING
-                                </span>
-</td>
-</tr>
-<!-- Critical Item -->
-<tr class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer">
-<td class="px-6 py-5 font-mono text-outline">#114-KTM</td>
-<td class="px-6 py-5">
-<div class="font-bold">INFRASTRUCTURE_LEAD</div>
-<div class="text-[10px] text-outline mt-0.5">DATA_CORE_INTL</div>
-</td>
-<td class="px-6 py-5 font-mono text-error">NEEDS_RESPONSE</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-on-surface-variant">
-<span class="w-1.5 h-1.5 bg-outline-variant"></span>
-                                    SUBMITTED
-                                </span>
-</td>
-</tr>
-<!-- Standard Item -->
-<tr class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer">
-<td class="px-6 py-5 font-mono text-outline">#202-PQR</td>
-<td class="px-6 py-5">
-<div class="font-bold">UI_ENGINEER_CMD</div>
-<div class="text-[10px] text-outline mt-0.5">VOID_INDUSTRIES</div>
-</td>
-<td class="px-6 py-5 font-mono text-on-surface-variant">2023.10.22 // 09:15</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-outline">
-<span class="w-1.5 h-1.5 bg-outline-variant"></span>
-                                    DRAFTING
-                                </span>
-</td>
-</tr>
-<!-- Rejected Item -->
-<tr class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer bg-surface-container-lowest/30">
-<td class="px-6 py-5 font-mono text-outline-variant">#044-ERR</td>
-<td class="px-6 py-5 opacity-60">
-<div class="font-bold">PROTOCOL_MANAGER</div>
-<div class="text-[10px] text-outline-variant mt-0.5">SYNERGY_CORP</div>
-</td>
-<td class="px-6 py-5 font-mono text-outline-variant">SYSTEM_ARCHIVED</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-error/60">
-<span class="w-1.5 h-1.5 bg-error/40"></span>
-                                    REJECTED
-                                </span>
-</td>
-</tr>
-<!-- Repeating pattern -->
-<tr class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer">
-<td class="px-6 py-5 font-mono text-outline">#331-BVC</td>
-<td class="px-6 py-5">
-<div class="font-bold">SECURITY_AUDITOR</div>
-<div class="text-[10px] text-outline mt-0.5">FORTRESS_APPS</div>
-</td>
-<td class="px-6 py-5 font-mono text-on-surface-variant">2023.10.20 // 17:44</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-on-surface-variant">
-<span class="w-1.5 h-1.5 bg-outline-variant"></span>
-                                    SUBMITTED
-                                </span>
-</td>
-</tr>
-<tr class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer">
-<td class="px-6 py-5 font-mono text-outline">#404-TRC</td>
-<td class="px-6 py-5">
-<div class="font-bold">DATABASE_CLEANER</div>
-<div class="text-[10px] text-outline mt-0.5">CLEAN_SLATE_SYSTEMS</div>
-</td>
-<td class="px-6 py-5 font-mono text-on-surface-variant">2023.10.19 // 11:30</td>
-<td class="px-6 py-5">
-<span class="flex items-center gap-2 text-outline">
-<span class="w-1.5 h-1.5 bg-outline-variant"></span>
-                                    DRAFTING
-                                </span>
-</td>
-</tr>
-</tbody>
-</table>
-</section>
-<!-- Right Panel: Mission Timeline -->
-<aside class="flex-[2] bg-surface-container-low overflow-y-auto p-8 border-l border-outline-variant/10">
-<div class="mb-10">
-<div class="flex items-start justify-between mb-2">
-<span class="text-[10px] font-mono text-primary font-bold">CURRENT_MISSION: 093-XLR</span>
-<span class="material-symbols-outlined text-outline cursor-pointer hover:text-on-surface">open_in_new</span>
-</div>
-<h2 class="font-headline text-2xl font-black uppercase tracking-tight text-on-surface">SENIOR_SYSTEMS_OPERATOR</h2>
-<p class="text-on-surface-variant text-sm mt-1">NEURAL_NET_SOLUTIONS</p>
-</div>
-<!-- Timeline Logs -->
-<div class="space-y-0">
-<!-- Event 1 -->
-<div class="relative pl-8 pb-10 border-l border-outline-variant/20">
-<div class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-tertiary"></div>
-<div class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest">T_MINUS: 0h 42m</div>
-<h4 class="text-xs font-bold text-tertiary uppercase">TECHNICAL_SCREEN_INVITATION</h4>
-<p class="text-[11px] text-on-surface-variant mt-2 leading-relaxed">
-                            Candidate requested for live coding simulation on Node-04. 
-                            <span class="text-primary font-bold">STATUS: CONFIRMED</span>
-</p>
-<div class="mt-4 flex gap-2">
-<button class="bg-surface-container-high px-3 py-1 text-[9px] font-bold border border-outline-variant/30 hover:bg-surface-bright">JOIN_MEETING</button>
-<button class="bg-surface-container-high px-3 py-1 text-[9px] font-bold border border-outline-variant/30 hover:bg-surface-bright">VIEW_DOCS</button>
-</div>
-</div>
-<!-- Event 2 -->
-<div class="relative pl-8 pb-10 border-l border-outline-variant/20">
-<div class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-primary"></div>
-<div class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest">2023.10.23 // 16:20</div>
-<h4 class="text-xs font-bold text-on-surface uppercase">RESUME_PARSED_SUCCESS</h4>
-<p class="text-[11px] text-on-surface-variant mt-2 leading-relaxed">
-                            System successfully extracted operational history. Keyword match: 88%. Moved to manual review phase.
-                        </p>
-</div>
-<!-- Event 3 -->
-<div class="relative pl-8 pb-10 border-l border-outline-variant/20">
-<div class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-outline-variant"></div>
-<div class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest">2023.10.23 // 09:00</div>
-<h4 class="text-xs font-bold text-outline uppercase">MISSION_INITIATED</h4>
-<p class="text-[11px] text-on-surface-variant mt-2 leading-relaxed">
-                            Application sequence started by OPERATOR_01. Authentication tokens generated for Neural_Net API.
-                        </p>
-</div>
-<!-- Event 4 (End of line) -->
-<div class="relative pl-8 border-l border-transparent">
-<div class="absolute -left-[5px] top-0 w-2.5 h-2.5 border border-outline-variant"></div>
-<div class="text-[10px] font-mono text-outline-variant uppercase">END_OF_HISTORY</div>
-</div>
-</div>
-<!-- Action Card -->
-<div class="mt-12 bg-surface-container-highest p-4 border border-outline-variant/20">
-<div class="flex items-center gap-2 mb-3">
-<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">bolt</span>
-<span class="text-[10px] font-bold uppercase tracking-widest text-primary">PREDICTIVE_NEXT_STEP</span>
-</div>
-<p class="text-[11px] text-on-surface leading-tight mb-4">Based on historical data for this entity, the technical screen will focus on concurrent process management.</p>
-<button class="w-full bg-outline-variant/20 border border-outline-variant/40 py-2 text-[10px] font-bold text-primary hover:bg-outline-variant/30">RUN_SIMULATION</button>
-</div>
-</aside>
-</div>
-</main>
-<!-- FOOTER -->
-<footer class="bg-[#000000] dark:bg-[#000000] font-['Inter'] text-[9px] font-mono tracking-widest border-t border-[#484848]/30 docked full-width bottom-0 h-8 flat no shadows fixed bottom-0 left-0 w-full flex justify-between items-center px-4 z-50">
-<div class="flex items-center gap-6">
-<span class="text-[#484848]">v1.0.4_STABLE</span>
-<div class="flex items-center gap-2">
-<span class="w-1 h-1 bg-tertiary animate-pulse"></span>
-<span class="text-[#eff8ff]">LOG_STREAM</span>
-</div>
-</div>
-<div class="flex items-center gap-8 text-[#484848]">
-<span class="hover:text-[#c6c6c7] cursor-default">LATENCY:14ms</span>
-<span class="hover:text-[#c6c6c7] cursor-default">MEM:42%</span>
-<span class="text-on-surface-variant">OP_LEVEL:7</span>
-</div>
-</footer>
-</body></html>
+  </head>
+  <body
+    class="font-body selection:bg-primary selection:text-on-primary overflow-hidden"
+  >
+    <!-- TOP NAV BAR -->
+    <header
+      class="bg-[#0e0e0e] dark:bg-[#0e0e0e] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-xs font-bold border-b border-[#484848]/20 docked full-width top-0 z-50 flat no shadows flex justify-between items-center w-full px-6 h-14 fixed"
+    >
+      <div class="flex items-center gap-8">
+        <span class="text-xl font-black text-[#c6c6c7] tracking-tighter"
+          >NESTOR</span
+        >
+        <nav class="hidden md:flex items-center gap-6">
+          <a
+            class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1"
+            href="#"
+            >SESSION_ACTIVE</a
+          >
+          <a
+            class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1"
+            href="#"
+            >PROXY_LHR_01</a
+          >
+          <a
+            class="text-[#767575] hover:bg-[#1f2020] transition-colors px-2 py-1"
+            href="#"
+            >BROWSER_SYNCED</a
+          >
+        </nav>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="material-symbols-outlined text-[#c6c6c7]"
+          >notifications</span
+        >
+        <span class="material-symbols-outlined text-[#c6c6c7]">terminal</span>
+        <div
+          class="w-8 h-8 bg-surface-container-high border border-outline-variant flex items-center justify-center"
+        >
+          <img
+            alt="OPERATOR_AVATAR"
+            class="w-full h-full object-cover"
+            data-alt="Avatar of the system operator"
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBVJZXnT8Nvqx5ouBQ5nvmkQD7XfcXkFBZqiRPMEopXhs7R5DXMGClxxld7xE8fK9CEEu-6Fc34gUJ17fQ0pOMDu-R83I4oFw1dNfscGah4UKQPZRPyY7QDIix9A-GwW9MlTdJuiCup63lVNODohHjA_HZYyXDpIzdQ631gta0MAuF-2Mk5KM4VO5HXw6uyXiwMhhfQhw1lL2RgYdZo4PrETrSIgVkB-RoKZWG9TeTcvwK-x8YcMwkWhJYY9nhLluH7OFHsQmQiIleR"
+          />
+        </div>
+      </div>
+    </header>
+    <!-- SIDE NAV BAR -->
+    <aside
+      class="bg-[#131313] dark:bg-[#131313] font-['Space_Grotesk'] uppercase tracking-[0.05em] text-[11px] font-medium border-r border-[#484848]/20 docked left-0 h-full w-64 0px-corners flat no shadows fixed left-0 top-0 h-screen flex flex-col pt-20"
+    >
+      <div class="px-6 mb-8">
+        <h2 class="text-[#c6c6c7] font-bold text-sm tracking-widest">
+          NESTOR_OPS
+        </h2>
+        <p class="text-[#767575] text-[9px] mt-1">STATUS: COMMAND_READY</p>
+      </div>
+      <nav class="flex-1">
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">grid_view</span> DASHBOARD
+        </a>
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">account_circle</span> PROFILE
+        </a>
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">explore</span> DISCOVERY
+        </a>
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">fact_check</span> REVIEW_QUEUE
+        </a>
+        <a
+          class="bg-[#1f2020] text-[#c6c6c7] border-l-2 border-[#c6c6c7] px-4 py-3 flex items-center gap-3 transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">description</span>
+          APPLICATIONS
+        </a>
+        <a
+          class="text-[#767575] px-4 py-3 flex items-center gap-3 hover:bg-[#1f2020] hover:text-[#c6c6c7] transition-all duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined">settings</span> SETTINGS
+        </a>
+      </nav>
+      <div class="p-4 border-t border-outline-variant/10">
+        <button
+          class="w-full bg-primary text-on-primary py-3 font-bold tracking-tighter hover:opacity-90 transition-opacity"
+        >
+          NEW_SEARCH
+        </button>
+      </div>
+    </aside>
+    <!-- MAIN CONTENT CANVAS -->
+    <main class="ml-64 pt-14 h-screen flex flex-col">
+      <!-- Header Info Bar -->
+      <div
+        class="h-16 flex items-center justify-between px-8 border-b border-outline-variant/10 bg-surface-container-low"
+      >
+        <div class="flex items-center gap-4">
+          <h1
+            class="font-headline text-lg font-bold tracking-wider text-primary"
+          >
+            APPLICATIONS_LOG
+          </h1>
+          <span
+            class="text-[10px] bg-tertiary-container/10 text-tertiary px-2 py-0.5 border border-tertiary/20 font-mono"
+            >COUNT: 14_ACTIVE</span
+          >
+        </div>
+        <div class="flex items-center gap-2">
+          <div
+            class="flex bg-surface-container-lowest border border-outline-variant/20 p-0.5"
+          >
+            <button
+              class="px-3 py-1 text-[10px] font-bold bg-primary text-on-primary"
+            >
+              ALL
+            </button>
+            <button
+              class="px-3 py-1 text-[10px] font-bold text-outline hover:text-on-surface"
+            >
+              INTERVIEW
+            </button>
+            <button
+              class="px-3 py-1 text-[10px] font-bold text-outline hover:text-on-surface"
+            >
+              PENDING
+            </button>
+          </div>
+          <div class="w-[1px] h-4 bg-outline-variant/30 mx-2"></div>
+          <button
+            class="material-symbols-outlined text-outline hover:text-primary"
+          >
+            filter_list
+          </button>
+          <button
+            class="material-symbols-outlined text-outline hover:text-primary"
+          >
+            search
+          </button>
+        </div>
+      </div>
+      <!-- Two-Panel Layout -->
+      <div class="flex-1 flex overflow-hidden">
+        <!-- Left Panel: High-Density Table -->
+        <section
+          class="flex-[3] border-r border-outline-variant/10 overflow-y-auto bg-surface"
+        >
+          <table class="w-full text-left border-collapse">
+            <thead class="sticky top-0 bg-surface z-10">
+              <tr
+                class="text-[10px] font-bold text-outline-variant tracking-widest uppercase border-b border-outline-variant/20"
+              >
+                <th class="px-6 py-4 font-medium">ID_STAMP</th>
+                <th class="px-6 py-4 font-medium">POSITION_ENTITY</th>
+                <th class="px-6 py-4 font-medium">LAST_ACTION</th>
+                <th class="px-6 py-4 font-medium">STATUS</th>
+              </tr>
+            </thead>
+            <tbody class="text-[11px] font-medium text-on-surface">
+              <!-- Active Item -->
+              <tr
+                class="bg-surface-container-high border-l-2 border-primary group cursor-pointer"
+              >
+                <td class="px-6 py-5 font-mono text-outline">#093-XLR</td>
+                <td class="px-6 py-5">
+                  <div class="font-bold text-primary group-hover:underline">
+                    SENIOR_SYSTEMS_OPERATOR
+                  </div>
+                  <div class="text-[10px] text-outline mt-0.5">
+                    NEURAL_NET_SOLUTIONS
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-on-surface-variant">
+                  2023.10.24 // 14:02
+                </td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-tertiary">
+                    <span class="w-1.5 h-1.5 bg-tertiary animate-pulse"></span>
+                    INTERVIEWING
+                  </span>
+                </td>
+              </tr>
+              <!-- Critical Item -->
+              <tr
+                class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer"
+              >
+                <td class="px-6 py-5 font-mono text-outline">#114-KTM</td>
+                <td class="px-6 py-5">
+                  <div class="font-bold">INFRASTRUCTURE_LEAD</div>
+                  <div class="text-[10px] text-outline mt-0.5">
+                    DATA_CORE_INTL
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-error">NEEDS_RESPONSE</td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-on-surface-variant">
+                    <span class="w-1.5 h-1.5 bg-outline-variant"></span>
+                    SUBMITTED
+                  </span>
+                </td>
+              </tr>
+              <!-- Standard Item -->
+              <tr
+                class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer"
+              >
+                <td class="px-6 py-5 font-mono text-outline">#202-PQR</td>
+                <td class="px-6 py-5">
+                  <div class="font-bold">UI_ENGINEER_CMD</div>
+                  <div class="text-[10px] text-outline mt-0.5">
+                    VOID_INDUSTRIES
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-on-surface-variant">
+                  2023.10.22 // 09:15
+                </td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-outline">
+                    <span class="w-1.5 h-1.5 bg-outline-variant"></span>
+                    DRAFTING
+                  </span>
+                </td>
+              </tr>
+              <!-- Rejected Item -->
+              <tr
+                class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer bg-surface-container-lowest/30"
+              >
+                <td class="px-6 py-5 font-mono text-outline-variant">
+                  #044-ERR
+                </td>
+                <td class="px-6 py-5 opacity-60">
+                  <div class="font-bold">PROTOCOL_MANAGER</div>
+                  <div class="text-[10px] text-outline-variant mt-0.5">
+                    SYNERGY_CORP
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-outline-variant">
+                  SYSTEM_ARCHIVED
+                </td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-error/60">
+                    <span class="w-1.5 h-1.5 bg-error/40"></span>
+                    REJECTED
+                  </span>
+                </td>
+              </tr>
+              <!-- Repeating pattern -->
+              <tr
+                class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer"
+              >
+                <td class="px-6 py-5 font-mono text-outline">#331-BVC</td>
+                <td class="px-6 py-5">
+                  <div class="font-bold">SECURITY_AUDITOR</div>
+                  <div class="text-[10px] text-outline mt-0.5">
+                    FORTRESS_APPS
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-on-surface-variant">
+                  2023.10.20 // 17:44
+                </td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-on-surface-variant">
+                    <span class="w-1.5 h-1.5 bg-outline-variant"></span>
+                    SUBMITTED
+                  </span>
+                </td>
+              </tr>
+              <tr
+                class="border-b border-outline-variant/5 hover:bg-surface-container-low transition-colors cursor-pointer"
+              >
+                <td class="px-6 py-5 font-mono text-outline">#404-TRC</td>
+                <td class="px-6 py-5">
+                  <div class="font-bold">DATABASE_CLEANER</div>
+                  <div class="text-[10px] text-outline mt-0.5">
+                    CLEAN_SLATE_SYSTEMS
+                  </div>
+                </td>
+                <td class="px-6 py-5 font-mono text-on-surface-variant">
+                  2023.10.19 // 11:30
+                </td>
+                <td class="px-6 py-5">
+                  <span class="flex items-center gap-2 text-outline">
+                    <span class="w-1.5 h-1.5 bg-outline-variant"></span>
+                    DRAFTING
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <!-- Right Panel: Mission Timeline -->
+        <aside
+          class="flex-[2] bg-surface-container-low overflow-y-auto p-8 border-l border-outline-variant/10"
+        >
+          <div class="mb-10">
+            <div class="flex items-start justify-between mb-2">
+              <span class="text-[10px] font-mono text-primary font-bold"
+                >CURRENT_MISSION: 093-XLR</span
+              >
+              <span
+                class="material-symbols-outlined text-outline cursor-pointer hover:text-on-surface"
+                >open_in_new</span
+              >
+            </div>
+            <h2
+              class="font-headline text-2xl font-black uppercase tracking-tight text-on-surface"
+            >
+              SENIOR_SYSTEMS_OPERATOR
+            </h2>
+            <p class="text-on-surface-variant text-sm mt-1">
+              NEURAL_NET_SOLUTIONS
+            </p>
+          </div>
+          <!-- Timeline Logs -->
+          <div class="space-y-0">
+            <!-- Event 1 -->
+            <div class="relative pl-8 pb-10 border-l border-outline-variant/20">
+              <div
+                class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-tertiary"
+              ></div>
+              <div
+                class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest"
+              >
+                T_MINUS: 0h 42m
+              </div>
+              <h4 class="text-xs font-bold text-tertiary uppercase">
+                TECHNICAL_SCREEN_INVITATION
+              </h4>
+              <p
+                class="text-[11px] text-on-surface-variant mt-2 leading-relaxed"
+              >
+                Candidate requested for live coding simulation on Node-04.
+                <span class="text-primary font-bold">STATUS: CONFIRMED</span>
+              </p>
+              <div class="mt-4 flex gap-2">
+                <button
+                  class="bg-surface-container-high px-3 py-1 text-[9px] font-bold border border-outline-variant/30 hover:bg-surface-bright"
+                >
+                  JOIN_MEETING
+                </button>
+                <button
+                  class="bg-surface-container-high px-3 py-1 text-[9px] font-bold border border-outline-variant/30 hover:bg-surface-bright"
+                >
+                  VIEW_DOCS
+                </button>
+              </div>
+            </div>
+            <!-- Event 2 -->
+            <div class="relative pl-8 pb-10 border-l border-outline-variant/20">
+              <div
+                class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-primary"
+              ></div>
+              <div
+                class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest"
+              >
+                2023.10.23 // 16:20
+              </div>
+              <h4 class="text-xs font-bold text-on-surface uppercase">
+                RESUME_PARSED_SUCCESS
+              </h4>
+              <p
+                class="text-[11px] text-on-surface-variant mt-2 leading-relaxed"
+              >
+                System successfully extracted operational history. Keyword
+                match: 88%. Moved to manual review phase.
+              </p>
+            </div>
+            <!-- Event 3 -->
+            <div class="relative pl-8 pb-10 border-l border-outline-variant/20">
+              <div
+                class="absolute -left-[5px] top-0 w-2.5 h-2.5 bg-outline-variant"
+              ></div>
+              <div
+                class="text-[10px] font-mono text-outline mb-1 uppercase tracking-widest"
+              >
+                2023.10.23 // 09:00
+              </div>
+              <h4 class="text-xs font-bold text-outline uppercase">
+                MISSION_INITIATED
+              </h4>
+              <p
+                class="text-[11px] text-on-surface-variant mt-2 leading-relaxed"
+              >
+                Application sequence started by OPERATOR_01. Authentication
+                tokens generated for Neural_Net API.
+              </p>
+            </div>
+            <!-- Event 4 (End of line) -->
+            <div class="relative pl-8 border-l border-transparent">
+              <div
+                class="absolute -left-[5px] top-0 w-2.5 h-2.5 border border-outline-variant"
+              ></div>
+              <div class="text-[10px] font-mono text-outline-variant uppercase">
+                END_OF_HISTORY
+              </div>
+            </div>
+          </div>
+          <!-- Action Card -->
+          <div
+            class="mt-12 bg-surface-container-highest p-4 border border-outline-variant/20"
+          >
+            <div class="flex items-center gap-2 mb-3">
+              <span
+                class="material-symbols-outlined text-primary"
+                style="font-variation-settings: &quot;FILL&quot; 1"
+                >bolt</span
+              >
+              <span
+                class="text-[10px] font-bold uppercase tracking-widest text-primary"
+                >PREDICTIVE_NEXT_STEP</span
+              >
+            </div>
+            <p class="text-[11px] text-on-surface leading-tight mb-4">
+              Based on historical data for this entity, the technical screen
+              will focus on concurrent process management.
+            </p>
+            <button
+              class="w-full bg-outline-variant/20 border border-outline-variant/40 py-2 text-[10px] font-bold text-primary hover:bg-outline-variant/30"
+            >
+              RUN_SIMULATION
+            </button>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <!-- FOOTER -->
+    <footer
+      class="bg-[#000000] dark:bg-[#000000] font-['Inter'] text-[9px] font-mono tracking-widest border-t border-[#484848]/30 docked full-width bottom-0 h-8 flat no shadows fixed bottom-0 left-0 w-full flex justify-between items-center px-4 z-50"
+    >
+      <div class="flex items-center gap-6">
+        <span class="text-[#484848]">v1.0.4_STABLE</span>
+        <div class="flex items-center gap-2">
+          <span class="w-1 h-1 bg-tertiary animate-pulse"></span>
+          <span class="text-[#eff8ff]">LOG_STREAM</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-8 text-[#484848]">
+        <span class="hover:text-[#c6c6c7] cursor-default">LATENCY:14ms</span>
+        <span class="hover:text-[#c6c6c7] cursor-default">MEM:42%</span>
+        <span class="text-on-surface-variant">OP_LEVEL:7</span>
+      </div>
+    </footer>
+  </body>
+</html>

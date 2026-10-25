@@ -2,11 +2,7 @@ import {
   BrowserSessionStatusSchema,
   type BrowserSessionStatus,
 } from "@nestor/contracts";
-import {
-  isDisabled,
-  isEnabled,
-  normalizeFlagValue,
-} from "./env-flags.mjs";
+import { isDisabled, isEnabled, normalizeFlagValue } from "./env-flags.mjs";
 
 export { isDisabled, isEnabled, normalizeFlagValue };
 
@@ -185,7 +181,11 @@ export function getDesktopTestDelayMs(
   }
 
   if (!/^\d+$/.test(normalized)) {
-    warnInvalidEnvValue(envVarName, normalized, "the default disabled behavior");
+    warnInvalidEnvValue(
+      envVarName,
+      normalized,
+      "the default disabled behavior",
+    );
     return 0;
   }
 

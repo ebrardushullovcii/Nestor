@@ -96,7 +96,9 @@ describe("SettingsApplyModeSection", () => {
   it("keeps a typed daily limit behind its own save, with the saved mode", async () => {
     const { onSave } = renderSection({ mode: "confirm_before_submit" });
 
-    expect(screen.queryByRole("button", { name: "Save daily limit" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save daily limit" }),
+    ).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Most preparations in one day"), {
       target: { value: "8" },

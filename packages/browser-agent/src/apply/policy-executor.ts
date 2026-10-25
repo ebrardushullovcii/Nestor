@@ -1809,8 +1809,7 @@ export async function executeApplyProposal(
                 : candidate.ref === control.ref) &&
               [candidate.value, candidate.label].some(
                 (value) =>
-                  normalizeSignal(value) ===
-                  normalizeSignal(radioAnswer.value),
+                  normalizeSignal(value) === normalizeSignal(radioAnswer.value),
               ),
           );
           if (!selected)

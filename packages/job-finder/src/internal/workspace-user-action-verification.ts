@@ -92,7 +92,9 @@ export async function verifySourceAccessUserAction(input: {
   request: UserActionRequest;
   onVerified?: (
     request: UserActionRequest,
-  ) => Promise<{ status: "continued" } | { status: "blocked"; message: string }>;
+  ) => Promise<
+    { status: "continued" } | { status: "blocked"; message: string }
+  >;
 }): Promise<UserActionRequest | null> {
   const request = UserActionRequestSchema.parse(input.request);
   if (request.state !== "verifying" || !isSourceAccessUserAction(request)) {
@@ -154,7 +156,5 @@ export async function verifySourceAccessUserAction(input: {
     request: nextRequest,
     event: reduction.event,
   });
-  return commit.request.state === "resolved"
-    ? commit.request
-    : null;
+  return commit.request.state === "resolved" ? commit.request : null;
 }

@@ -65,8 +65,16 @@ describe("finished source count", () => {
       startedAt: "2026-08-19T10:00:00.000Z",
       targetIds: ["source_a", "source_b"],
       targetExecutions: [
-        { targetId: "source_a", adapterKind: "target_site", state: "completed" },
-        { targetId: "source_b", adapterKind: "target_site", state: "cancelled" },
+        {
+          targetId: "source_a",
+          adapterKind: "target_site",
+          state: "completed",
+        },
+        {
+          targetId: "source_b",
+          adapterKind: "target_site",
+          state: "cancelled",
+        },
       ],
     });
 
@@ -83,7 +91,11 @@ describe("finished source count", () => {
       startedAt: "2026-08-19T10:00:00.000Z",
       targetIds: ["source_a", "source_b", "source_c", "source_d"],
       targetExecutions: [
-        { targetId: "source_a", adapterKind: "target_site", state: "completed" },
+        {
+          targetId: "source_a",
+          adapterKind: "target_site",
+          state: "completed",
+        },
         { targetId: "source_b", adapterKind: "target_site", state: "failed" },
         { targetId: "source_c", adapterKind: "target_site", state: "skipped" },
         { targetId: "source_d", adapterKind: "target_site", state: "running" },

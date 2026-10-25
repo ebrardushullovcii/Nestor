@@ -76,10 +76,7 @@ describe("configureDesktopUserDataDirectory", () => {
   });
 
   test("keeps Electron's default user-data path when no override is configured", () => {
-    const defaultDirectory = path.join(
-      os.tmpdir(),
-      "nestor-default-user-data",
-    );
+    const defaultDirectory = path.join(os.tmpdir(), "nestor-default-user-data");
 
     expect(
       resolveDesktopUserDataDirectory(

@@ -84,8 +84,7 @@ describe("resume profile revision gates", () => {
     const { repository, workspaceService } = createWorkspaceServiceHarness({
       documentManager,
     });
-    const revisionBefore = (await repository.getProfileWithRevision())
-      .revision;
+    const revisionBefore = (await repository.getProfileWithRevision()).revision;
 
     const generation = workspaceService.generateResume("job_ready");
     await renderStarted.promise;

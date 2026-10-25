@@ -145,11 +145,17 @@ describe("apply queue runner", () => {
       return Promise.resolve();
     });
     expect(harness.queue()?.id).toBe(boundId);
-    expect(harness.queue()?.assistantScopes).toEqual([{ conversationId: "chat", jobIds: ids(12) }]);
+    expect(harness.queue()?.assistantScopes).toEqual([
+      { conversationId: "chat", jobIds: ids(12) },
+    ]);
     expect(harness.runs[0]?.mode).toBe("prepare_only");
     const failed = createHarness();
     const second = createApplyQueueRunner(failed.deps);
-    await expect(second.start(ids(2), "autonomous_submit", () => Promise.reject(new Error("Stopped before binding")))).rejects.toThrow("Stopped before binding");
+    await expect(
+      second.start(ids(2), "autonomous_submit", () =>
+        Promise.reject(new Error("Stopped before binding")),
+      ),
+    ).rejects.toThrow("Stopped before binding");
     expect(failed.runs).toHaveLength(0);
     expect(failed.queue()).toBeNull();
     runner.dispose();

@@ -227,9 +227,18 @@ describe("registered user actions", () => {
   it("applies an explicitly requested reversible resume approval without another confirmation", async () => {
     const executeAction = vi.fn().mockResolvedValue(true);
     const createProposal = vi.fn();
-    const context = { service: {}, ports: { executeAction, publishWorkspaceUpdate: vi.fn() }, session: { assertCurrent: vi.fn(), createProposal } } as unknown as AssistantToolContext;
-    await executeRegisteredAssistantAction({ actionId: "approve-resumes", input: { jobIds: ["j"] } }, context);
-    expect(executeAction).toHaveBeenCalledExactlyOnceWith("approve-resumes", { jobIds: ["j"] });
+    const context = {
+      service: {},
+      ports: { executeAction, publishWorkspaceUpdate: vi.fn() },
+      session: { assertCurrent: vi.fn(), createProposal },
+    } as unknown as AssistantToolContext;
+    await executeRegisteredAssistantAction(
+      { actionId: "approve-resumes", input: { jobIds: ["j"] } },
+      context,
+    );
+    expect(executeAction).toHaveBeenCalledExactlyOnceWith("approve-resumes", {
+      jobIds: ["j"],
+    });
     expect(createProposal).not.toHaveBeenCalled();
   });
 

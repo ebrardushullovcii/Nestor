@@ -1,6 +1,8 @@
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
-type DiscoveryJobs = Readonly<JobFinderRendererWorkspaceSnapshot["discoveryJobs"]>;
+type DiscoveryJobs = Readonly<
+  JobFinderRendererWorkspaceSnapshot["discoveryJobs"]
+>;
 type ReviewQueue = Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]>;
 type ApplicationRecords = Readonly<
   JobFinderRendererWorkspaceSnapshot["applicationRecords"]
@@ -8,7 +10,9 @@ type ApplicationRecords = Readonly<
 type ApplicationAttempts = Readonly<
   JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
 >;
-type TailoredAssets = Readonly<JobFinderRendererWorkspaceSnapshot["tailoredAssets"]>;
+type TailoredAssets = Readonly<
+  JobFinderRendererWorkspaceSnapshot["tailoredAssets"]
+>;
 
 // Workspace deltas retain unchanged collection references. Key by those
 // collections, not the enclosing snapshot or a selected ID: local navigation

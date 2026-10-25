@@ -145,8 +145,7 @@ async function run() {
     const baseline = JSON.parse(await readFile(baselineWorkspacePath, "utf8"));
     const request = createActionRequest();
     await page.evaluate(
-      async (state) =>
-        window.nestor.jobFinder.test.resetWorkspaceState(state),
+      async (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
       {
         ...baseline,
         profileSetupState: {

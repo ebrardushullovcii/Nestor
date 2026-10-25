@@ -288,10 +288,13 @@ describe("assistant interactive workspace reads", () => {
     const runAgentDiscovery = vi.fn(
       (onActivity: (event: { runId: string }) => void) => {
         onActivity({ runId: run.id });
-        return (
-        new Promise<{ activeDiscoveryRun: typeof run; recentDiscoveryRuns: [] }>((resolve) => {
-          finish = () => resolve({ activeDiscoveryRun: run, recentDiscoveryRuns: [] });
-        }));
+        return new Promise<{
+          activeDiscoveryRun: typeof run;
+          recentDiscoveryRuns: [];
+        }>((resolve) => {
+          finish = () =>
+            resolve({ activeDiscoveryRun: run, recentDiscoveryRuns: [] });
+        });
       },
     );
     vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({

@@ -40,8 +40,7 @@ beforeAll(() => {
 });
 
 const WORKSPACE_BEHAVIOR_LABEL = "Browser & saved jobs";
-const APPLICATION_AUTHORITY_LABEL =
-  "Applying";
+const APPLICATION_AUTHORITY_LABEL = "Applying";
 
 const browserSession = {
   source: "target_site",

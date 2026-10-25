@@ -184,7 +184,10 @@ test("a final provider-paused checkpoint notifies the renderer only after it is 
       message: "AI service unavailable: insufficient funds.",
     },
   };
-  const result: unknown = callback({ sender } as unknown as IpcMainInvokeEvent, batch);
+  const result: unknown = callback(
+    { sender } as unknown as IpcMainInvokeEvent,
+    batch,
+  );
   await vi.waitFor(() =>
     expect(saveResumeBatchCheckpoint).toHaveBeenCalledOnce(),
   );

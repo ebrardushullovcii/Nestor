@@ -123,8 +123,7 @@ export default async function assistantHarness(qa) {
       "function",
   );
   await qa.page.evaluate(
-    (input) =>
-      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+    (input) => window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl,
       applicationUrl,

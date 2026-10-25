@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  DesktopBrowserState,
-  UserActionRequest,
-} from "@nestor/contracts";
+import type { DesktopBrowserState, UserActionRequest } from "@nestor/contracts";
 import { installAutomaticSourceAccessResume } from "./automatic-source-access-resume";
 
 const origin = "http://127.0.0.1:47950/";
@@ -235,7 +232,10 @@ describe("automatic source access resume", () => {
       tabId: "person_tab",
     });
     expect(flow.performUserAction).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "confirm_done", requestId: request.id }),
+      expect.objectContaining({
+        action: "confirm_done",
+        requestId: request.id,
+      }),
     );
 
     // Two tabs on the site: neither is guessed.
@@ -254,7 +254,9 @@ describe("automatic source access resume", () => {
   });
   it("still carries on a step an earlier check left still blocked", async () => {
     vi.useFakeTimers();
-    const flow = setup([{ ...request, state: "still_blocked" } as UserActionRequest]);
+    const flow = setup([
+      { ...request, state: "still_blocked" } as UserActionRequest,
+    ]);
     flow.emit(
       browserState({
         tabs: [{ ...browserState().tabs[0]!, title: "Signed-in jobs" }],
@@ -262,7 +264,10 @@ describe("automatic source access resume", () => {
     );
     await vi.advanceTimersByTimeAsync(20);
     expect(flow.performUserAction).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "confirm_done", requestId: request.id }),
+      expect.objectContaining({
+        action: "confirm_done",
+        requestId: request.id,
+      }),
     );
     flow.dispose();
   });

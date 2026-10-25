@@ -49,7 +49,9 @@ export function inferFieldSensitivity(
   return "medium";
 }
 
-export function sensitivityToRisk(sensitivity: ResumeImportFieldSensitivity): number {
+export function sensitivityToRisk(
+  sensitivity: ResumeImportFieldSensitivity,
+): number {
   switch (sensitivity) {
     case "low":
       return 0.12;
@@ -149,7 +151,9 @@ export function buildCandidateConfidenceBreakdown(input: {
     input.bundle,
     input.candidate.sourceBlockIds,
   );
-  const normalizationRisk = normalizeConfidence(input.normalizationRisk ?? 0.14);
+  const normalizationRisk = normalizeConfidence(
+    input.normalizationRisk ?? 0.14,
+  );
   const conflictRisk = normalizeConfidence(
     input.conflictRisk ?? sensitivityToRisk(fieldSensitivity) * 0.5,
   );

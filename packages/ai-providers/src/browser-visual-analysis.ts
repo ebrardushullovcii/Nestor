@@ -758,8 +758,7 @@ export function createBrowserVisualAnalysisProviderFromEnvironment(
       DEFAULT_BROWSER_VISUAL_MODEL,
     apiMode:
       parseModelApiMode(
-        env.NESTOR_BROWSER_VISION_API_MODE ??
-          env.NESTOR_AI_VISION_API_MODE,
+        env.NESTOR_BROWSER_VISION_API_MODE ?? env.NESTOR_AI_VISION_API_MODE,
       ) ?? DEFAULT_VISION_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(

@@ -33,7 +33,8 @@ describe("createJobFinderWorkspaceService", () => {
         {
           snapshotId: "visual_snapshot_search_probe",
           observationSetId: "visual_observation_search_probe",
-          summary: "Visible search controls and job cards appear in the viewport.",
+          summary:
+            "Visible search controls and job cards appear in the viewport.",
           capturedAt: "2026-03-20T10:00:45.000Z",
           storagePath: "/tmp/source-debug/visual-search-probe.png",
           retention: "retained",
@@ -51,7 +52,8 @@ describe("createJobFinderWorkspaceService", () => {
           purpose: "source_debug",
           providerKind: "deterministic",
           providerLabel: "Deterministic browser visual analysis",
-          summary: "Visible search controls and job cards appear in the viewport.",
+          summary:
+            "Visible search controls and job cards appear in the viewport.",
           observations: [],
           blockers: [],
           visibleControls: ["Keyword search and location filter are visible"],
@@ -173,12 +175,14 @@ describe("createJobFinderWorkspaceService", () => {
     ];
     expect(new Set(learnedLines).size).toBe(learnedLines.length);
     expect(evidenceRefs.length).toBeGreaterThan(0);
-    expect(
-      attempts.some((attempt) => attempt.visualEvidence.length > 0),
-    ).toBe(true);
+    expect(attempts.some((attempt) => attempt.visualEvidence.length > 0)).toBe(
+      true,
+    );
     expect(
       attempts.some((attempt) =>
-        attempt.confirmedFacts.some((fact) => fact.includes("Visual evidence:")),
+        attempt.confirmedFacts.some((fact) =>
+          fact.includes("Visual evidence:"),
+        ),
       ),
     ).toBe(true);
     const visualEvidenceRef = evidenceRefs.find(
@@ -266,5 +270,4 @@ describe("createJobFinderWorkspaceService", () => {
     expect(runs[0]?.state).toBe("interrupted");
     expect(runs[0]?.activePhase).toBeNull();
   });
-
 });

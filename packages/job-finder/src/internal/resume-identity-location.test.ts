@@ -18,7 +18,9 @@ describe("resume header location against the profile identity", () => {
 
   test("a location that drops the profile's place still counts as a mismatch", () => {
     expect(
-      findResumeDraftIdentityConflicts(profile, { location: "Munich, Germany" }),
+      findResumeDraftIdentityConflicts(profile, {
+        location: "Munich, Germany",
+      }),
     ).toHaveLength(1);
   });
 });
