@@ -6,6 +6,8 @@ import type {
   JobFinderSearchRequest,
   JobSearchCampaignMode,
   AiJobSearchBehavior,
+  JobSearchGoals,
+  KnownJobUrlLookup,
   CandidateProfile,
   AgentDiscoveryProgress,
   JobSource,
@@ -21,11 +23,7 @@ import type {
 export type { Tool, ToolCall };
 
 // Narrow interface for search preferences used by the agent
-export interface AgentSearchPreferences {
-  targetRoles: string[];
-  locations: string[];
-  workModes?: string[];
-}
+export type AgentSearchPreferences = JobSearchGoals;
 
 export interface AgentNavigationPolicy {
   allowedHostnames: string[];
@@ -55,6 +53,7 @@ export interface AgentPromptContext {
 }
 
 export interface AgentConfig {
+  lookupKnownUrls?: KnownJobUrlLookup;
   /** No person-specified result cap; retain every suitable posting found. */
   retainAllFound?: boolean;
   /** Public feed postings available for the model to inspect and select. */

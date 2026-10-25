@@ -1,4 +1,7 @@
-import { ListingRejectionCategorySchema } from "@nestor/contracts";
+import {
+  ListingRejectionCategorySchema,
+  toJobSearchGoals,
+} from "@nestor/contracts";
 import {
   parseToolArguments,
   runAgentLoop,
@@ -14,6 +17,7 @@ import {
   type BrowserAgentRunCheckpoint,
   type DiscoveryAccessBlockerReason,
   type JobPosting,
+  type ReadDiscoveryPostingPage,
   type SourceDebugPhaseCompletionMode,
 } from "@nestor/contracts";
 import type { APIResponse, Page } from "playwright";
@@ -38,17 +42,25 @@ import {
 } from "./page-read-parts";
 import type { AgentConfig, AgentProgress, AgentResult } from "../types";
 import type { SearchResultCache } from "./search-result-cache";
+import { readCachedSearchResult } from "./search-result-cache";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
 import { normalizeExtractedJobSourceId, sanitizeUrl } from "./job-identity";
 import {
   createJobSearchPrompts,
   describeRemoteHandling,
+  searchSelectivity,
 } from "./job-search-prompts";
 import { createMoveReviewer, describeSearchGoal } from "./move-reviewer";
 import {
   createBotCheckTracker,
   inspectBotCheckInterstitial,
 } from "./bot-check";
+import {
+  omitKnownListingItems,
+  onlyNewJobs,
+  postingUrlKey,
+} from "./known-listings";
+import { readPostingDetail } from "./read-posting-detail";
 
 /**
  * The agent that searches one site for jobs, and the agent that checks a
@@ -62,6 +74,7 @@ import {
  */
 
 export interface JobSearchAgentInput {
+  readPostingPage?: ReadDiscoveryPostingPage;
   resultCache?: SearchResultCache;
   hands: ApplyPageHands;
   /** The live page, for posting links handed to the extractor. Optional in tests. */
@@ -138,8 +151,12 @@ export function buildExtractionSelectionContext(
     targetRoles: config.searchPreferences.targetRoles,
     locations: config.searchPreferences.locations,
     workModes: config.searchPreferences.workModes,
+    goals: toJobSearchGoals(config.searchPreferences),
     request: config.promptContext.searchRequest,
-    searchGuidance: config.promptContext.searchGuidance,
+    searchGuidance: {
+      ...config.promptContext.searchGuidance,
+      selectivity: searchSelectivity(config),
+    },
     remoteRule: describeRemoteHandling(config),
     sourceInstructions: config.promptContext.siteInstructions ?? [],
     pageDecisions,
@@ -156,10 +173,8 @@ const DEFAULT_NO_PROGRESS_STEP_LIMIT = 24;
 function jobKey(
   job: Pick<JobPosting, "canonicalUrl" | "sourceJobId" | "source">,
 ): string {
-  const url = sanitizeUrl(job.canonicalUrl);
-  return url
-    ? `url:${url.toLowerCase()}`
-    : `id:${job.source}:${job.sourceJobId}`;
+  const url = job.canonicalUrl ? postingUrlKey(job.canonicalUrl) : null;
+  return url ? `url:${url}` : `id:${job.source}:${job.sourceJobId}`;
 }
 
 function toBlockerReason(
@@ -375,7 +390,7 @@ export async function runJobSearchAgent(
   const llmClient = withReasoningTask(input.llmClient, "search");
 
   input.signal?.throwIfAborted();
-  const reused = input.resultCache?.read(config);
+  const reused = await readCachedSearchResult(input.resultCache, config);
   if (reused) {
     input.onProgress?.({
       currentUrl: config.startingUrls[0] ?? "about:blank",
@@ -600,7 +615,57 @@ export async function runJobSearchAgent(
     });
   };
 
+  const detailReads = new Map<string, Promise<JobPosting>>();
+  let detailReadThrough = 0;
+  const completeNewListings = async (): Promise<void> => {
+    const readPage = input.readPostingPage;
+    if (!readPage || isSourceCheck) return;
+    const first = detailReadThrough;
+    const completed = await mapWithLimit(
+      collected.slice(first),
+      4,
+      async (job) => {
+        if (job.searchRejection) return job;
+        const key = jobKey(job);
+        let read = detailReads.get(key);
+        if (!read) {
+          emit("read_listing", `Reading the full listing for ${job.title}.`);
+          read = readPostingDetail({
+            posting: job,
+            readPage,
+            extractor: input.jobExtractor,
+            ...(input.signal ? { signal: input.signal } : {}),
+          });
+          detailReads.set(key, read);
+        }
+        return read;
+      },
+    );
+    completed.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        collected[first + index] = result.value;
+        if (
+          result.value.listingDetailFetch?.outcome === "fetch_failed" &&
+          !unreadableListings.some(
+            (item) => item.url === result.value.canonicalUrl,
+          )
+        ) {
+          unreadableListings.push({
+            title: result.value.title,
+            url: result.value.canonicalUrl,
+            category: "unreadable",
+            reason:
+              result.value.listingDetailFetch.detail ??
+              "The full listing could not be read.",
+          });
+        }
+      }
+    });
+    detailReadThrough += completed.length;
+    input.signal?.throwIfAborted();
+  };
   const checkpoint = async (): Promise<void> => {
+    await completeNewListings();
     if (!config.onCheckpoint) return;
     checkpointRevision += 1;
     const snapshot: BrowserAgentRunCheckpoint = {
@@ -760,7 +825,7 @@ export async function runJobSearchAgent(
       // text, links and extraction URL to a fresh observation, not a cached
       // source page (R3-069).
       const observation = await pageTools.observe();
-      const pageText =
+      let pageText =
         pageType === "search_results" && hands.readLinkedText
           ? await hands.readLinkedText()
           : await hands.readText();
@@ -768,6 +833,26 @@ export async function runJobSearchAgent(
         return { kind: "ok", content: "There is no page to read yet." };
       }
       recordListingRead(observation.url, observation.bodyTextExcerpt);
+      let savedListingsSkipped = 0;
+      if (
+        !isSourceCheck &&
+        pageType === "search_results" &&
+        config.lookupKnownUrls
+      ) {
+        const unseen = await omitKnownListingItems(
+          pageText,
+          config.lookupKnownUrls,
+        );
+        pageText = unseen.text;
+        savedListingsSkipped = unseen.skippedUrls.length;
+        for (const url of unseen.skippedUrls) {
+          const key = `url:${postingUrlKey(url)}`;
+          if (duplicateKeys.has(key)) continue;
+          duplicateKeys.add(key);
+          duplicateListings += 1;
+          duplicateListingPageUrls.push(observation.url);
+        }
+      }
       const selectionContext = !isSourceCheck
         ? buildExtractionSelectionContext(
             config,
@@ -826,6 +911,15 @@ export async function runJobSearchAgent(
           }),
         );
         if (posting) posting.producingPageUrl = observation.url;
+        if (posting && pageType === "job_detail") {
+          posting.detailQuality = "detail_enriched";
+          posting.listingDetailFetch = {
+            attemptedAt: now().toISOString(),
+            outcome: "enriched",
+            method: "page_text",
+            detail: "Read this listing page in full.",
+          };
+        }
         // A saved identity is a duplicate even when a later page cannot
         // supply its own posting link. Do not count it as rejected as well.
         if (posting && known.has(jobKey(posting))) {
@@ -893,6 +987,9 @@ export async function runJobSearchAgent(
         describeSave(added, found.length).split("\n")[0] ?? "Saved.",
       );
       const notes = [
+        savedListingsSkipped > 0
+          ? `${savedListingsSkipped} already-saved listing${savedListingsSkipped === 1 ? " was" : "s were"} skipped before the page reader; only new listings need reading. Continue through the remaining pages for new jobs.`
+          : null,
         pageRead.unreadParts > 0
           ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read this time; reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
           : null,
@@ -913,7 +1010,9 @@ export async function runJobSearchAgent(
             ? [
                 unread > 0
                   ? "This page read is incomplete; it does not establish that there are no jobs. Call extract_jobs again to retry unread parts."
-                  : "No job postings could be read from this page. If jobs are visible, they may load on scroll or sit behind a control; if not, this is not a listings page.",
+                  : savedListingsSkipped > 0
+                    ? "No new postings were read from this page. Already-saved cards were omitted before reading."
+                    : "No job postings could be read from this page. If jobs are visible, they may load on scroll or sit behind a control; if not, this is not a listings page.",
                 ...notes,
               ]
                 .filter((line): line is string => line !== null)
@@ -1174,9 +1273,15 @@ export async function runJobSearchAgent(
     },
   };
 
-  const catalogTools = config.sourceCatalog
+  const sourceCatalog = config.sourceCatalog
+    ? await onlyNewJobs(
+        config.sourceCatalog,
+        isSourceCheck ? undefined : config.lookupKnownUrls,
+      )
+    : undefined;
+  const catalogTools = sourceCatalog
     ? createSearchCatalogTools({
-        jobs: config.sourceCatalog,
+        jobs: sourceCatalog,
         keep,
         checkpoint,
         onInspect: (job) => inspectedCatalog.set(jobKey(job), job),
@@ -1190,7 +1295,7 @@ export async function runJobSearchAgent(
   if (config.sourceCatalog) {
     messages.push({
       role: "user",
-      content: `The site's public feed already supplied ${config.sourceCatalog.length} postings. Use list_catalog_jobs to review them in pages, read_catalog_job for details, and save_catalog_jobs for the ids that fit this request. Nothing from this catalog is saved until you select it. Review every catalog page. For each job, save its id or report its rejection category and reason with save_catalog_jobs; an undecided read is counted as deferred. Prefer this feed over browsing the same listings again. Known posting dates and update dates are distinct; never invent missing dates. You still have browser tools if the feed lacks necessary evidence.`,
+      content: `The site's public feed supplied ${sourceCatalog?.length ?? 0} new postings to review; already-saved URLs were omitted. Use list_catalog_jobs to review them in pages, read_catalog_job for details, and save_catalog_jobs for the ids that fit this request. Nothing from this catalog is saved until you select it. Review every catalog page. For each job, save its id or report its rejection category and reason with save_catalog_jobs; an undecided read is counted as deferred. Prefer this feed over browsing the same listings again. Known posting dates and update dates are distinct; never invent missing dates. You still have browser tools if the feed lacks necessary evidence.`,
     });
     if (config.sourceCatalogComplete) {
       messages.push({
@@ -1228,7 +1333,11 @@ export async function runJobSearchAgent(
           })
         : fingerprint;
     const reusedIndex = initialIndexFingerprint
-      ? input.resultCache?.read(config, initialIndexFingerprint)
+      ? await readCachedSearchResult(
+          input.resultCache,
+          config,
+          initialIndexFingerprint,
+        )
       : null;
     if (reusedIndex) {
       const reason =
@@ -1464,6 +1573,7 @@ export async function runJobSearchAgent(
     loop.reason = `Stopped: no new page content or listings in the last ${loop.steps - lastProgressStep} steps.`;
   }
   emit("finish", loop.reason);
+  await completeNewListings();
   const result = buildResult(loop);
   const completeIndex =
     initialIndex &&

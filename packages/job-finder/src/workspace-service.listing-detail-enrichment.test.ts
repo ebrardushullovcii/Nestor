@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ListingHtmlFetcher } from "./index";
 import { readPlanAssessment } from "./internal/plan-assessment";
-import { htmlToPlainText } from "./internal/listing-detail-extraction";
+import { htmlToPlainText } from "@nestor/browser-agent/listing-detail-extraction";
 import { createSeed } from "./workspace-service.test-fixtures";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 import { createAiClient } from "./workspace-service.test-runtimes";

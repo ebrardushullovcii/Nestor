@@ -7,6 +7,7 @@ import {
   type ListingDetailFetchOutcome,
   type MatchAssessment,
   type SavedJob,
+  type ExtractedListingDetail,
 } from "@nestor/contracts";
 import {
   extractListingDetailFromHtml,
@@ -15,8 +16,7 @@ import {
   LISTING_PAGE_OMISSION_MARKER,
   normalizeListingText,
   stripPictographGlyphs,
-  type ExtractedListingDetail,
-} from "./listing-detail-extraction";
+} from "@nestor/browser-agent/listing-detail-extraction";
 import {
   getAiProviderAccessFailure,
   isAiServiceBusy,

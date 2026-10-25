@@ -17,7 +17,7 @@ const TRACKING_PARAMETERS = new Set([
   "trk",
 ]);
 
-function normalizeUrl(value: string): string {
+export function normalizeUrl(value: string): string {
   try {
     const url = new URL(value.trim());
     url.hash = "";

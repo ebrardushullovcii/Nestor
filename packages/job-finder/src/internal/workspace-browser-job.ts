@@ -1,7 +1,7 @@
 import { type AddBrowserJobResult } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import { createMatchAssessmentAsync } from "./matching";
-import { listingPageText, listingPageLinks } from "./listing-detail-extraction";
+import { listingPageText, listingPageLinks } from "@nestor/browser-agent/listing-detail-extraction";
 import { saveJobsFromPage } from "./workspace-assistant-page-jobs";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
