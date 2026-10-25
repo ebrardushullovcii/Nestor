@@ -53,6 +53,41 @@ export function NeedsYouScreen() {
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const pinned = useRef<number | null>(null);
+  const [counts, setCounts] = useState(EMPTY_COUNTS);
+  useEffect(() => {
+    let live = true;
+    let reading = false;
+    let again = false;
+    const refresh = async () => {
+      if (reading) {
+        again = true;
+        return;
+      }
+      reading = true;
+      try {
+        do {
+          again = false;
+          const value = await window.nestor.needsYou.run(
+            "needs_you_counts",
+            {},
+          );
+          if (live) setCounts(value);
+        } while (live && again);
+      } catch {
+        /* A later store change retries the read; keep the last known count. */
+      } finally {
+        reading = false;
+      }
+    };
+    const unsubscribe = window.nestor.jobs.onChange((change) => {
+      if (change.cause === "application") void refresh();
+    });
+    void refresh();
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, []);
   const list = useStoreList<Item, NeedsYouCounts>({
     key: JSON.stringify([tab, text]),
     emptyCounts: EMPTY_COUNTS,
@@ -71,13 +106,14 @@ export function NeedsYouScreen() {
           nextCursor: page.nextCursor === null ? null : String(page.nextCursor),
         };
       }
-      const [page, counts] = await Promise.all([
-        window.nestor.needsYou.run("list_form_answers", { after, limit, text }),
-        window.nestor.needsYou.run("needs_you_counts", {}),
-      ]);
+      const page = await window.nestor.needsYou.run("list_form_answers", {
+        after,
+        limit,
+        text,
+      });
       return {
         ...page,
-        counts,
+        counts: EMPTY_COUNTS,
         nextCursor: page.nextCursor === null ? null : String(page.nextCursor),
       };
     },
@@ -170,10 +206,7 @@ export function NeedsYouScreen() {
     void list.refresh();
   }
   const totalTasks =
-    list.counts.question +
-    list.counts.sign_in +
-    list.counts.captcha +
-    list.counts.mfa;
+    counts.question + counts.sign_in + counts.captcha + counts.mfa;
   return (
     <LockedScreenLayout
       lockContentHeight
@@ -204,7 +237,7 @@ export function NeedsYouScreen() {
             onValueChange={setTab}
             options={[
               { value: "tasks", label: `Needs you ${totalTasks}` },
-              { value: "saved", label: `Saved answers ${list.counts.saved}` },
+              { value: "saved", label: `Saved answers ${counts.saved}` },
             ]}
           />
           {list.error ? <p role="alert">{list.error}</p> : null}
