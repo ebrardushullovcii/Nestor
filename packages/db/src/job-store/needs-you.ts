@@ -1,5 +1,6 @@
 import {
   SavedFormAnswerKeySchema,
+  SavedFormAnswerChangeSchema,
   type SavedFormAnswerKey,
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
@@ -282,7 +283,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const change = undo.begin();
         answerChange = change;
         try {
-          return { value: work(), ...change.finish() };
+          const value = work();
+          const result = change.finish();
+          const answerChanges = undo.changes(result.undoId).map((item) => {
+            const row = item.after ?? item.before;
+            return SavedFormAnswerChangeSchema.parse({
+              id: row?.id,
+              prompt: row?.prompt,
+              before: item.before?.answer ?? null,
+              after: item.after?.answer ?? null,
+            });
+          });
+          return { value, ...result, answerChanges };
         } finally {
           answerChange = null;
         }

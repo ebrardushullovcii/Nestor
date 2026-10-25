@@ -10,7 +10,11 @@ import { assertPersonAnswerAuthority } from "./person-answer-authority";
 import { AssistantToolError, type AssistantToolContext } from "./tool-kit";
 
 async function answerChange<
-  T extends { undoId: number | null; undoCount: number },
+  T extends {
+    undoId: number | null;
+    undoCount: number;
+    answerChanges: NeedsYouCommandOutput<"save_form_answer">["answerChanges"];
+  },
 >(value: T, summary: string, { session }: AssistantToolContext) {
   if (!value.undoId) return { summary, data: value };
   const { part } = await session.recordChange({
@@ -22,16 +26,14 @@ async function answerChange<
       input: { undoId: value.undoId },
       expectedCount: value.undoCount,
     },
-    entries: [
-      {
-        path: ["savedAnswers"],
-        kind: "set",
-        before: "Previous saved answers",
-        after: summary,
-        index: null,
-        label: "Saved answers for future forms",
-      },
-    ],
+    entries: value.answerChanges.map((change) => ({
+      path: ["savedAnswers", `#id:${change.id}`, "answer"],
+      kind: "set",
+      before: change.before ?? "Not saved",
+      after: change.after ?? "Forgotten",
+      index: null,
+      label: change.prompt.slice(0, 200),
+    })),
   });
   return { summary, data: value, parts: [part] };
 }
