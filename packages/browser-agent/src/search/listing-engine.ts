@@ -1,6 +1,7 @@
 import {
   clearRoleMatch,
   professionEvidence,
+  professionInstructions,
   roleDutyEvidence,
 } from "./listing-screening";
 import { listingClosedReason } from "./listing-status";
@@ -365,7 +366,7 @@ export async function screenCards(
     try {
       const answer = await ask(
         input,
-        'Classify each title by actual day-to-day profession, then compare it to the requested work. Return {"keep":{"0":1,"1":0,...}}, every title index exactly once: 1 for the requested profession, overlapping duties or genuinely ambiguous titles; 0 for clearly different functions. target_roles includes synonyms; related_roles also includes the requested related professions; wide_net adds transferable neighbors. Shared industry or technology is not shared duties. Backend/platform includes backend software, fullstack, APIs, distributed systems/storage, cloud infrastructure, SRE/DevOps and ambiguous software engineer titles. A product, domain or team name alone does not establish a different engineering function; do not infer frontend merely from an app/product name. Explicit graphics/frontend/mobile/embedded/kernel/hardware/QA, helpdesk, presales, evangelism and people-management functions are different unless the title/card shows overlapping backend/platform duties. Software maintenance/sustaining and distributed-systems software testing can contain backend duties. Engineering Lead is ambiguous; Engineering Manager normally manages people rather than doing IC work. Data Analyst/BI includes hands-on reporting/analytics in operations, sales/revenue, finance or people analytics, and analytics engineering/data science where duties overlap; infrastructure/software engineering, research scientists developing ML/AI models, and executive/department leadership are different functions. An analytics manager can still analyze; a broad word data/analytics/research alone does not establish overlap. These examples apply only to their respective requested professions. Unknown/generic roles go to full-text judgment. Never discard for location, work mode, pay, hours, contract, seniority or low expected fit. Senior Data Analyst is the same profession as Data Analyst. Judge languages naturally. No explanations.',
+        professionInstructions(input.goals),
 
         {
           goals: input.goals,

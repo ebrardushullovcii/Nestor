@@ -1422,6 +1422,7 @@ test("uses the verified no-reasoning title route while keeping fit on the primar
     expect(JSON.parse(capture.getCapturedBody())).toMatchObject({
       model: "mimo-v2.6-flash",
       reasoning_effort: "none",
+      temperature: 0,
       response_format: { type: "json_object" },
     });
     await client.chatWithTools!(

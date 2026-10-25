@@ -857,6 +857,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
             apiMode,
             model: validatedOptions.model,
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
+            ...(options?.reasoningTask === "listing_screen" &&
+            validatedOptions.model === "mimo-v2.6-flash" &&
+            isOpenCodeBaseUrl(validatedOptions.baseUrl)
+              ? { temperature: 0 }
+              : {}),
             ...(options?.jsonOutput ? { jsonOutput: true } : {}),
             ...(options?.jsonSchema &&
             isStableFitRoute({ ...validatedOptions, apiMode })

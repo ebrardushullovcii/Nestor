@@ -31,6 +31,15 @@ const { crashToken } = vi.hoisted(() => ({
   crashToken: "crash-sim-0001",
 }));
 
+// Recovery uses temporary user-data directories, not the Electron runtime.
+vi.mock("electron", () => ({
+  app: {
+    getPath: () => {
+      throw new Error("Recovery tests must set NESTOR_USER_DATA_DIR.");
+    },
+  },
+}));
+
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof CryptoModule>();
   return {
