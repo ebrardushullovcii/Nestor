@@ -389,7 +389,7 @@ export function ProfileSetupImportStep(props: {
                   </div>
                   <p className="mt-1 text-sm text-foreground-soft">
                     {formatProfileSetupReviewValue(
-                      candidate.valuePreview ?? candidate.value,
+                      candidate.value ?? candidate.valuePreview,
                     ) ??
                       candidate.evidenceText ??
                       "Review this imported suggestion."}

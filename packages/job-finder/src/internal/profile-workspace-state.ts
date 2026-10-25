@@ -59,7 +59,10 @@ function mergeReviewItems(
 export function summarizeReviewCandidates(
   candidates: readonly ResumeImportFieldCandidate[],
 ): ResumeImportFieldCandidateSummary[] {
-  return candidates.slice(0, 8).map((candidate) => ({
+  // No cap: the resume panel counts this list for its "N optional imported
+  // suggestions" banner, and a cap of 8 made the banner read 8 until fewer
+  // than 8 were left. Display surfaces slice for themselves.
+  return candidates.map((candidate) => ({
     id: candidate.id,
     target: candidate.target,
     label: candidate.label,

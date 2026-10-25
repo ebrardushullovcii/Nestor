@@ -79,10 +79,7 @@ export function candidateScore(candidate: ResumeImportFieldCandidate): number {
         ? -0.05
         : 0;
   return (
-    candidate.confidence +
-    sourceBonus +
-    evidenceBonus +
-    recommendationBonus
+    candidate.confidence + sourceBonus + evidenceBonus + recommendationBonus
   );
 }
 
@@ -149,6 +146,16 @@ function existingScalarValueForCandidate(
       return profile.applicationIdentity.preferredEmail;
     case "application_identity.preferredPhone":
       return profile.applicationIdentity.preferredPhone;
+    case "narrative.professionalStory":
+      return profile.narrative.professionalStory;
+    case "narrative.nextChapterSummary":
+      return profile.narrative.nextChapterSummary;
+    case "narrative.careerTransitionSummary":
+      return profile.narrative.careerTransitionSummary;
+    case "search_preferences.targetRoles":
+      return searchPreferences.targetRoles;
+    case "search_preferences.locations":
+      return searchPreferences.locations;
     case "search_preferences.workModes":
       return searchPreferences.workModes;
     case "search_preferences.employmentTypes":
@@ -178,16 +185,16 @@ function isEmptyWorkEligibilityValue(value: unknown): boolean {
 }
 
 function isPlaceholderScalarValue(
-  profile: CandidateProfile,
+  _profile: CandidateProfile,
   candidate: ResumeImportFieldCandidate,
   currentValue: unknown,
 ): boolean {
+  // A stored placeholder is empty no matter what else was saved since.
+  // Requiring a fully fresh-start profile here stranded the placeholder
+  // headline forever once the name alone had been written (a deferred
+  // vision pass or a second import could never replace it).
   if (candidate.target.key === "yearsExperience") {
-    return (
-      typeof currentValue === "number" &&
-      currentValue <= 0 &&
-      isFreshStartCandidateProfile(profile)
-    );
+    return typeof currentValue === "number" && currentValue <= 0;
   }
 
   if (typeof currentValue !== "string") {
@@ -196,35 +203,17 @@ function isPlaceholderScalarValue(
 
   switch (candidate.target.key) {
     case "firstName":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        normalizeText(currentValue) === "new"
-      );
+      return normalizeText(currentValue) === "new";
     case "lastName":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        normalizeText(currentValue) === "candidate"
-      );
+      return normalizeText(currentValue) === "candidate";
     case "fullName":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        normalizeText(currentValue) === "new candidate"
-      );
+      return normalizeText(currentValue) === "new candidate";
     case "headline":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        currentValue === PROFILE_PLACEHOLDER_HEADLINE
-      );
+      return currentValue === PROFILE_PLACEHOLDER_HEADLINE;
     case "summary":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        currentValue === PROFILE_PLACEHOLDER_SUMMARY
-      );
+      return currentValue === PROFILE_PLACEHOLDER_SUMMARY;
     case "currentLocation":
-      return (
-        isFreshStartCandidateProfile(profile) &&
-        currentValue === PROFILE_PLACEHOLDER_LOCATION
-      );
+      return currentValue === PROFILE_PLACEHOLDER_LOCATION;
     default:
       return false;
   }
@@ -1269,12 +1258,11 @@ function isEmptyRecordSection(
   }
 }
 
-const SHARED_MEMORY_SECTIONS = new Set([
-  "narrative",
-  "proof_point",
-  "answer_bank",
-  "application_identity",
-]);
+// Form answers and preferred contact details stay suggestions even into an
+// empty profile: screener answers are answered in Needs you, not silently
+// pre-filled from a resume. Narrative and proof points are profile content
+// the import is meant to build, so they fill like everything else.
+const SHARED_MEMORY_SECTIONS = new Set(["answer_bank", "application_identity"]);
 
 function hasTrustworthyVisualEvidence(
   candidate: ResumeImportFieldCandidate,
@@ -1335,6 +1323,7 @@ function promoteImportCandidatesIntoEmptyProfile(
         ["link", profile.links.length],
         ["project", profile.projects.length],
         ["language", profile.spokenLanguages.length],
+        ["proof_point", profile.proofBank.length],
       ] as const
     )
       .filter(([, count]) => count === 0)
@@ -1351,6 +1340,14 @@ function promoteImportCandidatesIntoEmptyProfile(
       candidate,
       bundle,
     );
+    // No block-evidence requirement for scalar and list fills: inferred
+    // values (a headline, a summary, target roles) have no source block by
+    // nature, and one wrong block id from the model used to veto the fill
+    // entirely. Promotion only writes into empty fields, so the person
+    // edits what's wrong on the form instead of confirming their own
+    // resume field by field. Record candidates still need evidence: an
+    // unevidenced record applied through a merge path can write nothing
+    // and silently swallow the suggestion.
     if (
       candidate.resolution !== "needs_review" ||
       SHARED_MEMORY_SECTIONS.has(candidate.target.section) ||
@@ -1361,18 +1358,10 @@ function promoteImportCandidatesIntoEmptyProfile(
       (candidate.conflictChoices?.length ?? 0) > 1 ||
       (candidateOverallConfidence(candidate) < 0.6 &&
         !trustworthyVisualEvidence) ||
-      !hasSufficientEvidence(candidate)
-    ) {
-      return candidate;
-    }
-    // A first-person "About me" is the person's own words but not a resume
-    // summary yet; it stays a suggestion on Basics instead of landing
-    // verbatim in every generated resume.
-    if (
-      candidate.target.section === "identity" &&
-      candidate.target.key === "summary" &&
-      typeof candidate.value === "string" &&
-      /\b(?:i|me|my|mine|myself)\b/i.test(candidate.value)
+      (isRecordTarget(candidate) && !hasSufficientEvidence(candidate)) ||
+      (candidate.target.section === "skill" &&
+        candidate.target.key === "record" &&
+        !shouldAutoApplySkillRecordCandidate(candidate))
     ) {
       return candidate;
     }
@@ -1389,9 +1378,19 @@ function promoteImportCandidatesIntoEmptyProfile(
         existingValue.trim().length === 0) ||
       (Array.isArray(existingValue) && existingValue.length === 0) ||
       isPlaceholderScalarValue(profile, candidate, existingValue);
+    // Search-preference lists replace the stored list when applied, so on
+    // a profile in use they only fill an empty list and never replace
+    // roles the person saved. A fresh-start import builds targeting from
+    // the resume, defaults included. Skill lists union-merge and may
+    // always top up.
+    const replacesExistingList =
+      isListTarget(candidate) &&
+      candidate.target.section === "search_preferences";
     const eligible = isRecord
       ? freshStart || emptySections.has(candidate.target.section)
-      : freshStart || isListTarget(candidate) || existingIsEmpty;
+      : replacesExistingList
+        ? freshStart || existingIsEmpty
+        : freshStart || isListTarget(candidate) || existingIsEmpty;
     if (
       !eligible ||
       (["employmentTypes", "compensation"].includes(candidate.target.key) &&
@@ -2466,7 +2465,10 @@ function applyCandidateResolution(
   return ResumeImportFieldCandidateSchema.parse({
     ...candidate,
     value: normalizedValue,
-    valuePreview: candidate.valuePreview ?? buildValuePreview(normalizedValue),
+    // The preview is what review cards show; regenerate it from the value
+    // that will actually be applied so a card can never promise one text
+    // and confirm another.
+    valuePreview: buildValuePreview(normalizedValue),
     confidence:
       resolution === "abstained"
         ? Math.min(candidate.confidence, candidateOverallConfidence(candidate))
@@ -3099,23 +3101,7 @@ export function reconcileCandidates(
     ),
     bundle,
   );
-  const reconciled = promoted.map((candidate) =>
-    options.readByModel &&
-    candidate.resolution === "auto_applied" &&
-    (candidate.target.section === "proof_point" ||
-      (candidate.target.section === "search_preferences" &&
-        ["workModes", "targetRoles"].includes(candidate.target.key)))
-      ? applyCandidateResolution(
-          profile,
-          searchPreferences,
-          candidate,
-          "needs_review",
-          candidate.target.section === "proof_point"
-            ? "confirm_imported_achievement"
-            : "confirm_imported_search_preferences",
-        )
-      : candidate,
-  );
+  const reconciled = promoted;
   if (!differentPersonConflict) {
     return reconciled;
   }

@@ -64,7 +64,72 @@ export function promoteGroundedSharedMemoryCandidates(
       }),
   );
 
+  // Work-history bullets the experience read already captured. The shared
+  // memory read re-states the strongest ones as proof points; keeping both
+  // produced duplicate "achievement" cards repeating the work history.
+  const experienceClaims = new Set(
+    candidates
+      .filter(
+        (candidate) =>
+          candidate.target.section === "experience" &&
+          isObject(candidate.value),
+      )
+      .flatMap((candidate) => {
+        if (!isObject(candidate.value)) return [];
+        const record = candidate.value;
+        return [
+          ...toStringArray(record.achievements),
+          ...toStringArray(record.highlights),
+          ...(typeof record.summary === "string" ? [record.summary] : []),
+        ].map((entry) => normalizeText(entry));
+      }),
+  );
+
   return candidates.map((candidate) => {
+    // A story or self-introduction identical to the summary is dropped
+    // even when reconciliation already applied it into the empty field:
+    // the summary itself lands in Professional summary, and copying the
+    // same paragraph into a second field leaves two copies to edit.
+    if (
+      (candidate.resolution === "needs_review" ||
+        candidate.resolution === "auto_applied") &&
+      typeof candidate.value === "string" &&
+      summaryValues.has(normalizeText(candidate.value)) &&
+      ((candidate.target.section === "narrative" &&
+        candidate.target.key === "professionalStory") ||
+        (candidate.target.section === "answer_bank" &&
+          candidate.target.key === "selfIntroduction"))
+    ) {
+      return {
+        ...candidate,
+        resolution: "rejected" as const,
+        resolutionReason: "redundant_with_professional_summary",
+        resolvedAt: new Date().toISOString(),
+      };
+    }
+
+    if (
+      candidate.target.section === "proof_point" &&
+      (candidate.resolution === "needs_review" ||
+        candidate.resolution === "auto_applied")
+    ) {
+      const claim =
+        typeof candidate.value === "string"
+          ? candidate.value
+          : isObject(candidate.value) &&
+              typeof candidate.value.claim === "string"
+            ? candidate.value.claim
+            : null;
+      if (claim && experienceClaims.has(normalizeText(claim))) {
+        return {
+          ...candidate,
+          resolution: "rejected" as const,
+          resolutionReason: "redundant_with_work_history",
+          resolvedAt: new Date().toISOString(),
+        };
+      }
+    }
+
     if (candidate.resolution !== "needs_review") {
       return candidate;
     }

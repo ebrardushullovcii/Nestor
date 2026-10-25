@@ -761,7 +761,7 @@ describe("ProfileSetupImportStep", () => {
     expect(optional).toBeTruthy();
     expect(optional?.open).toBe(false);
     expect(optional?.querySelector("summary")?.textContent).toContain(
-      "optional suggestions",
+      "1 optional suggestion",
     );
     // The item is listed with its own Optional severity badge; the card no
     // longer prints a second sentence counting the same suggestion.
