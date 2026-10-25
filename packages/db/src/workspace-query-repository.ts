@@ -13,7 +13,6 @@ import {
   type QueryCompaniesInput,
   type QueryCompaniesResult,
   type WorkspaceListCounts,
-  type WorkspaceHomeSummary,
   type WorkspaceChanges,
   type WorkspaceJobList,
   type JobFinderJobDetail,
@@ -50,9 +49,6 @@ export interface WorkspaceQueryRepository {
   getListCounts(input?: {
     planId?: string | null | undefined;
   }): WorkspaceListCounts;
-  getHomeSummary(input?: {
-    planId?: string | null | undefined;
-  }): WorkspaceHomeSummary;
   queryCompanies(input?: QueryCompaniesInput): QueryCompaniesResult;
   getChanges(after: number, limit?: number): WorkspaceChanges;
   close(): void;
@@ -614,48 +610,6 @@ export function createWorkspaceQueryRepository(
     },
     getListCounts(input) {
       return read(() => counts(plan(input)));
-    },
-    getHomeSummary(input) {
-      return read(() => {
-        const planId = plan(input);
-        const statuses = database
-          .prepare(
-            `SELECT e.status, count(*) AS total FROM workspace_entity_index e
-          WHERE e.origin = 'application_records' AND ${activeApplication} AND EXISTS (SELECT 1 FROM workspace_job_index i
-            WHERE i.id = e.job_id AND i.plan_id = ?) GROUP BY e.status`,
-          )
-          .all(planId);
-        const drafts = database
-          .prepare(
-            `SELECT CASE WHEN a.draft_id IS NOT NULL THEN 'stale' ELSE e.status END AS status, count(*) AS total
-          FROM workspace_entity_index e LEFT JOIN resume_draft_approval_state a ON a.draft_id = e.id
-          WHERE e.origin = 'resume_drafts' AND EXISTS (SELECT 1 FROM workspace_job_index i WHERE i.id = e.job_id AND i.plan_id = ?)
-          GROUP BY CASE WHEN a.draft_id IS NOT NULL THEN 'stale' ELSE e.status END`,
-          )
-          .all(planId);
-        return {
-          counts: counts(planId),
-          revision: revision(),
-          activePlanId: planId || null,
-          searchRunning:
-            database
-              .prepare(
-                "SELECT json_extract(value, '$.runState') AS state FROM singleton_state WHERE key = 'discovery_state'",
-              )
-              .get()?.state === "running",
-          resumesToReview: drafts
-            .filter(
-              (row) => row.status === "needs_review" || row.status === "draft",
-            )
-            .reduce((n, row) => n + Number(row.total), 0),
-          resumesApproved: drafts
-            .filter((row) => row.status === "approved")
-            .reduce((n, row) => n + Number(row.total), 0),
-          applicationsByStatus: Object.fromEntries(
-            statuses.map((row) => [String(row.status), Number(row.total)]),
-          ),
-        };
-      });
     },
     queryCompanies(input = {}) {
       const query = QueryCompaniesInputSchema.parse(input);

@@ -173,7 +173,7 @@ function syncJobFinderWindowCloseGuard(
   applyJobFinderWindowCloseGuard(composeLeaveConfirmation(input));
 }
 
-export function useJobFinderPageController() {
+export function useJobFinderPageController(loadWorkspace = true) {
   const location = useLocation();
   const routerNavigate = useNavigate();
   // Publishes the rendered route so every action status write can be owned by
@@ -192,7 +192,7 @@ export function useJobFinderPageController() {
     },
     [routerNavigate],
   );
-  const workspaceState = useJobFinderWorkspace();
+  const workspaceState = useJobFinderWorkspace(loadWorkspace);
   const { showToast } = useToast();
   const [actionState, setActionState] = useState<ActionState>({
     message: null,

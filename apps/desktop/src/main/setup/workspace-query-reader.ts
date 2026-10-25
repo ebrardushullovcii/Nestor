@@ -40,8 +40,6 @@ function read(request: WorkspaceReadRequest) {
       return repository.getJobDetail(request.input.jobId, request.input.planId);
     case "getCompanyDetail":
       return repository.getCompanyDetail(request.input.companyId);
-    case "getHomeSummary":
-      return repository.getHomeSummary(request.input);
     case "getListCounts":
       return repository.getListCounts(request.input);
     case "queryCompanies":

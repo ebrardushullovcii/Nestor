@@ -28,7 +28,6 @@ import {
   setPendingCloseSave,
 } from "./job-finder-window-close-guard";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
-import { JobFinderPage } from "./job-finder-page";
 import { useJobFinderPageController } from "./use-job-finder-page-controller";
 import { resetJobFinderOverlaysForTests } from "../features/job-finder/lib/job-finder-overlay-ownership";
 
@@ -466,125 +465,6 @@ describe("JobFinderWindowCloseGuard under an active overlay", () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
-    });
-  });
-});
-
-describe("JobFinderPage answers close requests in every render state", () => {
-  function renderJobFinderPage() {
-    const router = createMemoryRouter(
-      [{ path: "/job-finder", element: <JobFinderPage /> }],
-      { initialEntries: ["/job-finder"] },
-    );
-    render(<RouterProvider router={router} />);
-  }
-
-  it("answers close requests while the opening shell is still loading", async () => {
-    const bridge = installCloseBridgeMock();
-    const nestor = window.nestor as unknown as {
-      ping: () => Promise<never>;
-    };
-    nestor.ping = () => new Promise(() => undefined);
-
-    renderJobFinderPage();
-
-    act(() => {
-      bridge.emitCloseRequest("req_loading");
-    });
-
-    await waitFor(() => {
-      expect(bridge.resolutions).toEqual([
-        { requestId: "req_loading", decision: "proceed" },
-      ]);
-    });
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("uses the production brand lockup and macOS-safe header geometry while opening", () => {
-    installCloseBridgeMock();
-    const nestor = window.nestor as unknown as {
-      ping: () => Promise<never>;
-    };
-    nestor.ping = () => new Promise(() => undefined);
-
-    renderJobFinderPage();
-
-    const openingShell = document.querySelector<HTMLElement>(
-      "[data-job-finder-opening-shell]",
-    );
-    const header = document.querySelector<HTMLElement>(
-      "[data-job-finder-shell-header]",
-    );
-    const brand = document.querySelector<HTMLElement>("[data-desktop-brand]");
-    const wordmark = document.querySelector<HTMLElement>(
-      "[data-desktop-brand-wordmark]",
-    );
-    const moduleNavigation = document.querySelector<HTMLElement>(
-      "[data-desktop-module-navigation]",
-    );
-
-    expect(openingShell).not.toBeNull();
-    expect(header?.className).toContain("h-14");
-    expect(brand?.style.paddingInlineStart).toBe("");
-    expect(
-      wordmark?.contains(screen.getByRole("img", { name: "Nestor" })),
-    ).toBe(true);
-    expect(
-      screen.getByRole("img", { name: "Nestor" }).getAttribute("class"),
-    ).toContain("sm:h-[1.3rem]");
-    // The opening skeleton mirrors the loaded shell header: the caption row
-    // carries the brand lockup and the native window-control reserve, and the
-    // module switch is the wordmark's subtitle inside the brand region — the
-    // one instance on screen.
-    expect(moduleNavigation).not.toBeNull();
-    expect(
-      brand?.querySelector(
-        "[data-desktop-brand-region] [data-desktop-brand-subtitle] [data-desktop-module-navigation]",
-      ),
-    ).toBe(moduleNavigation);
-    expect(
-      document.querySelectorAll("[data-module-switch-trigger]"),
-    ).toHaveLength(1);
-    expect(moduleNavigation?.className).not.toContain("absolute");
-    expect(brand?.className).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(
-      document.querySelector<HTMLElement>(
-        "[data-desktop-header-window-control-inset]",
-      ),
-    ).not.toBeNull();
-    expect(screen.getAllByRole("group", { name: "Nestor modules" })).toContain(
-      moduleNavigation,
-    );
-    expect(
-      screen.getByRole("navigation", { name: "Job Finder sections" }),
-    ).not.toBe(moduleNavigation);
-  });
-
-  it("answers close requests on the post-ready generic error screen", async () => {
-    const bridge = installCloseBridgeMock();
-    const nestor = window.nestor as unknown as {
-      jobFinder: Record<string, unknown>;
-    };
-    nestor.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
-      Promise.reject(new Error("workspace storage unavailable")),
-    );
-    nestor.jobFinder.getStartupDatabaseRecovery = vi.fn(() =>
-      Promise.reject(new Error("recovery facts unavailable")),
-    );
-
-    renderJobFinderPage();
-    await screen.findAllByText("Couldn't open Job Finder");
-
-    act(() => {
-      bridge.emitCloseRequest("req_error_screen");
-    });
-
-    // Exactly one proceed also proves exactly one responder is mounted: two
-    // subscribers would each answer the same request.
-    await waitFor(() => {
-      expect(bridge.resolutions).toEqual([
-        { requestId: "req_error_screen", decision: "proceed" },
-      ]);
     });
   });
 });

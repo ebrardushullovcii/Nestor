@@ -6,6 +6,7 @@ import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { Navigate, useLocation, useOutletContext } from "react-router-dom";
+import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
 import {
   markGuidedSetupAutoOpenSpent,
@@ -355,11 +356,16 @@ export function JobFinderHydrationGate(props: {
 export { JobFinderRouteErrorBoundary };
 
 export function JobFinderHomeRoute() {
-  const context = useJobFinderPageContext();
+  // Home opens before any old workspace loads, so setup state comes from the
+  // launch read until a screen that needs that workspace has loaded it.
+  const context = useOutletContext<JobFinderPageContext | null>();
+  const launched = useLaunchReads().context;
+  const setupState =
+    context?.workspace.profileSetupState ?? launched?.profileSetupState;
   // A workspace that has not started setup opens guided setup directly; Home
   // is one screen of hallway before it. The redirect is spent immediately so
   // the sidebar's Home destination still works.
-  if (shouldAutoOpenGuidedSetup(context.workspace.profileSetupState)) {
+  if (setupState && shouldAutoOpenGuidedSetup(setupState)) {
     markGuidedSetupAutoOpenSpent();
     return <Navigate replace to="/job-finder/profile/setup" />;
   }

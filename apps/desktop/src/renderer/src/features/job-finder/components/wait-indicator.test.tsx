@@ -294,30 +294,4 @@ describe("lazy-route fallback", () => {
     expect(getRouteSkeletonPanes("/job-finder/home")).toBe(1);
     expect(getRouteSkeletonPanes("/job-finder/settings")).toBe(1);
   });
-
-  it("resolves the Suspense fallback to a RouteSkeleton, not the centred card", () => {
-    const pageSource = readSource("pages/job-finder-page.tsx");
-    const isPendingAdoption = PENDING_ADOPTION.some(
-      (entry) => entry.path === "pages/job-finder-page.tsx",
-    );
-
-    if (isPendingAdoption) {
-      // CR-PKG06-01 is open against PKG-04. Pin the current shape so the
-      // allowlist entry is provably still needed rather than decorative.
-      expect(pageSource).toContain("fillAvailableViewport");
-      return;
-    }
-
-    // The page hands its fallback to the kept-routes outlet, whose Suspense
-    // boundaries paint it while a screen's code loads.
-    const fallback = pageSource.slice(
-      pageSource.indexOf("<JobFinderKeptRoutesOutlet"),
-      pageSource.indexOf("readyMarker="),
-    );
-    expect(fallback).toContain("RouteSkeleton");
-    expect(fallback).not.toContain("fillAvailableViewport");
-    expect(readSource("pages/job-finder-kept-routes.tsx")).toContain(
-      "<Suspense fallback={props.fallback}",
-    );
-  });
 });

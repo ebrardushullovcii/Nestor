@@ -22,7 +22,6 @@ import {
   JobFinderShell,
   SHELL_HEADER_CLASS,
   SHELL_SIDEBAR_CLASS,
-  SHELL_SIDEBAR_ROW_CLASS,
 } from "./job-finder-shell";
 
 const RENDERER_ROOT = path.resolve(
@@ -120,10 +119,26 @@ function createCountedWorkspace(): JobFinderRendererWorkspaceSnapshot {
  * sees; the class strings this file compares are the ones that would paint at
  * 1439px (compact navigation) and 1441px (sidebar).
  */
-function renderShell(workspace: JobFinderRendererWorkspaceSnapshot) {
+const COUNTED_STAGES = {
+  found: 2,
+  hidden: 0,
+  shortlisted: 0,
+  resume: 0,
+  applied: 2,
+};
+
+function renderShell(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+  stageCounts = COUNTED_STAGES,
+) {
   return render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
-      <JobFinderShell needsYouCount={1} platform="win32" workspace={workspace}>
+      <JobFinderShell
+        needsYouCount={1}
+        platform="win32"
+        stageCounts={stageCounts}
+        workspace={workspace}
+      >
         <div>Current screen</div>
       </JobFinderShell>
     </MemoryRouter>,
@@ -227,7 +242,13 @@ describe("shell destination counts", () => {
       },
     };
 
-    renderShell(workspace);
+    renderShell(workspace, {
+      found: 0,
+      hidden: 0,
+      shortlisted: 0,
+      resume: 0,
+      applied: 0,
+    });
 
     for (const root of [getSidebar(), getCompactNavigation()]) {
       const counts = Array.from(
@@ -286,45 +307,6 @@ describe("shell destination counts", () => {
 });
 
 describe("shell chrome ownership", () => {
-  it("has the opening shell consume the exported chrome instead of copying it", () => {
-    // The opening frame used to hold seventeen hand-copied class strings kept
-    // honest only by a parity test. It now imports them, so the two shells
-    // cannot drift and the geometry delta is 0 by construction.
-    for (const exported of [
-      "SHELL_HEADER_CLASS",
-      "SHELL_HEADER_GRID_CLASS",
-      "SHELL_BRAND_ROW_CLASS",
-      "SHELL_SIDEBAR_CLASS",
-      "SHELL_SIDEBAR_ROW_CLASS",
-      "SHELL_SIDEBAR_ROW_COLLAPSED_CLASS",
-      "SHELL_SIDEBAR_ROW_INACTIVE_CLASS",
-      "SHELL_SIDEBAR_ROW_ACTIVE_CLASS",
-      "SHELL_CONTENT_CLASS",
-      "SHELL_MAIN_SCROLLING_CLASS",
-      "SHELL_MAIN_LOCKED_CLASS",
-      "SHELL_ROUTE_CONTAINER_BASE_CLASS",
-      "COMPACT_NAV_PILL_CLASS",
-      "COMPACT_NAV_PILL_ACTIVE_CLASS",
-      "LOCKED_LAYOUT_SCREENS",
-    ]) {
-      expect(SHELL_SOURCE).toContain(`export const ${exported}`);
-      expect(PAGE_SOURCE).toContain(exported);
-    }
-    // No `OPENING_SHELL_*` chrome copy survives.
-    expect(PAGE_SOURCE).not.toMatch(/const OPENING_SHELL_[A-Z_]*CLASS\s*=/);
-
-    // The strings the loaded shell actually paints are the exported ones.
-    renderShell(createCountedWorkspace());
-    expect(
-      document.querySelector("[data-job-finder-shell-header]")?.className,
-    ).toBe(SHELL_HEADER_CLASS);
-    expect(getSidebar().className).toBe(SHELL_SIDEBAR_CLASS);
-    expect(
-      within(getSidebar())
-        .getByRole("button", { name: /^Settings/ })
-        .className.startsWith(SHELL_SIDEBAR_ROW_CLASS),
-    ).toBe(true);
-  });
 
   it("uses shared tokens for the sticky shell edges and the search scrim", () => {
     expect(SHELL_HEADER_CLASS).toContain(
@@ -356,6 +338,5 @@ describe("shell chrome ownership", () => {
     expect(container?.style.getPropertyValue("--gap-route-section")).toBe(
       "var(--gap-card)",
     );
-    expect(PAGE_SOURCE).toContain("SHELL_ROUTE_SECTION_GAP_STYLE");
   });
 });

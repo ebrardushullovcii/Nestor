@@ -6,7 +6,6 @@ import {
   QueryJobListInputSchema,
   JobDiscoveryTargetSchema,
   SavedJobDiscoveryProvenanceSchema,
-  ResumeDraftSchema,
   type SavedJob,
   type QueryJobListInput,
   type QueryJobListResult,
@@ -383,37 +382,6 @@ describe("independent workspace queries", () => {
       raw.close();
     }
   });
-  test("Home counts current approvals separately from stale approval overlays", async () => {
-    const { writer, reader, filePath } = await fixture();
-    await writer.commitSavedJobDelta({
-      upserts: [
-        assessedJob({ id: "approved-a" }),
-        assessedJob({ id: "approved-b" }),
-      ],
-    });
-    for (const id of ["approved-a", "approved-b"])
-      await writer.upsertResumeDraft(
-        ResumeDraftSchema.parse({
-          id,
-          jobId: id,
-          status: "approved",
-          templateId: "classic_ats",
-          createdAt: "2026-10-20T00:00:00.000Z",
-          updatedAt: "2026-10-20T00:00:00.000Z",
-          approvedAt: "2026-10-20T00:00:00.000Z",
-          sections: [],
-        }),
-      );
-    const raw = new DatabaseSync(filePath);
-    try {
-      raw
-        .prepare("INSERT INTO resume_draft_approval_state VALUES (?,?,?)")
-        .run("approved-a", "Profile changed.", "2026-10-24T00:00:00.000Z");
-    } finally {
-      raw.close();
-    }
-    expect(reader.getHomeSummary({ planId: null }).resumesApproved).toBe(1);
-  });
   test("orders complete ties with the existing locale comparison and keeps unknown posting dates last", async () => {
     const { writer, reader } = await fixture();
     const first = assessedJob({
@@ -672,71 +640,6 @@ describe("independent workspace queries", () => {
       scoreWithheld: true,
       resultGroup: "mismatches",
     });
-  });
-  test("startup reads preserve legacy bodies and do not wait for evidence conversion", async () => {
-    const temp = await createTempRepository("nestor-early-query-");
-    cleanups.push(temp.cleanup);
-    const writer = await temp.createRepository();
-    const preferences = await writer.getSearchPreferences();
-    const campaigns = await writer.getCampaignState();
-    const job = createSavedJob({
-      id: "early",
-      status: "discovered",
-      description: "Synthetic listing evidence.",
-      firstSeenAt: "2026-10-20T10:00:00.000Z",
-    });
-    await writer.commitSavedJobDelta({ upserts: [job] });
-    await writer.close();
-    const raw = new DatabaseSync(temp.filePath);
-    cleanups.push(() => raw.close());
-    raw
-      .prepare(
-        "UPDATE saved_jobs SET value = ?, assessment_id = NULL, description_id = NULL, list_visible = NULL, first_seen_at = NULL, last_seen_at = NULL WHERE id = ?",
-      )
-      .run(JSON.stringify(job), job.id);
-    raw
-      .prepare(
-        "UPDATE singleton_state SET value = ? WHERE key = 'search_preferences'",
-      )
-      .run(JSON.stringify(preferences));
-    raw
-      .prepare(
-        "UPDATE singleton_state SET value = ? WHERE key = 'campaign_state'",
-      )
-      .run(JSON.stringify(campaigns));
-    raw.exec(
-      "DELETE FROM schema_migrations WHERE version IN (26,27,28,29); DELETE FROM workspace_read_meta",
-    );
-    const before = raw
-      .prepare("SELECT value FROM saved_jobs WHERE id = ?")
-      .get(job.id)!.value;
-    prepareWorkspaceQueryDatabase(temp.filePath);
-    const reader = createWorkspaceQueryRepository(temp.filePath);
-    cleanups.push(() => reader.close());
-    expect(reader.getStartupContext().sourceCount).toBe(
-      preferences.discovery.targets.length,
-    );
-    const page = reader.queryJobList({
-      list: "all",
-      filters: { planId: null },
-    });
-    expect(page.total).toBe(1);
-    expect(page.rows[0]).toMatchObject({
-      id: job.id,
-      firstSeenAt: job.firstSeenAt,
-    });
-    expect(reader.getHomeSummary({ planId: null }).counts.all).toBe(1);
-    expect(
-      raw.prepare("SELECT value FROM saved_jobs WHERE id = ?").get(job.id)!
-        .value,
-    ).toBe(before);
-    expect(
-      raw
-        .prepare(
-          "SELECT version FROM schema_migrations WHERE version IN (26,27,28,29)",
-        )
-        .all(),
-    ).toEqual([]);
   });
   test("a bulk index rebuild bumps order/activity once and retains subsequent row updates", async () => {
     const { writer, reader, filePath } = await fixture();

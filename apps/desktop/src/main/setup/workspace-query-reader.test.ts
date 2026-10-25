@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import { afterEach, expect, test, vi } from "vitest";
 import type {
   WorkspaceChanges,
-  WorkspaceHomeSummary,
   QueryJobListResult,
   WorkspaceQueryPortMessage,
 } from "@nestor/contracts";
@@ -25,18 +24,6 @@ vi.mock("@nestor/db", () => {
         hasMore: false,
         lists: [],
       }),
-      getHomeSummary: (): WorkspaceHomeSummary => {
-        state.trace.push("home read");
-        return {
-          counts,
-          revision: 0,
-          resumesToReview: 0,
-          resumesApproved: 0,
-          activePlanId: null,
-          searchRunning: false,
-          applicationsByStatus: {},
-        };
-      },
       queryJobList: (): QueryJobListResult => {
         state.trace.push("page read");
         return {
@@ -71,7 +58,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-test("posts the ready Home reply before starting a queued page read", async () => {
+test("answers each queued read before starting the next", async () => {
   const parent = new EventEmitter();
   Object.defineProperty(process, "parentPort", {
     configurable: true,
@@ -84,7 +71,7 @@ test("posts the ready Home reply before starting a queued page read", async () =
     }
     postMessage(message: WorkspaceQueryPortMessage) {
       if (message.type === "reply")
-        state.trace.push(message.id === 1 ? "home reply" : "page reply");
+        state.trace.push(`reply ${message.id}`);
     }
   }
   const port = new Port();
@@ -93,7 +80,10 @@ test("posts the ready Home reply before starting a queued page read", async () =
   });
   parent.emit("message", { data: { type: "attach" }, ports: [port] });
   port.emit("message", {
-    data: { id: 1, request: { method: "getHomeSummary", input: {} } },
+    data: {
+      id: 1,
+      request: { method: "queryJobList", input: { list: "discovery" } },
+    },
   });
   port.emit("message", {
     data: {
@@ -102,11 +92,11 @@ test("posts the ready Home reply before starting a queued page read", async () =
     },
   });
   parent.emit("message", { data: { type: "queries-ready" } });
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  await vi.waitFor(() => expect(state.trace).toHaveLength(4));
   expect(state.trace).toEqual([
-    "home read",
-    "home reply",
     "page read",
-    "page reply",
+    "reply 1",
+    "page read",
+    "reply 2",
   ]);
 });

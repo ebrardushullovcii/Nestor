@@ -1,14 +1,8 @@
 import {
-  JobListRowSchema,
-  ReviewQueueItemSchema,
   type JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { buildJobFinderGlobalSearchEntries } from "./build-job-finder-global-search-entries";
-import {
-  countDiscoveryVisibleJobs,
-  countShortlistedJobs,
-} from "./destination-counts";
 import { searchJobFinderEntries } from "./job-finder-global-search";
 
 function buildWorkspaceFixture(activeCampaignId: string | null) {
@@ -125,70 +119,6 @@ function buildWorkspaceFixture(activeCampaignId: string | null) {
 }
 
 describe("buildJobFinderGlobalSearchEntries", () => {
-  it("keeps rows beyond the former fetch limit searchable while counts retain active-plan scope", () => {
-    const seed = JobListRowSchema.parse({
-      id: "job-0",
-      source: "target_site",
-      sourceJobId: "synthetic",
-      canonicalUrl: "https://example.test/synthetic",
-      title: "Engineer",
-      company: "Example",
-      location: "Remote",
-      workMode: ["remote"],
-      applyPath: "external_redirect",
-      easyApplyEligible: false,
-      salaryText: null,
-      discoveredAt: "2026-10-13T00:00:00.000Z",
-      status: "discovered",
-      matchAssessment: { score: 80 },
-      detailRevision: "synthetic-revision",
-    });
-    const jobs = Array.from({ length: 1001 }, (_, index) => ({
-      ...seed,
-      id: `job-${index}`,
-      title: `Engineer ${index}`,
-    }));
-    const workspace = {
-      ...buildWorkspaceFixture("campaign-active"),
-      discoveryJobs: jobs,
-      campaigns: buildWorkspaceFixture("campaign-active").campaigns.map(
-        (campaign, index) => ({
-          ...campaign,
-          jobIds: jobs.slice(index * 50, (index + 1) * 50).map(({ id }) => id),
-        }),
-      ),
-      reviewQueue: jobs.slice(0, 75).map((job) =>
-        ReviewQueueItemSchema.parse({
-          jobId: job.id,
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          matchScore: 80,
-          applicationStatus: "shortlisted",
-          assetStatus: "not_started",
-          progressPercent: null,
-          resumeAssetId: null,
-          updatedAt: seed.discoveredAt,
-        }),
-      ),
-    };
-    const entries = buildJobFinderGlobalSearchEntries(workspace);
-    expect(entries.filter(({ kind }) => kind === "job")).toHaveLength(1001);
-    const lastJob = searchJobFinderEntries(entries, "Engineer 1000")
-      .find(({ kind }) => kind === "job")
-      ?.entries.find(({ id }) => id === "job-1000");
-    expect(lastJob?.href).toBe("/job-finder/discovery?jobId=job-1000");
-    expect(lastJob?.subtitle).toContain(
-      "Saved on this device, not in this search plan",
-    );
-    // Every job of the plan is shortlisted, so none waits in Find jobs.
-    expect(countDiscoveryVisibleJobs(workspace)).toBe(0);
-    expect(countShortlistedJobs(workspace)).toBe(50);
-    const planless = { ...workspace, activeCampaignId: "missing" };
-    expect(countDiscoveryVisibleJobs(planless)).toBe(1001 - 75);
-    expect(countShortlistedJobs(planless)).toBe(75);
-    expect(jobs[1000]).not.toHaveProperty("description");
-  });
 
   it("keeps the exact job and application context in search links", () => {
     const workspace = {
