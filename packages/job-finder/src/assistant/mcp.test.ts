@@ -34,7 +34,9 @@ it("creates and reads the real Needs you answer library through MCP", async () =
   });
   const ctx = context();
   ctx.session.assertPersonAnswerAuthority = () => Promise.resolve();
-  ctx.session.recordChange = vi.fn((input) =>
+  ctx.session.recordChange = vi.fn<
+    AssistantToolContext["session"]["recordChange"]
+  >((input) =>
     Promise.resolve({
       receipt: AssistantChangeReceiptSchema.parse({
         id: "receipt",
