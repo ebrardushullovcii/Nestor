@@ -831,7 +831,8 @@ export function ProfileSetupReviewQueueCard(props: {
                 ) : items.length > 0 ? (
                   <details className="md:col-span-2" key="optional">
                     <summary className="cursor-pointer text-sm font-medium">
-                      {items.length} optional suggestions
+                      {items.length} optional suggestion
+                      {items.length === 1 ? "" : "s"}
                     </summary>
                     <div className="mt-3 grid gap-3">{cards}</div>
                   </details>

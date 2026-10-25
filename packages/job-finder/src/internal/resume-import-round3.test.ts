@@ -184,29 +184,36 @@ describe("round-three resume import regressions", () => {
     ["workModes", ["onsite", "remote"]],
     ["targetRoles", ["Illustrator", "Visual Designer"]],
   ])(
-    "R3-053/R3-086 keeps imported %s reviewable until confirmation",
+    "R3-053/R3-086 imported %s fill the empty preference, but never replace a saved one",
     (key, values) => {
       const proposed = candidate("search_preferences", key, values);
+      const emptyPreferences = {
+        ...seed.searchPreferences,
+        workModes: [],
+        targetRoles: [],
+      };
       const reconciled = reconcileCandidates(
         fresh(),
-        { ...seed.searchPreferences, workModes: [], targetRoles: [] },
+        emptyPreferences,
         [proposed],
         bundle,
         { readByModel: true },
       );
-      expect(reconciled[0]?.resolution).toBe("needs_review");
+      expect(reconciled[0]?.resolution).toBe("auto_applied");
       expect(
-        apply(reconciled).searchPreferences[key as "workModes" | "targetRoles"],
-      ).toEqual([]);
-      const confirmed = {
-        ...reconciled[0]!,
-        resolution: "auto_applied" as const,
-      };
-      expect(
-        apply([confirmed], fresh(), confirmed.id).searchPreferences[
+        apply(reconciled, fresh()).searchPreferences[
           key as "workModes" | "targetRoles"
         ],
       ).toEqual(values);
+
+      const saved = reconcileCandidates(
+        seed.profile,
+        seed.searchPreferences,
+        [proposed],
+        bundle,
+        { readByModel: true },
+      );
+      expect(saved[0]?.resolution).toBe("needs_review");
     },
   );
 
@@ -385,7 +392,7 @@ describe("round-three resume import regressions", () => {
     });
   });
 
-  test("R3-223 imported evidence stays reviewable even alongside a matching role achievement", () => {
+  test("R3-223 imported evidence repeating a role achievement verbatim is dropped as a duplicate", () => {
     const proof = candidate(
       "proof_point",
       "record",
@@ -409,8 +416,11 @@ describe("round-three resume import regressions", () => {
       resolution: "auto_applied" as const,
     };
     expect(
-      promoteGroundedSharedMemoryCandidates([experience, proof])[1]?.resolution,
-    ).toBe("needs_review");
+      promoteGroundedSharedMemoryCandidates([experience, proof])[1],
+    ).toMatchObject({
+      resolution: "rejected",
+      resolutionReason: "redundant_with_work_history",
+    });
   });
 });
 

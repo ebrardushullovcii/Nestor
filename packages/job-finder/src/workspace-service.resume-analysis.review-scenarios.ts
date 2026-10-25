@@ -224,7 +224,7 @@ describe("createJobFinderWorkspaceService", () => {
     ).toEqual(["Platform migration proof"]);
   });
 
-  test("only auto-applies low-risk literal fields while routing experience records to review", async () => {
+  test("fills a placeholder headline and empty work history on an existing profile", async () => {
     const seed = createSeed();
     const { repository, workspaceService } = createWorkspaceServiceHarness({
       seed: {
@@ -484,7 +484,7 @@ describe("createJobFinderWorkspaceService", () => {
     expect(snapshot.profile.fullName).toBe("Jamie Rivers");
     expect(snapshot.profile.firstName).toBe("Jamie");
     expect(snapshot.profile.lastName).toBe("Rivers");
-    expect(snapshot.profile.headline).toBe("Import your resume to begin");
+    expect(snapshot.profile.headline).toBe("Staff Frontend Engineer");
     expect(snapshot.profile.email).toBe("jamie@example.com");
     expect(snapshot.profile.phone).toBe("+49 555 1234");
     expect(snapshot.profile.linkedinUrl).toBe(

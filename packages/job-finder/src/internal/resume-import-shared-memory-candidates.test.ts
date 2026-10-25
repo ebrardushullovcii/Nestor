@@ -8,7 +8,7 @@ import {
 } from "../workspace-service.resume-analysis.shared";
 
 describe("promoteGroundedSharedMemoryCandidates", () => {
-  test("keeps role achievements and richer proofs available for explicit review", () => {
+  test("drops proofs that repeat a work-history bullet verbatim, keeps richer proofs for review", () => {
     const now = "2026-07-31T04:00:00.000Z";
     const achievement =
       "Led a React and TypeScript shipment-tracking redesign used by 18 internal operations teams.";
@@ -124,7 +124,8 @@ describe("promoteGroundedSharedMemoryCandidates", () => {
     );
     expect(promoted[1]).toEqual(
       expect.objectContaining({
-        resolution: "needs_review",
+        resolution: "rejected",
+        resolutionReason: "redundant_with_work_history",
       }),
     );
     expect(promoted[2]).toEqual(
@@ -182,6 +183,24 @@ describe("promoteGroundedSharedMemoryCandidates", () => {
     // The same paragraph must not fill both the professional summary and the
     // professional story: one edit, one field.
     expect(promoted[1]).toEqual(
+      expect.objectContaining({
+        resolution: "rejected",
+        resolutionReason: "redundant_with_professional_summary",
+      }),
+    );
+
+    // Same when reconciliation already applied the story into the empty
+    // narrative field.
+    const appliedStory = {
+      ...duplicateStory,
+      resolution: "auto_applied" as const,
+    };
+    expect(
+      promoteGroundedSharedMemoryCandidates([
+        summaryCandidate,
+        appliedStory,
+      ])[1],
+    ).toEqual(
       expect.objectContaining({
         resolution: "rejected",
         resolutionReason: "redundant_with_professional_summary",

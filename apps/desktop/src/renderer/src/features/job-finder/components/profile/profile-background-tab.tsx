@@ -121,8 +121,12 @@ export function ProfileBackgroundTab({
                 defaultOpen={index === 0}
                 forceOpenSignal={getAppendedRecordOpenSignal(entry.id)}
                 summary={joinProfileSummaryParts([
-                  watch(`records.education.${index}.degree`),
-                  watch(`records.education.${index}.schoolName`),
+                  // The card title already shows the degree (or the school
+                  // when there is no degree); repeating it here printed the
+                  // degree twice.
+                  watch(`records.education.${index}.degree`)?.trim()
+                    ? watch(`records.education.${index}.schoolName`)
+                    : null,
                   joinProfileSummaryParts([
                     watch(`records.education.${index}.startDate`),
                     watch(`records.education.${index}.endDate`),
