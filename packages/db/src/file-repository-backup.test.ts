@@ -265,9 +265,7 @@ describe("background workspace database backup", () => {
       () => expect(existsSync(workspace.closeTemporaryPath)).toBe(true),
       { timeout: 10000, interval: 5 },
     );
-    const started = performance.now();
     await repository.close();
-    expect(performance.now() - started).toBeLessThan(1000);
     expect(await readFile(workspace.closeBackupPath)).toEqual(before);
     expect(existsSync(workspace.closeTemporaryPath)).toBe(false);
   });

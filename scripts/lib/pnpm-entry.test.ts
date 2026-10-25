@@ -18,12 +18,12 @@ import {
 const POSIX_ONLY = "needs a POSIX PATH and shebang execution";
 const onWindows = process.platform === "win32";
 
-// Same approved scratch root the release evidence collector uses for
-// disposable fixtures.
+// Disposable fixtures live under one scratch root in the OS temp dir.
 const approvedTempRoot = path.join(os.tmpdir(), "opencode");
 const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 function makeFixture(name: string): string {
+  mkdirSync(approvedTempRoot, { recursive: true });
   return mkdtempSync(path.join(approvedTempRoot, `${name}-`));
 }
 
