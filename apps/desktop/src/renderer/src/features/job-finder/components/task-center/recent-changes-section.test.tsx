@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
 
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
-import { cleanup, render, } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, test, } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import {
-  resetRecentChangesForTest,
-} from "../../lib/recent-changes";
+import { resetRecentChangesForTest } from "../../lib/recent-changes";
 import { RecentChangesSection } from "./recent-changes-section";
 
 const workspace = {
@@ -19,7 +17,6 @@ beforeEach(() => resetRecentChangesForTest());
 afterEach(() => cleanup());
 
 describe("RecentChangesSection", () => {
-
   test("shows nothing before the first move", () => {
     const { container } = render(
       <RecentChangesSection

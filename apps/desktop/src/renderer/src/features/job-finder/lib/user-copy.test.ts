@@ -217,7 +217,7 @@ const RULES: readonly Rule[] = [
  * and is deleted by the zone package that converts that file. The list MUST be
  * empty when the last zone package lands.
  *
- * Owners, by zone: `screens/applications/**` and `pages/**` → Applications;
+ * Owners, by zone: `pages/**` → Applications;
  * `screens/settings/**` → Settings; `screens/discovery/**` → Find jobs;
  * `../shortlisted/**` → Shortlisted;
  * `components/profile/**` → Profile; `screens/companies/**`,
@@ -237,8 +237,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/components/profile/profile-import-suggestion-list.tsx",
     "features/job-finder/components/profile/profile-preferences-sections.tsx",
     "features/job-finder/components/profile/setup/profile-setup-step-sections.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-helpers.ts",
-    "features/job-finder/screens/applications/applications-status.ts",
     "features/job-finder/screens/settings/settings-runtime-summary.tsx",
   ],
   underscoreDisplay: [

@@ -3,9 +3,7 @@ import {
   isDiscoveryAlsoFoundResult,
   isDiscoveryDecidedJob,
 } from "../screens/discovery/discovery-result-groups";
-import { listApplyRunsStoppedBySafeguard } from "./apply-run-pause-state";
 import { countWorkspaceNeedsYouItems } from "./needs-you-count";
-import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";
 
 /**
  * One exported owner per destination badge, named for the population it counts.
@@ -98,39 +96,6 @@ export function countApplicationRecords(
   return (workspace.applicationRecords ?? []).filter((record) =>
     campaignJobIds.has(record.jobId),
   ).length;
-}
-
-const NO_SAFEGUARDS = {
-  companyApplicationCaps: [],
-  simultaneousApplicationConflicts: [],
-  listingSignals: [],
-  abnormalFailurePauses: [],
-  preparedBatchSampleReviews: [],
-  contradictoryAnswerDetections: [],
-  safeguardDismissals: [],
-  updatedAt: null,
-} as const;
-
-/**
- * Everything Safeguards holds back: active safeguard records plus the
- * application runs a safety limit stopped. The Safeguards page, Home's next
- * step and the Activity card all count this, so their numbers agree.
- */
-export function countWorkspaceSafeguardBlockers(
-  workspace: Pick<
-    JobFinderRendererWorkspaceSnapshot,
-    | "applyRuns"
-    | "applyJobResults"
-    | "userActionRequests"
-    | "intelligence"
-    | "applicationRecords"
-  >,
-): number {
-  return (
-    countActiveSafeguardBlockers(
-      workspace.intelligence?.safeguards ?? NO_SAFEGUARDS,
-    ) + listApplyRunsStoppedBySafeguard(workspace).length
-  );
 }
 
 export function countNeedsYou(

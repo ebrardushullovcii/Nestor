@@ -1159,28 +1159,6 @@ export function JobFinderPage() {
     (...args) => latestShellState.current.context?.onRunSourceDebug(...args),
     [],
   );
-  const onCancelApplyRun = useCallback(async (runId: string) => {
-    const current = latestShellState.current;
-    if (!current.workspace || !current.context) return false;
-    // Cancel stops the whole run. Prefer the actively filling result, then
-    // its first assigned application; a batch can have several applications.
-    let assignedResult = null;
-    for (const result of current.workspace.applyJobResults) {
-      if (result.runId !== runId || result.applicationRecordId === null)
-        continue;
-      assignedResult ??= result;
-      if (result.state === "filling") {
-        assignedResult = result;
-        break;
-      }
-    }
-    if (!assignedResult?.applicationRecordId) return false;
-    return current.context.onCancelApplyRun({
-      runId,
-      jobId: assignedResult.jobId,
-      applicationRecordId: assignedResult.applicationRecordId,
-    });
-  }, []);
   const onUndoRecentChange = useCallback(
     (change: RecentChange) =>
       latestShellState.current.context?.onUndoRecentChange(change) ??
@@ -1274,7 +1252,6 @@ export function JobFinderPage() {
             isResumeImportPending={context.isPending(
               jobFinderPendingActions.profileImport(),
             )}
-            onCancelApplyRun={onCancelApplyRun}
             onDismissSavedStatus={dismissSavedStatus}
             onNavigate={navigateFromShell}
             onUndoRecentChange={onUndoRecentChange}

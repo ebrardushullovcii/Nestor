@@ -21,9 +21,6 @@ interface JobFinderTaskCenterProps {
   workspace: JobFinderRendererWorkspaceSnapshot;
   isResumeImportPending: boolean;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
-  onCancelApplyRun?:
-    | ((runId: string) => boolean | void | Promise<boolean | void>)
-    | undefined;
   onNavigate?: ((path: string) => void | Promise<void>) | undefined;
   /** Puts back one of the person's recent moves. */
   onUndoRecentChange?: ((change: RecentChange) => Promise<boolean>) | undefined;
@@ -88,9 +85,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
   // whether the Task Center is open, regardless of how the last toggle
   // happened (summary click, Escape, outside press, or task navigation).
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [cancelRequestedTaskIds, setCancelRequestedTaskIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const [taskFeedback, setTaskFeedback] = useState<
     Readonly<Record<string, string>>
   >({});
@@ -110,18 +104,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
       props.workspace,
     ],
   );
-
-  useEffect(() => {
-    const cancellableTaskIds = new Set(
-      model.items.filter((item) => item.canCancel).map((item) => item.id),
-    );
-    setCancelRequestedTaskIds((current) => {
-      const next = new Set(
-        [...current].filter((taskId) => cancellableTaskIds.has(taskId)),
-      );
-      return next.size === current.size ? current : next;
-    });
-  }, [model.items]);
 
   const closePanel = useCallback((restoreFocus: boolean) => {
     setIsPanelOpen(false);
@@ -167,46 +149,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, [closePanel, isPanelOpen, isPanelTopmost]);
-
-  async function cancelTask(item: JobFinderTaskCenterItem) {
-    if (
-      !item.canCancel ||
-      !item.cancelKind ||
-      cancelRequestedTaskIds.has(item.id)
-    ) {
-      return;
-    }
-
-    setTaskFeedback((current) => {
-      const next = { ...current };
-      delete next[item.id];
-      return next;
-    });
-    setCancelRequestedTaskIds((current) => new Set(current).add(item.id));
-    try {
-      const cancelOperation = props.onCancelApplyRun
-        ? () => props.onCancelApplyRun?.(item.id)
-        : undefined;
-      const result = cancelOperation ? await cancelOperation() : false;
-      if (result !== false) {
-        return;
-      }
-    } catch {
-      // Keep the task available for another attempt and explain what happened here.
-    }
-
-    setTaskFeedback((current) => ({
-      ...current,
-      [item.id]:
-        "Cancellation did not complete. Check the task, then try again.",
-    }));
-
-    setCancelRequestedTaskIds((current) => {
-      const next = new Set(current);
-      next.delete(item.id);
-      return next;
-    });
-  }
 
   async function navigateToTask(item: JobFinderTaskCenterItem) {
     if (!item.resumeRoute) {
@@ -361,13 +303,12 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
-            Nothing is running. Resume imports and application runs show here
+            Nothing is running. Resume imports and source checks show here
             while they work.
           </p>
         ) : (
           <div className="grid gap-3">
             {visibleItems.map((item) => {
-              const cancellationRequested = cancelRequestedTaskIds.has(item.id);
               const visibleStatus = item.status;
               return (
                 <article
@@ -415,7 +356,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
                     ) : null}
                   </dl>
 
-                  {item.canCancel || item.resumeRoute ? (
+                  {item.resumeRoute ? (
                     <div className="flex flex-wrap justify-end gap-2">
                       {item.resumeRoute && item.resumeActionLabel ? (
                         <Button
@@ -435,19 +376,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
                           variant="outline"
                         >
                           {item.reviewActionLabel}
-                        </Button>
-                      ) : null}
-                      {item.canCancel ? (
-                        <Button
-                          disabled={cancellationRequested}
-                          onClick={() => void cancelTask(item)}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          {cancellationRequested
-                            ? "Cancellation requested"
-                            : "Cancel task"}
                         </Button>
                       ) : null}
                     </div>

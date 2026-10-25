@@ -97,7 +97,6 @@ import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
 interface JobFinderShellProps {
   children: ReactNode;
   isResumeImportPending?: boolean;
-  onCancelApplyRun?: (runId: string) => Promise<boolean>;
   onDismissSavedStatus?: () => void;
   onNavigate?: (path: string) => void;
   onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
@@ -471,7 +470,6 @@ function getActiveScreen(pathname: string): JobFinderScreen {
 export function JobFinderShell({
   children,
   isResumeImportPending = false,
-  onCancelApplyRun,
   onDismissSavedStatus,
   onNavigate,
   onUndoRecentChange,
@@ -1719,7 +1717,6 @@ export function JobFinderShell({
             </button>
             <JobFinderTaskCenter
               isResumeImportPending={isResumeImportPending}
-              onCancelApplyRun={onCancelApplyRun}
               onNavigate={(path) => {
                 if (onNavigate) {
                   onNavigate(path);
