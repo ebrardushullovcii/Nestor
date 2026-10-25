@@ -9,10 +9,8 @@ import {
 /**
  * ADR 0012 / ADR 0013 application-authority contracts.
  *
- * These schemas are the durable foundation for user-scoped autonomous
- * application execution. They are additive only: current production remains
- * prepare-only and no runtime behavior changes until these contracts are wired
- * through an explicit vertical slice per mode.
+ * Authority for application execution. The engine retains a lower-authority
+ * prepare-only capability; the person's Apply setting has two choices.
  *
  * Layering note: this module intentionally depends only on `./base`. The
  * apply-flow module imports from here, so shared origin/path validators are
@@ -48,6 +46,13 @@ export const ApplicationAutomationModeSchema = z.enum(
 export type ApplicationAutomationMode = z.infer<
   typeof ApplicationAutomationModeSchema
 >;
+
+/** The person's Apply setting. prepare_only remains an engine safety capability. */
+export const ApplicationApplyModeSchema =
+  ApplicationAutomationModeSchema.exclude(["prepare_only"]);
+export type ApplicationApplyMode = z.infer<typeof ApplicationApplyModeSchema>;
+export const DEFAULT_APPLICATION_APPLY_MODE: ApplicationApplyMode =
+  "confirm_before_submit";
 
 export const applicationAuthorityStatusValues = [
   "active",
@@ -336,11 +341,7 @@ export const ApplicationAuthorityEnvelopeSchema = z
     status: ApplicationAuthorityStatusSchema,
     revision: z.number().int().positive(),
     scope: ApplicationAuthorityScopeSchema,
-    maxApplicationsPerRun: z
-      .number()
-      .int()
-      .min(1)
-      .max(Number.MAX_SAFE_INTEGER),
+    maxApplicationsPerRun: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     intermediateMutationsAuthorized: z.boolean(),
     // Pinned false for v1: autonomous authority never includes creating
     // employer accounts. Widening this requires an explicit contract change.

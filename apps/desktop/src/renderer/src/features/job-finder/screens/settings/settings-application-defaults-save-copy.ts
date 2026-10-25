@@ -1,13 +1,11 @@
 import type {
-  ApplicationAutomationMode,
+  ApplicationApplyMode,
   UpdateApplicationDefaultsInput,
 } from "@nestor/contracts";
 
-const APPLY_MODE_SAVED: Record<ApplicationAutomationMode, string> = {
-  prepare_only:
-    "Applying saved. Apply fills in each form and attaches the resume; you press Send.",
+const APPLY_MODE_SAVED: Record<ApplicationApplyMode, string> = {
   confirm_before_submit:
-    "Applying saved. Apply fills in each form, then waits for your go-ahead before sending.",
+    "Applying saved. Apply fills in each form and attaches your resume; you press Send.",
   autonomous_submit:
     "Applying saved. Apply fills in and sends each application, and pauses only when it needs you.",
 };

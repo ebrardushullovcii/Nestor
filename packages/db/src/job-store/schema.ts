@@ -10,7 +10,7 @@
  */
 import { APPLICATION_SCHEMA } from "./application-schema";
 
-export const JOB_STORE_VERSION = 2;
+export const JOB_STORE_VERSION = 3;
 
 const JOBS = `
 CREATE TABLE IF NOT EXISTS jobs (

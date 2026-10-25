@@ -2572,7 +2572,7 @@ describe("createJobFinderWorkspaceService", () => {
       seed.settings = {
         ...seed.settings,
         resumeApplicationMode: "original_resume",
-        applicationAutomationMode: "prepare_only",
+        applicationAutomationMode: "confirm_before_submit",
       };
       const { workspaceService } = createWorkspaceServiceHarness({ seed });
       const snapshot = await workspaceService.startAutoApplyQueueRun(

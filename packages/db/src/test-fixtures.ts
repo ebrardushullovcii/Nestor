@@ -187,6 +187,7 @@ export function createSeed(): JobFinderRepositorySeed {
     resumeImportDocumentBundles: [],
     resumeImportFieldCandidates: [],
     settings: {
+      applicationAutomationMode: "confirm_before_submit",
       resumeApplicationMode: "tailored_per_job" as const,
       resumeFormat: "html" as const,
       resumeTemplateId: "classic_ats" as const,

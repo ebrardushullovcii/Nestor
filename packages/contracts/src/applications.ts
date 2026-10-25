@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { IsoDateTimeSchema } from "./base";
 import { JobIdSchema, JobSelectionSchema } from "./jobs";
+import { ApplicationApplyModeSchema } from "./application-authority";
 
 export const ApplyJobsInputSchema = z
   .object({ selection: JobSelectionSchema })
@@ -35,6 +36,7 @@ export const ApplicationIdSchema = z.number().int().positive();
 export const ApplicationRowSchema = z.object({
   id: ApplicationIdSchema,
   jobId: JobIdSchema,
+  mode: ApplicationApplyModeSchema,
   title: z.string(),
   company: z.string(),
   location: z.string(),

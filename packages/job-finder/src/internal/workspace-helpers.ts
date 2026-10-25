@@ -202,7 +202,7 @@ export function normalizeJobFinderSettings(
   return JobFinderSettingsSchema.parse({
     ...settings,
     applicationAutomationMode:
-      settings.applicationAutomationMode ?? "prepare_only",
+      settings.applicationAutomationMode ?? "confirm_before_submit",
     resumeApplicationMode: settings.resumeApplicationMode ?? "tailored_per_job",
     resumeFormat: "pdf",
     resumeTemplateId: selectedTemplateAvailable

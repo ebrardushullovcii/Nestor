@@ -1,10 +1,13 @@
 import {
   ApplicationListQuerySchema,
+  ApplicationApplyModeSchema,
+  DEFAULT_APPLICATION_APPLY_MODE,
   ApplicationPreparationUpdateSchema,
   ApplyJobsInputSchema,
   type ApplicationListPage,
   type ApplicationListQuery,
   type ApplicationRow,
+  type ApplicationApplyMode,
   type ApplicationPreparationUpdate,
   type ApplyJobsInput,
   type ApplyJobsResult,
@@ -18,6 +21,7 @@ import { createNeedsYouStore } from "./needs-you";
 type Row = {
   id: number;
   job_id: number;
+  mode: ApplicationApplyMode;
   title: string;
   company: string;
   location: string;
@@ -29,13 +33,14 @@ type Row = {
   error: string | null;
 };
 
-const COLUMNS = `a.id, a.job_id, j.title, j.company, j.location, a.state,
+const COLUMNS = `a.id, a.job_id, a.mode, j.title, j.company, j.location, a.state,
   a.attempt, a.queued_at, a.updated_at, a.submitted_at, a.error`;
 
 function toRow(row: Row): ApplicationRow {
   return {
     id: row.id,
     jobId: row.job_id,
+    mode: row.mode,
     title: row.title,
     company: row.company,
     location: row.location,
@@ -68,7 +73,11 @@ export function createApplicationStore(store: JobStore) {
 
   return {
     /** Queues approved jobs; the browser runner consumes these rows separately. */
-    applyJobs(input: ApplyJobsInput): ApplyJobsResult {
+    applyJobs(
+      input: ApplyJobsInput,
+      requestedMode: ApplicationApplyMode = DEFAULT_APPLICATION_APPLY_MODE,
+    ): ApplyJobsResult {
+      const mode = ApplicationApplyModeSchema.parse(requestedMode);
       const { selection } = ApplyJobsInputSchema.parse(input);
       if (!("ids" in selection) && selection.filter.stage !== "resume") {
         throw new Error("Apply requires the Approved filter.");
@@ -96,14 +105,14 @@ export function createApplicationStore(store: JobStore) {
         ).get(...params) as { n: number };
         const now = Date.now();
         const result = sql(
-          `INSERT INTO applications (job_id, state, queued_at, updated_at)
-           SELECT j.id, 'queued', ?, ? FROM jobs j WHERE ${where}
+          `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
+           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${where}
            ON CONFLICT(job_id) DO UPDATE SET
-             state = 'queued', queued_at = excluded.queued_at,
+             mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL
            WHERE applications.state IN ('stopped', 'failed')
              AND applications.submitted_at IS NULL`,
-        ).run(now, now, ...params);
+        ).run(mode, now, now, ...params);
         const queued = Number(result.changes);
         if (queued > 0)
           changed(selected && selected.length <= 200 ? selected : null);
