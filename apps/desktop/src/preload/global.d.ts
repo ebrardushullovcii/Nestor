@@ -1,4 +1,5 @@
 import type { DesktopResumesBridge } from "./resumes";
+import type { DesktopTrackerBridge } from "./tracker";
 import type {
   ApplicationListPage,
   ApplicationListQuery,
@@ -180,6 +181,7 @@ declare global {
       assistant: DesktopAssistantBridge;
       jobs: DesktopJobsBridge;
       resumes: DesktopResumesBridge;
+      tracker: DesktopTrackerBridge;
       ping: () => Promise<DesktopPlatformPing>;
       window: {
         close: () => Promise<{ ok: true }>;

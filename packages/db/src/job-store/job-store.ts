@@ -30,6 +30,7 @@ import { JOB_STORE_SCHEMA, JOB_STORE_VERSION } from "./schema";
 import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 
+export { createTrackerStore, type TrackerStore } from "./tracker";
 export {
   createResumeStore,
   ResumeChangedError,

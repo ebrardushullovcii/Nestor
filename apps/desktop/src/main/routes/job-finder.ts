@@ -2668,12 +2668,12 @@ export function registerJobFinderRouteHandlers(
           workspace.job.title,
           workspace.job.company,
         );
-        const saveResult = await chooseResumeExportPath(
+        const chosenPath = await chooseResumeExportPath(
           event.sender,
           defaultPath,
         );
 
-        if (saveResult.canceled || !saveResult.filePath) {
+        if (!chosenPath) {
           const snapshot = await readWorkspaceProjection(
             jobFinderWorkspaceService,
           );
@@ -2690,9 +2690,7 @@ export function registerJobFinderRouteHandlers(
           } satisfies JobFinderResumePdfExportReply;
         }
 
-        outputPath = saveResult.filePath.toLowerCase().endsWith(".pdf")
-          ? saveResult.filePath
-          : `${saveResult.filePath}.pdf`;
+        outputPath = chosenPath;
       }
 
       const snapshot = await jobFinderWorkspaceService.exportResumePdf(

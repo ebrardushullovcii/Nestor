@@ -41,32 +41,47 @@ export function buildResumeExportDefaultPath(
   return path.join(app.getPath("documents"), `${fileName}.pdf`);
 }
 /**
- * Where Download PDF writes. A person picks the file in the save dialog; a
+ * Where an export writes. A person picks the file in the save dialog; a
  * test-API run, which cannot answer a native dialog, saves under the app's own
- * data folder so the download still writes a real file.
+ * data folder so the export still writes a real file.
  */
-export async function chooseResumeExportPath(
+export async function chooseSavePath(
   sender: WebContents,
   defaultPath: string,
-): Promise<{ canceled: boolean; filePath?: string }> {
+  kind: { name: string; extension: string; title: string },
+): Promise<string | null> {
   if (isDesktopTestApiEnabled()) {
     const directory = path.join(app.getPath("userData"), "exports");
     await mkdir(directory, { recursive: true });
-    return {
-      canceled: false,
-      filePath: path.join(directory, path.basename(defaultPath)),
-    };
+    return path.join(directory, path.basename(defaultPath));
   }
   const options: SaveDialogOptions = {
     defaultPath,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
+    filters: [{ name: kind.name, extensions: [kind.extension] }],
     properties: ["createDirectory", "showOverwriteConfirmation"],
-    // Not "tailored": the same dialog opens for a document nothing could be
-    // tailored for.
-    title: "Export resume PDF",
+    title: kind.title,
   };
   const browserWindow = BrowserWindow.fromWebContents(sender);
-  return browserWindow
-    ? dialog.showSaveDialog(browserWindow, options)
-    : dialog.showSaveDialog(options);
+  const result = browserWindow
+    ? await dialog.showSaveDialog(browserWindow, options)
+    : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return null;
+  const suffix = `.${kind.extension}`;
+  return result.filePath.toLowerCase().endsWith(suffix)
+    ? result.filePath
+    : `${result.filePath}${suffix}`;
+}
+
+/** Download PDF: the resume, named after the job. */
+export function chooseResumeExportPath(
+  sender: WebContents,
+  defaultPath: string,
+): Promise<string | null> {
+  // Not "tailored": the same dialog opens for a document nothing could be
+  // tailored for.
+  return chooseSavePath(sender, defaultPath, {
+    name: "PDF",
+    extension: "pdf",
+    title: "Export resume PDF",
+  });
 }

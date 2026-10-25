@@ -1,4 +1,5 @@
 import { createResumesBridge } from "./resumes";
+import { createTrackerBridge } from "./tracker";
 import {
   ApplicationListPageSchema,
   ApplicationListQuerySchema,
@@ -416,6 +417,7 @@ const desktopApi = {
   assistant: assistantBridge,
   jobs: jobsBridge,
   resumes: createResumesBridge(nativeIpcRenderer),
+  tracker: createTrackerBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   window: {
     close: () => ipcRenderer.invoke("window:close") as Promise<{ ok: true }>,

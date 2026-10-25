@@ -38,7 +38,7 @@ export function toIso(ms: number): string {
 }
 
 /** Each word must start a word in the title, company or location. */
-function toTextMatch(text: string): string | null {
+export function toTextMatch(text: string): string | null {
   const words = text
     .split(/\s+/u)
     .map((word) => word.replace(/"/gu, "").trim())
