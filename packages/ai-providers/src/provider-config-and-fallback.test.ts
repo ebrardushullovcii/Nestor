@@ -1408,6 +1408,7 @@ test("uses the verified no-reasoning title route while keeping fit on the primar
       [],
       {
         reasoningTask: "listing_screen",
+        jsonOutput: true,
         jsonSchema: {
           name: "screen",
           schema: {

@@ -414,8 +414,10 @@ export async function screenCards(
           },
         ]);
       for (const [index, keep] of Object.entries(answer.keep)) {
-        if (!keep) unrelated.add(titles[Number(index)]);
-        else unrelated.delete(titles[Number(index)]);
+        const title = titles[Number(index)];
+        if (!title) throw new Error("Role screen returned an unknown title.");
+        if (!keep) unrelated.add(title);
+        else unrelated.delete(title);
       }
       for (const title of titles) decisions.set(title, !unrelated.has(title));
     } catch (error) {
