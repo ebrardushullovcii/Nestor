@@ -3692,8 +3692,8 @@ export function createWorkspaceDiscoveryMethods(
         try {
           collected = await collectTargetJobs({
             ctx,
-            lookupKnownUrls: async (urls) =>
-              urls.filter((url) => knownListingUrls.has(url)),
+            lookupKnownUrls: (urls) =>
+              Promise.resolve(urls.filter((url) => knownListingUrls.has(url))),
             target,
             sourceInstructionArtifacts,
             profile,

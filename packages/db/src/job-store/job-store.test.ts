@@ -43,6 +43,25 @@ afterEach(() => {
 });
 
 describe("job store", () => {
+  it("recognizes saved listing aliases and hidden jobs before another search reads them", () => {
+    const store = open();
+    const first = found(1);
+    const { added } = store.saveFoundJobs({ searchId: "first", jobs: [first] });
+    const alias = found(1, {
+      url: "https://other.example.test/jobs/abc",
+      sourceId: "other",
+      sourceJobId: "abc",
+    });
+    store.saveFoundJobs({ searchId: "second", jobs: [alias] });
+    store.setStage(added, "hidden");
+    const tracked = `${alias.url}?utm_campaign=repeat`;
+    const fresh = "https://other.example.test/jobs/new";
+    expect(store.findKnownUrls([first.url, tracked, fresh, first.url])).toEqual(
+      [first.url, tracked],
+    );
+    expect(store.findKnownUrls([])).toEqual([]);
+  });
+
   it("adds only new jobs when a search runs again and merges a job listed on two sites", () => {
     const store = open();
     const first = store.saveFoundJobs({

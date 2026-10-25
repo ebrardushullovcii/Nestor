@@ -8,7 +8,7 @@ import {
 test("a saved result card is omitted before reading while a new card stays whole", async () => {
   const oldUrl = "https://jobs.example.test/opening?id=old";
   const newUrl = "https://jobs.example.test/opening?id=new";
-  const lookup = vi.fn(async () => [oldUrl]);
+  const lookup = vi.fn(() => Promise.resolve([oldUrl]));
   const result = await omitKnownListingItems(
     [
       "Jobs near Berlin",
@@ -32,9 +32,9 @@ test("a saved link does not hide a mixed card or unstructured new listing", asyn
     "New Engineer → https://jobs.example.test/new\n[Page item 1]\nKnown → https://jobs.example.test/old\nNew → https://jobs.example.test/new\n[End page item 1]";
   expect(
     (
-      await omitKnownListingItems(text, async () => [
-        "https://jobs.example.test/old",
-      ])
+      await omitKnownListingItems(text, () =>
+        Promise.resolve(["https://jobs.example.test/old"]),
+      )
     ).text,
   ).toBe(text);
 });
@@ -46,9 +46,9 @@ test("repeat feed results omit saved URLs without merging different query IDs or
     { canonicalUrl: "https://jobs.example.test/Opening?id=old" },
   ];
   expect(
-    await onlyNewJobs(jobs, async () => [
-      "https://jobs.example.test/opening?id=old",
-    ]),
+    await onlyNewJobs(jobs, () =>
+      Promise.resolve(["https://jobs.example.test/opening?id=old"]),
+    ),
   ).toEqual(jobs.slice(1));
   expect(postingUrlKey("https://jobs.example.test/job?b=2&a=1#top")).toBe(
     "https://jobs.example.test/job?a=1&b=2",

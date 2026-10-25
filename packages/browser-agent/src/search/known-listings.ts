@@ -32,7 +32,9 @@ export async function omitKnownListingItems(
     ...text.matchAll(/\[Page item (\d+)\]\n[\s\S]*?\[End page item \1\]/gu),
   ];
   const links = (item: string) =>
-    [...item.matchAll(/→ (https?:\/\/[^\s<>]+)/gu)].map((match) => match[1]!);
+    [...item.matchAll(/→ (https?:\/\/[^\s<>]+)/gu)].flatMap(([, url]) =>
+      url ? [url] : [],
+    );
   const urls = [...new Set(items.flatMap((item) => links(item[0])))];
   if (!urls.length) return { text, skippedUrls: [] };
   const requested = new Set(urls.map(postingUrlKey));
