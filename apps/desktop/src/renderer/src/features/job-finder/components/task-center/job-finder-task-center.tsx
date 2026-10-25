@@ -303,7 +303,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
-            Nothing is running. Resume imports and application runs show here
+            Nothing is running. Resume imports and source checks show here
             while they work.
           </p>
         ) : (
