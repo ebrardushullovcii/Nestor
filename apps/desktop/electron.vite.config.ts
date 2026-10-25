@@ -118,6 +118,10 @@ const workspaceAliases = {
   "@nestor/browser-runtime": browserRuntimePath,
   "@nestor/contracts": contractsPath,
   "@nestor/core": corePath,
+  "@nestor/db/job-store": path.resolve(
+    currentDir,
+    "../../packages/db/src/job-store/job-store.ts",
+  ),
   "@nestor/db": dbPath,
   "@nestor/live-assistant": liveAssistantPath,
   "@nestor/job-finder/assistant-attention": path.resolve(
