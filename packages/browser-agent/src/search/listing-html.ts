@@ -172,6 +172,41 @@ function link(node: Element, base: string): string | null {
   }
 }
 
+/**
+ * Script bodies taken out of a page before it is parsed. A board's
+ * hydration payload is often most of its page, and the parser would build it
+ * character by character only for this reader to keep its literal job arrays
+ * and published JSON-LD. Each script stays in place, empty, so the page keeps
+ * its shape; text the parser would not read as a script (comments and the
+ * raw-text elements) is left as it is.
+ */
+function takeScripts(html: string): {
+  markup: string;
+  scripts: { type: string; body: string }[];
+} {
+  const scripts: { type: string; body: string }[] = [];
+  const markup = html.replace(
+    /<!--[\s\S]*?(?:-->|$)|<(style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])[^>]*>[\s\S]*?(?:<\/\1(?=[\s/>])[^>]*>|$)|<script(?=[\s/>])([^>]*)>([\s\S]*?)(?:<\/script(?=[\s/>])[^>]*>|$)/giu,
+    (
+      match,
+      raw: string | undefined,
+      attributes: string | undefined,
+      body: string | undefined,
+    ) => {
+      if (raw !== undefined || attributes === undefined) return match;
+      scripts.push({
+        type:
+          /\btype\s*=\s*["']?([^"'\s>]+)/iu
+            .exec(attributes)?.[1]
+            ?.toLowerCase() ?? "",
+        body: body ?? "",
+      });
+      return `<script${attributes}></script>`;
+    },
+  );
+  return { markup, scripts };
+}
+
 /** Standard HTML semantics only; observed links, never synthesized board routes. */
 export function readInventoryHtml(
   html: string,
@@ -183,18 +218,13 @@ export function readInventoryHtml(
   portals: string[];
   needsInteraction: boolean;
 } {
-  const doc = parse(html);
+  const { markup, scripts } = takeScripts(html);
+  const doc = parse(markup);
   const nodes = descendants(doc);
   const cards = new Map<string, ListingCard>();
   const published: Record<string, unknown>[] = [];
-  for (const script of nodes.filter((node) => node.tagName === "script")) {
-    for (const job of embeddedJobs(
-      script.childNodes
-        .map((child) =>
-          child.nodeName === "#text" ? (child as Tree.TextNode).value : "",
-        )
-        .join(""),
-    )) {
+  for (const script of scripts) {
+    for (const job of embeddedJobs(script.body)) {
       const address =
         job.absolute_url ?? job.jobUrl ?? job.hostedUrl ?? job.href;
       if (typeof job.title !== "string" || typeof address !== "string")
@@ -239,20 +269,11 @@ export function readInventoryHtml(
     if ([record["@type"]].flat().includes("JobPosting")) published.push(record);
     Object.values(record).forEach(visit);
   };
-  for (const script of nodes.filter(
-    (node) =>
-      node.tagName === "script" && attr(node, "type") === "application/ld+json",
+  for (const script of scripts.filter(
+    (script) => script.type === "application/ld+json",
   )) {
     try {
-      visit(
-        JSON.parse(
-          script.childNodes
-            .map((child) =>
-              child.nodeName === "#text" ? (child as Tree.TextNode).value : "",
-            )
-            .join(""),
-        ),
-      );
+      visit(JSON.parse(script.body));
     } catch {
       /* Malformed published data does not prevent visible-card reading. */
     }

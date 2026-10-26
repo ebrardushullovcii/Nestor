@@ -4,15 +4,48 @@ import { htmlToPlainText, listingPageText } from "./listing-detail-extraction";
 
 /** The same challenge detector for a read-only HTTP snapshot. */
 export function blockedByCheck(html: string): boolean {
+  const bodyTextExcerpt = listingPageText(html);
+  // A page with more visible text than a challenge page has is not one; most
+  // listing and board pages stop here, without a whitespace-collapsed copy.
+  if (moreVisibleTextThan(bodyTextExcerpt, CHALLENGE_TEXT_LIMIT)) return false;
   return isBotCheckInterstitial({
     title: htmlToPlainText(
       html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
     ),
-    bodyTextExcerpt: listingPageText(html),
+    bodyTextExcerpt,
     headings: [],
     controls: [],
     links: [],
   });
+}
+
+/** The most visible text a challenge page has, whitespace collapsed. */
+const CHALLENGE_TEXT_LIMIT = 1_500;
+
+/**
+ * Whether `text` has more than `limit` characters that are not whitespace
+ * (as `\s` matches it); its whitespace-collapsed form is then longer too.
+ */
+function moreVisibleTextThan(text: string, limit: number): boolean {
+  if (text.length <= limit) return false;
+  let visible = 0;
+  for (let at = 0; at < text.length; at++) {
+    const code = text.charCodeAt(at);
+    const space =
+      (code >= 9 && code <= 13) ||
+      code === 32 ||
+      code === 0xa0 ||
+      code === 0x1680 ||
+      (code >= 0x2000 && code <= 0x200a) ||
+      code === 0x2028 ||
+      code === 0x2029 ||
+      code === 0x202f ||
+      code === 0x205f ||
+      code === 0x3000 ||
+      code === 0xfeff;
+    if (!space && ++visible > limit) return true;
+  }
+  return false;
 }
 
 type BotCheckPage = Pick<
@@ -38,7 +71,7 @@ export function isBotCheckInterstitial(
 ): boolean {
   const text = observation.bodyTextExcerpt.replace(/\s+/gu, " ").trim();
   const sparse =
-    text.length <= 1_500 &&
+    text.length <= CHALLENGE_TEXT_LIMIT &&
     observation.links.filter((link) => link.visible).length <= 5 &&
     !observation.controls.some(
       (control) =>
