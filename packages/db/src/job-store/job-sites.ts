@@ -299,6 +299,17 @@ export function createJobSitesStore(store: JobStore) {
         `SELECT count(*) AS "all", coalesce(sum(enabled), 0) AS enabled, coalesce(sum(NOT enabled), 0) AS disabled, coalesce(sum(attention), 0) AS needs_attention FROM job_sites`,
       ).get() as JobSitePage["counts"];
     },
+    healthCounts() {
+      const counts = sql(`SELECT count(*) AS total,
+        coalesce(sum(NOT attention),0) AS healthy,
+        coalesce(sum(attention),0) AS needsAttention
+        FROM job_sites WHERE enabled=1`).get() as {
+        total: number;
+        healthy: number;
+        needsAttention: number;
+      };
+      return { ...counts, running: 0 };
+    },
     record(
       id: number,
       input: JobSiteRuntimeUpdate,

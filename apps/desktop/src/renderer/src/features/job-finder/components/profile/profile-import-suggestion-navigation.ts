@@ -77,11 +77,6 @@ const scalarFieldNameByTarget: Record<string, string> = {
   "narrative.careerTransitionSummary": "narrative.careerTransitionSummary",
   "narrative.differentiators": "narrative.differentiators",
   "narrative.motivationThemes": "narrative.motivationThemes",
-  "answer_bank.availability": "answerBank.availability",
-  "answer_bank.visaSponsorship": "answerBank.visaSponsorship",
-  "answer_bank.relocation": "answerBank.relocation",
-  "answer_bank.selfIntroduction": "answerBank.selfIntroduction",
-  "answer_bank.careerTransition": "answerBank.careerTransition",
   "application_identity.preferredEmail": "applicationIdentity.preferredEmail",
   "application_identity.preferredPhone": "applicationIdentity.preferredPhone",
   "work_eligibility.authorizedWorkCountries":

@@ -1,5 +1,4 @@
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
-import { withPlanAssessment } from "./plan-assessment";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
 import {
   getAiProviderAccessFailure,
   isAiServiceBusy,
@@ -7,15 +6,10 @@ import {
 import {
   SavedJobSchema,
   type SavedJob,
-  type CandidateProfile,
 } from "@nestor/contracts";
 import { projectDiscoveryJobViews } from "./listing-activity";
-import {
-  DEFAULT_RESUME_APPLICATION_MODE,
-} from "./job-resume-application-mode";
-import type {
-  WorkspaceServiceContext,
-} from "./workspace-service-context";
+import { DEFAULT_RESUME_APPLICATION_MODE } from "./job-resume-application-mode";
+import type { WorkspaceServiceContext } from "./workspace-service-context";
 import type { JobFinderWorkspaceService } from "./workspace-service-contracts";
 import {
   createModelListingPageReader,
@@ -25,11 +19,8 @@ import {
 } from "./listing-detail-enrichment";
 import { jobNeedsFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentSession } from "./match-assessment-session";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import { createMatchAssessment, createMatchAssessmentAsync } from "./matching";
-
-
 
 type WorkspaceApplicationMethods = Pick<
   JobFinderWorkspaceService,
@@ -39,36 +30,6 @@ type WorkspaceApplicationMethods = Pick<
   | "removeJobFromReview"
   | "removeJobsFromReview"
 >;
-
-/**
- * True when the only change between two profiles is answers the person saved
- * for next time. Saving an answer while a batch runs (the default now) must
- * not fail the application being filled in meanwhile: the resume it attached
- * does not read the saved answers.
- */
-export function onlySavedAnswersWereAdded(
-  before: CandidateProfile,
-  after: CandidateProfile,
-): boolean {
-  const beforeAnswers = before.answerBank.customAnswers;
-  const afterAnswers = after.answerBank.customAnswers;
-  const kept = new Set(beforeAnswers.map((answer) => JSON.stringify(answer)));
-  if (
-    afterAnswers.length < beforeAnswers.length ||
-    afterAnswers.filter((answer) => kept.has(JSON.stringify(answer))).length !==
-      beforeAnswers.length
-  ) {
-    return false;
-  }
-  const withoutCustomAnswers = (profile: CandidateProfile) =>
-    JSON.stringify({
-      ...profile,
-      answerBank: { ...profile.answerBank, customAnswers: [] },
-    });
-  return withoutCustomAnswers(before) === withoutCustomAnswers(after);
-}
-
-
 
 export function createWorkspaceApplicationMethods(
   ctx: WorkspaceServiceContext,
@@ -258,8 +219,14 @@ export function createWorkspaceApplicationMethods(
     if (ids.length === 0) return;
     const requested = new Set(ids);
     const display = await ctx.repository.readDisplayCollections?.();
-    const [settings, preferences, selectedSaved, intelligence, assets, attempts] =
-      await Promise.all([
+    const [
+      settings,
+      preferences,
+      selectedSaved,
+      intelligence,
+      assets,
+      attempts,
+    ] = await Promise.all([
       ctx.repository.getSettings(),
       ctx.repository.readSearchPreferencesProjection?.() ??
         ctx.repository.getSearchPreferences(),
@@ -374,28 +341,20 @@ export function createWorkspaceApplicationMethods(
       if (!options.force && !alreadyRead && !jobNeedsListingDetail(job)) {
         return;
       }
-      const [profile, profilePreferences, settings, campaignState] =
-        await Promise.all([
-          ctx.repository.getProfile(),
-          ctx.repository.getSearchPreferences(),
-          ctx.repository.getSettings(),
-          ctx.repository.getCampaignState(),
-        ]);
-      const assessmentPlanId = campaignState?.activeCampaignId ?? null;
-      const activePlan = campaignState?.campaigns.find(
-        (plan) => plan.id === assessmentPlanId,
+      const [profile, profilePreferences, settings] = await Promise.all([
+        ctx.repository.getProfile(),
+        ctx.repository.getSearchPreferences(),
+        ctx.repository.getSettings(),
+      ]);
+      const searchPreferences = enrichSearchPreferencesFromProfile(
+        withSettingsFitBehavior(profilePreferences, settings),
+        profile,
       );
-      const searchPreferences = activePlan
-        ? searchPreferencesForCampaignRun(activePlan)
-        : profilePreferences;
       const session = createMatchAssessmentSession({
         profile,
         // Scored with the same remote setting a search uses, so reading the
         // listing on shortlist does not flip the job's location verdict.
-        searchPreferences: withSavedJobSearchBehavior(
-          enrichSearchPreferencesFromProfile(searchPreferences, profile),
-          settings,
-        ),
+        searchPreferences,
         calculate: createMatchAssessment,
       });
       if (
@@ -414,10 +373,7 @@ export function createWorkspaceApplicationMethods(
         const assessed = await createMatchAssessmentAsync(
           ctx.aiClient,
           profile,
-          withSavedJobSearchBehavior(
-            enrichSearchPreferencesFromProfile(searchPreferences, profile),
-            settings,
-          ),
+          searchPreferences,
           job,
           signal,
           // Shortlisting asked for the job, not for this read.
@@ -429,7 +385,7 @@ export function createWorkspaceApplicationMethods(
           updateJobIds: [jobId],
           update: (current) =>
             current.id === jobId && current.description === job.description
-              ? withPlanAssessment(current, assessmentPlanId, matchAssessment)
+              ? { ...current, matchAssessment }
               : current,
         });
         return;
@@ -455,10 +411,7 @@ export function createWorkspaceApplicationMethods(
             const assessed = await createMatchAssessmentAsync(
               ctx.aiClient,
               profile,
-              withSavedJobSearchBehavior(
-                enrichSearchPreferencesFromProfile(searchPreferences, profile),
-                settings,
-              ),
+              searchPreferences,
               posting,
               signal,
               // Only "Judge fit" waits on this read.
@@ -506,14 +459,7 @@ export function createWorkspaceApplicationMethods(
               detailQuality: next.detailQuality,
               listingDetailFetch: next.listingDetailFetch,
               listingDetailCapture: next.listingDetailCapture,
-              planAssessments: withPlanAssessment(
-                current,
-                assessmentPlanId,
-                next.matchAssessment,
-              ).planAssessments,
-              matchAssessment: assessmentPlanId
-                ? current.matchAssessment
-                : next.matchAssessment,
+              matchAssessment: next.matchAssessment,
             }
           : current;
       if (!listingReadCurrent(generation)) return;
@@ -589,27 +535,6 @@ export function createWorkspaceApplicationMethods(
   // Assistant edits queue on the same per-job transition tail.
   ctx.withResumeDraftTransition = withResumeDraftTransition;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   return {
     async assessJobListing(jobId) {
       if (!ctx.fetchListingHtml)
@@ -647,6 +572,5 @@ export function createWorkspaceApplicationMethods(
         );
       }
     },
-
   };
 }

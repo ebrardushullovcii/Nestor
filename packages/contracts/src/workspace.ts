@@ -1,5 +1,6 @@
 import { PreparedApplicationFormSchema } from "./prepared-application-form";
 import { z } from "zod";
+import { JobSiteCountsSchema } from "./job-sites";
 
 import {
   AiProviderKindSchema,
@@ -109,8 +110,7 @@ import {
   JobSearchCampaignSchema,
 } from "./job-search-campaigns";
 import { CampaignNotificationSchema } from "./campaign-operations";
-import {
-  JobFinderIntelligenceStateSchema } from "./job-finder-intelligence";
+import { JobFinderIntelligenceStateSchema } from "./job-finder-intelligence";
 import { ApplyQueueSchema } from "./apply-queue";
 
 export const JobFinderJobActionInputSchema = z.object({
@@ -450,6 +450,13 @@ export const JobFinderSourceDebugActionInputSchema = z.object({
 export type JobFinderSourceDebugActionInput = z.infer<
   typeof JobFinderSourceDebugActionInputSchema
 >;
+
+/** A source check started from the app, which reports progress under `requestId`. */
+export const JobFinderRunSourceDebugInputSchema =
+  JobFinderSourceDebugActionInputSchema.extend({
+    requestId: z.string().max(200).nullable().optional(),
+    readabilityTimeoutMs: z.number().finite().positive().optional(),
+  });
 
 export const JobFinderOpenBrowserSessionInputSchema = z.object({
   targetId: NonEmptyStringSchema.nullable().default(null),
@@ -1345,6 +1352,12 @@ const WorkspaceSnapshotCoreSchema = z.object({
   profile: CandidateProfileSchema,
   searchPreferences: JobSearchPreferencesSchema,
   profileSetupState: ProfileSetupStateSchema,
+  siteCounts: JobSiteCountsSchema.default({
+    all: 0,
+    enabled: 0,
+    disabled: 0,
+    needs_attention: 0,
+  }),
   browserSession: BrowserSessionStateSchema,
   sourceAccessPrompts: z.array(SourceAccessPromptSchema).default([]),
   discoverySessions: z.array(DiscoveryAdapterSessionStateSchema).default([]),

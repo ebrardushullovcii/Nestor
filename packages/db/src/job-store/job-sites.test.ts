@@ -1,6 +1,32 @@
 import { expect, test } from "vitest";
 import { openJobStore, createJobSitesStore } from "./job-store";
 
+test("source-health counts use enabled site rows and their current health", () => {
+  const store = openJobStore(":memory:");
+  try {
+    const sites = createJobSitesStore(store);
+    sites.add({
+      text: "https://healthy.example.test/jobs\nhttps://blocked.example.test/jobs\nhttps://disabled.example.test/jobs",
+    });
+    const rows = sites.list().rows;
+    sites.record(rows.find((row) => row.url.includes("blocked"))!.id, {
+      health: "needs_sign_in",
+    });
+    sites.update({
+      id: rows.find((row) => row.url.includes("disabled"))!.id,
+      enabled: false,
+    });
+    expect(sites.healthCounts()).toEqual({
+      total: 2,
+      healthy: 1,
+      needsAttention: 1,
+      running: 0,
+    });
+  } finally {
+    store.close();
+  }
+});
+
 test("bulk add explains duplicates and invalid entries; editing a site touches only that site", () => {
   const store = openJobStore(":memory:");
   try {

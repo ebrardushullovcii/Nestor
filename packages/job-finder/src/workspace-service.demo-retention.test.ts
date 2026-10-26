@@ -5,13 +5,42 @@ import {
   createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
-/**
- * Regression guard for the demo/manual-save data-gating blocker. Demo and
- * manually saved workspaces persist no campaign state, so every queue surface
- * must stay reachable through adoption/reconciliation instead of an empty
- * `campaigns[0].jobIds` gate.
- */
+/** Campaign-free legacy fixtures receive a read-only queue projection. */
 describe("workspace service demo retention", () => {
+  test("goal saves preserve campaigns and Home counts current enabled job-site rows", async () => {
+    const seed = createSeed();
+    const { workspaceService, repository, jobSites } =
+      createWorkspaceServiceHarness({ seed });
+    jobSites.add({
+      text: "https://second.synthetic.test/jobs\nhttps://disabled.synthetic.test/jobs",
+    });
+    const rows = jobSites.list().rows;
+    jobSites.record(
+      rows.find((row) => row.url.includes("second.synthetic"))!.id,
+      { health: "needs_sign_in" },
+    );
+    jobSites.update({
+      id: rows.find((row) => row.url.includes("disabled.synthetic"))!.id,
+      enabled: false,
+    });
+    const first = await workspaceService.getWorkspaceSnapshot();
+    expect(first.dashboard.sourceHealth).toEqual({
+      healthy: 1,
+      needsAttention: 1,
+      running: 0,
+      total: 2,
+    });
+    const campaigns = await repository.getCampaignState();
+    const result = await workspaceService.saveSearchPreferences({
+      ...first.searchPreferences,
+      targetRoles: ["Platform Engineer"],
+    });
+    expect(result.dashboard.sourceHealth).toEqual(first.dashboard.sourceHealth);
+    expect(result.searchPreferences.discovery.targets).toEqual([]);
+    expect(await repository.getCampaignState()).toEqual(campaigns);
+    expect(jobSites.counts().enabled).toBe(2);
+  });
+
   test("adopts a campaign-free demo seed with non-empty Shortlisted and coherent sources", async () => {
     const seed = createSeed();
     expect(seed.campaigns).toEqual([]);
@@ -28,43 +57,8 @@ describe("workspace service demo retention", () => {
     );
     expect(snapshot.reviewQueue.length).toBeGreaterThan(0);
     expect(snapshot.dashboard.jobsAwaitingReview).toBeGreaterThan(0);
-    expect(snapshot.dashboard.sourceHealth.total).toBe(
-      seed.searchPreferences.discovery.targets.filter(
-        (target) => target.enabled,
-      ).length,
+    expect(snapshot.siteCounts.enabled).toBe(
+      seed.jobSites.filter((target) => target.enabled).length,
     );
-  });
-
-  test("reconciles a stale empty-retention campaign back into the queues on read", async () => {
-    const seed = createSeed();
-    const harness = createWorkspaceServiceHarness({ seed });
-    const { repository, workspaceService } = harness;
-
-    const healthy = await workspaceService.getWorkspaceSnapshot();
-    expect(healthy.dashboard.jobsAwaitingReview).toBeGreaterThan(0);
-
-    // Simulate the legacy stale singleton: retention wiped after adoption
-    // while the adoption history stays intact.
-    const staleState = await repository.getCampaignState();
-    expect(staleState).not.toBeNull();
-    if (!staleState) return;
-    await repository.saveCampaignState({
-      notifications: staleState.notifications,
-      activeCampaignId: staleState.activeCampaignId,
-      campaigns: staleState.campaigns.map((campaign) =>
-        campaign.id === staleState.activeCampaignId
-          ? { ...campaign, jobIds: [] }
-          : campaign,
-      ),
-    });
-    const gated = await workspaceService.getWorkspaceSnapshot();
-    expect(gated.dashboard.jobsAwaitingReview).toBeGreaterThan(0);
-
-    const repaired = await repository.getCampaignState();
-    expect(
-      repaired?.campaigns.find(
-        (campaign) => campaign.id === repaired.activeCampaignId,
-      )?.jobIds,
-    ).toEqual(expect.arrayContaining(seed.savedJobs.map((job) => job.id)));
   });
 });

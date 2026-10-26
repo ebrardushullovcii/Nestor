@@ -32,6 +32,7 @@ import {
 import type { SQLInputValue } from "node:sqlite";
 
 import type { JobStore } from "./job-store";
+import { createProfileStore } from "./profile-store";
 import { toFilterSql, toIso } from "./job-list";
 import { createNeedsYouStore } from "./needs-you";
 
@@ -106,6 +107,9 @@ function isOwnSendLineage(
 }
 
 export function createApplicationStore(store: JobStore) {
+  // Retired approvals must be revoked before any Apply reader can queue them,
+  // including callers that have not opened Profile or the workspace yet.
+  createProfileStore(store);
   const { sql } = store;
   const changed = (ids: number[] | null = null) =>
     store.notify({

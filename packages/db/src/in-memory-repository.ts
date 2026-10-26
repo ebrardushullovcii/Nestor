@@ -1,3 +1,5 @@
+import { createProfileWorkspace } from "./job-store/profile-workspace";
+import { openJobStore, type JobStore } from "./job-store/job-store";
 import {
   retainedResumeExportPaths,
   collectResumeFileReferences,
@@ -35,16 +37,10 @@ import {
   JobFinderSettingsSchema,
   JobSearchCampaignCollectionSchema,
   JobSearchPreferencesSchema,
-  ProfileCopilotMessageSchema,
-  ProfileRevisionSchema,
-  ProfileSetupStateSchema,
-  ResumeDocumentBundleSchema,
   ResumeAssistantMessageSchema,
   ResumeDraftRevisionSchema,
   ResumeDraftSchema,
   ResumeExportArtifactSchema,
-  ResumeImportFieldCandidateSchema,
-  ResumeImportRunSchema,
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   SourceDebugEvidenceRefSchema,
@@ -58,7 +54,6 @@ import {
   UserActionRequestSchema,
   type ApplicationAnswerRecord,
   type ApplicationQuestionRecord,
-  type CandidateProfile,
   type SavedJob,
   type ResumeValidationResult,
   type UserActionRequest,
@@ -108,10 +103,8 @@ import {
 } from "./user-action-repository-support";
 import {
   clearApprovedResumeExportsForJob,
-  replaceArtifactsForRun,
   resolveApprovedExportId,
   sortExports,
-  sortImportRuns,
   sortMessages,
   sortNewestFirst,
   sortResearch,
@@ -123,10 +116,7 @@ import {
   assertResumeRevisionCoalescing,
   retainResumeDraftRevisions,
 } from "./resume-draft-revision-retention";
-import {
-  applyProfileCopilotMessagePatchFlags,
-  findProfileCopilotMessageByPatchGroup,
-} from "./profile-copilot-message-flags";
+
 import type {
   JobFinderRepository,
   JobFinderRepositorySeed,
@@ -147,11 +137,13 @@ function assertAtMostOneActiveApplicationAuthority(
 
 export function createInMemoryJobFinderRepository(
   seed: JobFinderRepositorySeed,
+  options: { store?: JobStore } = {},
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
+  const profileStore = options.store ?? openJobStore(":memory:");
+  const profileWorkspace = createProfileWorkspace(profileStore, state);
   assertAtMostOneActiveApplicationAuthority(state);
   let applyQueue: ApplyQueue | null = null;
-  let profileRevision = 1;
   let discoveryProjectionSource: typeof state.discovery | null = null;
   let discoveryProjection: DiscoveryDisplayProjection | null = null;
   let intelligenceProjectionSource: typeof state.intelligence | null = null;
@@ -187,47 +179,13 @@ export function createInMemoryJobFinderRepository(
     return rows;
   }
 
-  function readProfileWithRevision(): {
-    profile: CandidateProfile;
-    revision: number;
-  } {
-    return cloneValue({ profile: state.profile, revision: profileRevision });
-  }
-
-  function commitProfileUpdateOutcome(
-    updateProfile: (current: CandidateProfile) => CandidateProfile,
-    expectedRevision: number | undefined,
-  ):
-    | { status: "applied"; profile: CandidateProfile; revision: number }
-    | { status: "stale"; profile: CandidateProfile; revision: number } {
-    if (
-      expectedRevision !== undefined &&
-      expectedRevision !== profileRevision
-    ) {
-      return {
-        status: "stale",
-        profile: cloneValue(state.profile),
-        revision: profileRevision,
-      };
-    }
-
-    const nextProfile = CandidateProfileSchema.parse(
-      cloneValue(updateProfile(cloneValue(state.profile))),
-    );
-    state.profile = nextProfile;
-    profileRevision += 1;
-    return {
-      status: "applied",
-      profile: cloneValue(nextProfile),
-      revision: profileRevision,
-    };
-  }
-
   return {
     ...createApplicationAnswerSnapshotRepositoryMethods({
       read: () => state,
       mutate: (operation) => {
-        const draft = JobFinderRepositoryStateSchema.parse(cloneValue(state));
+        const draft = JobFinderRepositoryStateSchema.parse(
+          cloneValue({ ...state, ...profileWorkspace.state() }),
+        );
         const result = operation(draft);
         Object.assign(state, draft);
         return result;
@@ -236,17 +194,21 @@ export function createInMemoryJobFinderRepository(
     ...createApplicationAuthorityRepositoryMethods({
       read: () => state,
       mutate: (operation) => {
-        const draft = JobFinderRepositoryStateSchema.parse(cloneValue(state));
+        const draft = JobFinderRepositoryStateSchema.parse(
+          cloneValue({ ...state, ...profileWorkspace.state() }),
+        );
         const result = operation(draft);
         Object.assign(state, draft);
         return result;
       },
     }),
     close() {
+      if (!options.store) profileStore.close();
       return Promise.resolve();
     },
-    exportState: () => Promise.resolve(cloneValue(state)),
-    readDisplayCollections: () =>
+    exportState: () =>
+      Promise.resolve(cloneValue({ ...state, ...profileWorkspace.state() })),
+    readDisplayCollections: async () =>
       Promise.resolve({
         tailoredAssets: borrowDisplayRows(state.tailoredAssets),
         resumeDrafts: borrowDisplayRows(state.resumeDrafts, sortResumeDrafts),
@@ -269,14 +231,9 @@ export function createInMemoryJobFinderRepository(
           state.sourceInstructionArtifacts,
         ),
         sourceDebugAttempts: borrowDisplayRows(state.sourceDebugAttempts),
-        profileCopilotMessages: borrowDisplayRows(
-          state.profileCopilotMessages,
-          sortMessages,
-        ),
-        profileRevisions: borrowDisplayRows(
-          state.profileRevisions,
-          sortNewestFirst,
-        ),
+        profileCopilotMessages:
+          await profileWorkspace.methods.listProfileCopilotMessages(),
+        profileRevisions: await profileWorkspace.methods.listProfileRevisions(),
         userActionRequests: borrowDisplayRows(
           state.userActionRequests,
           sortUserActionRequests,
@@ -309,6 +266,7 @@ export function createInMemoryJobFinderRepository(
         ),
       ),
     reset(nextSeed) {
+      profileWorkspace.reset(nextSeed);
       const normalizedSeed = JobFinderRepositoryStateSchema.parse(
         cloneValue(nextSeed),
       );
@@ -320,10 +278,6 @@ export function createInMemoryJobFinderRepository(
       // backend. Rewinding it to 1 would let a token captured before the reset
       // still satisfy the equality check afterwards and overwrite the freshly
       // seeded profile, search preferences and profile setup state.
-      profileRevision += 1;
-      state.profile = normalizedSeed.profile;
-      state.searchPreferences = normalizedSeed.searchPreferences;
-      state.profileSetupState = normalizedSeed.profileSetupState;
       state.savedJobs = normalizedSeed.savedJobs;
       state.tailoredAssets = normalizedSeed.tailoredAssets;
       state.resumeDrafts = normalizedSeed.resumeDrafts;
@@ -337,8 +291,6 @@ export function createInMemoryJobFinderRepository(
       state.resumeResearchArtifacts = normalizedSeed.resumeResearchArtifacts;
       state.resumeValidationResults = normalizedSeed.resumeValidationResults;
       state.resumeAssistantMessages = normalizedSeed.resumeAssistantMessages;
-      state.profileCopilotMessages = normalizedSeed.profileCopilotMessages;
-      state.profileRevisions = normalizedSeed.profileRevisions;
       state.applyRuns = normalizedSeed.applyRuns;
       state.applyJobResults = normalizedSeed.applyJobResults;
       state.applySubmitApprovals = normalizedSeed.applySubmitApprovals;
@@ -371,7 +323,6 @@ export function createInMemoryJobFinderRepository(
       state.sourceInstructionArtifacts =
         normalizedSeed.sourceInstructionArtifacts;
       state.sourceDebugEvidenceRefs = normalizedSeed.sourceDebugEvidenceRefs;
-      state.settings = normalizedSeed.settings;
       state.discovery = normalizedSeed.discovery;
       state.campaigns = normalizedSeed.campaigns;
       state.activeCampaignId = normalizedSeed.activeCampaignId;
@@ -380,172 +331,6 @@ export function createInMemoryJobFinderRepository(
       state.intelligence = normalizedSeed.intelligence;
 
       return Promise.resolve();
-    },
-    getProfile() {
-      return Promise.resolve(cloneValue(state.profile));
-    },
-    readProfileProjection() {
-      return Promise.resolve(borrowDisplayRows([state.profile])[0]!);
-    },
-    getProfileWithRevision() {
-      return Promise.resolve(readProfileWithRevision());
-    },
-    saveProfile(profile) {
-      state.profile = CandidateProfileSchema.parse(cloneValue(profile));
-      profileRevision += 1;
-      return Promise.resolve();
-    },
-    commitProfileUpdate(updateProfile, options) {
-      try {
-        return Promise.resolve(
-          commitProfileUpdateOutcome(updateProfile, options?.expectedRevision),
-        );
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
-    getSearchPreferences() {
-      return Promise.resolve(cloneValue(state.searchPreferences));
-    },
-    readSearchPreferencesProjection() {
-      return Promise.resolve(borrowDisplayRows([state.searchPreferences])[0]!);
-    },
-    getProfileSetupState() {
-      return Promise.resolve(cloneValue(state.profileSetupState));
-    },
-    saveSearchPreferences(searchPreferences) {
-      state.searchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      // Preference-only writes advance the shared profile epoch so copilot
-      // commits that captured older preferences fail closed as stale.
-      profileRevision += 1;
-      return Promise.resolve();
-    },
-    saveProfileSetupState(profileSetupState) {
-      state.profileSetupState = ProfileSetupStateSchema.parse(
-        cloneValue(profileSetupState),
-      );
-      // Setup-state-only writes advance the shared profile epoch so copilot
-      // commits that captured older setup state fail closed as stale.
-      profileRevision += 1;
-      return Promise.resolve();
-    },
-    saveProfileAndSearchPreferences(profile, searchPreferences) {
-      state.profile = CandidateProfileSchema.parse(cloneValue(profile));
-      state.searchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      profileRevision += 1;
-      return Promise.resolve();
-    },
-    commitProfileCopilotState({
-      profile,
-      searchPreferences,
-      profileSetupState,
-      messages,
-      revisions,
-      messagePatchFlags,
-      expectedProfileRevision,
-    }) {
-      if (
-        expectedProfileRevision !== undefined &&
-        expectedProfileRevision !== profileRevision
-      ) {
-        return Promise.resolve({
-          status: "stale" as const,
-          profile: cloneValue(state.profile),
-          revision: profileRevision,
-        });
-      }
-
-      state.profile = CandidateProfileSchema.parse(cloneValue(profile));
-      profileRevision += 1;
-      state.searchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      state.profileSetupState = ProfileSetupStateSchema.parse(
-        cloneValue(profileSetupState),
-      );
-
-      if (messages) {
-        const normalizedMessages = ProfileCopilotMessageSchema.array().parse(
-          cloneValue(messages),
-        );
-        for (const message of normalizedMessages) {
-          state.profileCopilotMessages = upsertById(
-            state.profileCopilotMessages,
-            message,
-          );
-        }
-      }
-
-      if (revisions) {
-        const normalizedRevisions = ProfileRevisionSchema.array().parse(
-          cloneValue(revisions),
-        );
-        for (const revision of normalizedRevisions) {
-          state.profileRevisions = upsertById(state.profileRevisions, revision);
-        }
-      }
-
-      // Flag deltas resolve against transaction-current rows so sibling
-      // groups changed by a concurrent apply/reject are never reverted.
-      if (messagePatchFlags && messagePatchFlags.length > 0) {
-        const changedMessages = applyProfileCopilotMessagePatchFlags(
-          ProfileCopilotMessageSchema.array().parse(
-            cloneValue(state.profileCopilotMessages),
-          ),
-          cloneValue(messagePatchFlags),
-        );
-        for (const message of changedMessages) {
-          state.profileCopilotMessages = upsertById(
-            state.profileCopilotMessages,
-            ProfileCopilotMessageSchema.parse(cloneValue(message)),
-          );
-        }
-      }
-
-      return Promise.resolve({
-        status: "applied" as const,
-        profile: cloneValue(state.profile),
-        revision: profileRevision,
-      });
-    },
-    commitProfileCopilotPatchFlagUpdate({ patchGroupId, applyMode }) {
-      const currentMessages = ProfileCopilotMessageSchema.array().parse(
-        cloneValue(state.profileCopilotMessages),
-      );
-
-      const messageIndex = findProfileCopilotMessageByPatchGroup(
-        currentMessages,
-        { patchGroupId },
-      );
-
-      if (messageIndex < 0) {
-        return Promise.resolve(false);
-      }
-
-      const [changedMessage] = applyProfileCopilotMessagePatchFlags(
-        currentMessages,
-        [
-          {
-            messageId: currentMessages[messageIndex]!.id,
-            patchGroupId,
-            applyMode,
-          },
-        ],
-      );
-
-      if (changedMessage) {
-        state.profileCopilotMessages = upsertById(
-          state.profileCopilotMessages,
-          ProfileCopilotMessageSchema.parse(cloneValue(changedMessage)),
-        );
-      }
-      return Promise.resolve(true);
     },
     listSavedJobs(options?: { limit?: number; offset?: number }) {
       const normalizePaginationValue = (
@@ -694,7 +479,9 @@ export function createInMemoryJobFinderRepository(
 
         const nextSettings = updateSettings
           ? JobFinderSettingsSchema.parse(
-              cloneValue(updateSettings(cloneValue(state.settings))),
+              cloneValue(
+                updateSettings(profileWorkspace.preferences.settings.read()),
+              ),
             )
           : null;
 
@@ -819,7 +606,7 @@ export function createInMemoryJobFinderRepository(
         state.resumeExportArtifacts = nextResumeExportArtifacts;
         state.tailoredAssets = nextTailoredAssets;
         if (nextSettings) {
-          state.settings = nextSettings;
+          profileWorkspace.preferences.settings.replace(nextSettings);
         }
         if (nextDiscoveryState) {
           state.discovery = nextDiscoveryState;
@@ -1006,198 +793,6 @@ export function createInMemoryJobFinderRepository(
       );
       return Promise.resolve();
     },
-    listResumeImportRuns(options) {
-      let values = state.resumeImportRuns;
-
-      if (options?.sourceResumeId) {
-        values = values.filter(
-          (entry) => entry.sourceResumeId === options.sourceResumeId,
-        );
-      }
-
-      if (options?.statuses && options.statuses.length > 0) {
-        const allowedStatuses = new Set(options.statuses);
-        values = values.filter((entry) => allowedStatuses.has(entry.status));
-      }
-
-      const sortedValues = sortImportRuns(cloneValue(values));
-      return Promise.resolve(
-        typeof options?.limit === "number"
-          ? sortedValues.slice(0, Math.max(0, options.limit))
-          : sortedValues,
-      );
-    },
-    async getLatestResumeImportRun(sourceResumeId) {
-      const values = await this.listResumeImportRuns({
-        ...(sourceResumeId ? { sourceResumeId } : {}),
-        limit: 1,
-      });
-      return values[0] ?? null;
-    },
-    upsertResumeImportRun(run) {
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      state.resumeImportRuns = upsertById(
-        state.resumeImportRuns,
-        normalizedRun,
-      );
-      return Promise.resolve();
-    },
-    listResumeImportDocumentBundles(options) {
-      const values = state.resumeImportDocumentBundles.filter((entry) => {
-        if (options?.runId && entry.runId !== options.runId) {
-          return false;
-        }
-
-        if (
-          options?.sourceResumeId &&
-          entry.sourceResumeId !== options.sourceResumeId
-        ) {
-          return false;
-        }
-
-        return true;
-      });
-
-      return Promise.resolve(sortNewestFirst(cloneValue(values)));
-    },
-    listResumeImportFieldCandidates(options) {
-      const values = state.resumeImportFieldCandidates.filter((entry) => {
-        if (options?.runId && entry.runId !== options.runId) {
-          return false;
-        }
-
-        if (options?.resolution && entry.resolution !== options.resolution) {
-          return false;
-        }
-
-        if (options?.resolutions && options.resolutions.length > 0) {
-          const allowedResolutions = new Set(options.resolutions);
-
-          if (!allowedResolutions.has(entry.resolution)) {
-            return false;
-          }
-        }
-
-        return true;
-      });
-
-      return Promise.resolve(sortNewestFirst(cloneValue(values)));
-    },
-    replaceResumeImportRunArtifacts({ run, documentBundles, fieldCandidates }) {
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      const normalizedBundles = ResumeDocumentBundleSchema.array().parse(
-        cloneValue([...documentBundles]),
-      );
-      const normalizedCandidates =
-        ResumeImportFieldCandidateSchema.array().parse(
-          cloneValue([...fieldCandidates]),
-        );
-
-      for (const bundle of normalizedBundles) {
-        if (bundle.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume document bundle does not belong to the provided import run.",
-          );
-        }
-      }
-
-      for (const candidate of normalizedCandidates) {
-        if (candidate.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume import candidate does not belong to the provided import run.",
-          );
-        }
-      }
-
-      state.resumeImportRuns = upsertById(
-        state.resumeImportRuns,
-        normalizedRun,
-      );
-      const nextArtifacts = replaceArtifactsForRun(
-        state.resumeImportDocumentBundles,
-        state.resumeImportFieldCandidates,
-        normalizedRun.id,
-        normalizedBundles,
-        normalizedCandidates,
-      );
-      state.resumeImportDocumentBundles = nextArtifacts.bundles;
-      state.resumeImportFieldCandidates = nextArtifacts.candidates;
-      return Promise.resolve();
-    },
-    finalizeResumeImportRun({
-      profile,
-      searchPreferences,
-      run,
-      documentBundles,
-      fieldCandidates,
-      expectedProfileRevision,
-    }) {
-      const normalizedProfile = CandidateProfileSchema.parse(
-        cloneValue(profile),
-      );
-      const normalizedSearchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      const normalizedBundles = ResumeDocumentBundleSchema.array().parse(
-        cloneValue([...documentBundles]),
-      );
-      const normalizedCandidates =
-        ResumeImportFieldCandidateSchema.array().parse(
-          cloneValue([...fieldCandidates]),
-        );
-
-      for (const bundle of normalizedBundles) {
-        if (bundle.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume document bundle does not belong to the provided import run.",
-          );
-        }
-      }
-
-      for (const candidate of normalizedCandidates) {
-        if (candidate.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume import candidate does not belong to the provided import run.",
-          );
-        }
-      }
-
-      if (
-        expectedProfileRevision !== undefined &&
-        expectedProfileRevision !== profileRevision
-      ) {
-        return Promise.resolve({
-          status: "stale" as const,
-          profile: cloneValue(state.profile),
-          searchPreferences: cloneValue(state.searchPreferences),
-          revision: profileRevision,
-        });
-      }
-
-      state.profile = normalizedProfile;
-      profileRevision += 1;
-      state.searchPreferences = normalizedSearchPreferences;
-      state.resumeImportRuns = upsertById(
-        state.resumeImportRuns,
-        normalizedRun,
-      );
-      const nextArtifacts = replaceArtifactsForRun(
-        state.resumeImportDocumentBundles,
-        state.resumeImportFieldCandidates,
-        normalizedRun.id,
-        normalizedBundles,
-        normalizedCandidates,
-      );
-      state.resumeImportDocumentBundles = nextArtifacts.bundles;
-      state.resumeImportFieldCandidates = nextArtifacts.candidates;
-      return Promise.resolve({
-        status: "applied" as const,
-        profile: cloneValue(state.profile),
-        searchPreferences: cloneValue(state.searchPreferences),
-        revision: profileRevision,
-      });
-    },
     listResumeValidationResults(draftId) {
       const values = draftId
         ? state.resumeValidationResults.filter(
@@ -1250,36 +845,6 @@ export function createInMemoryJobFinderRepository(
       state.resumeAssistantMessages = upsertById(
         state.resumeAssistantMessages,
         normalizedMessage,
-      );
-      return Promise.resolve();
-    },
-    listProfileCopilotMessages() {
-      return Promise.resolve(
-        sortMessages(cloneValue(state.profileCopilotMessages)),
-      );
-    },
-    upsertProfileCopilotMessage(message) {
-      const normalizedMessage = ProfileCopilotMessageSchema.parse(
-        cloneValue(message),
-      );
-      state.profileCopilotMessages = upsertById(
-        state.profileCopilotMessages,
-        normalizedMessage,
-      );
-      return Promise.resolve();
-    },
-    listProfileRevisions() {
-      return Promise.resolve(
-        sortNewestFirst(cloneValue(state.profileRevisions)),
-      );
-    },
-    upsertProfileRevision(revision) {
-      const normalizedRevision = ProfileRevisionSchema.parse(
-        cloneValue(revision),
-      );
-      state.profileRevisions = upsertById(
-        state.profileRevisions,
-        normalizedRevision,
       );
       return Promise.resolve();
     },
@@ -2227,10 +1792,9 @@ export function createInMemoryJobFinderRepository(
         }
       }
       if (profile) {
-        state.profile = profile;
-        profileRevision += 1;
+        profileWorkspace.profile.replace(profile);
       }
-      if (preferences) state.searchPreferences = preferences;
+      if (preferences) profileWorkspace.preferences.goals.replace(preferences);
       return Promise.resolve();
     },
     listApplicationRecords() {
@@ -2424,26 +1988,6 @@ export function createInMemoryJobFinderRepository(
 
       return Promise.resolve();
     },
-    getSettings() {
-      return Promise.resolve(cloneValue(state.settings));
-    },
-    saveSettings(settings) {
-      state.settings = JobFinderSettingsSchema.parse(cloneValue(settings));
-      return Promise.resolve();
-    },
-    commitSettingsUpdate(update) {
-      try {
-        const nextSettings = JobFinderSettingsSchema.parse(
-          cloneValue(update(cloneValue(state.settings))),
-        );
-        state.settings = nextSettings;
-        return Promise.resolve(cloneValue(nextSettings));
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    },
     readDiscoveryBootstrapProjection() {
       return Promise.resolve(toDiscoveryBootstrapProjection(state.discovery));
     },
@@ -2584,5 +2128,6 @@ export function createInMemoryJobFinderRepository(
       applyQueue = queue ? ApplyQueueSchema.parse(cloneValue(queue)) : null;
       return Promise.resolve();
     },
+    ...profileWorkspace.methods,
   };
 }

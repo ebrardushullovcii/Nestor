@@ -211,7 +211,6 @@ function laneSeed(): JobFinderRepositoryState {
       tailoringMode: "balanced",
       companyBlacklist: [],
       companyWhitelist: [],
-      discovery: { historyLimit: 5, targets: [] },
     }),
     profileSetupState: ProfileSetupStateSchema.parse({
       status: "completed",

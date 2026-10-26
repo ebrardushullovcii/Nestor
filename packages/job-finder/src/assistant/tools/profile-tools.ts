@@ -40,7 +40,7 @@ const Id = NonEmptyStringSchema.max(200);
  * profile read in a conversation instead of sitting in every system prompt.
  */
 export const PROFILE_EDITING_RULES = [
-  "Profile edits are typed operations sent with edit_profile. Each operation names its kind: replace_identity_fields, replace_professional_summary_fields, replace_work_eligibility_fields, replace_profile_list_fields, remove_profile_list_entries, replace_search_preferences_fields, replace_compensation_preferences_fields, set_resume_approach, upsert_/remove_ experience, education, certification, project, link, language records, upsert_/remove_ proof_point and reusable_answer, reorder_education_records, resolve_review_items.",
+  "Profile edits are typed operations sent with edit_profile. Each operation names its kind: replace_identity_fields, replace_professional_summary_fields, replace_work_eligibility_fields, replace_profile_list_fields, remove_profile_list_entries, replace_search_preferences_fields, replace_compensation_preferences_fields, set_resume_approach, upsert_/remove_ experience, education, certification, project, link, language records, upsert_/remove_ proof_point, reorder_education_records, resolve_review_items.",
   "An update to an existing card (experience, education, certification, link, project, language) carries that card's id from read_profile; an upsert without an id creates a new card. Include only the fields that change.",
   "Use the exact fields in edit_profile's operation schema. Experience uses companyName, summary and achievements (not company, description or bullets); education uses schoolName; projects use summary and projectUrl. workModes and seniorityLevels belong in replace_search_preferences_fields, not replace_profile_list_fields. Unknown fields reject the whole request without saving anything; correct the named fields and retry.",
   "Work modes use remote, hybrid, onsite or flexible. Built-in employment types use Full-time, Part-time, Contract, Internship or Temporary, with spaces or hyphens as shown, never invented snake_case codes. Employment types and seniority levels also accept the person's own custom wording; preserve it when they ask for a custom value.",
@@ -285,6 +285,7 @@ function setupReadiness(snapshot: AssistantPersonalState) {
   const readiness = evaluateProfileSetupReadiness(
     snapshot.profile,
     snapshot.searchPreferences,
+    snapshot.enabledSiteCount,
   );
   readiness.hasDiscoverySource = snapshot.enabledSiteCount > 0;
   const blockers = getProfileSetupReadinessBlockers(readiness);
@@ -780,53 +781,27 @@ export function fieldsTouchedByOperation(
 function parseOperations(
   raw: readonly unknown[],
   profile: CandidateProfile,
-  searchPreferences: JobSearchPreferences,
 ): ProfileCopilotPatchOperation[] {
   const operations: ProfileCopilotPatchOperation[] = [];
   const problems: string[] = [];
-  let discovery = searchPreferences.discovery;
   raw.forEach((entry, index) => {
     const unknownFields = unknownProfileFields(
       ProfileCopilotPatchOperationSchema,
       entry,
       `operations[${index}]`,
     );
-    // Merge before schema defaults can turn an omitted source list into [].
-    let candidate = entry;
+    const parsed = ProfileCopilotPatchOperationSchema.safeParse(entry);
     if (
-      entry &&
-      typeof entry === "object" &&
-      "operation" in entry &&
-      entry.operation === "replace_search_preferences_fields" &&
-      "value" in entry &&
-      entry.value &&
-      typeof entry.value === "object" &&
-      "discovery" in entry.value &&
-      entry.value.discovery &&
-      typeof entry.value.discovery === "object" &&
-      !Array.isArray(entry.value.discovery)
+      parsed.success &&
+      (parsed.data.operation === "replace_answer_bank_fields" ||
+        parsed.data.operation === "upsert_reusable_answer" ||
+        parsed.data.operation === "remove_reusable_answer")
     ) {
-      if (
-        unknownFields.length === 0 &&
-        Object.hasOwn(entry.value.discovery, "targets")
-      ) {
-        problems.push(
-          "Source lists cannot be replaced through edit_profile. Use add_sites, update_site or set_sites_enabled to change only the requested sites; omit discovery.targets here.",
-        );
-        return;
-      }
-      candidate = {
-        ...entry,
-        value: {
-          ...entry.value,
-          discovery: {
-            ...discovery,
-            ...entry.value.discovery,
-          },
-        },
-      };
+      problems.push(
+        "Profile's old answer bank is retired. Manage reusable application answers in Needs you.",
+      );
+      return;
     }
-    const parsed = ProfileCopilotPatchOperationSchema.safeParse(candidate);
     if (
       parsed.success &&
       parsed.data.operation === "replace_identity_fields" &&
@@ -843,12 +818,6 @@ function parseOperations(
     if (unknownFields.length > 0) problems.push(...unknownFields);
     else if (parsed.success) {
       operations.push(parsed.data);
-      if (
-        parsed.data.operation === "replace_search_preferences_fields" &&
-        parsed.data.value.discovery
-      ) {
-        discovery = parsed.data.value.discovery;
-      }
     } else
       problems.push(`operations[${index}]: ${describeZodIssues(parsed.error)}`);
   });
@@ -938,11 +907,7 @@ export const editProfileTool = defineTool({
   async execute(input, context) {
     const { service, session, ports } = context;
     const snapshot = await ports.readPersonalState();
-    const operations = parseOperations(
-      input.operations,
-      snapshot.profile,
-      snapshot.searchPreferences,
-    );
+    const operations = parseOperations(input.operations, snapshot.profile);
 
     const editor = session.context?.editor;
     if (editor?.editor === "profile" && editor.dirtyFields.length > 0) {
@@ -960,20 +925,6 @@ export const editProfileTool = defineTool({
         );
       }
     }
-
-    if (
-      operations.some((operation) =>
-        [
-          "upsert_reusable_answer",
-          "remove_reusable_answer",
-          "replace_answer_bank_fields",
-        ].includes(operation.operation),
-      )
-    )
-      throw new AssistantToolError(
-        "refused",
-        "Form answers belong in Needs you. Use list_needs_you and answer_need for a pending question, or the Needs you saved-answer commands to edit remembered answers.",
-      );
 
     if (input.mode === "suggest") {
       const { proposal, part } = await session.createProposal({

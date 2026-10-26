@@ -1,4 +1,7 @@
-import { normalizePublicLinkUrl } from "@nestor/contracts";
+import {
+  followPrimaryContacts,
+  normalizePublicLinkUrl,
+} from "@nestor/contracts";
 import type {
   ResumeProfileExtraction,
   TailoredResumeDraft,
@@ -78,69 +81,6 @@ export function buildPreviewSectionsFromDraft(draft: TailoredResumeDraft) {
       lines: [...draft.targetedKeywords],
     },
   ].filter((section) => section.lines.length > 0);
-}
-
-/**
- * The email and phone applications use usually repeat the primary ones. When
- * the primary changes in a save that leaves the application one alone, and
- * the application one was that old value (or empty), it follows. Otherwise
- * the person chose a different address on purpose and it stays. Without this
- * "my email is now ..." changed the profile while every application kept
- * sending the old address.
- */
-export function followPrimaryContacts(
-  currentProfile: CandidateProfile,
-  nextProfile: CandidateProfile,
-): CandidateProfile {
-  const follow = (input: {
-    currentPrimary: string | null;
-    nextPrimary: string | null;
-    currentPreferred: string | null;
-    nextPreferred: string | null;
-    normalize: (value: string | null) => string;
-  }): string | null => {
-    const primaryChanged =
-      input.normalize(input.currentPrimary) !==
-      input.normalize(input.nextPrimary);
-    const preferredUntouched =
-      input.normalize(input.currentPreferred) ===
-      input.normalize(input.nextPreferred);
-    const preferredMirroredPrimary =
-      !input.normalize(input.currentPreferred) ||
-      input.normalize(input.currentPreferred) ===
-        input.normalize(input.currentPrimary);
-    return primaryChanged && preferredUntouched && preferredMirroredPrimary
-      ? input.nextPrimary
-      : input.nextPreferred;
-  };
-  const preferredEmail = follow({
-    currentPrimary: currentProfile.email,
-    nextPrimary: nextProfile.email,
-    currentPreferred: currentProfile.applicationIdentity.preferredEmail,
-    nextPreferred: nextProfile.applicationIdentity.preferredEmail,
-    normalize: (value) => normalizeText(value ?? ""),
-  });
-  const preferredPhone = follow({
-    currentPrimary: currentProfile.phone,
-    nextPrimary: nextProfile.phone,
-    currentPreferred: currentProfile.applicationIdentity.preferredPhone,
-    nextPreferred: nextProfile.applicationIdentity.preferredPhone,
-    normalize: (value) => (value ?? "").replace(/\D/gu, ""),
-  });
-  if (
-    preferredEmail === nextProfile.applicationIdentity.preferredEmail &&
-    preferredPhone === nextProfile.applicationIdentity.preferredPhone
-  ) {
-    return nextProfile;
-  }
-  return {
-    ...nextProfile,
-    applicationIdentity: {
-      ...nextProfile.applicationIdentity,
-      preferredEmail,
-      preferredPhone,
-    },
-  };
 }
 
 export function normalizeProfileBeforeSave(
@@ -395,7 +335,8 @@ export function mergeExperienceRecords(
           existingEntry.companyName,
           existingEntry.title,
           existingEntry.startDate,
-        ]) === key || areEquivalentExperienceRecords(existingEntry, entry),
+        ]) === key ||
+        areEquivalentExperienceRecords(existingEntry, entry),
     );
     const match = matchIndex === -1 ? null : (merged[matchIndex] ?? null);
     const nextEntry = {
@@ -476,7 +417,9 @@ export function mergeEducationRecords(
       ]
         .map((part) => normalizeText(part ?? ""))
         .join("|");
-    return Boolean(left.degree || left.fieldOfStudy) && key(left) === key(right);
+    return (
+      Boolean(left.degree || left.fieldOfStudy) && key(left) === key(right)
+    );
   };
 
   extracted.forEach((entry, index) => {

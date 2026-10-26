@@ -33,9 +33,6 @@ describe("job finder demo state", () => {
         savedJobIds.has(entry.jobId),
       ),
     ).toBe(true);
-    expect(state.searchPreferences.discovery.targets).toEqual(
-      expect.arrayContaining([expect.objectContaining({ enabled: true })]),
-    );
     expect(
       state.savedJobs.find((job) => job.id === "job_consent_queue"),
     ).toEqual(
@@ -47,16 +44,11 @@ describe("job finder demo state", () => {
     );
   });
 
-  test("resume workspace seeds stay campaign-free with an enabled source", () => {
+  test("resume workspace seeds stay campaign-free", () => {
     const state = createResumeWorkspaceDemoState();
 
     expect(state.campaigns).toEqual([]);
     expect(state.activeCampaignId).toBeNull();
-    expect(
-      state.searchPreferences.discovery.targets.some(
-        (target) => target.enabled,
-      ),
-    ).toBe(true);
   });
 
   test("agent-owned browser drive can reach Apply with an approved resume", () => {
@@ -158,16 +150,11 @@ describe("job finder demo state", () => {
 
   test("apply-queue seed jobs pin historical provenance to the configured target", () => {
     const applyState = createApplyQueueDemoState();
-    const configuredTarget =
-      applyState.searchPreferences.discovery.targets.find(
-        (target) => target.id === "target_linkedin_default",
-      );
-
-    expect(configuredTarget).toBeDefined();
-    expect(configuredTarget?.enabled).toBe(true);
-    expect(configuredTarget?.startingUrl).toBe(
-      "https://www.linkedin.com/jobs/search/",
-    );
+    const configuredTarget = {
+      id: "target_linkedin_default",
+      adapterKind: "auto",
+      startingUrl: "https://www.linkedin.com/jobs/search/",
+    };
 
     // job_generating seeds the queue's not-ready entry, so both seed jobs are
     // asserted through the apply queue's derivation chain.

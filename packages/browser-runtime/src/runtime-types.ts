@@ -143,19 +143,22 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    * performs without this flag; only the site's attempt to transmit or
    * persist that selection externally is gated here. This never authorizes
    * DOM form submission or clicking a final apply control; those remain
-   * independently blocked. The runtime opens a short, same-origin window only
-   * around one exact grounded field action, accepts bounded fetch/XHR
-   * POST/PUT/PATCH traffic only when the URL or operation body has explicit
-   * draft/autosave/update semantics, and denies final-action, ambiguous,
-   * cross-origin, late, long-lived, beacon, and navigation traffic. Omitted
-   * values are false.
+   * independently blocked. The runtime opens a short window around a grounded
+   * field action, accepts bounded fetch/XHR POST/PUT/PATCH traffic and denies
+   * final-action, late, long-lived, beacon and navigation traffic. A pinned
+   * origin list requires explicit draft/autosave/update semantics and denies
+   * cross-origin requests. Omitted values are false. Attachment upload has
+   * its own file-bound permission below.
    */
   intermediateMutationsAuthorized?: boolean;
+  /** Upload only the exact selected attachment while the form stays fenced. */
+  attachmentUploadsAuthorized?: boolean;
   /**
    * Canonical origins covered by the exact authority envelope. This list is
-   * inert unless `intermediateMutationsAuthorized` is true, and the runtime
-   * refuses to open a field-save window when the current page origin is not
-   * an exact member.
+   * checked before field-save and attachment windows. Attachment uploads need
+   * a pinned source origin. Field saves use a member of this list (or the current
+   * origin when empty) and stay pinned to it. A separate storage origin can
+   * receive only the exact selected file. Final-submit origins stay separate.
    */
   intermediateMutationAllowedOrigins?: string[];
   /**
@@ -165,6 +168,7 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    */
   recheckIntermediateMutationAuthority?: (
     observedOrigin: string,
+    purpose?: "answers" | "attachment",
   ) => Promise<boolean>;
   /**
    * Explicit final-submit authorization. The production Playwright runtime
@@ -266,7 +270,11 @@ export interface ApplicationPreparationProgress {
 export interface BrowserSessionRuntime {
   readRenderedPage?(
     url: string,
-    options?: { signal?: AbortSignal | undefined; onPage?: AutomationPageListener; ready?: (html: string) => boolean },
+    options?: {
+      signal?: AbortSignal | undefined;
+      onPage?: AutomationPageListener;
+      ready?: (html: string) => boolean;
+    },
   ): Promise<{ html: string; finalUrl: string }>;
   getSessionState(source: JobSource): Promise<BrowserSessionState>;
   openSession(

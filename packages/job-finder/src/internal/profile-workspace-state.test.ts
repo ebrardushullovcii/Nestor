@@ -1,6 +1,4 @@
-import {
-  ProfileSetupStateSchema,
-} from "@nestor/contracts";
+import { ProfileSetupStateSchema } from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
@@ -26,6 +24,7 @@ describe("profile workspace setup completion", () => {
         {
           repository,
           hasRunJobSearch: () => true,
+          jobSites: { counts: () => ({ enabled: 1 }) },
         } as unknown as WorkspaceServiceContext,
         {
           profile: seed.profile,

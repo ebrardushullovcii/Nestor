@@ -90,7 +90,9 @@ export function createWorkspaceSourceDebugMethods(
           const campaignState = await ctx.repository.getCampaignState();
           if (campaignState) {
             const relevantCampaigns = campaignState.campaigns.filter(
-              (campaign) => campaign.sourceTargetIds.includes(targetId),
+              (campaign) =>
+                campaign.id === campaignState.activeCampaignId &&
+                Boolean(ctx.jobSites?.get(Number(targetId))),
             );
             await Promise.all(
               relevantCampaigns.map((campaign) =>

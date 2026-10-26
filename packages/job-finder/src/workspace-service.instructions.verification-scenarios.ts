@@ -12,8 +12,8 @@ import {
 describe("createJobFinderWorkspaceService", () => {
   test("verify source instructions replays the chosen artifact without overwriting it mid-run", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       instructionStatus: "validated",
       validatedInstructionId: "instruction_existing_validated",
       draftInstructionId: null,

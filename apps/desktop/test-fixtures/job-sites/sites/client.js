@@ -249,9 +249,51 @@ if (form) {
   }
 
   for (const input of form.querySelectorAll('input[type="file"]'))
-    input.addEventListener("change", () => {
-      form.querySelector(`[data-file-name="${input.name}"]`).textContent =
-        input.files[0]?.name || "No file selected";
+    input.addEventListener("change", async () => {
+      const label = form.querySelector(`[data-file-name="${input.name}"]`);
+      label.textContent = input.files[0]?.name || "No file selected";
+      const transport = new URLSearchParams(location.search).get("upload");
+      if (!["async", "xhr"].includes(transport)) return;
+      if (!input.files[0]) return;
+      label.textContent = "Uploading resume…";
+      try {
+        const signed = await fetch("/api/non-user-graphql", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            operationName: "UploadHandle",
+            query: "query UploadHandle { fileUploadHandle { url fields } }",
+            variables: {},
+          }),
+        });
+        const target = (await signed.json()).data.fileUploadHandle;
+        const body = new FormData();
+        body.append(input.name, input.files[0]);
+        for (const [key, value] of Object.entries(target.fields))
+          body.append(key, value);
+        const uploaded =
+          transport === "xhr"
+            ? await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", target.url);
+                xhr.onload = () =>
+                  resolve(
+                    xhr.status === 200 && JSON.parse(xhr.responseText).uploaded,
+                  );
+                xhr.onerror = reject;
+                xhr.send(body);
+              })
+            : await fetch(target.url, { method: "POST", body }).then(
+                async (response) =>
+                  response.ok && (await response.json()).uploaded,
+              );
+        if (!uploaded) throw new Error("Resume failed to upload");
+        input.setCustomValidity("");
+        label.textContent = `Resume attached: ${input.files[0].name}`;
+      } catch {
+        input.setCustomValidity("Resume failed to upload");
+        label.textContent = "Resume failed to upload";
+      }
     });
   for (const zone of form.querySelectorAll("[data-drop]")) {
     const input = control(zone.dataset.drop);

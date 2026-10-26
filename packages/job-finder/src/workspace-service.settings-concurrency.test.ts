@@ -194,10 +194,6 @@ describe("scoped settings updates against transaction-current state", () => {
     expect(settings.resumeApplicationMode).toBe("tailored_per_job");
     expect(settings.appearanceTheme).toBe("dark");
     expect(searchPreferences.tailoringMode).toBe("aggressive");
-    // Best matches only also turns on the strict collection filter.
-    expect(searchPreferences.discovery.collectOnlyHardCriteriaMatches).toBe(
-      true,
-    );
     expect(snapshot.searchPreferences.tailoringMode).toBe("aggressive");
 
     // Keeping the original file is the other half of the same choice.
@@ -233,16 +229,12 @@ describe("scoped settings updates against transaction-current state", () => {
       ...staleProfileDraft,
       locations: ["Vienna, Austria"],
       tailoringMode: "aggressive",
-      discovery: {
-        ...staleProfileDraft.discovery,
-        collectOnlyHardCriteriaMatches: true,
-      },
     });
 
     const persisted = await base.getSearchPreferences();
     expect(persisted.locations).toEqual(["Vienna, Austria"]);
     expect(persisted.tailoringMode).toBe("conservative");
-    expect(persisted.discovery.collectOnlyHardCriteriaMatches).toBe(false);
+    expect(persisted.searchSelectivity).toBe("wide_net");
   });
 
   test("application defaults keep theme and CRM untouched", async () => {
@@ -375,6 +367,7 @@ describe("fault ordering for scoped saves", () => {
 
   test("failed settings commit persists nothing", async () => {
     const base = createInMemoryJobFinderRepository(createSeed());
+    const before = await base.getSettings();
     const repository: JobFinderRepository = {
       ...base,
       commitSettingsUpdate: () => Promise.reject(new Error("commit failed")),
@@ -384,7 +377,7 @@ describe("fault ordering for scoped saves", () => {
     await expect(
       service.updateWorkspaceBehavior({ keepSessionAlive: true }),
     ).rejects.toThrow("commit failed");
-    expect(await base.getSettings()).toEqual(createSeed().settings);
+    expect(await base.getSettings()).toEqual(before);
   });
 
   test("failed paired legacy commit rolls back settings and job pinning together", async () => {

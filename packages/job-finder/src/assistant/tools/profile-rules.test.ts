@@ -323,11 +323,6 @@ describe("sidebar resume import outcomes", () => {
           availableStartDate: null,
           remoteEligible: null,
         },
-        answerBank: {
-          ...seed.profile.answerBank,
-          workAuthorization: null,
-          visaSponsorship: null,
-        },
       };
       seed.searchPreferences = { ...seed.searchPreferences, workModes: [] };
       const { workspaceService } = createWorkspaceServiceHarness({ seed });
@@ -405,11 +400,7 @@ describe("sidebar resume import outcomes", () => {
         status: "in_progress",
         completedAt: null,
       };
-      if (missing === "source")
-        seed.searchPreferences = {
-          ...seed.searchPreferences,
-          discovery: { ...seed.searchPreferences.discovery, targets: [] },
-        };
+      if (missing === "source") seed.jobSites = [];
       if (missing === "eligibility")
         seed.profile = {
           ...seed.profile,
@@ -417,11 +408,6 @@ describe("sidebar resume import outcomes", () => {
             ...seed.profile.workEligibility,
             authorizedWorkCountries: [],
             requiresVisaSponsorship: null,
-          },
-          answerBank: {
-            ...seed.profile.answerBank,
-            workAuthorization: null,
-            visaSponsorship: null,
           },
         };
       if (missing === "headline")
@@ -483,10 +469,7 @@ describe("sidebar resume import outcomes", () => {
   it("returns the actual setup blockers after a first-job edit and separates optional phone", async () => {
     const seed = createSeed();
     seed.profile = { ...seed.profile, headline: null, phone: null };
-    seed.searchPreferences = {
-      ...seed.searchPreferences,
-      discovery: { ...seed.searchPreferences.discovery, targets: [] },
-    };
+    seed.jobSites = [];
     seed.profileSetupState = {
       ...seed.profileSetupState,
       status: "in_progress",

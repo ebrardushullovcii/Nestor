@@ -1,0 +1,46 @@
+{
+  "id": "pass11-attachment-upload",
+  "provenance": "Scrubbed reproduction of the captured same-origin GraphQL presign followed by a multipart storage POST to /. Names, bytes, hosts and signing values are synthetic, not captured credentials.",
+  "presign": {
+    "operationName": "UploadHandle",
+    "query": "query UploadHandle { fileUploadHandle { url fields } }",
+    "variables": {}
+  },
+  "fields": {
+    "acl": "private",
+    "bucket": "synthetic-files",
+    "key": "resumes/synthetic-resume.pdf",
+    "Content-Type": "application/pdf",
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": "EXAMPLEUPLOADKEY12345/20990101/local-test-1/s3/aws4_request",
+    "X-Amz-Date": "20990101T000000Z",
+    "X-Amz-Security-Token": "c3ludGhldGljLXVwbG9hZC1zZXNzaW9uLXRva2Vu",
+    "X-Amz-Signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "policy": {
+    "expiration": "2099-01-01T01:00:00Z",
+    "conditions": [
+      { "bucket": "synthetic-files" },
+      { "acl": "private" },
+      ["starts-with", "$key", "resumes/"]
+    ]
+  },
+  "preparedAnswers": ["+12025550123", "90000"],
+  "refusedMetadata": [
+    { "token": "candidate phone +12025550123" },
+    { "key": "uploads/salary_expectation_90000" },
+    { "X-Amz-Security-Token": "candidatephone+12025550123" },
+    { "X-Amz-Date": "candidate salary expectation 90000" }
+  ],
+  "refusedPaths": [
+    "/api/create-application/upload",
+    "/api/apply-to-job/files",
+    "/api/create_application/upload",
+    "/api/create-user/upload"
+  ],
+  "refusedPresign": {
+    "operationName": "B",
+    "query": "query A { fileUploadHandle { url } } mutation B { saveCandidateProfile { id } }",
+    "variables": {}
+  }
+}

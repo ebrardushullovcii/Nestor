@@ -16,7 +16,6 @@ interface BuildProfileScreenViewModelInput {
   applicationIdentityValues:
     | ProfileEditorValues["applicationIdentity"]
     | undefined;
-  answerBankValues: ProfileEditorValues["answerBank"] | undefined;
   certificationValues:
     | ProfileEditorValues["records"]["certifications"]
     | undefined;
@@ -267,15 +266,6 @@ function buildProfileSectionProgress(
       input.applicationIdentityValues?.preferredEmail,
       input.applicationIdentityValues?.preferredPhone,
       input.applicationIdentityValues?.preferredLinkIds,
-      input.answerBankValues?.workAuthorization,
-      input.answerBankValues?.visaSponsorship,
-      input.answerBankValues?.relocation,
-      input.answerBankValues?.travel,
-      input.answerBankValues?.noticePeriod,
-      input.answerBankValues?.availability,
-      input.answerBankValues?.salaryExpectations,
-      input.answerBankValues?.selfIntroduction,
-      input.answerBankValues?.careerTransition,
       input.targetRoles,
       input.jobFamilies,
       input.seniorityLevels,
@@ -290,9 +280,6 @@ function buildProfileSectionProgress(
       input.tailoringMode,
       input.minimumSalaryUsd,
       input.targetSalaryUsd,
-    ]),
-    countFilledRecordFields(input.answerBankValues?.customAnswers ?? [], [
-      "id",
     ]),
   );
   const preferences = withRequiredProgress(

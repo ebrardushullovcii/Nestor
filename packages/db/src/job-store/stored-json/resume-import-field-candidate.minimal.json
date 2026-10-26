@@ -1,0 +1,13 @@
+{
+  "id": "synthetic",
+  "runId": "synthetic",
+  "target": {
+    "section": "identity",
+    "key": "synthetic"
+  },
+  "label": "synthetic",
+  "sourceKind": "parser_literal",
+  "value": "synthetic",
+  "confidence": 1,
+  "createdAt": "2026-10-26T00:00:00.000Z"
+}

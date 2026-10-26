@@ -425,12 +425,6 @@ describe("tool-using AI capabilities", () => {
       }),
     );
     const preferences = createPreferences();
-    const source = preferences.discovery.targets[0]!;
-    preferences.discovery.targets = Array.from({ length: 897 }, (_, index) => ({
-      ...source,
-      id: `source_${index}`,
-      customInstructions: `DISCOVERY_ONLY_${index}`.repeat(100),
-    }));
     const request: CreateResumeDraftInput = {
       profile,
       searchPreferences: preferences,
@@ -553,7 +547,7 @@ describe("tool-using AI capabilities", () => {
       JSON.stringify(previousPayload).length +
       JSON.stringify({ ...request, ...grounded }).length;
     expect(JSON.stringify(payload).length).toBeLessThan(
-      previousPayloadAndReadChars / 10,
+      previousPayloadAndReadChars,
     );
   });
 

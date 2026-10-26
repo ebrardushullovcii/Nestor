@@ -1,5 +1,6 @@
 import {
   AssistantJobViewSchema,
+  AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
   matchesAssistantListView,
   type AssistantNavigationDisplay,
@@ -34,7 +35,8 @@ export async function waitForDisplayedDestination(
     const panel = shownElements('[role="tabpanel"][aria-labelledby]')[0];
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
-    const section = actual.pathname === "/job-finder/profile" ? profileSection : null;
+    const section =
+      actual.pathname === "/job-finder/profile" ? profileSection : null;
     const dialog = shownElements("[role]").find(
       (element) =>
         ["dialog", "alertdialog"].includes(
@@ -75,12 +77,14 @@ export async function waitForDisplayedDestination(
       : expected.pathname === "/job-finder/profile"
         ? Boolean(panel)
         : expected.pathname === "/job-finder/applications"
-          ? shownElements("main h1, [role=main] h1").some((heading) => heading.textContent?.trim() === "Applications")
-        : Boolean(
-            shownElements(
-              "main h1, main h2, [role=main] h1, [role=main] h2",
-            )[0],
-          );
+          ? shownElements("main h1, [role=main] h1").some(
+              (heading) => heading.textContent?.trim() === "Applications",
+            )
+          : Boolean(
+              shownElements(
+                "main h1, main h2, [role=main] h1, [role=main] h2",
+              )[0],
+            );
     const jobId = expected.searchParams.get(
       expected.pathname === "/job-finder/discovery" ? "job" : "jobId",
     );
@@ -91,18 +95,39 @@ export async function waitForDisplayedDestination(
       );
     let viewDisplayed = true;
     const trackerView = expected.pathname === "/job-finder/applications";
-    const schema = trackerView ? AssistantTrackerViewSchema : AssistantJobViewSchema;
-    const view = expected.searchParams.get(trackerView ? "applications" : "jobs");
+    const needsView = expected.pathname === "/job-finder/actions";
+    const schema = needsView
+      ? AssistantNeedsViewSchema
+      : trackerView
+        ? AssistantTrackerViewSchema
+        : AssistantJobViewSchema;
+    const view = expected.searchParams.get(
+      needsView ? "needs" : trackerView ? "applications" : "jobs",
+    );
     if (view) {
       try {
         const requested = schema.parse(JSON.parse(view));
+        const stateAttribute = needsView
+          ? "data-needs-list-state"
+          : trackerView
+            ? "data-application-list-state"
+            : "data-job-list-state";
         const state = shownElements(
-          trackerView ? "main [data-application-list-state]" : "main [data-job-list-state]",
-        )[0]?.getAttribute(trackerView ? "data-application-list-state" : "data-job-list-state");
+          `main [${stateAttribute}]`,
+        )[0]?.getAttribute(stateAttribute);
         viewDisplayed = matchesAssistantListView(
           schema.parse(JSON.parse(state ?? "null")),
           requested,
         );
+        if (needsView) {
+          const focusId = AssistantNeedsViewSchema.parse(requested).focusId;
+          if (focusId !== undefined)
+            viewDisplayed &&= shownElements("main [data-needs-detail-id]").some(
+              (element) =>
+                element.getAttribute("data-needs-detail-id") ===
+                String(focusId),
+            );
+        }
       } catch {
         viewDisplayed = false;
       }
@@ -115,7 +140,12 @@ export async function waitForDisplayedDestination(
       reason:
         overlay !== "none"
           ? "An overlay still covers the destination."
-          : "The requested page or section has not been displayed.",
+          : needsView &&
+              view &&
+              !viewDisplayed &&
+              shownElements('main [data-needs-editing="true"]').length > 0
+            ? "Needs you has unsaved answer text. Save it before changing its view."
+            : "The requested page or section has not been displayed.",
     };
     if (
       matches &&

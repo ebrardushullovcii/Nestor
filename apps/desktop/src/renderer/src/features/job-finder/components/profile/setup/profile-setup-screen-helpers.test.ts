@@ -646,7 +646,6 @@ describe("isProfileSetupPathStepComplete", () => {
 
 describe("isProfileSetupPathStepComplete domain evidence", () => {
   const untouchedReadiness: ProfileSetupPathStepReadiness = {
-    hasAnswerBank: false,
     hasContactPath: false,
     hasCoreIdentity: false,
     hasDiscoverySource: false,
@@ -657,7 +656,6 @@ describe("isProfileSetupPathStepComplete domain evidence", () => {
     hasWorkModePreference: false,
   };
   const completeReadiness: ProfileSetupPathStepReadiness = {
-    hasAnswerBank: true,
     hasContactPath: true,
     hasCoreIdentity: true,
     hasDiscoverySource: true,
@@ -765,7 +763,6 @@ describe("isProfileSetupPathStepComplete domain evidence", () => {
   it("leaves empty optional steps unbadged without turning them into blockers", () => {
     const readiness: ProfileSetupPathStepReadiness = {
       ...completeReadiness,
-      hasAnswerBank: false,
       hasNarrative: false,
     };
     const baseInput = {

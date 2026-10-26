@@ -12,7 +12,9 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("treats collection result-changing guidance as positive search proof instead of leaving search coverage in draft", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -22,7 +24,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const strongFindings = createStrongSourceDebugFindingsByPhase();
     const browserRuntime = createAgentBrowserRuntime(
       [
@@ -68,9 +71,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -97,7 +98,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("treats stable jobs search routes with visible filter controls as positive search proof", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -107,7 +110,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const strongFindings = createStrongSourceDebugFindingsByPhase();
     const browserRuntime = createAgentBrowserRuntime(
       [
@@ -153,9 +157,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,

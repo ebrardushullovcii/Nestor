@@ -60,10 +60,12 @@ describe("Home's first view on a cold start (ADR 0077)", () => {
   test("answers without draft settlement or automation, then starts them once", async () => {
     const harness = createWorkspaceServiceHarness({ seed: createSeed() });
     // A workspace that already has its plan, opened by a fresh service.
-    await ensureCampaignState({
-      repository: harness.repository,
-      searchPreferences: await harness.repository.getSearchPreferences(),
-    });
+    await harness.repository.saveCampaignState(
+      await ensureCampaignState({
+        repository: harness.repository,
+        searchPreferences: await harness.repository.getSearchPreferences(),
+      }),
+    );
 
     const writes = recordRepositoryWrites(harness.repository);
     const home = await harness.workspaceService.getWorkspaceHomeSnapshot?.();

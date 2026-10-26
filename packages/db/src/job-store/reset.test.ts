@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createJobSitesStore,
+  createProfileStore,
+  createPreferencesStore,
   openJobStore,
   resetJobStore,
   seedTrackerDemo,
@@ -84,6 +86,8 @@ describe("resetJobStore", () => {
   it("leaves the store as a new file would be, and nothing removed on disk", () => {
     const fresh = openJobStore(":memory:");
     stores.push(fresh);
+    createProfileStore(fresh);
+    createPreferencesStore(fresh);
     const { file, store } = openFile();
 
     const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
@@ -109,6 +113,8 @@ describe("resetJobStore", () => {
     expect(changes.map((change) => change.cause)).toEqual([
       "application",
       "sites",
+      "profile",
+      "settings",
     ]);
     expect(changes[0]!.ids).toBeNull();
 
@@ -127,6 +133,21 @@ describe("resetJobStore", () => {
     const reopened = openJobStore(file);
     stores.push(reopened);
     expect(reopened.stageCounts().found).toBe(1);
+  });
+
+  it("keeps existing Profile and Settings handles usable with fresh defaults after reset", () => {
+    const { store } = openFile();
+    const profile = createProfileStore(store),
+      preferences = createPreferencesStore(store);
+    profile.patch({ fields: { headline: "Synthetic old profile" } });
+    preferences.goals.patch({ lists: { targetRoles: ["Old role"] } });
+    preferences.settings.patch({ fields: { appearanceTheme: "dark" } });
+    resetJobStore(store);
+    expect(profile.read().headline).toBeNull();
+    expect(preferences.goals.read().targetRoles).toEqual([]);
+    expect(preferences.settings.read().appearanceTheme).toBe("system");
+    profile.patch({ fields: { headline: "Fresh profile" } });
+    expect(profile.read().headline).toBe("Fresh profile");
   });
 
   it("refuses to run inside a transaction", () => {

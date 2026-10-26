@@ -1,3 +1,4 @@
+import type { WorkspaceServiceContext } from "./workspace-service-context";
 import type {
   ApplicationQuestionKind,
   CandidateAnswerKind,
@@ -80,4 +81,30 @@ export function eligibilityAnswerScope(input: {
         ...(input.hiringCountry ? { hiringCountry: input.hiringCountry } : {}),
       }
     : undefined;
+}
+
+/** Reusable text has one home, shared with Needs you. Unknown hiring countries stay unconfirmed. */
+export function rememberWorkspaceAnswer(
+  ctx: WorkspaceServiceContext,
+  input: {
+    prompt: string;
+    answer: string;
+    kind: ApplicationQuestionKind;
+    hiringCountry?: string;
+  },
+): void {
+  if (!ctx.savedAnswers)
+    throw new Error("Saved answers are unavailable in this workspace.");
+  const answer = createReusableAnswerForQuestion(input);
+  const eligibility =
+    input.kind === "work_authorization" || input.kind === "visa_sponsorship";
+  ctx.savedAnswers.upsert({
+    key: answer.id,
+    prompt: input.prompt,
+    answer: input.answer,
+    kind: answer.kind,
+    label: answer.label,
+    scope: { country: eligibility ? (input.hiringCountry ?? "") : "" },
+    needsConfirmation: eligibility && !input.hiringCountry,
+  });
 }

@@ -1,0 +1,120 @@
+{
+  "id": "synthetic",
+  "runId": "synthetic",
+  "sourceResumeId": "synthetic",
+  "sourceFileKind": "plain_text",
+  "primaryParserKind": "plain_text",
+  "parserKinds": [
+    "plain_text"
+  ],
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "languageHints": [
+    "synthetic"
+  ],
+  "warnings": [
+    "synthetic"
+  ],
+  "pages": [
+    {
+      "pageNumber": 1,
+      "text": "synthetic",
+      "charCount": 1,
+      "parserKinds": [
+        "plain_text"
+      ],
+      "usedOcr": true,
+      "width": 1,
+      "height": 1,
+      "rotationDegrees": 1,
+      "routeKind": "plain_text_native",
+      "quality": {
+        "score": 1,
+        "textDensity": 1,
+        "tokenCount": 1,
+        "lineCount": 1,
+        "blockCount": 1,
+        "columnLikelihood": 1,
+        "readingOrderConfidence": 1,
+        "nativeTextCoverage": 1,
+        "ocrConfidence": 1,
+        "imageCoverageRatio": 1,
+        "invalidUnicodeRatio": 1
+      },
+      "qualityWarnings": [
+        "synthetic"
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "id": "synthetic",
+      "pageNumber": 1,
+      "readingOrder": 1,
+      "text": "synthetic",
+      "kind": "heading",
+      "sectionHint": "identity",
+      "bbox": {
+        "left": 1,
+        "top": 1,
+        "width": 1,
+        "height": 1
+      },
+      "sourceParserKinds": [
+        "plain_text"
+      ],
+      "sourceConfidence": 1,
+      "lineIds": [
+        "synthetic"
+      ],
+      "parserLineage": [
+        "plain_text"
+      ],
+      "readingOrderConfidence": 1,
+      "textSpan": {
+        "start": 1,
+        "end": 1
+      }
+    }
+  ],
+  "fullText": "synthetic",
+  "parserManifest": {
+    "workerKind": "embedded_node",
+    "workerVersion": "synthetic",
+    "manifestVersion": "synthetic",
+    "runtimeLabel": "synthetic",
+    "availableCapabilities": [
+      "synthetic"
+    ],
+    "executorVersions": {
+      "synthetic": "synthetic"
+    }
+  },
+  "route": {
+    "routeKind": "plain_text_native",
+    "triageReasons": [
+      "synthetic"
+    ],
+    "preferredExecutors": [
+      "plain_text"
+    ],
+    "usedExecutors": [
+      "plain_text"
+    ]
+  },
+  "quality": {
+    "score": 1,
+    "textDensity": 1,
+    "tokenCount": 1,
+    "lineCount": 1,
+    "blockCount": 1,
+    "columnLikelihood": 1,
+    "readingOrderConfidence": 1,
+    "nativeTextCoverage": 1,
+    "ocrConfidence": 1,
+    "imageCoverageRatio": 1,
+    "invalidUnicodeRatio": 1
+  },
+  "qualityWarnings": [
+    "synthetic"
+  ]
+}

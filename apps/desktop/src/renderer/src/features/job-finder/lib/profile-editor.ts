@@ -1,23 +1,13 @@
 import { normalizePublicLinkUrl } from "@nestor/contracts";
 import {
-  candidateAnswerKindValues,
   CandidateProfileSchema,
+  followPrimaryContacts,
   JobSearchPreferencesSchema,
   type ResumeImportFieldCandidateSummary,
-  SourceInstructionStatusSchema,
   type CandidateProfile,
-  type JobDiscoveryTarget,
   type JobSearchPreferences,
 } from "@nestor/contracts";
-import type {
-  DiscoveryTargetEditorValue,
-  ProofBankEntryFormEntry,
-  ReusableAnswerFormEntry,
-} from "./job-finder-types";
-import {
-  deriveJobSourceLabel,
-  isGeneratedJobSourceLabel,
-} from "./job-source-display-name";
+import type { ProofBankEntryFormEntry } from "./job-finder-types";
 import {
   booleanToSelect,
   buildFullName,
@@ -151,101 +141,6 @@ function dedupeImportCandidatesByFingerprint<
   });
 }
 
-function toDiscoveryTargetEditorValues(
-  searchPreferences: JobSearchPreferences,
-): DiscoveryTargetEditorValue[] {
-  return searchPreferences.discovery.targets.map((target) => ({
-    id: target.id,
-    label: target.label,
-    startingUrl: target.startingUrl,
-    enabled: target.enabled,
-    adapterKind: "auto",
-    customInstructions: target.customInstructions ?? "",
-    instructionStatus: target.instructionStatus,
-    validatedInstructionId: target.validatedInstructionId,
-    draftInstructionId: target.draftInstructionId,
-    lastDebugRunId: target.lastDebugRunId,
-    lastVerifiedAt: target.lastVerifiedAt,
-    staleReason: target.staleReason,
-  }));
-}
-
-function toDiscoveryTargets(
-  values: readonly DiscoveryTargetEditorValue[],
-  persistedTargets: readonly JobDiscoveryTarget[],
-): JobDiscoveryTarget[] {
-  const persistedTargetById = new Map<string, JobDiscoveryTarget>();
-  for (const persistedTarget of persistedTargets) {
-    // Preserve the previous find() behavior if malformed persisted data contains duplicate IDs.
-    if (!persistedTargetById.has(persistedTarget.id)) {
-      persistedTargetById.set(persistedTarget.id, persistedTarget);
-    }
-  }
-
-  return values.map((target) => {
-    const parsedStatus = SourceInstructionStatusSchema.safeParse(
-      target.instructionStatus,
-    );
-    const instructionStatus = parsedStatus.success
-      ? parsedStatus.data
-      : "missing";
-    const startingUrl = target.startingUrl.trim();
-    const persistedTarget = persistedTargetById.get(target.id);
-    const startingUrlChanged =
-      persistedTarget !== undefined &&
-      persistedTarget.startingUrl.trim() !== startingUrl;
-    const label = target.label.trim();
-    const keptGeneratedLabel =
-      startingUrlChanged &&
-      persistedTarget !== undefined &&
-      label === persistedTarget.label.trim() &&
-      isGeneratedJobSourceLabel(label, persistedTarget.startingUrl);
-
-    return {
-      instructionStatus: startingUrlChanged ? "missing" : instructionStatus,
-      id: target.id,
-      label: keptGeneratedLabel ? deriveJobSourceLabel(startingUrl) : label,
-      startingUrl,
-      enabled: target.enabled,
-      adapterKind: "auto",
-      customInstructions: target.customInstructions.trim() || null,
-      validatedInstructionId: startingUrlChanged
-        ? null
-        : target.validatedInstructionId,
-      draftInstructionId: startingUrlChanged ? null : target.draftInstructionId,
-      lastDebugRunId: startingUrlChanged ? null : target.lastDebugRunId,
-      lastVerifiedAt: startingUrlChanged ? null : target.lastVerifiedAt,
-      staleReason: startingUrlChanged
-        ? "Starting page URL changed. Check this source again before reusing saved guidance."
-        : target.staleReason,
-    };
-  });
-}
-
-function isValidSourceInstructionStatus(value: string): boolean {
-  return SourceInstructionStatusSchema.safeParse(value).success;
-}
-
-// An "Add source" click materializes a blank draft row immediately. A draft
-// the user never touched has nothing entered to lose, so it stays optional:
-// it neither blocks the save nor persists. That optionality only applies to
-// fresh drafts whose id is absent from the persisted baseline. A saved source
-// cleared back to blank is a material edit: it must remain in validation,
-// keep failing the save with the named completion error, and preserve its
-// metadata until the user deletes it with explicit Remove.
-function isEmptyDiscoveryTargetDraft(
-  target: DiscoveryTargetEditorValue,
-  persistedTargetIds: ReadonlySet<string>,
-): boolean {
-  return (
-    !persistedTargetIds.has(target.id) &&
-    !target.label.trim() &&
-    !target.startingUrl.trim() &&
-    !target.customInstructions.trim() &&
-    !target.enabled
-  );
-}
-
 function toProofBankFormEntries(
   profile: CandidateProfile,
 ): ProofBankEntryFormEntry[] {
@@ -258,24 +153,6 @@ function toProofBankFormEntries(
     roleFamilies: joinListInput(entry.roleFamilies),
     projectIds: joinListInput(entry.projectIds),
     linkIds: joinListInput(entry.linkIds),
-  }));
-}
-
-function toReusableAnswerFormEntries(
-  profile: CandidateProfile,
-): ReusableAnswerFormEntry[] {
-  return profile.answerBank.customAnswers.map((entry) => ({
-    id: entry.id,
-    ...(entry.needsConfirmation ? { needsConfirmation: true } : {}),
-    label: entry.label,
-    question: entry.question,
-    answer: entry.answer,
-    kind: entry.kind,
-    ...(entry.applicationScope
-      ? { applicationScope: entry.applicationScope }
-      : {}),
-    roleFamilies: joinListInput(entry.roleFamilies),
-    proofEntryIds: joinListInput(entry.proofEntryIds),
   }));
 }
 
@@ -365,18 +242,6 @@ export function createProfileEditorValues(
       ),
       preferredPhone: profile.applicationIdentity.preferredPhone ?? "",
     },
-    answerBank: {
-      availability: profile.answerBank.availability ?? "",
-      careerTransition: profile.answerBank.careerTransition ?? "",
-      customAnswers: toReusableAnswerFormEntries(profile),
-      noticePeriod: profile.answerBank.noticePeriod ?? "",
-      relocation: profile.answerBank.relocation ?? "",
-      salaryExpectations: profile.answerBank.salaryExpectations ?? "",
-      selfIntroduction: profile.answerBank.selfIntroduction ?? "",
-      travel: profile.answerBank.travel ?? "",
-      visaSponsorship: profile.answerBank.visaSponsorship ?? "",
-      workAuthorization: profile.answerBank.workAuthorization ?? "",
-    },
     languages: toLanguageFormEntries(profile),
     links: toLinkFormEntries(profile),
     narrative: {
@@ -425,8 +290,6 @@ export function createSearchPreferencesEditorValues(
   return {
     companyBlacklist: joinListInput(searchPreferences.companyBlacklist),
     companyWhitelist: joinListInput(searchPreferences.companyWhitelist),
-    collectOnlyHardCriteriaMatches:
-      searchPreferences.discovery.collectOnlyHardCriteriaMatches ?? false,
     employmentTypes: joinListInput(searchPreferences.employmentTypes),
     shiftPreference: searchPreferences.shiftPreference ?? "any",
     minimumWeeklyHours:
@@ -442,7 +305,6 @@ export function createSearchPreferencesEditorValues(
     salaryCurrency: searchPreferences.compensation.currency ?? "",
     seniorityLevels: joinListInput(searchPreferences.seniorityLevels),
     tailoringMode: searchPreferences.tailoringMode,
-    discoveryTargets: toDiscoveryTargetEditorValues(searchPreferences),
     targetCompanyStages: joinListInput(searchPreferences.targetCompanyStages),
     targetIndustries: joinListInput(searchPreferences.targetIndustries),
     targetRoles: joinListInput(searchPreferences.targetRoles),
@@ -584,21 +446,6 @@ export function buildProfilePayload(
           entry.roleFamilies,
           entry.projectIds,
           entry.linkIds,
-        ].some((value) => Boolean(value.trim())),
-    ) ??
-    findIncompleteRowMessage(
-      values.answerBank.customAnswers,
-      "custom answer",
-      "Custom answer",
-      (entry) => entry.label || entry.question || entry.answer,
-      (entry) => Boolean(entry.question.trim()) && Boolean(entry.answer.trim()),
-      (entry) =>
-        [
-          entry.label,
-          entry.question,
-          entry.answer,
-          entry.roleFamilies,
-          entry.proofEntryIds,
         ].some((value) => Boolean(value.trim())),
     );
 
@@ -807,34 +654,6 @@ export function buildProfilePayload(
         values.applicationIdentity.preferredLinkIds,
       ),
     },
-    answerBank: {
-      workAuthorization: values.answerBank.workAuthorization.trim() || null,
-      visaSponsorship: values.answerBank.visaSponsorship.trim() || null,
-      relocation: values.answerBank.relocation.trim() || null,
-      travel: values.answerBank.travel.trim() || null,
-      noticePeriod: values.answerBank.noticePeriod.trim() || null,
-      availability: values.answerBank.availability.trim() || null,
-      salaryExpectations: values.answerBank.salaryExpectations.trim() || null,
-      selfIntroduction: values.answerBank.selfIntroduction.trim() || null,
-      careerTransition: values.answerBank.careerTransition.trim() || null,
-      customAnswers: values.answerBank.customAnswers
-        .filter((entry) => entry.question.trim() && entry.answer.trim())
-        .map((entry) => ({
-          id: entry.id,
-          ...(entry.needsConfirmation ? { needsConfirmation: true } : {}),
-          kind: candidateAnswerKindValues.includes(entry.kind)
-            ? entry.kind
-            : "other",
-          label: entry.label.trim() || entry.question.trim(),
-          question: entry.question.trim(),
-          answer: entry.answer.trim(),
-          roleFamilies: parseTokenListInput(entry.roleFamilies),
-          proofEntryIds: parseListInput(entry.proofEntryIds),
-          ...(entry.applicationScope
-            ? { applicationScope: entry.applicationScope }
-            : {}),
-        })),
-    },
     professionalSummary: {
       shortValueProposition:
         values.summary.shortValueProposition.trim() || null,
@@ -925,53 +744,13 @@ export function buildProfilePayload(
     };
   }
 
-  return { payload: parsedPayload.data };
+  return { payload: followPrimaryContacts(profile, parsedPayload.data) };
 }
 
 export function buildSearchPreferencesPayload(
   searchPreferences: JobSearchPreferences,
   values: SearchPreferencesEditorValues,
 ): { payload?: JobSearchPreferences; validationMessage?: string } {
-  // Untouched "Add source" drafts are optional and never persist, so every
-  // validation and persistence step below sees only rows the user entered.
-  // Cleared persisted sources stay in validation: omitting them would delete
-  // saved sources (and their guidance metadata) without explicit Remove.
-  const persistedTargetIds = new Set(
-    searchPreferences.discovery.targets.map((target) => target.id),
-  );
-  const meaningfulDiscoveryTargets = values.discoveryTargets.filter(
-    (target) => !isEmptyDiscoveryTargetDraft(target, persistedTargetIds),
-  );
-
-  const incompleteTarget = meaningfulDiscoveryTargets.find((target) => {
-    if (!target.label.trim()) {
-      return true;
-    }
-
-    try {
-      const url = new URL(target.startingUrl.trim());
-      return url.protocol !== "http:" && url.protocol !== "https:";
-    } catch {
-      return true;
-    }
-  });
-
-  if (incompleteTarget) {
-    return {
-      validationMessage: `Complete the name and public http or https URL for "${incompleteTarget.label.trim() || "New source"}" before saving.`,
-    };
-  }
-
-  const invalidTargetStatus = meaningfulDiscoveryTargets.find(
-    (target) => !isValidSourceInstructionStatus(target.instructionStatus),
-  );
-
-  if (invalidTargetStatus) {
-    return {
-      validationMessage: `Job source "${invalidTargetStatus.label.trim() || invalidTargetStatus.id}" has an invalid setup status.`,
-    };
-  }
-
   const parsedMinimumSalaryUsd = parseRequiredNonNegativeInteger(
     values.minimumSalaryUsd,
   );
@@ -1095,15 +874,6 @@ export function buildSearchPreferencesPayload(
     tailoringMode: searchPreferences.tailoringMode,
     companyBlacklist: parseListInput(values.companyBlacklist),
     companyWhitelist: parseListInput(values.companyWhitelist),
-    discovery: {
-      ...searchPreferences.discovery,
-      collectOnlyHardCriteriaMatches:
-        searchPreferences.discovery.collectOnlyHardCriteriaMatches ?? false,
-      targets: toDiscoveryTargets(
-        meaningfulDiscoveryTargets,
-        searchPreferences.discovery.targets,
-      ),
-    },
   };
 
   const parsedPayload = JobSearchPreferencesSchema.safeParse(payload);

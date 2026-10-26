@@ -1,3 +1,4 @@
+import { ProfileHoursField } from "../profile-hours-field";
 import { SetupSites } from "@renderer/features/job-lists/setup-sites";
 import { useId, useRef, type ReactNode } from "react";
 import { formatProfileSetupReviewValue } from "./profile-setup-screen-helpers";
@@ -54,15 +55,6 @@ const booleanSelectOptions = [
   { label: "Not set", value: "" },
   { label: "Yes", value: "yes" },
   { label: "No", value: "no" },
-] as const;
-// Same wording as the employment type on a work-history card, so a saved
-// preference and a listing's stated type compare as equal text.
-const SETUP_EMPLOYMENT_TYPE_OPTIONS = [
-  "Full-time",
-  "Part-time",
-  "Contract",
-  "Internship",
-  "Temporary",
 ] as const;
 
 function getImportConflictSummary(
@@ -844,47 +836,18 @@ export function ProfileSetupTargetingStep(props: {
           )}
         </fieldset>
 
-        <fieldset className="grid gap-2">
-          <legend className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
-            Hours
-          </legend>
-          <p className="text-sm leading-6 text-foreground-soft">
-            Tick the kinds of work you want. Leave every box empty to see all of
-            them.
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {SETUP_EMPLOYMENT_TYPE_OPTIONS.map((employmentType) => {
-              const selectedTypes = parseListInput(
-                props.preferencesForm.watch("employmentTypes"),
-              );
-              const checked = selectedTypes.some(
-                (value) => value.toLowerCase() === employmentType.toLowerCase(),
-              );
-              return (
-                <CheckboxField
-                  checked={checked}
-                  key={employmentType}
-                  label={employmentType}
-                  onCheckedChange={(nextChecked) =>
-                    props.preferencesForm.setValue(
-                      "employmentTypes",
-                      joinListInput(
-                        nextChecked
-                          ? [...selectedTypes, employmentType]
-                          : selectedTypes.filter(
-                              (value) =>
-                                value.toLowerCase() !==
-                                employmentType.toLowerCase(),
-                            ),
-                      ),
-                      { shouldDirty: true, shouldTouch: true },
-                    )
-                  }
-                />
-              );
-            })}
-          </div>
-        </fieldset>
+        <ProfileHoursField
+          values={parseListInput(
+            props.preferencesForm.watch("employmentTypes"),
+          )}
+          onChange={(values) =>
+            props.preferencesForm.setValue(
+              "employmentTypes",
+              joinListInput(values),
+              { shouldDirty: true, shouldTouch: true, shouldValidate: true },
+            )
+          }
+        />
 
         {props.renderFooter({
           nextLabel: "Save and continue to Extras",

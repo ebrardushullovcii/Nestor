@@ -119,15 +119,15 @@ export async function connectAssistantMcp(
       close,
       tools: listed.tools.map((tool): AssistantToolDefinition => {
         const definition = byName.get(tool.name)!;
+        const { required, ...inputSchema } = tool.inputSchema;
         return {
           ...definition,
           description: tool.description ?? definition.description,
           parameters: {
+            ...inputSchema,
             type: "object",
             properties: tool.inputSchema.properties ?? {},
-            ...(tool.inputSchema.required
-              ? { required: tool.inputSchema.required }
-              : {}),
+            ...(required ? { required } : {}),
           },
           async execute(input: unknown) {
             const result = CallToolResultSchema.parse(

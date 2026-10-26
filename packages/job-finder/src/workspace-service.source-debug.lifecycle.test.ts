@@ -15,11 +15,14 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("runs source debug, persists artifacts, and validates learned instructions after replay", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const visualSearchFindings: AgentDebugFindings = {
       summary:
         "Visible search controls and job cards were confirmed by visual analysis.",
@@ -116,9 +119,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -193,7 +194,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("marks lingering running source-debug runs as interrupted in the background without a snapshot", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       discovery: {
         ...createSeed().discovery,
@@ -249,10 +252,9 @@ describe("createJobFinderWorkspaceService", () => {
           timing: null,
         },
       ],
-    });
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,

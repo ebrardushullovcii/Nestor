@@ -709,7 +709,6 @@ describe("createPrimaryPageActions", () => {
       profile: completeSetupProfile,
       searchPreferences: {
         ...completeSetupPreferences,
-        discovery: { ...completeSetupPreferences.discovery, targets: [] },
       },
       profileSetupState: {
         status: "in_progress",
@@ -1154,13 +1153,6 @@ describe("createPrimaryPageActions", () => {
     createJobSitesStore(setupStore).update({ id: 1, enabled: false });
     const disabledPreferences = JobSearchPreferencesSchema.parse({
       ...completeSetupPreferences,
-      discovery: {
-        ...completeSetupPreferences.discovery,
-        targets: completeSetupPreferences.discovery.targets.map((target) => ({
-          ...target,
-          enabled: false,
-        })),
-      },
     });
     let persistedSnapshot = {
       profile: completeSetupProfile,

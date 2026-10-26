@@ -30,12 +30,18 @@ import {
   type JobDetail,
   type NeedsYouKind,
   type ApplicationAutomationMode,
+  type SourceInstructionArtifact,
+  jobSiteTarget,
 } from "@nestor/contracts";
 import {
   readSavedApplicationAnswers,
   type ApplicationStore,
 } from "@nestor/db/applications";
-import { createResumeStore, type JobStore } from "@nestor/db/job-store";
+import {
+  createJobSitesStore,
+  createResumeStore,
+  type JobStore,
+} from "@nestor/db/job-store";
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 
 import {
@@ -63,6 +69,11 @@ import {
 } from "./answer-dependencies";
 import { resolveApplicationAttachmentsForExecution } from "../internal/workspace-application-attachments";
 import type { CandidateAssetResolver } from "../internal/workspace-service-contracts";
+import {
+  buildInstructionGuidance,
+  resolveActiveSourceInstructionArtifact,
+} from "../internal/workspace-helpers";
+import { uniqueStrings } from "../internal/shared";
 
 export interface ApplicationServiceDeps {
   jobs: JobStore;
@@ -83,6 +94,7 @@ export interface ApplicationServiceDeps {
     profile: CandidateProfile;
     settings: JobFinderSettings;
     searchPreferences: JobSearchPreferences;
+    sourceInstructionArtifacts?: readonly SourceInstructionArtifact[];
   }>;
   isPaused(): Promise<boolean>;
   isHoldingCurrent(): Promise<boolean>;
@@ -205,6 +217,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       profile: savedProfile,
       settings,
       searchPreferences,
+      sourceInstructionArtifacts = [],
     } = await deps.readInputs();
     const profile = savedProfile;
     const filePath = approved.pdfPath ?? profile.baseResume.storagePath;
@@ -251,6 +264,25 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
     const target = job.applyUrl ?? job.url;
+    const sighting =
+      job.sightings.find((row) => (row.applyUrl ?? row.url) === target) ??
+      job.sightings.find((row) => row.url === job.url);
+    const siteId = Number(sighting?.sourceId);
+    const site =
+      Number.isSafeInteger(siteId) && siteId > 0
+        ? createJobSitesStore(jobs).get(siteId)
+        : null;
+    const instructions = site
+      ? uniqueStrings([
+          site.customInstructions ?? "",
+          ...buildInstructionGuidance(
+            resolveActiveSourceInstructionArtifact(
+              jobSiteTarget(site),
+              sourceInstructionArtifacts,
+            ),
+          ),
+        ])
+      : [];
     let startingUrl: string | undefined;
     if (
       row.attempt > 1 &&
@@ -314,6 +346,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       letterAnswers,
     );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
+      ...(instructions.length ? { instructions } : {}),
       job: toResumeJob(job),
       profile,
       settings,
@@ -331,9 +364,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
-      intermediateMutationsAuthorized: mode !== "prepare_only",
-      intermediateMutationAllowedOrigins: [...allowedOrigins],
-      recheckIntermediateMutationAuthority: async (observedOrigin) => {
+      intermediateMutationsAuthorized:
+        !envelope || envelope.intermediateMutationsAuthorized,
+      attachmentUploadsAuthorized: true,
+      // No envelope: the browser pins each live form frame's own origin.
+      // An envelope, when present, continues to narrow those destinations.
+      intermediateMutationAllowedOrigins: envelope ? [...allowedOrigins] : [],
+      recheckIntermediateMutationAuthority: async (
+        observedOrigin,
+        purpose = "answers",
+      ) => {
+        if (
+          purpose === "answers" &&
+          envelope &&
+          !envelope.intermediateMutationsAuthorized
+        )
+          return false;
         if (
           !current(row) ||
           signal.aborted ||
@@ -355,7 +401,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               new Date().toISOString(),
             ) ||
             !permission.scope.jobIds.includes(String(row.jobId)) ||
-            !permission.allowedResumeSha256.includes(sha256)
+            !permission.allowedResumeSha256.includes(sha256) ||
+            !permission.allowedOrigins.includes(observedOrigin) ||
+            (purpose === "answers" &&
+              !permission.intermediateMutationsAuthorized)
           )
             return false;
         }
@@ -364,7 +413,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          latestMode !== "prepare_only" &&
           jobs.getJob(row.jobId)?.stage === "resume" &&
           resume?.approvedAt === approved.approvedAt &&
           resume.pdfPath === approved.pdfPath &&

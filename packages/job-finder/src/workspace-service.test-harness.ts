@@ -1,3 +1,12 @@
+import type { JobDiscoveryTarget } from "@nestor/contracts";
+import {
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "@nestor/db/applications";
+import {
+  createTestJobSites,
+  createTestJobStore,
+} from "./job-sites.test-support";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
   JobFinderAiClient,
@@ -25,12 +34,13 @@ export const workspaceHarnessInputs = new WeakMap<
   {
     repository: ReturnType<typeof createInMemoryJobFinderRepository>;
     documentManager: ReturnType<typeof createDocumentManager>;
+    jobSites: JobSitesStore;
   }
 >();
 
 export function createWorkspaceServiceHarness(
   options: {
-    seed?: JobFinderRepositorySeed;
+    seed?: JobFinderRepositorySeed & { jobSites?: JobDiscoveryTarget[] };
     jobSites?: JobSitesStore;
     browserRuntime?: BrowserSessionRuntime;
     aiClient?: JobFinderAiClient;
@@ -47,9 +57,11 @@ export function createWorkspaceServiceHarness(
     onSavedJobsRescored?: () => void;
   } = {},
 ) {
-  const repository = createInMemoryJobFinderRepository(
-    options.seed ?? createSeed(),
-  );
+  const seed = options.seed ?? createSeed();
+  const store = createTestJobStore();
+  const repository = createInMemoryJobFinderRepository(seed, { store });
+  const jobSites =
+    options.jobSites ?? createTestJobSites(seed.jobSites ?? [], store);
   const browserRuntime = options.browserRuntime ?? createBrowserRuntime();
   const aiClient = options.aiClient ?? createAiClient();
   const documentManager = options.documentManager ?? createDocumentManager();
@@ -59,7 +71,9 @@ export function createWorkspaceServiceHarness(
   const researchAdapter = options.researchAdapter ?? createResearchAdapter();
   const workspaceService = createJobFinderWorkspaceService({
     repository,
-    ...(options.jobSites ? { jobSites: options.jobSites } : {}),
+    savedAnswers: createSavedAnswersStore(store),
+    readSavedAnswers: () => readSavedApplicationAnswers(store),
+    jobSites,
     ...(options.onResumeEvidenceFinished
       ? { onResumeEvidenceFinished: options.onResumeEvidenceFinished }
       : {}),
@@ -82,9 +96,25 @@ export function createWorkspaceServiceHarness(
       : {}),
   });
 
-  workspaceHarnessInputs.set(workspaceService, { repository, documentManager });
-  return {
+  workspaceHarnessInputs.set(workspaceService, {
     repository,
+    documentManager,
+    jobSites,
+  });
+  return {
+    readSavedAnswerRows: () =>
+      createSavedAnswersStore(store)
+        .list()
+        .rows.map(
+          (row) =>
+            createSavedAnswersStore(store).get({
+              key: row.key,
+              scope: row.scope,
+            })!,
+        ),
+    savedAnswers: createSavedAnswersStore(store),
+    repository,
+    jobSites,
     browserRuntime,
     aiClient,
     documentManager,

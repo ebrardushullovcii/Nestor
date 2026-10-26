@@ -1,17 +1,15 @@
+import { createProfileStore } from "./job-store/profile-store";
+import { createPreferencesStore } from "./job-store/preferences-store";
+import type { JobStore } from "./job-store/job-store";
 import { readResumeRevision } from "./internal/resume-revision-storage";
 import { retainedResumeExportPaths } from "./resume-export-retention";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
-  ProfileCopilotMessageSchema,
-  ProfileRevisionSchema,
   ResumeAssistantMessageSchema,
-  ResumeDocumentBundleSchema,
   ResumeDraftRevisionSchema,
   ResumeDraftSchema,
   ResumeExportArtifactSchema,
-  ResumeImportFieldCandidateSchema,
-  ResumeImportRunSchema,
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   TailoredAssetSchema,
@@ -26,13 +24,10 @@ import {
 } from "./internal/resume-approval-state";
 import {
   cloneValue,
-  getSingletonValue,
-  getSingletonValueWithRevision,
   listCollectionValues,
   parsePersistedRowValue,
   listValues,
   upsertIndexedCollectionValue,
-  saveSingletonValue,
 } from "./internal/state";
 import type { JobFinderRepository } from "./repository-types";
 import {
@@ -63,22 +58,11 @@ type FileRepositoryResumeMethods = Pick<
   | "listRetainedResumeExportPaths"
   | "listResumeResearchArtifacts"
   | "upsertResumeResearchArtifact"
-  | "listResumeImportRuns"
-  | "getLatestResumeImportRun"
-  | "upsertResumeImportRun"
-  | "listResumeImportDocumentBundles"
-  | "listResumeImportFieldCandidates"
-  | "replaceResumeImportRunArtifacts"
-  | "finalizeResumeImportRun"
   | "listResumeValidationResults"
   | "listLatestResumeValidationResults"
   | "upsertResumeValidationResult"
   | "listResumeAssistantMessages"
   | "upsertResumeAssistantMessage"
-  | "listProfileCopilotMessages"
-  | "upsertProfileCopilotMessage"
-  | "listProfileRevisions"
-  | "upsertProfileRevision"
   | "saveResumeDraftWithValidation"
   | "applyResumePatchWithRevision"
   | "approveResumeExport"
@@ -90,6 +74,7 @@ export function createFileRepositoryResumeMethods(
   context: FileRepositoryContext,
   scheduleApprovalFold: () => void,
   foldApprovalChanges: () => () => void,
+  store: JobStore,
 ): FileRepositoryResumeMethods {
   const { database, filePath, upsertPersistedValue, writePersistedValue } =
     context;
@@ -348,298 +333,6 @@ export function createFileRepositoryResumeMethods(
         normalizedArtifact,
       );
     },
-    listResumeImportRuns(options) {
-      const whereParts: string[] = [];
-      const params: Array<string | number> = [];
-
-      if (options?.sourceResumeId) {
-        whereParts.push("source_resume_id = ?");
-        params.push(options.sourceResumeId);
-      }
-
-      if (options?.statuses && options.statuses.length > 0) {
-        const placeholders = options.statuses.map(() => "?").join(", ");
-        whereParts.push(`status IN (${placeholders})`);
-        params.push(...options.statuses);
-      }
-
-      const limitSql =
-        typeof options?.limit === "number" && options.limit >= 0
-          ? ` LIMIT ${Math.floor(options.limit)}`
-          : "";
-
-      return Promise.resolve(
-        cloneValue(
-          listCollectionValues(
-            database,
-            "resume_import_runs",
-            ResumeImportRunSchema,
-            {
-              ...(whereParts.length > 0
-                ? { whereSql: whereParts.join(" AND "), params }
-                : {}),
-              orderBySql: `started_at DESC, id ASC${limitSql}`,
-            },
-          ),
-        ),
-      );
-    },
-    getLatestResumeImportRun(sourceResumeId) {
-      const runs = listCollectionValues(
-        database,
-        "resume_import_runs",
-        ResumeImportRunSchema,
-        {
-          ...(sourceResumeId
-            ? { whereSql: "source_resume_id = ?", params: [sourceResumeId] }
-            : {}),
-          orderBySql: "started_at DESC, id ASC",
-        },
-      );
-      return Promise.resolve(runs[0] ?? null);
-    },
-    upsertResumeImportRun(run) {
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      return upsertPersistedValue("resume_import_runs", normalizedRun);
-    },
-    listResumeImportDocumentBundles(options) {
-      const whereParts: string[] = [];
-      const params: Array<string> = [];
-
-      if (options?.runId) {
-        whereParts.push("run_id = ?");
-        params.push(options.runId);
-      }
-
-      if (options?.sourceResumeId) {
-        whereParts.push("source_resume_id = ?");
-        params.push(options.sourceResumeId);
-      }
-
-      return Promise.resolve(
-        cloneValue(
-          listCollectionValues(
-            database,
-            "resume_import_document_bundles",
-            ResumeDocumentBundleSchema,
-            {
-              ...(whereParts.length > 0
-                ? { whereSql: whereParts.join(" AND "), params }
-                : {}),
-              orderBySql: "created_at DESC, id ASC",
-            },
-          ),
-        ),
-      );
-    },
-    listResumeImportFieldCandidates(options) {
-      const whereParts: string[] = [];
-      const params: Array<string> = [];
-
-      if (options?.runId) {
-        whereParts.push("run_id = ?");
-        params.push(options.runId);
-      }
-
-      const normalizedResolutions = options?.resolution
-        ? [options.resolution]
-        : options?.resolutions?.length
-          ? [...options.resolutions]
-          : [];
-
-      if (normalizedResolutions.length === 1) {
-        whereParts.push("resolution = ?");
-        params.push(normalizedResolutions[0]!);
-      } else if (normalizedResolutions.length > 1) {
-        const placeholders = normalizedResolutions.map(() => "?").join(", ");
-        whereParts.push(`resolution IN (${placeholders})`);
-        params.push(...normalizedResolutions);
-      }
-
-      return Promise.resolve(
-        cloneValue(
-          listCollectionValues(
-            database,
-            "resume_import_field_candidates",
-            ResumeImportFieldCandidateSchema,
-            {
-              ...(whereParts.length > 0
-                ? { whereSql: whereParts.join(" AND "), params }
-                : {}),
-              orderBySql: "created_at DESC, id ASC",
-            },
-          ),
-        ),
-      );
-    },
-    replaceResumeImportRunArtifacts({ run, documentBundles, fieldCandidates }) {
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      const normalizedBundles = ResumeDocumentBundleSchema.array().parse(
-        cloneValue([...documentBundles]),
-      );
-      const normalizedCandidates =
-        ResumeImportFieldCandidateSchema.array().parse(
-          cloneValue([...fieldCandidates]),
-        );
-
-      for (const bundle of normalizedBundles) {
-        if (bundle.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume document bundle does not belong to the provided import run.",
-          );
-        }
-      }
-
-      for (const candidate of normalizedCandidates) {
-        if (candidate.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume import candidate does not belong to the provided import run.",
-          );
-        }
-      }
-
-      runImmediateTransaction(database, () => {
-        writePersistedValue("resume_import_runs", normalizedRun);
-        database
-          .prepare(
-            "DELETE FROM resume_import_document_bundles WHERE run_id = ?",
-          )
-          .run(normalizedRun.id);
-        database
-          .prepare(
-            "DELETE FROM resume_import_field_candidates WHERE run_id = ?",
-          )
-          .run(normalizedRun.id);
-
-        for (const bundle of normalizedBundles) {
-          writePersistedValue("resume_import_document_bundles", bundle);
-        }
-
-        for (const candidate of normalizedCandidates) {
-          writePersistedValue("resume_import_field_candidates", candidate);
-        }
-      });
-
-      return secureDatabaseFile(filePath);
-    },
-    finalizeResumeImportRun({
-      profile,
-      searchPreferences,
-      run,
-      documentBundles,
-      fieldCandidates,
-      expectedProfileRevision,
-    }) {
-      const normalizedProfile = CandidateProfileSchema.parse(
-        cloneValue(profile),
-      );
-      const normalizedSearchPreferences = JobSearchPreferencesSchema.parse(
-        cloneValue(searchPreferences),
-      );
-      const normalizedRun = ResumeImportRunSchema.parse(cloneValue(run));
-      const normalizedBundles = ResumeDocumentBundleSchema.array().parse(
-        cloneValue([...documentBundles]),
-      );
-      const normalizedCandidates =
-        ResumeImportFieldCandidateSchema.array().parse(
-          cloneValue([...fieldCandidates]),
-        );
-
-      for (const bundle of normalizedBundles) {
-        if (bundle.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume document bundle does not belong to the provided import run.",
-          );
-        }
-      }
-
-      for (const candidate of normalizedCandidates) {
-        if (candidate.runId !== normalizedRun.id) {
-          throw new Error(
-            "Resume import candidate does not belong to the provided import run.",
-          );
-        }
-      }
-
-      const outcome = runImmediateTransaction<
-        | {
-            status: "applied";
-            profile: typeof normalizedProfile;
-            searchPreferences: typeof normalizedSearchPreferences;
-            revision: number;
-          }
-        | {
-            status: "stale";
-            profile: typeof normalizedProfile;
-            searchPreferences: typeof normalizedSearchPreferences;
-            revision: number;
-          }
-      >(database, () => {
-        const persistedProfile = getSingletonValueWithRevision(
-          database,
-          "profile",
-          CandidateProfileSchema,
-        );
-        const currentProfile = persistedProfile.value ?? normalizedProfile;
-        const currentSearchPreferences =
-          getSingletonValue(
-            database,
-            "search_preferences",
-            JobSearchPreferencesSchema,
-          ) ?? normalizedSearchPreferences;
-
-        if (
-          expectedProfileRevision !== undefined &&
-          expectedProfileRevision !== persistedProfile.revision
-        ) {
-          return {
-            status: "stale" as const,
-            profile: currentProfile,
-            searchPreferences: currentSearchPreferences,
-            revision: persistedProfile.revision,
-          };
-        }
-
-        saveSingletonValue(database, "profile", normalizedProfile);
-        saveSingletonValue(
-          database,
-          "search_preferences",
-          normalizedSearchPreferences,
-        );
-        writePersistedValue("resume_import_runs", normalizedRun);
-        database
-          .prepare(
-            "DELETE FROM resume_import_document_bundles WHERE run_id = ?",
-          )
-          .run(normalizedRun.id);
-        database
-          .prepare(
-            "DELETE FROM resume_import_field_candidates WHERE run_id = ?",
-          )
-          .run(normalizedRun.id);
-
-        for (const bundle of normalizedBundles) {
-          writePersistedValue("resume_import_document_bundles", bundle);
-        }
-
-        for (const candidate of normalizedCandidates) {
-          writePersistedValue("resume_import_field_candidates", candidate);
-        }
-
-        return {
-          status: "applied" as const,
-          profile: normalizedProfile,
-          searchPreferences: normalizedSearchPreferences,
-          revision: persistedProfile.revision + 1,
-        };
-      });
-
-      if (outcome.status === "stale") {
-        return Promise.resolve(outcome);
-      }
-
-      return secureDatabaseFile(filePath).then(() => outcome);
-    },
     listResumeValidationResults(draftId) {
       return Promise.resolve(
         cloneValue(
@@ -714,49 +407,6 @@ export function createFileRepositoryResumeMethods(
         "resume_assistant_messages",
         normalizedMessage,
       );
-    },
-    listProfileCopilotMessages() {
-      return Promise.resolve(
-        cloneValue(
-          listCollectionValues(
-            database,
-            "profile_copilot_messages",
-            ProfileCopilotMessageSchema,
-            {
-              orderBySql: "created_at ASC, id ASC",
-            },
-          ),
-        ),
-      );
-    },
-    upsertProfileCopilotMessage(message) {
-      const normalizedMessage = ProfileCopilotMessageSchema.parse(
-        cloneValue(message),
-      );
-      return upsertPersistedValue(
-        "profile_copilot_messages",
-        normalizedMessage,
-      );
-    },
-    listProfileRevisions() {
-      return Promise.resolve(
-        cloneValue(
-          listCollectionValues(
-            database,
-            "profile_revisions",
-            ProfileRevisionSchema,
-            {
-              orderBySql: "created_at DESC, id ASC",
-            },
-          ),
-        ),
-      );
-    },
-    upsertProfileRevision(revision) {
-      const normalizedRevision = ProfileRevisionSchema.parse(
-        cloneValue(revision),
-      );
-      return upsertPersistedValue("profile_revisions", normalizedRevision);
     },
     saveResumeDraftWithValidation({ draft, validation, tailoredAsset }) {
       const normalizedDraft = ResumeDraftSchema.parse(
@@ -1118,21 +768,23 @@ export function createFileRepositoryResumeMethods(
          ON CONFLICT(asset_id) DO UPDATE SET updated_at = excluded.updated_at`,
       );
       let publish = () => {};
-      runImmediateTransaction(database, () => {
-        for (const draftId of new Set(draftIds)) {
-          const row = readJobId.get(draftId);
-          if (!row) continue;
-          const jobId = String(row.job_id);
-          syncApprovedResumeExportsForJob(database, jobId, null);
-          markDraft.run(draftId, staleReason, updatedAt);
-          const asset = readFirstAssetId.get(jobId);
-          if (asset) clearAssetFile.run(updatedAt, String(asset.id));
-        }
-        publish = foldApprovalChanges();
-        if (profile) saveSingletonValue(database, "profile", profile);
-        if (preferences)
-          saveSingletonValue(database, "search_preferences", preferences);
-      });
+      store.transaction(() =>
+        runImmediateTransaction(database, () => {
+          for (const draftId of new Set(draftIds)) {
+            const row = readJobId.get(draftId);
+            if (!row) continue;
+            const jobId = String(row.job_id);
+            syncApprovedResumeExportsForJob(database, jobId, null);
+            markDraft.run(draftId, staleReason, updatedAt);
+            const asset = readFirstAssetId.get(jobId);
+            if (asset) clearAssetFile.run(updatedAt, String(asset.id));
+          }
+          publish = foldApprovalChanges();
+          if (profile) createProfileStore(store).replace(profile);
+          if (preferences)
+            createPreferencesStore(store).goals.replace(preferences);
+        }),
+      );
       publish();
 
       await secureDatabaseFile(filePath);

@@ -1723,7 +1723,6 @@ describe("apply agent run endings", () => {
           ...baseConfig.sources,
           profile: CandidateProfileSchema.parse({
             ...baseConfig.sources.profile,
-            answerBank: { workAuthorization: "Yes" },
           }),
         },
       }),

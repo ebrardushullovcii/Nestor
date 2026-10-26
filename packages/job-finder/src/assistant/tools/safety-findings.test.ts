@@ -35,7 +35,9 @@ function world() {
   // same synthetic substitutions rather than the repository behind the spy.
   service.getWorkspaceProjection = () => service.getWorkspaceSnapshot();
   const changes: unknown[] = [];
-  const openInApp = vi.fn(() => Promise.resolve());
+  const openInApp = vi.fn<AssistantTurnSession["openInApp"]>(() =>
+    Promise.resolve(),
+  );
   const publishWorkspaceUpdate = vi.fn();
   const session = {
     conversationId: randomUUID(),
@@ -295,12 +297,10 @@ describe("R3 assistant safety findings", () => {
   });
 
 
-  it("R3-008 preserves every source across separate remote and budget changes", async () => {
+  it("R3-008 preserves job sites across separate preference changes", async () => {
     const ctx = world();
     const before = await ctx.service.getWorkspaceSnapshot();
-    expect(before.searchPreferences.discovery.targets.length).toBeGreaterThan(
-      0,
-    );
+    expect(before.siteCounts.enabled).toBeGreaterThan(0);
     const behavior = AiBehaviorPreferenceSchema.parse(
       before.settings.aiBehavior ?? {},
     );
@@ -323,17 +323,15 @@ describe("R3 assistant safety findings", () => {
         operations: [
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { runJobBudget: 120 } },
+            value: { minimumSalaryUsd: 120 },
           },
         ],
       },
       ctx,
     );
     const after = await ctx.service.getWorkspaceSnapshot();
-    expect(after.searchPreferences.discovery.targets).toEqual(
-      before.searchPreferences.discovery.targets,
-    );
-    expect(after.searchPreferences.discovery.runJobBudget).toBe(120);
+    expect(after.siteCounts).toEqual(before.siteCounts);
+    expect(after.searchPreferences.minimumSalaryUsd).toBe(120);
     await editProfileTool.execute(
       {
         summary: "Two narrow budget updates",
@@ -341,21 +339,19 @@ describe("R3 assistant safety findings", () => {
         operations: [
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { runJobBudget: 121 } },
+            value: { minimumSalaryUsd: 121 },
           },
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { historyLimit: 4 } },
+            value: { targetSalaryUsd: 400 },
           },
         ],
       },
       ctx,
     );
     const combined = await ctx.service.getWorkspaceSnapshot();
-    expect(combined.searchPreferences.discovery.runJobBudget).toBe(121);
-    expect(combined.searchPreferences.discovery.targets).toEqual(
-      before.searchPreferences.discovery.targets,
-    );
+    expect(combined.searchPreferences.minimumSalaryUsd).toBe(121);
+    expect(combined.siteCounts).toEqual(before.siteCounts);
     expect(JSON.stringify(ctx.changes)).not.toContain('"field":"targets"');
     expect(JSON.stringify(ctx.changes)).not.toContain(
       '"label":"Removed targets"',
@@ -507,6 +503,27 @@ describe("R3 assistant safety findings", () => {
     ).rejects.toThrow("Choose one destination");
     await openInAppTool.execute({ screen: "applications" }, ctx);
     expect(ctx.openInApp).toHaveBeenLastCalledWith("/job-finder/applications");
+  });
+
+  it("opens the requested Needs you state and rejects task IDs on another screen", async () => {
+    const ctx = world();
+    const needsView = {
+      tab: "saved" as const,
+      text: "notice",
+      focusId: 7,
+      selectedIds: [7],
+    };
+    await openInAppTool.execute({ screen: "needs_you", needsView }, ctx);
+    const route = new URL(
+      ctx.openInApp.mock.calls[0]![0],
+      "https://nestor.local",
+    );
+    expect(route.pathname).toBe("/job-finder/actions");
+    expect(JSON.parse(route.searchParams.get("needs")!)).toEqual(needsView);
+    await expect(
+      openInAppTool.execute({ screen: "applications", needsView }, ctx),
+    ).rejects.toThrow("requires screen needs_you");
+    expect(ctx.openInApp).toHaveBeenCalledTimes(1);
   });
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {

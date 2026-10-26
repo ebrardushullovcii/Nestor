@@ -699,9 +699,7 @@ test("a one-question retry ignores historical detected questions from an older h
     text: "5 years",
     saveScope: "application_once",
   });
-  expect(
-    (await harness.repository.getProfile()).answerBank.customAnswers,
-  ).toEqual(seed.profile.answerBank.customAnswers);
+  expect(harness.readSavedAnswerRows()).toEqual([]);
 });
 
 test.each(["Years of experience", "I consent to a background check"])(
@@ -763,9 +761,7 @@ test.each(["Years of experience", "I consent to a background check"])(
       supersedesAnswerId: previous.id,
       saveScope: "application_once",
     });
-    expect(
-      (await harness.repository.getProfile()).answerBank.customAnswers,
-    ).toEqual([]);
+    expect(harness.readSavedAnswerRows()).toEqual([]);
   },
 );
 test("a current attempt can re-answer a record marked answered by an earlier check", async () => {
@@ -830,16 +826,15 @@ test.each([false, true])(
       sourceKind: "user",
       saveScope: saveForFuture ? "reusable_profile" : "application_once",
     });
-    const answers = (await harness.repository.getProfile()).answerBank
-      .customAnswers;
+    const answers = harness.readSavedAnswerRows();
     if (saveForFuture)
       expect(answers).toContainEqual(
         expect.objectContaining({
-          question: "Expected salary",
+          prompt: "Expected salary",
           answer: "90000 EUR",
         }),
       );
-    else expect(answers).toEqual(seed.profile.answerBank.customAnswers);
+    else expect(answers).toEqual([]);
   },
 );
 
@@ -1063,8 +1058,7 @@ test("saving a different pay for a second application replaces the saved answer 
     saveForFuture: true,
   });
 
-  const saved = (await harness.repository.getProfile()).answerBank
-    .customAnswers;
+  const saved = harness.readSavedAnswerRows();
   expect(saved).toHaveLength(1);
   expect(saved[0]?.answer).toBe("50000 USD");
   expect(

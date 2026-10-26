@@ -23,7 +23,6 @@ import {
 } from "./internal/saved-job-storage";
 import { ensureResumeApprovalState } from "./internal/resume-approval-state";
 import { ensurePreferenceStorageTables } from "./internal/preference-storage";
-import { validateWorkspaceSettingsFile } from "./internal/state";
 import { createWorkspaceListActivityReader } from "./internal/workspace-list-activity";
 import {
   createWorkspaceListOrdering,
@@ -53,7 +52,6 @@ export interface WorkspaceQueryRepository {
 }
 
 function prepareQuerySchema(database: DatabaseSync): void {
-  validateWorkspaceSettingsFile(database);
   ensureResumeApprovalState(database);
   ensureSavedJobRelations(database);
   ensurePreferenceStorageTables(database);

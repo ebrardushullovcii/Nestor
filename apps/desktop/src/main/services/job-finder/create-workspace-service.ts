@@ -1,5 +1,12 @@
-import { readSavedApplicationAnswers } from "@nestor/db/applications";
-import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
+import {
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "@nestor/db/applications";
+import {
+  createJobSitesStore,
+  createResumeStore,
+  createPreferencesStore,
+} from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
@@ -61,7 +68,6 @@ import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-e
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { prepareWorkspaceWriter } from "../../setup/workspace-database-startup";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
-import { adoptPristineWorkspaceStarterSources } from "./pristine-starter-source-adoption";
 import {
   ensureJobFinderUserDataDirectory,
   getBrowserAgentProfileDirectory,
@@ -627,6 +633,7 @@ export async function createJobFinderRuntimeAsync(
   let jobFinderRepository: JobFinderRepository;
   try {
     jobFinderRepository = await createFileJobFinderRepository({
+      store: getJobStore(),
       filePath: getJobFinderWorkspaceFilePath(),
       seed: createEmptyJobFinderRepositoryState(),
       deferEvidenceConversion: backgroundEvidenceConversion,
@@ -666,21 +673,30 @@ export async function createJobFinderRuntimeAsync(
     desktopTestApiEnabled,
   });
   // The new background search (Find jobs) runs on the same browser and AI.
+  const searchPreferencesStore = createPreferencesStore(getJobStore());
   setJobSearchServiceFactory(() =>
     Promise.resolve(
       createJobSearchRunner({
         store: getJobStore(),
+        readRemoteCountsAsAnyLocation: () =>
+          searchPreferencesStore.settings.read().aiBehavior?.jobSearch
+            .remoteCountsAsAnyLocation ?? true,
         engine: createListingSearchEngine({
           browserRuntime,
           aiClient,
         }),
         readContext: async () => {
-          const [profile, searchPreferences, sourceInstructionArtifacts] =
-            await Promise.all([
-              jobFinderRepository.getProfile(),
-              jobFinderRepository.getSearchPreferences(),
-              jobFinderRepository.listSourceInstructionArtifacts(),
-            ]);
+          const [
+            profile,
+            searchPreferences,
+            sourceInstructionArtifacts,
+            settings,
+          ] = await Promise.all([
+            jobFinderRepository.getProfile(),
+            jobFinderRepository.getSearchPreferences(),
+            jobFinderRepository.listSourceInstructionArtifacts(),
+            jobFinderRepository.getSettings(),
+          ]);
           return {
             profile,
             searchPreferences,
@@ -688,6 +704,8 @@ export async function createJobFinderRuntimeAsync(
               .enabled()
               .map(jobSiteTarget),
             sourceInstructionArtifacts,
+            remoteCountsAsAnyLocation:
+              settings.aiBehavior?.jobSearch.remoteCountsAsAnyLocation ?? true,
           };
         },
       }),
@@ -789,6 +807,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   } = started ?? (await createJobFinderRuntimeAsync(envOverrides));
   const workspaceService = createJobFinderWorkspaceService({
     jobSites: createJobSitesStore(getJobStore()),
+    savedAnswers: createSavedAnswersStore(getJobStore()),
     readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),
     resumeDraftProcessor,
     aiClient,
@@ -882,24 +901,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       repository: jobFinderRepository,
       performUserAction: performWatchedUserAction,
     });
-  }
-
-  // One-time lossless adoption for legacy pristine targetless workspaces.
-  // Runs through the canonical save path; a failure must never block startup,
-  // so it degrades to skipping adoption (the workspace stays as persisted).
-  try {
-    await adoptPristineWorkspaceStarterSources({
-      getCampaignState: () => jobFinderRepository.getCampaignState(),
-      getProfileSetupState: () => jobFinderRepository.getProfileSetupState(),
-      getSearchPreferences: () => jobFinderRepository.getSearchPreferences(),
-      saveSearchPreferences: (next) =>
-        workspaceService.saveSearchPreferences(next),
-    });
-  } catch (error) {
-    console.warn(
-      "Skipping pristine starter source adoption after an error:",
-      error,
-    );
   }
 
   return workspaceService;

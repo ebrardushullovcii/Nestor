@@ -5,7 +5,6 @@ import {
 
 import type { ReviseCandidateProfileInput } from "../shared";
 import { buildGenericExplicitFieldPatchGroups } from "./profile-copilot-field-updates";
-import { buildJobSourcePatchReply } from "./profile-copilot-job-sources";
 import { buildNaturalSearchPreferenceReply } from "./profile-copilot-natural-preferences";
 import {
   buildSpecializedPatchResults,
@@ -51,7 +50,6 @@ export function buildDeterministicPatchReply(
     return naturalPreferenceReply;
   }
 
-  const jobSourceReply = buildJobSourcePatchReply(input);
   const specializedResult = buildSpecializedPatchResults(input);
   const urlPatchReply = buildUrlPatchReply(input);
   const genericFieldPatchGroups = buildGenericExplicitFieldPatchGroups(input);
@@ -62,7 +60,6 @@ export function buildDeterministicPatchReply(
     ...specializedGroups,
     ...normalizePatchReply(urlPatchReply),
     ...genericFieldPatchGroups,
-    ...normalizePatchReply(jobSourceReply),
   ];
 
   if (patchGroups.length > 0 || clarificationQuestion !== null) {
@@ -71,5 +68,5 @@ export function buildDeterministicPatchReply(
       : patchGroups;
   }
 
-  return jobSourceReply && "content" in jobSourceReply ? jobSourceReply : null;
+  return null;
 }

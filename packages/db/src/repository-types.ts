@@ -1,3 +1,5 @@
+import type { UpsertSavedFormAnswerInput } from "@nestor/contracts";
+import type { JobStore } from "./job-store/job-store";
 import type {
   PreparedApplicationForm,
   ApplyJobResult,
@@ -417,6 +419,7 @@ export interface JobFinderRepository
     fieldCandidates: readonly ResumeImportFieldCandidate[];
   }): Promise<void>;
   finalizeResumeImportRun(input: {
+    savedAnswers?: readonly UpsertSavedFormAnswerInput[];
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
     run: ResumeImportRun;
@@ -788,6 +791,7 @@ export interface WorkspaceDatabaseRecoveryRequiredDetails {
 }
 
 export interface FileJobFinderRepositoryOptions {
+  store?: JobStore;
   filePath: string;
   seed: JobFinderRepositorySeed;
   /** Desktop's startup worker converts evidence in slices; typed reads support both shapes. */

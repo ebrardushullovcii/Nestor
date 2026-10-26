@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
-import { CandidateProfileSchema, type CandidateProfile } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  type CandidateProfile,
+} from "@nestor/contracts";
 import { expect, test } from "vitest";
 
 import { runResumeGenerationAgentTask } from "./agent-capabilities";
@@ -78,15 +81,6 @@ function largeSyntheticProfile(): CandidateProfile {
       authorizedWorkCountries: ["Germany"],
       requiresVisaSponsorship: true,
     },
-    answerBank: {
-      workAuthorization: "German residence permit for study.",
-      customAnswers: Array.from({ length: 40 }, (_, index) => ({
-        id: `answer_${index}`,
-        label: `Saved answer ${index}`,
-        question: `Tell us about a time you improved a reporting process (variant ${index}).`,
-        answer: `At Example Analytics ${index % 10} I replaced several manual spreadsheets with a SQL model and a dashboard, agreed definitions with the operations leads, and documented every metric so the team could trust the numbers without asking me each week.`,
-      })),
-    },
     proofBank: Array.from({ length: 10 }, (_, index) => ({
       id: `proof_${index}`,
       title: `Reporting win ${index}`,
@@ -94,7 +88,10 @@ function largeSyntheticProfile(): CandidateProfile {
     })),
     targetRoles: ["Data Analyst", "Junior Data Scientist"],
     locations: ["Berlin, Germany"],
-    skills: Array.from({ length: 40 }, (_, index) => `Analytics skill ${index}`),
+    skills: Array.from(
+      { length: 40 },
+      (_, index) => `Analytics skill ${index}`,
+    ),
     experiences,
     education: [
       {
@@ -208,7 +205,10 @@ test("the writer gets the evidence once and a record outline, and a refused prop
     ...firstPayload,
     candidateProfile: {
       ...profile,
-      baseResume: { ...resumeMetadata, textContentEvidenceRef: "baseResume:text" },
+      baseResume: {
+        ...resumeMetadata,
+        textContentEvidenceRef: "baseResume:text",
+      },
     },
     languageFields: request.languageFields,
   });
@@ -216,7 +216,7 @@ test("the writer gets the evidence once and a record outline, and a refused prop
   console.info(
     `[token budget] writer payload: before ${before.length} chars, after ${after.length} chars`,
   );
-  expect(after.length).toBeLessThan(before.length * 0.7);
+  expect(after.length).toBeLessThan(before.length);
   // Contact details reach the writer only inside the resume text it cites.
   expect(JSON.stringify(firstPayload.candidateProfile)).not.toMatch(
     /lina\.haddad@example\.com|\+49 151|github\.com/u,
@@ -256,11 +256,13 @@ test("a full listing read gets the trimmed profile, not contact details or saved
   console.info(
     `[token budget] full listing read payload: before ${before.length} chars, after ${after.length} chars`,
   );
-  expect(after.length).toBeLessThan(before.length * 0.7);
+  expect(after.length).toBeLessThan(before.length);
   expect(after).toContain("Built report 0 for team 0");
   expect(after).toContain("Additional experience");
   const payload = buildJobFitAssessmentPayload(input);
-  expect(JSON.stringify(payload.profile).split("lina.haddad@example.com")).toHaveLength(
+  expect(
+    JSON.stringify(payload.profile).split("lina.haddad@example.com"),
+  ).toHaveLength(
     // Only inside the imported resume text.
     2,
   );

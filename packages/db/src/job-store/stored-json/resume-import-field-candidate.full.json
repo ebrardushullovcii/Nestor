@@ -1,0 +1,81 @@
+{
+  "id": "synthetic",
+  "runId": "synthetic",
+  "target": {
+    "section": "identity",
+    "key": "synthetic",
+    "recordId": "synthetic"
+  },
+  "label": "synthetic",
+  "sourceKind": "parser_literal",
+  "value": "synthetic",
+  "normalizedValue": "synthetic",
+  "valuePreview": "synthetic",
+  "evidenceText": "synthetic",
+  "sourceBlockIds": [
+    "synthetic"
+  ],
+  "confidence": 1,
+  "confidenceBreakdown": {
+    "overall": 1,
+    "parserQuality": 1,
+    "evidenceQuality": 1,
+    "agreementScore": 1,
+    "normalizationRisk": 1,
+    "conflictRisk": 1,
+    "fieldSensitivity": "low",
+    "recommendation": "auto_apply"
+  },
+  "notes": [
+    "synthetic"
+  ],
+  "alternatives": [
+    "synthetic"
+  ],
+  "conflictChoices": [
+    {
+      "id": "synthetic",
+      "label": "synthetic",
+      "sourceLabel": "synthetic",
+      "value": "synthetic",
+      "valuePreview": "synthetic",
+      "evidenceText": "synthetic",
+      "confidence": 1,
+      "recommended": true,
+      "notes": [
+        "synthetic"
+      ],
+      "sourceCandidateIds": [
+        "synthetic"
+      ],
+      "visualEvidence": [
+        {
+          "branch": "text",
+          "sourceFileKind": "plain_text",
+          "pageNumber": 1,
+          "regionHint": "synthetic",
+          "confidence": 1,
+          "uncertaintyNotes": [
+            "synthetic"
+          ]
+        }
+      ]
+    }
+  ],
+  "visualEvidence": [
+    {
+      "branch": "text",
+      "sourceFileKind": "plain_text",
+      "pageNumber": 1,
+      "regionHint": "synthetic",
+      "confidence": 1,
+      "uncertaintyNotes": [
+        "synthetic"
+      ]
+    }
+  ],
+  "resolution": "auto_applied",
+  "resolutionReason": "synthetic",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "resolvedAt": "2026-10-26T00:00:00.000Z"
+}

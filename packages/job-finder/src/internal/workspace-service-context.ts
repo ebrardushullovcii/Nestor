@@ -1,3 +1,4 @@
+import type { SavedAnswersStore } from "@nestor/db/applications";
 import type { CandidateReusableAnswer } from "@nestor/contracts";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
@@ -77,6 +78,7 @@ export interface WorkspaceServiceContext {
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  savedAnswers?: SavedAnswersStore;
   readSavedAnswers?: () => readonly CandidateReusableAnswer[];
   backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;

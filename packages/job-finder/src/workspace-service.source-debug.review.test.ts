@@ -18,7 +18,9 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("final source-instruction reviewer receives rich phase context and can override final curation", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -28,7 +30,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const reviewPrompts: string[] = [];
     const fallbackClient = createDeterministicJobFinderAiClient(
       "Tests use the deterministic fallback agent.",
@@ -95,9 +98,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -143,7 +144,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("skips the AI final reviewer when summary-first handoff still cannot fit the context budget", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -153,7 +156,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     let reviewCallCount = 0;
     const fallbackClient = createDeterministicJobFinderAiClient(
       "Tests use the deterministic fallback agent.",
@@ -218,9 +222,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -235,7 +237,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("final source-instruction reviewer is told to write future-run instructions, and its lines stand as returned", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -245,7 +249,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const reviewPrompts: string[] = [];
     const fallbackClient = createDeterministicJobFinderAiClient(
       "Tests use the deterministic fallback agent.",
@@ -309,9 +314,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -349,7 +352,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("keeps timed-out partial evidence in draft and exposes completion metadata in run details", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -359,7 +364,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const browserRuntime = createAgentBrowserRuntime(
       [
         {
@@ -462,9 +468,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -508,7 +512,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("final source-debug review switches to summary-first handoff when transcript context is too large", async () => {
-    const repository = createInMemoryJobFinderRepository({
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -518,7 +524,8 @@ describe("createJobFinderWorkspaceService", () => {
       resumeResearchArtifacts: [],
       resumeValidationResults: [],
       resumeAssistantMessages: [],
-    });
+    };
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const reviewPrompts: string[] = [];
     const fallbackClient = createDeterministicJobFinderAiClient(
       "Tests use the deterministic fallback agent.",
@@ -578,9 +585,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -601,8 +606,8 @@ describe("createJobFinderWorkspaceService", () => {
 
   test("clears prior learned instructions for the target before a fresh source-debug run", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       instructionStatus: "validated",
       validatedInstructionId: "instruction_old_validated",
       draftInstructionId: "instruction_old_draft",
@@ -671,7 +676,10 @@ describe("createJobFinderWorkspaceService", () => {
       }),
     ];
 
-    const repository = createInMemoryJobFinderRepository(seed);
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = seed;
+    const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const browserRuntime = createAgentBrowserRuntime(
       [
         {
@@ -698,9 +706,7 @@ describe("createJobFinderWorkspaceService", () => {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
       },
     );
-    const jobSites = createTestJobSites(
-      (await repository.getSearchPreferences()).discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,

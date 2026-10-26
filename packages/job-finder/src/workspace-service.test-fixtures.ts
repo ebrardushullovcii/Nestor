@@ -1,6 +1,7 @@
 import type { ResumeProfileExtraction } from "@nestor/ai-providers";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import type {
+  JobDiscoveryTarget,
   SavedJob,
   SavedJobDiscoveryProvenance,
   SourceDebugPhase,
@@ -8,6 +9,8 @@ import type {
 } from "@nestor/contracts";
 import {
   FRESH_START_CANDIDATE_PROFILE_ID,
+  CandidateAnswerBankSchema,
+  JobDiscoveryPreferencesSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   SavedJobDiscoveryProvenanceSchema,
@@ -87,9 +90,28 @@ export function toPhaseId(
   }
 }
 
-export function createSeed(): JobFinderRepositorySeed {
+export function createSeed(): JobFinderRepositorySeed & {
+  jobSites: JobDiscoveryTarget[];
+} {
   return {
+    jobSites: [
+      {
+        id: "1",
+        label: "Primary target",
+        startingUrl: "https://www.linkedin.com/jobs/search/",
+        enabled: true,
+        adapterKind: "auto",
+        customInstructions: null,
+        instructionStatus: "missing",
+        validatedInstructionId: null,
+        draftInstructionId: null,
+        lastDebugRunId: null,
+        lastVerifiedAt: null,
+        staleReason: null,
+      },
+    ],
     profile: {
+      answerBank: CandidateAnswerBankSchema.parse({}),
       id: "candidate_1",
       firstName: "Alex",
       lastName: "Vanguard",
@@ -139,25 +161,6 @@ export function createSeed(): JobFinderRepositorySeed {
           linkIds: ["link_1"],
         },
       ],
-      answerBank: {
-        workAuthorization:
-          "Authorized to work in the United Kingdom and open to remote roles across Europe.",
-        visaSponsorship:
-          "Do not currently require visa sponsorship for UK-based roles.",
-        relocation:
-          "Open to relocation for the right platform or systems role.",
-        travel:
-          "Open to occasional travel for workshops and planning meetings.",
-        noticePeriod: "Available after a 30-day notice period.",
-        availability: "Available to interview now and start within 30 days.",
-        salaryExpectations:
-          "Targeting senior remote roles in the 180k-220k USD range depending on scope and package.",
-        selfIntroduction:
-          "I am a systems-focused product designer with 10 years of experience building workflow tools, design systems, and operations platforms.",
-        careerTransition:
-          "I am moving deeper into workflow platform roles because that is where my strongest measurable impact has been.",
-        customAnswers: [],
-      },
       applicationIdentity: {
         preferredEmail: "alex@example.com",
         preferredPhone: "+44 7700 900123",
@@ -180,8 +183,8 @@ export function createSeed(): JobFinderRepositorySeed {
         analysisWarnings: [],
       },
       workEligibility: {
-        authorizedWorkCountries: [],
-        requiresVisaSponsorship: null,
+        authorizedWorkCountries: ["United Kingdom"],
+        requiresVisaSponsorship: false,
         willingToRelocate: null,
         preferredRelocationRegions: [],
         willingToTravel: null,
@@ -256,6 +259,7 @@ export function createSeed(): JobFinderRepositorySeed {
       spokenLanguages: [],
     },
     searchPreferences: {
+      discovery: JobDiscoveryPreferencesSchema.parse({}),
       targetRoles: [
         "Principal Designer",
         "Senior Product Designer",
@@ -283,25 +287,6 @@ export function createSeed(): JobFinderRepositorySeed {
       tailoringMode: "balanced",
       companyBlacklist: [],
       companyWhitelist: ["Signal Systems"],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "target_linkedin_default",
-            label: "Primary target",
-            startingUrl: "https://www.linkedin.com/jobs/search/",
-            enabled: true,
-            adapterKind: "auto",
-            customInstructions: null,
-            instructionStatus: "missing",
-            validatedInstructionId: null,
-            draftInstructionId: null,
-            lastDebugRunId: null,
-            lastVerifiedAt: null,
-            staleReason: null,
-          },
-        ],
-      },
     },
     profileSetupState: {
       status: "completed",
@@ -585,6 +570,11 @@ export function createFreshStartSeedProfile(): JobFinderRepositorySeed["profile"
       ...profile.applicationIdentity,
       preferredEmail: null,
       preferredPhone: null,
+    },
+    workEligibility: {
+      ...profile.workEligibility,
+      authorizedWorkCountries: [],
+      requiresVisaSponsorship: null,
     },
     baseResume: {
       ...profile.baseResume,

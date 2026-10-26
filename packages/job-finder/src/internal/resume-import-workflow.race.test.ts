@@ -197,6 +197,7 @@ describe("resume import foreground revision race", () => {
     const seed = createFreshStartSeed();
     const base = createInMemoryJobFinderRepository(seed);
     const importedText = "Jamie Rivers\njamie@example.com";
+    let interveningEdits = 0;
     const repository: JobFinderRepository = {
       ...base,
       finalizeResumeImportRun: async (input) => {
@@ -204,7 +205,7 @@ describe("resume import foreground revision race", () => {
         // the revision this import captured and its finalization.
         await base.saveProfile({
           ...(await base.getProfile()),
-          summary: "Saved the setup form while the import was running.",
+          summary: `Saved the setup form while the import was running: ${++interveningEdits}.`,
         });
         return base.finalizeResumeImportRun(input);
       },
@@ -229,7 +230,7 @@ describe("resume import foreground revision race", () => {
 
     // The write that won the race is still intact.
     expect(profile.summary).toBe(
-      "Saved the setup form while the import was running.",
+      `Saved the setup form while the import was running: ${interveningEdits}.`,
     );
     // The imported details are held for the user, not applied automatically.
     expect(candidates.length).toBeGreaterThan(0);

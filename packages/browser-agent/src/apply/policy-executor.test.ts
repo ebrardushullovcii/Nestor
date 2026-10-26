@@ -2745,8 +2745,24 @@ describe("Round 2 application recovery", () => {
         ],
       });
       const { config, hands } = configFor(page);
-      config.sources.profile.answerBank.visaSponsorship =
-        "I will need employer sponsorship after my student permit ends.";
+      config.sources.reusableAnswers = [
+        {
+          id: "sponsorship",
+          kind: "visa_sponsorship",
+          label: "Sponsorship",
+          question: "Do you need visa sponsorship in Germany?",
+          answer:
+            "I will need employer sponsorship after my student permit ends.",
+          proofEntryIds: [],
+          roleFamilies: [],
+          applicationScope: {
+            hiringCountry: "DE",
+            resultId: null,
+            applicationRecordId: null,
+            location: null,
+          },
+        },
+      ];
       config.sources.posting.location = "Berlin, Germany";
       const choose = vi.spyOn(hands, "chooseOption");
       const check = vi.fn(() =>
@@ -3171,7 +3187,6 @@ describe("one-use answers and compatible originals", () => {
       expect(
         tool === "type" ? hands.fillText : hands.setToggle,
       ).toHaveBeenCalledOnce();
-      expect(profile().answerBank.customAnswers).toEqual([]);
       const unrelated = await executeApplyProposal(
         { tool: "set_checkbox", ref: "c0", checked: true },
         observationOf(source).signature,

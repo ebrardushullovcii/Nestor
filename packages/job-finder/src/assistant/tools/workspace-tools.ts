@@ -3,6 +3,7 @@ import type { AssistantTaskPlan } from "@nestor/contracts";
 import {
   AssistantTaskPlanStepSchema,
   AssistantJobViewSchema,
+  AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
   JobIdSchema,
   JobDetailSchema,
@@ -330,6 +331,9 @@ export const openInAppTool = defineTool({
       "Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true).",
     ),
     resume: json.boolean(),
+    needsView: json.looseObject(
+      "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",
+    ),
     view: json.looseObject(
       "Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions.",
     ),
@@ -345,6 +349,7 @@ export const openInAppTool = defineTool({
     jobId: JobIdSchema.optional(),
     applicationView: AssistantTrackerViewSchema.optional(),
     resume: z.boolean().optional(),
+    needsView: AssistantNeedsViewSchema.optional(),
     view: AssistantJobViewSchema.optional(),
     section: z
       .enum([
@@ -361,6 +366,14 @@ export const openInAppTool = defineTool({
   effect: "read",
   async execute(input, context) {
     const { session, ports } = context;
+    if (
+      input.needsView &&
+      (input.screen !== "needs_you" || input.jobId || input.resume)
+    )
+      throw new AssistantToolError(
+        "invalid_input",
+        "A Needs you view requires screen needs_you and task or saved-answer IDs in needsView.",
+      );
     if (input.resume && input.screen && input.screen !== "shortlisted")
       throw new AssistantToolError(
         "invalid_input",
@@ -508,6 +521,11 @@ export const openInAppTool = defineTool({
       route = `${destination.pathname}${destination.search}`;
     }
     const view = input.view ?? jobView;
+    if (input.needsView) {
+      const destination = new URL(route, "https://nestor.local");
+      destination.searchParams.set("needs", JSON.stringify(input.needsView));
+      route = `${destination.pathname}${destination.search}`;
+    }
     if (view) {
       const destination = new URL(route, "https://nestor.local");
       destination.searchParams.set("jobs", JSON.stringify(view));

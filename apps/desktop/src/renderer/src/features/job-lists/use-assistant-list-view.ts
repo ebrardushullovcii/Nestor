@@ -1,9 +1,11 @@
 import {
   AssistantJobViewSchema,
+  AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
   matchesAssistantListView,
   type AssistantTrackerView,
   type AssistantJobView,
+  type AssistantNeedsView,
 } from "@nestor/contracts";
 import { useEffect, useRef } from "react";
 import type { ListSelection } from "./list-selection";
@@ -13,6 +15,8 @@ type Options<T> = {
   current: T;
   applyView: (view: T) => void;
   setSelection: (selection: ListSelection) => void;
+  setFocus?: (id: number) => void;
+  canApply?: boolean;
 };
 
 export function useAssistantListView(
@@ -29,9 +33,20 @@ export function useAssistantTrackerView(
   useAssistantView(raw, AssistantTrackerViewSchema, options);
 }
 
+export function useAssistantNeedsView(
+  raw: string | null,
+  options: Options<AssistantNeedsView>,
+) {
+  useAssistantView(raw, AssistantNeedsViewSchema, options);
+}
+
 /** Apply selection after the screen has applied filters and reset its old selection. */
 function useAssistantView<
-  T extends { selectedIds?: number[] | undefined; all?: boolean | undefined },
+  T extends {
+    selectedIds?: number[] | undefined;
+    all?: boolean | undefined;
+    focusId?: number | undefined;
+  },
 >(
   raw: string | null,
   schema: {
@@ -54,6 +69,8 @@ function useAssistantView<
     }
     const parsed = schema.safeParse(value);
     if (!parsed.success) return;
+    pending.current = null;
+    if (latest.current.canApply === false) return;
     pending.current = parsed.data;
     latest.current.applyView(parsed.data);
   }, [raw, options.requestId, schema]);
@@ -61,9 +78,10 @@ function useAssistantView<
   useEffect(() => {
     const request = pending.current;
     if (!request) return;
-    const { selectedIds, all, ...filter } = request;
+    const { selectedIds, all, focusId, ...filter } = request;
     if (!matchesAssistantListView(latest.current.current, filter)) return;
     pending.current = null;
+    if (focusId !== undefined) latest.current.setFocus?.(focusId);
     if (selectedIds === undefined && all === undefined) return;
     latest.current.setSelection({
       all: all ?? false,

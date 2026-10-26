@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import { withResumeBatchLiveness } from "./resume-batch-checkpoint";
 import { readPlanAssessment } from "./plan-assessment";
 import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
@@ -109,7 +110,6 @@ import type { WorkspaceServiceContext } from "./workspace-service-context";
 import {
   resolveAdapterKind,
   getPreferredSessionAdapter,
-  invalidateChangedSourceGuidance,
   normalizeJobFinderSettings,
   normalizeResumeDraftTemplate,
   normalizeSearchPreferences,
@@ -425,6 +425,7 @@ function projectCampaignApplicationFacts(input: {
   applyJobResults: readonly ApplyJobResult[];
   applyRuns: readonly ApplyRun[];
   userActionRequests: readonly UserActionRequest[];
+  sourceTargetIds: ReadonlySet<string>;
 }) {
   // Resolve lineage through the job's memberships rather than scanning every
   // campaign for each run, record and action request. A group shared by more
@@ -439,7 +440,6 @@ function projectCampaignApplicationFacts(input: {
       campaignIdsByJobId.set(jobId, memberships);
     }
   }
-  const activeSourceTargetIds = new Set(input.activeCampaign.sourceTargetIds);
   const runCampaignById = new Map(
     input.applyRuns.map((run) => [
       run.id,
@@ -486,7 +486,7 @@ function projectCampaignApplicationFacts(input: {
   );
   const userActionRequests = input.userActionRequests.filter((request) => {
     if (request.scope.type === "discovery_source") {
-      return activeSourceTargetIds.has(request.scope.targetId);
+      return input.sourceTargetIds.has(request.scope.targetId);
     }
     if (runCampaignById.get(request.scope.runId) !== activeCampaignId) {
       return false;
@@ -847,49 +847,6 @@ export function createWorkspaceSnapshotProfileMethods(
       );
     }
     lastNoResponseAutomationRunAt = now;
-  }
-
-  async function syncActiveCampaignPreferences(
-    searchPreferences: JobSearchPreferences,
-  ): Promise<void> {
-    // The preferences/pointer rewrite is derived from a fresh collection read
-    // inside the campaign transition so a scheduled-run commit that lands
-    // first keeps its history, run facts, rules, and notifications.
-    await ctx.withCampaignTransition(async () => {
-      const campaignState = await ensureCampaignState({
-        repository: ctx.repository,
-        searchPreferences,
-      });
-      const now = new Date().toISOString();
-      await ctx.repository.saveCampaignState({
-        ...campaignState,
-        campaigns: campaignState.campaigns.map((campaign) => {
-          const liveTargets = searchPreferences.discovery.targets;
-          const campaignPreferences =
-            campaign.id === campaignState.activeCampaignId
-              ? {
-                  ...searchPreferences,
-                  discovery: {
-                    ...searchPreferences.discovery,
-                    targets: liveTargets,
-                  },
-                }
-              : {
-                  ...campaign.searchPreferences,
-                  discovery: {
-                    ...campaign.searchPreferences.discovery,
-                    targets: liveTargets,
-                  },
-                };
-          return {
-            ...campaign,
-            searchPreferences: campaignPreferences,
-            sourceTargetIds: campaign.sourceTargetIds,
-            updatedAt: now,
-          };
-        }),
-      });
-    });
   }
 
   async function recoverInterruptedApplyRunsOnLoad(): Promise<void> {
@@ -1320,16 +1277,14 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   function resolveBrowserSessionTarget(input: {
-    targets: readonly JobDiscoveryTarget[];
     targetId: string | null | undefined;
   }): JobDiscoveryTarget | null {
     if (!input.targetId) {
       return null;
     }
 
-    const target =
-      input.targets.find((candidate) => candidate.id === input.targetId) ??
-      null;
+    const site = ctx.jobSites?.get(Number(input.targetId));
+    const target = site ? jobSiteTarget(site) : null;
 
     if (!target) {
       throw new Error("The requested job source is no longer available.");
@@ -1493,9 +1448,7 @@ export function createWorkspaceSnapshotProfileMethods(
           setupContext.searchPreferences,
           discovery.sessions,
         );
-    const preferredSessionAdapter = getPreferredSessionAdapter(
-      setupContext.searchPreferences,
-    );
+    const preferredSessionAdapter = getPreferredSessionAdapter(ctx.jobSites);
     const browserSession = createBrowserSessionSnapshot(
       discoverySessions,
       preferredSessionAdapter,
@@ -1507,7 +1460,15 @@ export function createWorkspaceSnapshotProfileMethods(
     );
     const generatedAt = new Date().toISOString();
     const sourceAccessInput = {
-      targets: setupContext.searchPreferences.discovery.targets,
+      targets: [
+        ...new Set([
+          ...discovery.recentSourceDebugRuns.map((run) => run.targetId),
+          ...sourceInstructionArtifacts.map((artifact) => artifact.targetId),
+        ]),
+      ].flatMap((id) => {
+        const site = ctx.jobSites?.get(Number(id));
+        return site ? [jobSiteTarget(site)] : [];
+      }),
       recentSourceDebugRuns: discovery.recentSourceDebugRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
       sourceDebugAttempts,
@@ -1655,7 +1616,19 @@ export function createWorkspaceSnapshotProfileMethods(
       throw new Error("The active job search campaign is unavailable.");
     }
     const activeCampaignJobIds = new Set(activeCampaign.jobIds);
-    const activeCampaignTargetIds = new Set(activeCampaign.sourceTargetIds);
+    const activeCampaignTargetIds = new Set(
+      [
+        ...discovery.recentSourceDebugRuns.map((run) => run.targetId),
+        ...(discovery.activeSourceDebugRun
+          ? [discovery.activeSourceDebugRun.targetId]
+          : []),
+        ...userActionRequests.flatMap((request) =>
+          request.scope.type === "discovery_source"
+            ? [request.scope.targetId]
+            : [],
+        ),
+      ].filter((id) => ctx.jobSites?.get(Number(id))),
+    );
     const campaignSavedJobs = savedJobs.filter((job) =>
       activeCampaignJobIds.has(job.id),
     );
@@ -1673,6 +1646,7 @@ export function createWorkspaceSnapshotProfileMethods(
       applyJobResults,
       applyRuns,
       userActionRequests,
+      sourceTargetIds: activeCampaignTargetIds,
     });
     const campaignApplyRunIds = new Set(campaignApplyRuns.map((run) => run.id));
     const campaignApplyJobResults = applyJobResults.filter((result) =>
@@ -1804,8 +1778,7 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: campaignApplyRuns,
       userActionRequests: campaignUserActionRequests,
       discovery,
-      searchPreferences: setupContext.searchPreferences,
-      sourceAccessPrompts,
+      sourceHealth: ctx.jobSites?.healthCounts(),
     });
 
     const listableIntelligence = {
@@ -1827,6 +1800,7 @@ export function createWorkspaceSnapshotProfileMethods(
       profile: setupContext.profile,
       searchPreferences: setupContext.searchPreferences,
       profileSetupState: setupContext.profileSetupState,
+      siteCounts: ctx.jobSites?.counts(),
       browserSession,
       sourceAccessPrompts,
       discoverySessions,
@@ -2020,18 +1994,12 @@ export function createWorkspaceSnapshotProfileMethods(
       notifications: [],
     };
     const bootstrapCampaignState = campaignState;
-    const bootstrapActiveCampaign = campaignState.campaigns.find(
-      (campaign) => campaign.id === campaignState.activeCampaignId,
-    );
-    const bootstrapTargetIds = new Set(
-      bootstrapActiveCampaign?.sourceTargetIds ?? [],
-    );
     // Application lineage is deferred in bootstrap snapshots. Fail closed
     // until the complete snapshot can join requests to runs and records.
     const bootstrapUserActionRequests = userActionRequests.filter(
       (request) =>
         request.scope.type === "discovery_source" &&
-        bootstrapTargetIds.has(request.scope.targetId),
+        Boolean(ctx.jobSites?.get(Number(request.scope.targetId))),
     );
     // A bootstrap snapshot of a workspace that has never run discovery still
     // has to name the real browser lane, or the first paint claims the search
@@ -2039,7 +2007,7 @@ export function createWorkspaceSnapshotProfileMethods(
     const bootstrapRuntimeSession = await readUninitializedRuntimeSession(
       ctx,
       discovery.sessions,
-      getPreferredSessionAdapter(setupContext.searchPreferences),
+      getPreferredSessionAdapter(ctx.jobSites),
     );
     // Bootstrap intentionally omits sourceAccessPrompts: login-required
     // prompts need deferred debug history, so attention here reflects stored
@@ -2055,7 +2023,7 @@ export function createWorkspaceSnapshotProfileMethods(
       discovery: {
         activeSourceDebugRun: discovery.activeSourceDebugRun,
       },
-      searchPreferences: bootstrapSearchPreferences,
+      sourceHealth: ctx.jobSites?.healthCounts(),
     });
 
     return JobFinderWorkspaceSnapshotSchema.parse({
@@ -2071,9 +2039,10 @@ export function createWorkspaceSnapshotProfileMethods(
       profile: setupContext.profile,
       searchPreferences: bootstrapSearchPreferences,
       profileSetupState: setupContext.profileSetupState,
+      siteCounts: ctx.jobSites?.counts(),
       browserSession: createBrowserSessionSnapshot(
         discovery.sessions,
-        getPreferredSessionAdapter(setupContext.searchPreferences),
+        getPreferredSessionAdapter(ctx.jobSites),
         bootstrapRuntimeSession,
       ),
       sourceAccessPrompts: [],
@@ -2130,36 +2099,6 @@ export function createWorkspaceSnapshotProfileMethods(
       commitApplicationDefaultFields({ resumeApplicationMode }),
   });
 
-  async function preserveRemovedSourceLabels(
-    currentSearchPreferences: JobSearchPreferences,
-    nextSearchPreferences: JobSearchPreferences,
-  ): Promise<void> {
-    const removedSourceLabels = new Map(
-      currentSearchPreferences.discovery.targets
-        .filter(
-          (target) =>
-            !nextSearchPreferences.discovery.targets.some(
-              (next) => next.id === target.id,
-            ),
-        )
-        .map((target) => [target.id, target.label]),
-    );
-    if (removedSourceLabels.size > 0) {
-      const preserveLabels = (job: SavedJob): SavedJob => ({
-        ...job,
-        provenance: job.provenance.map((entry) =>
-          entry.sourceLabel || !removedSourceLabels.has(entry.targetId)
-            ? entry
-            : {
-                ...entry,
-                sourceLabel: removedSourceLabels.get(entry.targetId),
-              },
-        ),
-      });
-      await ctx.repository.commitSavedJobDelta({ update: preserveLabels });
-    }
-  }
-
   async function persistSearchPreferences(
     searchPreferences: JobSearchPreferences,
     options: { preserveAiBehaviorOwnedFields: boolean },
@@ -2183,24 +2122,12 @@ export function createWorkspaceSnapshotProfileMethods(
         ? {
             ...parsedSearchPreferences,
             tailoringMode: currentSearchPreferences.tailoringMode,
-            discovery: {
-              ...parsedSearchPreferences.discovery,
-              collectOnlyHardCriteriaMatches:
-                currentSearchPreferences.discovery
-                  .collectOnlyHardCriteriaMatches ?? false,
-            },
+            searchSelectivity: currentSearchPreferences.searchSelectivity,
           }
         : parsedSearchPreferences;
-    const nextSearchPreferences = invalidateChangedSourceGuidance(
-      currentSearchPreferences,
-      ownedFieldsPreservedSearchPreferences,
-    );
-    await preserveRemovedSourceLabels(
-      currentSearchPreferences,
-      nextSearchPreferences,
-    );
+    const nextSearchPreferences = ownedFieldsPreservedSearchPreferences;
     await ctx.repository.saveSearchPreferences(nextSearchPreferences);
-    await syncActiveCampaignPreferences(nextSearchPreferences);
+
     await deriveAndPersistProfileSetupState(ctx, {
       persistedState: currentProfileSetupState,
       profile: currentProfile,
@@ -2311,14 +2238,12 @@ export function createWorkspaceSnapshotProfileMethods(
       );
       const sourceInstructionArtifacts =
         await ctx.repository.listSourceInstructionArtifacts();
-      const configuredTargets = searchPreferences.discovery.targets;
       const target = resolveBrowserSessionTarget({
-        targets: configuredTargets,
         targetId: input?.targetId,
       });
       const sessionSource = target
         ? resolveAdapterKind(target)
-        : getPreferredSessionAdapter(searchPreferences);
+        : getPreferredSessionAdapter(ctx.jobSites);
       try {
         const session = await ctx.browserRuntime.openSession(
           sessionSource,
@@ -2349,11 +2274,8 @@ export function createWorkspaceSnapshotProfileMethods(
       }
     },
     async checkBrowserSession() {
-      const searchPreferences = normalizeSearchPreferences(
-        await ctx.repository.getSearchPreferences(),
-      );
       const session = await ctx.browserRuntime.getSessionState(
-        getPreferredSessionAdapter(searchPreferences),
+        getPreferredSessionAdapter(ctx.jobSites),
       );
       await ctx.persistBrowserSessionState(session);
       return getWorkspaceSnapshot(true);
@@ -2428,19 +2350,11 @@ export function createWorkspaceSnapshotProfileMethods(
       const parsedSearchPreferences = normalizeSearchPreferences(
         JobSearchPreferencesSchema.parse(searchPreferences),
       );
-      const nextSearchPreferences = invalidateChangedSourceGuidance(
-        currentSearchPreferences,
-        {
-          ...parsedSearchPreferences,
-          tailoringMode: currentSearchPreferences.tailoringMode,
-          discovery: {
-            ...parsedSearchPreferences.discovery,
-            collectOnlyHardCriteriaMatches:
-              currentSearchPreferences.discovery
-                .collectOnlyHardCriteriaMatches ?? false,
-          },
-        },
-      );
+      const nextSearchPreferences = {
+        ...parsedSearchPreferences,
+        tailoringMode: currentSearchPreferences.tailoringMode,
+        searchSelectivity: currentSearchPreferences.searchSelectivity,
+      };
       const nextProfileSetupState = resolvePendingReviewItemsAfterExplicitSave({
         currentProfile,
         currentSearchPreferences,
@@ -2451,10 +2365,6 @@ export function createWorkspaceSnapshotProfileMethods(
       });
 
       await nextTurn();
-      await preserveRemovedSourceLabels(
-        currentSearchPreferences,
-        nextSearchPreferences,
-      );
       if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
         await ctx.staleApprovedResumeDrafts(
           "Profile details changed after approval and the resume needs a fresh review.",
@@ -2468,7 +2378,7 @@ export function createWorkspaceSnapshotProfileMethods(
         );
       }
       await nextTurn();
-      await syncActiveCampaignPreferences(nextSearchPreferences);
+
       await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
@@ -2775,20 +2685,18 @@ export function createWorkspaceSnapshotProfileMethods(
         }),
       );
 
-      // Then the two search-preference fields this section owns. They go
-      // through the ordinary preferences save so the active plan's copy of
-      // the preferences (which a search actually reads) stays in step.
+      // Save only the goal fields owned by this section. Sites remain in their row store.
       const nextTailoringMode =
         resumeApproach !== undefined && resumeApproach !== "original_resume"
           ? resumeApproach
           : undefined;
-      const nextCollectOnlyHardCriteriaMatches =
+      const nextSearchSelectivity =
         parsedInput.aiBehavior === undefined
           ? undefined
-          : parsedInput.aiBehavior.jobSearch.selectivity === "best_matches";
+          : parsedInput.aiBehavior.jobSearch.selectivity;
       if (
         nextTailoringMode !== undefined ||
-        nextCollectOnlyHardCriteriaMatches !== undefined
+        nextSearchSelectivity !== undefined
       ) {
         const currentSearchPreferences = normalizeSearchPreferences(
           await ctx.repository.getSearchPreferences(),
@@ -2796,10 +2704,9 @@ export function createWorkspaceSnapshotProfileMethods(
         const changed =
           (nextTailoringMode !== undefined &&
             nextTailoringMode !== currentSearchPreferences.tailoringMode) ||
-          (nextCollectOnlyHardCriteriaMatches !== undefined &&
-            nextCollectOnlyHardCriteriaMatches !==
-              (currentSearchPreferences.discovery
-                .collectOnlyHardCriteriaMatches ?? false));
+          (nextSearchSelectivity !== undefined &&
+            nextSearchSelectivity !==
+              currentSearchPreferences.searchSelectivity);
         if (changed) {
           await persistSearchPreferences(
             {
@@ -2807,15 +2714,9 @@ export function createWorkspaceSnapshotProfileMethods(
               ...(nextTailoringMode !== undefined
                 ? { tailoringMode: nextTailoringMode }
                 : {}),
-              discovery: {
-                ...currentSearchPreferences.discovery,
-                ...(nextCollectOnlyHardCriteriaMatches !== undefined
-                  ? {
-                      collectOnlyHardCriteriaMatches:
-                        nextCollectOnlyHardCriteriaMatches,
-                    }
-                  : {}),
-              },
+              ...(nextSearchSelectivity !== undefined
+                ? { searchSelectivity: nextSearchSelectivity }
+                : {}),
             },
             { preserveAiBehaviorOwnedFields: false },
           );

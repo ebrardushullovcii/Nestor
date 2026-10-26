@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SavedFormAnswer } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { AnswerField } from "./answer-field";
@@ -9,8 +9,11 @@ export function SavedAnswerPane(props: {
   onEditing: (editing: boolean) => void;
   onSaved: (message: string) => void;
   onForget: (ids: number[]) => Promise<void>;
+  onMissing?: (id: number) => void;
 }) {
   const [value, setValue] = useState<SavedFormAnswer | null>(null);
+  const onMissing = useRef(props.onMissing);
+  onMissing.current = props.onMissing;
   const [answer, setAnswer] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -21,6 +24,7 @@ export function SavedAnswerPane(props: {
       .run("get_form_answer", { id: props.id })
       .then((value) => {
         if (live) {
+          if (!value) onMissing.current?.(props.id);
           setValue(value);
           setAnswer(value?.answer ?? "");
           setLoaded(true);
@@ -40,6 +44,7 @@ export function SavedAnswerPane(props: {
     <section
       id="list-detail"
       aria-label="Saved answer"
+      data-needs-detail-id={value?.id}
       className="surface-panel-shell min-h-0 overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
     >
       {!loaded ? (

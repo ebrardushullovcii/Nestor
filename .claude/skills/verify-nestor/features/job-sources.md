@@ -13,8 +13,8 @@ Job Finder searches the sites the person adds. Sites live in the indexed `job_si
 
 Use this instance's replica URLs only. A synthetic profile may be seeded when import is not the feature under test; say so in the result.
 
-- In setup, fill `Job site URLs` with `<sites>/board/` twice and press Save and continue. Assert one enabled `job_sites` row. Return to Job targets, then Finish: setup completes and the first search starts using the site row even when the legacy profile targets list is empty.
-- In Profile, bulk-add replica addresses, including an existing address and an invalid one. Keep the duplicate/invalid feedback, then correct the remaining input. Assert no `searchPreferences.discovery.targets` write.
+- In setup, fill `Job site URLs` with `<sites>/board/` twice and press Save and continue. Assert one enabled `job_sites` row. Return to Job targets, then Finish: setup completes and the first search starts using the site row independently of the saved goal fields.
+- In Profile, bulk-add replica addresses, including an existing address and an invalid one. Keep the duplicate/invalid feedback, then correct the remaining input. Assert only the changed `job_sites` rows are written.
 - For a large list, add 900 distinct replica paths without searching them. Assert only 25 list rows and a 25-row `list_sites` response, page forward, find the last URL, rename it, switch it off/on and inspect that row in `job_sites`.
 - In the picker, assert 25 checkboxes, find the last URL, exclude it and check the count; then None and select board/lever/greenhouse. Run a live search and repeat. Assert only those three site rows receive last-searched/health/lane metadata, descriptions remain full text, and the repeat makes no AI calls.
 - A 900-row UI check does not prove a 900-source search. Measure the scheduler separately.

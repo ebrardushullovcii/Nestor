@@ -14,8 +14,8 @@ import {
 describe("createJobFinderWorkspaceService", () => {
   test("ignores wildcard and templated route hints when deriving starting urls", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       startingUrl: "https://www.linkedin.com/jobs/",
       instructionStatus: "draft",
       draftInstructionId: "instruction_linkedin_template_routes",
@@ -131,8 +131,8 @@ describe("createJobFinderWorkspaceService", () => {
 
   test("replay verification strips unstable current-job query params from learned starting urls", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       startingUrl: "https://www.linkedin.com/jobs/",
       instructionStatus: "draft",
       draftInstructionId: "instruction_linkedin_unstable_job_route",
@@ -253,8 +253,8 @@ describe("createJobFinderWorkspaceService", () => {
 
   test("non-search same-host query urls are not promoted into search-filter starting urls", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       id: "1",
       label: "Example Careers",
       startingUrl: "https://example.com/careers/",
@@ -369,9 +369,9 @@ describe("createJobFinderWorkspaceService", () => {
 
   test("saveSourceInstructionArtifact updates a bound target artifact and rejects unbound edits", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets = [
+    seed.jobSites = [
       {
-        ...seed.searchPreferences.discovery.targets[0]!,
+        ...seed.jobSites[0]!,
         instructionStatus: "draft",
         validatedInstructionId: null,
         draftInstructionId: "instruction_linkedin_draft_editable",
@@ -428,5 +428,4 @@ describe("createJobFinderWorkspaceService", () => {
       }),
     ).rejects.toThrow(/unknown source instruction/i);
   });
-
 });

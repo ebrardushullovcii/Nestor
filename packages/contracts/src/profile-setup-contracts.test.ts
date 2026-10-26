@@ -6,7 +6,9 @@ import {
   ProfileSetupStateSchema,
   ProfileReviewItemSchema,
   CandidateProfileSchema,
+  CandidateAnswerBankSchema,
   JobSearchPreferencesSchema,
+  JobDiscoveryPreferencesSchema,
   createFreshStartCandidateProfile,
   evaluateProfileSetupReadiness,
   deriveProfileSetupState,
@@ -32,19 +34,6 @@ const emptyNarrative = {
   careerTransitionSummary: null,
   differentiators: [],
   motivationThemes: [],
-};
-
-const emptyAnswerBank = {
-  workAuthorization: null,
-  visaSponsorship: null,
-  relocation: null,
-  travel: null,
-  noticePeriod: null,
-  availability: null,
-  salaryExpectations: null,
-  selfIntroduction: null,
-  careerTransition: null,
-  customAnswers: [],
 };
 
 const emptyApplicationIdentity = {
@@ -123,7 +112,6 @@ const blankSearchPreferencesFixture = JobSearchPreferencesSchema.parse({
   tailoringMode: "balanced",
   companyBlacklist: [],
   companyWhitelist: [],
-  discovery: { historyLimit: 5, targets: [] },
 });
 
 const completeSearchPreferencesFixture = JobSearchPreferencesSchema.parse({
@@ -150,16 +138,6 @@ const completeSearchPreferencesFixture = JobSearchPreferencesSchema.parse({
   tailoringMode: "balanced",
   companyBlacklist: [],
   companyWhitelist: [],
-  discovery: {
-    historyLimit: 5,
-    targets: [
-      {
-        id: "source_1",
-        label: "Signal Systems careers",
-        startingUrl: "https://signal.example/careers",
-      },
-    ],
-  },
 });
 
 describe("contracts profile setup schemas", () => {
@@ -285,7 +263,7 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
+        answerBank: CandidateAnswerBankSchema.parse({}),
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -342,27 +320,9 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
-        discovery: {
-          historyLimit: 5,
-          targets: [
-            {
-              id: "source_1",
-              label: "Signal Systems careers",
-              startingUrl: "https://signal.example/careers",
-              enabled: true,
-              adapterKind: "auto",
-              customInstructions: null,
-              instructionStatus: "missing",
-              validatedInstructionId: null,
-              draftInstructionId: null,
-              lastDebugRunId: null,
-              lastVerifiedAt: null,
-              staleReason: null,
-            },
-          ],
-        },
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
-      { now: "2026-04-11T10:15:00.000Z" },
+      { enabledSiteCount: 1, now: "2026-04-11T10:15:00.000Z" },
     );
 
     expect(state.status).toBe("completed");
@@ -416,11 +376,11 @@ describe("contracts profile setup schemas", () => {
     const readiness = evaluateProfileSetupReadiness(
       completeProfileFixture,
       completeSearchPreferencesFixture,
+      1,
     );
 
     expect(readiness.materiallyComplete).toBe(true);
     expect(readiness.hasNarrative).toBe(false);
-    expect(readiness.hasAnswerBank).toBe(false);
     expect(getProfileSetupReadinessBlockers(readiness)).toEqual([]);
   });
 
@@ -475,7 +435,7 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
+        answerBank: CandidateAnswerBankSchema.parse({}),
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -532,9 +492,10 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
-        discovery: { historyLimit: 5, targets: [] },
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
+        enabledSiteCount: 1,
         currentState: {
           status: "in_progress",
           currentStep: "background",
@@ -622,7 +583,7 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
+        answerBank: CandidateAnswerBankSchema.parse({}),
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -679,9 +640,10 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
-        discovery: { historyLimit: 5, targets: [] },
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
+        enabledSiteCount: 1,
         currentState: {
           status: "in_progress",
           currentStep: "background",
@@ -704,6 +666,7 @@ describe("contracts profile setup schemas", () => {
       completeProfileFixture,
       completeSearchPreferencesFixture,
       {
+        enabledSiteCount: 1,
         currentState: {
           status: "in_progress",
           currentStep: "targeting",
@@ -772,7 +735,7 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
+        answerBank: CandidateAnswerBankSchema.parse({}),
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -829,8 +792,9 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
-        discovery: { historyLimit: 5, targets: [] },
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
+      0,
     );
 
     expect(readiness.freshStart).toBe(true);
@@ -892,7 +856,7 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
+        answerBank: CandidateAnswerBankSchema.parse({}),
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -949,9 +913,10 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
-        discovery: { historyLimit: 5, targets: [] },
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
+        enabledSiteCount: 0,
         currentState: {
           status: "completed",
           currentStep: "ready_check",
@@ -1030,25 +995,14 @@ describe("contracts profile setup schemas", () => {
       targetRoles: ["Principal Designer"],
       locations: ["Remote"],
       workModes: ["remote"],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "source_1",
-            label: "Signal Systems careers",
-            startingUrl: "https://signal.example/careers",
-            enabled: true,
-            adapterKind: "auto",
-          },
-        ],
-      },
     });
     expect(
-      evaluateProfileSetupReadiness(profile, searchPreferences)
+      evaluateProfileSetupReadiness(profile, searchPreferences, 1)
         .materiallyComplete,
     ).toBe(true);
 
     const state = deriveProfileSetupState(profile, searchPreferences, {
+      enabledSiteCount: 1,
       currentState: {
         status: "completed",
         currentStep: "targeting",
@@ -1088,6 +1042,7 @@ describe("contracts profile setup schemas", () => {
       createFreshStartCandidateProfile(),
       blankSearchPreferencesFixture,
       {
+        enabledSiteCount: 0,
         currentState: {
           status: "completed",
           currentStep: "targeting",
@@ -1151,6 +1106,7 @@ describe("contracts profile setup schemas", () => {
     const readiness = evaluateProfileSetupReadiness(
       createFreshStartCandidateProfile(),
       blankSearchPreferencesFixture,
+      0,
     );
 
     expect(readiness.freshStart).toBe(true);
@@ -1167,8 +1123,8 @@ describe("contracts profile setup schemas", () => {
     ]);
   });
 
-  test("needs both work-eligibility answers, as facts or saved sentences", () => {
-    const withAnswers = (workEligibility: object, answerBank: object = {}) =>
+  test("needs both structured work-eligibility facts", () => {
+    const withAnswers = (workEligibility: object) =>
       evaluateProfileSetupReadiness(
         CandidateProfileSchema.parse({
           ...completeProfileFixture,
@@ -1178,9 +1134,9 @@ describe("contracts profile setup schemas", () => {
             requiresVisaSponsorship: null,
             ...workEligibility,
           },
-          answerBank: { ...emptyAnswerBank, ...answerBank },
         }),
         completeSearchPreferencesFixture,
+        1,
       ).hasWorkEligibilityAnswers;
 
     expect(withAnswers({})).toBe(false);
@@ -1199,9 +1155,6 @@ describe("contracts profile setup schemas", () => {
         requiresVisaSponsorship: true,
       }),
     ).toBe(true);
-    expect(
-      withAnswers({}, { workAuthorization: "Yes", visaSponsorship: "No" }),
-    ).toBe(true);
     // Materially complete is unchanged, so a setup finished before the
     // question existed is not reopened.
     expect(
@@ -1215,6 +1168,7 @@ describe("contracts profile setup schemas", () => {
           },
         }),
         completeSearchPreferencesFixture,
+        1,
       ).materiallyComplete,
     ).toBe(true);
   });
@@ -1231,6 +1185,7 @@ describe("contracts profile setup schemas", () => {
     const readiness = evaluateProfileSetupReadiness(
       importedProfile,
       blankSearchPreferencesFixture,
+      0,
     );
     const optionalProofPoint = ProfileReviewItemSchema.parse({
       id: "review_proof_point",
@@ -1279,6 +1234,7 @@ describe("contracts profile setup schemas", () => {
         evaluateProfileSetupReadiness(
           completeProfileFixture,
           completeSearchPreferencesFixture,
+          1,
         ),
         [optionalProofPoint],
       ),
@@ -1290,6 +1246,7 @@ describe("contracts profile setup schemas", () => {
         evaluateProfileSetupReadiness(
           createFreshStartCandidateProfile(),
           blankSearchPreferencesFixture,
+          0,
         ),
         [],
       ),
@@ -1304,6 +1261,7 @@ describe("contracts profile setup schemas", () => {
     const readinessWithoutWorkMode = evaluateProfileSetupReadiness(
       completeProfileFixture,
       preferencesWithoutWorkMode,
+      1,
     );
 
     expect(readinessWithoutWorkMode.hasWorkModePreference).toBe(false);
@@ -1317,6 +1275,7 @@ describe("contracts profile setup schemas", () => {
     const readinessWithWorkMode = evaluateProfileSetupReadiness(
       completeProfileFixture,
       completeSearchPreferencesFixture,
+      1,
     );
     expect(readinessWithWorkMode.hasWorkModePreference).toBe(true);
     expect(readinessWithWorkMode.materiallyComplete).toBe(true);

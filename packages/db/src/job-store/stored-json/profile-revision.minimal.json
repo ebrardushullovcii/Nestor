@@ -1,0 +1,20 @@
+{
+  "id": "synthetic",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "trigger": "assistant_patch",
+  "snapshotProfile": {
+    "id": "synthetic",
+    "yearsExperience": null,
+    "baseResume": {
+      "id": "synthetic",
+      "fileName": "synthetic",
+      "uploadedAt": "2026-10-26T00:00:00.000Z"
+    }
+  },
+  "snapshotSearchPreferences": {
+    "minimumSalaryUsd": null,
+    "approvalMode": "draft_only",
+    "tailoringMode": "conservative"
+  },
+  "snapshotProfileSetupState": {}
+}
