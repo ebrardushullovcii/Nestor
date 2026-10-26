@@ -13,25 +13,15 @@ export function asksListingDiscovery(question: string): boolean {
   );
 }
 
-function sourceCategory(
-  label: string,
-  url: string,
-): "board" | "company" | null {
+function sourceCategory(label: string): "board" | "company" | null {
   // Read the source's recorded description, never an employer/provider allow-list.
   if (/\bjob[ -]?boards?\b/iu.test(label)) return "board";
   if (
-    /\b(?:company (?:website|careers?)|careers? (?:page|site|website))\b/iu.test(
+    /\b(?:company|employer)(?:'s)? (?:website|careers?(?: (?:page|site|website))?)\b/iu.test(
       label,
     )
   )
     return "company";
-  try {
-    const path = new URL(url).pathname;
-    if (/(?:^|\/)boards?(?:\/|$)/iu.test(path)) return "board";
-    if (/(?:^|\/)careers?(?:\/|$)/iu.test(path)) return "company";
-  } catch {
-    /* Old rows may not have a source URL. */
-  }
   return null;
 }
 
@@ -39,12 +29,25 @@ function sourceCategory(
 export function listingDiscoveryAnswer(
   control: ApplyFormControl,
   sources: ApplyAnswerSources,
+  siblings: readonly ApplyFormControl[] = [],
 ): ApplyAnswer | null {
   const source = sources.listingDiscovery;
   if (!source?.label.trim()) return null;
   let value = source.label.trim();
-  if (control.options.length) {
-    const category = sourceCategory(source.label, source.url);
+  const options =
+    control.kind === "radio" && control.choiceGroupKey
+      ? siblings
+          .filter(
+            (candidate) =>
+              candidate.kind === "radio" &&
+              candidate.choiceGroupKey === control.choiceGroupKey &&
+              candidate.visible &&
+              !candidate.disabled,
+          )
+          .map((candidate) => candidate.label || candidate.value)
+      : control.options;
+  if (options.length) {
+    const category = sourceCategory(source.label);
     let host = "";
     try {
       host = new URL(source.url).hostname.replace(/^www\./u, "");
@@ -52,12 +55,12 @@ export function listingDiscoveryAnswer(
       /* Old rows can lack a usable URL. */
     }
     value =
-      control.options.find((option) =>
+      options.find((option) =>
         [source.label, host].some(
           (name) => !!name && normalizeSignal(name) === normalizeSignal(option),
         ),
       ) ??
-      control.options.find((option) =>
+      options.find((option) =>
         category === "board"
           ? /^(?:an? |online )?job[ -]?board(?: website)?$/iu.test(
               option.trim(),
@@ -67,7 +70,7 @@ export function listingDiscoveryAnswer(
               option.trim(),
             ),
       ) ??
-      control.options.find((option) =>
+      options.find((option) =>
         /^(?:other|other source)$/iu.test(option.trim()),
       ) ??
       "";

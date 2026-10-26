@@ -6700,43 +6700,157 @@ test("an explicit stored-fact reference with a changed value still gets checked"
   expect(result.outcome).toBe("paused");
 });
 
-test("a refused source question is handed over once while the rest of the batch fills", async () => {
+test.each(["fill_fields", "separate tools"])(
+  "a refused source question is handed over once while the rest fills (%s)",
+  async (mode) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          label: "How did you hear about this job?",
+          groupLabel: "My Information",
+          tagName: "select",
+          value: "",
+          options: ["Referral"],
+        },
+        { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+      ],
+    });
+    const input = config(source);
+    input.sources.listingDiscovery = {
+      label: "Local job board",
+      url: "https://listing.example.test/board/",
+    };
+    const choose = vi.spyOn(input.hands, "chooseOption"),
+      fill = vi.spyOn(input.hands, "fillText");
+    const fields: FillFieldsEntry[] = [
+      { tool: "select", ref: "c0", option: "Referral" },
+      { tool: "type", ref: "c1", text: "Robin Ashford" },
+    ];
+    const model: LLMClient =
+      mode === "fill_fields"
+        ? repeatingModel("fill_fields", { fields })
+        : {
+            chatWithTools: () =>
+              Promise.resolve({
+                toolCalls: fields.map(({ tool, ...args }, index) => ({
+                  id: `call${index}`,
+                  type: "function",
+                  function: { name: tool, arguments: JSON.stringify(args) },
+                })),
+              }),
+          };
+    const result = await runApplyAgent(input, model);
+    expect(result.outcome).toBe("paused");
+    expect(result.modelTurns).toBeLessThanOrEqual(2);
+    expect(choose).not.toHaveBeenCalled();
+    expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
+    const questions = result.pauses.flatMap((pause) => pause.questions ?? []);
+    expect(questions).toHaveLength(1);
+    expect(questions[0].answerOptions).toEqual(["Referral"]);
+  },
+);
+
+test.each([false, true])(
+  "a rejected name typo can be corrected from Profile (typed gate: %s)",
+  async (typed) => {
+    const source = page({ controls: [{ ...nameControl(), value: "" }] });
+    const input = config(source, { modelQuestionClassification: typed });
+    const fill = vi.spyOn(input.hands, "fillText");
+    const flow = scriptedModel([
+      { name: "type", args: { ref: "c0", text: "Robin Ashworth" } },
+      { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
+      { name: "finish", args: { reason: "The recorded name is filled." } },
+    ]);
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) => {
+        if (definitions[0]?.function.name !== "report_question_kinds")
+          return flow.chatWithTools(messages, definitions, options);
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: {
+                name: "report_question_kinds",
+                arguments: JSON.stringify({
+                  plainIndexes: [0],
+                  flagged: [],
+                  tags: [
+                    {
+                      index: 0,
+                      kind: "other",
+                      country: null,
+                      sourceId: "profile.fullName",
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+    expect(fill).toHaveBeenCalledExactlyOnceWith("c0", "Robin Ashford");
+    expect(result.outcome).toBe("prepared");
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  },
+);
+
+test("held questions do not hide a required invalid email from correction", async () => {
   const source = page({
     controls: [
       {
         ...nameControl(),
-        label: "How did you hear about this job?",
-        groupLabel: "My Information",
         tagName: "select",
+        label: "How did you hear about this job?",
         value: "",
         options: ["Referral"],
       },
-      { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+      {
+        ...nameControl(),
+        index: 1,
+        id: "email",
+        name: "email",
+        inputType: "email",
+        label: "Email",
+        value: "invalid@",
+        invalid: true,
+      },
     ],
   });
   const input = config(source);
+  input.sources.profile.email = "robin.replay@example.test";
   input.sources.listingDiscovery = {
     label: "Local job board",
-    url: "https://listing.example.test/board/",
+    url: "https://listing.example.test/jobs/1",
   };
-  const choose = vi.spyOn(input.hands, "chooseOption"),
-    fill = vi.spyOn(input.hands, "fillText");
+  const original = input.hands.fillText;
+  input.hands.fillText = (ref, value) => {
+    source.controls[1].invalid = false;
+    return original(ref, value);
+  };
   const result = await runApplyAgent(
     input,
-    repeatingModel("fill_fields", {
-      fields: [
-        { tool: "select", ref: "c0", option: "Referral" },
-        { tool: "type", ref: "c1", text: "Robin Ashford" },
-      ],
-    }),
+    scriptedModel([
+      { name: "select", args: { ref: "c0", option: "Referral" } },
+      { name: "type", args: { ref: "c1", text: "robin.replay@example.test" } },
+      {
+        name: "finish",
+        args: {
+          reason: "One source question needs the person.",
+          needsPerson: true,
+        },
+      },
+    ]),
   );
+  expect(source.controls[1].value).toBe("robin.replay@example.test");
   expect(result.outcome).toBe("paused");
-  expect(result.modelTurns).toBeLessThanOrEqual(2);
-  expect(choose).not.toHaveBeenCalled();
-  expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
-  const questions = result.pauses.flatMap((pause) => pause.questions ?? []);
-  expect(questions).toHaveLength(1);
-  expect(questions[0].answerOptions).toEqual(["Referral"]);
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .map((question) => question.prompt),
+  ).toEqual(["How did you hear about this job?"]);
 });
 
 test("a changed proposal for a refused field costs no second fact check while another field fills", async () => {

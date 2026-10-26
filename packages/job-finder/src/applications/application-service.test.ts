@@ -358,7 +358,39 @@ it("passes the job's current site notes and learned Apply instructions to prepar
   ]);
   expect(f.execute.mock.calls[0]![1].listingDiscovery).toEqual({
     label: "Replica",
-    url: "https://replica.test/board",
+    url: "https://replica.test/jobs/0",
+  });
+  expect(f.execute.mock.calls[0]![1].job.canonicalUrl).toBe(
+    "https://replica.test/jobs/0",
+  );
+});
+
+it("keeps the sighting's historical source after its configured site URL changes", async () => {
+  const f = await setup(1),
+    sites = createJobSitesStore(f.jobs);
+  sites.add({ text: "https://original-board.test/" });
+  const source = sites.list().rows[0]!;
+  f.jobs
+    .sql(
+      "UPDATE job_sightings SET source_id=?, url=?, source_label=? WHERE job_id=?",
+    )
+    .run(
+      String(source.id),
+      "https://original-board.test/jobs/1",
+      "Original job board",
+      f.ids[0]!,
+    );
+  sites.update({
+    id: source.id,
+    url: "https://different-board.test/",
+    label: "Different source",
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute.mock.calls[0]![1].listingDiscovery).toEqual({
+    label: "Original job board",
+    url: "https://original-board.test/jobs/1",
   });
   expect(f.execute.mock.calls[0]![1].job.canonicalUrl).toBe(
     "https://replica.test/jobs/0",

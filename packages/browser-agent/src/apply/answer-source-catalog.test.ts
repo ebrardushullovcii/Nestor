@@ -777,9 +777,9 @@ test("known contact links bind their profile field name, and listing answers bin
 });
 test.each([
   ["Local job board", "https://listings.example.test/jobs/1", "Job board"],
-  ["Example careers page", "https://example.test/jobs/1", "Company website"],
-  ["Example", "https://example.test/careers/", "Company website"],
-  ["Example", "https://example.test/board/", "Job board"],
+  ["Company careers page", "https://example.test/jobs/1", "Company website"],
+  ["Example", "https://example.test/careers/", "Other"],
+  ["Example", "https://example.test/board/", "Other"],
 ])(
   "maps recorded listing provenance onto the form options: %s",
   (label, url, answer) => {

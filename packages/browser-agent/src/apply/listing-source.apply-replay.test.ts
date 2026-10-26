@@ -91,11 +91,12 @@ test.each([
     "https://employer.example.test/roles/1",
     "Company website",
   ],
-  ["Unclassified source", "https://listing.example.test/board/", "Job board"],
+  ["Unclassified source", "https://listing.example.test/board/", "Other"],
+  ["Unclassified source", "https://employer.example.test/careers/", "Other"],
   [
-    "Unclassified source",
-    "https://employer.example.test/careers/",
-    "Company website",
+    "Regional opportunities",
+    "https://regional-jobs.example.test/careers/",
+    "Other",
   ],
   ["Unclassified source", "https://listing.example.test/jobs/1", "Other"],
 ])(
@@ -236,3 +237,89 @@ test("Send rechecks the source category against the actual options, without acce
     expect(result[0]?.supported).toBe(answer === "Job board");
   }
 });
+
+test.each([false, true])(
+  "a source radio selects only the approved option (typed gate: %s)",
+  async (typed) => {
+    const src = sources(
+      "Local job board",
+      "https://listing.example.test/jobs/1",
+    );
+    const controls = ["Job board", "Referral", "Other"].map((label, index) => ({
+      ...field.controls[0],
+      ref: `r${index}`,
+      kind: "radio" as const,
+      groupLabel: "How did you hear about this job?",
+      label,
+      value: label,
+      options: [],
+      choiceGroupKey: "source",
+      answerControlType: "single_choice" as const,
+    }));
+    const observation = { ...field, controls };
+    const setToggle = vi.fn((ref: string, checked: boolean) => {
+      controls.find((control) => control.ref === ref)!.checked = checked;
+      return Promise.resolve({
+        ok: true as const,
+        observedValue: checked ? "checked" : "unchecked",
+      });
+    });
+    const config = {
+      sources: src,
+      application: { jobId: "1", applicationId: "1", startingUrl: field.url! },
+      authority: {
+        mode: "prepare_only",
+        submitAuthorized: false,
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "pause_for_user",
+        allowedOrigins: [],
+      },
+      hands: { observe: () => Promise.resolve(observation), setToggle },
+      siteLabel: "Synthetic employer",
+    } as unknown as ApplyAgentConfig;
+    const deps = {
+      config,
+      now,
+      guardState: createApplyGuardState(),
+      ...(typed
+        ? {
+            classifyQuestions: () =>
+              Promise.resolve(
+                new Map([
+                  [
+                    "How did you hear about this job?",
+                    {
+                      asksAboutPay: false,
+                      declarationKind: null,
+                      answerTags: {
+                        kind: "other" as const,
+                        country: null,
+                        sourceId: "listingDiscovery",
+                      },
+                    },
+                  ],
+                ]),
+              ),
+          }
+        : {}),
+    };
+    const wrong = await executeApplyProposal(
+      { tool: "set_checkbox", ref: "r1", checked: true },
+      field.signature,
+      deps,
+    );
+    expect(wrong.kind).toBe("suggestion");
+    expect(setToggle).not.toHaveBeenCalled();
+    const correct = await executeApplyProposal(
+      { tool: "set_checkbox", ref: "r0", checked: true },
+      field.signature,
+      deps,
+    );
+    expect(correct).toMatchObject({
+      kind: "filled",
+      filled: { ref: "r0", answer: { value: "Job board" } },
+    });
+    expect(setToggle).toHaveBeenCalledExactlyOnceWith("r0", true);
+    expect(controls[1].checked).toBe(false);
+  },
+);

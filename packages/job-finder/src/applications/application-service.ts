@@ -145,15 +145,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const first = [...job.sightings].sort((a, b) =>
       a.seenAt.localeCompare(b.seenAt),
     )[0];
-    const siteId = Number(first?.sourceId);
-    const source =
-      Number.isSafeInteger(siteId) && siteId > 0
-        ? createJobSitesStore(jobs).get(siteId)
-        : null;
     return {
       label: first?.sourceLabel ?? job.sourceLabel,
-      // A job URL can be the employer's page even when discovery was on a board.
-      url: source?.url ?? first?.url ?? job.url,
+      // Site settings are editable; only the historical sighting is evidence.
+      url: first?.url ?? job.url,
     };
   };
   const resumes = createResumeStore(jobs);

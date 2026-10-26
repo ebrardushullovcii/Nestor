@@ -668,9 +668,14 @@ async function decideAnswer(input: {
   const discovery =
     (!deps.classifyQuestions || control.answerTags?.kind === "other") &&
     asksListingDiscovery(questionPrompt(control))
-      ? listingDiscoveryAnswer(control, config.sources)
+      ? listingDiscoveryAnswer(control, config.sources, input.controls)
       : null;
-  const value = formatGithubAnswer(control, discovery?.value ?? input.value);
+  const value = formatGithubAnswer(
+    control,
+    control.kind === "radio" || control.kind === "checkbox"
+      ? input.value
+      : (discovery?.value ?? input.value),
+  );
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
@@ -781,7 +786,22 @@ async function decideAnswer(input: {
     // Only requested writing reaches the independent claim checker below.
   }
   if (asksListingDiscovery(questionPrompt(control))) {
-    const answer = listingDiscoveryAnswer(control, config.sources);
+    const answer = listingDiscoveryAnswer(
+      control,
+      config.sources,
+      input.controls,
+    );
+    if (
+      answer &&
+      (control.kind === "radio" || control.kind === "checkbox") &&
+      normalizeSignal(answer.value) !== normalizeSignal(value)
+    )
+      return {
+        kind: "leave",
+        reason: "This option does not match the recorded listing source.",
+        suggestion: null,
+        permission: true,
+      };
     return answer
       ? { kind: "use", answer }
       : {
@@ -2322,6 +2342,20 @@ export async function executeApplyProposal(
           checked = value === "yes";
         }
       }
+      if (
+        radioAnswer &&
+        control.kind === "radio" &&
+        checked &&
+        ![control.label, control.value].some(
+          (value) =>
+            normalizeSignal(value) === normalizeSignal(radioAnswer.value),
+        )
+      )
+        return {
+          kind: "refused",
+          reason: "The approved answer does not match this radio option.",
+          observation,
+        };
       // A declaration the person makes about themselves is theirs. This is the
       // one place the model is overruled rather than advised. It is not,
       // however, a reason to stop: the run used to end on the first such box
