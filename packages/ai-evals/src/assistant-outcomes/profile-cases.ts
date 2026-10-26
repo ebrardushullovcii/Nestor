@@ -248,8 +248,8 @@ const recordValues: Record<ProfileRecordCollection, Record<string, unknown>> = {
     heroMetric: "20%",
     supportingContext: "Synthetic measurement context.",
     roleFamilies: ["Analysis"],
-    projectIds: ["outcome-projects"],
-    linkIds: ["outcome-links"],
+    projectIds: ["outcome-proof-project"],
+    linkIds: ["Before"],
   },
 };
 

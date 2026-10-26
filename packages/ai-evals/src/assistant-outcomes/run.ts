@@ -9,6 +9,10 @@ import {
   profileFieldOutcomeCases,
   profileRecordOutcomeCases,
 } from "./profile-cases";
+import {
+  preferenceOutcomeCases,
+  checkPreferenceFixtures,
+} from "./preference-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -22,11 +26,13 @@ interface VerifyContext {
   note(text: string): Promise<unknown>;
 }
 export function allBatches(): BuiltAppBatch[] {
+  checkPreferenceFixtures();
   return [
     ...navigationOutcomeCases(),
     ...shellOutcomeCases(),
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
+    ...preferenceOutcomeCases(),
   ];
 }
 
@@ -151,6 +157,33 @@ export async function run(
   );
   if (!String(synthetic.fields.email ?? "").includes("@"))
     throw Error("Synthetic Profile did not hydrate");
+  await page.evaluate(async () => {
+    const jobs = (window as unknown as { nestor: { jobs: DesktopJobsBridge } })
+      .nestor.jobs;
+    await jobs.run("upsert_profile_record", {
+      collection: "links",
+      record: {
+        id: "Before",
+        label: "Initial synthetic portfolio",
+        url: "https://example.test/before",
+        kind: "portfolio",
+        isDraft: false,
+      },
+    });
+    await jobs.run("upsert_profile_record", {
+      collection: "projects",
+      record: {
+        id: "outcome-proof-project",
+        name: "Synthetic reference project",
+      },
+    });
+    await jobs.run("patch_settings", {
+      fields: {
+        collapseSideMenuWithAssistant: false,
+        applicationAutomationMode: "confirm_before_submit",
+      },
+    });
+  });
   await writeFile(
     path.join(ctx.evidenceDir, "case-selection.json"),
     JSON.stringify(
