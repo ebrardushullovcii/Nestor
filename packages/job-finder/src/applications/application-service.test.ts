@@ -1,4 +1,5 @@
 import type { ApplyBlocker } from "@nestor/browser-agent";
+import { createHash } from "node:crypto";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +8,9 @@ import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplicationReviewCardSchema,
+  ApplicationAuthorityEnvelopeSchema,
+  ApplicationAuthorityStopConditionsSchema,
+  serializeApplicationAuthorityDecisionPolicyForDigest,
   ApplyExecutionResultSchema,
   type FoundJob,
   type ApplyExecutionResult,
@@ -23,6 +27,8 @@ import {
 
 const preparation = vi.hoisted(() => ({
   blocker: null as ApplyBlocker | null,
+  readAnswers:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
 }));
 
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
@@ -32,6 +38,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
     createApplyFormPreparer: (
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
+      preparation.readAnswers = input.readReusableAnswers;
       input.onPrepared?.({
         result: {
           outcome: "ready_to_send",
@@ -172,7 +179,9 @@ async function setup(count: number, concurrency?: number) {
       NonNullable<BrowserSessionRuntime["readApplicationPageWithPerson"]>
     >(() => Promise.resolve(null as RawApplyPage | null)),
   };
-  const authorizeSending = vi.fn(() => Promise.resolve(null));
+  const authorizeSending = vi.fn<ApplicationServiceDeps["authorizeSending"]>(
+    () => Promise.resolve(null),
+  );
   const onError = vi.fn();
   const authorityRepository = {
     recoverArmedSubmissionAttempts: vi.fn(() =>
@@ -278,6 +287,92 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   expect(await recheck("https://replica.test")).toBe(true);
   f.seed.profile.phone = "+447700900999";
   expect(await recheck("https://replica.test")).toBe(false);
+});
+
+it("refuses sendPrepared after a used answer changes post-Ready and refills without a final browser action", async () => {
+  const f = await setup(1);
+  const saved = f.applications.needsYou.remember({
+    key: "salary",
+    prompt: "Annual salary expectation",
+    answer: "50000",
+    kind: "salary_expectation",
+    input: "number",
+    scope: {},
+    options: [],
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const row = f.applications.listApplications().rows[0]!;
+  const answers = await preparation.readAnswers!([
+    {
+      prompt: "Annual salary expectation",
+      kind: "salary_expectation",
+      answerControlType: "text",
+      answerOptions: [],
+      inputConstraints: { type: "number" },
+    },
+  ]);
+  expect(answers[0]?.answer).toBe("50000");
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  const artifact = f.applications.getWork(row.id)!.resumeArtifact;
+  const policy = {
+    version: 1 as const,
+    answerPolicy: {
+      approvedAnswerSnapshot: { revision: 1, digest: "a".repeat(64) },
+      unknownRequiredQuestion: "pause_for_user" as const,
+      unknownEligibility: "pause_for_user" as const,
+      unknownLegalRequirement: "pause_for_user" as const,
+    },
+    stopConditions: ApplicationAuthorityStopConditionsSchema.parse(
+      Object.fromEntries(
+        ApplicationAuthorityStopConditionsSchema.keyof().options.map((key) => [
+          key,
+          key === "outcomeUncertain" ? "stop_no_retry" : "pause_for_user",
+        ]),
+      ),
+    ),
+  };
+  const envelope = ApplicationAuthorityEnvelopeSchema.parse({
+    id: "explicit-send",
+    mode: "autonomous_submit",
+    status: "active",
+    revision: 1,
+    scope: { campaignId: null, jobIds: [String(row.jobId)] },
+    maxApplicationsPerRun: 1,
+    intermediateMutationsAuthorized: false,
+    accountCreationAuthorized: false,
+    allowedResumeSha256: [artifact.sha256],
+    allowedOrigins: ["https://replica.test"],
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    revokedAt: null,
+    decisionPolicy: {
+      ...policy,
+      revision: 1,
+      digest: createHash("sha256")
+        .update(serializeApplicationAuthorityDecisionPolicyForDigest(policy))
+        .digest("hex"),
+    },
+  });
+  f.authorizeSending.mockResolvedValue(envelope);
+  const finalAction =
+    vi.fn<NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>>();
+  f.deps.browser.executeExactlyOneFinalAction = finalAction;
+  const arm = vi.spyOn(f.applications, "beginSubmission");
+  f.applications.needsYou.saveAnswer({ id: saved.id, answer: "52000" });
+  expect(await f.service.sendPrepared(row.id)).toBe(false);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(row.id)).toMatchObject({
+    state: "running",
+    mode: "confirm_before_submit",
+    attempt: row.attempt + 1,
+  });
+  expect(arm).not.toHaveBeenCalled();
+  expect(finalAction).not.toHaveBeenCalled();
 });
 
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
