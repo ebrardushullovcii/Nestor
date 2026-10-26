@@ -27,7 +27,7 @@ import {
   JobFinderOpenBrowserSessionInputSchema,
   JobFinderPerformanceSnapshotSchema,
   JobFinderDiagnosticExportResultSchema,
-  JobFinderSourceDebugActionInputSchema,
+  JobFinderRunSourceDebugInputSchema,
   JobFinderSourceInstructionActionInputSchema,
   SaveJobFinderWorkspaceInputSchema,
   SourceDebugProgressEventSchema,
@@ -448,35 +448,6 @@ export async function scopeSendPermissionToPreparedJobs(
     modeOverride,
     perRunFloor,
   );
-}
-
-/**
- * Apply and Try again approve Light and Tailored resumes. Each entry point
- * performs the same export-and-approve sequence before
- * submission authority is scoped from approved export hashes.
- */
-function parseOptionalRequestId(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-
-  const requestId = (payload as { requestId?: unknown }).requestId;
-  if (typeof requestId !== "string" || requestId.trim().length === 0) {
-    return null;
-  }
-
-  return requestId;
-}
-
-function parseSourceReadabilityTimeout(payload: unknown): number | null {
-  if (!payload || typeof payload !== "object") return null;
-  const timeoutMs = (payload as { readabilityTimeoutMs?: unknown })
-    .readabilityTimeoutMs;
-  return typeof timeoutMs === "number" &&
-    Number.isFinite(timeoutMs) &&
-    timeoutMs > 0
-    ? Math.min(Math.trunc(timeoutMs), 15_000)
-    : null;
 }
 
 /**
@@ -1230,10 +1201,14 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:run-source-debug",
     async (event, payload: unknown) => {
-      const { targetId } = JobFinderSourceDebugActionInputSchema.parse(payload);
+      const input = JobFinderRunSourceDebugInputSchema.parse(payload);
+      const { targetId } = input;
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const requestId = parseOptionalRequestId(payload);
-      const readabilityTimeoutMs = parseSourceReadabilityTimeout(payload);
+      const requestId = input.requestId?.trim() ? input.requestId : null;
+      const readabilityTimeoutMs =
+        input.readabilityTimeoutMs === undefined
+          ? null
+          : Math.min(Math.trunc(input.readabilityTimeoutMs), 15_000);
       let snapshot: JobFinderWorkspaceSnapshot;
       try {
         const run = (signal?: AbortSignal) =>

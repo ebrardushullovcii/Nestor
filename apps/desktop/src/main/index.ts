@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { configureInterviewMediaPermissions } from "./setup/interview-media-permissions";
 import { areAdvancedInterviewSurfacesEnabled } from "./setup/interview-surface-mode";
 import { registerCoreDesktopRoutes } from "./setup/register-core-routes";
-import { loadEmbeddedBrowser } from "./services/browser/load-embedded-browser";
+import { attachEmbeddedBrowserWhenLoaded } from "./services/browser/load-embedded-browser";
 import {
   hasSingleInstanceLock,
   startupDiagnosticsPath,
@@ -204,11 +204,7 @@ function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
     workspaceQueryHost?.attach(window);
-    void loadEmbeddedBrowser()
-      .then((browser) => browser.attachWindow(window))
-      .catch((error: unknown) => {
-        console.error("[Desktop] The embedded browser could not load.", error);
-      });
+    attachEmbeddedBrowserWhenLoaded(window);
     registerFinishedWorkWindow(window);
     return window;
   } catch (error) {

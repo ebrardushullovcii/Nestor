@@ -27,7 +27,7 @@ import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
 import { getApplicationService } from "../services/applications";
-import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
+import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { startJobFinderRuntime } from "../services/job-finder/workspace-service";
 
 /** The registered Assistant actions and preload bridge execute the same commands. */
@@ -98,7 +98,7 @@ export async function executeApplicationStoreCommand(
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);
-      if (opened) await getEmbeddedBrowser().command({ type: "open" });
+      if (opened) await (await loadEmbeddedBrowser()).command({ type: "open" });
       return ApplicationCommandResultSchema.parse(opened);
     }
     case "list-needs-you":
