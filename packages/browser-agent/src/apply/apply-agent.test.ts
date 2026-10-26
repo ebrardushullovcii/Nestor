@@ -963,7 +963,7 @@ test.each([
       page({ controls: [{ ...nameControl(), label, groupLabel: second }] }),
       new Date().toISOString(),
     );
-    const control = { ...observation.controls[0]!, attestationKind: null };
+    const control = { ...observation.controls[0], attestationKind: null };
     expect(
       savedAnswerForQuestion(control, [
         {
@@ -986,7 +986,7 @@ test("a counter-only declaration prompt keeps its heading instead of becoming em
     new Date().toISOString(),
   );
   const control = {
-    ...observation.controls[0]!,
+    ...observation.controls[0],
     kind: "checkbox" as const,
     attestationKind: "terms_acceptance" as const,
     label: "Step 2 of 6",
