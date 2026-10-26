@@ -6385,10 +6385,10 @@ test("picker replay: two attempts end in Needs you with offered options, even wh
   });
   const input = config(source);
   input.sources.profile.currentCountry = pickerReplay.primary;
-  const chooseOption = vi.fn(async (_ref: string, option: string) => {
+  const chooseOption = vi.fn((_ref: string, option: string) => {
     source.controls[0].value = option;
     source.controls[0].options = pickerReplay.options;
-    return { ok: false as const, error: "No matching option" };
+    return Promise.resolve({ ok: false as const, error: "No matching option" });
   });
   input.hands.chooseOption = chooseOption;
   const model = repeatingModel("select", {

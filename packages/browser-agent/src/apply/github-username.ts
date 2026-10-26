@@ -11,8 +11,9 @@ export function githubUsername(
     if (!["github.com", "www.github.com"].includes(url.hostname.toLowerCase()))
       return null;
     const parts = url.pathname.split("/").filter(Boolean);
-    return parts.length === 1 && /^[a-z\d-]+$/iu.test(parts[0]!)
-      ? parts[0]!
+    const username = parts.at(0);
+    return parts.length === 1 && username && /^[a-z\d-]+$/iu.test(username)
+      ? username
       : null;
   } catch {
     return null;
@@ -20,6 +21,9 @@ export function githubUsername(
 }
 
 export function asksGithubUsername(control: ApplyFormControl): boolean {
+  const prompt = `${control.groupLabel} ${control.label}`;
+  if (/\bgithub\b/iu.test(prompt) && /\b(?:user\s*name|handle)\b/iu.test(prompt))
+    return true;
   const text = `${control.groupLabel} ${control.label} ${control.placeholder}`;
   return (
     /\bgithub\b/iu.test(text) &&
