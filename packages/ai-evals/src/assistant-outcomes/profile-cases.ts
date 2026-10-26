@@ -5,6 +5,7 @@ import {
   ProfileListsSchema,
   type DesktopJobsBridge,
   type ProfileRecordCollection,
+  type ProfileOverview,
 } from "@nestor/contracts";
 import { equalOutcome } from "./outcome";
 import { currentUndoReceipt, type BuiltAppBatch } from "./built-app";
@@ -139,11 +140,13 @@ const initialProfile = PatchProfileInputSchema.parse({
 
 /** Each requested field has its own stored-value assertion, even in one chat. */
 export function profileFieldOutcomeCases(): BuiltAppBatch[] {
+  let before: ProfileOverview | undefined;
+  let receiptId: string | undefined;
   return [
     {
       id: "profile-fields",
       prepare: async (page) => {
-        await page.evaluate(
+        before = await page.evaluate(
           (input) =>
             (window as unknown as AppWindow).nestor.jobs.run(
               "patch_profile",
@@ -157,6 +160,7 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
         Object.entries(profileEdit[kind]).map(([key, expected]) => ({
           actionId: `profile.${kind === "fields" ? "field" : "list"}.${key}`,
           observe: async (page, reply, evidence) => {
+            receiptId = currentUndoReceipt(reply, evidence, "profile")?.id;
             const current = await page.evaluate(
               async ({ kind, key }) => {
                 const value = await (
@@ -185,6 +189,39 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
           },
         })),
       ),
+    },
+    {
+      id: "profile-fields-undo",
+      requires: ["profile-fields"],
+      request:
+        "Undo the Profile field and list edits from your previous reply. Restore all of those values exactly; keep unrelated records.",
+      actions: [
+        {
+          actionId: "profile.undo",
+          observe: async (page, _reply, evidence) => [
+            equalOutcome(
+              "data",
+              "Full prior Profile restored",
+              "jobs.get_profile before the write versus after Undo",
+              await page.evaluate(() =>
+                (window as unknown as AppWindow).nestor.jobs.run(
+                  "get_profile",
+                  {},
+                ),
+              ),
+              before,
+            ),
+            equalOutcome(
+              "data",
+              "The original receipt was undone",
+              "Persisted Assistant receipt status",
+              evidence.receipts.find((receipt) => receipt.id === receiptId)
+                ?.status,
+              "undone",
+            ),
+          ],
+        },
+      ],
     },
   ];
 }

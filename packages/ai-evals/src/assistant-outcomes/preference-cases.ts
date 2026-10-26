@@ -183,73 +183,123 @@ export function preferenceOutcomeCases(): BuiltAppBatch[] {
       listPrefix: "settings.list",
     },
   ] as const;
-  return groups.map((group) => ({
-    id: `edit-${group.id}`,
-    prepare: async (page) => {
-      if (group.write === "patch_profile_goals")
-        await page.evaluate(
-          (input) =>
-            (window as unknown as AppWindow).nestor.jobs.run(
-              "patch_profile_goals",
-              input,
-            ),
-          PatchGoalsInputSchema.parse(group.before),
-        );
-      else
-        await page.evaluate(
-          (input) =>
-            (window as unknown as AppWindow).nestor.jobs.run(
-              "patch_settings",
-              input,
-            ),
-          PatchSettingsInputSchema.parse(group.before),
-        );
-    },
-    request: `For this synthetic evaluation, read my current ${group.id} and save these exact supplied choices. Preserve every other value and do not start any applications. ${JSON.stringify(group.expected)}`,
-    actions: (["fields", "lists"] as const).flatMap((kind) =>
-      Object.entries(group.expected[kind]).map(([key, expected]) => ({
-        actionId: `${kind === "fields" ? group.fieldPrefix : group.listPrefix}.${key}`,
-        observe: async (page, reply, evidence) => {
-          const value: unknown =
-            group.read === "get_profile_goals"
-              ? await page.evaluate(() =>
-                  (window as unknown as AppWindow).nestor.jobs.run(
-                    "get_profile_goals",
-                    {},
-                  ),
-                )
-              : await page.evaluate(() =>
-                  (window as unknown as AppWindow).nestor.jobs.run(
-                    "get_settings",
-                    {},
-                  ),
-                );
-          return [
-            equalOutcome(
-              "data",
-              "This preference write has its own Undo receipt",
-              "Current Assistant reply change card",
-              Boolean(
-                currentUndoReceipt(
-                  reply,
-                  evidence,
-                  group.id === "goals" ? "profile" : "settings",
+  return groups.flatMap((group): BuiltAppBatch[] => {
+    let savedBefore: unknown;
+    let receiptId: string | undefined;
+    return [
+      {
+        id: `edit-${group.id}`,
+        prepare: async (page) => {
+          if (group.write === "patch_profile_goals")
+            savedBefore = await page.evaluate(
+              (input) =>
+                (window as unknown as AppWindow).nestor.jobs.run(
+                  "patch_profile_goals",
+                  input,
                 ),
-              ),
-              true,
-            ),
-            equalOutcome(
-              "data",
-              `Saved ${key}`,
-              `${group.read}.${key}`,
-              leaf(value, key),
-              expected,
-            ),
-          ];
+              PatchGoalsInputSchema.parse(group.before),
+            );
+          else
+            savedBefore = await page.evaluate(
+              (input) =>
+                (window as unknown as AppWindow).nestor.jobs.run(
+                  "patch_settings",
+                  input,
+                ),
+              PatchSettingsInputSchema.parse(group.before),
+            );
         },
-      })),
-    ),
-  }));
+        request: `For this synthetic evaluation, read my current ${group.id} and save these exact supplied choices. Preserve every other value and do not start any applications. ${JSON.stringify(group.expected)}`,
+        actions: (["fields", "lists"] as const).flatMap((kind) =>
+          Object.entries(group.expected[kind]).map(([key, expected]) => ({
+            actionId: `${kind === "fields" ? group.fieldPrefix : group.listPrefix}.${key}`,
+            observe: async (page, reply, evidence) => {
+              receiptId = currentUndoReceipt(
+                reply,
+                evidence,
+                group.id === "goals" ? "profile" : "settings",
+              )?.id;
+              const value: unknown =
+                group.read === "get_profile_goals"
+                  ? await page.evaluate(() =>
+                      (window as unknown as AppWindow).nestor.jobs.run(
+                        "get_profile_goals",
+                        {},
+                      ),
+                    )
+                  : await page.evaluate(() =>
+                      (window as unknown as AppWindow).nestor.jobs.run(
+                        "get_settings",
+                        {},
+                      ),
+                    );
+              return [
+                equalOutcome(
+                  "data",
+                  "This preference write has its own Undo receipt",
+                  "Current Assistant reply change card",
+                  Boolean(
+                    currentUndoReceipt(
+                      reply,
+                      evidence,
+                      group.id === "goals" ? "profile" : "settings",
+                    ),
+                  ),
+                  true,
+                ),
+                equalOutcome(
+                  "data",
+                  `Saved ${key}`,
+                  `${group.read}.${key}`,
+                  leaf(value, key),
+                  expected,
+                ),
+              ];
+            },
+          })),
+        ),
+      },
+      {
+        id: `undo-${group.id}`,
+        requires: [`edit-${group.id}`],
+        request: `Undo the ${group.id} changes from your previous reply, restoring every supplied preference exactly.`,
+        actions: [
+          {
+            actionId: group.id === "goals" ? "profile.undo" : "settings.undo",
+            observe: async (page, _reply, evidence) => [
+              equalOutcome(
+                "data",
+                "Previous preferences restored exactly",
+                `jobs.${group.read} before the write versus after Undo`,
+                group.read === "get_profile_goals"
+                  ? await page.evaluate(() =>
+                      (window as unknown as AppWindow).nestor.jobs.run(
+                        "get_profile_goals",
+                        {},
+                      ),
+                    )
+                  : await page.evaluate(() =>
+                      (window as unknown as AppWindow).nestor.jobs.run(
+                        "get_settings",
+                        {},
+                      ),
+                    ),
+                savedBefore,
+              ),
+              equalOutcome(
+                "data",
+                "Original preference receipt was undone",
+                "Persisted Assistant receipt status",
+                evidence.receipts.find((receipt) => receipt.id === receiptId)
+                  ?.status,
+                "undone",
+              ),
+            ],
+          },
+        ],
+      },
+    ];
+  });
 }
 
 // Fail at --list, before any app starts, when a new contract leaf lacks a fixture.

@@ -26,6 +26,10 @@ import { trackerOutcomeCases } from "./tracker-cases";
 import { applicationViewOutcomeCases } from "./application-view-cases";
 import { readOutcomeCases } from "./read-cases";
 import { profileViewOutcomeCases } from "./profile-view-cases";
+import {
+  profileOperationOutcomeCases,
+  declarationOutcomeCases,
+} from "./profile-operation-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -53,6 +57,8 @@ export function allBatches(
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
     ...preferenceOutcomeCases(),
+    ...profileOperationOutcomeCases(),
+    ...declarationOutcomeCases(),
     ...profileViewOutcomeCases(),
     ...siteOutcomeCases(replicaOrigin),
     ...applicationViewOutcomeCases(),
@@ -155,6 +161,32 @@ export async function run(
     throw Error("Replica network guard did not pass");
   const page = await ctx.page;
   page.setDefaultTimeout(10_000);
+  const empty = await page.evaluate(async () => {
+    const jobs = (window as unknown as { nestor: { jobs: DesktopJobsBridge } })
+      .nestor.jobs;
+    const [profile, counts, sites] = await Promise.all([
+      jobs.run("get_profile", {}),
+      jobs.run("stage_counts", {}),
+      jobs.run("list_sites", { limit: 1 }),
+    ]);
+    return (
+      !profile.hasResumeText &&
+      !profile.hasSavedResumeFile &&
+      ![
+        profile.fields.fullName,
+        profile.fields.firstName,
+        profile.fields.lastName,
+        profile.fields.email,
+      ].some(Boolean) &&
+      Object.values(profile.counts).every((count) => count === 0) &&
+      Object.values(counts).every((count) => count === 0) &&
+      sites.total === 0
+    );
+  });
+  if (!empty)
+    throw Error(
+      "Outcome seeding requires an empty isolated instance; existing Profile, files, sites and jobs were left untouched",
+    );
   // Preconditions only. The actual requests below go through the visible composer.
   await page.evaluate(
     async (origin) => {

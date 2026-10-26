@@ -278,6 +278,23 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ),
   ...actions(
     "profile",
+    "Profile Undo",
+    ["undo_change"],
+    [
+      [
+        "undo",
+        "Undo Profile fields, goals, records, permissions or a committed batch",
+      ],
+    ],
+  ),
+  ...actions(
+    "settings",
+    "Settings Undo",
+    ["undo_change"],
+    [["undo", "Undo a Settings change without replacing later edits"]],
+  ),
+  ...actions(
+    "profile",
     "Work permissions",
     ["set_work_permissions", "undo_change"],
     [["work_permissions", "Edit limited work permissions with Undo"]],
