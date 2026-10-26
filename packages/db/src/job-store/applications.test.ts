@@ -139,12 +139,13 @@ it("persists a saved fallback and visible skipped application across restart wit
     ),
   ).toBe(true);
   expect(applications.needsYou.forApplication(work.id)).toEqual([]);
-  expect(
-    applications.applyJobs(
-      { selection: { ids: [work.jobId] } },
-      "autonomous_submit",
-    ),
-  ).toMatchObject({ queued: 0, unchanged: 1 });
+  // Apply all never undoes the skip.
+  const everything = {
+    selection: { filter: { stage: "resume" as const }, except: [] },
+  };
+  expect(applications.applyJobs(everything, "autonomous_submit")).toMatchObject(
+    { queued: 0, unchanged: 1 },
+  );
   expect(applications.getApplication(work.id)).toMatchObject({
     state: "skipped",
     mode: work.mode,
@@ -157,16 +158,25 @@ it("persists a saved fallback and visible skipped application across restart wit
     error: "Neither saved option is offered.",
   });
   expect(reopened.claimNext()).toBeNull();
+  expect(reopened.applyJobs(everything, "autonomous_submit")).toMatchObject({
+    queued: 0,
+    unchanged: 1,
+  });
+  expect(reopened.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    mode: work.mode,
+    attempt: work.attempt,
+  });
+  // Applying to that job by name is the person's own call: it comes back.
   expect(
     reopened.applyJobs(
       { selection: { ids: [work.jobId] } },
       "autonomous_submit",
     ),
-  ).toMatchObject({ queued: 0, unchanged: 1 });
+  ).toMatchObject({ queued: 1, unchanged: 0 });
   expect(reopened.getApplication(work.id)).toMatchObject({
-    state: "skipped",
-    mode: work.mode,
-    attempt: work.attempt,
+    state: "queued",
+    error: null,
   });
   expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
     rule,

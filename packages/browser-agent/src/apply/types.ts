@@ -71,6 +71,12 @@ export interface ApplyFormControl {
   choiceGroupKey?: string;
   placeholder: string;
   required: boolean;
+  /**
+   * What the page itself says, before the model's reading of the label may
+   * mark the question required. Only the page's word can make a saved rule
+   * skip a whole application.
+   */
+  requiredOnPage?: boolean;
   disabled: boolean;
   readOnly: boolean;
   visible: boolean;

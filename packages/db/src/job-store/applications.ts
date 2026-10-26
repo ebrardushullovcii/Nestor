@@ -182,6 +182,9 @@ export function createApplicationStore(store: JobStore) {
           ).n;
         const approved = count(approvedWhere);
         const now = Date.now();
+        // A job the person picked by name is their own intent: it comes
+        // back even after a saved rule skipped it. Apply all never undoes a
+        // skip.
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
            SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
@@ -189,9 +192,11 @@ export function createApplicationStore(store: JobStore) {
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL, disposition = NULL
            WHERE applications.state IN ('stopped', 'failed')
-             AND applications.disposition IS NULL
+             AND (applications.disposition IS NULL OR ? = 1)
              AND applications.submitted_at IS NULL RETURNING id`,
-        ).all(mode, now, now, ...params) as { id: number }[];
+        ).all(mode, now, now, ...params, selected ? 1 : 0) as {
+          id: number;
+        }[];
         for (const { id } of result) {
           if (instruction)
             sql(`INSERT INTO application_instructions (application_id, conversation_id, mode)

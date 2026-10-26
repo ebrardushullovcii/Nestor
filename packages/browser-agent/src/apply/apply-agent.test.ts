@@ -7785,6 +7785,114 @@ describe("saved picker fallback replay", () => {
     expect(choose).not.toHaveBeenCalled();
   });
 
+  test("a refusal that shows no list is not proof of absence", async () => {
+    const source = picker(["Other region"]);
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    const choose = vi.fn((_ref: string, value: string) =>
+      Promise.resolve({
+        ok: false as const,
+        error: `The list did not offer "${value}".`,
+        reason: "option_not_offered" as const,
+        offeredOptions: [],
+      }),
+    );
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(choose).toHaveBeenCalledTimes(2);
+    expect(result.skipReason).toBeUndefined();
+    expect(result.outcome).toBe("paused");
+  });
+
+  test("a rerun skips only on what this run's list says; earlier refusals send it to the person", async () => {
+    // Run 1: the list offers neither, so the rule skips.
+    const first = picker(["Other region"]);
+    const input = config(first);
+    input.sources.reusableAnswers = [savedRule()];
+    input.hands.chooseOption = list(first, ["Other region"]);
+    const skipped = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(skipped.skipReason).toContain("neither");
+    // Run 2 continues with run 1's refusals; the list has changed since.
+    const second = picker(["Other region"]);
+    const rerun = config(second, {
+      initialPickerAttempts: skipped.pickerAttempts,
+    });
+    rerun.sources.reusableAnswers = [savedRule()];
+    const choose = list(second, ["Other region", fallbackReplay.fallback]);
+    rerun.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      rerun,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(choose).not.toHaveBeenCalled();
+    expect(result.skipReason).toBeUndefined();
+    expect(result.outcome).toBe("paused");
+  });
+
+  test("the model's reading never makes an optional picker's rule skip", async () => {
+    const source = picker(["Other region"], { required: false });
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    input.modelQuestionClassification = true;
+    const choose = list(source, ["Other region"]);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(input, {
+      chatWithTools: (_messages, definitions) => {
+        const name = definitions[0]?.function.name ?? "finish";
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: name,
+              type: "function" as const,
+              function:
+                name === "report_question_kinds"
+                  ? {
+                      name,
+                      arguments: JSON.stringify({
+                        questions: [
+                          {
+                            index: 0,
+                            asksAboutPay: false,
+                            declarationKind: null,
+                            required: true,
+                          },
+                        ],
+                      }),
+                    }
+                  : {
+                      name: "finish",
+                      arguments: JSON.stringify({ reason: "Filled." }),
+                    },
+            },
+          ],
+        });
+      },
+    });
+    expect(choose).not.toHaveBeenCalled();
+    expect(result.skipReason).toBeUndefined();
+  });
+
+  test("both answers of a rule are checked like any answer: a pay picker stays the person's", async () => {
+    const question = "Expected salary range";
+    const source = picker(["Other region"], { label: question });
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule({ question, label: question })];
+    const choose = list(source, ["Other region", fallbackReplay.fallback]);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+    expect(choose).not.toHaveBeenCalled();
+  });
+
   test("a rule saved for another application stays with it", async () => {
     const source = picker(["Other region"]);
     const input = config(source);

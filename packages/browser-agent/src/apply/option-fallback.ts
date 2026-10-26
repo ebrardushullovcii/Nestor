@@ -67,7 +67,9 @@ export function savedPickerRule(
 ): { saved: CandidateReusableAnswer; rule: SavedOptionFallback } | null {
   if (
     (control.kind !== "select" && control.kind !== "combobox") ||
-    !control.required ||
+    // The page's own required flag: the model's reading never turns an
+    // optional picker into one whose rule can skip the application.
+    !(control.requiredOnPage ?? control.required) ||
     control.answered ||
     control.disabled ||
     !control.visible

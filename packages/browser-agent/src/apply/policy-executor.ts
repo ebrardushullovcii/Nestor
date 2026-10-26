@@ -258,7 +258,8 @@ function recordPickerFailure(
     ].slice(-20),
     notOffered: [
       ...(previous?.notOffered ?? []).filter((value) => value !== tried),
-      ...(offeredOptions ? [tried] : []),
+      // A refusal proves absence only with the list it showed instead.
+      ...(offeredOptions?.length ? [tried] : []),
     ].slice(-20),
     offeredOptions: offeredOptions?.length
       ? offeredOptions.slice(0, 500)
@@ -390,19 +391,44 @@ async function applyPickerRule(input: {
   rule: SavedOptionFallback;
 }): Promise<ApplyExecutionOutcome> {
   const { deps, control, observation, at, saved, rule } = input;
-  const choice = await decideAnswer({
-    deps,
-    control,
-    value: rule.primary,
-    storedFactId: `answerLibrary.${saved.id}`,
-  });
-  if (choice.kind === "leave") {
-    return notEntered({ deps, control, observation, at, decision: choice });
-  }
   const key = pickerQuestionKey(control);
   const offered = () =>
     deps.guardState.pickerAttempts.get(key)?.offeredOptions ?? [];
+  // A skip rests only on what the list said in this run: choices it refused
+  // here, with the list it showed instead. Refusals remembered from an
+  // earlier run only stop a retry, and send the question to the person.
+  const refusedNow = new Set<string>();
+  let listedNow: readonly string[] = [];
   for (const [position, wanted] of [rule.primary, rule.fallback].entries()) {
+    // Each of the person's two answers is checked like any answer to this
+    // question before it goes in: the fallback as their saved answer too, so
+    // pay kept private or an eligibility answer still holds.
+    const choice = await decideAnswer({
+      deps:
+        position === 0
+          ? deps
+          : {
+              ...deps,
+              config: {
+                ...deps.config,
+                sources: {
+                  ...deps.config.sources,
+                  reusableAnswers: deps.config.sources.reusableAnswers.map(
+                    (answer) =>
+                      answer.id === saved.id
+                        ? { ...answer, answer: wanted }
+                        : answer,
+                  ),
+                },
+              },
+            },
+      control,
+      value: wanted,
+      storedFactId: `answerLibrary.${saved.id}`,
+    });
+    if (choice.kind === "leave") {
+      return notEntered({ deps, control, observation, at, decision: choice });
+    }
     // A second pass only when the list's reply spells the choice its own way.
     for (let pass = 0; pass < 2; pass += 1) {
       // Only the picker's own reply shows what it lacks; the list read with
@@ -453,17 +479,20 @@ async function applyPickerRule(input: {
           at,
         );
       }
+      if (write.offeredOptions?.length) {
+        refusedNow.add(normalizeSignal(option));
+        listedNow = write.offeredOptions;
+      }
     }
   }
-  const record = deps.guardState.pickerAttempts.get(key);
   const absent = (wanted: string) => {
-    const match = strictOptionMatch(record?.offeredOptions ?? [], wanted);
+    if (!listedNow.length) return false;
+    const match = strictOptionMatch(listedNow, wanted);
     return (
       match.kind !== "ambiguous" &&
-      (record?.notOffered.includes(
+      refusedNow.has(
         normalizeSignal(match.kind === "match" ? match.value : wanted),
-      ) ??
-        false)
+      )
     );
   };
   if (absent(rule.primary) && absent(rule.fallback))
@@ -737,6 +766,7 @@ async function withModelQuestionKinds(
     attestationKind: classification.declarationKind,
     // A label's asterisk is how many forms say required; the reading knows.
     required: control.required || classification.required === true,
+    requiredOnPage: control.requiredOnPage ?? control.required,
     ...(typeof classification.asksHiringCountry === "boolean"
       ? { asksHiringCountry: classification.asksHiringCountry }
       : {}),
