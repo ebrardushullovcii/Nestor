@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 
 const writing = JSON.parse(
   readFileSync(
@@ -14,7 +15,20 @@ export function handlePersonalClaims(req, res, url, { send }) {
     send(405, "This fixture is fill-only.");
     return true;
   }
-  if (url.pathname === "/personal-claims/apply/answer-gate") {
+  if (url.pathname === "/personal-claims/apply/github-format") {
+    send(
+      200,
+      `<!doctype html><title>Apply — Synthetic Workshop</title>
+      <h1>Engineer — Synthetic Workshop</h1><form>
+      <label>Full name<input name="name" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>GitHub<input name="github" aria-describedby="github-help" required></label>
+      <p id="github-help">Please provide your GitHub username, if you have one.</p>
+      <label>GitHub URL<input name="github_url" type="url" required></label>
+      <label>Your GitHub handle will be shown publicly<input name="public_notice" required></label>
+      <button>Send application</button></form>`,
+    );
+  } else if (url.pathname === "/personal-claims/apply/answer-gate") {
     send(
       200,
       `<!doctype html><title>Apply — Synthetic Workshop</title>
