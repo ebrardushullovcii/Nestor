@@ -4,10 +4,12 @@ import {
   NEEDS_YOU_COMMANDS,
   RESUME_COMMANDS,
   TRACKER_COMMANDS,
+  type ResumeCommandOutputs,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { needsYouCommandTools } from "./needs-you-commands";
+import { assistantCommandTools } from "./command-tools";
 const needsCommands = needsYouCommandTools(() =>
   Promise.reject(new Error("No command execution in catalog test")),
 );
@@ -15,6 +17,31 @@ import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
 describe("assistant action inventory", () => {
+  it("offers the real resume commands and PDF export in the resume editor", () => {
+    const commands = assistantCommandTools<
+      typeof RESUME_COMMANDS,
+      ResumeCommandOutputs
+    >(RESUME_COMMANDS, () => Promise.reject(new Error("Catalog only")), {
+      group: "resume",
+    });
+    const names = buildAssistantToolCatalog({
+      commands,
+      mode: "grouped",
+      browserAvailable: false,
+      screen: "resume_studio",
+    }).map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "get_resume",
+        "save_resume",
+        "approve_resume",
+        "export_resume_pdf",
+      ]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(["read_resume", "export_resume"]),
+    );
+  });
   it("keeps initial screen catalogs below half the full schema payload", () => {
     const bytes = (tools: ReturnType<typeof buildAssistantToolCatalog>) =>
       JSON.stringify(

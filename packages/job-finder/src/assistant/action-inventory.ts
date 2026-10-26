@@ -266,7 +266,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "resume.commands",
     screen: "Shortlisted",
     action: "Read, edit, level, rewrite and approve a resume, with Undo",
-    channels: ["resumes:run", "resumes:preview", "resumes:export-pdf"],
+    channels: ["resumes:run", "resumes:preview"],
     coverage: tools(
       "list_shortlisted",
       "get_resume",
@@ -276,6 +276,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "rewrite_resume",
       "approve_resume",
     ),
+  },
+  {
+    id: "resume.export_pdf",
+    screen: "Resume editor",
+    action: "Export the saved resume as a PDF",
+    channels: ["resumes:run", "resumes:export-pdf"],
+    coverage: tools("export_resume_pdf"),
   },
 
   // Apply's shared store commands; tracker statuses have their own catalog.

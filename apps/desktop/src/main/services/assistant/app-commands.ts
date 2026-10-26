@@ -299,6 +299,20 @@ export function assistantAppCommands() {
           approve_resume: ["action_approve_resumes"],
         },
         results: {
+          export_resume_pdf: async (value, input) => {
+            if (!value.outputPath)
+              return {
+                summary: "PDF export cancelled. No file was written.",
+                data: value,
+              };
+            const { job } = await runResumeCommand("get_resume", {
+              jobId: input.jobId,
+            });
+            return {
+              summary: `Exported the saved resume PDF for ${job.title} at ${job.company} to ${value.outputPath}.`,
+              data: value,
+            };
+          },
           list_shortlisted: async (page, _input, { session }) => {
             await session.createResultSet({
               kind: "jobs",

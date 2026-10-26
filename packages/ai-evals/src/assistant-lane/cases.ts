@@ -470,6 +470,8 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "shortlist.remove": "Take Bluebird Health off my shortlist.",
   "resume.commands":
     "Use the lightest resume changes for the Northwind job, then tell me what the resume says.",
+  "resume.export_pdf":
+    "Export the saved resume for the Northwind job as a PDF.",
   "resume.strategies": "Which resume approach is selected?",
   "apply.authority":
     "Let Job Finder send applications without asking me each time.",
@@ -484,7 +486,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "companies.intelligence": "Add a note to Northwind Labs: design team of 12.",
   "settings.read": "What are my apply settings?",
   "settings.ai_behavior": "Make the AI write more conservatively.",
-  "settings.applying": "Set my daily application limit to 5.",
+  "settings.applying": "Use Fill in for me as my default Apply mode.",
   "settings.workspace": "Only search, don't prepare applications for now.",
   "settings.theme": "Switch to dark mode.",
   "settings.safeguards": "What safeguards are on?",

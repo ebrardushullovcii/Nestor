@@ -8,6 +8,7 @@ import {
   type ShortlistedPage,
   type ResumeCommandName,
   type ResumeCommandOutputs,
+  type ResumePdfExportResult,
 } from "@nestor/contracts";
 import type { z } from "zod";
 
@@ -35,6 +36,10 @@ export type RunResumeCommand = <K extends ResumeCommandName>(
 export function createResumeCommandRunner(
   service: () => Promise<ResumeService>,
   read: () => Promise<ResumeCommandReads> = service,
+  exportPdf?: (
+    resumes: ResumeService,
+    jobId: number,
+  ) => Promise<ResumePdfExportResult>,
 ): RunResumeCommand {
   const handlers: Handlers = {
     list_shortlisted: async (input) => (await read()).list(input),
@@ -47,6 +52,11 @@ export function createResumeCommandRunner(
       (await service()).undoLevel(jobId, changeId),
     rewrite_resume: async ({ jobId }) => (await service()).rewrite(jobId),
     approve_resume: async ({ jobId }) => (await service()).approve(jobId),
+    export_resume_pdf: async ({ jobId }) => {
+      if (!exportPdf)
+        throw new Error("PDF export needs the app's file chooser.");
+      return exportPdf(await service(), jobId);
+    },
   };
 
   return async (name, input) => {
