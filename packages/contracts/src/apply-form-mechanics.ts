@@ -139,7 +139,12 @@ export interface ApplicationFormActionHandoff {
 
 export type ApplyWriteResult =
   | { ok: true; observedValue: string }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      reason?: "option_not_offered";
+      offeredOptions?: string[];
+    };
 
 /** Where following a link left the browser. */
 export type ApplyNavigationResult =

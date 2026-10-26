@@ -1,3 +1,4 @@
+import { choosePageOption } from "./choose-page-option";
 import type {
   ApplyBlockedAttempt,
   RawApplyClickable,
@@ -1481,35 +1482,12 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
-        await locator.selectOption({ label: optionLabel }, { timeout: 5_000 });
-        return { ok: true, observedValue: optionLabel };
-      } catch {
-        // A list the page draws itself opens on click and is picked from the
-        // options it renders; the same intent, a different mechanism.
-        try {
-          // Open it, type enough of the answer for the list to narrow to it,
-          // then take the choice that says it. Typing first is what makes a
-          // list of two hundred countries usable at all.
-          await locator.click({ timeout: 5_000 });
-          await locator
-            .fill(optionLabel, { timeout: 2_000 })
-            .catch(async () => {
-              await locator.type(optionLabel, { timeout: 2_000 });
-            });
-          await page
-            .getByRole("option", { name: optionLabel, exact: true })
-            .first()
-            .click({ timeout: 5_000 });
-          return { ok: true, observedValue: optionLabel };
-        } catch (error) {
-          return {
-            ok: false,
-            error: describeWriteFailure(
-              error,
-              `The list did not offer "${optionLabel}".`,
-            ),
-          };
-        }
+        return await choosePageOption(page, locator, optionLabel);
+      } catch (error) {
+        return {
+          ok: false,
+          error: describeWriteFailure(error, "The picker could not select that option."),
+        };
       }
     },
     setToggle: async (ref, checked): Promise<ApplyWriteResult> => {
