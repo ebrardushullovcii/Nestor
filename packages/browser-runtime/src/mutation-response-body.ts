@@ -93,9 +93,16 @@ export function installMutationResponseBodyObserver(): void {
     XMLHttpRequest,
     { method: string; url: string }
   >();
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+  XMLHttpRequest.prototype.open = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    async = true,
+    username?: string | null,
+    password?: string | null,
+  ): void {
     requests.set(this, { method: method.toUpperCase(), url: String(url) });
-    Reflect.apply(open, this, [method, url, ...rest]);
+    Reflect.apply(open, this, [method, url, async, username, password]);
   };
   XMLHttpRequest.prototype.send = function (body) {
     const request = requests.get(this);
