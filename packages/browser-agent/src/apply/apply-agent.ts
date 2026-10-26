@@ -73,6 +73,7 @@ import {
   checkFormReadiness,
   fileUploadProblems,
   hasRemainingApplicationStep,
+  holdsAnswer,
   runSubmitPreflight,
   unresolvedRequiredControls,
   UPLOAD_REPAIR_QUESTION_ID,
@@ -841,7 +842,7 @@ async function runMeasuredApplyAgent(
         !current ||
         current.disabled ||
         (!current.visible && current.kind !== "file") ||
-        current.answered
+        holdsAnswer(current)
       )
         pendingQuestions.delete(key);
     }
@@ -981,7 +982,7 @@ async function runMeasuredApplyAgent(
       ) {
         observedAnswers.delete(fieldKey);
       }
-      if (control.answered)
+      if (holdsAnswer(control))
         pendingQuestions.delete(pendingQuestionKey(control));
     }
     // However many files the site refused, on this step or an earlier one,
@@ -1352,7 +1353,7 @@ async function runMeasuredApplyAgent(
                   !control.required &&
                   !control.disabled &&
                   (control.visible || control.kind === "file") &&
-                  !control.answered &&
+                  !holdsAnswer(control) &&
                   isCoverLetterControl(control),
               )
             : undefined;

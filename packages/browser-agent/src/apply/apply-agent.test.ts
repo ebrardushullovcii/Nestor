@@ -1,6 +1,7 @@
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
+import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
 import { describe, expect, test, vi } from "vitest";
 
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
@@ -2166,6 +2167,83 @@ describe("apply agent run endings", () => {
     expect(fileQuestions(result)).toEqual([
       expect.objectContaining({ id: "upload_repair" }),
     ]);
+  });
+
+  test("a required file field the widget emptied after storage took the file is answered", async () => {
+    // Replay of the Greenhouse-shaped gate run: the field is labelled only
+    // "Attach", is required by its "Resume/CV *" description, and is empty
+    // again once the widget has sent the file.
+    const { fields, file, url } = emptiedAttach;
+    const source = page({
+      url,
+      bodyText: "Platform Engineer. Apply for this job.",
+      controls: [
+        ...fields.map((field, index) => ({
+          ...nameControl(),
+          index,
+          id: field.id,
+          name: field.id,
+          label: field.label,
+          value: field.value,
+        })),
+        {
+          ...nameControl(),
+          index: fields.length,
+          id: file.id,
+          name: "",
+          inputType: "file",
+          label: file.label,
+          hint: file.described,
+          value: "",
+          upload: {
+            described: file.described,
+            nearby: file.nearby,
+            shown: false,
+          },
+        },
+      ],
+    });
+    const suppliedResume = {
+      id: "resume_document",
+      fileName: "resume.txt",
+      mimeType: "text/plain",
+      label: "Your CV",
+      kind: "resume" as const,
+      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
+    };
+    const uploadFile = vi.fn((_ref: string, upload: { name: string }) => {
+      source.controls[fields.length] = {
+        ...source.controls[fields.length]!,
+        value: file.afterUpload.value,
+        upload: {
+          described: file.described,
+          nearby: file.afterUpload.nearby,
+          shown: false,
+          fileName: upload.name,
+          network: "accepted",
+        },
+      };
+      return Promise.resolve({ ok: true as const, observedValue: upload.name });
+    });
+    const input = config(source, {
+      intermediateWritesAuthorized: false,
+      sources: { ...config(source).sources, documents: [suppliedResume] },
+    });
+    input.hands.uploadFile = uploadFile;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "upload",
+          args: { ref: `c${fields.length}`, documentId: suppliedResume.id },
+        },
+        { name: "submit_application", args: { ref: "a0" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(uploadFile).toHaveBeenCalledOnce();
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+    expect(result.outcome).toBe("prepared");
   });
 
   test("a widget that empties its input still hands over a file the server or fence refused", async () => {
