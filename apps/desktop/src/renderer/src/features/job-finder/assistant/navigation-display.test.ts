@@ -6,36 +6,102 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+it("explains when unsaved answer text blocks a Needs you view change", async () => {
+  const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "tasks" }))}`;
+  document.body.innerHTML =
+    '<main><h1>Needs you</h1><div data-needs-editing="true" data-needs-list-state=\'{"tab":"saved"}\'></div></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({
+    status: "blocked",
+    reason:
+      "Needs you has unsaved answer text. Save it before changing its view.",
+  });
+});
+
+it("confirms the Needs you tab, filter, selection and loaded focused answer together", async () => {
+  const view = {
+    tab: "saved",
+    text: "notice",
+    focusId: 7,
+    selectedIds: [7],
+    all: false,
+  };
+  const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`;
+  document.body.innerHTML =
+    '<main><h1>Needs you</h1><div data-needs-list-state="{}"></div><section></section></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document
+    .querySelector("[data-needs-list-state]")!
+    .setAttribute("data-needs-list-state", JSON.stringify(view));
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document.querySelector("section")!.setAttribute("data-needs-detail-id", "7");
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "displayed" });
+});
+
 it("waits for the requested job's actual details, even after the route changes", async () => {
   const route = "/job-finder/review-queue?jobId=7";
-  document.body.innerHTML = '<main><h1>Shortlisted</h1><section data-job-detail-id="3"></section></main>';
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.body.innerHTML =
+    '<main><h1>Shortlisted</h1><section data-job-detail-id="3"></section></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
   document.querySelector("section")!.setAttribute("data-job-detail-id", "7");
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "displayed" });
 });
 
 it("acknowledges filters and selection only after the list actually applies them", async () => {
-  const view = { stage: "hidden", text: "Engineer", selectedIds: [7], all: false };
+  const view = {
+    stage: "hidden",
+    text: "Engineer",
+    selectedIds: [7],
+    all: false,
+  };
   const route = `/job-finder/discovery?jobs=${encodeURIComponent(JSON.stringify(view))}`;
-  document.body.innerHTML = '<main><h1>Find jobs</h1><div data-job-list-state="{}"></div></main>';
+  document.body.innerHTML =
+    '<main><h1>Find jobs</h1><div data-job-list-state="{}"></div></main>';
   const hidden = document.createElement("div");
   hidden.setAttribute("data-kept-route", "hidden");
-  hidden.innerHTML = '<main><h1>Shortlisted</h1><div data-job-list-state="{}"></div></main>';
+  hidden.innerHTML =
+    '<main><h1>Shortlisted</h1><div data-job-list-state="{}"></div></main>';
   document.body.prepend(hidden);
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
-  document.querySelector("body > main [data-job-list-state]")!.setAttribute("data-job-list-state", JSON.stringify(view));
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document
+    .querySelector("body > main [data-job-list-state]")!
+    .setAttribute("data-job-list-state", JSON.stringify(view));
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "displayed" });
 });
 
 it("waits for the linked Application and its actual filter and selection", async () => {
   const view = { statuses: ["interview"], selectedIds: [7] };
   const route = `/job-finder/applications?jobId=7&applications=${encodeURIComponent(JSON.stringify(view))}`;
-  document.body.innerHTML = '<main><h1>Applications</h1><section data-job-detail-id="3"></section><div data-application-list-state="{}"></div></main>';
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.body.innerHTML =
+    '<main><h1>Applications</h1><section data-job-detail-id="3"></section><div data-application-list-state="{}"></div></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
   document.querySelector("section")!.setAttribute("data-job-detail-id", "7");
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
-  document.querySelector("[data-application-list-state]")!.setAttribute("data-application-list-state", JSON.stringify(view));
-  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed", section: null });
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document
+    .querySelector("[data-application-list-state]")!
+    .setAttribute("data-application-list-state", JSON.stringify(view));
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "displayed", section: null });
 });
 
 it("does not acknowledge a Profile query until the visible tab changes", async () => {

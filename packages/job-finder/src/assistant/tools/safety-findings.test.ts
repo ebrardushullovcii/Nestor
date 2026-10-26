@@ -35,7 +35,9 @@ function world() {
   // same synthetic substitutions rather than the repository behind the spy.
   service.getWorkspaceProjection = () => service.getWorkspaceSnapshot();
   const changes: unknown[] = [];
-  const openInApp = vi.fn(() => Promise.resolve());
+  const openInApp = vi.fn<AssistantTurnSession["openInApp"]>(() =>
+    Promise.resolve(),
+  );
   const publishWorkspaceUpdate = vi.fn();
   const session = {
     conversationId: randomUUID(),
@@ -507,6 +509,27 @@ describe("R3 assistant safety findings", () => {
     ).rejects.toThrow("Choose one destination");
     await openInAppTool.execute({ screen: "applications" }, ctx);
     expect(ctx.openInApp).toHaveBeenLastCalledWith("/job-finder/applications");
+  });
+
+  it("opens the requested Needs you state and rejects task IDs on another screen", async () => {
+    const ctx = world();
+    const needsView = {
+      tab: "saved" as const,
+      text: "notice",
+      focusId: 7,
+      selectedIds: [7],
+    };
+    await openInAppTool.execute({ screen: "needs_you", needsView }, ctx);
+    const route = new URL(
+      ctx.openInApp.mock.calls[0]![0],
+      "https://nestor.local",
+    );
+    expect(route.pathname).toBe("/job-finder/actions");
+    expect(JSON.parse(route.searchParams.get("needs")!)).toEqual(needsView);
+    await expect(
+      openInAppTool.execute({ screen: "applications", needsView }, ctx),
+    ).rejects.toThrow("requires screen needs_you");
+    expect(ctx.openInApp).toHaveBeenCalledTimes(1);
   });
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {

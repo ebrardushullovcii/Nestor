@@ -6,7 +6,8 @@ import type {
   NeedsYouTask,
   SavedFormAnswerSummary,
 } from "@nestor/contracts";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { useAssistantNeedsView } from "@renderer/features/job-lists/use-assistant-list-view";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
@@ -164,9 +165,52 @@ export function NeedsYouScreen() {
     pinned.current = null;
     setCreating(false);
   }, []);
+  useAssistantNeedsView(searchParams.get("needs"), {
+    requestId: useLocation().key,
+    canApply: !editing,
+    current: { tab, text, kind },
+    setSelection,
+    setFocus: (id) => {
+      activate(id);
+      pinned.current = id;
+    },
+    applyView: (view) => {
+      if (view.tab !== undefined) setTab(view.tab);
+      if (view.text !== undefined) setText(view.text);
+      if (view.kind !== undefined && view.kind !== kind)
+        setSearchParams(
+          (previous) => {
+            const next = new URLSearchParams(previous);
+            if (view.kind) next.set("kind", view.kind);
+            else next.delete("kind");
+            return next;
+          },
+          { replace: true },
+        );
+    },
+  });
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
-  const selectedCount = countSelected(selection, list.total);
+  const shownIds = new Set(list.rows.map((row) => row.id));
+  const visibleSelection = {
+    ...selection,
+    ids: new Set([...selection.ids].filter((id) => shownIds.has(id))),
+  };
+  useEffect(() => {
+    if (list.loading) return;
+    const ids = new Set(list.rows.map((row) => row.id));
+    setSelection((current) => {
+      const valid = new Set([...current.ids].filter((id) => ids.has(id)));
+      return valid.size === current.ids.size
+        ? current
+        : { ...current, ids: valid };
+    });
+  }, [list.loading, list.rows, selection]);
+  const selectedCount = countSelected(visibleSelection, list.total);
+  const missing = useCallback((id: number) => {
+    if (pinned.current === id) pinned.current = null;
+    setActiveId((current) => (current === id ? null : current));
+  }, []);
   const active = list.rows.find((row) => row.id === activeId);
   const source = active && "source" in active ? active.source : undefined;
   useListKeys({
@@ -179,8 +223,8 @@ export function NeedsYouScreen() {
     loadMore: () => void list.loadMore(),
     filterSelector: "#needs-you-filter",
   });
-  const latest = useRef({ list, selection, activeId });
-  latest.current = { list, selection, activeId };
+  const latest = useRef({ list, selection: visibleSelection, activeId });
+  latest.current = { list, selection: visibleSelection, activeId };
   const resolved = useCallback(
     (id: number, message: string) => {
       const { list, selection } = latest.current;
@@ -227,7 +271,18 @@ export function NeedsYouScreen() {
     <LockedScreenLayout
       lockContentHeight
       topContent={
-        <div className="grid gap-3 pb-4">
+        <div
+          className="grid gap-3 pb-4"
+          data-needs-editing={editing ? "true" : "false"}
+          data-needs-list-state={JSON.stringify({
+            tab,
+            text,
+            kind,
+            focusId: activeId ?? undefined,
+            selectedIds: [...visibleSelection.ids],
+            all: selection.all,
+          })}
+        >
           <PageHeader
             actions={
               tab === "saved" ? (
@@ -286,7 +341,7 @@ export function NeedsYouScreen() {
             loading={list.loading}
             hasMore={!editing && list.nextCursor !== null}
             onLoadMore={() => void list.loadMore()}
-            selection={selection}
+            selection={visibleSelection}
             selectedCount={selectedCount}
             onSelectAll={() => setSelection(selectAll())}
             onClearSelection={() => setSelection(NO_SELECTION)}
@@ -398,6 +453,7 @@ export function NeedsYouScreen() {
             <section
               id="list-detail"
               aria-label="Source sign-in"
+              data-needs-detail-id={activeId}
               className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
             >
               <SourceNeedPane key={source.id} source={source} />
@@ -407,6 +463,7 @@ export function NeedsYouScreen() {
               key={`task:${activeId}`}
               id={activeId}
               onEditing={setEditing}
+              onMissing={missing}
               onResolved={resolved}
             />
           ) : (
@@ -414,6 +471,7 @@ export function NeedsYouScreen() {
               key={`answer:${activeId}`}
               id={activeId}
               onEditing={setEditing}
+              onMissing={missing}
               onSaved={(message) => {
                 showToast({ title: message });
                 void list.refresh();
