@@ -1484,8 +1484,6 @@ describe("application login UserActionRequest adoption", () => {
 // Gate 3: the app closed while an answered step was being checked. Startup
 // failed the batch run first, and the check then left the card on "still
 // blocked" asking the person to do what was already done.
-describe("a step whose run ended before its check", () => {
-});
 
 // R4: "I clicked Cancel this step on both blocked items and each time the page
 // said the step was closed, but the header badge stayed on Needs you: 2
