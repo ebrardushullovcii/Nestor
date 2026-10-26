@@ -632,7 +632,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (
           !application ||
           application.attempt !== value.attempt ||
-          !["running", "needs_you"].includes(application.state)
+          !["running", "needs_you", "ready"].includes(application.state)
         )
           return { status: "stale" };
 

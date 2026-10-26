@@ -4,6 +4,8 @@ import { basename } from "node:path";
 import {
   buildApplyFormObservation,
   canContinueApplicationAfterAccess,
+  checkWrittenApplicationAnswers,
+  inferQuestionKind,
   hasSubmissionConfirmationText,
   type ApplyAgentResult,
   type ApplyBlocker,
@@ -47,6 +49,7 @@ import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
   createApplyFormPreparer,
   buildApplyLetterDependencies,
+  toApplyLlmClient,
 } from "../internal/agent-application-preparation";
 import {
   withApplicationAuthorityGate,
@@ -701,6 +704,96 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             )
               void wake();
             return;
+          }
+          // A Ready row may predate a grounding fix. Re-ground generated
+          // answers from current Profile/resume/scoped answers before arming
+          // either automatic sending or the person's sidebar Send instruction.
+          const card = applications.getWork(row.id)?.reviewCard;
+          const written =
+            card?.answers.filter((answer) => answer.written) ?? [];
+          if (written.length) {
+            const questions = written.map((answer) => ({
+              prompt: answer.question,
+              kind: inferQuestionKind({
+                label: answer.question,
+                groupLabel: "",
+                placeholder: "",
+                kind: "text",
+              }),
+              answerControlType: /^(?:yes|no)$/iu.test(answer.answer)
+                ? ("boolean" as const)
+                : ("text" as const),
+              answerOptions: [] as string[],
+            }));
+            const queries = questions.map((question) => ({
+              ...describeFormQuestion(question, job),
+              prompt: question.prompt,
+            }));
+            const saved = applications.needsYou
+              .answersForQuestions(row.id, queries, origin)
+              .map((answer) =>
+                toKnownFormAnswer(
+                  answer,
+                  questions[
+                    queries.findIndex((query) => query.key === answer.key)
+                  ]!,
+                  job.location,
+                  row.id,
+                ),
+              );
+            const client = toApplyLlmClient(deps.aiClient);
+            const checks = client
+              ? await checkWrittenApplicationAnswers({
+                  client,
+                  sources: {
+                    profile,
+                    resumeText: profile.baseResume.textContent,
+                    reusableAnswers: saved,
+                    documents: [],
+                    posting: {
+                      title: job.title,
+                      company: job.company,
+                      location: job.location,
+                      description: job.description ?? "",
+                    },
+                  },
+                  answers: written,
+                  payDisclosed:
+                    settings.salaryDisclosure === "answer_from_profile",
+                  signal,
+                }).catch(() => null)
+              : null;
+            const rejected = questions.filter(
+              (_question, index) => !checks?.[index]?.supported,
+            );
+            if (rejected.length) {
+              // The new question supersedes the ungrounded generated value.
+              // Do not immediately consume the same unusable saved answer.
+              for (const question of rejected) {
+                const known = describeFormQuestion(question, job);
+                applications.needsYou.request(
+                  {
+                    applicationId: row.id,
+                    attempt: row.attempt,
+                    fieldKey: known.key,
+                    kind: "question",
+                    key: known.key,
+                    scope: {},
+                    prompt: question.prompt,
+                    input: known.input,
+                    options: known.options,
+                    reusePrompt: known.reusePrompt,
+                  },
+                  { reuseAnswers: false },
+                );
+              }
+              // Refill from the person's answer after this task resolves;
+              // a retained, already-answered control must not keep the old
+              // unsupported value merely because the site says it is filled.
+              await closePage(row.id, row.attempt);
+              waiting.set(row.id, row.attempt);
+              return;
+            }
           }
           const activeEnvelopes =
             await deps.authorityRepository.listApplicationAuthorityEnvelopes({

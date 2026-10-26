@@ -4,6 +4,7 @@ import { expect, test, vi } from "vitest";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
 import type { LLMClient } from "../agent/contracts";
+import { evidenceFitsQuestion } from "./answer-evidence";
 
 const sources = {
   profile: CandidateProfileSchema.parse({
@@ -31,31 +32,29 @@ const sources = {
   },
 };
 test("a lying supported checker cannot authorize any pass-11 invention", async () => {
-  const chatWithTools = vi
-    .fn<LLMClient["chatWithTools"]>()
-    .mockResolvedValue({
-      toolCalls: [
-        {
-          id: "lie",
-          type: "function",
-          function: {
-            name: "report_answer_checks",
-            arguments: JSON.stringify({
-              checks: replay.cases.map((entry, index) => ({
-                index,
-                supported: true,
-                reason: "Supported",
-                evidence: entry.evidence.map((evidence) => ({
-                  ...evidence,
-                  claim: entry.answer,
-                  kind: "applicant_fact",
-                })),
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+    toolCalls: [
+      {
+        id: "lie",
+        type: "function",
+        function: {
+          name: "report_answer_checks",
+          arguments: JSON.stringify({
+            checks: replay.cases.map((entry, index) => ({
+              index,
+              supported: true,
+              reason: "Supported",
+              evidence: entry.evidence.map((evidence) => ({
+                ...evidence,
+                claim: entry.answer,
+                kind: "applicant_fact",
               })),
-            }),
-          },
+            })),
+          }),
         },
-      ],
-    });
+      },
+    ],
+  });
   const result = await checkWrittenApplicationAnswers({
     client: { chatWithTools },
     sources,
@@ -70,37 +69,35 @@ test("the whole applicant object cannot serve as a quote even with a lying check
   const applicant = plainAnswerCheckFacts(
     applicationFacts(sources, { payDisclosed: false }),
   );
-  const chatWithTools = vi
-    .fn<LLMClient["chatWithTools"]>()
-    .mockResolvedValue({
-      toolCalls: [
-        {
-          id: "lie",
-          type: "function",
-          function: {
-            name: "report_answer_checks",
-            arguments: JSON.stringify({
-              checks: [
-                {
-                  index: 0,
-                  supported: true,
-                  reason: "Supported",
-                  evidence: [
-                    {
-                      source: "applicant",
-                      path: "",
-                      quote: JSON.stringify(applicant),
-                      claim: "A personal claim",
-                      kind: "applicant_fact",
-                    },
-                  ],
-                },
-              ],
-            }),
-          },
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+    toolCalls: [
+      {
+        id: "lie",
+        type: "function",
+        function: {
+          name: "report_answer_checks",
+          arguments: JSON.stringify({
+            checks: [
+              {
+                index: 0,
+                supported: true,
+                reason: "Supported",
+                evidence: [
+                  {
+                    source: "applicant",
+                    path: "",
+                    quote: JSON.stringify(applicant),
+                    claim: "A personal claim",
+                    kind: "applicant_fact",
+                  },
+                ],
+              },
+            ],
+          }),
         },
-      ],
-    });
+      },
+    ],
+  });
   const result = await checkWrittenApplicationAnswers({
     client: { chatWithTools },
     sources,
@@ -110,4 +107,52 @@ test("the whole applicant object cannot serve as a quote even with a lying check
     ],
   });
   expect(result[0]?.supported).toBe(false);
+});
+
+test.each([
+  ["7 years in TypeScript", true],
+  ["7 years of professional experience using TypeScript", true],
+  ["7 years of experience, and I use TypeScript", false],
+  ["7 years of software engineering with TypeScript", false],
+  ["7 years overall. TypeScript is a skill.", false],
+])("a skill duration must be stated by the source: %s", (quote, supported) => {
+  expect(
+    evidenceFitsQuestion({
+      question: "How many years of experience do you have in TypeScript?",
+      answer: "7",
+      applicant: {},
+      evidence: [{ source: "resume", path: "", quote }],
+    }),
+  ).toBe(supported);
+});
+
+test("a matching saved opinion is usable, but the same value for a different question is not", () => {
+  const evidence = [
+    {
+      source: "applicant",
+      path: "/savedAnswers/0/answer",
+      quote: "Playwright",
+    },
+  ];
+  const question = "What is your favourite testing product?";
+  expect(
+    evidenceFitsQuestion({
+      question,
+      answer: "Playwright",
+      evidence,
+      applicant: { savedAnswers: [{ question, answer: "Playwright" }] },
+    }),
+  ).toBe(true);
+  expect(
+    evidenceFitsQuestion({
+      question,
+      answer: "Playwright",
+      evidence,
+      applicant: {
+        savedAnswers: [
+          { question: "Which product do you maintain?", answer: "Playwright" },
+        ],
+      },
+    }),
+  ).toBe(false);
 });

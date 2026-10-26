@@ -1,12 +1,17 @@
 import type { ApplyBlocker } from "@nestor/browser-agent";
 import { createHash } from "node:crypto";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
+import { createHash } from "node:crypto";
+import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/invented-personal-answers.json";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
+  ApplicationAuthorityEnvelopeSchema,
+  serializeApplicationAuthorityDecisionPolicyForDigest,
+  type ApplicationReviewAnswer,
   ApplicationReviewCardSchema,
   ApplicationAuthorityEnvelopeSchema,
   ApplicationAuthorityStopConditionsSchema,
@@ -32,6 +37,7 @@ import {
 } from "./application-service";
 
 const preparation = vi.hoisted(() => ({
+  answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
   readAnswers:
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
@@ -70,6 +76,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
         },
         reviewCard: ApplicationReviewCardSchema.parse({
           siteLabel: "Replica",
+          answers: preparation.answers,
           pageUrl: input.executionInput.job.canonicalUrl,
           preparedAt: new Date().toISOString(),
         }),
@@ -96,6 +103,7 @@ const ready = () =>
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   preparation.blocker = null;
+  preparation.answers = [];
   vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
@@ -895,3 +903,118 @@ it("automatically carries every waiting page on after one site sign-in and MFA, 
   expect(f.authorizeSending).not.toHaveBeenCalled();
   expect(f.onError).not.toHaveBeenCalled();
 });
+
+function sendEnvelope(jobId: number, sha256: string) {
+  const content = {
+    version: 1 as const,
+    answerPolicy: {
+      approvedAnswerSnapshot: { revision: 1, digest: "b".repeat(64) },
+      unknownRequiredQuestion: "pause_for_user" as const,
+      unknownEligibility: "pause_for_user" as const,
+      unknownLegalRequirement: "pause_for_user" as const,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+    },
+    stopConditions: {
+      unavailableCredentials: "pause_for_user" as const,
+      loginRequired: "pause_for_user" as const,
+      mfaRequired: "pause_for_user" as const,
+      captcha: "pause_for_user" as const,
+      antiBot: "pause_for_user" as const,
+      accountCreation: "pause_for_user" as const,
+      staleObservation: "pause_for_user" as const,
+      ambiguousFinalControl: "pause_for_user" as const,
+      originDrift: "pause_for_user" as const,
+      outcomeUncertain: "stop_no_retry" as const,
+    },
+  };
+  return ApplicationAuthorityEnvelopeSchema.parse({
+    id: "grounding-authority",
+    mode: "confirm_before_submit",
+    status: "active",
+    revision: 1,
+    scope: { campaignId: null, jobIds: [String(jobId)] },
+    maxApplicationsPerRun: 1,
+    intermediateMutationsAuthorized: true,
+    accountCreationAuthorized: false,
+    revokedAt: null,
+    allowedResumeSha256: [sha256],
+    allowedOrigins: ["https://replica.test"],
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    decisionPolicy: {
+      ...content,
+      revision: 1,
+      digest: createHash("sha256")
+        .update(serializeApplicationAuthorityDecisionPolicyForDigest(content))
+        .digest("hex"),
+    },
+  });
+}
+
+it.each(replay.cases)(
+  "sendPrepared re-grounds a Ready answer before arming: $question",
+  async (entry) => {
+    const f = await setup(1);
+    f.seed.profile.yearsExperience = replay.applicant.yearsExperience;
+    f.seed.profile.skills = replay.applicant.skills;
+    f.seed.profile.workEligibility.requiresVisaSponsorship = false;
+    preparation.answers = [
+      {
+        question: entry.question,
+        answer: entry.answer,
+        source: "Written for this application",
+        written: true,
+        groundedIn: [],
+      },
+    ];
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    const row = f.applications.listApplications().rows[0]!,
+      work = f.applications.getWork(row.id)!;
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(row.jobId, work.resumeArtifact.sha256!),
+    );
+    const chatWithTools = vi
+      .fn<NonNullable<ApplicationServiceDeps["aiClient"]["chatWithTools"]>>()
+      .mockResolvedValue({
+        toolCalls: [
+          {
+            id: "lying-check",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Supported",
+                    evidence: entry.evidence.map((evidence) => ({
+                      ...evidence,
+                      kind: "applicant_fact",
+                      claim: entry.answer,
+                    })),
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    f.deps.aiClient = { ...f.deps.aiClient, chatWithTools };
+    const action = vi.fn();
+    Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+    expect(await f.service.sendPrepared(row.id)).toBe(false);
+    expect(chatWithTools).toHaveBeenCalledOnce();
+    expect(action).not.toHaveBeenCalled();
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
+    expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);

@@ -106,12 +106,44 @@ function quoteStatesSkillYears(
   return quote.split(/[;\n]|[.!?](?:\s|$)/u).some((clause) => {
     if (/\b(?:overall|total|career)\b/iu.test(clause)) return false;
     const text = normalize(clause);
+    const duration = new RegExp(
+      `(?:^| )${normalize(claim.years)} (?:years?|yrs?)(?: |$)`,
+      "u",
+    ).exec(text);
+    if (!duration) return false;
+    const after = text
+      .slice(duration.index + duration[0].length)
+      .trim()
+      .split(" ");
+    const connectors = new Set([
+      "of",
+      "professional",
+      "experience",
+      "working",
+      "with",
+      "in",
+      "using",
+      "hands",
+      "on",
+    ]);
+    const firstSubject = after.findIndex((word) => !connectors.has(word));
+    if (
+      firstSubject >= 0 &&
+      firstSubject <= 4 &&
+      claim.topics.includes(after[firstSubject]!) &&
+      claim.topics.every((topic) =>
+        after.slice(firstSubject, firstSubject + 8).includes(topic),
+      )
+    )
+      return true;
+    const before = text.slice(0, duration.index).trim().split(" ").slice(-8);
     return (
-      new RegExp(
-        `(?:^| )${claim.years.replace(".", "\\.")} (?:years?|yrs?)(?: |$)`,
-        "u",
-      ).test(text) &&
-      claim.topics.every((topic) => text.split(" ").includes(topic))
+      claim.topics.every((topic) => before.includes(topic)) &&
+      before.every(
+        (word) =>
+          claim.topics.includes(word) ||
+          ["and", "or", "with", "using", "for"].includes(word),
+      )
     );
   });
 }
@@ -132,8 +164,30 @@ export function evidenceFitsQuestion(input: {
     );
   });
   if (opinion.test(question) || opinion.test(answer)) return exactSaved;
+  const years = skillYearClaim(question, answer);
+  const namedDuration =
+    years &&
+    evidence.some(
+      (entry) =>
+        entry.source !== "posting" && quoteStatesSkillYears(entry.quote, years),
+    );
+  const affirmativeAuthorization =
+    /^(?:yes|true)$/iu.test(answer.trim()) &&
+    !/\b(?:previous|prior|before|ever|worked|consulted)\b/iu.test(question) &&
+    /\b(?:authori[sz]ed|authorization|eligible)\b.*\bwork\b|\bwork\b.*\b(?:authori[sz]ation|eligibility)\b/iu.test(
+      question,
+    ) &&
+    evidence.some(
+      (entry) =>
+        entry.source === "applicant" &&
+        /^\/workEligibility\/Countries where you can work\/\d+$/u.test(
+          entry.path,
+        ),
+    );
   if (
     scalar(answer) &&
+    !namedDuration &&
+    !affirmativeAuthorization &&
     !evidence.some(
       (entry) =>
         labelMatches(question, entry, applicant) &&
@@ -141,15 +195,6 @@ export function evidenceFitsQuestion(input: {
     )
   )
     return false;
-  const years = skillYearClaim(question, answer);
-  if (
-    years &&
-    !exactSaved &&
-    !evidence.some(
-      (entry) =>
-        entry.source !== "posting" && quoteStatesSkillYears(entry.quote, years),
-    )
-  )
-    return false;
+  if (years && !exactSaved && !namedDuration) return false;
   return true;
 }
