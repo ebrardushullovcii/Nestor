@@ -16,7 +16,7 @@ import {
   buildRecentConversation,
   placeNewExperiencesByDate,
 } from "./internal/workspace-profile-copilot-methods";
-import { followPrimaryContacts } from "./internal/profile-merge";
+import { followPrimaryContacts } from "@nestor/contracts";
 import {
   createAiClient,
   createSeed,

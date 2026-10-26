@@ -1,9 +1,7 @@
-import {
-  invalidateProfileResumes,
-  followPrimaryContact,
-} from "./profile-effects";
+import { invalidateProfileResumes } from "./profile-effects";
 import {
   createFreshStartCandidateProfile,
+  followPrimaryContact,
   ProfileFieldsSchema,
   ProfileListsSchema,
   PatchProfileInputSchema,
@@ -286,16 +284,16 @@ export function createProfileStore(store: JobStore) {
           ["email", "applicationIdentity.preferredEmail"],
           ["phone", "applicationIdentity.preferredPhone"],
         ] as const) {
-          if (Object.hasOwn(nextFields, primary))
+          if (nextFields[primary] !== undefined)
             nextFields[preferred] = followPrimaryContact({
-              before: before[primary],
+              before: before[primary] as string | null,
               after: nextFields[primary],
-              preferred: before[preferred],
+              preferred: before[preferred] as string | null,
               nextPreferred: Object.hasOwn(nextFields, preferred)
-                ? nextFields[preferred]
-                : before[preferred],
+                ? (nextFields[preferred] ?? null)
+                : (before[preferred] as string | null),
               phone: primary === "phone",
-            }) as string | null;
+            });
         }
         const previousFields = values.read(Object.keys(nextFields));
         let resumeChanged = Object.entries(nextFields).some(

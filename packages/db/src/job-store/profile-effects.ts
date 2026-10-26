@@ -78,23 +78,3 @@ export function applySettingsResumeEffects(
       searchId: null,
     });
 }
-
-/** An intentional application address wins; a mirrored primary address follows the edit. */
-export function followPrimaryContact(input: {
-  before: unknown;
-  after: unknown;
-  preferred: unknown;
-  nextPreferred: unknown;
-  phone?: boolean;
-}): unknown {
-  const normalize = (value: unknown) => {
-    const text = typeof value === "string" ? value : "";
-    return input.phone ? text.replace(/\D/gu, "") : text.trim().toLowerCase();
-  };
-  return normalize(input.before) !== normalize(input.after) &&
-    normalize(input.preferred) === normalize(input.nextPreferred) &&
-    (!normalize(input.preferred) ||
-      normalize(input.preferred) === normalize(input.before))
-    ? input.after
-    : input.nextPreferred;
-}

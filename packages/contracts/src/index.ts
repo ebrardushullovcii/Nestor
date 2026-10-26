@@ -11,6 +11,7 @@ export * from "./candidate-assets";
 export * from "./application-documents";
 export * from "./apply";
 export * from "./profile";
+export * from "./profile-contacts";
 export * from "./job-finder-actions";
 export * from "./assistant";
 export * from "./profile-copilot";

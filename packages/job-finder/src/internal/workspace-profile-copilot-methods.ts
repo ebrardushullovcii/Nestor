@@ -34,7 +34,7 @@ import {
   commitProfileCopilotStateWithStaleRetry,
   type CommitProfileCopilotStateInput,
 } from "./profile-commit-stale-conflict";
-import { followPrimaryContacts } from "./profile-merge";
+import { followPrimaryContacts } from "@nestor/contracts";
 import {
   MIRRORED_PROFILE_LIST_FIELDS,
   mergeMirroredListHalves,

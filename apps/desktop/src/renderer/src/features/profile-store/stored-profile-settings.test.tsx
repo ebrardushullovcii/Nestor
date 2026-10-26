@@ -348,3 +348,30 @@ test("per-source feedback uses the current site row even after its label changed
     ),
   ).toBe(true);
 });
+
+test("a primary contact autosave cannot replay its former application email", async () => {
+  profileScreen();
+  const email = await screen.findByRole("textbox", {
+    name: "Email",
+  });
+  email.focus();
+  fireEvent.change(email, { target: { value: "new-contact@example.test" } });
+  await waitFor(() =>
+    expect(
+      createProfileStore(store).read().applicationIdentity.preferredEmail,
+    ).toBe("new-contact@example.test"),
+  );
+  await screen.findByText("Profile saved.");
+  expect(document.activeElement).toBe(email);
+  fireEvent.change(screen.getByLabelText(/^Headline/u), {
+    target: { value: "Another edit" },
+  });
+  await waitFor(() =>
+    expect(createProfileStore(store).overview().fields.headline).toBe(
+      "Another edit",
+    ),
+  );
+  expect(
+    createProfileStore(store).read().applicationIdentity.preferredEmail,
+  ).toBe("new-contact@example.test");
+});

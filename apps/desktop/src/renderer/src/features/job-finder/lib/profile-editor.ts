@@ -1,6 +1,7 @@
 import { normalizePublicLinkUrl } from "@nestor/contracts";
 import {
   CandidateProfileSchema,
+  followPrimaryContacts,
   JobSearchPreferencesSchema,
   type ResumeImportFieldCandidateSummary,
   SourceInstructionStatusSchema,
@@ -850,7 +851,7 @@ export function buildProfilePayload(
     };
   }
 
-  return { payload: parsedPayload.data };
+  return { payload: followPrimaryContacts(profile, parsedPayload.data) };
 }
 
 export function buildSearchPreferencesPayload(

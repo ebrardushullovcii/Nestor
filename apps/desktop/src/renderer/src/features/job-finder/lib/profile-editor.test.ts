@@ -228,7 +228,9 @@ describe("profile editor application identity defaults", () => {
     expect(result.validationMessage).toBeUndefined();
     expect(result.payload?.email).toBe("alex+jobs@example.co.uk");
     expect(result.payload?.secondaryEmail).toBeNull();
-    expect(result.payload?.applicationIdentity.preferredEmail).toBeNull();
+    expect(result.payload?.applicationIdentity.preferredEmail).toBe(
+      "alex+jobs@example.co.uk",
+    );
   });
 
   test.each([

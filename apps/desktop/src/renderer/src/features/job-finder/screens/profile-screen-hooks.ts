@@ -747,15 +747,25 @@ export function useProfileScreenForms(input: {
       loadedProfileContentFingerprintRef.current = incomingProfileFingerprint;
       loadedReviewCandidatesContentFingerprintRef.current =
         incomingCandidatesFingerprint;
-      runWithoutDraftEditSignal(() =>
-        profileForm.reset(
-          createProfileEditorValues(
-            input.profile,
-            input.latestResumeImportReviewCandidates,
-          ),
-          { keepValues: profileChangedSinceSeen },
-        ),
-      );
+      runWithoutDraftEditSignal(() => {
+        const incoming = createProfileEditorValues(
+          input.profile,
+          input.latestResumeImportReviewCandidates,
+        );
+        // Canonical contact following belongs to this save too. Adopt it before
+        // keeping focused inputs, so old hidden values cannot become new edits.
+        profileForm.setValue(
+          "applicationIdentity.preferredEmail",
+          incoming.applicationIdentity.preferredEmail,
+          { shouldDirty: false },
+        );
+        profileForm.setValue(
+          "applicationIdentity.preferredPhone",
+          incoming.applicationIdentity.preferredPhone,
+          { shouldDirty: false },
+        );
+        profileForm.reset(incoming, { keepValues: profileChangedSinceSeen });
+      });
       // Incomplete added rows are omitted by the save payload. They are still
       // the person's draft and must survive the response to that save.
       const canonicalLanguageIds = new Set(
