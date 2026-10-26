@@ -260,6 +260,63 @@ function historyRecordMatches(
     });
 }
 
+// Permission to acknowledge a form is not evidence of a new personal fact.
+const routineDeclarations: Partial<
+  Record<ApplicationAttestationKind, readonly string[]>
+> = {
+  truthfulness_certification: [
+    "I certify that the information is true",
+    "I certify my answers are true",
+    "I certify that my answers are true and complete",
+    "I certify that the information provided is true and complete",
+  ],
+  background_check_consent: [
+    "I consent to a background check",
+    "I agree to a background check",
+    "I authorize a background check",
+  ],
+  terms_acceptance: [
+    "I accept the terms",
+    "I agree to the terms",
+    "I agree to the terms and conditions",
+  ],
+  privacy_notice_acknowledgement: [
+    "I acknowledge the privacy notice",
+    "I have read the privacy notice",
+    "I agree to the privacy policy",
+  ],
+  marketing_contact_consent: [
+    "I consent to marketing contact",
+    "I agree to receive marketing communications",
+  ],
+};
+
+function permitConditionsFit(
+  sources: ApplyAnswerSources,
+  target: string,
+): boolean {
+  const permits =
+    sources.profile.workEligibility.limitedWorkPermissions?.filter(
+      (permission) => country(permission.country) === target,
+    ) ?? [];
+  return permits.every((permission) => {
+    // Only a complete, unqualified weekly-hours restriction can be compared
+    // locally. Dates, term-time rules and other conditions need the person.
+    const limit =
+      /^(?:up to |maximum |max |no more than )?(\d+) hours?(?: per week| weekly)$/u.exec(
+        normalizeFormQuestionPrompt(permission.conditions),
+      );
+    const hours = [
+      ...(sources.posting.description ?? "").matchAll(
+        /\b(\d+)\s*hours?\s*(?:per\s+week|\/\s*week|weekly)\b/giu,
+      ),
+    ];
+    return (
+      !!limit && hours.length === 1 && Number(hours[0]?.[1]) <= Number(limit[1])
+    );
+  });
+}
+
 export type ClassifiedAnswerDecision =
   | { kind: "literal"; source: ClassifiedAnswerSource }
   | { kind: "writing"; source: ClassifiedAnswerSource }
@@ -369,23 +426,6 @@ export function classifyAnswerPermission(input: {
           "do you now or in the future require sponsorship",
           "do you now or in the future require visa sponsorship",
         ].includes(question));
-  if (legal && knownLegalQuestion && target && tags.country === target) {
-    source =
-      catalog.find(
-        (row) =>
-          row.purpose === tags.kind &&
-          row.country === target &&
-          row.value === input.answer.trim(),
-      ) ?? source;
-  }
-  if (tags.kind === "other")
-    source =
-      catalog.find(
-        (row) =>
-          row.purpose === "profile" &&
-          row.value.trim() === input.answer.trim() &&
-          knownLiteralField(row, input.control),
-      ) ?? source;
   if (matchingSaved) {
     const human = catalog.find(
       (row) => row.id === `answerLibrary.${matchingSaved.id}`,
@@ -398,6 +438,11 @@ export function classifyAnswerPermission(input: {
     input.control.attestationKind &&
     input.approvedAttestations?.includes(input.control.attestationKind) &&
     inferAttestationKind(input.control) === input.control.attestationKind &&
+    routineDeclarations[input.control.attestationKind]?.some(
+      (statement) =>
+        normalizeFormQuestionPrompt(statement) ===
+        normalizeFormQuestionPrompt(input.control.label),
+    ) &&
     input.answer === "Yes"
   )
     source = {
@@ -484,6 +529,19 @@ export function classifyAnswerPermission(input: {
     if (!target || tags.country !== target || source.country !== target)
       return deny(
         "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
+      );
+    if (
+      !permitConditionsFit(input.sources, target) ||
+      (tags.kind === "sponsorship" &&
+        input.answer === "No" &&
+        input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+          (permission) =>
+            country(permission.country) === target &&
+            permission.requiresFutureSponsorship === true,
+        ))
+    )
+      return deny(
+        "The current permit conditions have not been shown to fit this job. Please confirm this answer.",
       );
     if (
       exactSaved ||

@@ -296,7 +296,11 @@ test("batch W: an explicitly named country uses its own profile fact", () => {
   const decision = classifyAnswerPermission({
     control: c,
     controls: [c],
-    tags: { kind: "work_auth", country: "GB", sourceId: null },
+    tags: {
+      kind: "work_auth",
+      country: "GB",
+      sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+    },
     sources: src,
     answer: "Yes",
     pageInstructions: "",
@@ -447,7 +451,11 @@ test("batch W: UK shorthand resolves without another question", () => {
   const decision = classifyAnswerPermission({
     control: c,
     controls: [c],
-    tags: { kind: "work_auth", country: "GB", sourceId: null },
+    tags: {
+      kind: "work_auth",
+      country: "GB",
+      sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+    },
     sources: src,
     answer: "Yes",
     pageInstructions: "",
@@ -509,7 +517,12 @@ test("batch W: preflight distinguishes compound conditions from an explicit coun
           plainIndexes: [0],
           flagged: [],
           tags: [
-            { index: 0, kind: "work_auth", country: "GB", sourceId: null },
+            {
+              index: 0,
+              kind: "work_auth",
+              country: "GB",
+              sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+            },
           ],
         }),
       ),
@@ -933,3 +946,129 @@ test.each(["truncated", "unparseable"])(
     expect(question?.note).toContain("two attempts");
   },
 );
+
+test.each([
+  [
+    "I certify that I hold a valid driving licence",
+    "truthfulness_certification",
+  ],
+  ["I have no unspent criminal convictions", "background_check_consent"],
+] as const)(
+  "an approval cannot assert a personal fact: %s",
+  async (label, kind) => {
+    const src = sources();
+    src.resumeText = "I do not hold a driving licence.";
+    const s = setup(field(label, { inputType: "checkbox", value: "on" }), src);
+    s.config.authority.preApprovedAttestationKinds = [kind];
+    const result = await executeApplyProposal(
+      { tool: "set_checkbox", ref: "c0", checked: true },
+      s.observation().signature,
+      {
+        config: s.config,
+        now: () => new Date(at),
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags(
+          { kind: "other", country: null, sourceId: null },
+          { declarationKind: kind },
+        ),
+      },
+    );
+    expect(result.kind).toBe("suggestion");
+    expect(s.setToggle).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ["Full name", "Alex Vanguard"],
+  ["Email", "alex@example.test"],
+])(
+  "a reference's %s never borrows the applicant's identity",
+  async (label, answer) => {
+    const src = sources();
+    src.profile.email = "alex@example.test";
+    const s = setup(
+      field(label, { groupLabel: "Professional reference" }),
+      src,
+    );
+    const result = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: answer },
+      s.observation().signature,
+      {
+        config: s.config,
+        now: () => new Date(at),
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags({
+          kind: "other",
+          country: null,
+          sourceId: null,
+        }),
+      },
+    );
+    expect(result.kind).toBe("suggestion");
+    expect(s.fillText).not.toHaveBeenCalled();
+    // Even a missing section heading cannot override an explicit no-source read.
+    s.raw.groupLabel = "";
+    expect(
+      classifyAnswerPermission({
+        control: s.observation().controls[0],
+        controls: s.observation().controls,
+        tags: { kind: "other", country: null, sourceId: null },
+        sources: src,
+        answer,
+        pageInstructions: "Professional reference",
+      }).kind,
+    ).toBe("needs_you");
+  },
+);
+
+test("a remembered legal Yes is rechecked against the current job's permit conditions", () => {
+  const src = sources();
+  src.profile.workEligibility.limitedWorkPermissions = [
+    {
+      country: "United Kingdom",
+      conditions: "Maximum 20 hours per week",
+      requiresFutureSponsorship: false,
+    },
+  ];
+  const label = "Are you authorized to work in the UK?";
+  src.reusableAnswers = [
+    {
+      id: "part-time",
+      question: label,
+      label,
+      kind: "work_authorization",
+      answer: "Yes",
+      roleFamilies: [],
+      proofEntryIds: [],
+      applicationScope: {
+        resultId: null,
+        applicationRecordId: null,
+        location: "United Kingdom",
+      },
+    },
+  ];
+  const s = setup(field(label), src),
+    control = s.observation().controls[0];
+  const decide = () =>
+    classifyAnswerPermission({
+      control,
+      controls: [control],
+      tags: {
+        kind: "work_auth",
+        country: "GB",
+        sourceId: "answerLibrary.part-time",
+      },
+      sources: src,
+      answer: "Yes",
+      pageInstructions: "",
+    });
+  src.posting.description = "This role requires 40 hours per week.";
+  expect(decide().kind).toBe("needs_you");
+  src.posting.description = "This role requires 15 hours per week.";
+  expect(decide().kind).toBe("literal");
+  src.profile.workEligibility.limitedWorkPermissions[0].conditions =
+    "20 hours per week during term time";
+  expect(decide().kind).toBe("needs_you");
+  src.profile.workEligibility.limitedWorkPermissions = [];
+  expect(decide().kind).toBe("literal");
+});
