@@ -1,10 +1,16 @@
 import type { JobFinderRepositorySeed } from "./index";
-import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
+import {
+  CandidateAnswerBankSchema,
+  JobDiscoveryPreferencesSchema,
+  JobFinderIntelligenceStateSchema,
+} from "@nestor/contracts";
 
 export function createSeed(): JobFinderRepositorySeed {
   return {
     profile: {
+      answerBank: CandidateAnswerBankSchema.parse({}),
       id: "candidate_1",
+      resumeIdentityOwnership: null,
       firstName: "Alex",
       lastName: "Vanguard",
       middleName: null,
@@ -33,18 +39,6 @@ export function createSeed(): JobFinderRepositorySeed {
         motivationThemes: [],
       },
       proofBank: [],
-      answerBank: {
-        workAuthorization: null,
-        visaSponsorship: null,
-        relocation: null,
-        travel: null,
-        noticePeriod: null,
-        availability: null,
-        salaryExpectations: null,
-        selfIntroduction: null,
-        careerTransition: null,
-        customAnswers: [],
-      },
       applicationIdentity: {
         preferredEmail: null,
         preferredPhone: null,
@@ -52,6 +46,7 @@ export function createSeed(): JobFinderRepositorySeed {
       },
       baseResume: {
         id: "resume_1",
+        sha256: null,
         fileName: "alex-vanguard.pdf",
         uploadedAt: "2026-03-20T10:00:00.000Z",
         storagePath: "/tmp/alex-vanguard.pdf",
@@ -100,6 +95,7 @@ export function createSeed(): JobFinderRepositorySeed {
       spokenLanguages: [],
     },
     searchPreferences: {
+      discovery: JobDiscoveryPreferencesSchema.parse({}),
       targetRoles: ["Principal Designer"],
       jobFamilies: [],
       locations: ["Remote"],
@@ -123,25 +119,6 @@ export function createSeed(): JobFinderRepositorySeed {
       tailoringMode: "balanced" as const,
       companyBlacklist: [],
       companyWhitelist: [],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "target_primary",
-            label: "Primary target",
-            startingUrl: "https://jobs.example.com/search",
-            enabled: true,
-            adapterKind: "auto" as const,
-            customInstructions: null,
-            instructionStatus: "missing" as const,
-            validatedInstructionId: null,
-            draftInstructionId: null,
-            lastDebugRunId: null,
-            lastVerifiedAt: null,
-            staleReason: null,
-          },
-        ],
-      },
     },
     profileSetupState: {
       status: "completed" as const,

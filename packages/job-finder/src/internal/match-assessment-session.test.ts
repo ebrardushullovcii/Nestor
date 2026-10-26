@@ -14,7 +14,6 @@ import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import {
   MATCH_ASSESSMENT_SCORER_VERSION,
   createMatchAssessmentPostingFingerprint,
-  createMatchAssessmentContextFingerprint,
   createMatchAssessmentSession,
 } from "./match-assessment-session";
 
@@ -456,40 +455,4 @@ test("a changed-goals batch replaces a carried full assessment in the session", 
   expect(
     session.assess({ ...posting, matchAssessment: full }, nextBatch).judgment,
   ).toEqual(nextBatch);
-});
-
-test("job source changes do not invalidate listing fit", () => {
-  const seed = createSeed();
-  const before = createMatchAssessmentContextFingerprint(
-    seed.profile,
-    seed.searchPreferences,
-  );
-  expect(
-    createMatchAssessmentContextFingerprint(seed.profile, {
-      ...seed.searchPreferences,
-      discovery: {
-        ...seed.searchPreferences.discovery,
-        targets: [],
-        historyLimit: 3,
-      },
-    }),
-  ).toBe(before);
-});
-
-test("remote reach remains a fit input when source settings are excluded", () => {
-  const seed = createSeed();
-  expect(
-    createMatchAssessmentContextFingerprint(seed.profile, {
-      ...seed.searchPreferences,
-      discovery: {
-        ...seed.searchPreferences.discovery,
-        remoteCountsAsAnyLocation: false,
-      },
-    }),
-  ).not.toBe(
-    createMatchAssessmentContextFingerprint(
-      seed.profile,
-      seed.searchPreferences,
-    ),
-  );
 });

@@ -7,6 +7,13 @@ import {
   ResumeDraftSchema,
   SubmissionOutcomeRecordSchema,
   TrackerFilterSchema,
+  ProfileCopilotMessageSchema,
+  ProfileRevisionSchema,
+  ResumeDocumentBundleSchema,
+  ResumeImportFieldCandidateSchema,
+  ResumeImportRunSchema,
+  ProfileEditsDraftSchema,
+  ProfileSetupStateSchema,
 } from "@nestor/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -24,7 +31,9 @@ import { describe, expect, it } from "vitest";
 interface StoredJsonSchema {
   safeParse(
     value: unknown,
-  ): { success: true } | { success: false; error: { issues: unknown[] } };
+  ):
+    | { success: true; data: unknown }
+    | { success: false; error: { issues: unknown[] } };
 }
 
 const STORED_JSON: Record<string, StoredJsonSchema> = {
@@ -36,6 +45,13 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   SubmissionOutcomeRecordSchema,
   ApplicationResumeArtifactSchema,
   ApplyExecutionResultSchema,
+  ProfileCopilotMessageSchema,
+  ProfileRevisionSchema,
+  ResumeDocumentBundleSchema,
+  ResumeImportFieldCandidateSchema,
+  ResumeImportRunSchema,
+  ProfileEditsDraftSchema,
+  ProfileSetupStateSchema,
 };
 
 const FIXTURES: Record<string, string> = {
@@ -47,13 +63,25 @@ const FIXTURES: Record<string, string> = {
   SubmissionOutcomeRecordSchema: "submission-outcome-record",
   ApplicationResumeArtifactSchema: "application-resume-artifact",
   ApplyExecutionResultSchema: "apply-execution-result",
+  ProfileCopilotMessageSchema: "profile-copilot-message",
+  ProfileRevisionSchema: "profile-revision",
+  ResumeDocumentBundleSchema: "resume-document-bundle",
+  ResumeImportFieldCandidateSchema: "resume-import-field-candidate",
+  ResumeImportRunSchema: "resume-import-run",
+  ProfileEditsDraftSchema: "profile-edits-draft",
+  ProfileSetupStateSchema: "profile-setup-state",
 };
 
 const fixtureDir = path.join(__dirname, "stored-json");
 
 describe("JSON the job store keeps", () => {
   it("covers every schema the store parses stored JSON with", () => {
-    const parsed = new Set<string>();
+    // These two readers assemble an envelope around JSON-valued fields
+    // before parsing, rather than calling Schema.parse(JSON.parse(...)).
+    const parsed = new Set<string>([
+      "ProfileEditsDraftSchema",
+      "ProfileSetupStateSchema",
+    ]);
     for (const file of readdirSync(__dirname)) {
       if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
       const source = readFileSync(path.join(__dirname, file), "utf8");
@@ -76,5 +104,10 @@ describe("JSON the job store keeps", () => {
         ) as unknown;
         const result = schema.safeParse(row);
         expect(result.success ? [] : result.error.issues).toEqual([]);
+        if (result.success) {
+          if (row !== null && typeof row === "object")
+            expect(result.data).toMatchObject(row);
+          else expect(result.data).toEqual(row);
+        }
       });
 });

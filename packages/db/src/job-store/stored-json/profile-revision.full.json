@@ -1,0 +1,722 @@
+{
+  "id": "synthetic",
+  "sequence": 1,
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "reason": "synthetic",
+  "trigger": "assistant_patch",
+  "messageId": "synthetic",
+  "patchGroupId": "synthetic",
+  "restoredFromRevisionId": "synthetic",
+  "snapshotProfile": {
+    "id": "synthetic",
+    "resumeIdentityOwnership": {
+      "acknowledgedSourceFullName": "synthetic",
+      "acknowledgedSourceEmail": "synthetic",
+      "acknowledgedAt": "2026-10-26T00:00:00.000Z"
+    },
+    "firstName": "synthetic",
+    "lastName": "synthetic",
+    "middleName": "synthetic",
+    "fullName": "synthetic",
+    "preferredDisplayName": "synthetic",
+    "headline": "synthetic",
+    "summary": "synthetic",
+    "currentLocation": "synthetic",
+    "currentCity": "synthetic",
+    "currentRegion": "synthetic",
+    "currentCountry": "synthetic",
+    "timeZone": "synthetic",
+    "yearsExperience": 1,
+    "email": "synthetic",
+    "secondaryEmail": "synthetic",
+    "phone": "synthetic",
+    "portfolioUrl": "synthetic",
+    "linkedinUrl": "synthetic",
+    "githubUrl": "synthetic",
+    "personalWebsiteUrl": "synthetic",
+    "baseResume": {
+      "id": "synthetic",
+      "fileName": "synthetic",
+      "uploadedAt": "2026-10-26T00:00:00.000Z",
+      "storagePath": "synthetic",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "textContent": "synthetic",
+      "textUpdatedAt": "2026-10-26T00:00:00.000Z",
+      "sourceIdentity": {
+        "fullName": "synthetic",
+        "email": "synthetic"
+      },
+      "extractionStatus": "not_started",
+      "lastAnalyzedAt": "2026-10-26T00:00:00.000Z",
+      "analysisProviderKind": "deterministic",
+      "analysisProviderLabel": "synthetic",
+      "analysisWarnings": [
+        "synthetic"
+      ]
+    },
+    "workEligibility": {
+      "authorizedWorkCountries": [
+        "synthetic"
+      ],
+      "limitedWorkPermissions": [
+        {
+          "country": "synthetic",
+          "conditions": "synthetic",
+          "requiresFutureSponsorship": true
+        }
+      ],
+      "requiresVisaSponsorship": true,
+      "willingToRelocate": true,
+      "preferredRelocationRegions": [
+        "synthetic"
+      ],
+      "willingToTravel": true,
+      "remoteEligible": true,
+      "noticePeriodDays": 1,
+      "availableStartDate": "synthetic",
+      "securityClearance": "synthetic"
+    },
+    "professionalSummary": {
+      "shortValueProposition": "synthetic",
+      "fullSummary": "synthetic",
+      "careerThemes": [
+        "synthetic"
+      ],
+      "leadershipSummary": "synthetic",
+      "domainFocusSummary": "synthetic",
+      "strengths": [
+        "synthetic"
+      ]
+    },
+    "narrative": {
+      "professionalStory": "synthetic",
+      "nextChapterSummary": "synthetic",
+      "careerTransitionSummary": "synthetic",
+      "differentiators": [
+        "synthetic"
+      ],
+      "motivationThemes": [
+        "synthetic"
+      ]
+    },
+    "proofBank": [
+      {
+        "id": "synthetic",
+        "title": "synthetic",
+        "claim": "synthetic",
+        "heroMetric": "synthetic",
+        "supportingContext": "synthetic",
+        "roleFamilies": [
+          "synthetic"
+        ],
+        "projectIds": [
+          "synthetic"
+        ],
+        "linkIds": [
+          "synthetic"
+        ]
+      }
+    ],
+    "answerBank": {
+      "workAuthorization": "synthetic",
+      "visaSponsorship": "synthetic",
+      "relocation": "synthetic",
+      "travel": "synthetic",
+      "noticePeriod": "synthetic",
+      "availability": "synthetic",
+      "salaryExpectations": "synthetic",
+      "selfIntroduction": "synthetic",
+      "careerTransition": "synthetic",
+      "customAnswers": [
+        {
+          "needsConfirmation": true,
+          "id": "synthetic",
+          "kind": "work_authorization",
+          "label": "synthetic",
+          "question": "synthetic",
+          "answer": "synthetic",
+          "roleFamilies": [
+            "synthetic"
+          ],
+          "proofEntryIds": [
+            "synthetic"
+          ],
+          "applicationScope": {
+            "resultId": "synthetic",
+            "applicationRecordId": "synthetic",
+            "location": "synthetic",
+            "hiringCountry": "synthetic"
+          }
+        }
+      ]
+    },
+    "applicationIdentity": {
+      "preferredEmail": "synthetic",
+      "preferredPhone": "synthetic",
+      "preferredLinkIds": [
+        "synthetic"
+      ]
+    },
+    "skillGroups": {
+      "coreSkills": [
+        "synthetic"
+      ],
+      "tools": [
+        "synthetic"
+      ],
+      "languagesAndFrameworks": [
+        "synthetic"
+      ],
+      "softSkills": [
+        "synthetic"
+      ],
+      "highlightedSkills": [
+        "synthetic"
+      ]
+    },
+    "targetRoles": [
+      "synthetic"
+    ],
+    "locations": [
+      "synthetic"
+    ],
+    "skills": [
+      "synthetic"
+    ],
+    "experiences": [
+      {
+        "id": "synthetic",
+        "companyName": "synthetic",
+        "companyUrl": "synthetic",
+        "title": "synthetic",
+        "employmentType": "synthetic",
+        "location": "synthetic",
+        "workMode": [
+          "remote"
+        ],
+        "startDate": "synthetic",
+        "endDate": "synthetic",
+        "isCurrent": true,
+        "isDraft": true,
+        "summary": "synthetic",
+        "achievements": [
+          "synthetic"
+        ],
+        "skills": [
+          "synthetic"
+        ],
+        "domainTags": [
+          "synthetic"
+        ],
+        "peopleManagementScope": "synthetic",
+        "ownershipScope": "synthetic"
+      }
+    ],
+    "education": [
+      {
+        "id": "synthetic",
+        "schoolName": "synthetic",
+        "degree": "synthetic",
+        "fieldOfStudy": "synthetic",
+        "location": "synthetic",
+        "startDate": "synthetic",
+        "endDate": "synthetic",
+        "isDraft": true,
+        "summary": "synthetic"
+      }
+    ],
+    "certifications": [
+      {
+        "id": "synthetic",
+        "name": "synthetic",
+        "issuer": "synthetic",
+        "issueDate": "synthetic",
+        "expiryDate": "synthetic",
+        "credentialUrl": "https://synthetic.example.test",
+        "isDraft": true
+      }
+    ],
+    "links": [
+      {
+        "id": "synthetic",
+        "label": "synthetic",
+        "url": "https://synthetic.example.test",
+        "kind": "portfolio",
+        "isDraft": true
+      }
+    ],
+    "projects": [
+      {
+        "id": "synthetic",
+        "name": "synthetic",
+        "projectType": "synthetic",
+        "summary": "synthetic",
+        "role": "synthetic",
+        "skills": [
+          "synthetic"
+        ],
+        "outcome": "synthetic",
+        "projectUrl": "synthetic",
+        "repositoryUrl": "synthetic",
+        "caseStudyUrl": "synthetic"
+      }
+    ],
+    "spokenLanguages": [
+      {
+        "id": "synthetic",
+        "language": "synthetic",
+        "proficiency": "synthetic",
+        "interviewPreference": true,
+        "notes": "synthetic"
+      }
+    ]
+  },
+  "snapshotSearchPreferences": {
+    "searchSelectivity": "best_matches",
+    "targetRoles": [
+      "synthetic"
+    ],
+    "jobFamilies": [
+      "synthetic"
+    ],
+    "locations": [
+      "synthetic"
+    ],
+    "excludedLocations": [
+      "synthetic"
+    ],
+    "workModes": [
+      "remote"
+    ],
+    "seniorityLevels": [
+      "synthetic"
+    ],
+    "targetIndustries": [
+      "synthetic"
+    ],
+    "targetCompanyStages": [
+      "synthetic"
+    ],
+    "employmentTypes": [
+      "synthetic"
+    ],
+    "shiftPreference": "day",
+    "weeklyHours": {
+      "minimum": 1,
+      "maximum": 1
+    },
+    "minimumSalaryUsd": 2080,
+    "targetSalaryUsd": 2080,
+    "salaryCurrency": "USD",
+    "compensation": {
+      "basis": "base",
+      "minimum": 1,
+      "maximum": 1,
+      "interval": "hour",
+      "currency": "USD",
+      "currencyStatus": "explicit"
+    },
+    "approvalMode": "draft_only",
+    "tailoringMode": "conservative",
+    "companyBlacklist": [
+      "synthetic"
+    ],
+    "companyWhitelist": [
+      "synthetic"
+    ],
+    "discovery": {
+      "targets": [
+        {
+          "id": "synthetic",
+          "label": "synthetic",
+          "startingUrl": "https://synthetic.example.test",
+          "enabled": true,
+          "adapterKind": "auto",
+          "customInstructions": "synthetic",
+          "instructionStatus": "missing",
+          "validatedInstructionId": "synthetic",
+          "draftInstructionId": "synthetic",
+          "lastDebugRunId": "synthetic",
+          "lastVerifiedAt": "2026-10-26T00:00:00.000Z",
+          "staleReason": "synthetic"
+        }
+      ],
+      "historyLimit": 1,
+      "collectOnlyHardCriteriaMatches": true,
+      "runJobBudget": 1,
+      "remoteCountsAsAnyLocation": true
+    }
+  },
+  "snapshotProfileSetupState": {
+    "status": "not_started",
+    "currentStep": "import",
+    "completedAt": "2026-10-26T00:00:00.000Z",
+    "reviewItems": [
+      {
+        "id": "synthetic",
+        "step": "import",
+        "target": {
+          "domain": "identity",
+          "key": "synthetic",
+          "recordId": "synthetic"
+        },
+        "label": "synthetic",
+        "reason": "synthetic",
+        "severity": "critical",
+        "status": "pending",
+        "proposedValue": "synthetic",
+        "sourceSnippet": "synthetic",
+        "sourceCandidateId": "synthetic",
+        "sourceRunId": "synthetic",
+        "createdAt": "2026-10-26T00:00:00.000Z",
+        "resolvedAt": "2026-10-26T00:00:00.000Z"
+      }
+    ],
+    "reviewedSteps": [
+      "import"
+    ],
+    "lastResumedAt": "2026-10-26T00:00:00.000Z"
+  },
+  "snapshotProfileAfter": {
+    "id": "synthetic",
+    "resumeIdentityOwnership": {
+      "acknowledgedSourceFullName": "synthetic",
+      "acknowledgedSourceEmail": "synthetic",
+      "acknowledgedAt": "2026-10-26T00:00:00.000Z"
+    },
+    "firstName": "synthetic",
+    "lastName": "synthetic",
+    "middleName": "synthetic",
+    "fullName": "synthetic",
+    "preferredDisplayName": "synthetic",
+    "headline": "synthetic",
+    "summary": "synthetic",
+    "currentLocation": "synthetic",
+    "currentCity": "synthetic",
+    "currentRegion": "synthetic",
+    "currentCountry": "synthetic",
+    "timeZone": "synthetic",
+    "yearsExperience": 1,
+    "email": "synthetic",
+    "secondaryEmail": "synthetic",
+    "phone": "synthetic",
+    "portfolioUrl": "synthetic",
+    "linkedinUrl": "synthetic",
+    "githubUrl": "synthetic",
+    "personalWebsiteUrl": "synthetic",
+    "baseResume": {
+      "id": "synthetic",
+      "fileName": "synthetic",
+      "uploadedAt": "2026-10-26T00:00:00.000Z",
+      "storagePath": "synthetic",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "textContent": "synthetic",
+      "textUpdatedAt": "2026-10-26T00:00:00.000Z",
+      "sourceIdentity": {
+        "fullName": "synthetic",
+        "email": "synthetic"
+      },
+      "extractionStatus": "not_started",
+      "lastAnalyzedAt": "2026-10-26T00:00:00.000Z",
+      "analysisProviderKind": "deterministic",
+      "analysisProviderLabel": "synthetic",
+      "analysisWarnings": [
+        "synthetic"
+      ]
+    },
+    "workEligibility": {
+      "authorizedWorkCountries": [
+        "synthetic"
+      ],
+      "limitedWorkPermissions": [
+        {
+          "country": "synthetic",
+          "conditions": "synthetic",
+          "requiresFutureSponsorship": true
+        }
+      ],
+      "requiresVisaSponsorship": true,
+      "willingToRelocate": true,
+      "preferredRelocationRegions": [
+        "synthetic"
+      ],
+      "willingToTravel": true,
+      "remoteEligible": true,
+      "noticePeriodDays": 1,
+      "availableStartDate": "synthetic",
+      "securityClearance": "synthetic"
+    },
+    "professionalSummary": {
+      "shortValueProposition": "synthetic",
+      "fullSummary": "synthetic",
+      "careerThemes": [
+        "synthetic"
+      ],
+      "leadershipSummary": "synthetic",
+      "domainFocusSummary": "synthetic",
+      "strengths": [
+        "synthetic"
+      ]
+    },
+    "narrative": {
+      "professionalStory": "synthetic",
+      "nextChapterSummary": "synthetic",
+      "careerTransitionSummary": "synthetic",
+      "differentiators": [
+        "synthetic"
+      ],
+      "motivationThemes": [
+        "synthetic"
+      ]
+    },
+    "proofBank": [
+      {
+        "id": "synthetic",
+        "title": "synthetic",
+        "claim": "synthetic",
+        "heroMetric": "synthetic",
+        "supportingContext": "synthetic",
+        "roleFamilies": [
+          "synthetic"
+        ],
+        "projectIds": [
+          "synthetic"
+        ],
+        "linkIds": [
+          "synthetic"
+        ]
+      }
+    ],
+    "answerBank": {
+      "workAuthorization": "synthetic",
+      "visaSponsorship": "synthetic",
+      "relocation": "synthetic",
+      "travel": "synthetic",
+      "noticePeriod": "synthetic",
+      "availability": "synthetic",
+      "salaryExpectations": "synthetic",
+      "selfIntroduction": "synthetic",
+      "careerTransition": "synthetic",
+      "customAnswers": [
+        {
+          "needsConfirmation": true,
+          "id": "synthetic",
+          "kind": "work_authorization",
+          "label": "synthetic",
+          "question": "synthetic",
+          "answer": "synthetic",
+          "roleFamilies": [
+            "synthetic"
+          ],
+          "proofEntryIds": [
+            "synthetic"
+          ],
+          "applicationScope": {
+            "resultId": "synthetic",
+            "applicationRecordId": "synthetic",
+            "location": "synthetic",
+            "hiringCountry": "synthetic"
+          }
+        }
+      ]
+    },
+    "applicationIdentity": {
+      "preferredEmail": "synthetic",
+      "preferredPhone": "synthetic",
+      "preferredLinkIds": [
+        "synthetic"
+      ]
+    },
+    "skillGroups": {
+      "coreSkills": [
+        "synthetic"
+      ],
+      "tools": [
+        "synthetic"
+      ],
+      "languagesAndFrameworks": [
+        "synthetic"
+      ],
+      "softSkills": [
+        "synthetic"
+      ],
+      "highlightedSkills": [
+        "synthetic"
+      ]
+    },
+    "targetRoles": [
+      "synthetic"
+    ],
+    "locations": [
+      "synthetic"
+    ],
+    "skills": [
+      "synthetic"
+    ],
+    "experiences": [
+      {
+        "id": "synthetic",
+        "companyName": "synthetic",
+        "companyUrl": "synthetic",
+        "title": "synthetic",
+        "employmentType": "synthetic",
+        "location": "synthetic",
+        "workMode": [
+          "remote"
+        ],
+        "startDate": "synthetic",
+        "endDate": "synthetic",
+        "isCurrent": true,
+        "isDraft": true,
+        "summary": "synthetic",
+        "achievements": [
+          "synthetic"
+        ],
+        "skills": [
+          "synthetic"
+        ],
+        "domainTags": [
+          "synthetic"
+        ],
+        "peopleManagementScope": "synthetic",
+        "ownershipScope": "synthetic"
+      }
+    ],
+    "education": [
+      {
+        "id": "synthetic",
+        "schoolName": "synthetic",
+        "degree": "synthetic",
+        "fieldOfStudy": "synthetic",
+        "location": "synthetic",
+        "startDate": "synthetic",
+        "endDate": "synthetic",
+        "isDraft": true,
+        "summary": "synthetic"
+      }
+    ],
+    "certifications": [
+      {
+        "id": "synthetic",
+        "name": "synthetic",
+        "issuer": "synthetic",
+        "issueDate": "synthetic",
+        "expiryDate": "synthetic",
+        "credentialUrl": "https://synthetic.example.test",
+        "isDraft": true
+      }
+    ],
+    "links": [
+      {
+        "id": "synthetic",
+        "label": "synthetic",
+        "url": "https://synthetic.example.test",
+        "kind": "portfolio",
+        "isDraft": true
+      }
+    ],
+    "projects": [
+      {
+        "id": "synthetic",
+        "name": "synthetic",
+        "projectType": "synthetic",
+        "summary": "synthetic",
+        "role": "synthetic",
+        "skills": [
+          "synthetic"
+        ],
+        "outcome": "synthetic",
+        "projectUrl": "synthetic",
+        "repositoryUrl": "synthetic",
+        "caseStudyUrl": "synthetic"
+      }
+    ],
+    "spokenLanguages": [
+      {
+        "id": "synthetic",
+        "language": "synthetic",
+        "proficiency": "synthetic",
+        "interviewPreference": true,
+        "notes": "synthetic"
+      }
+    ]
+  },
+  "snapshotSearchPreferencesAfter": {
+    "searchSelectivity": "best_matches",
+    "targetRoles": [
+      "synthetic"
+    ],
+    "jobFamilies": [
+      "synthetic"
+    ],
+    "locations": [
+      "synthetic"
+    ],
+    "excludedLocations": [
+      "synthetic"
+    ],
+    "workModes": [
+      "remote"
+    ],
+    "seniorityLevels": [
+      "synthetic"
+    ],
+    "targetIndustries": [
+      "synthetic"
+    ],
+    "targetCompanyStages": [
+      "synthetic"
+    ],
+    "employmentTypes": [
+      "synthetic"
+    ],
+    "shiftPreference": "day",
+    "weeklyHours": {
+      "minimum": 1,
+      "maximum": 1
+    },
+    "minimumSalaryUsd": 2080,
+    "targetSalaryUsd": 2080,
+    "salaryCurrency": "USD",
+    "compensation": {
+      "basis": "base",
+      "minimum": 1,
+      "maximum": 1,
+      "interval": "hour",
+      "currency": "USD",
+      "currencyStatus": "explicit"
+    },
+    "approvalMode": "draft_only",
+    "tailoringMode": "conservative",
+    "companyBlacklist": [
+      "synthetic"
+    ],
+    "companyWhitelist": [
+      "synthetic"
+    ],
+    "discovery": {
+      "targets": [
+        {
+          "id": "synthetic",
+          "label": "synthetic",
+          "startingUrl": "https://synthetic.example.test",
+          "enabled": true,
+          "adapterKind": "auto",
+          "customInstructions": "synthetic",
+          "instructionStatus": "missing",
+          "validatedInstructionId": "synthetic",
+          "draftInstructionId": "synthetic",
+          "lastDebugRunId": "synthetic",
+          "lastVerifiedAt": "2026-10-26T00:00:00.000Z",
+          "staleReason": "synthetic"
+        }
+      ],
+      "historyLimit": 1,
+      "collectOnlyHardCriteriaMatches": true,
+      "runJobBudget": 1,
+      "remoteCountsAsAnyLocation": true
+    }
+  },
+  "snapshotResumeApplicationMode": "tailored_per_job",
+  "snapshotResumeApplicationModeAfter": "tailored_per_job"
+}

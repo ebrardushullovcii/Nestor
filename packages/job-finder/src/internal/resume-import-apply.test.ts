@@ -1,3 +1,4 @@
+import { resumeImportSavedAnswers } from "./resume-import-saved-answers";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -201,4 +202,42 @@ describe("explicit approval of imported preferences", () => {
       );
     },
   );
+});
+
+test("reusable import text goes to Needs you; unresolved text requires confirmation there", () => {
+  const accepted = ResumeImportFieldCandidateSchema.parse({
+    ...contactCandidate("email", "I build reporting tools."),
+    target: { section: "answer_bank", key: "selfIntroduction", recordId: null },
+    label: "Introduction",
+  });
+  expect(
+    resumeImportSavedAnswers([
+      accepted,
+      {
+        ...accepted,
+        id: "unreviewed",
+        target: { ...accepted.target, key: "careerTransition" },
+        resolution: "needs_review",
+      },
+    ]),
+  ).toEqual([
+    {
+      key: "resume_import:self_intro",
+      kind: "self_intro",
+      prompt: "Introduction",
+      label: "Introduction",
+      answer: "I build reporting tools.",
+      input: "text",
+      needsConfirmation: false,
+    },
+    {
+      key: "resume_import:career_transition",
+      kind: "career_transition",
+      prompt: "Introduction",
+      label: "Introduction",
+      answer: "I build reporting tools.",
+      input: "text",
+      needsConfirmation: true,
+    },
+  ]);
 });

@@ -7,8 +7,6 @@ import type {
   SavedJob,
 } from "@nestor/contracts";
 
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   createFitVerdictFingerprint,
   createMatchAssessmentContextFingerprint,
@@ -16,6 +14,7 @@ import {
 } from "./match-assessment-session";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
 
 /**
  * Legacy verdict stamp to verdict fingerprint, for every set of goals a
@@ -34,16 +33,16 @@ export function buildLegacyVerdictFingerprintMap(input: {
   const goals = [
     input.searchPreferences,
     ...(input.campaignState?.campaigns ?? []).map(
-      searchPreferencesForCampaignRun,
+      (campaign) => campaign.searchPreferences,
     ),
   ];
   const map = new Map<string, string>();
   for (const raw of goals) {
     for (const preferences of [
-      raw,
-      withSavedJobSearchBehavior(
-        enrichSearchPreferencesFromProfile(raw, input.profile),
-        input.settings,
+      withSettingsFitBehavior(raw, input.settings),
+      enrichSearchPreferencesFromProfile(
+        withSettingsFitBehavior(raw, input.settings),
+        input.profile,
       ),
     ]) {
       const context = createMatchAssessmentContextFingerprint(

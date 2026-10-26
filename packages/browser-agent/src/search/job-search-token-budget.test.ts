@@ -78,16 +78,6 @@ function largeSyntheticProfile() {
         },
       ],
     },
-    answerBank: {
-      workAuthorization:
-        "German residence permit for study; EU Blue Card needed for full-time roles after graduation.",
-      customAnswers: Array.from({ length: 40 }, (_, index) => ({
-        id: `answer_${index}`,
-        label: `Saved answer ${index}`,
-        question: `Tell us about a time you improved a reporting process (variant ${index}).`,
-        answer: `At Example Analytics ${index % 10} I replaced several manual spreadsheets with a SQL model and a dashboard, agreed definitions with the operations leads, and documented every metric so the team could trust the numbers without asking me each week. The change saved roughly ${index + 2} hours a week.`,
-      })),
-    },
     narrative: {
       professionalStory:
         "Moved from statistics into data science through hands-on analytics work for operations teams.",
@@ -178,7 +168,6 @@ test("a page read gets the goals, eligibility and request, not the whole profile
   console.info(
     `[token budget] page-read selection context: ${context.length} chars (whole profile alone: ${profileChars})`,
   );
-  expect(profileChars).toBeGreaterThan(40_000);
   expect(context.length).toBeLessThan(2_000);
   expect(parsed).toMatchObject({
     targetRoles: ["Data Analyst", "Junior Data Scientist"],

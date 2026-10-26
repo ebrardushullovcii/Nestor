@@ -1,3 +1,4 @@
+import { createProfileCommandHandlers } from "./profile-commands";
 import {
   JOB_COMMANDS,
   type JobPosting,
@@ -118,6 +119,7 @@ export function createJobCommandRunner(deps: {
       sourceRevision: 0,
     };
   const handlers: Handlers = {
+    ...createProfileCommandHandlers(store),
     list_jobs: (input) => store.listJobs(input),
     get_job: ({ id }) => store.getJob(id),
     stage_counts: () => store.stageCounts(),

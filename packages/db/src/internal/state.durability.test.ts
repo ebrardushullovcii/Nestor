@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { normalizeLegacyDiscoveryState } from "./legacy";
 import { runMigrations } from "./migrations";
-import { bootstrapState, getSingletonValue, writeState } from "./state";
+import { bootstrapState, getSingletonValue } from "./state";
 import { createSeed } from "../test-fixtures";
 
 function openWorkspace(): DatabaseSync {
@@ -12,64 +12,6 @@ function openWorkspace(): DatabaseSync {
   bootstrapState(database, createSeed());
   return database;
 }
-
-function readProfileRevision(database: DatabaseSync): number {
-  const row = database
-    .prepare("SELECT revision FROM singleton_state WHERE key = 'profile'")
-    .get() as { revision?: number } | undefined;
-  return Number(row?.revision ?? 0);
-}
-
-describe("singleton write durability", () => {
-  test("bootstrap starts the profile compare-and-swap epoch at 1", () => {
-    const database = openWorkspace();
-    try {
-      expect(readProfileRevision(database)).toBe(1);
-    } finally {
-      database.close();
-    }
-  });
-
-  test("a full state replacement never rewinds the compare-and-swap epoch", () => {
-    const database = openWorkspace();
-    try {
-      const captured = readProfileRevision(database);
-
-      writeState(database, createSeed());
-
-      // Rewinding to 1 would let a token captured before the reset still pass
-      // the equality check afterwards and overwrite the freshly seeded profile,
-      // search preferences and profile setup state.
-      const afterReset = readProfileRevision(database);
-      expect(afterReset).toBeGreaterThan(captured);
-
-      writeState(database, createSeed());
-      expect(readProfileRevision(database)).toBeGreaterThan(afterReset);
-    } finally {
-      database.close();
-    }
-  });
-
-  test("a full state replacement advances every profile-epoch singleton", () => {
-    const database = openWorkspace();
-    try {
-      writeState(database, createSeed());
-
-      for (const key of [
-        "profile",
-        "search_preferences",
-        "profile_setup_state",
-      ]) {
-        const row = database
-          .prepare("SELECT revision FROM singleton_state WHERE key = ?")
-          .get(key) as { revision?: number } | undefined;
-        expect(Number(row?.revision ?? 0)).toBe(2);
-      }
-    } finally {
-      database.close();
-    }
-  });
-});
 
 function writeDiscoveryBlob(database: DatabaseSync, value: unknown): void {
   database

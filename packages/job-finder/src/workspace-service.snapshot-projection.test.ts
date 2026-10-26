@@ -41,7 +41,7 @@ function service(repository: JobFinderRepository) {
 async function fixture(storage: "memory" | "file", noRuntimeRefresh = false) {
   const seed = createSeed();
   if (noRuntimeRefresh)
-    seed.searchPreferences.discovery.targets.forEach((target) => {
+    seed.jobSites.forEach((target) => {
       target.enabled = false;
     });
   const pending = SavedJobSchema.parse({
@@ -106,48 +106,48 @@ async function fixture(storage: "memory" | "file", noRuntimeRefresh = false) {
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} snapshot display projection`, () => {
     if (storage === "file")
-    test("company membership edits preserve discovery rows and match canonical company lists", async () => {
-      const { repo, close } = await fixture(storage);
-      try {
-        const workspace = service(repo);
-        await workspace.getWorkspaceProjection();
-        const before = await workspace.getWorkspaceProjection();
-        const intelligence = await repo.getIntelligenceState();
-        const jobs = await repo.listSavedJobs();
-        const chosen = jobs[0]!;
-        const { CompanyEntitySchema } = await import("@nestor/contracts");
-        await repo.saveIntelligenceState({
-          ...intelligence,
-          companies: [
-            CompanyEntitySchema.parse({
-              id: "synthetic_membership",
-              canonicalName: "Synthetic employer",
-              jobIds: [chosen.id],
-              createdAt: "2026-10-23T00:00:00.000Z",
-              updatedAt: "2026-10-23T00:00:00.000Z",
-            }),
-          ],
-        });
-        const after = await workspace.getWorkspaceProjection();
-        const canonical = await workspace.getWorkspaceSnapshot();
-        expect(after.companyJobs.map((job) => job.id)).toEqual([chosen.id]);
-        // Compare the public IPC shape while lazy getters still have an open
-        // repository. Internal preparation symbols may differ between reads.
-        expect(structuredClone(after.companyJobs)).toEqual(
-          structuredClone(canonical.companyJobs),
-        );
-        expect(structuredClone(after.discoveryJobs)).toEqual(
-          structuredClone(before.discoveryJobs),
-        );
-        if (storage === "file")
-          for (const row of after.discoveryJobs)
-            expect(row).toBe(
-              before.discoveryJobs.find((job) => job.id === row.id),
-            );
-      } finally {
-        await close();
-      }
-    });
+      test("company membership edits preserve discovery rows and match canonical company lists", async () => {
+        const { repo, close } = await fixture(storage);
+        try {
+          const workspace = service(repo);
+          await workspace.getWorkspaceProjection();
+          const before = await workspace.getWorkspaceProjection();
+          const intelligence = await repo.getIntelligenceState();
+          const jobs = await repo.listSavedJobs();
+          const chosen = jobs[0]!;
+          const { CompanyEntitySchema } = await import("@nestor/contracts");
+          await repo.saveIntelligenceState({
+            ...intelligence,
+            companies: [
+              CompanyEntitySchema.parse({
+                id: "synthetic_membership",
+                canonicalName: "Synthetic employer",
+                jobIds: [chosen.id],
+                createdAt: "2026-10-23T00:00:00.000Z",
+                updatedAt: "2026-10-23T00:00:00.000Z",
+              }),
+            ],
+          });
+          const after = await workspace.getWorkspaceProjection();
+          const canonical = await workspace.getWorkspaceSnapshot();
+          expect(after.companyJobs.map((job) => job.id)).toEqual([chosen.id]);
+          // Compare the public IPC shape while lazy getters still have an open
+          // repository. Internal preparation symbols may differ between reads.
+          expect(structuredClone(after.companyJobs)).toEqual(
+            structuredClone(canonical.companyJobs),
+          );
+          expect(structuredClone(after.discoveryJobs)).toEqual(
+            structuredClone(before.discoveryJobs),
+          );
+          if (storage === "file")
+            for (const row of after.discoveryJobs)
+              expect(row).toBe(
+                before.discoveryJobs.find((job) => job.id === row.id),
+              );
+        } finally {
+          await close();
+        }
+      });
     test("profile review and copilot mutation callbacks return display metadata while public canonical reads stay owned", async () => {
       const { repo, close } = await fixture(storage);
       try {

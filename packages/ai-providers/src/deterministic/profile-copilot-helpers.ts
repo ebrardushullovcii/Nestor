@@ -1,6 +1,5 @@
 import {
   ProfileCopilotReplySchema,
-  STARTER_JOB_SOURCES,
   type ProfileCopilotContext,
   type ProfileCopilotPatchGroup,
   type ProfileCopilotRelevantReviewItem,
@@ -559,43 +558,6 @@ export function detectRequestedYearsExperience(request: string): number | null {
   return trailingInteger;
 }
 
-export function normalizeSourceLabel(value: string): string {
-  return normalizeFactText(value)
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-export function normalizeSourceStartingUrl(value: string): string {
-  return value.trim().toLowerCase().replace(/\/+$/, "");
-}
-
-export function formatSourceLabels(labels: readonly string[]): string {
-  if (labels.length <= 1) {
-    return labels[0] ?? "";
-  }
-
-  if (labels.length === 2) {
-    return `${labels[0]} and ${labels[1]}`;
-  }
-
-  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
-}
-
-export function buildJobSourcePatchSummary(input: {
-  addedLabels: readonly string[];
-  reEnabledLabels: readonly string[];
-}): string {
-  if (input.addedLabels.length > 0 && input.reEnabledLabels.length === 0) {
-    return `Add ${formatSourceLabels(input.addedLabels)} job source${input.addedLabels.length === 1 ? "" : "s"}`;
-  }
-
-  if (input.reEnabledLabels.length > 0 && input.addedLabels.length === 0) {
-    return `Re-enable ${formatSourceLabels(input.reEnabledLabels)} job source${input.reEnabledLabels.length === 1 ? "" : "s"}`;
-  }
-
-  return "Update job sources";
-}
-
 export function formatPatchGroupSummaryList(
   patchGroups: readonly ProfileCopilotPatchGroup[],
 ): string {
@@ -610,50 +572,6 @@ export function formatPatchGroupSummaryList(
   }
 
   return `${summaries.slice(0, -1).join(", ")}, and ${summaries[summaries.length - 1]}`;
-}
-
-export function inferRequestedJobSources(request: string) {
-  const normalized = normalizeSourceLabel(request);
-  const mentionsKnownSource = STARTER_JOB_SOURCES.some((preset) =>
-    preset.aliases.some((alias) =>
-      normalized.includes(normalizeSourceLabel(alias)),
-    ),
-  );
-  const hasSourceEditVerb =
-    /\b(add|include|save|use|track|watch|follow|enable|reactivate)\b/.test(
-      normalized,
-    ) ||
-    /\bre\s*enable\b/.test(normalized) ||
-    /\bturn\s+(?:.+\s+)?(?:back\s+)?on\b/.test(normalized);
-  const soundsLikeSourceEdit =
-    /job source|job sources|source|sources|search site|search sites|job board|job boards/.test(
-      normalized,
-    ) ||
-    (mentionsKnownSource && hasSourceEditVerb);
-
-  if (!soundsLikeSourceEdit) {
-    return [] as Array<{ label: string; startingUrl: string }>;
-  }
-
-  const requestedSources = new Map<
-    string,
-    { label: string; startingUrl: string }
-  >();
-
-  for (const preset of STARTER_JOB_SOURCES) {
-    if (
-      preset.aliases.some((alias) =>
-        normalized.includes(normalizeSourceLabel(alias)),
-      )
-    ) {
-      requestedSources.set(preset.label, {
-        label: preset.label,
-        startingUrl: preset.startingUrl,
-      });
-    }
-  }
-
-  return [...requestedSources.values()];
 }
 
 export function requestLooksLikeWorkModePreferenceEdit(

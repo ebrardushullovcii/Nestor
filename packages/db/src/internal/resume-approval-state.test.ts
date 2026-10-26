@@ -33,6 +33,7 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
   const temp = await createTempRepository("nestor-approval-state-");
   let repo = await temp.createRepository();
   const db = new DatabaseSync(temp.filePath);
+  const profileDb = new DatabaseSync(`${temp.filePath}.jobs.sqlite`);
   try {
     await repo.upsertResumeDraft(draft("a"));
     await repo.upsertResumeDraft(draft("b"));
@@ -67,7 +68,7 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
       targetRoles: ["Synthetic role"],
     };
     // A failure after the approval rows were written must roll back the whole save.
-    db.exec(`CREATE TRIGGER fail_profile BEFORE UPDATE ON singleton_state WHEN NEW.key='profile'
+    profileDb.exec(`CREATE TRIGGER fail_profile BEFORE UPDATE ON profile
       BEGIN SELECT RAISE(ABORT, 'synthetic commit failure'); END;`);
     await expect(
       repo.staleResumeDrafts!({
@@ -96,7 +97,7 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
     expect(
       db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
     ).toBe(0);
-    db.exec("DROP TRIGGER fail_profile");
+    profileDb.exec("DROP TRIGGER fail_profile");
     // Warm the committed body cache after the other connection's schema changes.
     const warm = await repo.readDisplayCollections!();
     const parse = vi.spyOn(JSON, "parse");
@@ -170,6 +171,7 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
   } finally {
     vi.restoreAllMocks();
     db.close();
+    profileDb.close();
     await repo.close();
     await temp.cleanup();
   }

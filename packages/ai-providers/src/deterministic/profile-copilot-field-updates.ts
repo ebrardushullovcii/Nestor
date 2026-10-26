@@ -4,7 +4,6 @@ import type {
   ProfileCopilotPatchGroup,
   ProfileIdentityPatchFieldsSchema,
   ProfileNarrativePatchFieldsSchema,
-  ProfileAnswerBankPatchFieldsSchema,
   ProfileApplicationIdentityPatchFieldsSchema,
   ProfileCoreListPatchFieldsSchema,
   ProfileProfessionalSummaryPatchFieldsSchema,
@@ -71,14 +70,8 @@ export const specialistOwnedReplacementFields = {
     fields: ["targetRoles", "locations"],
   },
   replace_search_preferences_fields: {
-    sourceModule: "job-source, salary, target-role, and work-mode specialists",
-    fields: [
-      "discovery",
-      "minimumSalaryUsd",
-      "targetRoles",
-      "targetSalaryUsd",
-      "workModes",
-    ],
+    sourceModule: "salary, target-role, and work-mode specialists",
+    fields: ["minimumSalaryUsd", "targetRoles", "targetSalaryUsd", "workModes"],
   },
   replace_compensation_preferences_fields: {
     sourceModule: "unified typed salary command parser",
@@ -169,11 +162,14 @@ type ContractReplacementKey =
   | ContractFieldKeys<typeof ProfileWorkEligibilityPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileProfessionalSummaryPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileNarrativePatchFieldsSchema>
-  | ContractFieldKeys<typeof ProfileAnswerBankPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileApplicationIdentityPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileSkillGroupsPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileCoreListPatchFieldsSchema>
-  | ContractFieldKeys<typeof ProfileSearchPreferencesPatchFieldsSchema>
+  // Retired stored proposals still parse discovery, but it is not editable.
+  | Exclude<
+      ContractFieldKeys<typeof ProfileSearchPreferencesPatchFieldsSchema>,
+      "discovery"
+    >
   | ContractFieldKeys<typeof ProfileCompensationPreferencePatchFieldsSchema>;
 
 // Each alias resolves to `true` when coverage is exhaustive; otherwise the

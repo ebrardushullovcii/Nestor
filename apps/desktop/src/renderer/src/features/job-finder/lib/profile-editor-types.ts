@@ -2,14 +2,12 @@ import type { JobSearchPreferences } from "@nestor/contracts";
 import type {
   BooleanSelectValue,
   CertificationFormEntry,
-  DiscoveryTargetEditorValue,
   EducationFormEntry,
   ExperienceFormEntry,
   LanguageFormEntry,
   LinkFormEntry,
   ProjectFormEntry,
   ProofBankEntryFormEntry,
-  ReusableAnswerFormEntry,
 } from "./job-finder-types";
 
 export interface ProfileEditorValues {
@@ -73,18 +71,6 @@ export interface ProfileEditorValues {
     preferredLinkIds: string;
     preferredPhone: string;
   };
-  answerBank: {
-    availability: string;
-    careerTransition: string;
-    customAnswers: ReusableAnswerFormEntry[];
-    noticePeriod: string;
-    relocation: string;
-    salaryExpectations: string;
-    selfIntroduction: string;
-    travel: string;
-    visaSponsorship: string;
-    workAuthorization: string;
-  };
   skillGroups: {
     coreSkills: string;
     highlightedSkills: string;
@@ -105,7 +91,6 @@ export interface ProfileEditorValues {
 export interface SearchPreferencesEditorValues {
   companyBlacklist: string;
   companyWhitelist: string;
-  collectOnlyHardCriteriaMatches: boolean;
   employmentTypes: string;
   shiftPreference: "day" | "night" | "any";
   minimumWeeklyHours: string;
@@ -121,7 +106,6 @@ export interface SearchPreferencesEditorValues {
   tailoringMode: JobSearchPreferences["tailoringMode"];
   targetCompanyStages: string;
   targetIndustries: string;
-  discoveryTargets: DiscoveryTargetEditorValue[];
   targetRoles: string;
   targetSalaryUsd: string;
   workModes: JobSearchPreferences["workModes"];

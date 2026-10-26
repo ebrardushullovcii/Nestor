@@ -181,7 +181,7 @@ describe("the person's answer authority", () => {
           } as unknown as AssistantHostPorts,
         },
       ),
-    ).rejects.toThrow("Needs you");
+    ).rejects.toThrow("old answer bank is retired");
     expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
       before,
     );

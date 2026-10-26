@@ -3,8 +3,7 @@ import {
   ApplicationQuestionRecordSchema,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
-import { mergeApplicationAnswersIntoExecutionProfile } from "./workspace-application-answer-execution";
+import { applicationAnswersForExecution } from "./workspace-application-answer-execution";
 
 const now = "2026-08-10T10:00:00.000Z";
 
@@ -48,9 +47,7 @@ function answer(input: {
 
 describe("application answers in prepare-only execution", () => {
   it("injects every selected user-reviewed answer ahead of reusable profile answers", () => {
-    const profile = createSeed().profile;
-    const merged = mergeApplicationAnswersIntoExecutionProfile({
-      profile,
+    const merged = applicationAnswersForExecution({
       questionRecords: [
         question("question-1", "answer-1"),
         question("question-2", "answer-2"),
@@ -72,7 +69,7 @@ describe("application answers in prepare-only execution", () => {
       idPrefix: "application-run-1",
     });
 
-    expect(merged.answerBank.customAnswers.slice(0, 2)).toEqual([
+    expect(merged.slice(0, 2)).toEqual([
       expect.objectContaining({
         question: "Prompt for question-1",
         answer: "First",
@@ -85,9 +82,7 @@ describe("application answers in prepare-only execution", () => {
   });
 
   it("does not resurrect an answer whose latest revision was cleared", () => {
-    const profile = createSeed().profile;
-    const merged = mergeApplicationAnswersIntoExecutionProfile({
-      profile,
+    const merged = applicationAnswersForExecution({
       questionRecords: [question("question-1", null)],
       answerRecords: [
         answer({
@@ -107,11 +102,10 @@ describe("application answers in prepare-only execution", () => {
       idPrefix: "application-run-1",
     });
 
-    expect(merged).toBe(profile);
+    expect(merged).toEqual([]);
   });
   it("honors an explicit selection of an older answer despite a newer revision", () => {
-    const merged = mergeApplicationAnswersIntoExecutionProfile({
-      profile: createSeed().profile,
+    const merged = applicationAnswersForExecution({
       questionRecords: [question("question-1", "answer-old")],
       answerRecords: [
         answer({
@@ -129,13 +123,11 @@ describe("application answers in prepare-only execution", () => {
       ],
       idPrefix: "application-run-1",
     });
-    expect(merged.answerBank.customAnswers[0]?.answer).toBe("Old");
+    expect(merged[0]?.answer).toBe("Old");
   });
 });
 
 it("keeps the person's pay answers scoped to this application's execution profile", () => {
-  const profile = createSeed().profile;
-  const before = structuredClone(profile);
   const salary = {
     ...question("salary", "salary_answer"),
     prompt: "Expected salary",
@@ -145,8 +137,7 @@ it("keeps the person's pay answers scoped to this application's execution profil
     ...question("currency", "currency_answer"),
     prompt: "Salary currency",
   };
-  const merged = mergeApplicationAnswersIntoExecutionProfile({
-    profile,
+  const merged = applicationAnswersForExecution({
     questionRecords: [salary, currency],
     answerRecords: [
       answer({
@@ -164,7 +155,7 @@ it("keeps the person's pay answers scoped to this application's execution profil
     ],
     idPrefix: "application_request_pay",
   });
-  expect(merged.answerBank.customAnswers.slice(0, 2)).toEqual([
+  expect(merged.slice(0, 2)).toEqual([
     expect.objectContaining({
       question: "Expected salary",
       answer: "90000",
@@ -174,14 +165,12 @@ it("keeps the person's pay answers scoped to this application's execution profil
       answer: "EUR",
     }),
   ]);
-  for (const entry of merged.answerBank.customAnswers.slice(0, 2)) {
+  for (const entry of merged.slice(0, 2)) {
     expect(entry.id).toMatch(/^application_request_pay_/);
   }
-  expect(profile).toEqual(before);
 });
 
 it("an application's own currency survives a newer library-seeded suggestion", () => {
-  const profile = createSeed().profile;
   const own = answer({
     id: "own_currency",
     questionId: "currency",
@@ -197,23 +186,20 @@ it("an application's own currency survives a newer library-seeded suggestion", (
     }),
     sourceId: "answerLibrary.other_job_currency",
   };
-  const merged = mergeApplicationAnswersIntoExecutionProfile({
-    profile,
+  const merged = applicationAnswersForExecution({
     questionRecords: [
       { ...question("currency", library.id), prompt: "Currency" },
     ],
     answerRecords: [own, library],
     idPrefix: "application_this",
   });
-  expect(merged.answerBank.customAnswers[0]).toMatchObject({
+  expect(merged[0]).toMatchObject({
     question: "Currency",
     answer: "GBP",
   });
 });
 
 it("Prepare again keeps one-use eligibility on the same application even after a newer agent suggestion", () => {
-  const profile = createSeed().profile;
-  const before = structuredClone(profile);
   const own = {
     ...answer({
       id: "own",
@@ -239,15 +225,14 @@ it("Prepare again keeps one-use eligibility on the same application even after a
     resultId: "prepare_again",
     prompt: "Are you authorized to work in Germany?",
   };
-  const merged = mergeApplicationAnswersIntoExecutionProfile({
-    profile,
+  const merged = applicationAnswersForExecution({
     questionRecords: [currentQuestion],
     answerRecords: [own, proposed],
     idPrefix: "application_a",
     applicationRecordId: "application_a",
     jobLocation: "Hamburg, Germany",
   });
-  expect(merged.answerBank.customAnswers[0]).toMatchObject({
+  expect(merged[0]).toMatchObject({
     question: currentQuestion.prompt,
     answer: "Yes",
     applicationScope: {
@@ -257,15 +242,13 @@ it("Prepare again keeps one-use eligibility on the same application even after a
       hiringCountry: "Germany",
     },
   });
-  expect(profile).toEqual(before);
   expect(
-    mergeApplicationAnswersIntoExecutionProfile({
-      profile,
+    applicationAnswersForExecution({
       questionRecords: [currentQuestion],
       answerRecords: [own, proposed],
       idPrefix: "application_b",
       applicationRecordId: "application_b",
       jobLocation: "Hamburg, Germany",
     }),
-  ).toBe(profile);
+  ).toEqual([]);
 });

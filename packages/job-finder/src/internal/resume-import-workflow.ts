@@ -1,3 +1,4 @@
+import { resumeImportSavedAnswers } from "./resume-import-saved-answers";
 import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
@@ -330,6 +331,7 @@ async function finalizeResumeImportRunAtRevision(input: {
   candidates: ResumeImportFieldCandidate[];
 }> {
   const outcome = await input.ctx.repository.finalizeResumeImportRun({
+    savedAnswers: resumeImportSavedAnswers(input.fieldCandidates),
     profile: input.profile,
     searchPreferences: input.searchPreferences,
     run: input.run,

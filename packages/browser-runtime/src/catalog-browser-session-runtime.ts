@@ -219,10 +219,7 @@ function buildScreeningQuestions(input: {
     normalizedDescription.includes("visa sponsorship")
   ) {
     const questionId = `question_${input.job.id}_work_auth`;
-    const suggestedAnswerTexts = [
-      input.profile.answerBank.workAuthorization,
-      input.profile.answerBank.visaSponsorship,
-    ].filter((value): value is string => Boolean(value));
+    const suggestedAnswerTexts: string[] = [];
 
     questions.push({
       id: questionId,
@@ -259,7 +256,7 @@ function buildScreeningQuestions(input: {
         id: `question_${input.job.id}_salary`,
         prompt: "What are your salary expectations for this role?",
         kind: "salary_expectation",
-        answerText: input.profile.answerBank.salaryExpectations,
+        answerText: null,
         sourceId: input.profile.id,
         now: input.now,
       }),

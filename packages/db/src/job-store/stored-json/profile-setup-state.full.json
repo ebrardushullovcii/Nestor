@@ -1,0 +1,30 @@
+{
+  "status": "not_started",
+  "currentStep": "import",
+  "completedAt": "2026-10-26T00:00:00.000Z",
+  "reviewItems": [
+    {
+      "id": "synthetic",
+      "step": "import",
+      "target": {
+        "domain": "identity",
+        "key": "synthetic",
+        "recordId": "synthetic"
+      },
+      "label": "synthetic",
+      "reason": "synthetic",
+      "severity": "critical",
+      "status": "pending",
+      "proposedValue": "synthetic",
+      "sourceSnippet": "synthetic",
+      "sourceCandidateId": "synthetic",
+      "sourceRunId": "synthetic",
+      "createdAt": "2026-10-26T00:00:00.000Z",
+      "resolvedAt": "2026-10-26T00:00:00.000Z"
+    }
+  ],
+  "reviewedSteps": [
+    "import"
+  ],
+  "lastResumedAt": "2026-10-26T00:00:00.000Z"
+}

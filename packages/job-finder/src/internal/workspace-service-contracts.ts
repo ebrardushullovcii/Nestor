@@ -1,3 +1,4 @@
+import type { SavedAnswersStore } from "@nestor/db/applications";
 import type { CandidateReusableAnswer } from "@nestor/contracts";
 import type { JobSitesStore } from "@nestor/db/job-store";
 import type {
@@ -171,8 +172,8 @@ export interface JobFinderWorkspaceService {
    * preference and cover-letter preference into settings, and the resume
    * approach into both `settings.resumeApplicationMode` and
    * `searchPreferences.tailoringMode`. The search selectivity also drives
-   * `searchPreferences.discovery.collectOnlyHardCriteriaMatches`, so search
-   * preferences go through the ordinary save path (active plan kept in sync).
+   * `searchPreferences.searchSelectivity`, so search
+   * preferences go through the ordinary goal-store save path.
    */
   updateAiBehavior(
     input: UpdateAiBehaviorInput,
@@ -384,6 +385,7 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  savedAnswers?: SavedAnswersStore;
   readSavedAnswers?: () => readonly CandidateReusableAnswer[];
   jobSites?: JobSitesStore;
   /** Host acknowledgement that the first display transfer has finished. */

@@ -15,16 +15,13 @@ describe("generated skill context", () => {
     expect(accepts("Terraform")).toBe(true);
   });
 
-  test.each(["location", "eligibility", "answer"])(
+  test.each(["location", "eligibility"])(
     "uses profile %s context even when the job omits it",
     (source) => {
       const profile = createProfile();
       if (source === "location") profile.currentLocation = "New Zealand";
       if (source === "eligibility")
         profile.workEligibility.authorizedWorkCountries = ["New Zealand"];
-      if (source === "answer")
-        profile.answerBank.workAuthorization =
-          "Authorized to work in New Zealand";
       const accepts = buildResumeSkillContextFilter({}, profile);
       expect(accepts("New Zealand")).toBe(false);
       expect(accepts("Zealand")).toBe(false);

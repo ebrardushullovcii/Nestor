@@ -14,7 +14,6 @@ import {
   type TailoringMode,
   type WorkHistoryReviewSuggestion,
 } from "@nestor/contracts";
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { readPlanAssessment } from "./plan-assessment";
 import { fnv1a32 } from "@nestor/core";
 import {
@@ -289,7 +288,7 @@ function buildResumeWorkspaceSharedProfile(profile: CandidateProfile) {
       profile.narrative.nextChapterSummary ??
       profile.narrative.careerTransitionSummary ??
       null,
-    selfIntroduction: profile.answerBank.selfIntroduction,
+    selfIntroduction: profile.narrative.professionalStory,
     highlightedProofs: profile.proofBank.slice(0, 4).map((proof) => ({
       id: proof.id,
       title: proof.title,
@@ -1003,7 +1002,7 @@ export async function buildResumeWorkspace(
     (plan) => plan.id === planId,
   );
   const searchPreferences = activePlan
-    ? searchPreferencesForCampaignRun(activePlan)
+    ? activePlan.searchPreferences
     : profilePreferences;
   const job = readPlanAssessment(initialJob, planId);
   // The listing's full read runs when the person asks for it (Read and

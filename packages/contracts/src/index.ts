@@ -11,6 +11,7 @@ export * from "./candidate-assets";
 export * from "./application-documents";
 export * from "./apply";
 export * from "./profile";
+export * from "./profile-contacts";
 export * from "./job-finder-actions";
 export * from "./assistant";
 export * from "./profile-copilot";
@@ -67,3 +68,7 @@ export * from "./job-sites";
 export * from "./source-access";
 export * from "./needs-you-commands";
 export * from "./application-answer-dependencies";
+export * from "./profile-store";
+export * from "./preferences-store";
+
+export * from "./profile-commands";

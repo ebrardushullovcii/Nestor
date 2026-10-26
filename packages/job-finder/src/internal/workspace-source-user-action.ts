@@ -2,6 +2,7 @@ import {
   JOB_FINDER_BROWSER_LABEL,
   UserActionRequestSchema,
   type SourceDebugRunRecord,
+  type JobDiscoveryTarget,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import { deriveSourceAccessPrompts } from "./workspace-source-access-prompts";
@@ -19,6 +20,7 @@ function stableFingerprint(value: string): string {
 export async function persistDiscoveryLoginUserAction(input: {
   repository: JobFinderRepository;
   run: SourceDebugRunRecord;
+  target: JobDiscoveryTarget | null;
 }): Promise<void> {
   if (input.run.state !== "paused_manual") return;
 
@@ -28,9 +30,7 @@ export async function persistDiscoveryLoginUserAction(input: {
       input.repository.listSourceInstructionArtifacts(),
       input.repository.listSourceDebugAttempts(),
     ]);
-  const target = searchPreferences.discovery.targets.find(
-    (candidate) => candidate.id === input.run.targetId,
-  );
+  const target = input.target;
   if (!target) return;
 
   const prompt = deriveSourceAccessPrompts({

@@ -149,15 +149,7 @@ export function resolveCampaignSourceTargetIds(
     "searchPreferences" | "sourceTargetIds" | "sourceSelectionMode"
   >,
 ): string[] {
-  const selectedIds = campaign.sourceTargetIds ?? [];
-  const followsProfile =
-    campaign.sourceSelectionMode === "profile" ||
-    (campaign.sourceSelectionMode === undefined && selectedIds.length === 0);
-  return campaign.searchPreferences.discovery.targets
-    .filter((target) =>
-      followsProfile ? target.enabled : selectedIds.includes(target.id),
-    )
-    .map((target) => target.id);
+  return [...(campaign.sourceTargetIds ?? [])];
 }
 
 export const JobSearchCampaignCollectionSchema = z

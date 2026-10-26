@@ -64,8 +64,6 @@ export function buildResumeSkillContextFilter(
     ...(profile?.education.map((entry) => entry.location) ?? []),
     ...(profile?.workEligibility.authorizedWorkCountries ?? []),
     ...(profile?.workEligibility.preferredRelocationRegions ?? []),
-    profile?.answerBank.workAuthorization,
-    profile?.answerBank.visaSponsorship,
     ...Array.from(
       prose.matchAll(CONTEXT_CLAUSE_PATTERN),
       (match) => match[0].split(NEXT_SKILL_CLAUSE_PATTERN)[0],

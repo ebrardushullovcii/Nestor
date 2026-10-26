@@ -97,10 +97,6 @@ const searchPreferences = JobSearchPreferencesSchema.parse({
   },
   approvalMode: "review_before_submit",
   tailoringMode: "balanced",
-  discovery: {
-    targets: [],
-    historyLimit: 5,
-  },
 });
 
 function expectPreSubmitCheckpoint(result: ApplyExecutionResult) {

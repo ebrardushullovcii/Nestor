@@ -66,7 +66,6 @@ type ResolvedResumeImportSelection = {
     skills?: string[];
     skillGroups?: CandidateProfile["skillGroups"];
     narrative?: Partial<CandidateProfile["narrative"]>;
-    answerBank?: Partial<CandidateProfile["answerBank"]>;
     /**
      * Work-eligibility facts the resume states outright. `explicit` marks a
      * value the person is confirming from review right now; an imported value
@@ -479,18 +478,6 @@ function buildResolvedSelection(
           careerTransitionSummary: typeof value === "string" ? value : null,
         };
         break;
-      case "answer_bank.selfIntroduction":
-        selection.scalarFields.answerBank = {
-          ...(selection.scalarFields.answerBank ?? {}),
-          selfIntroduction: typeof value === "string" ? value : null,
-        };
-        break;
-      case "answer_bank.careerTransition":
-        selection.scalarFields.answerBank = {
-          ...(selection.scalarFields.answerBank ?? {}),
-          careerTransition: typeof value === "string" ? value : null,
-        };
-        break;
       case "work_eligibility.authorizedWorkCountries": {
         const values = uniqueStrings(toStringArray(value));
         if (values.length > 0) {
@@ -775,10 +762,6 @@ function mergeResolvedSelectionIntoWorkspace(
         ...(selection.scalarFields.narrative ?? {}),
       },
       proofBank: mergeProofBankEntries(profile.proofBank, selection.proofBank),
-      answerBank: {
-        ...profile.answerBank,
-        ...(selection.scalarFields.answerBank ?? {}),
-      },
       // A resume that says "EU citizen, no sponsorship needed" answers the two
       // questions every application form asks; saved answers are never
       // replaced by an import.

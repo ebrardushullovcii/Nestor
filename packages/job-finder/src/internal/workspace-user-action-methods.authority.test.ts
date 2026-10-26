@@ -9,12 +9,8 @@ import {
   type JobFinderRepository,
 } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
-
-import { createJobFinderWorkspaceService } from "../index";
 import {
-  createAiClient,
-  createBrowserRuntime,
-  createDocumentManager,
+  createWorkspaceServiceHarness,
   createSeed,
 } from "../workspace-service.test-support";
 import * as authorityResolution from "./apply-authority-resolution";
@@ -347,23 +343,17 @@ describe("saved-answer application authority", () => {
     "%s adds no salary-recovery collection reads for one unrelated saved answer",
     async (reader) => {
       const seed = answerSeed();
-      seed.profile.answerBank.customAnswers = [
-        {
-          id: "unrelated_answer",
-          label: "Years of experience",
-          question: "Years of experience",
-          answer: "5 years",
-          kind: "other",
-          roleFamilies: [],
-          proofEntryIds: [],
-        },
-      ];
-      const repository = createInMemoryJobFinderRepository(seed);
-      const service = createJobFinderWorkspaceService({
+      const {
         repository,
-        browserRuntime: createBrowserRuntime(),
-        aiClient: createAiClient(),
-        documentManager: createDocumentManager(),
+        workspaceService: service,
+        savedAnswers,
+      } = createWorkspaceServiceHarness({ seed });
+      savedAnswers.upsert({
+        key: "unrelated_answer",
+        label: "Years of experience",
+        prompt: "Years of experience",
+        answer: "5 years",
+        kind: "other",
       });
       const read = service[reader];
       if (!read) throw new Error("Display projection is unavailable.");

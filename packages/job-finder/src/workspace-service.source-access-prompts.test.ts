@@ -10,11 +10,11 @@ import {
 describe("createJobFinderWorkspaceService source access prompts", () => {
   test("derives a login-required source access prompt from a paused manual auth blocker", async () => {
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       lastDebugRunId: "source_debug_run_login_required",
@@ -22,7 +22,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
     seed.sourceDebugRuns = [
       {
         id: "source_debug_run_login_required",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         state: "paused_manual",
         startedAt: "2026-03-20T10:00:00.000Z",
         updatedAt: "2026-03-20T10:01:00.000Z",
@@ -56,7 +56,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       {
         id: "attempt_login_required",
         runId: "source_debug_run_login_required",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         phase: "access_auth_probe",
         startedAt: "2026-03-20T10:00:00.000Z",
         completedAt: "2026-03-20T10:01:00.000Z",
@@ -90,7 +90,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
 
     expect(snapshot.sourceAccessPrompts).toEqual([
       expect.objectContaining({
-        targetId: "target_linkedin_default",
+        targetId: "1",
         targetLabel: "LinkedIn",
         state: "prompt_login_required",
         detail: "Please sign in first.",
@@ -100,11 +100,11 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
 
   test("derives a login-recommended prompt from auth-limited but job-bearing source evidence", async () => {
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       lastDebugRunId: "source_debug_run_login_recommended",
@@ -114,7 +114,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
     seed.sourceDebugRuns = [
       {
         id: "source_debug_run_login_recommended",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         state: "completed",
         startedAt: "2026-03-20T10:00:00.000Z",
         updatedAt: "2026-03-20T10:02:00.000Z",
@@ -147,7 +147,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       {
         id: "attempt_login_recommended",
         runId: "source_debug_run_login_recommended",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         phase: "access_auth_probe",
         startedAt: "2026-03-20T10:00:00.000Z",
         completedAt: "2026-03-20T10:01:00.000Z",
@@ -183,7 +183,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_login_recommended",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:01:00.000Z",
         updatedAt: "2026-03-20T10:02:00.000Z",
@@ -263,7 +263,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
 
     expect(snapshot.sourceAccessPrompts).toEqual([
       expect.objectContaining({
-        targetId: "target_linkedin_default",
+        targetId: "1",
         targetUrl: "https://www.linkedin.com/jobs/collections/recommended/",
         state: "prompt_login_recommended",
         summary:
@@ -294,11 +294,11 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       runDiscovery: vi.fn(),
     };
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       draftInstructionId: "instruction_targeted_open",
@@ -307,7 +307,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
     seed.sourceInstructionArtifacts = [
       createSourceInstructionArtifact({
         id: "instruction_targeted_open",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         status: "draft",
         createdAt: "2026-03-20T10:01:00.000Z",
         updatedAt: "2026-03-20T10:02:00.000Z",
@@ -383,7 +383,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
     });
 
     await workspaceService.openBrowserSession({
-      targetId: "target_linkedin_default",
+      targetId: "1",
     });
 
     expect(openSession).toHaveBeenCalledWith("target_site", {
@@ -414,7 +414,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       getSessionState,
     };
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }

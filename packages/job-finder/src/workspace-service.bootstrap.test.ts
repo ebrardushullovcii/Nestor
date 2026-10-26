@@ -25,7 +25,7 @@ function createHydrationFixture() {
     state: "completed",
     startedAt: "2026-08-19T09:00:00.000Z",
     completedAt: "2026-08-19T09:02:00.000Z",
-    targetIds: ["target_linkedin_default"],
+    targetIds: ["1"],
     summary: {
       targetsPlanned: 1,
       targetsCompleted: 1,
@@ -36,7 +36,7 @@ function createHydrationFixture() {
   });
   const sourceDebugRun = SourceDebugRunRecordSchema.parse({
     id: "source_debug_history_1",
-    targetId: "target_linkedin_default",
+    targetId: "1",
     state: "completed",
     startedAt: "2026-08-19T09:05:00.000Z",
     updatedAt: "2026-08-19T09:10:00.000Z",

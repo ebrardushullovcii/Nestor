@@ -22,20 +22,20 @@ function createRequest(
 ): UserActionRequest {
   return UserActionRequestSchema.parse({
     id: "action_login",
-    dedupeKey: "discovery:target_linkedin_default:login",
+    dedupeKey: "discovery:1:login",
     revision: 1,
     kind: "login",
     state: "pending",
     scope: {
       type: "discovery_source",
-      targetId: "target_linkedin_default",
+      targetId: "1",
       source: "target_site",
       sourceDebugRunId: null,
       sourceDebugAttemptId: null,
     },
     verification: {
       type: "source_access",
-      targetId: "target_linkedin_default",
+      targetId: "1",
       blockerFingerprint: "login-wall-v1",
       expectedOrigin: "https://boards.example.com/",
     },
@@ -138,7 +138,9 @@ describe("workspace user action inbox operations", () => {
     seed.userActionRequests = [createRequest()];
     const harness = createWorkspaceServiceHarness({
       seed,
-      browserRuntime: createRuntime(vi.fn(() => Promise.resolve(blockedResult))),
+      browserRuntime: createRuntime(
+        vi.fn(() => Promise.resolve(blockedResult)),
+      ),
     });
     const openSession = vi
       .spyOn(harness.browserRuntime, "openSession")

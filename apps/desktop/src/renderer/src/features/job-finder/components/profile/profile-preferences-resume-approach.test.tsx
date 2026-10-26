@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JobSearchPreferencesSchema } from "@nestor/contracts";
@@ -23,7 +29,14 @@ function Harness() {
     defaultValues: createSearchPreferencesEditorValues(preferences),
   });
 
-  return <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />;
+  return (
+    <>
+      <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />
+      <output aria-label="Selected hours">
+        {preferencesForm.watch("employmentTypes")}
+      </output>
+    </>
+  );
 }
 
 beforeEach(() => {
@@ -39,7 +52,9 @@ describe("Preferences resume approach", () => {
   it("keeps the resume level out of the targeting section; it has its own section in this tab, and strict collection lives under Settings, AI behavior", () => {
     render(<Harness />);
 
-    expect(screen.queryByLabelText("Default resume tailoring style")).toBeNull();
+    expect(
+      screen.queryByLabelText("Default resume tailoring style"),
+    ).toBeNull();
     expect(
       screen.queryByText(/How broadly should Job Finder collect/),
     ).toBeNull();
@@ -56,11 +71,25 @@ describe("Preferences hours and where you work", () => {
     render(<Harness />);
 
     expect(screen.queryByText("Employment types")).toBeNull();
-    expect(screen.getByText("Hours (full-time, part-time)")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Hours" })).toBeTruthy();
     // The where-you-work preference no longer shares the name "work mode"
     // with a work-history card's own field.
     expect(screen.queryByText("Preferred work modes")).toBeNull();
     expect(screen.getByText("Where you want to work")).toBeTruthy();
     expect(screen.queryByText("Job families")).toBeNull();
   });
+});
+
+it("changes hours with the shared setup checkboxes and can return to all kinds of work", () => {
+  render(<Harness />);
+  const hours = within(screen.getByRole("group", { name: "Hours" }));
+  fireEvent.click(hours.getByRole("checkbox", { name: "Part-time" }));
+  expect(screen.getByLabelText("Selected hours").textContent).toBe("Part-time");
+  fireEvent.click(hours.getByRole("checkbox", { name: "Contract" }));
+  expect(screen.getByLabelText("Selected hours").textContent).toContain(
+    "Contract",
+  );
+  fireEvent.click(hours.getByRole("checkbox", { name: "Part-time" }));
+  fireEvent.click(hours.getByRole("checkbox", { name: "Contract" }));
+  expect(screen.getByLabelText("Selected hours").textContent).toBe("");
 });

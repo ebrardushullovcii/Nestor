@@ -20,7 +20,7 @@ function makeReads(service: object) {
   const inputs = workspaceHarnessInputs.get(service);
   if (!inputs)
     throw new Error("Use a workspace harness or supply explicit read ports.");
-  const { repository, documentManager } = inputs;
+  const { repository, documentManager, jobSites } = inputs;
   const store = openJobStore(":memory:");
   const jobs = createJobCommandRunner({ store });
   const resumes = createResumeStore(store);
@@ -127,9 +127,7 @@ function makeReads(service: object) {
         latestResumeImportReviewCandidates,
         latestResumeImportBundle: bundles[0] ?? null,
         resumeImportActive: false,
-        enabledSiteCount: searchPreferences.discovery.targets.filter(
-          (site) => site.enabled,
-        ).length,
+        enabledSiteCount: jobSites.counts().enabled,
         availableResumeTemplates: documentManager.listResumeTemplates(),
         generatedAt: new Date().toISOString(),
       };

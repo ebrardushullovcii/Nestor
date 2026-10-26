@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import {
   clearProfileSetupJustFinished,
   markProfileSetupJustFinished,
@@ -705,12 +706,11 @@ export function createPrimaryPageActions(
     workspace,
   } = args;
 
-  function getConfiguredSourceTarget(targetId: string) {
-    return (
-      workspace.searchPreferences.discovery.targets.find(
-        (target) => target.id === targetId,
-      ) ?? null
-    );
+  async function getConfiguredSourceTarget(targetId: string) {
+    const site = await window.nestor.jobs.run("get_site", {
+      id: Number(targetId),
+    });
+    return site ? jobSiteTarget(site) : null;
   }
   const applyRouteScopedMessage = (
     next: ActionState,
@@ -826,13 +826,18 @@ export function createPrimaryPageActions(
     onOpenBrowserSession: (
       input?: JobFinderOpenBrowserSessionInput,
       options?: JobFinderActionFailureReporting,
-    ) =>
-      runAction(
-        () => actions.openBrowserSession(input),
+    ) => {
+      let target: Awaited<ReturnType<typeof getConfiguredSourceTarget>> = null;
+      return runAction(
+        async () => {
+          target = input?.targetId
+            ? await getConfiguredSourceTarget(input.targetId)
+            : null;
+          return actions.openBrowserSession(input);
+        },
         () => undefined,
         (result) => {
           if (input?.targetId) {
-            const target = getConfiguredSourceTarget(input.targetId);
             if (result.browserSession.driver === "catalog_seed") {
               return target
                 ? `Targeted sign-in for ${target.label} is unavailable because the browser agent runtime is disabled.`
@@ -858,7 +863,8 @@ export function createPrimaryPageActions(
           // `JobFinderActionFailureReporting`.
           ...(options?.rethrowError ? { rethrowError: true } : {}),
         },
-      ),
+      );
+    },
     onOpenProfile: () => {
       navigate("/job-finder/profile", {
         state: { forceFullProfile: true },

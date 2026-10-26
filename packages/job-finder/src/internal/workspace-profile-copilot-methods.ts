@@ -9,7 +9,6 @@ import {
   CandidateProfileSchema,
   CandidateProjectSchema,
   CandidateProofBankEntrySchema,
-  CandidateReusableAnswerSchema,
   JobSearchPreferencesSchema,
   ProfileCopilotPatchGroupSchema,
   ProfileSetupStateSchema,
@@ -35,7 +34,7 @@ import {
   commitProfileCopilotStateWithStaleRetry,
   type CommitProfileCopilotStateInput,
 } from "./profile-commit-stale-conflict";
-import { followPrimaryContacts } from "./profile-merge";
+import { followPrimaryContacts } from "@nestor/contracts";
 import {
   MIRRORED_PROFILE_LIST_FIELDS,
   mergeMirroredListHalves,
@@ -146,7 +145,6 @@ function isPatchGroupSafeForAutoApply(
       operation.operation === "replace_work_eligibility_fields" ||
       operation.operation === "replace_professional_summary_fields" ||
       operation.operation === "replace_narrative_fields" ||
-      operation.operation === "replace_answer_bank_fields" ||
       operation.operation === "replace_application_identity_fields" ||
       operation.operation === "replace_skill_group_fields" ||
       operation.operation === "resolve_review_items"
@@ -431,7 +429,6 @@ function isPreferencesSectionItem(
   return [
     "search_preferences",
     "work_eligibility",
-    "answer_bank",
     "application_identity",
   ].includes(item.target.domain);
 }
@@ -1169,6 +1166,12 @@ export function createWorkspaceProfileCopilotMethods(input: {
 
     for (const operation of patchGroup.operations) {
       switch (operation.operation) {
+        case "replace_answer_bank_fields":
+        case "upsert_reusable_answer":
+        case "remove_reusable_answer":
+          throw new Error(
+            "Profile's old answer bank is retired. Manage reusable application answers in Needs you.",
+          );
         case "replace_identity_fields": {
           const previousProfile = nextProfile;
           nextProfile = followPrimaryContacts(
@@ -1220,15 +1223,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
             ...nextProfile,
             narrative: {
               ...nextProfile.narrative,
-              ...operation.value,
-            },
-          });
-          break;
-        case "replace_answer_bank_fields":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
               ...operation.value,
             },
           });
@@ -1286,6 +1280,10 @@ export function createWorkspaceProfileCopilotMethods(input: {
           break;
         }
         case "replace_search_preferences_fields": {
+          if (operation.value.discovery !== undefined)
+            throw new Error(
+              "Job sources are managed in Job sources, separately from Profile goals.",
+            );
           const hasLegacyCompensationAmount =
             operation.value.minimumSalaryUsd !== undefined ||
             operation.value.targetSalaryUsd !== undefined;
@@ -1495,34 +1493,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
           nextProfile = CandidateProfileSchema.parse({
             ...nextProfile,
             proofBank: removeRecord(nextProfile.proofBank, operation.recordId),
-          });
-          break;
-        case "upsert_reusable_answer":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
-              customAnswers: replaceOrInsertRecord(
-                nextProfile.answerBank.customAnswers,
-                {
-                  ...operation.record,
-                  id: operation.record.id ?? createUniqueId("answer"),
-                },
-                (record) => CandidateReusableAnswerSchema.parse(record),
-              ),
-            },
-          });
-          break;
-        case "remove_reusable_answer":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
-              customAnswers: removeRecord(
-                nextProfile.answerBank.customAnswers,
-                operation.recordId,
-              ),
-            },
           });
           break;
         case "set_resume_approach":

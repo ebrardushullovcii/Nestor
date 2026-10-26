@@ -24,8 +24,7 @@ import {
   reduceUserActionCommand,
 } from "../user-action-domain";
 import {
-  createReusableAnswerForQuestion,
-  eligibilityAnswerScope,
+  rememberWorkspaceAnswer,
   normalizeAnswerQuestion,
 } from "./workspace-answer-memory";
 import {
@@ -601,63 +600,14 @@ async function persistOneManualAnswer(input: {
   const now = new Date().toISOString();
 
   if (input.command.saveForFuture) {
-    const profile = await input.ctx.repository.getProfile();
-    const job = await readSavedJob(input.ctx.repository, question.jobId);
-    const applicationScope = eligibilityAnswerScope({
+    rememberWorkspaceAnswer(input.ctx, {
+      prompt: question.prompt,
+      answer,
       kind: question.kind,
-      resultId: question.resultId,
-      applicationRecordId: question.applicationRecordId ?? null,
-      location: job?.location,
       ...(input.command.hiringCountry
         ? { hiringCountry: input.command.hiringCountry }
         : {}),
     });
-    const normalizedPrompt = normalizeAnswerQuestion(question.prompt);
-    const exactMatches = profile.answerBank.customAnswers.filter((candidate) =>
-      [candidate.question, candidate.label].some(
-        (value) =>
-          normalizeAnswerQuestion(value) === normalizedPrompt &&
-          (candidate.applicationScope?.location ?? null) ===
-            (applicationScope?.location ?? null) &&
-          candidate.applicationScope?.hiringCountry ===
-            applicationScope?.hiringCountry,
-      ),
-    );
-    // The person kept "save for next time" on, so this answer becomes the
-    // saved one, replacing a different answer saved earlier for the same
-    // question. Failing here would leave the application stuck on a question
-    // the person already answered.
-    if (exactMatches.length === 0) {
-      await input.ctx.repository.saveProfile({
-        ...profile,
-        answerBank: {
-          ...profile.answerBank,
-          customAnswers: [
-            ...profile.answerBank.customAnswers,
-            createReusableAnswerForQuestion({
-              answer,
-              prompt: question.prompt,
-              ...(applicationScope ? { applicationScope } : {}),
-              kind: question.kind,
-            }),
-          ],
-        },
-      });
-    } else if (
-      exactMatches.some((candidate) => candidate.answer.trim() !== answer)
-    ) {
-      await input.ctx.repository.saveProfile({
-        ...profile,
-        answerBank: {
-          ...profile.answerBank,
-          customAnswers: profile.answerBank.customAnswers.map((candidate) =>
-            exactMatches.includes(candidate)
-              ? { ...candidate, answer }
-              : candidate,
-          ),
-        },
-      });
-    }
   }
 
   // A letter the person wrote or accepted here is the letter this
@@ -981,8 +931,7 @@ export function createWorkspaceUserActionMethods(
    * the answer asked it a moment later all the same.
    */
   async function answerStepsFromSavedAnswers(): Promise<void> {
-    const profile = await ctx.repository.getProfile();
-    const answered = profile.answerBank.customAnswers.flatMap((saved) => {
+    const answered = (ctx.readSavedAnswers?.() ?? []).flatMap((saved) => {
       const answer = saved.answer.trim();
       return answer
         ? [saved.question, saved.label]

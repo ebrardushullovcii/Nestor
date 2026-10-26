@@ -1,0 +1,55 @@
+{
+  "id": "synthetic",
+  "role": "user",
+  "content": "synthetic",
+  "context": {
+    "surface": "general"
+  },
+  "patchGroups": [
+    {
+      "id": "synthetic",
+      "summary": "synthetic",
+      "applyMode": "applied",
+      "operations": [
+        {
+          "operation": "replace_identity_fields",
+          "value": {
+            "currentCity": "synthetic",
+            "currentCountry": "synthetic",
+            "currentLocation": "synthetic",
+            "currentRegion": "synthetic",
+            "email": "synthetic",
+            "firstName": "synthetic",
+            "fullName": "synthetic",
+            "githubUrl": "synthetic",
+            "headline": "synthetic",
+            "lastName": "synthetic",
+            "linkedinUrl": "synthetic",
+            "middleName": "synthetic",
+            "personalWebsiteUrl": "synthetic",
+            "phone": "synthetic",
+            "portfolioUrl": "synthetic",
+            "preferredDisplayName": "synthetic",
+            "secondaryEmail": "synthetic",
+            "summary": "synthetic",
+            "timeZone": "synthetic",
+            "yearsExperience": 1
+          }
+        }
+      ],
+      "createdAt": "2026-10-26T00:00:00.000Z"
+    }
+  ],
+  "executionAttribution": {
+    "taskId": "synthetic",
+    "capability": "synthetic",
+    "durationMs": 1,
+    "model": "synthetic",
+    "reasoningEffort": "synthetic",
+    "providerCalls": 1,
+    "repairAttempts": 1,
+    "fallbackUsed": true,
+    "stopReason": "completed"
+  },
+  "createdAt": "2026-10-26T00:00:00.000Z"
+}

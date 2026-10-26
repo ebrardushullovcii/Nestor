@@ -40,7 +40,6 @@ const FIELD_ARRAY_ROOT_NAMES = new Set([
   "links",
   "languages",
   "proofBank",
-  "answerBank.customAnswers",
 ]);
 
 // Structural row mutations ARE genuine user edits even though the root resync
@@ -326,6 +325,54 @@ export function buildCanonicalAwareProfilePayload(input: {
   );
 }
 
+/** A background edit to a dirty value needs a choice, never a last-write-wins save. */
+function conflictsWithDirtyEdit(
+  before: unknown,
+  incoming: unknown,
+  draft: unknown,
+  dirty: unknown,
+  ownSave?: unknown,
+): boolean {
+  if (dirty === true)
+    return (
+      JSON.stringify(before) !== JSON.stringify(incoming) &&
+      JSON.stringify(incoming) !== JSON.stringify(draft) &&
+      JSON.stringify(incoming) !== JSON.stringify(ownSave)
+    );
+  if (!dirty || typeof dirty !== "object") return false;
+  if (Array.isArray(dirty) && Array.isArray(draft)) {
+    const draftRows: unknown[] = draft;
+    const rowFor = (rows: unknown, id: string | null): unknown =>
+      id && Array.isArray(rows)
+        ? rows.find((row: unknown) => stableRecordId(row) === id)
+        : undefined;
+    return dirty.some((child: unknown, index) => {
+      const row = draftRows[index];
+      const id = stableRecordId(row);
+      return conflictsWithDirtyEdit(
+        rowFor(before, id),
+        rowFor(incoming, id),
+        row,
+        child,
+        rowFor(ownSave, id),
+      );
+    });
+  }
+  const value = (row: unknown, key: string) =>
+    row && typeof row === "object"
+      ? (row as Record<string, unknown>)[key]
+      : undefined;
+  return Object.entries(dirty).some(([key, child]) =>
+    conflictsWithDirtyEdit(
+      value(before, key),
+      value(incoming, key),
+      value(draft, key),
+      child,
+      value(ownSave, key),
+    ),
+  );
+}
+
 export function useProfileScreenForms(input: {
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   onDraftEdited?: () => void;
@@ -367,6 +414,16 @@ export function useProfileScreenForms(input: {
     },
     [],
   );
+  const pendingOwnSave = useRef<{
+    profile: CandidateProfile;
+    goals: JobSearchPreferences;
+  } | null>(null);
+  const expectOwnSave = (
+    profile: CandidateProfile,
+    goals: JobSearchPreferences,
+  ) => {
+    pendingOwnSave.current = { profile, goals };
+  };
   const latestProfileRef = useRef(input.profile);
   const latestSearchPreferencesRef = useRef(input.searchPreferences);
   // Taken once: the preferences carry every job source, and serializing them
@@ -551,7 +608,6 @@ export function useProfileScreenForms(input: {
     profileSkillValues,
     eligibilityValues,
     applicationIdentityValues,
-    answerBankValues,
     experienceValues,
     educationValues,
     certificationValues,
@@ -569,7 +625,6 @@ export function useProfileScreenForms(input: {
       "profileSkills",
       "eligibility",
       "applicationIdentity",
-      "answerBank",
       "records.experiences",
       "records.education",
       "records.certifications",
@@ -596,7 +651,10 @@ export function useProfileScreenForms(input: {
     targetSalaryUsd,
     salaryCurrency,
     compensationInterval,
-    discoveryTargets,
+    shiftPreference,
+    minimumWeeklyHours,
+    maximumWeeklyHours,
+    compensationBasis,
   ] = useWatch({
     control: preferencesForm.control,
     name: [
@@ -616,7 +674,10 @@ export function useProfileScreenForms(input: {
       "targetSalaryUsd",
       "salaryCurrency",
       "compensationInterval",
-      "discoveryTargets",
+      "shiftPreference",
+      "minimumWeeklyHours",
+      "maximumWeeklyHours",
+      "compensationBasis",
     ],
   });
   const draftProfileResult = useMemo(
@@ -632,7 +693,6 @@ export function useProfileScreenForms(input: {
       }),
     [
       applicationIdentityValues,
-      answerBankValues,
       certificationValues,
       currentProfileBaseline,
       educationValues,
@@ -669,8 +729,11 @@ export function useProfileScreenForms(input: {
       companyBlacklist,
       companyWhitelist,
       compensationInterval,
+      compensationBasis,
+      shiftPreference,
+      minimumWeeklyHours,
+      maximumWeeklyHours,
       currentSearchPreferencesBaseline,
-      discoveryTargets,
       employmentTypes,
       excludedLocations,
       jobFamilies,
@@ -739,14 +802,25 @@ export function useProfileScreenForms(input: {
       loadedProfileContentFingerprintRef.current = incomingProfileFingerprint;
       loadedReviewCandidatesContentFingerprintRef.current =
         incomingCandidatesFingerprint;
-      runWithoutDraftEditSignal(() =>
-        profileForm.reset(
-          createProfileEditorValues(
-            input.profile,
-            input.latestResumeImportReviewCandidates,
-          ),
-        ),
-      );
+      runWithoutDraftEditSignal(() => {
+        const incoming = createProfileEditorValues(
+          input.profile,
+          input.latestResumeImportReviewCandidates,
+        );
+        // Canonical contact following belongs to this save too. Adopt it before
+        // keeping focused inputs, so old hidden values cannot become new edits.
+        profileForm.setValue(
+          "applicationIdentity.preferredEmail",
+          incoming.applicationIdentity.preferredEmail,
+          { shouldDirty: false },
+        );
+        profileForm.setValue(
+          "applicationIdentity.preferredPhone",
+          incoming.applicationIdentity.preferredPhone,
+          { shouldDirty: false },
+        );
+        profileForm.reset(incoming, { keepValues: profileChangedSinceSeen });
+      });
       // Incomplete added rows are omitted by the save payload. They are still
       // the person's draft and must survive the response to that save.
       const canonicalLanguageIds = new Set(
@@ -812,7 +886,27 @@ export function useProfileScreenForms(input: {
       profileForm.formState.dirtyFields,
     );
 
-    if (mergeOutcome.status === "conflict") {
+    if (
+      mergeOutcome.status === "conflict" ||
+      conflictsWithDirtyEdit(
+        createProfileEditorValues(
+          latestProfileRef.current,
+          input.latestResumeImportReviewCandidates,
+        ),
+        createProfileEditorValues(
+          input.profile,
+          input.latestResumeImportReviewCandidates,
+        ),
+        draftValues,
+        profileForm.formState.dirtyFields,
+        pendingOwnSave.current
+          ? createProfileEditorValues(
+              pendingOwnSave.current.profile,
+              input.latestResumeImportReviewCandidates,
+            )
+          : undefined,
+      )
+    ) {
       // Atomic abort: keep every local value, keep the previous baseline for
       // stale-save protection, and leave dirty guards untouched. The surface
       // is marked conflicted so the discard-and-reload affordance appears and
@@ -826,11 +920,26 @@ export function useProfileScreenForms(input: {
     loadedProfileContentFingerprintRef.current = incomingProfileFingerprint;
     loadedReviewCandidatesContentFingerprintRef.current =
       incomingCandidatesFingerprint;
-    runWithoutDraftEditSignal(() =>
-      profileForm.reset(mergeOutcome.value as ProfileEditorValues, {
-        keepDirty: true,
-      }),
-    );
+    runWithoutDraftEditSignal(() => {
+      if (
+        buildOrderedContentFingerprint(mergeOutcome.value) ===
+        buildOrderedContentFingerprint(draftValues)
+      ) {
+        profileForm.reset(
+          createProfileEditorValues(
+            input.profile,
+            input.latestResumeImportReviewCandidates,
+          ),
+          {
+            keepValues: true,
+            keepDirty: true,
+          },
+        );
+      } else
+        profileForm.reset(mergeOutcome.value as ProfileEditorValues, {
+          keepDirty: true,
+        });
+    });
     applyBackgroundConflictSurface("profile", false);
     setValidationMessage(null);
     setBackgroundMergeNotice(
@@ -885,6 +994,7 @@ export function useProfileScreenForms(input: {
       runWithoutDraftEditSignal(() =>
         preferencesForm.reset(
           createSearchPreferencesEditorValues(input.searchPreferences),
+          { keepValues: true },
         ),
       );
       applyBackgroundConflictSurface("preferences", false);
@@ -928,7 +1038,18 @@ export function useProfileScreenForms(input: {
       preferencesForm.formState.dirtyFields,
     );
 
-    if (preferencesMergeOutcome.status === "conflict") {
+    if (
+      preferencesMergeOutcome.status === "conflict" ||
+      conflictsWithDirtyEdit(
+        createSearchPreferencesEditorValues(latestSearchPreferencesRef.current),
+        createSearchPreferencesEditorValues(input.searchPreferences),
+        draftPreferencesValues,
+        preferencesForm.formState.dirtyFields,
+        pendingOwnSave.current
+          ? createSearchPreferencesEditorValues(pendingOwnSave.current.goals)
+          : undefined,
+      )
+    ) {
       applyBackgroundConflictSurface("preferences", true);
       setBackgroundMergeNotice(backgroundConflictNoticeMessage);
       return;
@@ -1005,7 +1126,6 @@ export function useProfileScreenForms(input: {
     () =>
       buildProfileScreenViewModel({
         applicationIdentityValues,
-        answerBankValues,
         certificationValues,
         companyBlacklist,
         companyWhitelist,
@@ -1038,7 +1158,6 @@ export function useProfileScreenForms(input: {
       }),
     [
       applicationIdentityValues,
-      answerBankValues,
       certificationValues,
       companyBlacklist,
       companyWhitelist,
@@ -1113,9 +1232,16 @@ export function useProfileScreenForms(input: {
     backgroundConflictSurfaces.profile;
 
   return {
+    expectOwnSave,
+    editBaseline: {
+      profile: currentProfileBaseline,
+      goals: currentSearchPreferencesBaseline,
+    },
     backgroundArrays,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
+    draftProfileResult,
+    draftDiffers: profileDraftDiffers || preferencesDraftDiffers,
     draftSearchPreferencesResult,
     experienceArray: wrapUserFieldArray(experienceArray),
     hasBackgroundConflict,

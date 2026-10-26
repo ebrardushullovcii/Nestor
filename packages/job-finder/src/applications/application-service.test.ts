@@ -12,12 +12,17 @@ import {
   ApplicationAuthorityStopConditionsSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   ApplyExecutionResultSchema,
+  SourceInstructionArtifactSchema,
   type FoundJob,
   type ApplyExecutionResult,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
-import { createResumeStore, openJobStore } from "@nestor/db/job-store";
+import {
+  createJobSitesStore,
+  createResumeStore,
+  openJobStore,
+} from "@nestor/db/job-store";
 import { afterEach, expect, it, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
@@ -266,6 +271,52 @@ it("returns an answer the form still rejects to Needs you instead of failing wit
   expect(f.applications.needsYou.list().rows[0]?.id).not.toBe(first.id);
   expect(f.onError).not.toHaveBeenCalled();
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("passes the job's current site notes and learned Apply instructions to preparation", async () => {
+  const f = await setup(1);
+  const sites = createJobSitesStore(f.jobs);
+  sites.add({ text: "https://replica.test/board" });
+  const site = sites.list().rows[0]!;
+  sites.update({
+    id: site.id,
+    label: "Renamed source",
+    customInstructions: "Use the guest application.",
+  });
+  sites.record(site.id, {
+    draftInstructionId: "site-draft",
+    instructionStatus: "draft",
+  });
+  f.jobs
+    .sql("UPDATE job_sightings SET source_id=? WHERE job_id=?")
+    .run(String(site.id), f.ids[0]!);
+  const readInputs = f.deps.readInputs.bind(f.deps);
+  f.deps.readInputs = async () => ({
+    ...(await readInputs()),
+    sourceInstructionArtifacts: [
+      SourceInstructionArtifactSchema.parse({
+        id: "site-draft",
+        targetId: String(site.id),
+        status: "draft",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+        basedOnRunId: "synthetic-run",
+        applyGuidance: ["Upload the resume before continuing."],
+        versionInfo: {
+          promptProfileVersion: "test",
+          toolsetVersion: "test",
+          adapterVersion: "test",
+        },
+      }),
+    ],
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute.mock.calls[0]![1].instructions).toEqual([
+    "Use the guest application.",
+    "[Apply] Upload the resume before continuing.",
+  ]);
 });
 
 it("keeps filling while another form saves unrelated answers, but vetoes changed Profile facts", async () => {

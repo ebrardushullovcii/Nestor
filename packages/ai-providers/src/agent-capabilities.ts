@@ -841,7 +841,7 @@ export async function runResumeGenerationAgentTask(input: {
       ? { textContentEvidenceRef: "baseResume:text" }
       : { textContent: profileResumeText },
   );
-  const { discovery, ...searchPreferences } = input.request.searchPreferences;
+  const searchPreferences = input.request.searchPreferences;
   // Send the current listing once. Browser navigation/fetch diagnostics and
   // the search source catalog are operational state, not resume evidence.
   // Candidate facts and listing prose are kept intact, including long fields.
@@ -869,7 +869,6 @@ export async function runResumeGenerationAgentTask(input: {
     candidateProfile,
     searchPreferences: {
       ...searchPreferences,
-      remoteCountsAsAnyLocation: discovery.remoteCountsAsAnyLocation ?? true,
     },
     settings: {
       resumeFormat: input.request.settings.resumeFormat,

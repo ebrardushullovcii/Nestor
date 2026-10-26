@@ -4,7 +4,6 @@ import {
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
   createFreshStartCandidateProfile,
-  createStarterJobDiscoveryTargets,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
 
@@ -30,11 +29,6 @@ export function createEmptyJobFinderRepositoryState(): JobFinderRepositoryState 
       tailoringMode: "balanced",
       companyBlacklist: [],
       companyWhitelist: [],
-      discovery: {
-        historyLimit: 5,
-        // No seeded sources: the user adds the job sites they actually use.
-        targets: createStarterJobDiscoveryTargets(),
-      },
     }),
     profileSetupState: ProfileSetupStateSchema.parse({
       status: "not_started",

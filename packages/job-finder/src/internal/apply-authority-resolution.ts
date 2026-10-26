@@ -186,9 +186,6 @@ export async function resolveApplyAuthorityForJob(input: {
     getSettings?: Parameters<
       typeof readSalaryDisclosurePreference
     >[0]["getSettings"];
-    commitSettingsUpdate?: Parameters<
-      typeof readSalaryDisclosurePreference
-    >[0]["commitSettingsUpdate"];
     listApplicationAuthorityEnvelopes: (filter: {
       status?: "active";
     }) => Promise<readonly ApplicationAuthorityEnvelope[]>;
@@ -200,17 +197,10 @@ export async function resolveApplyAuthorityForJob(input: {
 }): Promise<
   ApplyAuthorityResolution & { envelope: ApplicationAuthorityEnvelope | null }
 > {
-  const { getSettings, commitSettingsUpdate } = input.repository;
-  const salaryDisclosure =
-    getSettings && commitSettingsUpdate
-      ? await readSalaryDisclosurePreference({
-          getSettings: () => getSettings.call(input.repository),
-          commitSettingsUpdate: (update) =>
-            commitSettingsUpdate.call(input.repository, update),
-          listApplicationAuthorityEnvelopes: (filter) =>
-            input.repository.listApplicationAuthorityEnvelopes(filter),
-        })
-      : "pause_for_user";
+  const { getSettings } = input.repository;
+  const salaryDisclosure = getSettings
+    ? await readSalaryDisclosurePreference({ getSettings: () => getSettings.call(input.repository) })
+    : "pause_for_user";
   let active: readonly ApplicationAuthorityEnvelope[] = [];
   try {
     active = await input.repository.listApplicationAuthorityEnvelopes({

@@ -26,23 +26,14 @@ import {
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
-  CandidateProfileSchema,
   JobFinderActivityControlSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
-  JobFinderSettingsSchema,
   JobSearchCampaignCollectionSchema,
-  JobSearchPreferencesSchema,
-  ProfileCopilotMessageSchema,
-  ProfileRevisionSchema,
-  ProfileSetupStateSchema,
-  ResumeDocumentBundleSchema,
   ResumeAssistantMessageSchema,
   ResumeDraftRevisionSchema,
   ResumeDraftSchema,
   ResumeExportArtifactSchema,
-  ResumeImportFieldCandidateSchema,
-  ResumeImportRunSchema,
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   SavedJobSchema,
@@ -468,24 +459,6 @@ function parseSingletonRow<TValue>(
     }),
   ) as TValue;
 }
-
-/** Settings authorize external actions, so validate their file once on open. */
-export function validateWorkspaceSettingsFile(database: DatabaseSync): void {
-  const row = database
-    .prepare("SELECT value FROM singleton_state WHERE key = 'settings'")
-    .get();
-  if (row)
-    validatePersistedRowValue({
-      tableName: "singleton_state",
-      rowId: "settings",
-      value: parsePersistedRowJson({
-        tableName: "singleton_state",
-        rowId: "settings",
-        rawValue: String(row.value),
-      }),
-      schema: JobFinderSettingsSchema,
-    });
-}
 export function getSingletonValue<TValue>(
   database: DatabaseSync,
   key: StateTableKey,
@@ -805,14 +778,6 @@ export function writeState(
   database.exec("BEGIN IMMEDIATE");
 
   try {
-    initSingletonValue(database, "profile", state.profile);
-    initSingletonValue(database, "search_preferences", state.searchPreferences);
-    initSingletonValue(
-      database,
-      "profile_setup_state",
-      state.profileSetupState,
-    );
-    initSingletonValue(database, "settings", state.settings);
     replaceDiscoveryStorage(database, state.discovery);
     if (state.campaigns.length > 0 && state.activeCampaignId) {
       initSingletonValue(database, "campaign_state", {
@@ -958,42 +923,6 @@ export function writeState(
     );
     replaceIndexedCollection(
       database,
-      "resume_import_runs",
-      state.resumeImportRuns,
-      {
-        columnNames: ["source_resume_id", "started_at", "status"],
-        getColumns: (value) => {
-          const run = ResumeImportRunSchema.parse(value);
-          return [run.sourceResumeId, run.startedAt, run.status];
-        },
-      },
-    );
-    replaceIndexedCollection(
-      database,
-      "resume_import_document_bundles",
-      state.resumeImportDocumentBundles,
-      {
-        columnNames: ["run_id", "source_resume_id", "created_at"],
-        getColumns: (value) => {
-          const bundle = ResumeDocumentBundleSchema.parse(value);
-          return [bundle.runId, bundle.sourceResumeId, bundle.createdAt];
-        },
-      },
-    );
-    replaceIndexedCollection(
-      database,
-      "resume_import_field_candidates",
-      state.resumeImportFieldCandidates,
-      {
-        columnNames: ["run_id", "resolution", "created_at"],
-        getColumns: (value) => {
-          const candidate = ResumeImportFieldCandidateSchema.parse(value);
-          return [candidate.runId, candidate.resolution, candidate.createdAt];
-        },
-      },
-    );
-    replaceIndexedCollection(
-      database,
       "resume_research_artifacts",
       state.resumeResearchArtifacts,
       {
@@ -1025,30 +954,6 @@ export function writeState(
         getColumns: (value) => {
           const message = ResumeAssistantMessageSchema.parse(value);
           return [message.jobId, message.createdAt];
-        },
-      },
-    );
-    replaceIndexedCollection(
-      database,
-      "profile_copilot_messages",
-      state.profileCopilotMessages,
-      {
-        columnNames: ["created_at"],
-        getColumns: (value) => {
-          const message = ProfileCopilotMessageSchema.parse(value);
-          return [message.createdAt];
-        },
-      },
-    );
-    replaceIndexedCollection(
-      database,
-      "profile_revisions",
-      state.profileRevisions,
-      {
-        columnNames: ["created_at"],
-        getColumns: (value) => {
-          const revision = ProfileRevisionSchema.parse(value);
-          return [revision.createdAt];
         },
       },
     );
@@ -1257,24 +1162,10 @@ export function readState(
   database: DatabaseSync,
   fallbackSeed: JobFinderRepositorySeed,
 ): JobFinderRepositoryState {
-  const profile =
-    getSingletonValue(database, "profile", CandidateProfileSchema) ??
-    fallbackSeed.profile;
-  const searchPreferences =
-    getSingletonValue(
-      database,
-      "search_preferences",
-      JobSearchPreferencesSchema,
-    ) ?? fallbackSeed.searchPreferences;
-  const settings =
-    getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
-    fallbackSeed.settings;
-  const profileSetupState =
-    getSingletonValue(
-      database,
-      "profile_setup_state",
-      ProfileSetupStateSchema,
-    ) ?? fallbackSeed.profileSetupState;
+  const profile = fallbackSeed.profile;
+  const searchPreferences = fallbackSeed.searchPreferences;
+  const settings = fallbackSeed.settings;
+  const profileSetupState = fallbackSeed.profileSetupState;
   const discovery = readDiscoveryStorage(database, fallbackSeed.discovery);
   const campaignState = getSingletonValue(
     database,
@@ -1328,30 +1219,9 @@ export function readState(
         orderBySql: "exported_at DESC, id ASC",
       },
     ),
-    resumeImportRuns: listCollectionValues(
-      database,
-      "resume_import_runs",
-      ResumeImportRunSchema,
-      {
-        orderBySql: "started_at DESC, id ASC",
-      },
-    ),
-    resumeImportDocumentBundles: listCollectionValues(
-      database,
-      "resume_import_document_bundles",
-      ResumeDocumentBundleSchema,
-      {
-        orderBySql: "created_at DESC, id ASC",
-      },
-    ),
-    resumeImportFieldCandidates: listCollectionValues(
-      database,
-      "resume_import_field_candidates",
-      ResumeImportFieldCandidateSchema,
-      {
-        orderBySql: "created_at DESC, id ASC",
-      },
-    ),
+    resumeImportRuns: fallbackSeed.resumeImportRuns,
+    resumeImportDocumentBundles: fallbackSeed.resumeImportDocumentBundles,
+    resumeImportFieldCandidates: fallbackSeed.resumeImportFieldCandidates,
     resumeResearchArtifacts: listCollectionValues(
       database,
       "resume_research_artifacts",
@@ -1376,22 +1246,8 @@ export function readState(
         orderBySql: "created_at ASC, id ASC",
       },
     ),
-    profileCopilotMessages: listCollectionValues(
-      database,
-      "profile_copilot_messages",
-      ProfileCopilotMessageSchema,
-      {
-        orderBySql: "created_at ASC, id ASC",
-      },
-    ),
-    profileRevisions: listCollectionValues(
-      database,
-      "profile_revisions",
-      ProfileRevisionSchema,
-      {
-        orderBySql: "created_at DESC, id ASC",
-      },
-    ),
+    profileCopilotMessages: fallbackSeed.profileCopilotMessages,
+    profileRevisions: fallbackSeed.profileRevisions,
     applyRuns: listCollectionValues(database, "apply_runs", ApplyRunSchema, {
       orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.apply_runs,
     }),

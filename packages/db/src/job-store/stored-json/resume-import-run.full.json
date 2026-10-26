@@ -1,0 +1,194 @@
+{
+  "id": "synthetic",
+  "sourceResumeId": "synthetic",
+  "sourceResumeFileName": "synthetic",
+  "trigger": "import",
+  "status": "queued",
+  "startedAt": "2026-10-26T00:00:00.000Z",
+  "completedAt": "2026-10-26T00:00:00.000Z",
+  "primaryParserKind": "plain_text",
+  "parserKinds": [
+    "plain_text"
+  ],
+  "routeKind": "plain_text_native",
+  "parserManifestVersion": "synthetic",
+  "qualityScore": 1,
+  "analysisProviderKind": "deterministic",
+  "analysisProviderLabel": "synthetic",
+  "visionProviderKind": "deterministic",
+  "visionProviderLabel": "synthetic",
+  "modelRoles": {
+    "text": {
+      "status": "not_started",
+      "startedAt": "2026-10-26T00:00:00.000Z",
+      "completedAt": "2026-10-26T00:00:00.000Z",
+      "providerKind": "deterministic",
+      "providerLabel": "synthetic",
+      "warning": "synthetic",
+      "errorMessage": "synthetic",
+      "timeoutMs": 1,
+      "candidateCount": 1
+    },
+    "vision": {
+      "status": "not_started",
+      "startedAt": "2026-10-26T00:00:00.000Z",
+      "completedAt": "2026-10-26T00:00:00.000Z",
+      "providerKind": "deterministic",
+      "providerLabel": "synthetic",
+      "warning": "synthetic",
+      "errorMessage": "synthetic",
+      "timeoutMs": 1,
+      "candidateCount": 1
+    },
+    "adjudication": {
+      "status": "not_started",
+      "startedAt": "2026-10-26T00:00:00.000Z",
+      "completedAt": "2026-10-26T00:00:00.000Z",
+      "providerKind": "deterministic",
+      "providerLabel": "synthetic",
+      "warning": "synthetic",
+      "errorMessage": "synthetic",
+      "timeoutMs": 1,
+      "candidateCount": 1
+    }
+  },
+  "timing": {
+    "totalMs": 1,
+    "textBranchMs": 1,
+    "literalExtractionMs": 1,
+    "reconciliationMs": 1,
+    "finalizationMs": 1,
+    "textStages": [
+      {
+        "stage": "identity_summary",
+        "status": "completed",
+        "providerKind": "deterministic",
+        "providerLabel": "synthetic",
+        "durationMs": 1,
+        "primaryProviderMs": 1,
+        "deterministicFallbackMs": 1,
+        "candidateCount": 1,
+        "fallbackKind": "timeout",
+        "fallbackReason": "synthetic"
+      }
+    ]
+  },
+  "analysisCacheIdentity": {
+    "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "parserFingerprint": "synthetic",
+    "textProviderKind": "deterministic",
+    "textProviderFingerprint": "synthetic",
+    "visionProviderKind": "deterministic",
+    "visionProviderFingerprint": "synthetic",
+    "promptVersion": "synthetic",
+    "schemaVersion": "synthetic",
+    "policyVersion": "synthetic",
+    "contextFingerprint": "synthetic"
+  },
+  "analysisCacheHit": true,
+  "analysisCacheSourceRunId": "synthetic",
+  "warnings": [
+    "synthetic"
+  ],
+  "errorMessage": "synthetic",
+  "failureKind": "interrupted",
+  "candidateCounts": {
+    "total": 1,
+    "autoApplied": 1,
+    "needsReview": 1,
+    "rejected": 1,
+    "abstained": 1
+  },
+  "timelineRepairProposals": [
+    {
+      "id": "synthetic",
+      "runId": "synthetic",
+      "issueKind": "overlapping_dates",
+      "status": "pending",
+      "certainty": "review_only",
+      "title": "synthetic",
+      "explanation": "synthetic",
+      "affectedExperienceIds": [
+        "synthetic"
+      ],
+      "initiallyPresentExperienceIds": [
+        "synthetic"
+      ],
+      "beforeExperiences": [
+        {
+          "id": "synthetic",
+          "companyName": "synthetic",
+          "companyUrl": "synthetic",
+          "title": "synthetic",
+          "employmentType": "synthetic",
+          "location": "synthetic",
+          "workMode": [
+            "remote"
+          ],
+          "startDate": "synthetic",
+          "endDate": "synthetic",
+          "isCurrent": true,
+          "isDraft": true,
+          "summary": "synthetic",
+          "achievements": [
+            "synthetic"
+          ],
+          "skills": [
+            "synthetic"
+          ],
+          "domainTags": [
+            "synthetic"
+          ],
+          "peopleManagementScope": "synthetic",
+          "ownershipScope": "synthetic"
+        }
+      ],
+      "proposedExperiences": [
+        {
+          "id": "synthetic",
+          "companyName": "synthetic",
+          "companyUrl": "synthetic",
+          "title": "synthetic",
+          "employmentType": "synthetic",
+          "location": "synthetic",
+          "workMode": [
+            "remote"
+          ],
+          "startDate": "synthetic",
+          "endDate": "synthetic",
+          "isCurrent": true,
+          "isDraft": true,
+          "summary": "synthetic",
+          "achievements": [
+            "synthetic"
+          ],
+          "skills": [
+            "synthetic"
+          ],
+          "domainTags": [
+            "synthetic"
+          ],
+          "peopleManagementScope": "synthetic",
+          "ownershipScope": "synthetic"
+        }
+      ],
+      "evidence": [
+        {
+          "candidateId": "synthetic",
+          "sourceBlockIds": [
+            "synthetic"
+          ],
+          "excerpt": "synthetic"
+        }
+      ],
+      "createdAt": "2026-10-26T00:00:00.000Z",
+      "resolvedAt": "2026-10-26T00:00:00.000Z",
+      "actionHistory": [
+        {
+          "action": "accept",
+          "occurredAt": "2026-10-26T00:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

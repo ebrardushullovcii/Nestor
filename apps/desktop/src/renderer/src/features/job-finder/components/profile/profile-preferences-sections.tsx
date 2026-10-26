@@ -1,3 +1,4 @@
+import { ProfileHoursField } from "./profile-hours-field";
 import { workModeValues } from "@nestor/contracts";
 import { useId } from "react";
 import type { UseFormReturn } from "react-hook-form";
@@ -86,11 +87,7 @@ export function ProfilePreferencesTargetingSection(props: {
             placeholder="Add a seniority level"
             values={parseListInput(watch("seniorityLevels"))}
           />
-          {/* "Part-time is the single most important thing about my
-              search" — hours were folded in among the other criteria under a
-              trade name. They get their own labelled control. */}
-          <ProfileListEditor
-            label="Hours (full-time, part-time)"
+          <ProfileHoursField
             onChange={(values) =>
               setValue(
                 "employmentTypes",
@@ -98,7 +95,6 @@ export function ProfilePreferencesTargetingSection(props: {
                 listFieldOptions,
               )
             }
-            placeholder="Add full-time, part-time, contract…"
             values={parseListInput(watch("employmentTypes"))}
           />
           <label className="grid gap-1 text-sm">

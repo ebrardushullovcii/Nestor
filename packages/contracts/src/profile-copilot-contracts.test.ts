@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  ProfileAnswerBankPatchFieldsSchema,
   ProfileCoreListPatchFieldsSchema,
   ProfileCopilotMessageSchema,
   ProfileCopilotPatchGroupSchema,
@@ -249,11 +248,6 @@ describe("contracts profile copilot schemas", () => {
     expect(ProfileCoreListPatchFieldsSchema.parse({ skills: [] })).toEqual({
       skills: [],
     });
-    expect(
-      ProfileAnswerBankPatchFieldsSchema.parse({ availability: null }),
-    ).toEqual({
-      availability: null,
-    });
 
     expect(ProfileIdentityPatchFieldsSchema.safeParse({}).success).toBe(false);
     expect(ProfileCoreListPatchFieldsSchema.safeParse({}).success).toBe(false);
@@ -351,7 +345,6 @@ describe("contracts profile copilot schemas", () => {
         professionalSummary: {},
         narrative: {},
         proofBank: [],
-        answerBank: {},
         applicationIdentity: {},
         skillGroups: {},
         targetRoles: [],

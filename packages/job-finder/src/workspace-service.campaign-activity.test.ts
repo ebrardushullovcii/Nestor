@@ -37,7 +37,7 @@ describe("workspace campaign and activity controls", () => {
     });
     // A deliberate Check source click clears the pause; it must never fail
     // with "press Resume on Home first" (whatever the check itself returns).
-    await service.runSourceDebug("target_linkedin_default").catch((error) => {
+    await service.runSourceDebug("1").catch((error) => {
       expect(String(error)).not.toContain("activity is paused");
     });
     expect((await service.getWorkspaceSnapshot()).activityControl.paused).toBe(

@@ -89,9 +89,7 @@ function getCurrentTargetValue(
         target.key as keyof CandidateProfile["narrative"]
       ];
     case "answer_bank":
-      return profile.answerBank[
-        target.key as keyof CandidateProfile["answerBank"]
-      ];
+      return null;
     case "experience":
       if (target.key !== "record") {
         return null;
@@ -849,6 +847,7 @@ export function buildProfileSetupReviewItems(
   const unresolvedCandidateDrafts = input.candidates
     .filter(
       (candidate) =>
+        candidate.target.section !== "answer_bank" &&
         (candidate.resolution === "needs_review" ||
           candidate.resolution === "abstained") &&
         shouldIncludeCandidateInSetupReview(candidate) &&

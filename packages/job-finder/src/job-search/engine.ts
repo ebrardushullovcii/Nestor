@@ -261,7 +261,10 @@ export function createListingSearchEngine(deps: {
         onUsage,
         ...input,
         profile: input.context.profile,
-        goals: toJobSearchGoals(input.context.searchPreferences),
+        goals: toJobSearchGoals({
+          ...input.context.searchPreferences,
+          remoteCountsAsAnyLocation: input.context.remoteCountsAsAnyLocation,
+        }),
       }),
   };
 }

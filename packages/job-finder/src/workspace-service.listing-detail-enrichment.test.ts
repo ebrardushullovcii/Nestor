@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type { ListingHtmlFetcher } from "./index";
 import { readPlanAssessment } from "./internal/plan-assessment";
 import { htmlToPlainText } from "@nestor/browser-agent/listing-detail-extraction";
@@ -97,8 +98,71 @@ const RECORD_PAGE = (title: string | null, company: string) =>
     description: DESCRIPTION_HTML,
   })}</script></head><body></body></html>`;
 
-describe("listing detail enrichment inside a discovery run", () => {
+test("Judge fit reads the current Settings policy and cannot reuse an opposite-policy verdict", async () => {
+  const seed = createSeed();
+  const job = seed.savedJobs[0]!;
+  const { aiClient: base } = createDetailReadingAiClient();
+  const assessJobFit = vi.fn<JobFinderAiClient["assessJobFit"]>(
+    async (input) => {
+      const result = await base.assessJobFit();
+      const off =
+        input.searchPreferences.discovery.remoteCountsAsAnyLocation === false;
+      return {
+        ...result,
+        score: off ? 82 : 96,
+        preferences: off ? "conflict" : "aligned",
+        preferencesExplanation: off
+          ? "Remote office is outside preferred places."
+          : "Remote location accepted.",
+      };
+    },
+  );
+  const { repository, workspaceService } = createWorkspaceServiceHarness({
+    seed,
+    aiClient: { ...base, assessJobFit },
+    fetchListingHtml: () =>
+      Promise.resolve({
+        status: 200,
+        html: RECORD_PAGE(job.title, job.company),
+        finalUrl: job.canonicalUrl,
+      }),
+  });
+  await workspaceService.assessJobListing(job.id);
+  const on = (await repository.listSavedJobs()).find(
+    (row) => row.id === job.id,
+  )!.matchAssessment;
+  expect(on.score).toBe(96);
+  const settings = await repository.getSettings();
+  await repository.saveSettings({
+    ...settings,
+    aiBehavior: {
+      ...settings.aiBehavior!,
+      jobSearch: {
+        ...settings.aiBehavior!.jobSearch,
+        remoteCountsAsAnyLocation: false,
+      },
+    },
+  });
+  await workspaceService.assessJobListing(job.id);
+  const off = (await repository.listSavedJobs()).find(
+    (row) => row.id === job.id,
+  )!.matchAssessment;
+  expect(off.score).toBe(82);
+  expect(
+    (await repository.listSavedJobs()).find((row) => row.id === job.id)
+      ?.planAssessments ?? {},
+  ).toEqual(job.planAssessments ?? {});
+  expect(off.judgment?.preferences).toBe("conflict");
+  expect(off.judgment?.contextFingerprint).not.toBe(
+    on.judgment?.contextFingerprint,
+  );
+  expect(
+    assessJobFit.mock.calls.at(-1)?.[0].searchPreferences.discovery
+      .remoteCountsAsAnyLocation,
+  ).toBe(false);
+});
 
+describe("listing detail enrichment inside a discovery run", () => {
   test("shortlisting returns before its background listing read and persists the later assessment", async () => {
     let release!: (result: Awaited<ReturnType<ListingHtmlFetcher>>) => void;
     const fetchListingHtml = vi.fn<ListingHtmlFetcher>(
@@ -161,8 +225,6 @@ test("an explicit listing read reports a job outside the saved list", async () =
   });
   await expect(
     workspaceService.assessJobListing("missing_synthetic_job"),
-  ).rejects.toThrow(
-    "This job is not in the saved list.",
-  );
+  ).rejects.toThrow("This job is not in the saved list.");
   expect(fetchListingHtml).not.toHaveBeenCalled();
 });

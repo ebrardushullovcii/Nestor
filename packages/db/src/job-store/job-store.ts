@@ -37,6 +37,11 @@ import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
+export { createProfileStore, type ProfileStore } from "./profile-store";
+export {
+  createPreferencesStore,
+  type PreferencesStore,
+} from "./preferences-store";
 export { createJobSitesStore, type JobSitesStore } from "./job-sites";
 export { createSourceAccessStore } from "./source-access";
 export { createSearchSourcesStore } from "./search-sources";
@@ -197,8 +202,19 @@ export function openJobStore(filePath: string): JobStore {
   let pending: JobChange[] = [];
 
   const notify = (change: JobChange) => {
-    if (change.stages.length === 0 && change.cause !== "sites") return;
+    if (
+      change.stages.length === 0 &&
+      !["sites", "profile", "profile_activity", "settings"].includes(
+        change.cause,
+      )
+    )
+      return;
     if (depth > 0) {
+      if (
+        change.cause === "profile" &&
+        !pending.some((item) => item.cause === "profile")
+      )
+        sql("UPDATE profile_revision SET version=version+1 WHERE id=1").run();
       pending.push(change);
       return;
     }
@@ -346,7 +362,7 @@ export function openJobStore(filePath: string): JobStore {
     unscoredJobIds: (limit) =>
       (
         sql(
-          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'hidden') AND fit_score = -1
+          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'resume', 'hidden') AND fit_score = -1
            ORDER BY found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),
@@ -388,3 +404,5 @@ export type { JobSearches } from "./searches";
 
 export { resetJobStore } from "./reset";
 export { approveOriginalResumesForTests, seedTrackerDemo } from "./test-seeds";
+
+export { createProfileEditDraftStore } from "./profile-edit-draft";

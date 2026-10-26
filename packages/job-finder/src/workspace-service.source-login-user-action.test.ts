@@ -1,11 +1,6 @@
-
-import {
-  SourceDebugRunRecordSchema,
-} from "@nestor/contracts";
-import { describe, expect, test, } from "vitest";
-import {
-  persistDiscoveryLoginUserAction,
-} from "./internal/workspace-source-user-action";
+import { SourceDebugRunRecordSchema, jobSiteTarget } from "@nestor/contracts";
+import { describe, expect, test } from "vitest";
+import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
   createSeed,
   createWorkspaceServiceHarness,
@@ -14,7 +9,7 @@ import {
 function createPausedRun(summary: string) {
   return SourceDebugRunRecordSchema.parse({
     id: "source_debug_run_login_required",
-    targetId: "target_linkedin_default",
+    targetId: "1",
     state: "paused_manual",
     startedAt: "2026-07-30T08:00:00.000Z",
     updatedAt: "2026-07-30T08:01:00.000Z",
@@ -41,17 +36,18 @@ function createPausedRun(summary: string) {
 }
 
 describe("discovery source login UserActionRequest adoption", () => {
-
   test("persists one strict browser-owned request for a login-required source prompt", async () => {
     const harness = createWorkspaceServiceHarness({ seed: createSeed() });
     const run = createPausedRun("Please sign in first.");
 
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
 
@@ -68,13 +64,13 @@ describe("discovery source login UserActionRequest adoption", () => {
       accountCreationAuthorized: false,
       scope: {
         type: "discovery_source",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         source: "target_site",
         sourceDebugRunId: run.id,
       },
       verification: {
         type: "source_access",
-        targetId: "target_linkedin_default",
+        targetId: "1",
         expectedOrigin: "https://www.linkedin.com/",
       },
     });
@@ -85,6 +81,7 @@ describe("discovery source login UserActionRequest adoption", () => {
 
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run: createPausedRun("Choose a search category manually."),
     });
 
@@ -96,6 +93,7 @@ describe("discovery source login UserActionRequest adoption", () => {
     const run = createPausedRun("Please sign in first.");
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
     const request = (await harness.repository.listUserActionRequests())[0];
@@ -113,6 +111,7 @@ describe("discovery source login UserActionRequest adoption", () => {
     });
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
 

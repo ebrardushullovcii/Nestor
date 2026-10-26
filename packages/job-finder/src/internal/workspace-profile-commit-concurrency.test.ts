@@ -6,9 +6,7 @@ import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "../index";
 import { ProfileCommitStaleError } from "./profile-commit-stale-conflict";
-import { RESUME_IMPORT_SUPERSEDED_MESSAGE } from "./resume-import-workflow";
 import {
-  createFreshStartSeedProfile,
   createSeed,
 } from "../workspace-service.test-fixtures";
 import {
@@ -17,28 +15,6 @@ import {
   createDocumentManager,
   createResearchAdapter,
 } from "../workspace-service.test-runtimes";
-
-const REUSABLE_ANSWER = {
-  id: "answer_concurrent_1",
-  kind: "other" as const,
-  label: "Notice period",
-  question: "What is your notice period?",
-  answer: "Two weeks",
-  roleFamilies: [],
-  proofEntryIds: [],
-};
-
-function addReusableAnswer(
-  current: Awaited<ReturnType<JobFinderRepository["getProfile"]>>,
-) {
-  return {
-    ...current,
-    answerBank: {
-      ...current.answerBank,
-      customAnswers: [...current.answerBank.customAnswers, REUSABLE_ANSWER],
-    },
-  };
-}
 
 function createTestHarness(repository: JobFinderRepository) {
   const workspaceService = createJobFinderWorkspaceService({
@@ -77,53 +53,17 @@ function createCopilotPatchGroupMessage() {
 }
 
 describe("profile copilot commit concurrency", () => {
-  test("a reusable answer landing during copilot compute survives the patch commit", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    let racedOnce = false;
-    const repository: JobFinderRepository = {
-      ...base,
-      commitProfileCopilotState: async (input) => {
-        if (!racedOnce) {
-          racedOnce = true;
-          await base.commitProfileUpdate(addReusableAnswer);
-        }
-        return base.commitProfileCopilotState(input);
-      },
-    };
-    await repository.upsertProfileCopilotMessage(
-      createCopilotPatchGroupMessage(),
-    );
-    const service = createTestHarness(repository);
-
-    await service.applyProfileCopilotPatchGroup("patch_headline_1");
-
-    const profile = await repository.getProfile();
-    expect(profile.headline).toBe("Copilot Headline");
-    expect(profile.answerBank.customAnswers).toEqual([REUSABLE_ANSWER]);
-    expect(racedOnce).toBe(true);
-  });
-
-  test("a reusable answer committed after the copilot patch survives", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    await base.upsertProfileCopilotMessage(createCopilotPatchGroupMessage());
-    const service = createTestHarness(base);
-
-    await service.applyProfileCopilotPatchGroup("patch_headline_1");
-    await base.commitProfileUpdate(addReusableAnswer);
-
-    const profile = await base.getProfile();
-    expect(profile.headline).toBe("Copilot Headline");
-    expect(profile.answerBank.customAnswers).toEqual([REUSABLE_ANSWER]);
-  });
-
   test("a second stale copilot commit raises a typed stale error without overwriting", async () => {
     const base = createInMemoryJobFinderRepository(createSeed());
-    await base.commitProfileUpdate(addReusableAnswer);
+    let editCount = 0;
     const repository: JobFinderRepository = {
       ...base,
       commitProfileCopilotState: async (input) => {
         const current = await base.getProfile();
-        await base.saveProfile({ ...current });
+        await base.saveProfile({
+          ...current,
+          summary: `Concurrent edit ${++editCount}`,
+        });
         return base.commitProfileCopilotState(input);
       },
     };
@@ -138,7 +78,6 @@ describe("profile copilot commit concurrency", () => {
 
     const profile = await repository.getProfile();
     expect(profile.headline).toBe(createSeed().profile.headline);
-    expect(profile.answerBank.customAnswers).toEqual([REUSABLE_ANSWER]);
 
     const messages = await repository.listProfileCopilotMessages();
     expect(messages[0]?.patchGroups[0]?.applyMode).toBe("needs_review");
@@ -196,80 +135,6 @@ describe("profile copilot commit concurrency", () => {
     expect(revisions.some((revision) => revision.trigger === "undo")).toBe(
       true,
     );
-  });
-});
-
-describe("resume import finalize concurrency", () => {
-  function createImportSeed() {
-    const seed = createSeed();
-    return {
-      ...seed,
-      profile: {
-        ...createFreshStartSeedProfile(),
-        baseResume: {
-          ...seed.profile.baseResume,
-          extractionStatus: "not_started" as const,
-          lastAnalyzedAt: null,
-          textContent: [
-            "Jamie Rivers",
-            "Staff Frontend Engineer",
-            "Berlin, Germany",
-            "jamie@example.com",
-            "",
-            "12 years of experience building React, TypeScript, and design systems.",
-          ].join("\n"),
-        },
-      },
-    };
-  }
-
-  test("a reusable answer landing during import compute survives finalization", async () => {
-    const base = createInMemoryJobFinderRepository(createImportSeed());
-    let racedOnce = false;
-    const repository: JobFinderRepository = {
-      ...base,
-      // The answer lands after the import captured its profile revision and
-      // before the import commits: the exact window in which a concurrent user
-      // edit must never be overwritten by extracted candidates.
-      finalizeResumeImportRun: async (input) => {
-        if (!racedOnce) {
-          racedOnce = true;
-          await base.commitProfileUpdate(addReusableAnswer);
-        }
-        return base.finalizeResumeImportRun(input);
-      },
-    };
-    const service = createTestHarness(repository);
-
-    await service.analyzeProfileFromResume();
-
-    const profile = await base.getProfile();
-    const run = await base.getLatestResumeImportRun();
-
-    expect(racedOnce).toBe(true);
-    // The concurrent edit wins the compare-and-swap; the import then
-    // re-reads the profile and lands on top of it, so the reusable answer and
-    // the imported identity both survive instead of the whole import waiting
-    // for review because a field was saved meanwhile.
-    expect(profile.answerBank.customAnswers).toEqual([REUSABLE_ANSWER]);
-    expect(profile.fullName).toBe("Jamie Rivers");
-    // The persisted run reflects suggestions still waiting for review after
-    // the retry; timing telemetry must not restore the earlier run status.
-    expect(run?.status).toBe("review_ready");
-    expect(run?.candidateCounts.needsReview).toBeGreaterThan(0);
-    expect(run?.warnings).not.toContain(RESUME_IMPORT_SUPERSEDED_MESSAGE);
-  });
-
-  test("a reusable answer committed after import finalization survives", async () => {
-    const base = createInMemoryJobFinderRepository(createImportSeed());
-    const service = createTestHarness(base);
-
-    await service.analyzeProfileFromResume();
-    await base.commitProfileUpdate(addReusableAnswer);
-
-    const profile = await base.getProfile();
-    expect(profile.fullName).toBe("Jamie Rivers");
-    expect(profile.answerBank.customAnswers).toEqual([REUSABLE_ANSWER]);
   });
 });
 

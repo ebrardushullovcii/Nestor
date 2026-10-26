@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import { releaseFinishedApplicationPages } from "./application-page-lifecycle";
 import { mergeApplyReviewCards } from "./agent-application-preparation";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
@@ -73,7 +74,7 @@ import {
 import { uniqueStrings } from "./shared";
 import { selectApplicationSighting } from "./listing-sightings";
 import { withApplicationRecordTransition } from "./application-crm";
-import { mergeApplicationAnswersIntoExecutionProfile } from "./workspace-application-answer-execution";
+import { applicationAnswersForExecution } from "./workspace-application-answer-execution";
 import { resolveApplicationAttachmentsForExecution } from "./workspace-application-attachments";
 import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { resolveApplyAuthorityForJob } from "./apply-authority-resolution";
@@ -1136,19 +1137,13 @@ export function createApplicationUserActionResumer(
       return;
     }
 
-    const [
-      profile,
-      settings,
-      searchPreferences,
-      instructionArtifacts,
-      debugAttempts,
-    ] = await Promise.all([
-      ctx.repository.getProfile(),
-      ctx.repository.getSettings(),
-      ctx.repository.getSearchPreferences(),
-      ctx.repository.listSourceInstructionArtifacts(),
-      ctx.repository.listSourceDebugAttempts(),
-    ]);
+    const [profile, settings, instructionArtifacts, debugAttempts] =
+      await Promise.all([
+        ctx.repository.getProfile(),
+        ctx.repository.getSettings(),
+        ctx.repository.listSourceInstructionArtifacts(),
+        ctx.repository.listSourceDebugAttempts(),
+      ]);
     const [answerRecords, questionRecords] = await Promise.all([
       ctx.repository.listApplicationAnswerRecords({
         jobId: scope.jobId,
@@ -1159,8 +1154,7 @@ export function createApplicationUserActionResumer(
         applicationRecordId: scope.applicationRecordId,
       }),
     ]);
-    const executionProfile = mergeApplicationAnswersIntoExecutionProfile({
-      profile,
+    const applicationAnswers = applicationAnswersForExecution({
       answerRecords,
       questionRecords,
       idPrefix: `application_${request.id}`,
@@ -1174,10 +1168,11 @@ export function createApplicationUserActionResumer(
       job.provenance.at(-1)?.targetId ??
       job.provenance[0]?.targetId ??
       null;
-    const provenanceTarget = provenanceTargetId
-      ? (searchPreferences.discovery.targets.find(
-          (target) => target.id === provenanceTargetId,
-        ) ?? null)
+    const provenanceSite = provenanceTargetId
+      ? ctx.jobSites?.get(Number(provenanceTargetId))
+      : null;
+    const provenanceTarget = provenanceSite
+      ? jobSiteTarget(provenanceSite)
       : null;
     const activeInstruction = provenanceTarget
       ? resolveActiveSourceInstructionArtifact(
@@ -1203,11 +1198,9 @@ export function createApplicationUserActionResumer(
         (evidence) => evidence.retention !== "temporary",
       ),
     });
-    // The person's answers, spelled out beside the questions they answer.
-    // Merged into the profile they would still have to be found; named here
-    // the agent can go straight to those fields, fill them and carry on
-    // instead of working the whole form a second time.
-    const answeredQuestionLines = executionProfile.answerBank.customAnswers
+    // Keep the person's selected answers beside their questions so resumption
+    // can fill those fields and continue without repeating the whole form.
+    const answeredQuestionLines = applicationAnswers
       .filter((answer) => answer.id.startsWith(`application_${request.id}_`))
       .map(
         (answer) =>
@@ -1317,7 +1310,7 @@ export function createApplicationUserActionResumer(
         applicationPageBindingKey: result.id,
         job: prerequisites.job,
         resumeArtifact: prerequisites.resumeArtifact,
-        profile: executionProfile,
+        profile,
         ...(applicationAttachments.length > 0
           ? { applicationAttachments }
           : {}),
@@ -1384,6 +1377,11 @@ export function createApplicationUserActionResumer(
               jobId: job.id,
             }),
           prepareApplicationForm: createApplyFormPreparer({
+            readReusableAnswers: () =>
+              Promise.resolve([
+                ...applicationAnswers,
+                ...(ctx.readSavedAnswers?.() ?? []),
+              ]),
             executionInput: applyFlowFacts,
             applicationRecordId: scope.applicationRecordId,
             aiClient: ctx.aiClient,
