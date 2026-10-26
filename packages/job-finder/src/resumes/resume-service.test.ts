@@ -93,6 +93,51 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("edits one summary without reproducing or dropping the rest, with an exact Undo", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const before = service.get(id).resume!;
+    const summary = before.draft!.sections.find(
+      (section) => section.kind === "summary",
+    )!;
+    const edit = service.edit({
+      jobId: id,
+      expectedUpdatedAt: before.updatedAt,
+      sections: [{ id: summary.id, fields: { text: "My exact summary." } }],
+    });
+    expect(edit.draft).toEqual({
+      ...before.draft,
+      sections: before.draft!.sections.map((section) =>
+        section.id === summary.id
+          ? { ...section, text: "My exact summary." }
+          : section,
+      ),
+    });
+    expect(service.undoChange(id, edit.undoId!).draft).toEqual(before.draft);
+  });
+
+  it("rejects partial full-draft saves and nonexistent edit targets without changing the resume", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const before = service.get(id).resume!;
+    expect(() =>
+      service.saveDraft(
+        id,
+        { ...before.draft!, sections: [] },
+        before.updatedAt,
+      ),
+    ).toThrow("remove existing resume content");
+    expect(() =>
+      service.edit({
+        jobId: id,
+        expectedUpdatedAt: before.updatedAt,
+        sections: [{ id: "missing", fields: { text: "No" } }],
+      }),
+    ).toThrow("no longer exists");
+    expect(service.get(id).resume).toEqual(before);
+  });
   it("keeps edit Undo and its previous approval, PDF and stage after reopening the store", async () => {
     const directory = mkdtempSync(path.join(tmpdir(), "resume-undo-"));
     cleanups.unshift(() => rmSync(directory, { recursive: true, force: true }));
@@ -207,6 +252,7 @@ describe("resumes on the store", () => {
       current.draft!,
       current.updatedAt,
     );
+    expect(_undoId).not.toBeNull();
     expect(() => service.undoLevel(id, changed.levelChangeId!)).toThrow(
       "changed since",
     );

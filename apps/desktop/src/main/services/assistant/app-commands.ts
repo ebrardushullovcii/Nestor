@@ -13,6 +13,7 @@ import {
   assistantCommandTools,
   guardResumeEditor,
   resumeCommandReceipts,
+  resumeResultData,
   needsYouCommandTools,
   type AssistantToolContext,
 } from "@nestor/job-finder";
@@ -297,6 +298,7 @@ export function assistantAppCommands() {
         group: "resume",
         before: {
           save_resume: resumeReceipts.before,
+          edit_resume: resumeReceipts.before,
           approve_resume: resumeReceipts.before,
           set_resume_level: (input, context) =>
             guardResumeEditor(input.jobId, context),
@@ -351,7 +353,26 @@ export function assistantAppCommands() {
               },
             };
           },
+          get_resume: (value) => ({
+            summary: `${value.job.title} at ${value.job.company}: ${value.resume?.state ?? "no resume yet"}. Edit with edit_resume; resume.updatedAt is the required revision.`,
+            data: {
+              job: {
+                id: value.job.id,
+                title: value.job.title,
+                company: value.job.company,
+                stage: value.job.stage,
+              },
+              resume: value.resume ? resumeResultData(value.resume) : null,
+              templates: value.templates,
+            },
+          }),
+          undo_resume_change: (value) => ({
+            summary: "Undid the resume change.",
+            data: resumeResultData(value),
+          }),
           save_resume: (value, input, context) =>
+            resumeReceipts.result(value, input, context, "edit"),
+          edit_resume: (value, input, context) =>
             resumeReceipts.result(value, input, context, "edit"),
           approve_resume: (value, input, context) =>
             resumeReceipts.result(value, input, context, "approve"),

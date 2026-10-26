@@ -95,6 +95,7 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "list_shortlisted",
     "get_resume",
     "save_resume",
+    "edit_resume",
     "set_resume_level",
     "undo_resume_level",
     "undo_resume_change",

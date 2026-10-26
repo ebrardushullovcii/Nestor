@@ -8,6 +8,25 @@ import type {
 import { diffValues } from "./change-diff";
 import { AssistantToolError, type AssistantToolContext } from "./tool-kit";
 
+/** Keep the edit revision ahead of content; provenance repeated on every bullet is not an edit input. */
+export function resumeResultData(value: StoredResume) {
+  const content = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(content);
+    if (input && typeof input === "object")
+      return Object.fromEntries(
+        Object.entries(input)
+          .filter(
+            ([key]) =>
+              key !== "sourceRefs" && key !== "lastGeneratedContentHash",
+          )
+          .map(([key, item]) => [key, content(item)]),
+      );
+    return input;
+  };
+  const { draft, ...metadata } = value;
+  return { ...metadata, draft: content(draft) };
+}
+
 /** The editor publishes this when sending a message or pressing an Undo card. */
 export function guardResumeEditor(
   jobId: number,
@@ -33,7 +52,11 @@ export function resumeCommandReceipts(
 ) {
   const previous = new WeakMap<object, StoredResume | null>();
   return {
-    async before(input: { jobId: number }, context: AssistantToolContext) {
+    async before(
+      this: void,
+      input: { jobId: number },
+      context: AssistantToolContext,
+    ) {
       guardResumeEditor(input.jobId, context);
       previous.set(
         input,
@@ -55,7 +78,7 @@ export function resumeCommandReceipts(
       if (!value.undoId)
         return {
           summary: "This resume already matches the request.",
-          data: value,
+          data: resumeResultData(value),
         };
       const entries =
         action === "edit"
@@ -82,7 +105,7 @@ export function resumeCommandReceipts(
         },
         entries: entries.slice(0, 60),
       });
-      return { summary, data: value, parts: [part] };
+      return { summary, data: resumeResultData(value), parts: [part] };
     },
   };
 }

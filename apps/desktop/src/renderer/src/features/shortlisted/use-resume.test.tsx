@@ -41,7 +41,7 @@ beforeEach(() => {
     pdfSha256: null,
   };
   write.mockReset();
-  write.mockImplementation(async (input) => {
+  write.mockImplementation((input) => {
     if (input.expectedUpdatedAt !== saved.updatedAt)
       throw new Error("This resume changed since you opened it.");
     saved = {
@@ -49,7 +49,7 @@ beforeEach(() => {
       draft: input.draft,
       updatedAt: new Date(Date.parse(saved.updatedAt) + 1).toISOString(),
     };
-    return saved;
+    return Promise.resolve(saved);
   });
   Object.assign(window, {
     nestor: {

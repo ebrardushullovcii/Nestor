@@ -44,6 +44,9 @@ export function useResume(jobId: number | null) {
   const latest = useRef({ jobId, resume, draft, dirty });
   const saving = useRef<Promise<boolean> | null>(null);
   const conflicted = useRef(false);
+  const unsaved = useRef(
+    new Map<number, { resume: StoredResume; draft: ResumeDraft }>(),
+  );
   latest.current = { jobId, resume, draft, dirty };
 
   const load = useCallback(async (id: number) => {
@@ -58,6 +61,13 @@ export function useResume(jobId: number | null) {
       return;
     setJob(view.job);
     setTemplates(view.templates);
+    const retained = unsaved.current.get(id);
+    if (!latest.current.dirty && retained) {
+      latest.current = { jobId: id, ...retained, dirty: true };
+      setResume(retained.resume);
+      setDraft(retained.draft);
+      setDirty(true);
+    }
     if (latest.current.dirty) {
       if (view.resume?.updatedAt !== latest.current.resume?.updatedAt) {
         conflicted.current = true;
@@ -74,6 +84,7 @@ export function useResume(jobId: number | null) {
 
   // A new job starts from what is saved.
   useEffect(() => {
+    latest.current = { jobId, resume: null, draft: null, dirty: false };
     setJob(null);
     setResume(null);
     setDraft(null);
@@ -113,7 +124,12 @@ export function useResume(jobId: number | null) {
           jobId: id,
           draft: current,
           expectedUpdatedAt: saved.updatedAt,
+          allowRemoval: true,
         });
+        const retained = unsaved.current.get(id);
+        if (retained?.draft === current) unsaved.current.delete(id);
+        else if (retained)
+          unsaved.current.set(id, { ...retained, resume: next });
         if (latest.current.jobId !== id) return false;
         setResume(next);
         // Edits made while saving are saved by the next round.
@@ -163,6 +179,11 @@ export function useResume(jobId: number | null) {
   }, [jobId, draft]);
 
   const edit = useCallback((next: ResumeDraft) => {
+    if (latest.current.jobId !== null && latest.current.resume)
+      unsaved.current.set(latest.current.jobId, {
+        resume: latest.current.resume,
+        draft: next,
+      });
     latest.current = { ...latest.current, draft: next, dirty: true };
     setDraft(next);
     setDirty(true);
@@ -187,6 +208,8 @@ export function useResume(jobId: number | null) {
   }, [save]);
 
   const loadSaved = useCallback(() => {
+    if (latest.current.jobId !== null)
+      unsaved.current.delete(latest.current.jobId);
     latest.current = { ...latest.current, dirty: false };
     conflicted.current = false;
     setDirty(false);

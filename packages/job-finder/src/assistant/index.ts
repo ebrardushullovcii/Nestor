@@ -42,6 +42,7 @@ export { AssistantToolError } from "./tool-kit";
 export {
   guardResumeEditor,
   resumeCommandReceipts,
+  resumeResultData,
 } from "./resume-command-receipts";
 export type { AssistantToolDefinition, AssistantToolContext } from "./tool-kit";
 

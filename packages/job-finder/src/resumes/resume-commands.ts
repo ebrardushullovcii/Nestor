@@ -44,8 +44,14 @@ export function createResumeCommandRunner(
   const handlers: Handlers = {
     list_shortlisted: async (input) => (await read()).list(input),
     get_resume: async ({ jobId }) => (await read()).get(jobId),
-    save_resume: async ({ jobId, draft, expectedUpdatedAt }) =>
-      (await service()).saveDraft(jobId, draft, expectedUpdatedAt),
+    save_resume: async ({ jobId, draft, expectedUpdatedAt, allowRemoval }) =>
+      (await service()).saveDraft(
+        jobId,
+        draft,
+        expectedUpdatedAt,
+        allowRemoval,
+      ),
+    edit_resume: async (input) => (await service()).edit(input),
     set_resume_level: async ({ jobId, level }) =>
       (await service()).setLevel(jobId, level),
     undo_resume_level: async ({ jobId, changeId }) =>

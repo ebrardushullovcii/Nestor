@@ -3,12 +3,95 @@ import type { AppCommandDefinition } from "./app-commands";
 
 import { JobIdSchema, JobListQuerySchema, type JobDetail } from "./jobs";
 import type { ResumeTemplateId } from "./base";
-import { ResumeDraftSchema } from "./resume";
+import {
+  ResumeDraftSchema,
+  ResumeDraftIdentitySchema,
+  ResumeDraftSectionSchema,
+  ResumeDraftEntrySchema,
+  ResumeDraftBulletSchema,
+} from "./resume";
 import {
   ResumeLevelSchema,
   type ShortlistedRow,
   type StoredResume,
 } from "./resumes";
+
+const ResumeBulletEditSchema = z
+  .object({
+    id: z.string().min(1),
+    fields: ResumeDraftBulletSchema.pick({
+      text: true,
+      included: true,
+      locked: true,
+    })
+      .partial()
+      .strict(),
+  })
+  .strict();
+export const EditResumeInputSchema = z
+  .object({
+    jobId: JobIdSchema,
+    expectedUpdatedAt: z.string(),
+    identity: ResumeDraftIdentitySchema.partial().strict().optional(),
+    layout: ResumeDraftSchema.pick({
+      templateId: true,
+      targetPageCount: true,
+      language: true,
+    })
+      .partial()
+      .strict()
+      .optional(),
+    sections: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            fields: ResumeDraftSectionSchema.pick({
+              label: true,
+              text: true,
+              included: true,
+              locked: true,
+            })
+              .partial()
+              .strict()
+              .optional(),
+            bullets: z.array(ResumeBulletEditSchema).max(100).optional(),
+            entries: z
+              .array(
+                z
+                  .object({
+                    id: z.string().min(1),
+                    fields: ResumeDraftEntrySchema.innerType()
+                      .pick({
+                        title: true,
+                        subtitle: true,
+                        location: true,
+                        startDate: true,
+                        endDate: true,
+                        summary: true,
+                        included: true,
+                        locked: true,
+                      })
+                      .partial()
+                      .strict()
+                      .optional(),
+                    bullets: z
+                      .array(ResumeBulletEditSchema)
+                      .max(100)
+                      .optional(),
+                  })
+                  .strict(),
+              )
+              .max(100)
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
+  })
+  .strict();
+export type EditResumeInput = z.infer<typeof EditResumeInputSchema>;
 
 /**
  * Every Shortlisted command. The screen calls them over the preload bridge
@@ -31,14 +114,21 @@ export const RESUME_COMMANDS = {
   save_resume: {
     effect: "local_write",
     description:
-      "Saves an edited resume draft. Pass the updatedAt you read; a newer save wins. An approved resume needs approving again.",
+      "Saves a complete replacement draft. For changing text or fields use edit_resume, which keeps all untouched content. Pass the resume's updatedAt; never guess it. Missing content is rejected unless allowRemoval is true for an explicitly requested removal or full replacement. An approved resume needs approving again.",
     input: z
       .object({
         jobId: JobIdSchema,
         draft: ResumeDraftSchema,
         expectedUpdatedAt: z.string(),
+        allowRemoval: z.boolean().optional(),
       })
       .strict(),
+  },
+  edit_resume: {
+    effect: "local_write",
+    description:
+      "Edits only named saved resume fields, sections, entries or bullets and keeps everything else. Read get_resume first and pass resume.updatedAt exactly; never guess a revision. Sections, entries and bullets use their saved IDs. Approval comes off until approved again. Returns a per-change Undo.",
+    input: EditResumeInputSchema,
   },
   set_resume_level: {
     effect: "local_write",
@@ -111,6 +201,7 @@ export interface ResumeCommandOutputs {
     templates: { id: ResumeTemplateId; label: string }[];
   };
   save_resume: ResumeChangeResult;
+  edit_resume: ResumeChangeResult;
   set_resume_level: StoredResume;
   undo_resume_level: StoredResume;
   rewrite_resume: StoredResume | null;

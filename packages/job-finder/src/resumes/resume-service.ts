@@ -1,4 +1,6 @@
 import { createResumeCommandReads } from "./resume-commands";
+import { editResumeDraft, dropsResumeContent } from "./edit-resume";
+import type { EditResumeInput } from "@nestor/contracts";
 import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
@@ -242,12 +244,36 @@ export function createResumeService(deps: ResumeServiceDeps) {
       deps.documentManager.listResumeTemplates(),
     ),
 
-    saveDraft(jobId: number, draft: ResumeDraft, expectedUpdatedAt: string) {
+    saveDraft(
+      jobId: number,
+      draft: ResumeDraft,
+      expectedUpdatedAt: string,
+      allowRemoval = false,
+    ) {
+      if (
+        !allowRemoval &&
+        dropsResumeContent(resumes.get(jobId)?.draft ?? null, draft)
+      )
+        throw new Error(
+          "This save would remove existing resume content. Use edit_resume for a targeted edit. Only set allowRemoval for an explicitly requested removal or full replacement.",
+        );
       // The editor's Reset order asks for date order; saving applies it.
       return resumes.saveDraft(
         jobId,
         normalizeResumeDraftEntryOrdering(draft),
         expectedUpdatedAt,
+      );
+    },
+    edit(input: EditResumeInput) {
+      const current = resumes.get(input.jobId);
+      if (!current?.draft)
+        throw new Error("This resume has no editable draft.");
+      return resumes.saveDraft(
+        input.jobId,
+        normalizeResumeDraftEntryOrdering(
+          editResumeDraft(current.draft, input),
+        ),
+        input.expectedUpdatedAt,
       );
     },
 
