@@ -37,7 +37,8 @@ export function strictOptionMatch(
   const qualified = options.filter(
     (option) => normalizeSignal(option.replace(qualifier, " ")) === wanted,
   );
-  if (qualified.length === 1) return { kind: "match", value: qualified[0] };
+  const [only] = qualified;
+  if (qualified.length === 1 && only) return { kind: "match", value: only };
   const near = options.filter((option) => {
     const normalized = normalizeSignal(option);
     return (
