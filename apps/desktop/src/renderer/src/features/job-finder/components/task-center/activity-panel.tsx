@@ -3,6 +3,7 @@ import type { ActivityFeed } from "@nestor/contracts";
 
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "../status-badge";
+import { refreshActivityFeed } from "../../lib/use-activity-feed";
 import { toActivityItems, type ActivityItem } from "./activity-items";
 
 const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v2";
@@ -55,12 +56,28 @@ function ActivityRow(props: {
  * finished in the last day. Each opens the screen that shows that work.
  */
 export function ActivityPanel(props: {
+  failed: boolean;
   feed: ActivityFeed | null;
   onOpen: (href: string) => void;
 }) {
   const [clearedIds, setClearedIds] = useState(readClearedIds);
   if (!props.feed)
-    return (
+    return props.failed ? (
+      <p
+        className="flex flex-wrap items-center justify-between gap-2 px-1 text-(length:--text-small) text-foreground-soft"
+        role="alert"
+      >
+        Activity could not be read.
+        <Button
+          onClick={refreshActivityFeed}
+          size="compact"
+          type="button"
+          variant="secondary"
+        >
+          Try again
+        </Button>
+      </p>
+    ) : (
       <p className="px-1 text-(length:--text-small) text-foreground-soft">
         Loading activity…
       </p>
@@ -103,7 +120,7 @@ export function ActivityPanel(props: {
         )}
       </section>
       {visibleFinished.length > 0 ? (
-        <section aria-label="Finished today" className="grid gap-2">
+        <section aria-label="Finished in the last day" className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
               Finished in the last day

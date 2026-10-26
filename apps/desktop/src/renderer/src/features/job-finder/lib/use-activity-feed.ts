@@ -8,7 +8,13 @@ import { afterFirstScreen } from "./after-first-screen";
  * and again after every store change or search progress update. One copy
  * per window, shared by the header button's count and the open panel.
  */
-let feed: ActivityFeed | null = null;
+export interface ActivityFeedState {
+  feed: ActivityFeed | null;
+  /** The last read failed; `feed` is what the one before it returned. */
+  failed: boolean;
+}
+
+let state: ActivityFeedState = { feed: null, failed: false };
 let started = false;
 let pending: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
@@ -17,12 +23,13 @@ function read(): void {
   // Hosts without the bridge (tests of other screens) have no Activity.
   const activity = window.nestor?.activity;
   if (!activity) return;
+  const settle = (next: ActivityFeedState) => {
+    state = next;
+    for (const listener of listeners) listener();
+  };
   void activity.feed().then(
-    (next) => {
-      feed = next;
-      for (const listener of listeners) listener();
-    },
-    () => undefined,
+    (feed) => settle({ feed, failed: false }),
+    () => settle({ feed: state.feed, failed: true }),
   );
 }
 
@@ -51,9 +58,9 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-const snapshot = () => feed;
+const snapshot = () => state;
 
-export function useActivityFeed(): ActivityFeed | null {
+export function useActivityFeed(): ActivityFeedState {
   useEffect(start, []);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

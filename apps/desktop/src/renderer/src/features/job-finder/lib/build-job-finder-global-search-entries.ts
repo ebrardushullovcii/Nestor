@@ -106,9 +106,11 @@ export async function searchSavedJobs(
 ): Promise<{
   entries: readonly JobFinderGlobalSearchEntry[];
   incomplete: boolean;
+  failed: boolean;
 }> {
   // The store's text filter needs a word; without one it would list any job.
-  if (!/[\p{L}\p{N}]/u.test(query)) return { entries: [], incomplete: false };
+  if (!/[\p{L}\p{N}]/u.test(query))
+    return { entries: [], incomplete: false, failed: false };
   const pages = await Promise.allSettled(
     SEARCHED_STAGES.map((stage) =>
       window.nestor.jobs.run("list_jobs", {
@@ -136,8 +138,10 @@ export async function searchSavedJobs(
         }))
       : [],
   );
+  const rejected = pages.filter((page) => page.status === "rejected").length;
   return {
     entries,
-    incomplete: pages.some((page) => page.status === "rejected"),
+    incomplete: rejected > 0,
+    failed: rejected === pages.length,
   };
 }

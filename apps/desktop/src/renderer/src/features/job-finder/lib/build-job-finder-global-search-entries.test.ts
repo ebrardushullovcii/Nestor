@@ -88,6 +88,7 @@ describe("searchSavedJobs", () => {
       expect(await searchSavedJobs(query)).toEqual({
         entries: [],
         incomplete: false,
+        failed: false,
       });
   });
 
@@ -107,6 +108,18 @@ describe("searchSavedJobs", () => {
     const { entries, incomplete } = await searchSavedJobs("analyst");
 
     expect(incomplete).toBe(true);
+    expect((await searchSavedJobs("analyst")).failed).toBe(false);
     expect(entries.map((entry) => entry.title)).toEqual(["Data Analyst"]);
+  });
+
+  it("says the search failed when no stage can be read", async () => {
+    Object.assign(window.nestor.jobs, {
+      run: () => Promise.reject(new Error("database is locked")),
+    });
+    expect(await searchSavedJobs("analyst")).toEqual({
+      entries: [],
+      incomplete: true,
+      failed: true,
+    });
   });
 });

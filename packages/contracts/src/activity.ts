@@ -1,4 +1,5 @@
 import type { ApplicationWorkState } from "./applications";
+import type { JobStage } from "./jobs";
 import type { ResumeState } from "./resumes";
 
 /**
@@ -20,6 +21,8 @@ export interface ActivitySearch {
 
 export interface ActivityResume {
   jobId: number;
+  /** Where the job is now, which may be past Shortlisted. */
+  stage: JobStage;
   title: string;
   company: string;
   state: ResumeState;

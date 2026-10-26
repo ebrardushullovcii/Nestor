@@ -4,6 +4,7 @@ import type {
   ActivityResume,
   ActivitySearch,
   ApplicationWorkState,
+  JobStage,
   ResumeState,
 } from "@nestor/contracts";
 
@@ -53,7 +54,7 @@ export function createActivityStore(store: JobStore) {
       );
       const resumes = (
         sql(
-          `SELECT r.job_id, j.title, j.company, r.state, r.updated_at, r.error
+          `SELECT r.job_id, j.stage, j.title, j.company, r.state, r.updated_at, r.error
            FROM resumes r JOIN jobs j ON j.id = r.job_id
            WHERE r.state IN ('queued', 'writing')
               OR (r.state IN ('ready', 'failed') AND r.updated_at >= ?)
@@ -61,6 +62,7 @@ export function createActivityStore(store: JobStore) {
            LIMIT ${LIMIT}`,
         ).all(since) as {
           job_id: number;
+          stage: JobStage;
           title: string;
           company: string;
           state: ResumeState;
@@ -70,6 +72,7 @@ export function createActivityStore(store: JobStore) {
       ).map(
         (row): ActivityResume => ({
           jobId: row.job_id,
+          stage: row.stage,
           title: row.title,
           company: row.company,
           state: row.state,
