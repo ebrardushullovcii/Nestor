@@ -58,16 +58,9 @@ import type {
   DesktopWindowCloseRequest,
   EditableSourceInstructionArtifact,
   DesktopWindowControlsState,
-  ApplicationAuthorityReadiness,
-  ApproveCurrentApplicationAnswersInput,
-  ApproveCurrentApplicationAnswersResult,
-  CreateApplicationAuthorityEnvelopeInput,
-  GetApplicationAuthorityEnvelopeInput,
-  GetApplicationAuthorityReadinessInput,
   InterviewExportFormat,
   InterviewExportResult,
   JobFinderInterviewFollowUpInput,
-  ListApplicationAuthorityEnvelopesInput,
   InterviewHotkeyAction,
   InterviewOverlayMoveInput,
   InterviewAudioTranscriptionInput,
@@ -96,8 +89,6 @@ import type {
   ResumeImportProgressEvent,
   ResumeImportRun,
   RevealSavedFileResult,
-  RevokeApplicationAuthorityEnvelopeInput,
-  ResolveSubmissionOutcomeInput,
   ResumeTimelineRepairAction,
   ResumeDocumentBundle,
   JobFinderRepositoryState,
@@ -115,7 +106,6 @@ import type {
   JobSearchPreferences,
   SetJobFinderActivityControlInput,
   UpdateApplicationDefaultsInput,
-  UpdateApplicationAuthorityEnvelopeInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
   WorkspaceRevision,
@@ -125,22 +115,8 @@ import type {
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
 import {
-  ApplicationAuthorityEnvelopeMutationResultSchema,
-  ApplicationAuthorityReadinessSchema,
-  ApproveCurrentApplicationAnswersInputSchema,
-  ApproveCurrentApplicationAnswersResultSchema,
-  CreateApplicationAuthorityEnvelopeInputSchema,
-  GetApplicationAuthorityEnvelopeInputSchema,
-  GetApplicationAuthorityEnvelopeResultSchema,
-  GetApplicationAuthorityReadinessInputSchema,
-  ListApplicationAuthorityEnvelopesInputSchema,
-  ListApplicationAuthorityEnvelopesResultSchema,
   JobFinderStartupDatabaseRecoveryFactSchema,
   JobFinderStartupResetRecoveryFactSchema,
-  RevokeApplicationAuthorityEnvelopeInputSchema,
-  ResolveSubmissionOutcomeInputSchema,
-  ResolveSubmissionOutcomeResultSchema,
-  UpdateApplicationAuthorityEnvelopeInputSchema,
 } from "@nestor/contracts";
 
 let activeResumeImportRequestId: string | null = null;
@@ -589,88 +565,6 @@ const desktopApi = {
         jobId,
         planId,
       }) as Promise<JobFinderJobDetail>,
-    getApplicationAuthorityReadiness: (
-      input: GetApplicationAuthorityReadinessInput = {},
-    ): Promise<ApplicationAuthorityReadiness> =>
-      ipcRenderer
-        .invoke(
-          "job-finder:get-application-authority-readiness",
-          GetApplicationAuthorityReadinessInputSchema.parse(input),
-        )
-        .then((result) => ApplicationAuthorityReadinessSchema.parse(result)),
-    approveCurrentApplicationAnswers: (
-      input: ApproveCurrentApplicationAnswersInput,
-    ): Promise<ApproveCurrentApplicationAnswersResult> =>
-      ipcRenderer
-        .invoke(
-          "job-finder:approve-current-application-answers",
-          ApproveCurrentApplicationAnswersInputSchema.parse(input),
-        )
-        .then((result) =>
-          ApproveCurrentApplicationAnswersResultSchema.parse(result),
-        ),
-    listApplicationAuthorityEnvelopes: (
-      input: ListApplicationAuthorityEnvelopesInput = {},
-    ) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:list-application-authority-envelopes",
-          ListApplicationAuthorityEnvelopesInputSchema.parse(input),
-        )
-        .then((result) =>
-          ListApplicationAuthorityEnvelopesResultSchema.parse(result),
-        ),
-    getApplicationAuthorityEnvelope: (
-      input: GetApplicationAuthorityEnvelopeInput,
-    ) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:get-application-authority-envelope",
-          GetApplicationAuthorityEnvelopeInputSchema.parse(input),
-        )
-        .then((result) =>
-          GetApplicationAuthorityEnvelopeResultSchema.parse(result),
-        ),
-    createApplicationAuthorityEnvelope: (
-      input: CreateApplicationAuthorityEnvelopeInput,
-    ) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:create-application-authority-envelope",
-          CreateApplicationAuthorityEnvelopeInputSchema.parse(input),
-        )
-        .then((result) =>
-          ApplicationAuthorityEnvelopeMutationResultSchema.parse(result),
-        ),
-    updateApplicationAuthorityEnvelope: (
-      input: UpdateApplicationAuthorityEnvelopeInput,
-    ) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:update-application-authority-envelope",
-          UpdateApplicationAuthorityEnvelopeInputSchema.parse(input),
-        )
-        .then((result) =>
-          ApplicationAuthorityEnvelopeMutationResultSchema.parse(result),
-        ),
-    revokeApplicationAuthorityEnvelope: (
-      input: RevokeApplicationAuthorityEnvelopeInput,
-    ) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:revoke-application-authority-envelope",
-          RevokeApplicationAuthorityEnvelopeInputSchema.parse(input),
-        )
-        .then((result) =>
-          ApplicationAuthorityEnvelopeMutationResultSchema.parse(result),
-        ),
-    resolveSubmissionOutcome: (input: ResolveSubmissionOutcomeInput) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:resolve-submission-outcome",
-          ResolveSubmissionOutcomeInputSchema.parse(input),
-        )
-        .then((result) => ResolveSubmissionOutcomeResultSchema.parse(result)),
     listCandidateAssets: (
       input: CandidateAssetListInput = { includeDeleted: false },
     ) =>

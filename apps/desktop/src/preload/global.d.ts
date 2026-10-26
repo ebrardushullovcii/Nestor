@@ -24,16 +24,11 @@ import type {
   DesktopAssistantBridge,
   DesktopBrowserBridge,
   DesktopJobsBridge,
-  ApplicationAuthorityEnvelope,
-  ApplicationAuthorityEnvelopeMutationResult,
-  ApplicationAuthorityReadiness,
   ApplicationListPage,
   ApplicationListQuery,
   ApplicationStoreDemoResult,
   ApplyJobsInput,
   ApplyJobsResult,
-  ApproveCurrentApplicationAnswersInput,
-  ApproveCurrentApplicationAnswersResult,
   CandidateAssetDeleteInput,
   CandidateAssetDeleteResult,
   CandidateAssetImportInput,
@@ -45,7 +40,6 @@ import type {
   CandidateAssetRestoreInput,
   CandidateAssetRestoreResult,
   CandidateProfile,
-  CreateApplicationAuthorityEnvelopeInput,
   DesktopAssistantBridge,
   DesktopBrowserBridge,
   DesktopContextMenuInput,
@@ -57,8 +51,6 @@ import type {
   DesktopWindowCloseResolution,
   DesktopWindowControlsState,
   EditableSourceInstructionArtifact,
-  GetApplicationAuthorityEnvelopeInput,
-  GetApplicationAuthorityReadinessInput,
   InterviewAudioTranscriptionInput,
   InterviewCaptionFileReadInput,
   InterviewCaptionFileTextResult,
@@ -89,13 +81,9 @@ import type {
   JobFinderWorkspaceEntityMutationInput,
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
-  ListApplicationAuthorityEnvelopesInput,
-  ListApplicationAuthorityEnvelopesResult,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
-  ResolveSubmissionOutcomeInput,
-  ResolveSubmissionOutcomeResult,
   ResumeDocumentBundle,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkReport,
@@ -105,7 +93,6 @@ import type {
   ResumeImportRun,
   ResumeTimelineRepairAction,
   RevealSavedFileResult,
-  RevokeApplicationAuthorityEnvelopeInput,
   SaveInterviewSetupInput,
   SaveJobFinderWorkspaceInput,
   SendInterviewChatMessageInput,
@@ -114,7 +101,6 @@ import type {
   SourceDebugRunDetails,
   SourceDebugRunRecord,
   UpdateAiBehaviorInput,
-  UpdateApplicationAuthorityEnvelopeInput,
   UpdateApplicationDefaultsInput,
   UpdateInterviewOverlayPreferenceInput,
   UpdateWorkspaceBehaviorInput,
@@ -237,30 +223,6 @@ declare global {
           listener: (change: JobChange) => void,
         ) => () => void;
         queries: WorkspaceQueryApi;
-        getApplicationAuthorityReadiness: (
-          input?: GetApplicationAuthorityReadinessInput,
-        ) => Promise<ApplicationAuthorityReadiness>;
-        approveCurrentApplicationAnswers: (
-          input: ApproveCurrentApplicationAnswersInput,
-        ) => Promise<ApproveCurrentApplicationAnswersResult>;
-        listApplicationAuthorityEnvelopes: (
-          input?: ListApplicationAuthorityEnvelopesInput,
-        ) => Promise<ListApplicationAuthorityEnvelopesResult>;
-        getApplicationAuthorityEnvelope: (
-          input: GetApplicationAuthorityEnvelopeInput,
-        ) => Promise<ApplicationAuthorityEnvelope | null>;
-        createApplicationAuthorityEnvelope: (
-          input: CreateApplicationAuthorityEnvelopeInput,
-        ) => Promise<ApplicationAuthorityEnvelopeMutationResult>;
-        updateApplicationAuthorityEnvelope: (
-          input: UpdateApplicationAuthorityEnvelopeInput,
-        ) => Promise<ApplicationAuthorityEnvelopeMutationResult>;
-        revokeApplicationAuthorityEnvelope: (
-          input: RevokeApplicationAuthorityEnvelopeInput,
-        ) => Promise<ApplicationAuthorityEnvelopeMutationResult>;
-        resolveSubmissionOutcome: (
-          input: ResolveSubmissionOutcomeInput,
-        ) => Promise<ResolveSubmissionOutcomeResult>;
         listCandidateAssets: (
           input?: CandidateAssetListInput,
         ) => Promise<CandidateAssetListResult>;
