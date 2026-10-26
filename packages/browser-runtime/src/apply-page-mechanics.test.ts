@@ -316,13 +316,14 @@ describe("reading the choices of lists the page draws itself", () => {
       try {
         await page.setContent(`<label for="country">Country of residence</label><input id="country" role="combobox" aria-expanded="false" aria-controls="shared" readonly>
       <label for="restrictions">${menuReplay.restrictionPrompt}</label><input id="restrictions" role="combobox" aria-expanded="false" aria-controls="shared" readonly>
+      <label for="previous">${menuReplay.previousEmploymentPrompt}</label><input id="previous" role="combobox" aria-expanded="false" aria-controls="shared" readonly>
       <div id="shared" role="listbox" hidden></div><script>
-      const data=${JSON.stringify({ entry, countries: menuReplay.countryOptions, restrictions: menuReplay.restrictionOptions })};
+      const data=${JSON.stringify({ entry, countries: menuReplay.countryOptions, restrictions: menuReplay.restrictionOptions, previous: menuReplay.previousEmploymentOptions })};
       const menu=document.getElementById('shared');
-      for(const id of ['country','restrictions']) { const input=document.getElementById(id);
+      for(const id of ['country','restrictions','previous']) { const input=document.getElementById(id);
         input.onclick=()=>{input.setAttribute('aria-controls','shared');input.setAttribute('aria-expanded','true');menu.hidden=false;
-          if(id==='restrictions' && !data.entry.settles) return;
-          setTimeout(()=>{menu.innerHTML=(id==='country'?data.countries:data.restrictions).map(x=>'<div role="option">'+x+'</div>').join('');},data.entry.delayMs);
+          if(id!=='country' && !data.entry.settles) return;
+          setTimeout(()=>{menu.innerHTML=(id==='country'?data.countries:data[id]).map(x=>'<div role="option">'+x+'</div>').join('');},data.entry.delayMs);
         };
       }
       document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('input[aria-expanded=true]').forEach(x=>{x.setAttribute('aria-expanded','false');if(data.entry.releaseOwner)x.removeAttribute('aria-controls');});menu.hidden=true;}});
@@ -337,6 +338,10 @@ describe("reading the choices of lists the page draws itself", () => {
             snapshot.controls.find((control) => control.id === "restrictions")
               ?.options,
           ).toEqual(entry.settles ? menuReplay.restrictionOptions : []);
+          expect(
+            snapshot.controls.find((control) => control.id === "previous")
+              ?.options,
+          ).toEqual(entry.settles ? menuReplay.previousEmploymentOptions : []);
           expect(snapshot.controls.every((control) => !control.value)).toBe(
             true,
           );
@@ -367,10 +372,16 @@ describe("reading the choices of lists the page draws itself", () => {
         </script>`);
       for (let read = 0; read < 2; read++) {
         const controls = (await readRawApplyPage(page)).controls;
-        expect(controls.find(control => control.id === "one")?.options).toEqual(["Germany", "France"]);
-        expect(controls.find(control => control.id === "two")?.options).toEqual(["United Kingdom", "Ireland"]);
+        expect(
+          controls.find((control) => control.id === "one")?.options,
+        ).toEqual(["Germany", "France"]);
+        expect(
+          controls.find((control) => control.id === "two")?.options,
+        ).toEqual(["United Kingdom", "Ireland"]);
       }
-    } finally { await page.close(); }
+    } finally {
+      await page.close();
+    }
   });
 
   test("a form's long choice list is preserved in order", async () => {
@@ -401,10 +412,12 @@ describe("reading the choices of lists the page draws itself", () => {
     // Called below with the locator that received the click.
     // eslint-disable-next-line @typescript-eslint/unbound-method
     const original = prototype.click;
-    const click = vi.spyOn(prototype, "click").mockImplementation(async function (this: Locator, options) {
-      await new Promise(resolve => setTimeout(resolve, 1450));
-      await original.call(this, options);
-    });
+    const click = vi
+      .spyOn(prototype, "click")
+      .mockImplementation(async function (this: Locator, options) {
+        await new Promise((resolve) => setTimeout(resolve, 1450));
+        await original.call(this, options);
+      });
     try {
       await page.setContent(`<label for="one">First question</label><input id="one" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
         <label for="two">Second question</label><input id="two" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
@@ -420,9 +433,16 @@ describe("reading the choices of lists the page draws itself", () => {
           }});
         </script>`);
       const controls = (await readRawApplyPage(page)).controls;
-      expect(controls.find(control => control.id === "one")?.options).toEqual(["First A", "First B"]);
-      expect(controls.find(control => control.id === "two")?.options).toEqual(["Second A", "Second B"]);
-    } finally { click.mockRestore(); await page.close(); }
+      expect(controls.find((control) => control.id === "one")?.options).toEqual(
+        ["First A", "First B"],
+      );
+      expect(controls.find((control) => control.id === "two")?.options).toEqual(
+        ["Second A", "Second B"],
+      );
+    } finally {
+      click.mockRestore();
+      await page.close();
+    }
   }, 15_000);
 
   test("each control gets its own choices, and keeps them on a second read", async () => {
