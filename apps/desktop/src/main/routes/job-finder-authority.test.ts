@@ -1,4 +1,4 @@
-import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,20 +6,9 @@ import {
   ApplicationAuthorityReadinessSchema,
 } from "@nestor/contracts";
 import type { JobFinderApplicationAuthorityService } from "../services/job-finder";
-import { registerJobFinderAuthorityRouteHandlers } from "./job-finder-authority";
-
-type RouteHandler = (
-  event: IpcMainInvokeEvent,
-  payload?: unknown,
-) => Promise<unknown>;
+import { createJobFinderAuthorityOperations } from "./job-finder-authority";
 
 function createHarness() {
-  const handlers = new Map<string, RouteHandler>();
-  const ipcMain = {
-    handle: vi.fn((channel: string, handler: RouteHandler) => {
-      handlers.set(channel, handler);
-    }),
-  } as unknown as IpcMain;
   const service = {
     getReadiness: vi.fn(),
     approveCurrentAnswers: vi.fn(),
@@ -31,7 +20,7 @@ function createHarness() {
     revoke: vi.fn(),
     resolveSubmissionOutcome: vi.fn(),
   } satisfies JobFinderApplicationAuthorityService;
-  registerJobFinderAuthorityRouteHandlers(ipcMain, { service });
+  const handlers = createJobFinderAuthorityOperations({ service });
   return { handlers, service };
 }
 

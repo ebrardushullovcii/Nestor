@@ -547,7 +547,6 @@ export function createWorkspaceSnapshotProfileMethods(
   | "updateApplicationDefaults"
   | "updateWorkspaceBehavior"
   | "updateAiBehavior"
-  | "updateTrackerCrm"
   | "updateAppearanceTheme"
 > & {
   /** Internal startup work; command writers join it, snapshot readers do not. */
@@ -2870,15 +2869,6 @@ export function createWorkspaceSnapshotProfileMethods(
       await ctx.repository.commitSettingsUpdate((current) =>
         JobFinderSettingsSchema.parse({ ...current, ...behaviorFields }),
       );
-      return getWorkspaceSnapshot(true);
-    },
-    async updateTrackerCrm(applicationCrm: ApplicationCrmSettings) {
-      const committedCrm = ApplicationCrmSettingsSchema.parse(applicationCrm);
-      await ctx.repository.commitSettingsUpdate((current) => ({
-        ...current,
-        applicationCrm: committedCrm,
-      }));
-      await runNoResponseAutomationIfDue({ settings: committedCrm });
       return getWorkspaceSnapshot(true);
     },
     async updateAppearanceTheme(appearanceTheme: AppearanceTheme) {

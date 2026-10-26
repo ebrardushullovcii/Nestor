@@ -5,14 +5,12 @@ export {
   resolveApplicationAuthoritySuccessorId,
   withApplicationAuthorityGate,
 } from "./internal/application-authority-gate";
-export * from "./product-action-tools";
 export * from "./resume-import-benchmark";
 export * from "./user-action-domain";
 export * from "./internal/performance-budget-evaluation";
 export * from "./internal/performance-evidence";
 export * from "./internal/match-assessment-change-audit";
 export * from "./internal/application-crm";
-export * from "./internal/workspace-crm-methods";
 export {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,

@@ -794,7 +794,7 @@ export function LiveAssistantPage() {
 
     const note = followUpDraft.trim();
     const input: JobFinderInterviewFollowUpInput = {
-      applicationRecordId: reviewSession.targetContext.id,
+      jobId: reviewSession.targetContext.id,
       sessionId: reviewSession.id,
       action,
       ...(note.length > 0 ? { note } : {}),

@@ -2,11 +2,6 @@ import { assistantTestReads } from "../store-reads.test-support";
 import { randomUUID } from "node:crypto";
 import {
   AiBehaviorPreferenceSchema,
-  ApplyJobResultSchema,
-  ApplyRunSchema,
-  ApplicationCrmDataSchema,
-  ApplicationRecordSchema,
-  type ApplicationRecord,
   AssistantResultSetSchema,
   AssistantMessageSchema,
   type RawApplyPage,
@@ -15,7 +10,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createSeed,
-  createBrowserRuntime,
   createWorkspaceServiceHarness,
 } from "../../workspace-service.test-support";
 import type { AssistantBrowserLease, AssistantHostPorts } from "../ports";
@@ -90,24 +84,6 @@ function world() {
   };
 }
 
-function application(): ApplicationRecord {
-  return ApplicationRecordSchema.parse({
-    id: "record",
-    jobId: "job_ready",
-    title: "Synthetic Engineer",
-    company: "Synthetic",
-    status: "submitted",
-    lastAttemptState: "submitted",
-    lastUpdatedAt: "2026-10-04T12:00:00.000Z",
-    latestBlocker: null,
-    crm: ApplicationCrmDataSchema.parse({
-      stage: "applied",
-      stageChangedAt: "2026-10-04T12:00:00.000Z",
-    }),
-    lastActionLabel: "Application sent",
-    nextActionLabel: null,
-  });
-}
 
 function page(url = "http://127.0.0.1:47950/brindle/jobs/50"): RawApplyPage {
   return {
@@ -318,82 +294,6 @@ describe("R3 assistant safety findings", () => {
     }
   });
 
-  it("inspection closes all form/submit windows before reading the exact saved application", async () => {
-    const seed = createSeed();
-    const record = {
-      ...application(),
-      status: "ready_for_review" as const,
-      lastAttemptState: "ready" as const,
-      crm: null,
-    };
-    seed.applicationRecords = [record];
-    const job = seed.savedJobs.find((job) => job.id === record.jobId)!;
-    const result = ApplyJobResultSchema.parse({
-      id: "bound_result",
-      runId: "bound_run",
-      jobId: job.id,
-      applicationRecordId: record.id,
-      state: "awaiting_review",
-      summary: "Ready",
-      detail: "Filled synthetic form",
-      startedAt: "2026-10-04T12:00:00.000Z",
-      updatedAt: "2026-10-04T12:00:00.000Z",
-    });
-    seed.applyJobResults = [result];
-    seed.applyRuns = [
-      ApplyRunSchema.parse({
-        id: result.runId,
-        state: "completed",
-        summary: "Ready",
-        detail: "Synthetic preparation",
-        jobIds: [job.id],
-        createdAt: result.updatedAt,
-        updatedAt: result.updatedAt,
-      }),
-    ];
-    const runtime = createBrowserRuntime();
-    const order: string[] = [];
-    runtime.closeApplicationFormAction = vi.fn(() => {
-      order.push("close");
-      return Promise.resolve();
-    });
-    const readBinding = vi.fn(() => {
-      order.push("read");
-      return Promise.resolve(page());
-    });
-    runtime.readApplicationPageBinding = readBinding;
-    const handToPerson = vi.fn();
-    const focusBinding = vi.fn();
-    runtime.handApplicationPageToPerson = handToPerson;
-    runtime.focusApplicationPageBinding = focusBinding;
-    const service = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: runtime,
-    }).workspaceService;
-    const input = {
-      jobId: job.id,
-      runId: result.runId,
-      resultId: result.id,
-      applicationRecordId: record.id,
-    };
-    await service.inspectPreparedApplicationPage(input);
-    expect(order).toEqual(["close", "read"]);
-    expect(readBinding).toHaveBeenCalledWith(job.source, result.id);
-    expect(handToPerson).not.toHaveBeenCalled();
-    expect(focusBinding).not.toHaveBeenCalled();
-    await expect(
-      service.inspectPreparedApplicationPage({
-        ...input,
-        applicationRecordId: "wrong",
-      }),
-    ).rejects.toThrow("no longer matches");
-    const close = vi.fn(() => Promise.reject(new Error("guard unavailable")));
-    runtime.closeApplicationFormAction = close;
-    await expect(service.inspectPreparedApplicationPage(input)).rejects.toThrow(
-      "guard unavailable",
-    );
-    expect(order).toEqual(["close", "read"]);
-  });
 
   it("R3-008 preserves every source across separate remote and budget changes", async () => {
     const ctx = world();

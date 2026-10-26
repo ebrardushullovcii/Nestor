@@ -4,12 +4,9 @@ import type {
   OpenBrowserSessionOptions,
 } from "@nestor/browser-runtime";
 import type {
-  ApplicationAutomationMode,
   ApplyJobResult,
-  ApplyRun,
   JobFinderDiscoveryState,
   JobFinderWorkspaceSnapshot,
-  JobSearchCampaign,
   JobSearchPreferences,
   JobSource,
   SavedJob,
@@ -17,35 +14,23 @@ import type {
   SourceDebugRunRecord,
 } from "@nestor/contracts";
 import {
-  ACTIVITY_PAUSED_MESSAGE,
-  ApplicationRecordSchema,
   JobFinderActivityControlSchema,
   jobSourceValues,
   SavedJobSchema,
   SetJobFinderActivityControlInputSchema,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
-import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { writeApplicationDocumentText } from "./internal/application-document-writer";
 import {
   localDateKey,
-  MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
 } from "./internal/application-preparation-capacity";
-import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
-import {
-  ensureCampaignState,
-} from "./internal/campaign-dashboard";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
-import { buildDiscoveryJobs } from "./internal/matching-review-queue";
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
 import {
   buildStaleResumeDraft,
   hasResumeAffectingJobChange,
 } from "./internal/resume-workspace-staleness";
-import { uniqueStrings } from "./internal/shared";
-import { createWorkspaceApplicationAnswerMethods } from "./internal/workspace-application-answer-methods";
 import { createWorkspaceApplicationMethods } from "./internal/workspace-application-methods";
 import {
   isSafelyParkedApplyQueue,
@@ -53,16 +38,13 @@ import {
   recoverInterruptedApplyRun,
   recoverInterruptedExactLineageProjections,
 } from "./internal/workspace-apply-run-recovery";
-import { createWorkspaceApplyRunStoreMethods } from "./internal/workspace-apply-run-store-methods";
 import { createWorkspaceAssistantEditMethods } from "./internal/workspace-assistant-edit-methods";
 import {
   extractJobsFromPageText,
   saveJobsFromPage,
 } from "./internal/workspace-assistant-page-jobs";
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
-import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
-import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
 import {
   getPreferredSessionAdapter,
 } from "./internal/workspace-helpers";
@@ -81,7 +63,6 @@ import { createWorkspaceSourceDebugMethods } from "./internal/workspace-source-d
 import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
   createWorkspaceUserActionMethods,
-  isWorkspaceActivityPaused,
 } from "./internal/workspace-user-action-methods";
 
 const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
@@ -764,23 +745,6 @@ export function createJobFinderWorkspaceService(
     }
   }
 
-  async function resumeVerifyingUserActionsAfterCommit(): Promise<void> {
-    // A grouped apply commits verifying request transitions after an earlier
-    // snapshot may already have completed a recovery run, so the cached
-    // recovery promise must not suppress this fresh resume. Concurrent
-    // callers share this single in-flight recovery run, and a crash between
-    // the grouped commit and this resume still recovers on the next restart
-    // because the recovery promise is only ever held in memory.
-    const recovery = userActionMethods.resumeVerifyingUserActions();
-    userActionRecoveryPromise = recovery;
-    try {
-      await recovery;
-    } finally {
-      if (userActionRecoveryPromise === recovery) {
-        userActionRecoveryPromise = null;
-      }
-    }
-  }
 
   async function readDisplayProjection() {
     return (
@@ -839,10 +803,6 @@ export function createJobFinderWorkspaceService(
   context.readWorkspaceSnapshot = () =>
     snapshotProfileMethods.getWorkspaceSnapshot();
   context.readWorkspaceProjection = readDisplayProjection;
-  const crmMethods = createWorkspaceCrmMethods({
-    ctx: context,
-    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
-  });
 
   const sourceDebugMethods = createWorkspaceSourceDebugMethods(context);
   context.runSourceDebugWorkflow = sourceDebugMethods.runSourceDebugWorkflow;
@@ -861,136 +821,11 @@ export function createJobFinderWorkspaceService(
     await onExplicitUserStart?.();
   }
 
-  /**
-   * Application work is the exception: the global pause is the person's brake
-   * on anything that fills in or sends a form, so a row's Try again or an
-   * Apply press refuses instead of quietly lifting it. Continue on Home (or in
-   * the header) is the one way back.
-   */
-  async function requireApplicationActivityNotPaused(): Promise<void> {
-    if (await isWorkspaceActivityPaused(repository)) {
-      throw new Error(ACTIVITY_PAUSED_MESSAGE);
-    }
-    await onExplicitUserStart?.();
-  }
 
-  async function resolvePreparationCampaign(
-    run: ApplyRun | null,
-  ): Promise<JobSearchCampaign | null> {
-    let state = await repository.getCampaignState();
-    if (!state) {
-      // Same serialized missing-state bootstrap as scoped discovery: re-read
-      // under one campaign transition and create only if still absent.
-      state = await context.withCampaignTransition(async () => {
-        const latestState = await repository.getCampaignState();
-        if (latestState) return latestState;
-        return ensureCampaignState({
-          repository,
-          searchPreferences: await repository.getSearchPreferences(),
-        });
-      });
-    }
-    if (run?.campaignId) {
-      const capturedCampaign = state.campaigns.find(
-        (candidate) => candidate.id === run.campaignId,
-      );
-      if (!capturedCampaign) {
-        throw new Error(
-          "The campaign captured by this apply run is no longer available. Restage the run from a current campaign before continuing.",
-        );
-      }
-      return capturedCampaign;
-    }
-    return (
-      state.campaigns.find(
-        (candidate) => candidate.id === state.activeCampaignId,
-      ) ?? null
-    );
-  }
 
-  function assertCampaignPreparationScope(
-    campaign: JobSearchCampaign,
-    jobIds: readonly string[],
-  ): void {
-    const uniqueJobIds = uniqueStrings(jobIds);
-    const unscopedJobId = uniqueJobIds.find(
-      (jobId) => !campaign.jobIds.includes(jobId),
-    );
-    if (unscopedJobId) {
-      throw new Error(
-        "That job is not retained in the active campaign. Select its campaign before preparing an application.",
-      );
-    }
-  }
 
-  async function requireEmployerApplicationCapacity(
-    jobIds: readonly string[],
-    run: ApplyRun | null = null,
-  ): Promise<void> {
-    const scopedJobIds = run?.jobIds ?? jobIds;
-    if (
-      uniqueStrings(scopedJobIds).length > MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN
-    ) {
-      throw new Error(
-        `Employer-application runs are limited to ${MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN} unique jobs.`,
-      );
-    }
-    const campaign = await resolvePreparationCampaign(run);
-    if (campaign) {
-      assertCampaignPreparationScope(campaign, scopedJobIds);
-    }
-  }
 
-  /**
-   * The one gate sequence every application preparation entry point shares:
-   * global activity, campaign lineage scope, fixed global capacity, and
-   * safeguard blockers. Entry points must delegate here instead of assembling
-   * their own subset so no route can skip a gate the others enforce.
-   */
-  async function requireApplicationPreparationGuards(
-    jobIds: readonly string[],
-    run: ApplyRun | null = null,
-  ): Promise<void> {
-    await requireApplicationActivityNotPaused();
-    await requireEmployerApplicationCapacity(jobIds, run);
-  }
 
-  async function withApplicationPreparationReservation<T>(
-    resolveScope: () =>
-      | {
-          jobIds: readonly string[];
-          run: ApplyRun | null;
-        }
-      | Promise<{
-          jobIds: readonly string[];
-          run: ApplyRun | null;
-        }>,
-    operation: (token: ApplicationPreparationCapacityToken) => Promise<T>,
-  ): Promise<T> {
-    const token = await withPreparationCapacityTransition(
-      repository,
-      async (capacityState) => {
-        const scope = await resolveScope();
-        const localDate = localDateKey(new Date());
-        await requireApplicationPreparationGuards(scope.jobIds, scope.run);
-        const created = {
-          localDate,
-          remainingJobs: uniqueStrings(scope.jobIds).length,
-          jobIds: uniqueStrings(scope.jobIds),
-        } satisfies ApplicationPreparationCapacityToken;
-        capacityState.tokens.add(created);
-        return created;
-      },
-    );
-
-    try {
-      return await operation(token);
-    } finally {
-      await withPreparationCapacityTransition(repository, (state) => {
-        state.tokens.delete(token);
-      });
-    }
-  }
 
   async function markApplicationPreparationStarted(
     input: { resultId: string; runId: string; jobId: string },
@@ -1030,54 +865,7 @@ export function createJobFinderWorkspaceService(
     });
   }
 
-  async function resolveApplicationStartRecordId(
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<string | undefined> {
-    if (applicationRecordId !== null) {
-      return applicationRecordId;
-    }
 
-    const job = (await repository.listSavedJobs()).find(
-      (entry) => entry.id === jobId,
-    );
-    if (!job) {
-      throw new Error(
-        `Unable to create an application record for unknown job '${jobId}'.`,
-      );
-    }
-
-    const now = new Date().toISOString();
-    const record = ApplicationRecordSchema.parse({
-      id: `application_${randomUUID()}`,
-      jobId,
-      title: job.title,
-      company: job.company,
-      status: job.status,
-      lastActionLabel: "New application record created for safe preparation.",
-      nextActionLabel: "Prepare the application when you are ready.",
-      lastUpdatedAt: now,
-    });
-    await repository.upsertApplicationRecord(record);
-    return record.id;
-  }
-
-  /**
-   * Guards approving (and therefore executing) an existing staged or paused
-   * run with exactly the gates a fresh preparation start faces. Only jobs
-   * that have not begun yet count as new consumption; jobs already prepared
-   * inside this run lineage are already reflected in today's quota through
-   * their result rows.
-   */
-  async function listPendingApplyRunJobIds(run: ApplyRun): Promise<string[]> {
-    const results = await repository.listApplyJobResults({ runId: run.id });
-    return uniqueStrings(run.jobIds).filter((jobId) => {
-      const result = results.find((candidate) => candidate.jobId === jobId);
-      return (
-        result?.state === "planned" && !result.applicationPreparationStartedAt
-      );
-    });
-  }
 
   async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,
@@ -1134,20 +922,6 @@ export function createJobFinderWorkspaceService(
     await commitActivityControl(rawInput);
     return getWorkspaceSnapshot();
   }
-  const applyRunStoreMethods = createWorkspaceApplyRunStoreMethods(context);
-  const applicationAnswerMethods = createWorkspaceApplicationAnswerMethods(
-    context,
-    applyRunStoreMethods.getApplyRunDetails,
-    (command) =>
-      trackWorkspaceOperation("application answer continuation", () =>
-        userActionMethods.performUserAction(command),
-      ),
-  );
-  const groupedAnswerMethods = createWorkspaceGroupedAnswerMethods({
-    ctx: context,
-    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
-    resumeVerifyingUserActions: resumeVerifyingUserActionsAfterCommit,
-  });
 
   function describeShutdownFailure(reason: unknown): string {
     return reason instanceof Error ? reason.message : String(reason);
@@ -1279,8 +1053,6 @@ export function createJobFinderWorkspaceService(
 
   return {
     shutdown,
-    writeApplicationDocumentText: (input) =>
-      writeApplicationDocumentText(context, input),
     ...snapshotProfileMethods,
     saveProfile: (profile) =>
       trackWorkspaceOperation("profile save", () =>
@@ -1339,28 +1111,6 @@ export function createJobFinderWorkspaceService(
         : trackWorkspaceOperation("workspace projection", () =>
             getWorkspaceSnapshot(true),
           ),
-    getApplicationDocumentContext: async (jobId, applicationRecordId) => {
-      const [profile, jobs, records, results] = await Promise.all([
-        repository.getProfile(),
-        repository.listSavedJobsByIds([jobId]),
-        repository.listApplicationRecords(),
-        repository.listApplyJobResults({ jobId, applicationRecordId }),
-      ]);
-      return {
-        profile,
-        job: buildDiscoveryJobs(jobs)[0] ?? null,
-        applicationRecord:
-          records.find(
-            (entry) =>
-              entry.id === applicationRecordId && entry.jobId === jobId,
-          ) ?? null,
-        latestResult:
-          [...results].sort(
-            (left, right) =>
-              Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-          )[0] ?? null,
-      };
-    },
     getWorkspaceBootstrap,
     getWorkspaceHomeSnapshot,
     ...sourceDebugMethods,
@@ -1380,13 +1130,6 @@ export function createJobFinderWorkspaceService(
           onProgress,
         );
       }),
-    ...applyRunStoreMethods,
-    ...applicationAnswerMethods,
-    ...groupedAnswerMethods,
-    saveUserActionAnswerDraft: (input) =>
-      trackWorkspaceOperation("answer draft", () =>
-        repository.saveUserActionAnswerDraft(input),
-      ),
     performUserAction: (command) =>
       trackWorkspaceOperation("application user action", () =>
         userActionMethods.performUserAction(command),
@@ -1400,129 +1143,6 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobsForReview!(jobIds),
       ),
-    recordApplicationsSentByPerson: () =>
-      recordApplicationsSentByPerson(context),
-    startApplyCopilotRun: (jobId, options, applicationRecordId) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        return withApplicationPreparationReservation(
-          () => ({ jobIds: [jobId], run: null }),
-          async (token) => {
-            const exactApplicationRecordId =
-              await resolveApplicationStartRecordId(jobId, applicationRecordId);
-            return applicationMethods.startApplyCopilotRun(
-              jobId,
-              options,
-              exactApplicationRecordId,
-              token,
-            );
-          },
-        );
-      }),
-    startAutoApplyRun: (jobId, applicationRecordId) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        return withApplicationPreparationReservation(
-          () => ({ jobIds: [jobId], run: null }),
-          async () => {
-            const exactApplicationRecordId =
-              await resolveApplicationStartRecordId(jobId, applicationRecordId);
-            return applicationMethods.startAutoApplyRun(
-              jobId,
-              exactApplicationRecordId,
-            );
-          },
-        );
-      }),
-    startAutoApplyQueueRun: (
-      jobIds,
-      applicationAutomationMode?: ApplicationAutomationMode,
-    ) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        return withApplicationPreparationReservation(
-          () => ({ jobIds, run: null }),
-          // The batch's own reservation already charges today's quota for
-          // every job in it. Without the token each job the batch begins is
-          // charged a second time, so the daily safeguard refuses partway
-          // through and the batch stalls with nothing on screen.
-          (token) =>
-            applicationMethods.startAutoApplyQueueRun(
-              jobIds,
-              token,
-              applicationAutomationMode,
-            ),
-        );
-      }),
-    approveApplyRun: (runId) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        return withApplicationPreparationReservation(
-          async () => {
-            const run =
-              (await repository.listApplyRuns()).find(
-                (entry) => entry.id === runId,
-              ) ?? null;
-            if (!run) {
-              throw new Error(`Unknown apply run '${runId}'.`);
-            }
-            return {
-              jobIds: await listPendingApplyRunJobIds(run),
-              run,
-            };
-          },
-          (token) => applicationMethods.approveApplyRun(runId, token),
-        );
-      }),
-    cancelApplyRun: (runId, options) =>
-      trackWorkspaceOperation("application preparation", () =>
-        applicationMethods.cancelApplyRun(runId, options),
-      ),
-    resolveApplyConsentRequest: (requestId, action) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        return withApplicationPreparationReservation(
-          async () => {
-            const [requests, runs, results] = await Promise.all([
-              repository.listApplicationConsentRequests(),
-              repository.listApplyRuns(),
-              repository.listApplyJobResults(),
-            ]);
-            const request = requests.find((entry) => entry.id === requestId);
-            if (!request)
-              throw new Error(`Unknown consent request '${requestId}'.`);
-            const run = runs.find((entry) => entry.id === request.runId);
-            if (!run) throw new Error(`Unknown apply run '${request.runId}'.`);
-            const jobIds = uniqueStrings(run.jobIds).filter((jobId) => {
-              const result = results.find(
-                (entry) => entry.runId === run.id && entry.jobId === jobId,
-              );
-              return (
-                result?.state === "planned" &&
-                !result.applicationPreparationStartedAt
-              );
-            });
-            return { jobIds, run };
-          },
-          (token) =>
-            applicationMethods.resolveApplyConsentRequest(
-              requestId,
-              action,
-              token,
-            ),
-        );
-      }),
-    revokeApplyRunApproval: (runId) =>
-      trackWorkspaceOperation("application preparation", () =>
-        applicationMethods.revokeApplyRunApproval(runId),
-      ),
-    approveApply: (jobId) =>
-      trackWorkspaceOperation("application preparation", async () => {
-        // Legacy direct-apply entry point. It delegates to the same guarded
-        // path as every other preparation start so it cannot bypass campaign
-        // scope, capacity, or safeguards; the submit authority of the wrapped
-        // method itself (prepare-only, no final submit) is unchanged.
-        return withApplicationPreparationReservation(
-          () => ({ jobIds: [jobId], run: null }),
-          (token) => applicationMethods.approveApply(jobId, undefined, token),
-        );
-      }),
-    ...crmMethods,
     applyAssistantProfileOperations: (request) =>
       trackWorkspaceOperation("profile proposal", () =>
         assistantEditMethods.applyAssistantProfileOperations(request),

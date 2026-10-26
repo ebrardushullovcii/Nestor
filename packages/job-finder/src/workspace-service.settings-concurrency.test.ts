@@ -103,39 +103,6 @@ function seedWithApprovedDraft(): ReturnType<typeof createSeed> {
 }
 
 describe("scoped settings updates against transaction-current state", () => {
-  test("tracker CRM commit merges over an application-defaults change landing mid-flight", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    let injectedDefaults = false;
-    const repository: JobFinderRepository = {
-      ...base,
-      commitSettingsUpdate: async (update) => {
-        if (!injectedDefaults) {
-          injectedDefaults = true;
-          await base.commitSettingsUpdate((current) => ({
-            ...current,
-            fontPreset: "space_grotesk_display",
-            appearanceTheme: "dark",
-          }));
-        }
-        return base.commitSettingsUpdate(update);
-      },
-    };
-    const service = createTestHarness(repository);
-
-    const snapshot = await service.updateTrackerCrm(
-      ApplicationCrmSettingsSchema.parse({
-        noResponseAutomation: { enabled: true, afterDays: 5 },
-      }),
-    );
-
-    const settings = await base.getSettings();
-    expect(settings.applicationCrm?.noResponseAutomation.afterDays).toBe(5);
-    expect(settings.fontPreset).toBe("space_grotesk_display");
-    expect(settings.appearanceTheme).toBe("dark");
-    expect(
-      snapshot.settings.applicationCrm?.noResponseAutomation.afterDays,
-    ).toBe(5);
-  });
 
   test("application-defaults commit merges over a tracker change landing mid-flight", async () => {
     const base = createInMemoryJobFinderRepository(createSeed());
@@ -301,36 +268,6 @@ describe("scoped settings updates against transaction-current state", () => {
 });
 
 describe("tracker CRM automation side effects", () => {
-  test("runs due-based automation once after the settings commit succeeds", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    const sequence: string[] = [];
-    const repository: JobFinderRepository = {
-      ...base,
-      commitSettingsUpdate: async (update) => {
-        sequence.push("commit");
-        return base.commitSettingsUpdate(update);
-      },
-    };
-    const service = createTestHarness(repository);
-    noResponseAutomationMock.mockImplementation(() => {
-      sequence.push("automate");
-      return Promise.resolve<readonly ApplicationRecord[]>([]);
-    });
-
-    await service.updateTrackerCrm(
-      ApplicationCrmSettingsSchema.parse({
-        noResponseAutomation: { enabled: true, afterDays: 7 },
-      }),
-    );
-
-    expect(sequence).toEqual(["commit", "automate"]);
-    expect(noResponseAutomationMock).toHaveBeenCalledTimes(1);
-    expect(noResponseAutomationMock.mock.calls[0]?.[0].settings).toEqual(
-      ApplicationCrmSettingsSchema.parse({
-        noResponseAutomation: { enabled: true, afterDays: 7 },
-      }),
-    );
-  });
 
   test("unrelated scoped saves never force automation past the due throttle", async () => {
     const service = createTestHarness(
@@ -349,46 +286,6 @@ describe("tracker CRM automation side effects", () => {
     expect(noResponseAutomationMock).toHaveBeenCalledTimes(1);
   });
 
-  test("automation failure is classified separately and never rolls back committed settings", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    const sequence: string[] = [];
-    const repository: JobFinderRepository = {
-      ...base,
-      commitSettingsUpdate: async (update) => {
-        sequence.push("commit");
-        return base.commitSettingsUpdate(update);
-      },
-    };
-    const service = createTestHarness(repository);
-    noResponseAutomationMock.mockImplementation(() => {
-      sequence.push("automate-failed");
-      return Promise.reject(new Error("crm down"));
-    });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    try {
-      const snapshot = await service.updateTrackerCrm(
-        ApplicationCrmSettingsSchema.parse({
-          noResponseAutomation: { enabled: true, afterDays: 9 },
-        }),
-      );
-
-      expect(sequence).toEqual(["commit", "automate-failed"]);
-      expect(
-        snapshot.settings.applicationCrm?.noResponseAutomation.afterDays,
-      ).toBe(9);
-      expect(
-        (await base.getSettings()).applicationCrm?.noResponseAutomation
-          .afterDays,
-      ).toBe(9);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "[JobFinderWorkspace] No-response automation skipped.",
-        expect.any(Error),
-      );
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
 });
 
 describe("approval invalidation and per-job mode pinning", () => {
@@ -549,27 +446,6 @@ describe("legacy saveSettings during desktop migration", () => {
     expect(snapshot.settings.resumeApplicationMode).toBe("original_resume");
   });
 
-  test("scoped commits after a legacy save merge onto its result instead of reverting it", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
-    const service = createTestHarness(base);
-    const snapshotBefore = await service.getWorkspaceSnapshot();
-
-    await service.saveSettings({
-      ...snapshotBefore.settings,
-      keepSessionAlive: true,
-      discoveryOnly: true,
-    });
-    await service.updateTrackerCrm(
-      ApplicationCrmSettingsSchema.parse({
-        noResponseAutomation: { enabled: true, afterDays: 12 },
-      }),
-    );
-
-    const settings = await base.getSettings();
-    expect(settings.keepSessionAlive).toBe(true);
-    expect(settings.discoveryOnly).toBe(true);
-    expect(settings.applicationCrm?.noResponseAutomation.afterDays).toBe(12);
-  });
 });
 
 test("pay choice saves through the real workspace service without sending permission or answer approval", async () => {

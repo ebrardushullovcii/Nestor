@@ -295,6 +295,20 @@ describe("applications on the job store", () => {
     applications.submissionUnknown(second.id, second.attempt);
     expect(applications.applyJobs({ selection: { ids } }).queued).toBe(0);
     expect(applications.stop(second.id)).toBe(false);
+    // Only the person's check moves an uncertain send, and only that one.
+    expect(applications.resolveUncertainSend(first.id, receipt)).toBe(false);
+    expect(
+      applications.resolveUncertainSend(second.id, {
+        ...receipt,
+        id: "resolution",
+        outcome: "not_submitted",
+      }),
+    ).toBe(true);
+    expect(applications.getApplication(second.id)).toMatchObject({
+      state: "stopped",
+      error: "You checked the site: this application was not sent.",
+    });
+    expect(jobs.getJob(second.jobId)?.stage).toBe("resume");
   });
 
   it("reads remembered answers only for the questions visible on the current form", () => {

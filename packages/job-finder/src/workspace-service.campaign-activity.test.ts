@@ -1,6 +1,5 @@
-import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAiClient,
@@ -8,49 +7,8 @@ import {
   createDocumentManager,
   createResearchAdapter,
   createSeed,
-  createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
-function createInterruptibleBrowserRuntime() {
-  const baseRuntime = createBrowserRuntime();
-  let markStarted!: () => void;
-  const started = new Promise<void>((resolve) => {
-    markStarted = resolve;
-  });
-  const executionState: { signal?: AbortSignal } = {};
-  const executeApplicationFlow = vi.fn(
-    async (
-      _source: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[0],
-      _input: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[1],
-      options?: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[2],
-    ) => {
-      if (!options?.signal) {
-        throw new Error("Expected direct apply execution to receive a signal.");
-      }
-      const signal = options.signal;
-      executionState.signal = signal;
-      markStarted();
-      return new Promise<never>((_resolve, reject) => {
-        const abort = () =>
-          reject(new DOMException("Application flow aborted.", "AbortError"));
-        signal.addEventListener("abort", abort, { once: true });
-        if (signal.aborted) {
-          abort();
-        }
-      });
-    },
-  );
-
-  return {
-    browserRuntime: {
-      ...baseRuntime,
-      executeApplicationFlow,
-    },
-    executeApplicationFlow,
-    executionState,
-    started,
-  };
-}
 
 function createService() {
   const repository = createInMemoryJobFinderRepository(createSeed());
@@ -95,98 +53,6 @@ describe("workspace campaign and activity controls", () => {
     });
   });
 
-  test("Home pause keeps the current browser run alive until Resume", async () => {
-    const seed = createSeed();
-    seed.settings = {
-      ...seed.settings,
-      resumeApplicationMode: "original_resume",
-    };
-    const interruptible = createInterruptibleBrowserRuntime();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: interruptible.browserRuntime,
-    });
-    const firstRun = workspaceService.startApplyCopilotRun("job_ready");
-    await interruptible.started;
-    const before = (await repository.listApplyRuns())[0]!;
 
-    const paused = await workspaceService.setActivityControl({
-      paused: true,
-      reason: "Paused by you.",
-      pauseBehavior: "finish_current",
-    });
-    expect(paused.activityControl.pauseBehavior).toBe("finish_current");
-    expect(interruptible.executionState.signal?.aborted).toBe(false);
-    expect((await repository.listApplyRuns())[0]).toMatchObject({
-      id: before.id,
-      state: "running",
-    });
 
-    await workspaceService.setActivityControl({ paused: false });
-    expect((await repository.listApplyRuns())[0]?.id).toBe(before.id);
-    const aborted = expect(firstRun).rejects.toThrow(/aborted/i);
-    await workspaceService.cancelApplyRun(before.id);
-    await aborted;
-  });
-
-  test("deduplicates and aborts a direct copilot browser run when activity pauses", async () => {
-    const seed = createSeed();
-    seed.settings = {
-      ...seed.settings,
-      resumeApplicationMode: "original_resume",
-    };
-    const interruptible = createInterruptibleBrowserRuntime();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: interruptible.browserRuntime,
-    });
-
-    const firstRun = workspaceService.startApplyCopilotRun("job_ready");
-    await interruptible.started;
-    expect(await repository.listApplyRuns()).toEqual([
-      expect.objectContaining({
-        state: "running",
-        jobIds: ["job_ready"],
-      }),
-    ]);
-    await expect(
-      workspaceService.startApplyCopilotRun("job_ready"),
-    ).rejects.toThrow(/already being prepared/i);
-
-    const pause = workspaceService.setActivityControl({ paused: true });
-    await expect(firstRun).rejects.toThrow(/aborted/i);
-    const paused = await pause;
-
-    expect(interruptible.executeApplicationFlow).toHaveBeenCalledTimes(1);
-    expect(interruptible.executionState.signal?.aborted).toBe(true);
-    const pausedRun = paused.applyRuns[0];
-    expect(pausedRun?.state).toBe("cancelled");
-    expect(typeof pausedRun?.completedAt).toBe("string");
-  });
-
-  test("aborts and recovers a direct copilot run when the workspace shuts down", async () => {
-    const seed = createSeed();
-    seed.settings = {
-      ...seed.settings,
-      resumeApplicationMode: "original_resume",
-    };
-    const interruptible = createInterruptibleBrowserRuntime();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: interruptible.browserRuntime,
-    });
-
-    const firstRun = workspaceService.startApplyCopilotRun("job_ready");
-    await interruptible.started;
-    const shutdown = workspaceService.shutdown();
-    await expect(firstRun).rejects.toThrow(/aborted/i);
-    await shutdown;
-
-    expect(interruptible.executionState.signal?.aborted).toBe(true);
-    const recoveredRun = (await repository.listApplyRuns())[0];
-    expect(recoveredRun?.state).toBe("failed");
-    expect(recoveredRun?.summary).toBe(
-      "Automatic apply stopped because the app closed.",
-    );
-  });
 });

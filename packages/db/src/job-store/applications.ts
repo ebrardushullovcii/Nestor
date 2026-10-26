@@ -503,6 +503,36 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /**
+     * The person checked the site after a send whose outcome was uncertain.
+     * Only their word moves the row: sent becomes Applied, not sent stops
+     * here so nothing sends it again by itself.
+     */
+    resolveUncertainSend(
+      id: number,
+      outcome: SubmissionOutcomeRecord,
+    ): boolean {
+      outcome = SubmissionOutcomeRecordSchema.parse(outcome);
+      return store.transaction(() => {
+        const current = getApplication(id);
+        if (!current || current.state !== "uncertain") return false;
+        const sent = outcome.outcome === "submitted";
+        sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
+          submission_outcome_id = ?, submission_outcome_json = ?, error = ? WHERE id = ?`).run(
+          sent ? "submitted" : "stopped",
+          sent && outcome.verifiedAt ? Date.parse(outcome.verifiedAt) : null,
+          Date.now(),
+          outcome.id,
+          JSON.stringify(outcome),
+          sent ? null : "You checked the site: this application was not sent.",
+          id,
+        );
+        if (sent) store.setStage([current.jobId], "applied");
+        changed([current.jobId]);
+        return true;
+      });
+    },
+
     /** A crash in preparation is retryable; an interrupted send requires proof. */
     recoverPreparation(): void {
       store.transaction(() => {

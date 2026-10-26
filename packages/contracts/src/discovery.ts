@@ -2894,7 +2894,8 @@ export const APPLICATION_SENT_CANNOT_MOVE_BACK_MESSAGE =
 export type ApplicationRecordInput = z.input<typeof ApplicationRecordSchema>;
 
 export const JobFinderInterviewFollowUpInputSchema = z.object({
-  applicationRecordId: NonEmptyStringSchema,
+  /** The job in Applications this session was opened for. */
+  jobId: NonEmptyStringSchema,
   sessionId: NonEmptyStringSchema,
   action: z.enum(["mark_interviewed", "add_follow_up_note"]),
   note: NonEmptyStringSchema.optional(),

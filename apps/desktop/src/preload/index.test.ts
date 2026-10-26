@@ -47,14 +47,8 @@ type ExposedJobFinderApi = {
   mutateWorkspaceEntities: (
     input: JobFinderWorkspaceEntityMutationInput,
   ) => Promise<JobFinderWorkspaceSyncResult>;
-  getApplicationAuthorityReadiness: (input?: unknown) => Promise<unknown>;
-  approveCurrentApplicationAnswers: (input: unknown) => Promise<unknown>;
-  listApplicationAuthorityEnvelopes: (input?: unknown) => Promise<unknown>;
-  createApplicationAuthorityEnvelope: (input: unknown) => Promise<unknown>;
   importResume: (onProgress?: (event: unknown) => void) => Promise<unknown>;
   cancelImportResume: () => void;
-  startApplyCopilotRun: (input: unknown) => Promise<unknown>;
-  resolveApplyConsentRequest: (input: unknown) => Promise<unknown>;
   setResumeClaimConfirmation: (input: unknown) => Promise<unknown>;
   getStartupResetRecovery: () => Promise<unknown>;
   getStartupDatabaseRecovery: () => Promise<unknown>;
@@ -235,91 +229,6 @@ describe("preload startup recovery boundary", () => {
     expect(mockInvoke).toHaveBeenCalledWith(
       "job-finder:dismiss-startup-database-recovery-notice",
     );
-  });
-});
-
-describe("preload application authority boundary", () => {
-  beforeEach(() => {
-    mockInvoke.mockClear();
-  });
-
-  it("validates authority management inputs and outputs", async () => {
-    mockInvoke.mockResolvedValueOnce([]);
-    await expect(
-      exposedJobFinder.listApplicationAuthorityEnvelopes({ status: "active" }),
-    ).resolves.toEqual([]);
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:list-application-authority-envelopes",
-      { status: "active" },
-    );
-
-    expect(() =>
-      exposedJobFinder.createApplicationAuthorityEnvelope({
-        mode: "prepare_only",
-        scope: { campaignId: null, jobIds: [] },
-        maxApplicationsPerRun: 1,
-        intermediateMutationsAuthorized: false,
-        allowedResumeSha256: [],
-        allowedOrigins: ["https://jobs.example.com"],
-        expiresAt: null,
-        allowAutoSubmitOverride: true,
-      }),
-    ).toThrow();
-    expect(mockInvoke).toHaveBeenCalledTimes(1);
-
-    mockInvoke.mockResolvedValueOnce([{ id: "malformed" }]);
-    await expect(
-      exposedJobFinder.listApplicationAuthorityEnvelopes(),
-    ).rejects.toThrow();
-  });
-
-  it("validates readiness and approval payloads at the preload boundary", async () => {
-    const readiness = {
-      generatedAt: "2026-08-28T10:00:00.000Z",
-      executionCapability: "prepare_only",
-      elevatedExecutionAvailable: false,
-      answerApprovalStatus: "missing_answers",
-      currentAnswers: {
-        sourceProfileRevision: 1,
-        digest: null,
-        entryCount: 0,
-        kinds: [],
-        missingRequiredKinds: [],
-      },
-      approvedSnapshot: null,
-      activeAuthority: null,
-      blockers: [{ code: "no_reusable_answers", remediation: "profile" }],
-    };
-    mockInvoke.mockResolvedValueOnce(readiness);
-    await expect(
-      exposedJobFinder.getApplicationAuthorityReadiness(),
-    ).resolves.toEqual(readiness);
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:get-application-authority-readiness",
-      {},
-    );
-
-    mockInvoke.mockResolvedValueOnce({
-      status: "blocked",
-      snapshot: null,
-      readiness,
-    });
-    await expect(
-      exposedJobFinder.approveCurrentApplicationAnswers({
-        expectedProfileRevision: 1,
-        confirmedCurrentAnswers: true,
-      }),
-    ).resolves.toMatchObject({ status: "blocked" });
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:approve-current-application-answers",
-      { expectedProfileRevision: 1, confirmedCurrentAnswers: true },
-    );
-    expect(() =>
-      exposedJobFinder.approveCurrentApplicationAnswers({
-        expectedProfileRevision: 1,
-        confirmedCurrentAnswers: false,
-      }),
-    ).toThrow();
   });
 });
 

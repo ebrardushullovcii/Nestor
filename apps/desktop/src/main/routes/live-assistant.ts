@@ -17,7 +17,7 @@ import {
   SaveInterviewSetupInputSchema,
   UpdateInterviewOverlayPreferenceInputSchema,
 } from "@nestor/contracts";
-import { getJobFinderWorkspaceService } from "../services/job-finder";
+import { runTrackerCommand } from "./tracker";
 import { getLiveAssistantService } from "../services/live-assistant";
 import {
   moveInterviewOverlayWindow,
@@ -259,11 +259,26 @@ export function registerLiveAssistantRouteHandlers(ipcMain: IpcMain) {
   ipcMain.handle(
     "live-assistant:record-job-finder-follow-up",
     async (_event, payload: unknown) => {
+      // The interview lands in Applications as an event on that job, the
+      // same command the tracker screen uses; an interview moves the status.
       const input = JobFinderInterviewFollowUpInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      return jobFinderWorkspaceService.recordLiveAssistantApplicationAction(
-        input,
-      );
+      const jobId = Number(input.jobId);
+      if (!Number.isSafeInteger(jobId) || jobId <= 0)
+        throw new Error(
+          "This session was opened for an application from before Applications moved. Log the interview on the job in Applications.",
+        );
+      const note = input.note?.trim();
+      return runTrackerCommand("add_event", {
+        jobId,
+        kind: input.action === "mark_interviewed" ? "interview" : "note",
+        title:
+          input.action === "mark_interviewed"
+            ? "Interview completed"
+            : "Interview follow-up note",
+        body: note
+          ? `Live Assistant session ${input.sessionId}: ${note}`
+          : `Live Assistant session ${input.sessionId}.`,
+      });
     },
   );
 }

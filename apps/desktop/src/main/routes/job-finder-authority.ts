@@ -1,4 +1,4 @@
-import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 
 import {
   ApplicationAuthorityEnvelopeMutationResultSchema,
@@ -27,7 +27,8 @@ export interface JobFinderAuthorityRouteDependencies {
 }
 
 /**
- * Main-process-only authority management boundary. It exposes inspect,
+ * Main-process-only authority management, reached through the Assistant's
+ * registered actions; the renderer has no bridge to it. It exposes inspect,
  * prepare-only create/update, and revocation; no preflight, arm, or submit
  * operation is registered here.
  */
@@ -121,11 +122,6 @@ export function createJobFinderAuthorityOperations(
   return operations;
 }
 
-export function registerJobFinderAuthorityRouteHandlers(ipcMain: IpcMain, dependencies?: JobFinderAuthorityRouteDependencies): void {
-  for (const [name, operation] of createJobFinderAuthorityOperations(dependencies)) {
-    ipcMain.handle(name, (event, input: unknown) => operation(event, input));
-  }
-}
 export async function executeAuthorityAction(id: string, input: unknown) {
   const operation = createJobFinderAuthorityOperations().get(`job-finder:${id}`);
   if (!operation) throw new Error("Unknown application authority action.");

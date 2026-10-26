@@ -7,7 +7,6 @@ import {
 } from "@nestor/db/applications";
 import { openJobStore } from "@nestor/db/job-store";
 import {
-  ApplyJobResultSchema,
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
   type CandidateAnswerKind,
@@ -543,45 +542,21 @@ describe("Job Finder application authority service", () => {
       outcome: "outcome_uncertain",
       revokedAt: null,
     });
-    const result = ApplyJobResultSchema.parse({
-      id: uncertainOutcome.resultId,
-      runId: uncertainOutcome.runId,
-      jobId: uncertainOutcome.jobId,
-      applicationRecordId: uncertainOutcome.applicationRecordId,
-      state: "blocked",
-      summary: "Outcome uncertain",
-      detail: "Verify on the employer site.",
-      startedAt: NOW,
-      updatedAt: NOW,
-      blockerReason: "submission_outcome_uncertain",
-      privacyReceipt: {
-        generatedAt: NOW,
-        lineage: {
-          runId: uncertainOutcome.runId,
-          jobId: uncertainOutcome.jobId,
-          resultId: uncertainOutcome.resultId,
-          applicationRecordId: uncertainOutcome.applicationRecordId,
-        },
-        destination: {
-          origin: "https://jobs.example.com",
-          safePath: "/apply",
-        },
-        resume: {
-          source: "original_upload",
-          sourceDocumentId: "resume_1",
-          exportArtifactId: null,
-          fileName: "Resume.pdf",
-          sha256: SHA,
-        },
-        finalSubmitAuthorized: true,
-        finalSubmitOccurred: false,
-        submissionOutcome: uncertainOutcome,
-      },
-    });
+    const applicationSends = {
+      read: vi.fn<
+        (applicationRecordId: string) => {
+          receipt: typeof uncertainOutcome;
+          pageUrl: string;
+        }
+      >(() => ({
+        receipt: uncertainOutcome,
+        pageUrl: "https://jobs.example.com/apply?step=2",
+      })),
+      resolve: vi.fn(),
+    };
     vi.spyOn(repository, "getSubmissionOutcomeRecord").mockResolvedValue(
       uncertainOutcome,
     );
-    vi.spyOn(repository, "listApplyJobResults").mockResolvedValue([result]);
     vi.spyOn(repository, "getSubmissionIdempotencyRecord").mockResolvedValue(
       idempotency,
     );
@@ -609,6 +584,7 @@ describe("Job Finder application authority service", () => {
       now: () => LATER,
       idFactory: () => ids.shift() ?? "unexpected",
       releaseApplicationPage,
+      applicationSends,
     });
 
     const resolution = await service.resolveSubmissionOutcome({
@@ -633,7 +609,10 @@ describe("Job Finder application authority service", () => {
         {
           id: "evidence_evidence",
           kind: "operator_confirmation",
-          destination: result.privacyReceipt?.destination,
+          destination: {
+            origin: "https://jobs.example.com",
+            safePath: "/apply",
+          },
           artifactRefId: null,
           observedAt: LATER,
           summary:
@@ -642,5 +621,24 @@ describe("Job Finder application authority service", () => {
       ],
       retry: { eligible: false, blockReason: "submission_confirmed" },
     });
+    expect(applicationSends.read).toHaveBeenCalledWith("application_1");
+    expect(applicationSends.resolve).toHaveBeenCalledWith(
+      "application_1",
+      expect.objectContaining({ outcome: "submitted" }),
+    );
+
+    // A row whose saved receipt is not this exact uncertain send stays blocked.
+    applicationSends.read.mockReturnValue({
+      receipt: { ...uncertainOutcome, id: "outcome_other" },
+      pageUrl: "https://jobs.example.com/apply",
+    });
+    resolve.mockClear();
+    const blocked = await service.resolveSubmissionOutcome({
+      uncertainOutcomeId: uncertainOutcome.id,
+      resolution: "submitted",
+      confirmedOnEmployerSite: true,
+    });
+    expect(blocked.status).toBe("blocked");
+    expect(resolve).not.toHaveBeenCalled();
   });
 });
