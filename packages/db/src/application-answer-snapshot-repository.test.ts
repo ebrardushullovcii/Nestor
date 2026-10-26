@@ -6,17 +6,13 @@ import {
   type ApprovedApplicationAnswerSnapshot,
   type ApprovedApplicationAnswerSnapshotContent,
 } from "@nestor/contracts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 
-import {
-  createFileJobFinderRepository,
-  createInMemoryJobFinderRepository,
-} from "./index";
-import { createSeed } from "./test-fixtures";
-import {
-  createTempRepository,
-  type FileRepository,
-} from "./file-repository.test-support";
+import { openJobStore, resetJobStore } from "./job-store/job-store";
+import { createSendGuards } from "./job-store/send-guards";
 
 function createSnapshot(
   id: string,
@@ -56,7 +52,8 @@ function createSnapshot(
 
 describe("application answer snapshot repository", () => {
   test("appends immutable revisions with transaction-current CAS and dedupes content", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const store = openJobStore(":memory:");
+    const repository = createSendGuards(store);
     const first = createSnapshot("answer_snapshot_1", "Yes");
 
     await expect(
@@ -114,25 +111,21 @@ describe("application answer snapshot repository", () => {
       }),
     ).rejects.toThrow("digest");
 
-    await repository.reset(createSeed());
+    resetJobStore(store);
     await expect(
       repository.getLatestApplicationAnswerSnapshot("candidate_1"),
     ).resolves.toBeNull();
-    await repository.close();
+    store.close();
   });
 
   test("persists, reopens, and resets the append-only collection in SQLite", async () => {
-    const temp = await createTempRepository("nestor-answer-snapshot-");
-    let repository: FileRepository | null = null;
-    let reopened: FileRepository | null = null;
+    const directory = mkdtempSync(path.join(tmpdir(), "nestor-answer-snapshot-"));
+    const filePath = path.join(directory, "job-finder.sqlite");
+    let store = openJobStore(filePath);
     try {
-      repository = await createFileJobFinderRepository({
-        filePath: temp.filePath,
-        seed: createSeed(),
-      });
       const first = createSnapshot("answer_snapshot_file_1", "Yes");
       await expect(
-        repository.commitApplicationAnswerSnapshot({
+        createSendGuards(store).commitApplicationAnswerSnapshot({
           snapshot: first,
           expectedLatestRevision: null,
         }),
@@ -140,13 +133,10 @@ describe("application answer snapshot repository", () => {
         status: "created",
         snapshot: { revision: 1 },
       });
-      await repository.close();
-      repository = null;
+      store.close();
 
-      reopened = await createFileJobFinderRepository({
-        filePath: temp.filePath,
-        seed: createSeed(),
-      });
+      store = openJobStore(filePath);
+      const reopened = createSendGuards(store);
       await expect(
         reopened.getLatestApplicationAnswerSnapshot("candidate_1"),
       ).resolves.toEqual(first);
@@ -161,14 +151,13 @@ describe("application answer snapshot repository", () => {
         snapshot: { revision: 2 },
       });
 
-      await reopened.reset(createSeed());
+      resetJobStore(store);
       await expect(reopened.listApplicationAnswerSnapshots()).resolves.toEqual(
         [],
       );
     } finally {
-      await repository?.close();
-      await reopened?.close();
-      await temp.cleanup();
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

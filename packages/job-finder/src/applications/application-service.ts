@@ -41,6 +41,7 @@ import {
   createJobSitesStore,
   createResumeStore,
   type JobStore,
+  type SendGuards,
 } from "@nestor/db/job-store";
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 
@@ -58,7 +59,6 @@ import {
   submitPreparedApplication,
   type SubmitPreparedApplicationRepository,
 } from "../internal/apply-submission-handoff";
-import type { JobFinderRepository } from "@nestor/db";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 import { toResumeJob } from "../resumes/write-resume";
 import { describeFormQuestion, toKnownFormAnswer } from "./questions";
@@ -84,7 +84,7 @@ export interface ApplicationServiceDeps {
   candidateAssets?: CandidateAssetResolver;
   authorityRepository: SubmitPreparedApplicationRepository &
     Pick<
-      JobFinderRepository,
+      SendGuards,
       | "listApplicationAuthorityEnvelopes"
       | "getApplicationAuthorityEnvelope"
       | "commitApplicationAuthorityEnvelope"

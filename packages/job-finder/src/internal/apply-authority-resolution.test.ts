@@ -1,6 +1,3 @@
-import { createInMemoryJobFinderRepository } from "@nestor/db";
-import { createSeed } from "../workspace-service.test-fixtures";
-import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import {
   ApplicationAuthorityEnvelopeSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
@@ -12,7 +9,6 @@ import {
   authorizeReviewedApplicationOrigin,
   PREPARE_ONLY_AUTHORITY,
   resolveApplyAuthority,
-  resolveApplyAuthorityForJob,
 } from "./apply-authority-resolution";
 import { withApplicationAuthorityGate } from "./application-authority-gate";
 
@@ -420,34 +416,5 @@ test.each([
     now: NOW,
   });
   expect(result.authority.salaryDisclosure).toBe("answer_from_profile");
-  expect(result.authority.submitAuthorized).toBe(false);
-});
-
-test("reads the saved pay choice independently of an old authority envelope", async () => {
-  const seed = createSeed();
-  const repository = createInMemoryJobFinderRepository({
-    ...seed,
-    applicationAuthorityEnvelopes: [
-      envelope({ status: "revoked", revokedAt: NOW }),
-    ],
-  });
-  expect(await readSalaryDisclosurePreference(repository)).toBe(
-    "pause_for_user",
-  );
-  await repository.commitSettingsUpdate((current) => ({
-    ...current,
-    salaryDisclosure: "pause_for_user",
-  }));
-  expect(await readSalaryDisclosurePreference(repository)).toBe(
-    "pause_for_user",
-  );
-  const result = await resolveApplyAuthorityForJob({
-    repository,
-    job: { id: "job_test" },
-    resumeSha256: RESUME_DIGEST,
-    applicationUrl: `${ORIGIN}/jobs/1/apply`,
-    now: NOW,
-  });
-  expect(result.authority.salaryDisclosure).toBe("pause_for_user");
   expect(result.authority.submitAuthorized).toBe(false);
 });

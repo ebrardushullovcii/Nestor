@@ -1,6 +1,7 @@
 import type {
   ApplicationAuthorityEnvelope,
   ApplicationAuthorityStatus,
+  ApprovedApplicationAnswerSnapshot,
   SubmissionArmedMarker,
   SubmissionExecutionGrant,
   SubmissionExecutionGrantStatus,
@@ -10,6 +11,20 @@ import type {
   SubmissionOutcomeResolutionInput,
   SubmissionPreflightRecord,
 } from "@nestor/contracts";
+
+/**
+ * Every record the send guards decide from. The guards read and change these
+ * as one value inside a single transaction.
+ */
+export interface SendGuardState {
+  applicationAuthorityEnvelopes: ApplicationAuthorityEnvelope[];
+  submissionPreflights: SubmissionPreflightRecord[];
+  submissionExecutionGrants: SubmissionExecutionGrant[];
+  submissionIdempotencyRecords: SubmissionIdempotencyRecord[];
+  submissionArmedMarkers: SubmissionArmedMarker[];
+  submissionOutcomeRecords: SubmissionOutcomeRecord[];
+  applicationAnswerSnapshots?: ApprovedApplicationAnswerSnapshot[];
+}
 
 export type ApplicationAuthorityEnvelopeCommitResult =
   | {

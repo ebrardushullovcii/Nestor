@@ -18,6 +18,7 @@ import {
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { setJobSearchServiceFactory } from "../job-commands";
 import { getJobStore } from "../job-store";
+import { getSendGuards } from "../send-guards";
 import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
@@ -648,11 +649,11 @@ export async function createJobFinderRuntimeAsync(
     }
     throw error;
   }
-  // Reconcile any crash-interrupted authority attempt before constructing or
-  // exposing the workspace service. The repository transition is durable and
-  // idempotent: armed attempts become permanently uncertain, active grants are
-  // revoked, and no browser action or submission capability is opened here.
-  await jobFinderRepository.recoverArmedSubmissionAttempts({
+  // Reconcile any crash-interrupted send before Apply starts. The transition
+  // is durable and idempotent: armed attempts become permanently uncertain,
+  // active grants are revoked, and no browser action or submission
+  // capability is opened here.
+  await getSendGuards().recoverArmedSubmissionAttempts({
     now: new Date().toISOString(),
   });
   clearBlockedStartupDatabaseRecoveryIncident();

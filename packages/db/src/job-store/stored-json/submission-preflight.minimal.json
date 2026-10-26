@@ -1,0 +1,26 @@
+{
+  "id": "id-sample",
+  "idempotencyKey": "idempotencyKey-sample",
+  "runId": "runId-sample",
+  "jobId": "jobId-sample",
+  "resultId": "resultId-sample",
+  "applicationRecordId": "applicationRecordId-sample",
+  "authorityEnvelopeId": "authorityEnvelopeId-sample",
+  "authorityRevision": 1,
+  "formObservation": {
+    "id": "id-sample",
+    "revision": 1,
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "resumeSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "answers": {
+    "revision": 1,
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "finalControl": {
+    "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ref": "ref-sample"
+  },
+  "remainingRunCapacityBefore": 1,
+  "createdAt": "2026-10-26T09:00:00.000Z"
+}

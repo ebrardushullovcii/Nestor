@@ -6,20 +6,16 @@ import {
   NonEmptyStringSchema,
   serializeApprovedApplicationAnswerSnapshotForDigest,
   type ApprovedApplicationAnswerSnapshot,
-  type JobFinderRepositoryState,
 } from "@nestor/contracts";
 
-import { cloneValue } from "./internal/state";
+import type { SendGuardStateStore } from "./application-authority-repository";
+import type { SendGuardState } from "./application-authority-repository-types";
 import type {
   ApplicationAnswerSnapshotCommitResult,
   ApplicationAnswerSnapshotRepository,
   CommitApplicationAnswerSnapshotInput,
 } from "./application-answer-snapshot-repository-types";
 
-interface ApplicationAnswerSnapshotStateStore {
-  read(): JobFinderRepositoryState;
-  mutate<T>(operation: (state: JobFinderRepositoryState) => T): T;
-}
 
 function snapshotContent(
   snapshot: ApprovedApplicationAnswerSnapshot,
@@ -68,7 +64,7 @@ function compareSnapshotContent(
 }
 
 function latestSnapshotForProfile(
-  state: JobFinderRepositoryState,
+  state: SendGuardState,
   profileId: string,
 ): ApprovedApplicationAnswerSnapshot | null {
   const matching = (state.applicationAnswerSnapshots ?? []).filter(
@@ -119,7 +115,7 @@ function parseSnapshotCandidate(
 ): ApprovedApplicationAnswerSnapshot {
   validateExpectedLatestRevision(input.expectedLatestRevision);
   const snapshot = ApprovedApplicationAnswerSnapshotSchema.parse(
-    cloneValue(input.snapshot),
+    structuredClone(input.snapshot),
   );
   // Re-parse the content separately so the bytes hashed here cannot include
   // lifecycle metadata or an accidental future field.
@@ -131,7 +127,7 @@ function parseSnapshotCandidate(
 }
 
 export function createApplicationAnswerSnapshotRepositoryMethods(
-  store: ApplicationAnswerSnapshotStateStore,
+  store: SendGuardStateStore,
 ): ApplicationAnswerSnapshotRepository {
   return {
     async listApplicationAnswerSnapshots(options) {
@@ -159,7 +155,7 @@ export function createApplicationAnswerSnapshotRepositoryMethods(
       for (const snapshot of snapshots) {
         verifySnapshotDigest(snapshot);
       }
-      return cloneValue(snapshots);
+      return structuredClone(snapshots);
     },
 
     async getApplicationAnswerSnapshot(id) {
@@ -173,13 +169,13 @@ export function createApplicationAnswerSnapshotRepositoryMethods(
       if (snapshot) {
         verifySnapshotDigest(snapshot);
       }
-      return cloneValue(snapshot);
+      return structuredClone(snapshot);
     },
 
     async getLatestApplicationAnswerSnapshot(profileId) {
       await Promise.resolve();
       const parsedProfileId = NonEmptyStringSchema.parse(profileId);
-      return cloneValue(
+      return structuredClone(
         latestSnapshotForProfile(store.read(), parsedProfileId),
       );
     },
@@ -187,7 +183,7 @@ export function createApplicationAnswerSnapshotRepositoryMethods(
     async commitApplicationAnswerSnapshot(input) {
       await Promise.resolve();
       const candidate = parseSnapshotCandidate(input);
-      return cloneValue(
+      return structuredClone(
         store.mutate((state): ApplicationAnswerSnapshotCommitResult => {
           const latest = latestSnapshotForProfile(state, candidate.profileId);
           const expectedRevision = input.expectedLatestRevision;

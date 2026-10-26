@@ -1,8 +1,6 @@
 import type { ApplicationAttestationKind } from "@nestor/contracts";
 import {
-  ApplyJobResultSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SubmissionArmedMarkerSchema,
   SubmissionExecutionGrantSchema,
@@ -11,18 +9,45 @@ import {
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test } from "vitest";
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
-  createFileJobFinderRepository,
-  createInMemoryJobFinderRepository,
-  type JobFinderRepository,
-} from "./index";
-import {
-  cleanupTempDirectoryWithRetry,
-  createTempRepository,
-} from "./file-repository.test-support";
-import { createSeed } from "./test-fixtures";
+  openJobStore,
+  resetJobStore,
+  type JobStore,
+} from "./job-store/job-store";
+import { createSendGuards, type SendGuards } from "./job-store/send-guards";
+
+/** The guards over a store that lives for one test. */
+function memoryGuards(): SendGuards {
+  return createSendGuards(openJobStore(":memory:"));
+}
+
+/** A store file that can be closed and opened again, as across a restart. */
+function storeFile(directories: string[], prefix: string) {
+  const directory = mkdtempSync(path.join(tmpdir(), prefix));
+  directories.push(directory);
+  const filePath = path.join(directory, "job-finder.sqlite");
+  let store: JobStore | null = null;
+  return {
+    filePath,
+    open(): SendGuards {
+      store?.close();
+      store = openJobStore(filePath);
+      return createSendGuards(store);
+    },
+    get store(): JobStore {
+      if (!store) throw new Error("The store is not open.");
+      return store;
+    },
+    close() {
+      store?.close();
+      store = null;
+    },
+  };
+}
 
 const at = "2026-08-27T10:00:00.000Z";
 const later = "2026-08-27T10:05:00.000Z";
@@ -126,78 +151,6 @@ function createGrant() {
     expiresAt: expiry,
     revokedAt: null,
     consumedAt: null,
-  });
-}
-
-function createApplyJobResult(input: {
-  resultId: string;
-  runId: string;
-  jobId: string;
-  applicationRecordId: string;
-}) {
-  return ApplyJobResultSchema.parse({
-    id: input.resultId,
-    runId: input.runId,
-    jobId: input.jobId,
-    applicationRecordId: input.applicationRecordId,
-    state: "submitting",
-    summary: "Application is ready for final action.",
-    detail: "The final action is awaiting a durable outcome.",
-    startedAt: at,
-    updatedAt: later,
-    privacyReceipt: {
-      generatedAt: later,
-      lineage: {
-        runId: input.runId,
-        jobId: input.jobId,
-        resultId: input.resultId,
-        applicationRecordId: input.applicationRecordId,
-      },
-      destination: {
-        origin: "https://jobs.example.com",
-        safePath: "/apply",
-      },
-      resume: {
-        source: "original_upload",
-        sourceDocumentId: "resume_1",
-        exportArtifactId: null,
-        fileName: "alex-vanguard.pdf",
-        sha256: digest,
-      },
-      finalSubmitOccurred: false,
-      submissionOutcome: null,
-    },
-  });
-}
-
-function createApplicationRecord(input: {
-  applicationRecordId: string;
-  jobId: string;
-}) {
-  return ApplicationRecordSchema.parse({
-    id: input.applicationRecordId,
-    jobId: input.jobId,
-    title: "Software Engineer",
-    company: "Example Inc",
-    status: "approved",
-    lastActionLabel: "Application prepared.",
-    nextActionLabel: "Review the prepared application.",
-    lastUpdatedAt: at,
-    lastAttemptState: "ready",
-    crm: {
-      revision: 2,
-      stage: "preparing",
-      stageChangedAt: at,
-    },
-    events: [
-      {
-        id: `event_${input.applicationRecordId}_existing`,
-        at,
-        title: "Application prepared",
-        detail: "The application is ready for review.",
-        emphasis: "neutral",
-      },
-    ],
   });
 }
 
@@ -343,30 +296,9 @@ function createReplacementEnvelope(id: string, jobId: string) {
 }
 
 async function persistAuthorityFixture(
-  repository: JobFinderRepository,
+  repository: SendGuards,
   fixture: ReturnType<typeof createAuthorityFixture>,
-  options: {
-    applicationRecord?: ReturnType<typeof createApplicationRecord> | null;
-  } = {},
 ) {
-  const applicationRecord =
-    options.applicationRecord === undefined
-      ? createApplicationRecord({
-          applicationRecordId: fixture.preflight.applicationRecordId,
-          jobId: fixture.preflight.jobId,
-        })
-      : options.applicationRecord;
-  if (applicationRecord) {
-    await repository.upsertApplicationRecord(applicationRecord);
-  }
-  await repository.upsertApplyJobResult(
-    createApplyJobResult({
-      resultId: fixture.preflight.resultId,
-      runId: fixture.preflight.runId,
-      jobId: fixture.preflight.jobId,
-      applicationRecordId: fixture.preflight.applicationRecordId,
-    }),
-  );
   expect(
     await repository.commitApplicationAuthorityEnvelope({
       envelope: fixture.envelope,
@@ -383,22 +315,8 @@ async function persistAuthorityFixture(
   }
 }
 
-async function exerciseAuthorityLifecycle(repository: JobFinderRepository) {
+async function exerciseAuthorityLifecycle(repository: SendGuards) {
   const envelope = createEnvelope();
-  await repository.upsertApplicationRecord(
-    createApplicationRecord({
-      applicationRecordId: "application_1",
-      jobId: "job_1",
-    }),
-  );
-  await repository.upsertApplyJobResult(
-    createApplyJobResult({
-      resultId: "result_1",
-      runId: "run_1",
-      jobId: "job_1",
-      applicationRecordId: "application_1",
-    }),
-  );
   expect(
     await repository.commitApplicationAuthorityEnvelope({
       envelope,
@@ -537,7 +455,7 @@ async function exerciseAuthorityLifecycle(repository: JobFinderRepository) {
 }
 
 async function exerciseCompoundAuthorityTransition(
-  repository: JobFinderRepository,
+  repository: SendGuards,
 ) {
   const confirm = createAuthorityFixture(
     "compound_confirm",
@@ -723,37 +641,15 @@ describe("transaction-current authority decision-policy gate", () => {
     {
       label: "submitted",
       outcome: "submitted" as const,
-      expectedRecord: {
-        status: "submitted",
-        lastAttemptState: "submitted",
-        latestBlocker: null,
-      },
-      expectedResult: {
-        state: "submitted",
-        blockerReason: null,
-        blockerSummary: null,
-      },
     },
     {
       label: "not_submitted",
       outcome: "not_submitted" as const,
-      expectedRecord: {
-        status: "approved",
-        lastAttemptState: "paused",
-        latestBlocker: {
-          code: "requires_manual_review",
-        },
-      },
-      expectedResult: {
-        state: "blocked",
-        blockerReason: null,
-        blockerSummary: null,
-      },
     },
   ])(
     "atomically resolves an uncertain outcome through explicit operator verification ($label)",
     async ({ outcome }) => {
-      const repository = createInMemoryJobFinderRepository(createSeed());
+      const repository = memoryGuards();
       const fixture = createAuthorityFixture(
         `operator_${outcome}`,
         "confirm_before_submit",
@@ -816,12 +712,11 @@ describe("transaction-current authority decision-policy gate", () => {
         outcome: operatorOutcome,
         idempotency: { revision: 4 },
       });
-      await repository.close();
     },
   );
 
   test("does not project final-submit authorization before an exact attempt is armed", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = memoryGuards();
     const fixture = createAuthorityFixture(
       "receipt_without_arm",
       "confirm_before_submit",
@@ -836,11 +731,10 @@ describe("transaction-current authority decision-policy gate", () => {
       }),
     ).toMatchObject({ status: "blocked" });
 
-    await repository.close();
   });
 
   test("blocks stale or cross-lineage operator resolution without mutation", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = memoryGuards();
     const fixture = createAuthorityFixture(
       "operator_rejected",
       "confirm_before_submit",
@@ -885,7 +779,6 @@ describe("transaction-current authority decision-policy gate", () => {
         fixture.preflight.idempotencyKey,
       ),
     ).toMatchObject({ status: "outcome_uncertain", revision: 3 });
-    await repository.close();
   });
 
   test.each([
@@ -949,7 +842,7 @@ describe("transaction-current authority decision-policy gate", () => {
       },
     },
   ])("$label before mutating children", async ({ reason, options }) => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = memoryGuards();
     const fixture = createAuthorityFixture(
       `validation_${reason}`,
       "confirm_before_submit",
@@ -988,7 +881,7 @@ describe("transaction-current authority decision-policy gate", () => {
   });
 
   test("treats newly added preflight bindings as exact input identity", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = memoryGuards();
     const fixture = createAuthorityFixture(
       "validation_exact_preflight",
       "confirm_before_submit",
@@ -1023,7 +916,7 @@ describe("transaction-current authority decision-policy gate", () => {
 });
 
 async function exerciseAuthorityReplacement(
-  repository: JobFinderRepository,
+  repository: SendGuards,
 ): Promise<string> {
   const initial = createAuthorityFixture("replace", "confirm_before_submit");
   await persistAuthorityFixture(repository, initial);
@@ -1171,114 +1064,21 @@ async function exerciseAuthorityReplacement(
   return activeAfterConcurrent[0]?.id ?? "";
 }
 
-describe("application authority repository", () => {
-  const cleanupDirectories: string[] = [];
-  afterEach(async () => {
-    await Promise.all(
-      cleanupDirectories.splice(0).map(cleanupTempDirectoryWithRetry),
-    );
+describe("send guards in the job store", () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0))
+      rmSync(directory, { recursive: true, force: true });
   });
 
-  test("enforces one-shot lifecycle and crash recovery in memory", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
-    await exerciseAuthorityLifecycle(repository);
+  test("enforces one-shot lifecycle and crash recovery", async () => {
+    await exerciseAuthorityLifecycle(memoryGuards());
   });
 
-  test("rewrites only the authority rows a mutation changed", async () => {
-    const temp = await createTempRepository("nestor-authority-row-diff-");
-    cleanupDirectories.push(temp.tempDirectory);
-    const repository = await temp.createRepository();
-    const fixture = createAuthorityFixture("row_diff", "confirm_before_submit");
-    await persistAuthorityFixture(repository, fixture);
-    await repository.close();
-
-    // Index columns are written only when their row is written, and they are
-    // derived from the row's JSON value. Poisoning them on rows the mutation
-    // must not touch makes any full-collection rewrite observable: the old
-    // delete-all-and-reinsert path restored every value from JSON.
-    const sentinelCreatedAt = "1999-01-01T00:00:00.000Z";
-    const sentinelRevision = 42;
-    const withDatabase = <TValue>(
-      operation: (database: DatabaseSync) => TValue,
-    ): TValue => {
-      const database = new DatabaseSync(temp.filePath);
-      try {
-        return operation(database);
-      } finally {
-        database.close();
-      }
-    };
-    withDatabase((database) => {
-      database
-        .prepare("UPDATE submission_preflights SET created_at = ? WHERE id = ?")
-        .run(sentinelCreatedAt, fixture.preflight.id);
-      database
-        .prepare(
-          "UPDATE application_authority_envelopes SET revision = ? WHERE id = ?",
-        )
-        .run(sentinelRevision, fixture.envelope.id);
-    });
-
-    const reopened = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
-    expect(await reopened.expireSubmissionExecutionGrants(verifiedAt)).toBe(0);
-    expect(await reopened.expireSubmissionExecutionGrants(expiry)).toBe(1);
-    await reopened.close();
-
-    const indexColumns = withDatabase((database) => ({
-      preflightCreatedAt: (
-        database
-          .prepare("SELECT created_at FROM submission_preflights WHERE id = ?")
-          .get(fixture.preflight.id) as { created_at?: unknown }
-      ).created_at,
-      envelopeRevision: (
-        database
-          .prepare(
-            "SELECT revision FROM application_authority_envelopes WHERE id = ?",
-          )
-          .get(fixture.envelope.id) as { revision?: unknown }
-      ).revision,
-      grantStatus: (
-        database
-          .prepare(
-            "SELECT status FROM submission_execution_grants WHERE id = ?",
-          )
-          .get(fixture.grant?.id ?? "") as { status?: unknown }
-      ).status,
-    }));
-
-    // Untouched rows keep their poisoned index columns; the one grant the
-    // mutation changed is rewritten from its new value.
-    expect(indexColumns.preflightCreatedAt).toBe(sentinelCreatedAt);
-    expect(indexColumns.envelopeRevision).toBe(sentinelRevision);
-    expect(indexColumns.grantStatus).toBe("expired");
-
-    const verification = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
-    expect(await verification.listSubmissionExecutionGrants()).toEqual([
-      expect.objectContaining({ id: fixture.grant?.id, status: "expired" }),
-    ]);
-    expect(await verification.listSubmissionPreflightRecords()).toEqual([
-      expect.objectContaining({ id: fixture.preflight.id, createdAt: at }),
-    ]);
-    await verification.close();
-  });
-
-  test("enforces one-shot lifecycle atomically and survives SQLite reopen", async () => {
-    const temp = await createTempRepository("nestor-authority-");
-    cleanupDirectories.push(temp.tempDirectory);
-    let repository = await temp.createRepository();
-    await exerciseAuthorityLifecycle(repository);
-    await repository.close();
-
-    repository = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
+  test("keeps the lifecycle across a restart", async () => {
+    const file = storeFile(directories, "nestor-authority-");
+    await exerciseAuthorityLifecycle(file.open());
+    const repository = file.open();
     expect(await repository.listApplicationAuthorityEnvelopes()).toHaveLength(
       2,
     );
@@ -1292,52 +1092,85 @@ describe("application authority repository", () => {
     expect(await repository.listSubmissionOutcomeRecords()).toEqual([
       expect.objectContaining({ outcome: "outcome_uncertain" }),
     ]);
-
-    await repository.close();
+    file.close();
   });
 
-  test("resets SQLite authority parents and children without violating foreign keys", async () => {
-    const temp = await createTempRepository("nestor-authority-reset-");
-    cleanupDirectories.push(temp.tempDirectory);
-    let repository = await temp.createRepository();
-    const fixture = createAuthorityFixture(
-      "reset_lifecycle",
-      "confirm_before_submit",
-    );
-    await persistAuthorityFixture(repository, fixture);
+  test("rewrites only the rows a change touched", async () => {
+    const file = storeFile(directories, "nestor-authority-row-diff-");
+    const fixture = createAuthorityFixture("row_diff", "confirm_before_submit");
+    await persistAuthorityFixture(file.open(), fixture);
 
-    await repository.reset(createSeed());
+    // The key columns are written only with their row, from its value.
+    // Poisoning them on rows the change must not touch shows any rewrite.
+    file.store.db
+      .prepare("UPDATE send_preflights SET idempotency_key = ? WHERE id = ?")
+      .run("poisoned", fixture.preflight.id);
+    file.store.db
+      .prepare("UPDATE send_authorities SET status = ? WHERE id = ?")
+      .run("poisoned", fixture.envelope.id);
+
+    const repository = file.open();
+    expect(await repository.expireSubmissionExecutionGrants(verifiedAt)).toBe(0);
+    expect(await repository.expireSubmissionExecutionGrants(expiry)).toBe(1);
+    const column = (sql: string, id: string) =>
+      Object.values(file.store.db.prepare(sql).get(id) ?? {})[0];
+    expect(
+      column(
+        "SELECT idempotency_key FROM send_preflights WHERE id = ?",
+        fixture.preflight.id,
+      ),
+    ).toBe("poisoned");
+    expect(
+      column(
+        "SELECT status FROM send_authorities WHERE id = ?",
+        fixture.envelope.id,
+      ),
+    ).toBe("poisoned");
+    expect(await repository.listSubmissionExecutionGrants()).toEqual([
+      expect.objectContaining({ id: fixture.grant?.id, status: "expired" }),
+    ]);
+    file.close();
+  });
+
+  test("stops on a damaged record instead of reading past it", async () => {
+    const file = storeFile(directories, "nestor-authority-damaged-");
+    const fixture = createAuthorityFixture("damaged", "confirm_before_submit");
+    await persistAuthorityFixture(file.open(), fixture);
+    file.store.db
+      .prepare("UPDATE send_authorities SET value = ? WHERE id = ?")
+      .run(
+        JSON.stringify({ ...fixture.envelope, allowedOrigins: "everywhere" }),
+        fixture.envelope.id,
+      );
+    await expect(
+      file.open().listApplicationAuthorityEnvelopes(),
+    ).rejects.toThrow();
+    file.close();
+  });
+
+  test("a reset clears every send record", async () => {
+    const file = storeFile(directories, "nestor-authority-reset-");
+    const repository = file.open();
+    await persistAuthorityFixture(
+      repository,
+      createAuthorityFixture("reset_lifecycle", "confirm_before_submit"),
+    );
+    resetJobStore(file.store);
     expect(await repository.listApplicationAuthorityEnvelopes()).toEqual([]);
     expect(await repository.listSubmissionPreflightRecords()).toEqual([]);
     expect(await repository.listSubmissionExecutionGrants()).toEqual([]);
     expect(await repository.listSubmissionIdempotencyRecords()).toEqual([]);
-    await repository.close();
-
-    repository = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
-    expect(await repository.listApplicationAuthorityEnvelopes()).toEqual([]);
-    expect(await repository.listSubmissionPreflightRecords()).toEqual([]);
-    await repository.close();
+    file.close();
   });
 
-  test("atomically gates and arms confirm/autonomous attempts in memory", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
-    await exerciseCompoundAuthorityTransition(repository);
+  test("atomically gates and arms confirm and autonomous attempts", async () => {
+    await exerciseCompoundAuthorityTransition(memoryGuards());
   });
 
-  test("atomically gates attempts, rolls back rejected transitions, and survives SQLite reopen", async () => {
-    const temp = await createTempRepository("nestor-authority-compound-");
-    cleanupDirectories.push(temp.tempDirectory);
-    let repository = await temp.createRepository();
-    await exerciseCompoundAuthorityTransition(repository);
-    await repository.close();
-
-    repository = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
+  test("keeps gated attempts and rolled-back refusals across a restart", async () => {
+    const file = storeFile(directories, "nestor-authority-compound-");
+    await exerciseCompoundAuthorityTransition(file.open());
+    const repository = file.open();
     expect(
       await repository.getSubmissionIdempotencyRecord(
         "submit_once_compound_confirm",
@@ -1364,25 +1197,17 @@ describe("application authority repository", () => {
     expect(
       await repository.getSubmissionExecutionGrant("grant_compound_failure"),
     ).toMatchObject({ status: "active", consumedAt: null });
-    await repository.close();
+    file.close();
   });
 
-  test("atomically rotates authority and revokes available children in memory", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
-    await exerciseAuthorityReplacement(repository);
+  test("atomically rotates authority and revokes available children", async () => {
+    await exerciseAuthorityReplacement(memoryGuards());
   });
 
-  test("atomically rotates authority, guarantees one active envelope, and survives SQLite reopen", async () => {
-    const temp = await createTempRepository("nestor-authority-replace-");
-    cleanupDirectories.push(temp.tempDirectory);
-    let repository = await temp.createRepository();
-    const activeId = await exerciseAuthorityReplacement(repository);
-    await repository.close();
-
-    repository = await createFileJobFinderRepository({
-      filePath: temp.filePath,
-      seed: createSeed(),
-    });
+  test("keeps one active authority after a rotation across a restart", async () => {
+    const file = storeFile(directories, "nestor-authority-replace-");
+    const activeId = await exerciseAuthorityReplacement(file.open());
+    const repository = file.open();
     const active = await repository.listApplicationAuthorityEnvelopes({
       status: "active",
     });
@@ -1402,25 +1227,17 @@ describe("application authority repository", () => {
         "authority_replace_concurrent_b",
       ),
     ).toBeNull();
-    await repository.close();
+    file.close();
   });
 
-  test("closes an armed attempt as uncertain on its own when its result receipt is missing", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+  test("closes an armed attempt as uncertain on the next start", async () => {
+    const file = storeFile(directories, "nestor-authority-recovery-");
     const fixture = createAuthorityFixture(
       "recovery_missing_result",
       "confirm_before_submit",
     );
-    // Persist the authority lifecycle without its ApplyJobResult parent.
-    expect(
-      await repository.commitApplicationAuthorityEnvelope({
-        envelope: fixture.envelope,
-        expectedRevision: null,
-      }),
-    ).toMatchObject({ status: "applied" });
-    await repository.commitSubmissionPreflight(fixture.preflight);
-    await repository.commitSubmissionExecutionGrant(fixture.grant!);
-    await repository.authorizeAndArmSubmissionAttempt({
+    await persistAuthorityFixture(file.open(), fixture);
+    await file.open().authorizeAndArmSubmissionAttempt({
       preflight: fixture.preflight,
       expectedIdempotencyRevision: 1,
       mode: "confirm_before_submit",
@@ -1429,7 +1246,8 @@ describe("application authority repository", () => {
       now: later,
     });
 
-    // One attempt without its result never stops the workspace opening.
+    // The app closed mid-send: the next start can't know what the site got.
+    const repository = file.open();
     await expect(
       repository.recoverArmedSubmissionAttempts({ now: later }),
     ).resolves.toHaveLength(1);
@@ -1441,72 +1259,57 @@ describe("application authority repository", () => {
     expect(await repository.listSubmissionOutcomeRecords()).toMatchObject([
       { outcome: "outcome_uncertain" },
     ]);
+    await expect(
+      repository.recoverArmedSubmissionAttempts({ now: verifiedAt }),
+    ).resolves.toEqual([]);
+    file.close();
+  });
+
+  test("commits a guarded outcome once", async () => {
+    const repository = memoryGuards();
+    const fixture = createAuthorityFixture(
+      "store_owned",
+      "confirm_before_submit",
+    );
+    await persistAuthorityFixture(repository, fixture);
+    await repository.authorizeAndArmSubmissionAttempt({
+      preflight: fixture.preflight,
+      expectedIdempotencyRevision: 1,
+      mode: "confirm_before_submit",
+      marker: fixture.marker,
+      executionGrantId: fixture.grant!.id,
+      now: later,
+    });
+    const outcome = createOperatorResolution(fixture.preflight, "submitted");
+    expect(
+      await repository.commitSubmissionOutcome({
+        outcome: { ...outcome, resultId: "another_attempt" },
+        expectedIdempotencyRevision: 2,
+      }),
+    ).toMatchObject({ status: "blocked" });
+    expect(
+      await repository.commitSubmissionOutcome({
+        outcome,
+        expectedIdempotencyRevision: 1,
+      }),
+    ).toMatchObject({ status: "stale" });
+    expect(
+      await repository.commitSubmissionOutcome({
+        outcome,
+        expectedIdempotencyRevision: 2,
+      }),
+    ).toMatchObject({
+      status: "recorded",
+      idempotency: { status: "resolved", outcome: "submitted" },
+    });
+    expect(
+      await repository.commitSubmissionOutcome({
+        outcome,
+        expectedIdempotencyRevision: 2,
+      }),
+    ).toMatchObject({ status: "duplicate" });
+    expect(await repository.getSubmissionOutcomeRecord(outcome.id)).toEqual(
+      outcome,
+    );
   });
 });
-
-test.each(["memory", "sqlite"] as const)(
-  "commits a guarded outcome without legacy application rows (%s)",
-  async (storage) => {
-    const temp =
-      storage === "sqlite"
-        ? await createTempRepository("nestor-store-outcome-")
-        : null;
-    const repository = temp
-      ? await temp.createRepository()
-      : createInMemoryJobFinderRepository(createSeed());
-    try {
-      const fixture = createAuthorityFixture(
-        "store_owned",
-        "confirm_before_submit",
-      );
-      await repository.commitApplicationAuthorityEnvelope({
-        envelope: fixture.envelope,
-        expectedRevision: null,
-      });
-      await repository.commitSubmissionPreflight(fixture.preflight);
-      await repository.commitSubmissionExecutionGrant(fixture.grant!);
-      await repository.authorizeAndArmSubmissionAttempt({
-        preflight: fixture.preflight,
-        expectedIdempotencyRevision: 1,
-        mode: "confirm_before_submit",
-        marker: fixture.marker,
-        executionGrantId: fixture.grant!.id,
-        now: later,
-      });
-      const outcome = createOperatorResolution(fixture.preflight, "submitted");
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome: { ...outcome, resultId: "another_attempt" },
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({ status: "blocked" });
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 1,
-        }),
-      ).toMatchObject({ status: "stale" });
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({
-        status: "recorded",
-        idempotency: { status: "resolved", outcome: "submitted" },
-      });
-      expect(
-        await repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: 2,
-        }),
-      ).toMatchObject({ status: "duplicate" });
-      expect(await repository.getSubmissionOutcomeRecord(outcome.id)).toEqual(
-        outcome,
-      );
-    } finally {
-      await repository.close();
-      if (temp) await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
-  },
-);

@@ -39,15 +39,18 @@ import {
   type ResolveSubmissionOutcomeInput,
   type ResolveSubmissionOutcomeResult,
   type UpdateApplicationAuthorityEnvelopeInput,
+  type CandidateProfile,
 } from "@nestor/contracts";
-import type { JobFinderRepository } from "@nestor/db";
 import { readSavedApplicationAnswers } from "@nestor/db/applications";
+import {
+  readProfileWithRevision,
+  type SendGuards,
+} from "@nestor/db/job-store";
 import { getJobStore } from "../job-store";
+import { getSendGuards } from "../send-guards";
 import { getApplicationStore } from "./application-store";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
-import { getJobFinderRepositoryForWorkspaceService } from "./create-workspace-service";
-import { getJobFinderWorkspaceService } from "./workspace-service";
 
 export type JobFinderApplicationAuthorityErrorCode =
   | "unsupported_mode"
@@ -99,10 +102,29 @@ export interface JobFinderApplicationAuthorityService {
   ): Promise<ResolveSubmissionOutcomeResult>;
 }
 
+/** The send guards' records and the saved profile they are checked against. */
+export type AuthorityRecords = SendGuards & {
+  getProfileWithRevision(): Promise<{
+    profile: CandidateProfile;
+    revision: number;
+  }>;
+};
+
+/** The records over the open job store. */
+export function readAuthorityRecords(
+  guards: SendGuards = getSendGuards(),
+): AuthorityRecords {
+  return {
+    ...guards,
+    getProfileWithRevision: () =>
+      Promise.resolve().then(() => readProfileWithRevision(getJobStore())),
+  };
+}
+
 export interface CreateJobFinderApplicationAuthorityServiceOptions {
   readSavedAnswers?: () => readonly CandidateReusableAnswer[];
-  repository?: JobFinderRepository;
-  resolveRepository?: () => Promise<JobFinderRepository>;
+  repository?: AuthorityRecords;
+  resolveRepository?: () => Promise<AuthorityRecords>;
   now?: () => string;
   idFactory?: () => string;
   releaseApplicationPage?: (resultId: string) => void;
@@ -197,7 +219,7 @@ function summarizeApprovedSnapshot(
  * under a running authority.
  */
 async function buildDecisionPolicy(input: {
-  repository: JobFinderRepository;
+  repository: AuthorityRecords;
   answers: readonly CandidateReusableAnswer[];
   mode: CreateApplicationAuthorityEnvelopeInput["mode"];
   intermediateMutationsAuthorized: boolean;
@@ -309,7 +331,7 @@ function assertRevocationClockIsValid(
 
 function parseMutationResult(
   result: Awaited<
-    ReturnType<JobFinderRepository["commitApplicationAuthorityEnvelope"]>
+    ReturnType<SendGuards["commitApplicationAuthorityEnvelope"]>
   >,
 ): ApplicationAuthorityEnvelopeMutationResult {
   return ApplicationAuthorityEnvelopeMutationResultSchema.parse(result);
@@ -331,7 +353,7 @@ export function createJobFinderApplicationAuthorityService(
           Promise.reject(
             new JobFinderApplicationAuthorityError(
               "repository_unavailable",
-              "The Job Finder workspace repository is unavailable.",
+              "The send records are unavailable.",
             ),
           ));
   const readSavedAnswers = options.readSavedAnswers ?? (() => []);
@@ -353,7 +375,7 @@ export function createJobFinderApplicationAuthorityService(
   }
 
   async function deriveReadiness(
-    repository: JobFinderRepository,
+    repository: AuthorityRecords,
   ): Promise<ApplicationAuthorityReadiness> {
     const state = await repository.getProfileWithRevision();
     const [approvedSnapshot, activeAuthority] = await Promise.all([
@@ -879,12 +901,10 @@ export function getJobFinderApplicationAuthorityService(): JobFinderApplicationA
           pageUrl: applications.getWork(id)?.reviewCard?.pageUrl ?? null,
         };
       },
-      // A send that is not a store row (an older record) is the
-      // authority repository's alone to resolve.
       canResolve: (applicationRecordId, outcome) => {
         const id = storeApplicationId(applicationRecordId);
         return (
-          id === null ||
+          id !== null &&
           getApplicationStore().canResolveUncertainSend(id, outcome)
         );
       },
@@ -894,18 +914,8 @@ export function getJobFinderApplicationAuthorityService(): JobFinderApplicationA
           getApplicationStore().resolveUncertainSend(id, outcome);
       },
     },
-    resolveRepository: async () => {
-      const workspaceService = await getJobFinderWorkspaceService();
-      const repository =
-        getJobFinderRepositoryForWorkspaceService(workspaceService);
-      if (repository === null) {
-        throw new JobFinderApplicationAuthorityError(
-          "repository_unavailable",
-          "The Job Finder workspace repository is unavailable.",
-        );
-      }
-      return repository;
-    },
+    resolveRepository: () =>
+      Promise.resolve().then(() => readAuthorityRecords()),
   });
   return defaultService;
 }

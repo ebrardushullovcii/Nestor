@@ -1,16 +1,18 @@
 import { createHash } from "node:crypto";
 
 import {
-  ApplyJobResultSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SubmissionExecutionGrantSchema,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
+import {
+  createSendGuards,
+  openJobStore,
+  type SendGuards,
+} from "@nestor/db/job-store";
 import type {
   ApplicationFinalActionResult,
   ApplicationFinalControl,
@@ -19,7 +21,6 @@ import type {
 } from "@nestor/browser-runtime";
 import { describe, expect, test } from "vitest";
 
-import { createSeed } from "../workspace-service.test-fixtures";
 import { buildSubmissionPreflightRecord } from "./application-submission-preflight";
 import {
   runApplicationSubmissionRuntime,
@@ -205,69 +206,17 @@ function buildBrowserRuntime(
   return { runtime, calls };
 }
 
-async function seedParents(
-  repository: ReturnType<typeof createInMemoryJobFinderRepository>,
-): Promise<void> {
-  await repository.upsertApplicationRecord(
-    ApplicationRecordSchema.parse({
-      id: "application_1",
-      jobId: "job_1",
-      title: "Synthetic application",
-      company: "Synthetic employer",
-      status: "approved",
-      lastActionLabel: "Application prepared",
-      nextActionLabel: "Review the prepared application",
-      lastUpdatedAt: NOW,
-      lastAttemptState: "ready",
-    }),
-  );
-  await repository.upsertApplyJobResult(
-    ApplyJobResultSchema.parse({
-      id: "result_1",
-      runId: "run_1",
-      jobId: "job_1",
-      applicationRecordId: "application_1",
-      state: "submitting",
-      summary: "Synthetic final action is ready.",
-      detail: "The synthetic executor is awaiting a durable outcome.",
-      startedAt: NOW,
-      updatedAt: NOW,
-      privacyReceipt: {
-        generatedAt: NOW,
-        lineage: {
-          runId: "run_1",
-          jobId: "job_1",
-          resultId: "result_1",
-          applicationRecordId: "application_1",
-        },
-        destination: { origin: ORIGIN, safePath: "/apply" },
-        resume: {
-          source: "original_upload",
-          sourceDocumentId: "resume_1",
-          exportArtifactId: null,
-          fileName: "resume.pdf",
-          sha256: RESUME_SHA256,
-        },
-        finalSubmitAuthorized: true,
-        finalSubmitOccurred: false,
-        submissionOutcome: null,
-      },
-    }),
-  );
-}
-
 async function createHarness(input: {
   mode: ApplicationAutomationMode;
   runtime?: ApplicationSubmissionBrowserRuntime;
   calls?: { observe: number; execute: number; action: number };
   allowedOrigins?: string[];
 }): Promise<{
-  repository: ReturnType<typeof createInMemoryJobFinderRepository>;
+  repository: SendGuards;
   runtimeInput: ApplicationSubmissionRuntimeInput;
   authority: ReturnType<typeof ApplicationAuthorityEnvelopeSchema.parse>;
 }> {
-  const repository = createInMemoryJobFinderRepository(createSeed());
-  await seedParents(repository);
+  const repository = createSendGuards(openJobStore(":memory:"));
   const authority = ApplicationAuthorityEnvelopeSchema.parse({
     id: "authority_1",
     mode: input.mode,
@@ -333,7 +282,7 @@ async function createHarness(input: {
 }
 
 async function commitConfirmGrant(
-  repository: ReturnType<typeof createInMemoryJobFinderRepository>,
+  repository: SendGuards,
 ): Promise<void> {
   const preflight = buildSubmissionPreflightRecord({
     id: "preflight_1",
@@ -500,7 +449,7 @@ describe("composed application submission runtime", () => {
 
   test("re-reads the authority in the final veto and prevents action after revocation", async () => {
     const repositoryHolder: {
-      current: ReturnType<typeof createInMemoryJobFinderRepository> | null;
+      current: SendGuards | null;
     } = { current: null };
     const browser = buildBrowserRuntime({
       onBetweenVetoes: async () => {
@@ -648,6 +597,4 @@ test("keeps exact validation feedback and allows correction after an attempted s
       },
     },
   });
-  const record = (await h.repository.listApplicationRecords())[0];
-  expect(record?.lastAttemptState).toBe("ready");
 });

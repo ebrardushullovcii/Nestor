@@ -15,6 +15,12 @@ import {
   ProfileEditsDraftSchema,
   ProfileSetupStateSchema,
   SourceInstructionArtifactSchema,
+  ApplicationAuthorityEnvelopeSchema,
+  SubmissionPreflightRecordSchema,
+  SubmissionExecutionGrantSchema,
+  SubmissionIdempotencyRecordSchema,
+  SubmissionArmedMarkerSchema,
+  ApprovedApplicationAnswerSnapshotSchema,
 } from "@nestor/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -54,6 +60,12 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   ProfileEditsDraftSchema,
   ProfileSetupStateSchema,
   SourceInstructionArtifactSchema,
+  ApplicationAuthorityEnvelopeSchema,
+  SubmissionPreflightRecordSchema,
+  SubmissionExecutionGrantSchema,
+  SubmissionIdempotencyRecordSchema,
+  SubmissionArmedMarkerSchema,
+  ApprovedApplicationAnswerSnapshotSchema,
 };
 
 const FIXTURES: Record<string, string> = {
@@ -73,6 +85,13 @@ const FIXTURES: Record<string, string> = {
   ProfileEditsDraftSchema: "profile-edits-draft",
   ProfileSetupStateSchema: "profile-setup-state",
   SourceInstructionArtifactSchema: "source-instruction-artifact",
+  ApplicationAuthorityEnvelopeSchema: "application-authority-envelope",
+  SubmissionPreflightRecordSchema: "submission-preflight",
+  SubmissionExecutionGrantSchema: "submission-execution-grant",
+  SubmissionIdempotencyRecordSchema: "submission-idempotency-record",
+  SubmissionArmedMarkerSchema: "submission-armed-marker",
+  ApprovedApplicationAnswerSnapshotSchema:
+    "approved-application-answer-snapshot",
 };
 
 const fixtureDir = path.join(__dirname, "stored-json");
@@ -81,10 +100,14 @@ describe("JSON the job store keeps", () => {
   it("covers every schema the store parses stored JSON with", () => {
     // These two readers assemble an envelope around JSON-valued fields
     // before parsing, rather than calling Schema.parse(JSON.parse(...)).
+    // The send guards parse each table's rows through that table's entry.
     const parsed = new Set<string>([
       "ProfileEditsDraftSchema",
       "ProfileSetupStateSchema",
     ]);
+    const guards = readFileSync(path.join(__dirname, "send-guards.ts"), "utf8");
+    for (const match of guards.matchAll(/([A-Za-z]+Schema)\.parse\(value\)/g))
+      parsed.add(match[1]!);
     for (const file of readdirSync(__dirname)) {
       if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
       const source = readFileSync(path.join(__dirname, file), "utf8");

@@ -20,6 +20,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",
   application_instructions: "application_id conversation_id mode",
   application_needs_you: "application_id attempt field_key task_id",
+  answer_approvals: "id profile_id revision value",
   application_origins: "application_id origin",
   applications:
     "id job_id mode state attempt queued_at updated_at submitted_at error submission_outcome_id submission_outcome_json",
@@ -91,6 +92,12 @@ const RELEASED_COLUMNS: Record<string, string> = {
   searches:
     "id state settings_json started_at finished_at sources_total sources_done found added merged scored error",
   seen_listing_cards: "url role_goals_key card_fingerprint verdict",
+  send_authorities: "id status value",
+  send_grants: "id preflight_id idempotency_key value",
+  send_keys: "id idempotency_key preflight_id value",
+  send_markers: "id idempotency_key preflight_id value",
+  send_outcomes: "id job_id value",
+  send_preflights: "id idempotency_key value",
   site_instructions: "id target_id updated_at value",
   source_needs_you: "source_id task_id requested_url",
   tracker:

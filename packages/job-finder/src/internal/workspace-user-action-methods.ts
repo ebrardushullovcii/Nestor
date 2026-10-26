@@ -1,4 +1,4 @@
-import { resolveApplyAuthorityForJob } from "./apply-authority-resolution";
+import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import { releaseFinishedApplicationPages } from "./application-page-lifecycle";
 import {
   ApplicationAnswerRecordSchema,
@@ -10,7 +10,6 @@ import {
   type UserActionRequest,
   JobFinderActivityControlSchema,
   type ApplicationQuestionRecord,
-  type ApplyJobResult,
 } from "@nestor/contracts";
 import {
   buildApplyFormObservation,
@@ -499,7 +498,6 @@ export async function findManualAnswerStepsCoveredBy(input: {
       : []
     ).map((job) => [job.id, job]),
   );
-  const resultsByApplication = new Map<string, readonly ApplyJobResult[]>();
   const covered: {
     request: UserActionRequest;
     answers: { questionId: string; answer: string }[];
@@ -509,40 +507,11 @@ export async function findManualAnswerStepsCoveredBy(input: {
     if (step.salaryQuestions.length > 0) {
       const { scope } = step;
       const job = salaryJobs.get(scope.jobId);
-      let payDisclosed = false;
-      if (job) {
-        const resultKey = JSON.stringify([
-          scope.runId,
-          scope.jobId,
-          scope.applicationRecordId,
-        ]);
-        let results = resultsByApplication.get(resultKey);
-        if (!results) {
-          results = await ctx.repository.listApplyJobResults({
-            runId: scope.runId,
-            jobId: scope.jobId,
-            applicationRecordId: scope.applicationRecordId,
-          });
-          resultsByApplication.set(resultKey, results);
-        }
-        const result = results.find(
-          (entry) =>
-            entry.id === scope.resultId &&
-            entry.runId === scope.runId &&
-            entry.jobId === scope.jobId &&
-            entry.applicationRecordId === scope.applicationRecordId,
-        );
-        // Cache facts for this lookup only. Permission is checked separately
-        // for every step, so a changed pay choice takes effect immediately.
-        const { authority } = await resolveApplyAuthorityForJob({
-          repository: ctx.repository,
-          job,
-          resumeSha256: result?.privacyReceipt?.resume.sha256,
-          applicationUrl: job.applicationUrl ?? job.canonicalUrl,
-          now: new Date().toISOString(),
-        });
-        payDisclosed = authority.salaryDisclosure === "answer_from_profile";
-      }
+      // Pay is answered only when the person chose to share it.
+      const payDisclosed =
+        job !== undefined &&
+        (await readSalaryDisclosurePreference(ctx.repository)) ===
+          "answer_from_profile";
       if (!payDisclosed) {
         if (
           step.salaryQuestions.some((question) => question.isRequired !== false)

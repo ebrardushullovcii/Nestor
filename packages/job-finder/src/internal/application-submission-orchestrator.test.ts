@@ -1,16 +1,18 @@
 import {
-  ApplyJobResultSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SubmissionExecutionGrantSchema,
   SubmissionPreflightRecordSchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import {
-  createInMemoryJobFinderRepository,
   type AuthorizeAndArmSubmissionAttemptInput,
 } from "@nestor/db";
+import {
+  createSendGuards,
+  openJobStore,
+  type SendGuards,
+} from "@nestor/db/job-store";
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
 
@@ -21,7 +23,6 @@ import {
   type SyntheticSubmissionExecutor,
   type SyntheticSubmissionExecutorResult,
 } from "./application-submission-orchestrator";
-import { createSeed } from "../workspace-service.test-fixtures";
 
 const NOW = "2026-08-27T10:00:00.000Z";
 const EXPIRES_AT = "2026-08-27T11:00:00.000Z";
@@ -197,55 +198,9 @@ function createInput(
 }
 
 async function commitEnvelope(
-  repository: ReturnType<typeof createInMemoryJobFinderRepository>,
+  repository: SendGuards,
   mode: ApplicationAutomationMode = "autonomous_submit",
 ) {
-  await repository.upsertApplicationRecord(
-    ApplicationRecordSchema.parse({
-      id: "application_1",
-      jobId: "job_1",
-      title: "Synthetic application",
-      company: "Synthetic employer",
-      status: "approved",
-      lastActionLabel: "Application prepared",
-      nextActionLabel: "Review the prepared application",
-      lastUpdatedAt: NOW,
-      lastAttemptState: "ready",
-    }),
-  );
-  await repository.upsertApplyJobResult(
-    ApplyJobResultSchema.parse({
-      id: "result_1",
-      runId: "run_1",
-      jobId: "job_1",
-      applicationRecordId: "application_1",
-      state: "submitting",
-      summary: "Synthetic final action is ready.",
-      detail: "The synthetic executor is awaiting a durable outcome.",
-      startedAt: NOW,
-      updatedAt: NOW,
-      privacyReceipt: {
-        generatedAt: NOW,
-        lineage: {
-          runId: "run_1",
-          jobId: "job_1",
-          resultId: "result_1",
-          applicationRecordId: "application_1",
-        },
-        destination: { origin: ORIGIN, safePath: "/apply" },
-        resume: {
-          source: "original_upload",
-          sourceDocumentId: "resume_1",
-          exportArtifactId: null,
-          fileName: "resume.pdf",
-          sha256: SHA_RESUME,
-        },
-        finalSubmitAuthorized: true,
-        finalSubmitOccurred: false,
-        submissionOutcome: null,
-      },
-    }),
-  );
   const envelope = createEnvelope(mode);
   expect(
     await repository.commitApplicationAuthorityEnvelope({
@@ -257,7 +212,7 @@ async function commitEnvelope(
 }
 
 async function commitPreflightAndGrant(
-  repository: ReturnType<typeof createInMemoryJobFinderRepository>,
+  repository: SendGuards,
   includeGrant = true,
 ) {
   const preflight = createPreflight();
@@ -274,7 +229,7 @@ async function commitPreflightAndGrant(
 
 describe("synthetic application submission orchestrator", () => {
   test("a person's retry after a not-sent attempt sends under the next key and records its outcome", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     const envelope = ApplicationAuthorityEnvelopeSchema.parse({
       ...createEnvelope(),
       maxApplicationsPerRun: 5,
@@ -336,7 +291,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("runs an autonomous attempt once, arms before execution, and records not-submitted", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     const executor = createNotSubmittedExecutor();
     const result = await runSyntheticApplicationSubmission(
@@ -359,7 +314,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("atomically consumes a confirm grant and arms before execution", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository, "confirm_before_submit");
     await commitPreflightAndGrant(repository);
     const executor = createNotSubmittedExecutor();
@@ -384,7 +339,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("the person's press on Send becomes the confirm grant, issued after the preflight", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository, "confirm_before_submit");
     const executor = createNotSubmittedExecutor();
 
@@ -406,7 +361,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("keeps prepare-only mode blocked and never arms or executes", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository, "prepare_only");
     const executor = createNotSubmittedExecutor();
 
@@ -423,7 +378,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("fails closed for missing or revoked authority", async () => {
-    const missingRepository = createInMemoryJobFinderRepository(createSeed());
+    const missingRepository = createSendGuards(openJobStore(":memory:"));
     const missingExecutor = createNotSubmittedExecutor();
     const missing = await runSyntheticApplicationSubmission(
       createInput(missingRepository, { executor: missingExecutor }),
@@ -434,7 +389,7 @@ describe("synthetic application submission orchestrator", () => {
     });
     expect(missingExecutor.execute).not.toHaveBeenCalled();
 
-    const revokedRepository = createInMemoryJobFinderRepository(createSeed());
+    const revokedRepository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(revokedRepository);
     await revokedRepository.revokeApplicationAuthorityEnvelope({
       id: "authority_1",
@@ -453,7 +408,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("rejects a stale form observation before compound authorization and arming", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository, "confirm_before_submit");
     await commitPreflightAndGrant(repository);
     const executor = createNotSubmittedExecutor();
@@ -483,7 +438,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("blocks a mandatory stop before arming and never invokes the executor", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     const executor = createNotSubmittedExecutor();
     const result = await runSyntheticApplicationSubmission(
@@ -512,7 +467,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("fails closed when the current envelope is revoked before compound arming", async () => {
-    const baseRepository = createInMemoryJobFinderRepository(createSeed());
+    const baseRepository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(baseRepository);
     const revokedBeforeArmRepository: SyntheticSubmissionAuthorityRepository = {
       ...baseRepository,
@@ -541,7 +496,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("returns recovery-needed on ambiguous compound failure with no synthetic action", async () => {
-    const baseRepository = createInMemoryJobFinderRepository(createSeed());
+    const baseRepository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(baseRepository, "confirm_before_submit");
     await commitPreflightAndGrant(baseRepository);
     const compoundFailureRepository: SyntheticSubmissionAuthorityRepository = {
@@ -576,7 +531,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("turns executor exceptions into durable uncertainty and permanently blocks retry", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     const executor = {
       execute: vi.fn(() =>
@@ -611,7 +566,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("records submitted when the executor provides employer-site evidence", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     const fabricatedSubmittedResult = {
       outcome: "submitted",
@@ -646,7 +601,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("returns typed recovery-needed when post-arm recovery is rejected", async () => {
-    const baseRepository = createInMemoryJobFinderRepository(createSeed());
+    const baseRepository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(baseRepository);
     let envelopeReads = 0;
     const recoveryRejectedRepository: SyntheticSubmissionAuthorityRepository = {
@@ -679,7 +634,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("recovers uncertainty when answer policy facts drift after arming", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     const executor = createNotSubmittedExecutor();
     const input = createInput(repository, { executor });
@@ -719,7 +674,7 @@ describe("synthetic application submission orchestrator", () => {
   });
 
   test("serializes same-key calls and prevents a second executor after the first resolves", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
+    const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
     let release!: () => void;
     const firstExecution = new Promise<void>((resolve) => {

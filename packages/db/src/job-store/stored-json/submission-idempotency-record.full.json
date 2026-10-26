@@ -1,0 +1,19 @@
+{
+  "id": "id-sample",
+  "idempotencyKey": "idempotencyKey-sample",
+  "preflightId": "preflightId-sample",
+  "authorityEnvelopeId": "authorityEnvelopeId-sample",
+  "authorityRevision": 1,
+  "runId": "runId-sample",
+  "jobId": "jobId-sample",
+  "resultId": "resultId-sample",
+  "applicationRecordId": "applicationRecordId-sample",
+  "status": "resolved",
+  "revision": 3,
+  "createdAt": "2026-10-26T09:00:00.000Z",
+  "updatedAt": "2026-10-26T10:00:00.000Z",
+  "armedAt": "2026-10-26T09:00:00.000Z",
+  "outcomeId": "outcomeId-sample",
+  "outcome": "submitted",
+  "revokedAt": null
+}
