@@ -278,6 +278,23 @@ describe("resumes on the store", () => {
     });
     expect(store.getJob(id)?.stage).toBe("shortlisted");
   });
+  it("also keeps a level Undo from restoring approval across a triage round trip", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await service.approve(id);
+    const level = service.setLevel(id, "light");
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    store.moveJobs({ selection: { ids: [id] }, to: "found" });
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    const current = service.get(id);
+    expect(() => service.undoLevel(id, level.levelChangeId!)).toThrow(
+      "changed since",
+    );
+    expect(service.get(id)).toEqual(current);
+    expect(current.resume?.approvedAt).toBeNull();
+    expect(current.job.stage).toBe("shortlisted");
+  });
   it("keeps each level Undo bound to its own change after writing finishes", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });

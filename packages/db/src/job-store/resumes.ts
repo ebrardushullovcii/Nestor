@@ -32,6 +32,9 @@ type PreviousResume = {
   draft: ResumeDraft | null;
   approvedAt: number | null;
   pdfPath: string | null;
+  afterStage: JobStage;
+  afterStageAt: number;
+  afterMoveId: number;
 };
 type StageStamp = { stage: JobStage; stage_at: number };
 
@@ -388,6 +391,9 @@ export function createResumeStore(store: JobStore): ResumeStore {
                 : null,
               approvedAt: row.approved_at,
               pdfPath: row.pdf_path,
+              afterStage: stageStamp(jobId)!.stage,
+              afterStageAt: stageStamp(jobId)!.stage_at,
+              afterMoveId: moveMarker(jobId),
             }
           : null;
         sql(
@@ -416,6 +422,14 @@ export function createResumeStore(store: JobStore): ResumeStore {
           );
         if (!row.previous_json) return toStoredResume(row);
         const previous = JSON.parse(row.previous_json) as PreviousResume;
+        if (
+          stageOf(jobId) !== previous.afterStage ||
+          stageStamp(jobId)?.stage_at !== previous.afterStageAt ||
+          moveMarker(jobId) !== previous.afterMoveId
+        )
+          throw new ResumeChangedError(
+            "This resume changed since that level change. Later job moves were kept.",
+          );
         const now = Date.now();
         sql(
           `UPDATE resumes SET level = ?, state = 'ready', error = NULL, draft_json = ?,
