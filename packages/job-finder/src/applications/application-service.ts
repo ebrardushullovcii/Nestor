@@ -6,6 +6,7 @@ import {
   canContinueApplicationAfterAccess,
   checkWrittenApplicationAnswers,
   requiresSavedNationalityAnswer,
+  requiresSavedOpinionAnswer,
   inferQuestionKind,
   hasSubmissionConfirmationText,
   type ApplyAgentResult,
@@ -720,7 +721,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             card?.answers.filter(
               (answer) =>
                 answer.written ||
-                requiresSavedNationalityAnswer(answer.question),
+                requiresSavedNationalityAnswer(answer.question) ||
+                requiresSavedOpinionAnswer(answer.question, answer.answer),
             ) ?? [];
           if (
             card?.letter &&

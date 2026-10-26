@@ -971,6 +971,17 @@ it.each([
     rule: "",
     written: false,
   })),
+  ...["What is your top skill?", "What is your go-to monitoring tool?"].map(
+    (question) => ({
+      question,
+      answer: "Playwright",
+      evidence: [
+        { source: "applicant", path: "/skills/0", quote: "Playwright" },
+      ],
+      rule: "",
+      written: false,
+    }),
+  ),
   ...ownWords.rules.map((rule) => ({
     question: ownWords.question,
     answer: ownWords.proposed,
