@@ -10,6 +10,7 @@ import {
   JOB_COMMANDS,
   AssistantChangeReceiptSchema,
   PROFILE_COMMANDS,
+  CandidateExperienceSchema,
   type ProfileCommandOutputs,
   SavedFormAnswersPageSchema,
   type JobCommandOutputs,
@@ -465,6 +466,117 @@ it("preserves command fields named status and complete through the chat wrapper 
   }
 });
 
+it("rejects Assistant edits when a screen saved the same facts after the planning read", async () => {
+  const store = openJobStore(":memory:");
+  const run = createJobCommandRunner({ store });
+  const receipts = profilePatchReceipts(run);
+  const definitions = assistantCommandTools<
+    typeof PROFILE_COMMANDS,
+    ProfileCommandOutputs
+  >(PROFILE_COMMANDS, run, {
+    group: "profile",
+    before: receipts.before,
+    results: receipts.results,
+  });
+  const ctx = context();
+  ctx.session.recordChange = async (input) => ({
+    receipt: AssistantChangeReceiptSchema.parse({
+      id: "receipt",
+      conversationId: "chat",
+      ...input,
+      createdAt: new Date().toISOString(),
+    }),
+    part: { type: "text", text: "Undo available" },
+  });
+  const mcp = await connectAssistantMcp(definitions, ctx);
+  const call = (name: string, input: unknown) =>
+    mcp.tools.find((tool) => tool.name === name)!.execute(input, ctx);
+  try {
+    await expect(
+      call("patch_profile", { fields: { headline: "Unplanned" } }),
+    ).rejects.toMatchObject({ kind: "missing_information" });
+    expect(
+      mcp.tools.find((tool) => tool.name === "upsert_profile_record")
+        ?.parameters,
+    ).toHaveProperty("allOf");
+    await call("get_profile", {});
+    await run("patch_profile", {
+      fields: { headline: "Screen saved" },
+      lists: { skills: ["SQL"] },
+    });
+    await expect(
+      call("patch_profile", { fields: { headline: "Chat overwrite" } }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    await expect(
+      call("patch_profile", { lists: { skills: ["Excel"] } }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    await expect(
+      call("commit_profile_edits", {
+        profile: { fields: { headline: "Batch overwrite" } },
+      }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    await call("get_profile_goals", {});
+    await run("patch_profile_goals", {
+      lists: { targetRoles: ["Screen role"] },
+      fields: { shiftPreference: "day" },
+    });
+    await expect(
+      call("patch_profile_goals", { lists: { targetRoles: ["Chat role"] } }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    await expect(
+      call("patch_profile_goals", { fields: { shiftPreference: "night" } }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    const record = CandidateExperienceSchema.parse({
+      id: "work",
+      title: "Original",
+      companyName: "Synthetic Lab",
+    });
+    await call("get_profile_record", { collection: "experiences", id: "work" });
+    await run("upsert_profile_record", { collection: "experiences", record });
+    await expect(
+      call("upsert_profile_record", {
+        collection: "experiences",
+        record: { ...record, title: "Chat overwrite" },
+      }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    await call("get_profile_record", { collection: "experiences", id: "work" });
+    await run("upsert_profile_record", {
+      collection: "experiences",
+      record: { ...record, title: "Screen saved" },
+    });
+    await expect(
+      call("upsert_profile_record", {
+        collection: "experiences",
+        record: { ...record, title: "Chat overwrite" },
+      }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    expect((await run("get_profile", {})).fields.headline).toBe("Screen saved");
+    expect((await run("get_profile_goals", {})).targetRoles).toEqual([
+      "Screen role",
+    ]);
+    expect(
+      (
+        await run("get_profile_record", {
+          collection: "experiences",
+          id: "work",
+        })
+      )?.record,
+    ).toMatchObject({ title: "Screen saved" });
+    // A later save to a different field does not block a scoped chat edit.
+    await call("get_profile", {});
+    await run("patch_profile", { fields: { headline: "Another screen edit" } });
+    await call("patch_profile", {
+      fields: { email: "synthetic@example.test" },
+    });
+    expect((await run("get_profile", {})).fields.headline).toBe(
+      "Another screen edit",
+    );
+  } finally {
+    await mcp.close();
+    store.close();
+  }
+});
+
 it("runs Profile and Settings field commands over MCP and protects unsaved Profile fields", async () => {
   const store = openJobStore(":memory:");
   const run = createJobCommandRunner({ store });
@@ -511,12 +623,14 @@ it("runs Profile and Settings field commands over MCP and protects unsaved Profi
     await expect(
       call("patch_profile", { fields: { headline: "Overwrite typing" } }),
     ).rejects.toThrow(/unsaved edits/u);
+    await call("get_profile", {});
     await call("patch_profile", {
       fields: { email: "synthetic@example.test" },
     });
     expect((await run("get_profile", {})).fields.email).toBe(
       "synthetic@example.test",
     );
+    await call("get_profile_goals", {});
     await call("patch_profile_goals", {
       lists: { targetRoles: ["UX Researcher"] },
     });

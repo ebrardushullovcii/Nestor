@@ -7,6 +7,8 @@ import {
   isAiServiceBusy,
 } from "@nestor/ai-providers";
 import {
+  hasProfileSetupPlaceholderValue,
+  type CandidateProfile,
   type ResumeCommandOutputs,
   type JobDetail,
   type ResumeDraft,
@@ -43,6 +45,31 @@ const BUSY_RETRY_MS = 30_000;
 /** Below this the listing is a card, and the resume reads the posting first. */
 const THIN_LISTING_CHARS = 400;
 
+/** Identity alone cannot ground a replacement for an existing tailored draft. */
+function hasResumeWriterEvidence(profile: CandidateProfile): boolean {
+  return Boolean(
+    profile.baseResume.textContent?.trim() ||
+    profile.baseResume.storagePath ||
+    (profile.headline?.trim() &&
+      !hasProfileSetupPlaceholderValue("headline", profile.headline)) ||
+    (profile.summary?.trim() &&
+      !hasProfileSetupPlaceholderValue("summary", profile.summary)) ||
+    profile.skills.length ||
+    profile.experiences.some(
+      (record) =>
+        !record.isDraft &&
+        (record.title?.trim() ||
+          record.companyName?.trim() ||
+          record.achievements.length),
+    ) ||
+    profile.education.some(
+      (record) =>
+        !record.isDraft && (record.schoolName?.trim() || record.degree?.trim()),
+    ) ||
+    profile.projects.length,
+  );
+}
+
 export interface ResumeServiceDeps extends ResumeWriterDeps {
   store: JobStore;
   documentManager: ResumeWriterDeps["documentManager"] &
@@ -74,6 +101,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
   let stopped = true;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribe: (() => void) | null = null;
+  let waitingForProfile = false;
 
   const requireJob = (jobId: number) => {
     const job = store.getJob(jobId);
@@ -121,6 +149,10 @@ export function createResumeService(deps: ResumeServiceDeps) {
     try {
       if (stopped || signal.aborted) return;
       const inputs = await deps.readInputs();
+      if (!hasResumeWriterEvidence(inputs.profile)) {
+        waitingForProfile = true;
+        return;
+      }
       const level = resumes.startWriting(
         jobId,
         resolveProfileResumeLevel(inputs),
@@ -162,12 +194,12 @@ export function createResumeService(deps: ResumeServiceDeps) {
     } finally {
       release();
       running.delete(jobId);
-      if (!retryTimer) pump();
+      if (!retryTimer && !waitingForProfile) pump();
     }
   }
 
   function pump() {
-    if (stopped) return;
+    if (stopped || waitingForProfile) return;
     for (const jobId of resumes.listUnwritten(50)) {
       if (running.has(jobId)) continue;
       const controller = new AbortController();
@@ -221,8 +253,14 @@ export function createResumeService(deps: ResumeServiceDeps) {
     start() {
       if (!stopped) return;
       stopped = false;
+      waitingForProfile = false;
       resumes.requeue();
       unsubscribe = store.onChange((change) => {
+        if (change.cause === "profile") {
+          waitingForProfile = false;
+          pump();
+          return;
+        }
         if (change.cause === "found" || change.cause === "fit") return;
         if (!change.stages.includes("shortlisted")) return;
         stopWritesThatLeft();

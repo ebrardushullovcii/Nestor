@@ -182,7 +182,7 @@ describe("contracts base schemas", () => {
 
     expect(preferences.companyBlacklist).toEqual([]);
     expect(preferences.workModes).toEqual([]);
-    expect(preferences).not.toHaveProperty("discovery");
+    expect(preferences.discovery.targets).toEqual([]);
   });
 
   test("migrates legacy annual USD preferences and preserves typed monthly ranges", () => {

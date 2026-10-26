@@ -1,5 +1,8 @@
 import type { z } from "zod";
-import type { AppCommandDefinition } from "@nestor/contracts";
+import {
+  ProfileEditConflictError,
+  type AppCommandDefinition,
+} from "@nestor/contracts";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type {
@@ -8,6 +11,7 @@ import type {
   AssistantToolGroup,
   AssistantToolResult,
 } from "./tool-kit";
+import { AssistantToolError } from "./tool-kit";
 
 type Catalog = Record<string, AppCommandDefinition>;
 
@@ -72,12 +76,20 @@ export function assistantCommandTools<
       async execute(input: unknown, context) {
         context.session.assertCurrent();
         const parsed = command.input.parse(input);
+        options.beforeRun?.(name, parsed, context);
         await options.before?.[name]?.(
           parsed as z.output<C[K]["input"]>,
           context,
         );
-        options.beforeRun?.(name, parsed, context);
-        const result = await run(name, parsed as z.input<C[K]["input"]>);
+        context.session.assertCurrent();
+        let result: O[K];
+        try {
+          result = await run(name, parsed as z.input<C[K]["input"]>);
+        } catch (error) {
+          if (error instanceof ProfileEditConflictError)
+            throw new AssistantToolError("conflict", error.message);
+          throw error;
+        }
         return (
           options.results?.[name]?.(
             result,

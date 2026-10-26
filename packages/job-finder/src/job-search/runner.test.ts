@@ -6,6 +6,7 @@ import {
   type FoundJob,
   type ListingCard,
   type JobSearchStatus,
+  type JobFitUpdate,
 } from "@nestor/contracts";
 import {
   createJobSitesStore,
@@ -62,7 +63,7 @@ function found(card: ListingCard): FoundJob {
       "Full published listing: build production APIs. Requirements: SQL and distributed systems.",
   };
 }
-function setup() {
+function setup(readRemoteCountsAsAnyLocation?: () => Promise<boolean>) {
   const store = openJobStore(":memory:");
   stores.push(store);
   const context: JobSearchContext = {
@@ -141,6 +142,7 @@ function setup() {
     store,
     engine,
     readContext: () => Promise.resolve(context),
+    ...(readRemoteCountsAsAnyLocation ? { readRemoteCountsAsAnyLocation } : {}),
   });
   runners.push(runner);
   return { store, context, runner, engine };
@@ -160,6 +162,41 @@ function finished(runner: JobSearchRunner): Promise<JobSearchStatus> {
 afterEach(() => {
   for (const runner of runners.splice(0)) runner.stop();
   for (const store of stores.splice(0)) store.close();
+});
+
+test("a remote-policy change during a model call cannot save an old score; retry judges with the new policy", async () => {
+  let remoteCountsAsAnyLocation = true;
+  const { runner, engine, store } = setup(() =>
+    Promise.resolve(remoteCountsAsAnyLocation),
+  );
+  const first = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementationOnce(({ context }) => {
+    expect(context.remoteCountsAsAnyLocation).toBe(true);
+    return first.promise;
+  });
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() => expect(engine.fitJobs).toHaveBeenCalledTimes(1));
+  const id = engine.fitJobs.mock.calls[0]![0].jobs[0]!.id;
+  remoteCountsAsAnyLocation = false;
+  first.resolve([
+    { id, score: 92, summary: "Old policy", reasons: [], gaps: [] },
+  ]);
+  await finished(runner);
+  expect(store.getJob(id)?.fitScore).toBeNull();
+  engine.fitJobs.mockImplementation(({ jobs, context }) => {
+    expect(context.remoteCountsAsAnyLocation).toBe(false);
+    return Promise.resolve(
+      jobs.map(({ id }) => ({
+        id,
+        score: 45,
+        summary: "New policy",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+  });
+  expect(await runner.scoreUnscored()).toBe(1);
+  expect(store.getJob(id)?.fitScore).toBe(45);
 });
 
 test("a background search merges all sightings before fitting; repeat reads and fits no saved jobs", async () => {

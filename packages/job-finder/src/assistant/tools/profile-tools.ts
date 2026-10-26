@@ -733,6 +733,10 @@ export function fieldsTouchedByOperation(
       return ["professionalSummary", "summary"];
     case "replace_narrative_fields":
       return ["narrative"];
+    case "replace_answer_bank_fields":
+    case "upsert_reusable_answer":
+    case "remove_reusable_answer":
+      return ["answerBank"];
     case "replace_application_identity_fields":
       return ["applicationIdentity"];
     case "replace_skill_group_fields":
@@ -787,6 +791,17 @@ function parseOperations(
       `operations[${index}]`,
     );
     const parsed = ProfileCopilotPatchOperationSchema.safeParse(entry);
+    if (
+      parsed.success &&
+      (parsed.data.operation === "replace_answer_bank_fields" ||
+        parsed.data.operation === "upsert_reusable_answer" ||
+        parsed.data.operation === "remove_reusable_answer")
+    ) {
+      problems.push(
+        "Profile's old answer bank is retired. Manage reusable application answers in Needs you.",
+      );
+      return;
+    }
     if (
       parsed.success &&
       parsed.data.operation === "replace_identity_fields" &&

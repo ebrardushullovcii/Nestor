@@ -2,9 +2,13 @@ import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { FoundJob } from "@nestor/contracts";
+import {
+  createFreshStartCandidateProfile,
+  type FoundJob,
+} from "@nestor/contracts";
 import {
   createResumeStore,
+  createProfileStore,
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -93,6 +97,44 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("keeps revoked drafts queued through an empty Profile cutover, then wakes on profile facts", async () => {
+    const seed = createSeed();
+    let profile = seed.profile;
+    const readInputs = vi.fn(() =>
+      Promise.resolve({
+        profile,
+        searchPreferences: seed.searchPreferences,
+        settings: seed.settings,
+      }),
+    );
+    const { store, service, id } = setup({ readInputs });
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const before = service.get(id).resume!.draft!;
+    await service.approve(id);
+    expect(service.get(id).resume?.approvedAt).not.toBeNull();
+    service.stop();
+    profile = createFreshStartCandidateProfile();
+    const profileStore = createProfileStore(store);
+    readInputs.mockClear();
+    service.start();
+    await vi.waitFor(() => expect(readInputs).toHaveBeenCalled());
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(service.get(id).resume).toMatchObject({
+      state: "queued",
+      approvedAt: null,
+      draft: { status: "stale", sections: before.sections },
+    });
+    expect(readInputs).toHaveBeenCalledTimes(1);
+    profile = { ...profile, headline: "Product Designer", skills: ["Figma"] };
+    profileStore.patch({
+      fields: { headline: profile.headline },
+      lists: { skills: profile.skills },
+    });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    expect(readInputs.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("edits one summary without reproducing or dropping the rest, with an exact Undo", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });

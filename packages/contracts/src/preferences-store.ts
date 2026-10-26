@@ -26,6 +26,7 @@ export const GoalFieldsSchema = z
       employmentTypes: true,
       companyBlacklist: true,
       companyWhitelist: true,
+      discovery: true,
       compensation: true,
       weeklyHours: true,
     }).shape,

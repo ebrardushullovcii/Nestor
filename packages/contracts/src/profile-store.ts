@@ -50,6 +50,7 @@ const identity = CandidateProfileSchema.omit({
   projects: true,
   spokenLanguages: true,
   proofBank: true,
+  answerBank: true,
 });
 /** Whitelisted leaf fields. An edit carries only the fields the person changed. */
 export const ProfileFieldsSchema = z
@@ -129,6 +130,13 @@ export const PatchProfileInputSchema = z
   })
   .strict();
 export type PatchProfileInput = z.input<typeof PatchProfileInputSchema>;
+
+export class ProfileEditConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProfileEditConflictError";
+  }
+}
 
 export const ProfileRecordSchemas = {
   experiences: CandidateExperienceSchema,

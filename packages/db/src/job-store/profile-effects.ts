@@ -47,6 +47,32 @@ export function applySettingsResumeEffects(
   after: Record<string, unknown>,
 ): void {
   if (
+    before["aiBehavior.jobSearch.remoteCountsAsAnyLocation"] !==
+    after["aiBehavior.jobSearch.remoteCountsAsAnyLocation"]
+  ) {
+    // Fit is derived from the location policy. Keep jobs and resume drafts;
+    // the next search judges these rows again with the new policy.
+    const ids = store
+      .sql(
+        `UPDATE jobs SET fit_score=-1,fit_summary=NULL
+       WHERE stage IN ('found','shortlisted','resume','hidden') AND fit_score>=0 RETURNING id`,
+      )
+      .all() as { id: number }[];
+    if (ids.length) {
+      store
+        .sql(
+          "UPDATE job_details SET fit_json=NULL WHERE job_id IN (SELECT value FROM json_each(?))",
+        )
+        .run(JSON.stringify(ids.map((row) => row.id)));
+      store.notify({
+        cause: "fit",
+        stages: ["found", "shortlisted", "resume", "hidden"],
+        ids: null,
+        searchId: null,
+      });
+    }
+  }
+  if (
     before.resumeFormat !== after.resumeFormat ||
     before.fontPreset !== after.fontPreset
   )

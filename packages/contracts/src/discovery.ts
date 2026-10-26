@@ -119,6 +119,49 @@ export function isRunnableJobDiscoveryTarget(
  */
 export const DISCOVERY_RUN_JOB_BUDGET_MAX = 2_000;
 
+const JobDiscoveryPreferencesObjectSchema = z.object({
+  targets: z.array(JobDiscoveryTargetSchema).default([]),
+  historyLimit: z.number().int().min(1).max(10).default(5),
+  collectOnlyHardCriteriaMatches: z.boolean().default(false),
+  /**
+   * Explicit total valid-job budget for one discovery run across all enabled
+   * targets. `null`/`undefined` retains all eligible listings collected with
+   * the normal crawl safety ceilings; when set, the budget is split across
+   * targets and raises the bounded crawl step/time ceilings proportionally.
+   */
+  runJobBudget: z
+    .number()
+    .int()
+    .min(1)
+    .max(DISCOVERY_RUN_JOB_BUDGET_MAX)
+    .nullish(),
+  /**
+   * Run-time copy of Settings' "Count remote jobs as any location"
+   * (`settings.aiBehavior.jobSearch.remoteCountsAsAnyLocation`), set by the
+   * search and scoring code from the saved settings when they read the
+   * preferences. Only `false` is ever set; absent means on. No save path
+   * writes it.
+   */
+  remoteCountsAsAnyLocation: z.boolean().optional(),
+});
+type JobDiscoveryPreferencesInput = z.input<
+  typeof JobDiscoveryPreferencesObjectSchema
+>;
+// Parsing normalizes the hard-criteria flag to its false default, while the
+// public output type keeps it optional so preference literals that omit the
+// flag stay assignable.
+export type JobDiscoveryPreferences = Omit<
+  z.infer<typeof JobDiscoveryPreferencesObjectSchema>,
+  "collectOnlyHardCriteriaMatches"
+> & {
+  collectOnlyHardCriteriaMatches?: boolean | undefined;
+};
+export const JobDiscoveryPreferencesSchema: z.ZodType<
+  JobDiscoveryPreferences,
+  z.ZodTypeDef,
+  JobDiscoveryPreferencesInput
+> = JobDiscoveryPreferencesObjectSchema;
+
 export const compensationIntervalValues = [
   "hour",
   "day",
@@ -272,6 +315,7 @@ export const JobSearchPreferencesObjectSchema = z.object({
   tailoringMode: TailoringModeSchema,
   companyBlacklist: z.array(NonEmptyStringSchema).default([]),
   companyWhitelist: z.array(NonEmptyStringSchema).default([]),
+  discovery: JobDiscoveryPreferencesSchema.default({}),
 });
 
 const annualMultiplierByInterval: Record<CompensationInterval, number> = {

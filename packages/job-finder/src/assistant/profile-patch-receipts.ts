@@ -1,6 +1,19 @@
 import {
   JobFinderSettingsSchema,
+  JobSearchPreferencesSchema,
+  ProfileFieldsSchema,
+  ProfileListsSchema,
+  GoalFieldsSchema,
+  GoalListsSchema,
+  type UpsertProfileRecordInputSchema,
   ProfileOverviewSchema,
+  type ProfileEditBatch,
+  type ProfileRecord,
+  type ProfileRecordPage,
+  type ProfileRecordQuery,
+  type RemoveProfileRecordInput,
+  type PatchGoalsInput,
+  type JobSearchPreferences,
   type PatchProfileInput,
   type PatchSettingsInput,
   type ProfileOverview,
@@ -8,7 +21,8 @@ import {
   type AssistantChangeEntry,
 } from "@nestor/contracts";
 import { diffValues } from "./change-diff";
-import type { AssistantToolContext } from "./tool-kit";
+import { AssistantToolError, type AssistantToolContext } from "./tool-kit";
+import type { z } from "zod";
 const at = (value: unknown, path: string[]): unknown =>
   path.reduce<unknown>(
     (current, key) =>
@@ -27,6 +41,64 @@ export function profilePatchReceipts(
 ) {
   const profiles = new WeakMap<object, ProfileOverview>(),
     settings = new WeakMap<object, JobFinderSettings>();
+  const plans = new WeakMap<
+    AssistantToolContext["session"],
+    {
+      profile?: ProfileOverview;
+      goals?: JobSearchPreferences;
+      records: Map<string, ProfileRecord | null>;
+    }
+  >();
+  const plan = ({ session }: AssistantToolContext) => {
+    let value = plans.get(session);
+    if (!value) {
+      value = { records: new Map() };
+      plans.set(session, value);
+    }
+    return value;
+  };
+  const requireRead = <T>(value: T | undefined, command: string): T => {
+    if (value === undefined)
+      throw new AssistantToolError(
+        "missing_information",
+        `Read ${command} before planning this edit, then try again.`,
+      );
+    return value;
+  };
+  const picked = (keys: object | undefined, read: (key: string) => unknown) =>
+    Object.fromEntries(Object.keys(keys ?? {}).map((key) => [key, read(key)]));
+  const recordKey = (collection: string, id: string) => `${collection}:${id}`;
+  const prepareProfile = (
+    input: PatchProfileInput,
+    context: AssistantToolContext,
+  ) => {
+    const before = requireRead(plan(context).profile, "get_profile");
+    input.expected = ProfileFieldsSchema.parse(
+      picked(
+        input.fields,
+        (key) => before.fields[key as keyof typeof before.fields],
+      ),
+    );
+    input.expectedLists = ProfileListsSchema.parse(
+      picked(
+        input.lists,
+        (key) => before.lists[key as keyof typeof before.lists],
+      ),
+    );
+    profiles.set(input, before);
+  };
+  const prepareGoals = (
+    input: PatchGoalsInput,
+    context: AssistantToolContext,
+  ) => {
+    const before = requireRead(plan(context).goals, "get_profile_goals");
+    input.expected = GoalFieldsSchema.parse(
+      picked(input.fields, (key) => at(before, key.split("."))),
+    );
+    input.expectedLists = GoalListsSchema.parse(
+      picked(input.lists, (key) => at(before, [key])),
+    );
+  };
   const receipt = async (
     value: unknown,
     entries: AssistantChangeEntry[],
@@ -47,10 +119,43 @@ export function profilePatchReceipts(
   };
   return {
     before: {
-      patch_profile: async (input: PatchProfileInput) => {
-        profiles.set(
-          input,
-          ProfileOverviewSchema.parse(await run("get_profile", {})),
+      patch_profile: prepareProfile,
+      patch_profile_goals: prepareGoals,
+      commit_profile_edits: (
+        input: ProfileEditBatch,
+        context: AssistantToolContext,
+      ) => {
+        if (input.profile) prepareProfile(input.profile, context);
+        if (input.goals) prepareGoals(input.goals, context);
+        input.expectedRecords = [
+          ...input.upsert.map((row) => ({
+            collection: row.collection,
+            id: row.record.id,
+          })),
+          ...input.remove,
+        ].map(({ collection, id }) => ({
+          collection,
+          id,
+          value: requireRead(
+            plan(context).records.get(recordKey(collection, id)),
+            "get_profile_record for this id",
+          ),
+        }));
+        if (input.workPermissions)
+          input.expectedWorkPermissions = requireRead(
+            plan(context).profile,
+            "get_profile",
+          ).limitedWorkPermissions;
+      },
+      upsert_profile_record: (
+        input: z.infer<typeof UpsertProfileRecordInputSchema>,
+        context: AssistantToolContext,
+      ) => {
+        input.expected = requireRead(
+          plan(context).records.get(
+            recordKey(input.collection, input.record.id),
+          ),
+          "get_profile_record for this id",
         );
       },
       patch_settings: async (input: PatchSettingsInput) => {
@@ -61,6 +166,50 @@ export function profilePatchReceipts(
       },
     },
     results: {
+      get_profile: (
+        value: ProfileOverview,
+        _input: unknown,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).profile = ProfileOverviewSchema.parse(value);
+        return { summary: "Read Profile.", data: value };
+      },
+      get_profile_goals: (
+        value: JobSearchPreferences,
+        _input: unknown,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).goals = JobSearchPreferencesSchema.parse(value);
+        return { summary: "Read Profile goals.", data: value };
+      },
+      get_profile_record: (
+        value: ProfileRecord | null,
+        input: RemoveProfileRecordInput,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).records.set(recordKey(input.collection, input.id), value);
+        return {
+          summary: value
+            ? "Read Profile record."
+            : "This Profile record does not exist.",
+          data: value,
+        };
+      },
+      list_profile_records: (
+        value: ProfileRecordPage,
+        _input: ProfileRecordQuery,
+        context: AssistantToolContext,
+      ) => {
+        for (const row of value.rows)
+          plan(context).records.set(
+            recordKey(row.collection, row.record.id),
+            row,
+          );
+        return {
+          summary: `Read ${value.rows.length} Profile records.`,
+          data: value,
+        };
+      },
       patch_profile: (
         value: ProfileOverview,
         input: PatchProfileInput,

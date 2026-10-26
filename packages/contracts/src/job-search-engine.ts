@@ -21,6 +21,9 @@ export type JobSearchGoals = Pick<
   JobSearchPreferences,
   "targetRoles" | "locations"
 > & {
+  /** Omitted means remote work may match any preferred place; hiring restrictions still apply. */
+  remoteCountsAsAnyLocation?: boolean | undefined;
+} & {
   [Key in keyof OtherSearchGoals]?: OtherSearchGoals[Key] | undefined;
 };
 
@@ -81,6 +84,9 @@ export function toJobSearchGoals(preferences: JobSearchGoals): JobSearchGoals {
     compensation,
     shiftPreference,
     weeklyHours,
+    ...(preferences.remoteCountsAsAnyLocation === false
+      ? { remoteCountsAsAnyLocation: false }
+      : {}),
   };
 }
 

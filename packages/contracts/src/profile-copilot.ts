@@ -11,6 +11,7 @@ import {
   AgentTaskMessageAttributionSchema,
 } from "./agent-task";
 import {
+  CandidateAnswerBankSchema,
   CandidateApplicationIdentitySchema,
   CandidateCertificationSchema,
   CandidateEducationSchema,
@@ -20,6 +21,7 @@ import {
   CandidateProfessionalSummarySchema,
   CandidateProjectSchema,
   CandidateProofBankEntrySchema,
+  CandidateReusableAnswerSchema,
   CandidateSkillGroupSchema,
   CandidateWorkEligibilitySchema,
   CandidateNarrativeSchema,
@@ -147,6 +149,14 @@ export type ProfileNarrativePatchFields = z.infer<
   typeof ProfileNarrativePatchFieldsSchema
 >;
 
+export const ProfileAnswerBankPatchFieldsSchema = requireAtLeastOneField(
+  CandidateAnswerBankSchema.omit({ customAnswers: true }).partial(),
+  "Answer bank updates must include at least one field.",
+);
+export type ProfileAnswerBankPatchFields = z.infer<
+  typeof ProfileAnswerBankPatchFieldsSchema
+>;
+
 export const ProfileApplicationIdentityPatchFieldsSchema =
   requireAtLeastOneField(
     CandidateApplicationIdentitySchema.partial(),
@@ -202,6 +212,7 @@ export const ProfileSearchPreferencesPatchFieldsSchema = requireAtLeastOneField(
     approvalMode: true,
     companyBlacklist: true,
     companyWhitelist: true,
+    discovery: true,
     employmentTypes: true,
     shiftPreference: true,
     weeklyHours: true,
@@ -290,6 +301,11 @@ const UpsertCandidateLanguageInputSchema = createPartialRecordUpsertSchema(
 );
 const UpsertCandidateProofBankEntryInputSchema =
   createPartialRecordUpsertSchema(CandidateProofBankEntrySchema, "Proof-point");
+const UpsertCandidateReusableAnswerInputSchema =
+  createPartialRecordUpsertSchema(
+    CandidateReusableAnswerSchema,
+    "Reusable-answer",
+  );
 const OrderedProfileRecordIdsSchema = z
   .array(NonEmptyStringSchema)
   .min(1)
@@ -316,6 +332,10 @@ export const ProfileCopilotPatchOperationSchema = z.discriminatedUnion(
     z.object({
       operation: z.literal("replace_narrative_fields"),
       value: ProfileNarrativePatchFieldsSchema,
+    }),
+    z.object({
+      operation: z.literal("replace_answer_bank_fields"),
+      value: ProfileAnswerBankPatchFieldsSchema,
     }),
     z.object({
       operation: z.literal("replace_application_identity_fields"),
@@ -417,6 +437,14 @@ export const ProfileCopilotPatchOperationSchema = z.discriminatedUnion(
     }),
     z.object({
       operation: z.literal("remove_proof_point"),
+      recordId: NonEmptyStringSchema,
+    }),
+    z.object({
+      operation: z.literal("upsert_reusable_answer"),
+      record: UpsertCandidateReusableAnswerInputSchema,
+    }),
+    z.object({
+      operation: z.literal("remove_reusable_answer"),
       recordId: NonEmptyStringSchema,
     }),
     z.object({

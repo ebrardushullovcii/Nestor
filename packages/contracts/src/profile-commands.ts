@@ -48,6 +48,9 @@ export interface ProfileEditResult {
   profile: ProfileOverview;
   goals: JobSearchPreferences;
 }
+export const UpsertProfileRecordInputSchema = ProfileRecordSchema.and(
+  z.object({ expected: ProfileRecordSchema.nullable().optional() }),
+);
 export const ProfileEditsDraftSchema = z
   .object({
     id: z.string().min(1).max(100),
@@ -95,7 +98,7 @@ export const PROFILE_COMMANDS = {
   patch_profile: {
     effect: "local_write",
     description:
-      "Changes only supplied Profile fields or text lists. Pass expected values to reject a conflicting edit without overwriting it. Work eligibility and application identity belong here; reusable application answers belong in Needs you.",
+      "Changes only supplied Profile fields or text lists. Read get_profile before planning an edit; Assistant writes compare those read values and reject concurrent changes. Work eligibility and application identity belong here; reusable application answers belong in Needs you.",
     input: PatchProfileInputSchema,
   },
   list_profile_records: {
@@ -112,8 +115,8 @@ export const PROFILE_COMMANDS = {
   upsert_profile_record: {
     effect: "local_write",
     description:
-      "Saves one work-history or background record, preserving every other row. Text lists retain stable rows, including repeated values.",
-    input: ProfileRecordSchema,
+      "Saves one work-history or background record, preserving every other row. Read get_profile_record for its id before planning the edit, including a new id; Assistant writes reject changes since that read.",
+    input: UpsertProfileRecordInputSchema,
   },
   remove_profile_record: {
     effect: "local_write",
@@ -139,7 +142,7 @@ export const PROFILE_COMMANDS = {
   patch_profile_goals: {
     effect: "local_write",
     description:
-      "Changes only supplied goal fields or lists. Does not save Profile, Settings or job sites.",
+      "Changes only supplied goal fields or lists. Read get_profile_goals before planning an edit; Assistant writes reject changes since that read. Does not save Profile, Settings or job sites.",
     input: PatchGoalsInputSchema,
   },
   get_settings: {

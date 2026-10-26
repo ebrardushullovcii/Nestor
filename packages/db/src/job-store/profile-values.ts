@@ -1,4 +1,5 @@
 import type { SQLInputValue } from "node:sqlite";
+import { ProfileEditConflictError } from "@nestor/contracts";
 import type { JobStore } from "./job-store";
 
 export type FieldValue = string | number | boolean | null | undefined;
@@ -111,7 +112,7 @@ export function createScalarValues(
           Object.hasOwn(expected, key) &&
           encode(expected[key]) !== encode(current[key])
         )
-          throw new Error(
+          throw new ProfileEditConflictError(
             `The saved ${key} changed while you were editing it. Reload this field and try again.`,
           );
       const changed = entries.filter(
@@ -159,7 +160,7 @@ export function createProfileItems(store: JobStore) {
         JSON.stringify(previous.map((row) => row.value)) !==
           JSON.stringify(expected)
       )
-        throw new Error(
+        throw new ProfileEditConflictError(
           `The saved ${field} changed while you were editing it. Reload this list and try again.`,
         );
       for (const row of previous) {

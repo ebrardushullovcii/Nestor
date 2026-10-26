@@ -53,6 +53,36 @@ function setup() {
   return { store, profile, preferences, resumes };
 }
 
+test("changing remote location policy retires active fit scores without changing drafts or applied history", () => {
+  const { store, preferences, resumes } = setup();
+  store.setFit(
+    [1, 2].map((id) => ({
+      id,
+      score: 90,
+      summary: "Remote match",
+      reasons: [],
+      gaps: [],
+    })),
+  );
+  const draft = resumes.get(1);
+  expect(() =>
+    store.transaction(() => {
+      preferences.settings.patch({
+        fields: { "aiBehavior.jobSearch.remoteCountsAsAnyLocation": false },
+      });
+      throw Error("Abort");
+    }),
+  ).toThrow("Abort");
+  expect(store.getJob(1)?.fitScore).toBe(90);
+  preferences.settings.patch({
+    fields: { "aiBehavior.jobSearch.remoteCountsAsAnyLocation": false },
+  });
+  expect(store.getJob(1)?.fitScore).toBeNull();
+  expect(store.getJob(1)?.fit).toBeNull();
+  expect(store.getJob(2)?.fitScore).toBe(90);
+  expect(resumes.get(1)).toEqual(draft);
+});
+
 test("every Profile fact writer invalidates active approval atomically while submitted history stays intact", () => {
   const { store, profile, resumes } = setup();
   expect(() =>

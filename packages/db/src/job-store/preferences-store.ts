@@ -260,6 +260,7 @@ export function createPreferencesStore(store: JobStore) {
             "resumeApplicationMode",
             "resumeFormat",
             "fontPreset",
+            "aiBehavior.jobSearch.remoteCountsAsAnyLocation",
           ]);
           let changed = settings.patch(
             Object.fromEntries(
@@ -288,6 +289,7 @@ export function createPreferencesStore(store: JobStore) {
                 "resumeApplicationMode",
                 "resumeFormat",
                 "fontPreset",
+                "aiBehavior.jobSearch.remoteCountsAsAnyLocation",
               ]),
             );
           if (changed)
@@ -306,6 +308,7 @@ export function createPreferencesStore(store: JobStore) {
             "resumeApplicationMode",
             "resumeFormat",
             "fontPreset",
+            "aiBehavior.jobSearch.remoteCountsAsAnyLocation",
           ]);
           let changed = settings.patch(patch.fields, patch.expected);
           for (const [field, value] of Object.entries(patch.lists))
@@ -329,6 +332,7 @@ export function createPreferencesStore(store: JobStore) {
                 "resumeApplicationMode",
                 "resumeFormat",
                 "fontPreset",
+                "aiBehavior.jobSearch.remoteCountsAsAnyLocation",
               ]),
             );
           if (changed)

@@ -79,7 +79,8 @@ test("editing one Profile field preserves full resume text and history; screen r
     "Shipped reports",
   ]);
   expect(store.sql("SELECT * FROM touched").all()).toEqual([]);
-  expect(Object.hasOwn(profile.read(), "answerBank")).toBe(false);
+  expect(profile.overview().fields).not.toHaveProperty("answerBank");
+  expect(profile.read().answerBank.selfIntroduction).toBeNull();
 });
 
 test("independent field edits do not replay stale siblings, and conflicting edits explain how to recover", () => {

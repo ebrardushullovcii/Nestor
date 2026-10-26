@@ -1,4 +1,7 @@
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  ProfileEditConflictError,
+} from "@nestor/contracts";
 import {
   describeResumeIdentityOwnershipChoice,
   useResumeSourceNameForProfile,
@@ -37,13 +40,13 @@ export function createProfileCommandHandlers(
           input.requireCurrentDraft &&
           (!input.draftId || drafts.read()?.id !== input.draftId)
         )
-          throw new Error(
+          throw new ProfileEditConflictError(
             "Newer edits replaced this draft. Reopen Profile to review your latest kept edits.",
           );
         for (const expected of input.expectedRecords) {
           const current = profile.records.get(expected.collection, expected.id);
           if (JSON.stringify(current) !== JSON.stringify(expected.value))
-            throw new Error(
+            throw new ProfileEditConflictError(
               `The saved ${expected.collection} record changed while you were editing it. Reload this record and try again.`,
             );
         }
@@ -52,7 +55,7 @@ export function createProfileCommandHandlers(
           JSON.stringify(profile.overview().limitedWorkPermissions) !==
             JSON.stringify(input.expectedWorkPermissions)
         )
-          throw new Error(
+          throw new ProfileEditConflictError(
             "Your saved work permissions changed while you were editing them. Reload and try again.",
           );
         if (input.profile) profile.patch(input.profile);
@@ -108,7 +111,19 @@ export function createProfileCommandHandlers(
     list_profile_records: (input) => profile.records.list(input),
     get_profile_record: ({ collection, id }) =>
       profile.records.get(collection, id),
-    upsert_profile_record: (input) => profile.records.upsert(input),
+    upsert_profile_record: (input) =>
+      store.transaction(() => {
+        if (
+          input.expected !== undefined &&
+          JSON.stringify(
+            profile.records.get(input.collection, input.record.id),
+          ) !== JSON.stringify(input.expected)
+        )
+          throw new ProfileEditConflictError(
+            "The saved Profile record changed while you were editing it. Reload this record and try again.",
+          );
+        return profile.records.upsert(input);
+      }),
     remove_profile_record: ({ collection, id }) => ({
       removed: profile.records.remove(collection, id),
     }),

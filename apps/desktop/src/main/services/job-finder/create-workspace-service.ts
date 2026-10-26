@@ -673,17 +673,25 @@ export async function createJobFinderRuntimeAsync(
     Promise.resolve(
       createJobSearchRunner({
         store: getJobStore(),
+        readRemoteCountsAsAnyLocation: async () =>
+          (await jobFinderRepository.getSettings()).aiBehavior?.jobSearch
+            .remoteCountsAsAnyLocation ?? true,
         engine: createListingSearchEngine({
           browserRuntime,
           aiClient,
         }),
         readContext: async () => {
-          const [profile, searchPreferences, sourceInstructionArtifacts] =
-            await Promise.all([
-              jobFinderRepository.getProfile(),
-              jobFinderRepository.getSearchPreferences(),
-              jobFinderRepository.listSourceInstructionArtifacts(),
-            ]);
+          const [
+            profile,
+            searchPreferences,
+            sourceInstructionArtifacts,
+            settings,
+          ] = await Promise.all([
+            jobFinderRepository.getProfile(),
+            jobFinderRepository.getSearchPreferences(),
+            jobFinderRepository.listSourceInstructionArtifacts(),
+            jobFinderRepository.getSettings(),
+          ]);
           return {
             profile,
             searchPreferences,
@@ -691,6 +699,8 @@ export async function createJobFinderRuntimeAsync(
               .enabled()
               .map(jobSiteTarget),
             sourceInstructionArtifacts,
+            remoteCountsAsAnyLocation:
+              settings.aiBehavior?.jobSearch.remoteCountsAsAnyLocation ?? true,
           };
         },
       }),

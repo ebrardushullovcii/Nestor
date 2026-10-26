@@ -1166,6 +1166,12 @@ export function createWorkspaceProfileCopilotMethods(input: {
 
     for (const operation of patchGroup.operations) {
       switch (operation.operation) {
+        case "replace_answer_bank_fields":
+        case "upsert_reusable_answer":
+        case "remove_reusable_answer":
+          throw new Error(
+            "Profile's old answer bank is retired. Manage reusable application answers in Needs you.",
+          );
         case "replace_identity_fields": {
           const previousProfile = nextProfile;
           nextProfile = followPrimaryContacts(
@@ -1274,6 +1280,10 @@ export function createWorkspaceProfileCopilotMethods(input: {
           break;
         }
         case "replace_search_preferences_fields": {
+          if (operation.value.discovery !== undefined)
+            throw new Error(
+              "Job sources are managed in Job sources, separately from Profile goals.",
+            );
           const hasLegacyCompensationAmount =
             operation.value.minimumSalaryUsd !== undefined ||
             operation.value.targetSalaryUsd !== undefined;

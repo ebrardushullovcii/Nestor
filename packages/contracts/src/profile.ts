@@ -225,6 +225,50 @@ export type CandidateReusableAnswer = z.infer<
   typeof CandidateReusableAnswerSchema
 >;
 
+function migrateReusableAnswerScope(
+  answer: CandidateReusableAnswer,
+): CandidateReusableAnswer {
+  // Migrate the exact suffix written by older versions; never infer a country.
+  if (
+    answer.applicationScope ||
+    (answer.kind !== "work_authorization" && answer.kind !== "visa_sponsorship")
+  )
+    return answer;
+  const legacy =
+    /^(.*) \(Application location: (.*); reuse only for the same hiring country and permit conditions\)$/u.exec(
+      answer.question,
+    );
+  if (!legacy) return answer;
+  const question = legacy[1]!;
+  return {
+    ...answer,
+    question,
+    label: question.slice(0, 120),
+    applicationScope: {
+      resultId: null,
+      applicationRecordId: null,
+      location: legacy[2] === "unspecified" ? null : legacy[2]!,
+    },
+  };
+}
+
+export const CandidateAnswerBankSchema = z.object({
+  workAuthorization: NonEmptyStringSchema.nullable().default(null),
+  visaSponsorship: NonEmptyStringSchema.nullable().default(null),
+  relocation: NonEmptyStringSchema.nullable().default(null),
+  travel: NonEmptyStringSchema.nullable().default(null),
+  noticePeriod: NonEmptyStringSchema.nullable().default(null),
+  availability: NonEmptyStringSchema.nullable().default(null),
+  salaryExpectations: NonEmptyStringSchema.nullable().default(null),
+  selfIntroduction: NonEmptyStringSchema.nullable().default(null),
+  careerTransition: NonEmptyStringSchema.nullable().default(null),
+  customAnswers: z
+    .array(CandidateReusableAnswerSchema)
+    .transform((answers) => answers.map(migrateReusableAnswerScope))
+    .default([]),
+});
+export type CandidateAnswerBank = z.infer<typeof CandidateAnswerBankSchema>;
+
 export const CandidateApplicationIdentitySchema = z.object({
   preferredEmail: NonEmptyStringSchema.nullable().default(null),
   preferredPhone: NonEmptyStringSchema.nullable().default(null),
@@ -302,6 +346,7 @@ export const CandidateProfileSchema = z.object({
   professionalSummary: CandidateProfessionalSummarySchema.default({}),
   narrative: CandidateNarrativeSchema.default({}),
   proofBank: z.array(CandidateProofBankEntrySchema).default([]),
+  answerBank: CandidateAnswerBankSchema.default({}),
   applicationIdentity: CandidateApplicationIdentitySchema.default({}),
   skillGroups: CandidateSkillGroupSchema.default({}),
   targetRoles: z.array(NonEmptyStringSchema).default([]),

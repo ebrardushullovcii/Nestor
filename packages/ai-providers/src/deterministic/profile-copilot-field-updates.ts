@@ -165,7 +165,11 @@ type ContractReplacementKey =
   | ContractFieldKeys<typeof ProfileApplicationIdentityPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileSkillGroupsPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileCoreListPatchFieldsSchema>
-  | ContractFieldKeys<typeof ProfileSearchPreferencesPatchFieldsSchema>
+  // Retired stored proposals still parse discovery, but it is not editable.
+  | Exclude<
+      ContractFieldKeys<typeof ProfileSearchPreferencesPatchFieldsSchema>,
+      "discovery"
+    >
   | ContractFieldKeys<typeof ProfileCompensationPreferencePatchFieldsSchema>;
 
 // Each alias resolves to `true` when coverage is exhaustive; otherwise the

@@ -37,16 +37,31 @@ export function createFitQueue(
     if (jobs.length === 0) return;
     judging += jobs.length;
     try {
+      const remoteCountsAsAnyLocation = deps.readRemoteCountsAsAnyLocation
+        ? await deps.readRemoteCountsAsAnyLocation()
+        : (context.remoteCountsAsAnyLocation ?? true);
       const updates = await abortable(
         deps.engine.fitJobs({
           jobs,
-          context,
+          context: { ...context, remoteCountsAsAnyLocation },
           signal,
           ...(settings?.note ? { request: settings.note } : {}),
         }),
         signal,
       );
       if (signal.aborted) return;
+      if (
+        deps.readRemoteCountsAsAnyLocation &&
+        (await deps.readRemoteCountsAsAnyLocation()) !==
+          remoteCountsAsAnyLocation
+      ) {
+        onError(
+          new Error(
+            "Location settings changed during scoring. These jobs remain unscored; search again to judge them with the current setting.",
+          ),
+        );
+        return;
+      }
       deps.store.setFit(updates);
       scored += updates.length;
       onScored(updates.length);
