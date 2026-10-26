@@ -856,6 +856,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               client && form
                 ? await checkClassifiedApplicationAnswers({
                     client,
+                    questionReadCacheScope: deps.aiClient,
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
                       settings.aiBehavior ?? {},
                     ).applying.preApprovedDeclarations,

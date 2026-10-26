@@ -7,13 +7,16 @@ import {
   classifyAnswerPermission,
   type ClassifiedAnswerDecision,
 } from "./answer-source-catalog";
-import { classifyApplicationQuestions } from "./question-classification";
+import {
+  createQuestionClassifier,
+  questionClassificationKey,
+} from "./question-classification";
 import {
   checkWrittenApplicationAnswers,
   type WrittenAnswerCheck,
 } from "./written-answer-grounding";
 
-/** Re-read the question's meaning and sources at send time; old card provenance grants nothing. */
+/** Re-ground current sources at send time; old card provenance grants nothing. */
 export async function checkClassifiedApplicationAnswers(input: {
   client: LLMClient;
   sources: ApplyAnswerSources;
@@ -26,6 +29,8 @@ export async function checkClassifiedApplicationAnswers(input: {
   };
   signal?: AbortSignal;
   formControls?: readonly ApplyFormControl[];
+  /** Same AI-client scope as preparation; only identical complete readings are reused. */
+  questionReadCacheScope?: object;
 }): Promise<WrittenAnswerCheck[]> {
   const controls: ApplyFormControl[] = input.answers.map((answer, index) => {
     const current = input.formControls?.filter(
@@ -56,19 +61,30 @@ export async function checkClassifiedApplicationAnswers(input: {
     };
   });
   if (!controls.length) return [];
-  const readings = await classifyApplicationQuestions({
+  // Classify the same full form and native metadata as preparation. Removing
+  // optional fields or required flags both changes the question's context and
+  // needlessly asks the model to reinterpret an already-read literal.
+  const contextControls = [...(input.formControls ?? [])];
+  for (const control of controls)
+    if (
+      !contextControls.some(
+        (current) => questionPrompt(current) === questionPrompt(control),
+      )
+    )
+      contextControls.push(control);
+  const catalog = answerSourceCatalog(input.sources);
+  const classify = createQuestionClassifier({
     client: input.client,
     signal: input.signal,
-    questions: input.answers.map((answer, index) => ({
-      prompt: answer.question,
-      kind: controls[index]?.kind ?? "text",
-      options: controls[index]?.options ?? [],
-      hint: controls[index]?.hint ?? "",
-      placeholder: controls[index]?.placeholder ?? "",
-    })),
-    pageInstructions: input.formContext.pageText,
-    sources: answerSourceCatalog(input.sources),
+    cacheScope: input.questionReadCacheScope,
+    sources: () => catalog,
   });
+  const readings = await classify(
+    contextControls,
+    JSON.stringify({
+      instructions: input.formContext.pageText,
+    }),
+  );
   const decisions = input.answers.map(
     (answer, index): ClassifiedAnswerDecision => {
       const control = controls[index];
@@ -77,7 +93,9 @@ export async function checkClassifiedApplicationAnswers(input: {
           kind: "needs_you",
           reason: "The question is no longer present.",
         };
-      const reading = readings.get(answer.question);
+      const reading =
+        readings.get(questionClassificationKey(control, contextControls)) ??
+        readings.get(answer.question);
       return classifyAnswerPermission({
         control: {
           ...control,
