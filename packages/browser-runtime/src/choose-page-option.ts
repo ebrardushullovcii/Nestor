@@ -30,6 +30,10 @@ export async function choosePageOption(
   }
   await locator.click({ timeout: 5_000 });
   if (await locator.isEditable()) await locator.fill(label, { timeout: 2_000 });
+  const handle = await locator.elementHandle();
+  const frame = await handle?.ownerFrame();
+  await handle?.dispose();
+  const scope = frame ?? page;
   const ids = (
     (await locator.getAttribute("aria-controls")) ??
     (await locator.getAttribute("aria-owns")) ??
@@ -40,10 +44,10 @@ export async function choosePageOption(
     .filter(Boolean);
   let list: Locator;
   if (ids.length === 1) {
-    const escaped = await page.evaluate((id) => CSS.escape(id), ids[0]!);
-    list = page.locator(`#${escaped}`);
+    const escaped = await scope.evaluate((id) => CSS.escape(id), ids[0]!);
+    list = scope.locator(`#${escaped}`);
   } else {
-    list = page.locator('[role="listbox"]:visible');
+    list = scope.locator('[role="listbox"]:visible');
     // Without a bound or unique list, another picker's choices are not evidence.
     if ((await list.count()) !== 1)
       return {
