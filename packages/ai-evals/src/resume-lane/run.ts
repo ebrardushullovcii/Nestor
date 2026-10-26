@@ -15,6 +15,7 @@ import {
   RESUME_LANE_CASES,
   readPersonaResume,
   readRecordedListings,
+  resumeTechnologyNames,
   type ResumeLaneCase,
 } from "./cases";
 import {
@@ -62,6 +63,9 @@ export interface StretchCheckReport {
     stretches: ResumeStretch[];
     flagged: boolean;
     removed: boolean;
+    checked: boolean;
+    missingBeforeCheck: boolean;
+    unanswered: boolean;
     verdicts: Array<{ verdict: string; reason: string }>;
   }>;
   /** Listing-only lines without a writer inferred flag or a model stretch verdict. */
@@ -135,6 +139,8 @@ export function stretchCheckReport(input: {
   title: string;
   company: string;
   yearsExperience: number | null;
+  technologyNames?: readonly string[] | undefined;
+  credentialNames?: readonly string[] | undefined;
 }): StretchCheckReport {
   const report: StretchCheckReport = {
     traceAvailable: Boolean(input.captures?.length),
@@ -142,7 +148,7 @@ export function stretchCheckReport(input: {
     unflaggedListingLines: [],
   };
   if (!input.draft || !input.captures?.length) return report;
-  const inferred = new Set<string>();
+  const inferred = new Map<string, string>();
   const key = (text: string) => text.replace(/\s+/gu, " ").trim();
   const walk = (value: unknown) => {
     if (Array.isArray(value)) {
@@ -152,9 +158,10 @@ export function stretchCheckReport(input: {
     const entry = object(value);
     if (!entry) return;
     if (entry.inferred === true && typeof entry.text === "string")
-      inferred.add(key(entry.text));
+      inferred.set(key(entry.text), entry.text);
     for (const child of Object.values(entry)) walk(child);
   };
+  const asked = new Set<string>();
   const checks = new Map<string, Array<{ verdict: string; reason: string }>>();
   for (const capture of input.captures) {
     const contributions = responseContributions(capture);
@@ -166,8 +173,10 @@ export function stretchCheckReport(input: {
       if (!entry || !Array.isArray(entry.claims)) return;
       for (const raw of entry.claims) {
         const claim = object(raw);
-        if (typeof claim?.id === "string" && typeof claim.text === "string")
+        if (typeof claim?.id === "string" && typeof claim.text === "string") {
           claims.set(claim.id, claim.text);
+          asked.add(claim.text);
+        }
       }
     };
     for (const raw of Array.isArray(request?.messages)
@@ -204,7 +213,8 @@ export function stretchCheckReport(input: {
     }
   }
   const final = new Set(draftLines(input.draft).map((line) => key(line.text)));
-  for (const [text, verdicts] of checks) {
+  for (const text of new Set([...checks.keys(), ...inferred.values()])) {
+    const verdicts = checks.get(text) ?? [];
     const section = {
       ...input.draft.sections[0]!,
       id: "probe",
@@ -231,6 +241,9 @@ export function stretchCheckReport(input: {
         stretches,
         flagged,
         removed: !final.has(key(text)),
+        checked: verdicts.length > 0,
+        missingBeforeCheck: !asked.has(text) && !final.has(key(text)),
+        unanswered: asked.has(text) && verdicts.length === 0,
         verdicts,
       });
     else report.unflaggedListingLines.push(text);
@@ -339,6 +352,8 @@ export function scoreCase(
           title: listing.title,
           company: listing.company,
           yearsExperience: profile.yearsExperience,
+          technologyNames: resumeTechnologyNames(),
+          credentialNames: listing.credentials,
         })
       : { invented: [], stretches: [] };
     const facts = assessment.invented;
@@ -386,6 +401,8 @@ export function scoreCase(
             title: listing.title,
             company: listing.company,
             yearsExperience: profile.yearsExperience,
+            technologyNames: resumeTechnologyNames(),
+            credentialNames: listing.credentials,
           })
         : {
             traceAvailable: Boolean(entry.captures?.length),
@@ -575,13 +592,13 @@ export function formatResumeLaneReport(
     "",
     "## Stretch handling by case",
     "",
-    "| Case | Trace available | Sanctioned lines checked | Flagged | Removed/rewritten | Unflagged listing-only lines |",
-    "| --- | --- | --- | --- | --- | --- |",
+    "| Case | Trace available | Sanctioned lines checked | Flagged | Removed/rewritten by checker | Missing before checker | No verdict | Unflagged listing-only lines |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...results
       .filter((row) => row.level === "aggressive")
       .map(
         (row) =>
-          `| ${row.caseId} | ${row.stretchChecks.traceAvailable ? "yes" : "no"} | ${row.stretchChecks.sanctioned.length} | ${row.stretchChecks.sanctioned.filter((line) => line.flagged).length} | ${row.stretchChecks.sanctioned.filter((line) => line.removed).length} | ${row.stretchChecks.unflaggedListingLines.length} |`,
+          `| ${row.caseId} | ${row.stretchChecks.traceAvailable ? "yes" : "no"} | ${row.stretchChecks.sanctioned.filter((line) => line.checked).length} | ${row.stretchChecks.sanctioned.filter((line) => line.flagged).length} | ${row.stretchChecks.sanctioned.filter((line) => line.checked && line.removed).length} | ${row.stretchChecks.sanctioned.filter((line) => line.missingBeforeCheck).length} | ${row.stretchChecks.sanctioned.filter((line) => line.unanswered).length} | ${row.stretchChecks.unflaggedListingLines.length} |`,
       ),
     "",
     "Confirmation chores and approval blockers require the built-app check; these counts do not assert approval behavior.",
@@ -601,7 +618,7 @@ export function formatResumeLaneReport(
       ),
       ...result.stretchChecks.sanctioned.map(
         (line) =>
-          `checker ${line.flagged ? "flagged" : "passed"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
+          `checker ${!line.checked ? "did not see" : line.flagged ? "flagged" : "passed"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
       ),
       ...result.flagsLeft.map((flag) => `flag left: ${flag}`),
     ];

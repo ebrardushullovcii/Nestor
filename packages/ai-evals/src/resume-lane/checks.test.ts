@@ -2,9 +2,16 @@ import { ResumeDraftSchema } from "@nestor/contracts";
 import { resumeClaimContentHash } from "@nestor/job-finder/resumes";
 import { describe, expect, it } from "vitest";
 
+import { RESUME_LANE_CASES } from "./cases";
+
 import type { EvalHttpCapture } from "../contracts";
 import { assessFacts, flagsLeft, inventedFacts, levelVerdicts } from "./checks";
-import { stretchCheckReport, tokensUsed } from "./run";
+import {
+  rescoreResumeLane,
+  scoreCase,
+  stretchCheckReport,
+  tokensUsed,
+} from "./run";
 
 const AT = "2026-10-26T00:00:00.000Z";
 const SOURCE = `CASEY ROWAN
@@ -188,6 +195,48 @@ describe("resume lane checks", () => {
     ]);
   });
 
+  it("uses reviewed technology names, keeping UI/UX wording out and listing credentials hard", () => {
+    const input = {
+      draft: draft([
+        "Built shared UI/UX with MongoDB.",
+        "Earned RHCE certification.",
+      ]),
+      source: SOURCE,
+      listing: LISTING + " RHCE preferred.",
+      title: "Frontend Engineer",
+      company: "Datadog",
+      yearsExperience: 5,
+      level: "aggressive" as const,
+      technologyNames: ["Kubernetes", "MongoDB"],
+      credentialNames: ["RHCE"],
+    };
+    expect(
+      assessFacts(input).invented.map((fact) => `${fact.kind}:${fact.value}`),
+    ).toEqual(["name:MongoDB", "credential:RHCE"]);
+    expect(
+      assessFacts({
+        ...input,
+        source: SOURCE + " RHCE certification.",
+      }).invented.map((fact) => fact.value),
+    ).toEqual(["MongoDB"]);
+  });
+
+  it("does not turn Marketing or Marketo into the month March, and reads compound/case aliases once", () => {
+    const result = assessFacts({
+      draft: draft(["Led campaigns with Marketo and CI/CD and DBT."]),
+      source: "Marketing manager.",
+      listing: "Uses Marketo, CI/CD and DBT.",
+      title: "Manager",
+      company: "Example",
+      yearsExperience: 5,
+      level: "aggressive",
+      technologyNames: ["Marketo", "CI/CD", "DBT", "dbt"],
+    });
+    expect(
+      result.stretches.map((line) => line.value.toLowerCase()).sort(),
+    ).toEqual(["ci/cd", "dbt", "marketo"]);
+  });
+
   it("does not count the role as Aggressive's headline as a claim", () => {
     expect(
       inventedFacts({
@@ -362,6 +411,43 @@ it("measures inferred listing and years stretches removed or flagged by the unch
     company: "Datadog",
     yearsExperience: 5,
   });
+  // Duplicate events/retries must not duplicate findings or reuse another request's line ids.
+  expect(
+    stretchCheckReport({
+      draft: finalDraft,
+      captures: [writer, checker, checker],
+      source: SOURCE + " Five years of experience.",
+      listing: LISTING + " Requires 6 years of experience.",
+      title: "Frontend Engineer",
+      company: "Datadog",
+      yearsExperience: 5,
+    }).sanctioned,
+  ).toHaveLength(2);
+  const noAnswer = { ...checker, responseBody: null };
+  const partial = stretchCheckReport({
+    draft: finalDraft,
+    captures: [writer, noAnswer],
+    source: SOURCE + " Five years of experience.",
+    listing: LISTING + " Requires 6 years of experience.",
+    title: "Frontend Engineer",
+    company: "Datadog",
+    yearsExperience: 5,
+  });
+  expect(
+    partial.sanctioned.every(
+      (line) => line.unanswered && !line.missingBeforeCheck,
+    ),
+  ).toBe(true);
+  const retried = stretchCheckReport({
+    draft: finalDraft,
+    captures: [writer, noAnswer, checker],
+    source: SOURCE + " Five years of experience.",
+    listing: LISTING + " Requires 6 years of experience.",
+    title: "Frontend Engineer",
+    company: "Datadog",
+    yearsExperience: 5,
+  });
+  expect(retried.sanctioned.every((line) => !line.unanswered)).toBe(true);
   expect(result.traceAvailable).toBe(true);
   expect(
     result.sanctioned.map((line) => ({
@@ -384,4 +470,20 @@ it("measures inferred listing and years stretches removed or flagged by the unch
       yearsExperience: 5,
     }).traceAvailable,
   ).toBe(false);
+});
+
+it("rescoring an empty or singleton released recording is idempotent", () => {
+  expect(rescoreResumeLane([])).toEqual([]);
+  const rows = scoreCase(RESUME_LANE_CASES[0]!, [
+    {
+      level: "original",
+      draft: null,
+      error: null,
+      seconds: 0,
+      modelCalls: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+    },
+  ]);
+  expect(rescoreResumeLane(rescoreResumeLane(rows))).toEqual(rows);
 });

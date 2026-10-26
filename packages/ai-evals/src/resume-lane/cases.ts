@@ -22,6 +22,9 @@ export interface RecordedListing {
   url: string;
   recordedAt: string;
   description: string;
+  /** Reviewed technology/credential vocabulary, not a capitalization guess. */
+  technologies?: readonly string[];
+  credentials?: readonly string[];
 }
 
 export interface ResumeLaneCase {
@@ -77,4 +80,15 @@ export function readRecordedListings(): ReadonlyMap<string, RecordedListing> {
     ),
   ) as RecordedListing[];
   return new Map(listings.map((listing) => [listing.id, listing]));
+}
+
+/** Named technologies reviewed against the five recorded listings. */
+export function resumeTechnologyNames(): readonly string[] {
+  return [
+    ...new Set(
+      [...readRecordedListings().values()].flatMap(
+        (listing) => listing.technologies ?? [],
+      ),
+    ),
+  ];
 }

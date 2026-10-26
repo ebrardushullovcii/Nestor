@@ -39,14 +39,16 @@ export function draftLines(draft: ResumeDraft): DraftLine[] {
   return lines;
 }
 
-const MONTH = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gu;
+const MONTH =
+  /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/gu;
 /** Lower case, plain spacing, and months as three letters ("April" = "Apr"). */
 const fold = (text: string) =>
   text
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^a-z0-9+#.%$ ]+/gu, " ")
-    .replace(MONTH, "$1")
+    .replace(/\.(?=\s|$)/gu, "")
+    .replace(MONTH, (month) => month.slice(0, 3))
     .replace(/\s+/gu, " ")
     .trim();
 
@@ -101,7 +103,7 @@ export function listingNames(listing: string, title = ""): Set<string> {
 }
 
 export interface InventedFact {
-  kind: "number" | "entry" | "name" | "leadership" | "domain";
+  kind: "number" | "entry" | "name" | "leadership" | "domain" | "credential";
   value: string;
   line: string;
 }
@@ -124,6 +126,8 @@ type FactInputs = {
   level?: ResumeLevel;
   /** Reviewed domain phrases for a case, when the hiring domain differs. */
   hiringDomainTerms?: readonly string[];
+  technologyNames?: readonly string[] | undefined;
+  credentialNames?: readonly string[] | undefined;
 };
 
 const includesWords = (text: string, value: string) =>
@@ -185,6 +189,16 @@ export function assessFacts(input: FactInputs): {
         stretches.push({ kind: "years", value, line: line.text, flagged });
       else invented.push({ kind: "number", value, line: line.text });
     }
+    for (const credential of input.credentialNames ?? [])
+      if (
+        includesWords(line.text, credential) &&
+        !includesWords(input.source, credential)
+      )
+        invented.push({
+          kind: "credential",
+          value: credential,
+          line: line.text,
+        });
     if (line.where === "entry") {
       const parts = line.text
         .split(/\s*[-��|,]\s*/u)
@@ -195,11 +209,21 @@ export function assessFacts(input: FactInputs): {
           invented.push({ kind: "entry", value: part, line: line.text });
       continue;
     }
-    const names = new Set([
-      ...listedNames,
-      ...listingNames(line.text, input.title),
-    ]);
-    if (line.where === "skills" && /^[A-Z][A-Za-z0-9+#./ -]*$/u.test(line.text))
+    const names = new Set(
+      new Map(
+        (
+          input.technologyNames ?? [
+            ...listedNames,
+            ...listingNames(line.text, input.title),
+          ]
+        ).map((name) => [fold(name), name]),
+      ).values(),
+    );
+    if (
+      !input.technologyNames &&
+      line.where === "skills" &&
+      /^[A-Z][A-Za-z0-9+#./ -]*$/u.test(line.text)
+    )
       names.add(line.text);
     for (const name of names) {
       if (
@@ -212,14 +236,17 @@ export function assessFacts(input: FactInputs): {
       )
         continue;
       if (
-        (!line.text.split(/[^A-Za-z0-9+#]+/u).includes(name) &&
-          !(line.where === "skills" && fold(line.text) === fold(name))) ||
+        !(input.technologyNames
+          ? includesWords(line.text, name)
+          : line.text.split(/[^A-Za-z0-9+#]+/u).includes(name) ||
+            (line.where === "skills" && fold(line.text) === fold(name))) ||
         includesWords(input.source, name) ||
         includesWords(input.title, name)
       )
         continue;
       // Company names in prose are checked as domain transfer, not technologies.
-      if (includesWords(input.company, name)) continue;
+      if (!input.technologyNames && includesWords(input.company, name))
+        continue;
       const key = `${line.text}|${fold(name)}`;
       if (seen.has(key)) continue;
       seen.add(key);
