@@ -10,6 +10,9 @@ import { JOB_STORE_SCHEMA } from "./schema";
  */
 export function resetJobStore(store: JobStore): void {
   const { db } = store;
+  // The foreign-key switch and VACUUM below only work between transactions.
+  if (db.isTransaction)
+    throw new Error("The job store can't be reset inside a transaction.");
   const tables = () =>
     db
       .prepare(

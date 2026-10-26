@@ -26,6 +26,7 @@ import {
   sweepStaleJobFinderResetArtifacts,
   type JobFinderResetRecoveryOutcome,
 } from "./reset-workspace";
+import { closeJobStore } from "../job-store";
 
 const { crashToken } = vi.hoisted(() => ({
   crashToken: "crash-sim-0001",
@@ -52,6 +53,8 @@ const temporaryDirectories: string[] = [];
 const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 afterEach(async () => {
+  // Recovery clears the job store in the test's folder; let it go first.
+  closeJobStore();
   if (originalUserDataDirectory === undefined) {
     delete process.env.NESTOR_USER_DATA_DIR;
   } else {

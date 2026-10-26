@@ -4,21 +4,35 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type * as JobStoreModule from "@nestor/db/job-store";
+import type * as ResetIntentMarker from "./job-finder/reset-intent-marker";
 import type { PendingResetIntent } from "./job-finder/reset-intent-marker";
 
-const { userData, pending } = vi.hoisted(() => ({
+const { userData, pending, failReset } = vi.hoisted(() => ({
   userData: { dir: "" },
   pending: { value: { status: "none" } as PendingResetIntent },
+  failReset: { next: false },
 }));
 
 vi.mock("electron", () => ({ app: {} }));
+vi.mock("@nestor/db/job-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof JobStoreModule>();
+  return {
+    ...actual,
+    resetJobStore: (store: Parameters<typeof actual.resetJobStore>[0]) => {
+      if (failReset.next) {
+        failReset.next = false;
+        throw new Error("database is locked");
+      }
+      actual.resetJobStore(store);
+    },
+  };
+});
 vi.mock("../setup/user-data-directory", () => ({
   resolveDesktopUserDataDirectory: () => userData.dir,
 }));
 vi.mock("./job-finder/reset-intent-marker", async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import("./job-finder/reset-intent-marker")
-  >()),
+  ...(await importOriginal<typeof ResetIntentMarker>()),
   readPendingResetIntentSync: () => pending.value,
 }));
 
@@ -79,5 +93,14 @@ describe("opening the job store after a reset stopped part way", () => {
       reason: "marker_unreadable",
       quarantinedFileName: null,
     });
+  });
+
+  it("keeps nothing open when finishing the reset fails, and tries again next time", () => {
+    storeWithOneJob();
+    pending.value = { status: "readable", intent: { token: "t", entries: [] } };
+    failReset.next = true;
+
+    expect(() => getJobStore()).toThrow("database is locked");
+    expect(getJobStore().stageCounts().found).toBe(0);
   });
 });

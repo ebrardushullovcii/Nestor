@@ -21,13 +21,22 @@ export function getJobStoreFilePath(): string {
 /** The Job Finder store, opened on first use. Main process only. */
 export function getJobStore(): JobStore {
   if (store) return store;
-  store = openJobStore(getJobStoreFilePath());
+  const opened = openJobStore(getJobStoreFilePath());
   // A confirmed reset that stopped part way finishes clearing the store
   // before any screen reads it; the workspace's own recovery handles the
   // rest. A marker that can't be read clears nothing: the person is told the
   // reset didn't finish and can start it again.
   const pending = readPendingResetIntentSync();
-  if (pending.status === "readable") resetJobStore(store);
+  if (pending.status === "readable") {
+    try {
+      resetJobStore(opened);
+    } catch (error) {
+      // Not kept: the next use tries again, and the marker stays.
+      opened.close();
+      throw error;
+    }
+  }
+  store = opened;
   if (pending.status === "unreadable")
     recordStartupResetRecoveryFact({
       status: "degraded",

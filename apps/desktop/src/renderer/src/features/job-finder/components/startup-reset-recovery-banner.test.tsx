@@ -254,4 +254,26 @@ describe("StartupResetRecoveryBanner", () => {
     await screen.findByText("Workspace startup recovery needs attention");
     expect(screen.queryByRole("button", { name: "Reset again" })).toBeNull();
   });
+
+  it("forgets a dismissed unreadable-marker notice, so a later failure shows again", async () => {
+    installDesktopBridge();
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_unreadable",
+      quarantinedFileName: null,
+    });
+    const view = renderBanner();
+    await screen.findByText("A reset didn't finish");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Dismiss workspace recovery message",
+      }),
+    );
+    expect(screen.queryByText("A reset didn't finish")).toBeNull();
+    expect(window.localStorage.length).toBe(0);
+
+    view.unmount();
+    renderBanner();
+    await screen.findByText("A reset didn't finish");
+  });
 });

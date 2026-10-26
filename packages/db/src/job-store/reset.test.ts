@@ -128,4 +128,11 @@ describe("resetJobStore", () => {
     stores.push(reopened);
     expect(reopened.stageCounts().found).toBe(1);
   });
+
+  it("refuses to run inside a transaction", () => {
+    const { store } = openFile();
+    expect(() => store.transaction(() => resetJobStore(store))).toThrow(
+      "inside a transaction",
+    );
+  });
 });

@@ -771,6 +771,11 @@ async function recoverPendingJobFinderWorkspaceResetOutcome(
     ]);
   }
 
+  // Like the reset itself: the job store and the Assistant's store are
+  // cleared before the marker goes. A failure keeps the marker.
+  resetJobStore(getJobStore());
+  await resetAssistantStoreWithJobs();
+
   await removeResetIntentMarker();
   await removeResetTrashDirectory(intent.token);
 
@@ -837,6 +842,17 @@ async function clearBrowserSession() {
   }
 }
 
+/**
+ * Conversations and the Assistant's grants go with the job store. Grants
+ * name job ids, and a cleared store numbers its jobs from 1 again, so a
+ * grant left behind could cover a different job.
+ */
+async function resetAssistantStoreWithJobs(): Promise<void> {
+  const { resetAssistantStore } =
+    await import("../assistant/assistant-service");
+  await resetAssistantStore();
+}
+
 export async function resetJobFinderBrowser() {
   const service = await getJobFinderWorkspaceService();
   await service.setActivityControl({ paused: true, reason: "Browser reset" });
@@ -895,8 +911,8 @@ export async function resetJobFinderWorkspace() {
     );
   }
 
-  // Before the reset is marked done: if this fails, the next start clears the
-  // store (see `getJobStore`).
+  // Before the reset is marked done, so a failure leaves the marker for the
+  // next start to finish both (see `getJobStore` and the recovery below).
   try {
     resetJobStore(getJobStore());
   } catch (error) {
@@ -905,18 +921,15 @@ export async function resetJobFinderWorkspace() {
       { cause: error },
     );
   }
-  await completeJobFinderWorkspaceReset(completedIntent);
-  // Conversations about the old workspace go with it.
   try {
-    const { resetAssistantStore } =
-      await import("../assistant/assistant-service");
-    await resetAssistantStore();
+    await resetAssistantStoreWithJobs();
   } catch (error) {
     throw new Error(
-      "Workspace data was removed, but assistant history could not be cleared. Try Reset everything again.",
+      "Workspace data was removed, but assistant history could not be cleared yet. Restart Nestor to finish the reset.",
       { cause: error },
     );
   }
+  await completeJobFinderWorkspaceReset(completedIntent);
 
   return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
 }

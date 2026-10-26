@@ -88,12 +88,20 @@ export function StartupResetRecoveryBanner() {
       ? `${fact.completedAt}:${fact.token}`
       : `${fact.reason}:${fact.quarantinedFileName ?? "none"}`;
 
-  if (dismissedKeys.has(dismissalKey) || readBannerDismissed(dismissalKey)) {
+  // An unreadable marker carries nothing that tells one failure from the
+  // next, so its dismissal lasts this session only: a later failure shows.
+  const remembersDismissal = !(
+    fact.status === "degraded" && fact.reason === "marker_unreadable"
+  );
+  if (
+    dismissedKeys.has(dismissalKey) ||
+    (remembersDismissal && readBannerDismissed(dismissalKey))
+  ) {
     return null;
   }
 
   function dismissBanner() {
-    persistBannerDismissed(dismissalKey);
+    if (remembersDismissal) persistBannerDismissed(dismissalKey);
     setDismissedKeys((current) => new Set(current).add(dismissalKey));
   }
 
