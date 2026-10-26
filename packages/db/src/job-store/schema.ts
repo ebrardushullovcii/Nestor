@@ -195,6 +195,16 @@ CREATE TABLE IF NOT EXISTS resumes (
   pdf_path TEXT
 );
 CREATE INDEX IF NOT EXISTS resumes_by_state ON resumes (state, updated_at);
+CREATE TABLE IF NOT EXISTS resume_changes (
+  id TEXT PRIMARY KEY,
+  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  before_json TEXT NOT NULL,
+  before_stage TEXT NOT NULL,
+  after_stage TEXT NOT NULL,
+  expected_updated_at INTEGER NOT NULL,
+  undone_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS resume_changes_by_job ON resume_changes(job_id);
 CREATE TABLE IF NOT EXISTS resume_pdf_assets (
   job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   path TEXT NOT NULL,

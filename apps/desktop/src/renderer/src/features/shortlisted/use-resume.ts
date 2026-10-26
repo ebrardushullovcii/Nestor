@@ -42,15 +42,34 @@ export function useResume(jobId: number | null) {
   } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const latest = useRef({ jobId, resume, draft, dirty });
+  const saving = useRef<Promise<boolean> | null>(null);
+  const conflicted = useRef(false);
   latest.current = { jobId, resume, draft, dirty };
 
   const load = useCallback(async (id: number) => {
     const view = await window.nestor.resumes.run("get_resume", { jobId: id });
     if (latest.current.jobId !== id) return;
+    if (saving.current) return;
+    if (
+      latest.current.resume &&
+      view.resume &&
+      view.resume.updatedAt < latest.current.resume.updatedAt
+    )
+      return;
     setJob(view.job);
-    setResume(view.resume);
     setTemplates(view.templates);
-    if (!latest.current.dirty) setDraft(view.resume?.draft ?? null);
+    if (latest.current.dirty) {
+      if (view.resume?.updatedAt !== latest.current.resume?.updatedAt) {
+        conflicted.current = true;
+        setSaveStatus("failed");
+        setSaveError(
+          "The saved resume changed elsewhere. Your typing is kept. Save your edits to replace the saved content, or load the saved resume.",
+        );
+      }
+    } else {
+      setResume(view.resume);
+      setDraft(view.resume?.draft ?? null);
+    }
   }, []);
 
   // A new job starts from what is saved.
@@ -62,6 +81,7 @@ export function useResume(jobId: number | null) {
     setPreview(null);
     setSaveError(null);
     setSaveStatus("saved");
+    conflicted.current = false;
     if (jobId !== null) void load(jobId);
   }, [jobId, load]);
 
@@ -82,33 +102,44 @@ export function useResume(jobId: number | null) {
   );
 
   const save = useCallback(async () => {
+    if (saving.current) return saving.current;
+    if (conflicted.current) return false;
     const { jobId: id, resume: saved, draft: current } = latest.current;
-    if (id === null || !saved || !current) return;
+    if (id === null || !saved || !current) return false;
     setSaveStatus("saving");
-    try {
-      const next = await window.nestor.resumes.run("save_resume", {
-        jobId: id,
-        draft: current,
-        expectedUpdatedAt: saved.updatedAt,
-      });
-      if (latest.current.jobId !== id) return;
-      setResume(next);
-      // Edits made while saving are saved by the next round.
-      if (latest.current.draft === current) setDirty(false);
-      setSaveStatus("saved");
-      setSaveError(null);
-    } catch (error) {
-      setSaveStatus("failed");
-      setSaveError(describeError(error));
-      if (/changed since you opened it/u.test(describeError(error))) {
-        setDirty(false);
-        void load(id);
+    const work = async () => {
+      try {
+        const next = await window.nestor.resumes.run("save_resume", {
+          jobId: id,
+          draft: current,
+          expectedUpdatedAt: saved.updatedAt,
+        });
+        if (latest.current.jobId !== id) return false;
+        setResume(next);
+        // Edits made while saving are saved by the next round.
+        const finished = latest.current.draft === current;
+        latest.current = { ...latest.current, resume: next, dirty: !finished };
+        if (finished) setDirty(false);
+        setSaveStatus("saved");
+        setSaveError(null);
+        return finished;
+      } catch (error) {
+        setSaveStatus("failed");
+        setSaveError(describeError(error));
+        conflicted.current = true;
+        return false;
       }
+    };
+    saving.current = work();
+    try {
+      return await saving.current;
+    } finally {
+      saving.current = null;
     }
-  }, [load]);
+  }, []);
 
   useEffect(() => {
-    if (!dirty || saveStatus === "saving") return;
+    if (!dirty || saveStatus !== "saved") return;
     const timer = setTimeout(() => void save(), SAVE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [dirty, draft, save, saveStatus]);
@@ -132,14 +163,37 @@ export function useResume(jobId: number | null) {
   }, [jobId, draft]);
 
   const edit = useCallback((next: ResumeDraft) => {
+    latest.current = { ...latest.current, draft: next, dirty: true };
     setDraft(next);
     setDirty(true);
   }, []);
 
   /** Saves a pending edit now, before approving or downloading. */
   const flush = useCallback(async () => {
-    if (latest.current.dirty) await save();
+    if (latest.current.dirty && !(await save()))
+      throw new Error(
+        "Resume edits are not saved. Your typing is kept; save or resolve it before continuing.",
+      );
   }, [save]);
+
+  const saveMyEdits = useCallback(async () => {
+    const id = latest.current.jobId;
+    if (id === null) return;
+    const view = await window.nestor.resumes.run("get_resume", { jobId: id });
+    if (latest.current.jobId !== id) return;
+    latest.current = { ...latest.current, resume: view.resume };
+    conflicted.current = false;
+    await save();
+  }, [save]);
+
+  const loadSaved = useCallback(() => {
+    latest.current = { ...latest.current, dirty: false };
+    conflicted.current = false;
+    setDirty(false);
+    setSaveError(null);
+    setSaveStatus("saved");
+    refresh();
+  }, [refresh]);
 
   return {
     job,
@@ -153,6 +207,8 @@ export function useResume(jobId: number | null) {
     previewError,
     edit,
     flush,
+    saveMyEdits,
+    loadSaved,
     refresh,
     setResume,
   };

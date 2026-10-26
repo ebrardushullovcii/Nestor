@@ -258,6 +258,9 @@ export function createResumeService(deps: ResumeServiceDeps) {
       running.get(jobId)?.abort();
       return restored;
     },
+    undoChange(jobId: number, changeId: string) {
+      return resumes.undoChange(jobId, changeId);
+    },
 
     /** Writes a failed or finished resume again at its own level. */
     rewrite(jobId: number) {
@@ -277,7 +280,12 @@ export function createResumeService(deps: ResumeServiceDeps) {
       const pdf = resume.draft
         ? await renderPdf(jobId, resume.draft, null)
         : null;
-      return resumes.approve(jobId, pdf?.path ?? null, pdf?.sha256 ?? null);
+      return resumes.approve(
+        jobId,
+        pdf?.path ?? null,
+        pdf?.sha256 ?? null,
+        resume.updatedAt,
+      );
     },
 
     async exportPdf(jobId: number, targetPath: string) {

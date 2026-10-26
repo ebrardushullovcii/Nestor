@@ -2334,8 +2334,12 @@ export class AssistantSessionHost {
   async undoChange(
     conversationId: string,
     receiptId: string,
+    context?: AssistantMessage["context"],
   ): Promise<AssistantUndoChangeResult> {
-    const session = this.detachedSession(conversationId, null);
+    const session = {
+      ...this.detachedSession(conversationId, null),
+      context: context ?? null,
+    };
     const result = await undoReceipt(
       { service: this.service, session, ports: this.ports },
       receiptId,

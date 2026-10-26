@@ -57,6 +57,8 @@ export function createResumeCommandRunner(
         throw new Error("PDF export needs the app's file chooser.");
       return exportPdf(await service(), jobId);
     },
+    undo_resume_change: async ({ jobId, changeId }) =>
+      (await service()).undoChange(jobId, changeId),
   };
 
   return async (name, input) => {

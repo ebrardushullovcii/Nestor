@@ -75,6 +75,14 @@ export const RESUME_COMMANDS = {
       "Exports the job's saved resume as a PDF using the app's Save dialog. The person chooses the file location; cancellation writes nothing. Does not save unsaved typing, approve the resume or apply to the job.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
+  undo_resume_change: {
+    effect: "local_write",
+    description:
+      "Undoes one saved resume edit or approval by its changeId, including its previous approval and PDF. Later edits or job moves are preserved; a conflict leaves everything unchanged.",
+    input: z
+      .object({ jobId: JobIdSchema, changeId: z.string().min(1).max(100) })
+      .strict(),
+  },
 } as const satisfies Record<string, AppCommandDefinition>;
 
 export type ResumeCommandName = keyof typeof RESUME_COMMANDS;
@@ -102,12 +110,18 @@ export interface ResumeCommandOutputs {
     /** The templates a resume can use, by id and name. */
     templates: { id: ResumeTemplateId; label: string }[];
   };
-  save_resume: StoredResume;
+  save_resume: ResumeChangeResult;
   set_resume_level: StoredResume;
   undo_resume_level: StoredResume;
   rewrite_resume: StoredResume | null;
-  approve_resume: StoredResume;
+  approve_resume: ResumeChangeResult;
   export_resume_pdf: ResumePdfExportResult;
+  undo_resume_change: StoredResume;
+}
+
+export interface ResumeChangeResult extends StoredResume {
+  /** A durable inverse for this exact edit or approval; null for a no-op. */
+  undoId: string | null;
 }
 
 export type ResumeCommandOutput<K extends ResumeCommandName> =

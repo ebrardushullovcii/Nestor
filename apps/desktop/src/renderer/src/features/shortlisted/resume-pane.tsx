@@ -65,6 +65,12 @@ export function ResumePane(props: {
 
   const changeLevel = async (next: ResumeLevel) => {
     if (next === level) return;
+    try {
+      await view.flush();
+    } catch (error) {
+      showToast({ title: describeError(error), tone: "warning" });
+      return;
+    }
     const wasApproved = approved;
     const changed = await run(() =>
       window.nestor.resumes.run("set_resume_level", {
@@ -88,7 +94,9 @@ export function ResumePane(props: {
           void run(() =>
             window.nestor.resumes.run("undo_resume_level", {
               jobId: job.id,
-              ...(changed.levelChangeId ? { changeId: changed.levelChangeId } : {}),
+              ...(changed.levelChangeId
+                ? { changeId: changed.levelChangeId }
+                : {}),
             }),
           ).then((undone) => {
             if (undone) view.refresh();
@@ -98,8 +106,8 @@ export function ResumePane(props: {
   };
 
   const download = async () => {
-    await view.flush();
     try {
+      await view.flush();
       const { outputPath } = await window.nestor.resumes.exportPdf(job.id);
       showToast(
         outputPath
@@ -154,12 +162,26 @@ export function ResumePane(props: {
         />
         <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
         <span className="text-xs text-foreground-muted">
-          {view.dirty || view.saveStatus === "saving"
-            ? "Saving…"
-            : view.saveStatus === "failed"
-              ? view.saveError
+          {view.saveStatus === "failed"
+            ? view.saveError
+            : view.dirty || view.saveStatus === "saving"
+              ? "Saving…"
               : null}
         </span>
+        {view.saveStatus === "failed" && (
+          <div className="flex gap-2">
+            <Button
+              size="toolbar"
+              variant="outline"
+              onClick={() => void view.saveMyEdits()}
+            >
+              Save my edits
+            </Button>
+            <Button size="toolbar" variant="ghost" onClick={view.loadSaved}>
+              Load saved resume
+            </Button>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2">
           {draft ? (
             <Button

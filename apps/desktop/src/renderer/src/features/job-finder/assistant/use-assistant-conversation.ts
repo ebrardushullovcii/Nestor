@@ -431,11 +431,18 @@ export function useAssistantConversation(options: {
   );
 
   const undo = useCallback(
-    async (receiptId: string): Promise<string | null> => {
+    async (
+      receiptId: string,
+      context?: AssistantContextReference,
+    ): Promise<string | null> => {
       const conversationId = stateRef.current.conversationId;
       if (!bridge || !conversationId) return null;
       try {
-        const result = await bridge.undoChange({ conversationId, receiptId });
+        const result = await bridge.undoChange({
+          conversationId,
+          receiptId,
+          context,
+        });
         return result.message;
       } catch (error) {
         return describeError(error);
