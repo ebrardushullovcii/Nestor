@@ -1429,6 +1429,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       }
       stopped = false;
       applications.recoverPreparation();
+      applications.needsYou.reconcileSavedQuestions();
       for (const state of ["ready", "needs_you"] as const)
         for (const row of applications.listWorkInState(state))
           waiting.set(row.id, row.attempt);

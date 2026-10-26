@@ -95,6 +95,36 @@
       "asked": "Expected salary (€)",
       "answer": "65000 USD per year",
       "matches": false
+    },
+    {
+      "saved": "Expected annual salary (EUR)",
+      "asked": "Expected annual salary (EUR)",
+      "answer": "5000 EUR per month",
+      "matches": false
+    },
+    {
+      "saved": "Have you previously worked for Example Company?",
+      "asked": "Have you ever been employed at Example Company?",
+      "answer": "No",
+      "matches": true
+    },
+    {
+      "saved": "Have you previously worked for GitLab?",
+      "asked": "Have you ever worked for any company?",
+      "answer": "No",
+      "matches": false
+    },
+    {
+      "saved": "What is your notice period?",
+      "asked": "When could you start after giving notice?",
+      "answer": "30 days",
+      "matches": true
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "What is your notice period and expected salary?",
+      "answer": "65000 EUR per year",
+      "matches": false
     }
   ]
 }

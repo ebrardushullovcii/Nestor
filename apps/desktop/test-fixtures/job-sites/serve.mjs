@@ -7,6 +7,7 @@ import { handleRealUploadShapes } from "./real-upload-shapes.mjs";
 import { handlePersonalClaims } from "./personal-claims.mjs";
 import { handleUploadRepair } from "./upload-repair.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
+import { handleRememberedQuestions } from "./remembered-questions.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -463,6 +464,14 @@ const server = http.createServer(async (req, res) => {
         "<!doctype html><title>Access denied</title><h1>You have been blocked.</h1><p>Automated requests are not allowed.</p>",
       );
     }
+    if (
+      await handleRememberedQuestions(req, res, url, {
+        send,
+        readPost,
+        logPost,
+      })
+    )
+      return;
     if (
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )

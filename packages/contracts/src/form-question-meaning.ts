@@ -63,7 +63,12 @@ function meaning(question: string): Meaning | null {
             "",
           )
       : "";
-    if (!subject || /\b(?:another|any|other|company|employer)\b/u.test(subject))
+    if (
+      !subject ||
+      /^(?:another|any|other)(?: company| employer)?$|^(?:the|a|an|this) (?:company|employer)$/u.test(
+        subject,
+      )
+    )
       return null;
     meanings.push({ intent: "prior_employer_work", subject, pay: false });
   }
@@ -112,7 +117,15 @@ export function savedQuestionMatches(
   const sourceCurrency = currency(savedQuestion) ?? currency(savedAnswer),
     targetCurrency = currency(formQuestion);
   if (targetCurrency && sourceCurrency !== targetCurrency) return false;
-  if (left === right) return true;
+  if (left === right) {
+    const required = period(formQuestion),
+      source = period(savedQuestion),
+      answer = period(savedAnswer);
+    return (
+      !required ||
+      (required !== "ambiguous" && (!answer || answer === (source ?? required)))
+    );
+  }
   const saved = meaning(savedQuestion),
     target = meaning(formQuestion);
   if (

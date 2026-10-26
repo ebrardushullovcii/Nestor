@@ -401,6 +401,128 @@ it("conflicting saved meanings and duplicate current targets never pick the late
   ).toBe("needs_you");
 });
 
+it.each(meanings.cases.slice(0, 4))(
+  "restart remembers reworded $saved without requeueing an uncertain send",
+  (entry) => {
+    const folder = mkdtempSync(
+      path.join(tmpdir(), "nestor-remembered-question-"),
+    );
+    folders.push(folder);
+    const file = path.join(folder, "jobs.sqlite");
+    const { jobs, applications } = open(file);
+    applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+    const [first, exact, uncertain] = [
+      applications.claimNext()!,
+      applications.claimNext()!,
+      applications.claimNext()!,
+    ];
+    const memory = applications.needsYou;
+    memory.remember({
+      key: "source",
+      prompt: entry.saved,
+      answer: entry.answer,
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    for (const [row, prompt] of [
+      [first, entry.asked],
+      [exact, entry.saved],
+      [uncertain, entry.asked],
+    ] as const)
+      expect(
+        memory.request(
+          question(row.id, row.attempt, {
+            key: `target-${row.id}`,
+            fieldKey: "target",
+            prompt,
+            input: "text",
+            reusePrompt: true,
+            scope: {},
+          }),
+          { reuseAnswers: false },
+        ).status,
+      ).toBe("needs_you");
+    jobs
+      .sql("UPDATE applications SET state='uncertain' WHERE id=?")
+      .run(uncertain.id);
+    jobs.close();
+    const reopened = open(file).applications;
+    expect(reopened.needsYou.reconcileSavedQuestions()).toBe(1);
+    expect(reopened.getApplication(first.id)?.state).toBe("queued");
+    expect(reopened.getApplication(exact.id)?.state).toBe("needs_you");
+    expect(reopened.getApplication(uncertain.id)?.state).toBe("uncertain");
+    expect(reopened.needsYou.reconcileSavedQuestions()).toBe(0);
+    const resumed = reopened.claimNext()!;
+    expect(resumed.id).toBe(first.id);
+    expect(
+      reopened.needsYou.request(
+        question(resumed.id, resumed.attempt, {
+          key: `target-${resumed.id}`,
+          fieldKey: "target",
+          prompt: entry.asked,
+          input: "text",
+          reusePrompt: true,
+          scope: {},
+        }),
+      ),
+    ).toEqual({ status: "answered", answer: entry.answer });
+  },
+);
+
+it("restart keeps conflicting meanings, duplicate targets and unoffered answers in Needs you", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+  const [conflict, duplicate, choice] = [
+    applications.claimNext()!,
+    applications.claimNext()!,
+    applications.claimNext()!,
+  ];
+  const memory = applications.needsYou;
+  memory.remember({
+    key: "notice-30",
+    prompt: "What is your notice period?",
+    answer: "30 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  memory.remember({
+    key: "notice-60",
+    prompt: "Required notice period",
+    answer: "60 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  for (const [row, fieldKey, input, options] of [
+    [conflict, "a", "text", []],
+    [duplicate, "b", "text", []],
+    [duplicate, "c", "text", []],
+    [choice, "d", "choice", ["60 days", "90 days"]],
+  ] as const)
+    memory.request(
+      question(row.id, row.attempt, {
+        key: fieldKey,
+        fieldKey,
+        prompt: "How much notice do you need to give?",
+        input,
+        options: [...options],
+        reusePrompt: true,
+        scope: {},
+      }),
+      { reuseAnswers: false },
+    );
+  expect(memory.reconcileSavedQuestions()).toBe(0);
+  expect(applications.getApplication(conflict.id)?.state).toBe("needs_you");
+  memory.forgetAnswers({
+    ids: [memory.getAnswerByKey({ key: "notice-60" })!.id],
+  });
+  expect(memory.reconcileSavedQuestions()).toBe(1);
+  expect(applications.getApplication(duplicate.id)?.state).toBe("needs_you");
+  expect(applications.getApplication(choice.id)?.state).toBe("needs_you");
+});
+
 it("persists guarded answer Undo without retracting answers that released applications", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
   folders.push(folder);
