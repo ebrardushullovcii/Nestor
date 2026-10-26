@@ -630,9 +630,17 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       return false;
     }
     if ((input.bodyText?.length ?? 0) > 65_536) return false;
-    const signal = `${parsedUrl.pathname} ${parsedUrl.search} ${
-      input.bodyText ?? ""
-    }`.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+    const decode = (value: string): string => {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    };
+    const signal =
+      `${decode(parsedUrl.pathname)} ${decode(parsedUrl.search)} ${decode(input.bodyText ?? "")}`
+        .replace(/\\(["'])/gu, "$1")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
     const finalActionSignal = new RegExp(guardInput.finalActionSignal, "iu");
     const intermediateActionSignal =
       /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;

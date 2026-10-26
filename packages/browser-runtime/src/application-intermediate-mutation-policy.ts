@@ -54,7 +54,7 @@ const ALLOWED_RESOURCE_KINDS = new Set<IntermediateMutationResourceKind>([
 ]);
 
 export const FINAL_ACTION_SIGNAL =
-  /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)/iu;
+  /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)|\/(?:apply|submit)(?=\/|\s|[?#]|$)|\/applications\/?(?=\s|[?#]|$)|(?:^|[^a-z0-9])(?:is[-_\s]*)?final["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:true|1|on|yes)(?=["'\s,}&\]]|$)/iu;
 const INTERMEDIATE_ACTION_SIGNAL =
   /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
 
@@ -74,10 +74,9 @@ function buildInspectableSignal(input: {
       return value;
     }
   };
-  return `${safeDecode(input.url.pathname)} ${safeDecode(input.url.search)} ${body}`.replace(
-    /([a-z0-9])([A-Z])/g,
-    "$1 $2",
-  );
+  return `${safeDecode(input.url.pathname)} ${safeDecode(input.url.search)} ${safeDecode(body)}`
+    .replace(/\\(["'])/gu, "$1")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
 /**

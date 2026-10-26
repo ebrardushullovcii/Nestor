@@ -1,5 +1,6 @@
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
 import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
+import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -495,6 +496,46 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       expect(requestHitsFor(parent.hits, "/api/save")).toHaveLength(0);
     },
   );
+
+  test("a live Fill save window denies bare apply endpoints and final flags while allowing non-final step saves", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml(
+      "/form",
+      '<input name="name" value="Synthetic Applicant">',
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/form`);
+    await ensurePrepareOnlyMutationGuard(page, true, []);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    const outcomes = await page.evaluate(async ({ denied, allowed }) => {
+      const results: boolean[] = [];
+      for (const request of [...denied, ...allowed]) {
+        try {
+          results.push(
+            (
+              await fetch(request.path, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: request.body,
+              })
+            ).ok,
+          );
+        } catch {
+          results.push(false);
+        }
+      }
+      return results;
+    }, finalMutationReplay);
+    expect(outcomes).toEqual([
+      ...finalMutationReplay.denied.map(() => false),
+      ...finalMutationReplay.allowed.map(() => true),
+    ]);
+    const writes = app.hits.filter((hit) => hit.method === "POST");
+    expect(writes).toHaveLength(finalMutationReplay.allowed.length);
+    expect(writes.map(({ path, body }) => ({ path, body }))).toEqual(
+      finalMutationReplay.allowed,
+    );
+  });
 
   test(
     "multipart draft saves require Send authority and stay pinned to the form origin",

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
 import {
   classifyIntermediateMutationRequest,
   type IntermediateMutationRequestInput,
@@ -22,6 +23,30 @@ function classify(overrides: Partial<IntermediateMutationRequestInput> = {}) {
 }
 
 describe("intermediate application mutation policy", () => {
+  test.each(finalMutationReplay.denied)(
+    "save-window send attack is refused: $path $body",
+    ({ path, body }) => {
+      expect(
+        classify({
+          method: "POST",
+          url: `https://apply.example.com${path}`,
+          bodyText: body,
+        }),
+      ).toEqual({ allowed: false, reason: "final_action_signal" });
+    },
+  );
+  test.each(finalMutationReplay.allowed)(
+    "non-final step save remains allowed: $path $body",
+    ({ path, body }) => {
+      expect(
+        classify({
+          method: "POST",
+          url: `https://apply.example.com${path}`,
+          bodyText: body,
+        }),
+      ).toEqual({ allowed: true, reason: "allowed_intermediate_mutation" });
+    },
+  );
   test.each([
     {
       url: "https://apply.example.com/api/applications",
