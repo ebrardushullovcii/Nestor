@@ -126,13 +126,78 @@ const writingGlue = new Set(
     "role position team company work working join joining build building help helping " +
     "apply applying bring bringing use using used develop developing support supporting " +
     "reliable dependable meaningful thoughtful strong stronger good great well " +
-    "because about through into together also especially aligns aligns alignment"
+    "because about through into together also especially aligns aligns alignment involves involving"
   ).split(/\s+/u),
 );
 function contentWords(text: string): string[] {
   return normalize(text)
     .split(" ")
     .filter((word) => word && !writingGlue.has(word));
+}
+
+/** Complete statements of intent only: no qualifications, history or named facts. */
+export function isPlainMotivationIntent(text: string): boolean {
+  const normalized = text
+    .trim()
+    .replace(/^I['’]m\b/iu, "I am")
+    .replace(/^I['’]d\b/iu, "I would");
+  const intent =
+    /^I (?:am (?:excited|interested|motivated) (?:about|in|by|to)|(?:would like|hope|want) to|would welcome) (.+)$/iu.exec(
+      normalized,
+    );
+  const body = intent?.[1];
+  if (!body) return false;
+  // Only connective words about future participation. No personal qualities,
+  // possession, qualifications, named entities, numbers or history fit here.
+  const words = new Set(
+    "a an the this that your opportunity chance role position team company work working join joining contribute contributing contribution help helping to in at on about with for and would welcome".split(
+      " ",
+    ),
+  );
+  const remainder = body
+    .replace(/[.,!]/gu, " ")
+    .toLowerCase()
+    .trim()
+    .split(/\s+/u);
+  return (
+    remainder.length > 0 &&
+    remainder.length <= 40 &&
+    remainder.every((word) => words.has(word))
+  );
+}
+
+/** Only the named role/opportunity and its employer may qualify plain intent. */
+export function motivationIntentSupported(
+  text: string,
+  evidence: readonly AnswerEvidence[],
+): boolean {
+  let intent = text;
+  for (const entry of evidence) {
+    if (entry.source !== "posting" || !entry.quote.trim()) continue;
+    const quoted = entry.quote.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    if (entry.path === "/title")
+      intent = intent.replace(
+        new RegExp(`${quoted}(?=\\s+(?:opportunity|role|position)\\b)`, "gu"),
+        "role",
+      );
+    if (entry.path === "/company")
+      intent = intent.replace(
+        new RegExp(
+          `(\\b(?:at|join|joining)\\s+)${quoted}(?=$|[\\s.,!;])`,
+          "gu",
+        ),
+        "$1company",
+      );
+  }
+  return isPlainMotivationIntent(intent);
+}
+
+/** A question naming one country carries its own jurisdiction across postings. */
+export function explicitApplicationCountry(question: string): string | null {
+  const countries = countriesIn(question);
+  return countries.size === 1
+    ? (countries.values().next().value ?? null)
+    : null;
 }
 
 /** Concrete claims must be in the cited text, even when the checker lies about support. */
@@ -143,6 +208,7 @@ export function concreteClaimsSupported(
   for (const clause of answer.split(
     /(?<=[.!?])\s+|\n|\b(?:and|but)\s+(?=I\b|I['’]|would\b|hope\b|want\b)/gu,
   )) {
+    if (motivationIntentSupported(clause, evidence)) continue;
     const personalHistory =
       /\b(?:led|worked|managed|built|delivered|earned|achieved|spent|graduated|founded|employed)\b|\bmy\s+(?:experience|work|career|time|tenure)\b/iu.test(
         clause,

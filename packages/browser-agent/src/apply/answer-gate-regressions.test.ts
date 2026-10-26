@@ -170,6 +170,92 @@ const call = (name: string, args: unknown) => ({
     },
   ],
 });
+
+test("captured motivation reaches Ready after one malformed checker retry without a final click", async () => {
+  const { runApplyAgent } = await import("./apply-agent");
+  const src = sources();
+  src.posting = {
+    title: "Engineer",
+    company: "Synthetic Workshop",
+    location: "Germany",
+    description: "Engineering workflow tools.",
+  };
+  const answer =
+    "I am excited about the Engineer opportunity at Synthetic Workshop and would welcome the chance to contribute to your team.";
+  const s = setup(
+    field("Why do you want to join us?", {
+      tagName: "textarea",
+      inputType: "",
+    }),
+    src,
+  );
+  s.page.actions = [
+    { index: 0, label: "Send application", visible: true, disabled: false },
+  ];
+  s.config.modelQuestionClassification = true;
+  s.config.runControl = { maxSteps: 4, noProgressStepLimit: 2 };
+  let checks = 0;
+  const click = vi.spyOn(s.config.hands, "clickAction");
+  const client = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((_messages, tools) => {
+      const name = tools[0]?.function.name;
+      if (name === "report_question_kinds")
+        return Promise.resolve(
+          call(name, {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [
+              {
+                index: 0,
+                kind: "motivation",
+                country: null,
+                sourceId: "posting.description",
+              },
+            ],
+          }),
+        );
+      if (name === "report_answer_checks") {
+        const rows = [
+          {
+            index: 0,
+            supported: true,
+            reason: "General interest in the advertised role",
+            evidence: [
+              {
+                kind: "role_motivation",
+                source: "posting",
+                path: "/postingContextOnly/title",
+                quote: "Engineer",
+                claim: "interest in the role",
+              },
+              {
+                kind: "role_motivation",
+                source: "posting",
+                path: "/postingContextOnly/company",
+                quote: "Synthetic Workshop",
+                claim: "interest in the employer",
+              },
+            ],
+          },
+        ];
+        return Promise.resolve(
+          call(name, { checks: ++checks === 1 ? JSON.stringify(rows) : rows }),
+        );
+      }
+      return Promise.resolve(
+        call("fill_fields", {
+          fields: [{ tool: "type", ref: "c0", text: answer }],
+          finishWhenReady: true,
+        }),
+      );
+    }),
+  };
+  const result = await runApplyAgent(s.config, client);
+  expect(s.raw.value).toBe(answer);
+  expect(result.outcome).toBe("prepared");
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(click).not.toHaveBeenCalled();
+});
 function lying(
   src: ApplyAnswerSources,
   kind = "motivation",

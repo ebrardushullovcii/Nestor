@@ -28,7 +28,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
   const writtenAnswerSentence =
     (config.writing?.writtenAnswerLength ?? "short") === "full"
       ? "- When you write an answer yourself, write it fully: a developed paragraph that uses most of the available character limit (roughly 70–90%) when supported facts allow it, without padding. When the field has no character limit, write four to six developed sentences, normally 100–160 words when the facts support that detail. Full must be meaningfully more developed than a Short answer to the same question. Include a concrete supported achievement and explain its relevance to a specific need in this job. Never invent a metric to fill space. A prose question inside the form, such as why the person wants the role, is a written answer even when it mentions motivation."
-      : "- When you write an answer yourself, keep it short: one or two direct sentences, with one specific from the resume or profile. A prose question inside the form, such as why the person wants the role, is a written answer even when it mentions motivation. Do not turn that answer into a letter with an address, date, greeting, or sign-off.";
+      : "- When you write an answer yourself, keep it short: one or two direct sentences. Include a specific from the resume or profile only when it supports the claim. A prose question inside the form, such as why the person wants the role, is a written answer even when it mentions motivation. Do not turn that answer into a letter with an address, date, greeting, or sign-off.";
 
   const declarationNames: Record<string, string> = {
     truthfulness_certification: "certifying that the answers are true",
@@ -69,6 +69,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "- A picker may use a substitute only under the person's saved conditional answer to that exact question. Follow its primary choice, fallback and skip instruction in that order; never invent a country substitution. If the rule says skip and no permitted option exists, leave the field unanswered and stop for Needs you when the form requires it. Save reusable fallback rules in Saved answers as the person's text, never as an unconditional replacement country.",
     "- A GitHub username or handle field gets just the username from the person's GitHub profile; GitHub URL fields keep the full URL.",
     writtenAnswerSentence,
+    "- Motivation can be a short statement of intent, such as 'I am excited about this opportunity.' It does not need a personal experience claim. Describe advertised work with the role as its subject and cite the posting; every qualification, achievement or personal-history claim still needs applicant evidence. Keep the person's own-words requirements and saved limits intact.",
     coverLetterSentence,
     continuationSentence,
     '- A separate cover-letter, motivation-letter, or supporting-statement field follows the cover-letter choice above. Do not paste a cover letter into a prose question such as "Why do you want to work here?"; answer that question using the written-answer length instead.',

@@ -24,6 +24,53 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("an exact country-named authorization source is read even without a preselected answer kind, and conflicts hand over", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!,
+    memory = applications.needsYou;
+  const prompt = "Are you authorized to work in the UK?";
+  const target = {
+    key: "current-uk-question",
+    prompt,
+    reusePrompt: true,
+    kind: "work_authorization" as const,
+  };
+  memory.remember({
+    key: "unscoped-saved-question",
+    prompt,
+    answer: "No",
+    input: "boolean",
+    options: [],
+    scope: {},
+    kind: "other",
+  });
+  expect(
+    memory
+      .answersForQuestions(row.id, [target], "https://jobs.example.test")
+      .map((answer) => answer.answer),
+  ).toEqual(["No"]);
+  expect(
+    memory.answersForQuestions(
+      row.id,
+      [{ ...target, prompt: "Are you authorized to work in Germany?" }],
+      "https://jobs.example.test",
+    ),
+  ).toEqual([]);
+  memory.remember({
+    key: "older-job-specific-question",
+    prompt,
+    answer: "Yes",
+    input: "boolean",
+    options: [],
+    scope: {},
+    kind: "work_authorization",
+  });
+  expect(
+    memory.answersForQuestions(row.id, [target], "https://jobs.example.test"),
+  ).toEqual([]);
+});
+
 it("revokes retired approvals before Apply even when Profile has never been constructed", () => {
   const jobs = openJobStore(":memory:");
   stores.push(jobs);

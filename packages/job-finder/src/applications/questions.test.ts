@@ -127,3 +127,27 @@ test("Workday legal prompt seeds are not country-scoped answers: the typed profi
     expect(question.key).not.toBe(saved.key);
   }
 });
+
+test("an exact authorization question naming one country reuses its own saved answer across posting locations", () => {
+  const prompt = "Are you authorized to work in the UK?";
+  const question = {
+    prompt,
+    kind: "work_authorization" as const,
+    answerControlType: "boolean" as const,
+    answerOptions: ["Yes", "No"],
+  };
+  const saved = describeSavedFormAnswer(prompt, "No");
+  const target = describeFormQuestion(question, { id: 1, location: "Germany" });
+  expect(target.reusePrompt).toBe(true);
+  expect(target.key).toBe(saved.key);
+  for (const prompt of [
+    "Are you authorized to work in this country?",
+    "Are you authorized to work in the UK and Germany?",
+  ])
+    expect(
+      describeFormQuestion(
+        { ...question, prompt },
+        { id: 1, location: "Germany" },
+      ).reusePrompt,
+    ).toBe(false);
+});

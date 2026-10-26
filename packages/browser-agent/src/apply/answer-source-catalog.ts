@@ -9,7 +9,11 @@ import type {
 } from "@nestor/contracts";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { storedFacts, savedAnswerForQuestion } from "./application-facts";
-import { countriesIn, countryTerms } from "./concrete-answer-claims";
+import {
+  countriesIn,
+  countryTerms,
+  isPlainMotivationIntent,
+} from "./concrete-answer-claims";
 import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
 import { employmentMonthEvidence } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
@@ -241,7 +245,10 @@ function knownLiteralField(
     return (
       groups.includes(group) &&
       (historyLabels[historyLeaf[2] ?? ""]?.includes(
-        normalizeFormQuestionPrompt(control.label),
+        normalizeFormQuestionPrompt(control.label).replace(
+          /\s+(?:dd mm yyyy|mm yyyy|yyyy mm dd|yyyy mm)$/u,
+          "",
+        ),
       ) ??
         false)
     );
@@ -341,21 +348,21 @@ function literalValueMatches(
         answer.trim() === `${source.value} day`)
     );
   }
-  if (source.value.trim() === answer.trim()) return true;
   const date =
     /^profile\.(experiences|education)\.[^.]+\.(startDate|endDate)$/u.exec(
       source.id,
     );
-  return (
-    !!date &&
-    employmentMonthEvidence(control.label, answer, [
+  if (date) {
+    const checked = employmentMonthEvidence(control.label, answer, [
       {
         source: "applicant",
         path: `/${date[1]}/0/${date[2]}`,
         quote: source.value,
       },
-    ]) === true
-  );
+    ]);
+    if (checked !== null) return checked;
+  }
+  return source.value.trim() === answer.trim();
 }
 
 // Permission to acknowledge a form is not evidence of a new personal fact.
@@ -432,7 +439,7 @@ function permitConditionsFit(
 
 export type ClassifiedAnswerDecision =
   | { kind: "literal"; source: ClassifiedAnswerSource }
-  | { kind: "writing"; source: ClassifiedAnswerSource }
+  | { kind: "writing"; source: ClassifiedAnswerSource | null }
   | { kind: "needs_you"; reason: string };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
 export function classifyAnswerPermission(input: {
@@ -510,6 +517,7 @@ export function classifyAnswerPermission(input: {
     "are you legally authorized to work in ",
     "are you legally authorised to work in ",
     "are you legally eligible to work in ",
+    "are you eligible to work in ",
     "are you authorized to work in ",
     "are you authorised to work in ",
     "do you have the right to work in ",
@@ -608,6 +616,19 @@ export function classifyAnswerPermission(input: {
       purpose: "listing",
       country: null,
     };
+  if (
+    !source &&
+    tags.kind === "motivation" &&
+    isPlainMotivationIntent(input.answer) &&
+    !requiresOwnWords(input.control.label) &&
+    !ownWordsAppliesToQuestion(
+      `${input.control.groupLabel}\n${input.pageInstructions}`,
+      input.control.label,
+    ) &&
+    !requiresSavedNationalityAnswer(input.control.label) &&
+    !requiresSavedOpinionAnswer(input.control.label, input.answer)
+  )
+    return { kind: "writing", source: null };
   if (!source)
     return deny(
       "There is no matching verbatim source for this question. Please supply your answer.",
@@ -680,7 +701,13 @@ export function classifyAnswerPermission(input: {
         "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
       );
     if (
-      !permitConditionsFit(input.sources, target) ||
+      (!(
+        exactSaved &&
+        tags.kind === "work_auth" &&
+        knownLegalQuestion &&
+        /^(?:no|false)$/iu.test(input.answer)
+      ) &&
+        !permitConditionsFit(input.sources, target)) ||
       (tags.kind === "sponsorship" &&
         input.answer === "No" &&
         input.sources.profile.workEligibility.limitedWorkPermissions?.some(
