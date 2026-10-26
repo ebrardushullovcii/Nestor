@@ -4,14 +4,14 @@ import {
   type CandidateProfile,
   type ResumeImportRun,
 } from "@nestor/contracts";
-import type { JobFinderWorkspaceService } from "@nestor/job-finder";
+import type { ProfileService } from "@nestor/job-finder";
 
 type ImportSnapshot = {
   profile: CandidateProfile;
   latestResumeImportRun: ResumeImportRun | null;
   visionProvider?: { requestTimeoutMs?: number | null } | null;
 };
-type ImportService = Pick<JobFinderWorkspaceService, "getResumeImportState">;
+type ImportService = Pick<ProfileService, "getResumeImportState">;
 
 function hasProfileDetails(profile: CandidateProfile): boolean {
   return (

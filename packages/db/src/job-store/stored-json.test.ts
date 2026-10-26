@@ -21,6 +21,7 @@ import {
   SubmissionIdempotencyRecordSchema,
   SubmissionArmedMarkerSchema,
   ApprovedApplicationAnswerSnapshotSchema,
+  PreparedApplicationFormSchema,
 } from "@nestor/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -66,6 +67,7 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   SubmissionIdempotencyRecordSchema,
   SubmissionArmedMarkerSchema,
   ApprovedApplicationAnswerSnapshotSchema,
+  PreparedApplicationFormSchema,
 };
 
 const FIXTURES: Record<string, string> = {
@@ -92,6 +94,7 @@ const FIXTURES: Record<string, string> = {
   SubmissionArmedMarkerSchema: "submission-armed-marker",
   ApprovedApplicationAnswerSnapshotSchema:
     "approved-application-answer-snapshot",
+  PreparedApplicationFormSchema: "prepared-application-form",
 };
 
 const fixtureDir = path.join(__dirname, "stored-json");

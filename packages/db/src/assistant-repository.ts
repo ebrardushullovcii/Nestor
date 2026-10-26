@@ -28,11 +28,10 @@ import {
   type AssistantTurn,
   type AssistantTurnStatus,
 } from "@nestor/contracts";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { secureDatabaseFile } from "./internal/migrations";
 
 /**
  * Storage for the app assistant (ADR 0037): conversations the person sees,
@@ -259,8 +258,14 @@ export function createAssistantRepository(
   database.exec("PRAGMA journal_mode = WAL");
   database.exec("PRAGMA busy_timeout = 5000");
   database.exec(SCHEMA_SQL);
-  if (!inMemory) {
-    void secureDatabaseFile(options.filePath);
+  if (!inMemory && process.platform !== "win32") {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        chmodSync(`${options.filePath}${suffix}`, 0o600);
+      } catch {
+        // The -wal and -shm files appear on first write.
+      }
+    }
   }
   const now = options.now ?? (() => new Date().toISOString());
   let closed = false;

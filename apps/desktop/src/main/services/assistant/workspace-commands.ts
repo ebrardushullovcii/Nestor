@@ -5,12 +5,10 @@ export function createAssistantWorkspaceCommands(): AssistantWorkspaceCommands {
     name: K,
   ): AssistantWorkspaceCommands[K] =>
     ((...args: unknown[]) =>
-      import("../job-finder/workspace-service").then(
-        async ({ getJobFinderWorkspaceService }) => {
-          const service = await getJobFinderWorkspaceService();
-          return Reflect.apply(service[name], service, args) as unknown;
-        },
-      )) as AssistantWorkspaceCommands[K];
+      import("../job-finder/runtime").then(async ({ getProfileService }) => {
+        const service = await getProfileService();
+        return Reflect.apply(service[name], service, args) as unknown;
+      })) as AssistantWorkspaceCommands[K];
   return {
     acceptSourceInstructionDraft: bind("acceptSourceInstructionDraft"),
     analyzeProfileFromResume: bind("analyzeProfileFromResume"),
@@ -24,9 +22,7 @@ export function createAssistantWorkspaceCommands(): AssistantWorkspaceCommands {
     getSourceDebugRun: bind("getSourceDebugRun"),
     getSourceDebugRunDetails: bind("getSourceDebugRunDetails"),
     listSourceDebugRuns: bind("listSourceDebugRuns"),
-    queueJobForReview: bind("queueJobForReview"),
     rejectProfileCopilotPatchGroup: bind("rejectProfileCopilotPatchGroup"),
-    removeJobFromReview: bind("removeJobFromReview"),
     runSourceDebug: bind("runSourceDebug"),
     saveProfile: bind("saveProfile"),
     saveProfileAndSearchPreferences: bind("saveProfileAndSearchPreferences"),
@@ -36,7 +32,6 @@ export function createAssistantWorkspaceCommands(): AssistantWorkspaceCommands {
     saveSourceInstructionArtifact: bind("saveSourceInstructionArtifact"),
     setActivityControl: bind("setActivityControl"),
     undoAssistantProfileChange: bind("undoAssistantProfileChange"),
-    undoAssistantResumeChange: bind("undoAssistantResumeChange"),
     undoAssistantSettingsChange: bind("undoAssistantSettingsChange"),
     undoProfileRevision: bind("undoProfileRevision"),
     updateAiBehavior: bind("updateAiBehavior"),

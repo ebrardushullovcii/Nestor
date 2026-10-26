@@ -1,22 +1,24 @@
 import {
-  createInMemoryJobFinderRepository,
+  createSeededRepository,
+  withProfileView,
+} from "../profile-service.test-support";
+import {
   type JobFinderRepository,
 } from "@nestor/db";
 import type { ResumeVisionProvider } from "@nestor/ai-providers";
 import { describe, expect, test, vi } from "vitest";
 
-import { createJobFinderWorkspaceService } from "../index";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createProfileService } from "../profile-service";
+import { createSeed } from "../test-fixtures";
 import {
   createAiClient,
   createBrowserRuntime,
   createDocumentManager,
-  createResearchAdapter,
-} from "../workspace-service.test-runtimes";
+} from "../test-runtimes";
 import {
   createStageCandidate,
   createTestBundle,
-} from "../workspace-service.resume-analysis.shared";
+} from "../resume-import.test-support";
 import { RESUME_IMPORT_VISION_SUPERSEDED_MESSAGE } from "./resume-import-workflow";
 import { interruptedTextImportMessage } from "./resume-import-recovery";
 
@@ -137,23 +139,21 @@ function createSlowVisionProvider(): ResumeVisionProvider {
 }
 
 function createService(repository: JobFinderRepository) {
-  return createJobFinderWorkspaceService({
+  return withProfileView(createProfileService({
     repository,
     browserRuntime: createBrowserRuntime(),
     aiClient: createTextStageAiClient(),
     visionProvider: createSlowVisionProvider(),
     documentManager: createDocumentManager(),
-    exportFileVerifier: { exists: () => Promise.resolve(true) },
-    researchAdapter: createResearchAdapter(),
-  });
+  }), repository);
 }
 
 function runImport(
-  workspaceService: ReturnType<typeof createService>,
+  profileWork: ReturnType<typeof createService>,
   seed: ReturnType<typeof createFreshStartSeed>,
 ) {
   const text = "Jamie Rivers\njamie@example.com";
-  return workspaceService.runResumeImport({
+  return profileWork.runResumeImport({
     baseResume: {
       ...seed.profile.baseResume,
       id: RESUME_ID,
@@ -195,7 +195,7 @@ function runImport(
 describe("resume import foreground revision race", () => {
   test("attaches the imported resume file when the foreground finalization loses the race", async () => {
     const seed = createFreshStartSeed();
-    const base = createInMemoryJobFinderRepository(seed);
+    const base = await createSeededRepository(seed);
     const importedText = "Jamie Rivers\njamie@example.com";
     let interveningEdits = 0;
     const repository: JobFinderRepository = {
@@ -210,9 +210,9 @@ describe("resume import foreground revision race", () => {
         return base.finalizeResumeImportRun(input);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: RESUME_ID,
@@ -251,7 +251,7 @@ describe("resume import foreground revision race", () => {
 
   test("keeps the newest imported resume when an older import finalizes late", async () => {
     const seed = createFreshStartSeed();
-    const base = createInMemoryJobFinderRepository(seed);
+    const base = await createSeededRepository(seed);
     // Both files carry the same header identity, so the identity guard cannot
     // be what keeps the older file out of the profile — only run ownership can.
     const sharedHeader = "Jamie Rivers\njamie@example.com";
@@ -277,9 +277,9 @@ describe("resume import foreground revision race", () => {
         return base.finalizeResumeImportRun(input);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
 
-    const firstImport = workspaceService.runResumeImport({
+    const firstImport = profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_race_first",
@@ -291,7 +291,7 @@ describe("resume import foreground revision race", () => {
     await firstFinalizerReady;
 
     // The user picked another file while the first import was still finishing.
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_race_second",
@@ -315,11 +315,11 @@ describe("resume import foreground revision race", () => {
 
   test("does not rewrite the profile when the finalization applies normally", async () => {
     const seed = createFreshStartSeed();
-    const repository = createInMemoryJobFinderRepository(seed);
-    const workspaceService = createService(repository);
+    const repository = await createSeededRepository(seed);
+    const profileWork = createService(repository);
     const importedText = "Jamie Rivers\njamie@example.com";
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: RESUME_ID,
@@ -341,10 +341,10 @@ describe("resume import foreground revision race", () => {
 describe("resume import multi-stage revision race", () => {
   test("applies deferred visual-scan refinements after an ordinary profile write advanced the revision", async () => {
     const seed = createFreshStartSeed();
-    const repository = createInMemoryJobFinderRepository(seed);
-    const workspaceService = createService(repository);
+    const repository = await createSeededRepository(seed);
+    const profileWork = createService(repository);
 
-    const snapshot = await runImport(workspaceService, seed);
+    const snapshot = await runImport(profileWork, seed);
     const textStageStatus = snapshot.latestResumeImportRun?.status;
     expect(["applied", "review_ready"]).toContain(textStageStatus);
     expect(snapshot.latestResumeImportRun?.modelRoles?.vision.status).toBe(
@@ -392,7 +392,7 @@ describe("resume import multi-stage revision race", () => {
 
   test("keeps the applied text import and its candidates when the visual scan loses the revision race twice", async () => {
     const seed = createFreshStartSeed();
-    const base = createInMemoryJobFinderRepository(seed);
+    const base = await createSeededRepository(seed);
     let finalizeCalls = 0;
     const repository: JobFinderRepository = {
       ...base,
@@ -408,9 +408,9 @@ describe("resume import multi-stage revision race", () => {
         return base.finalizeResumeImportRun(input);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
 
-    const snapshot = await runImport(workspaceService, seed);
+    const snapshot = await runImport(profileWork, seed);
     const textStageStatus = snapshot.latestResumeImportRun?.status;
     expect(["applied", "review_ready"]).toContain(textStageStatus);
     const textStageCandidateCount =
@@ -452,9 +452,9 @@ describe("resume import multi-stage revision race", () => {
 describe("resume import while the deferred visual scan runs", () => {
   test("a snapshot read during the visual scan keeps the applied text import", async () => {
     const seed = createFreshStartSeed();
-    const base = createInMemoryJobFinderRepository(seed);
+    const base = await createSeededRepository(seed);
     const seenDuringVisionStage: string[] = [];
-    let workspaceService: ReturnType<typeof createService> | null = null;
+    let profileWork: ReturnType<typeof createService> | null = null;
     let textStageFinalized = false;
     const repository: JobFinderRepository = {
       ...base,
@@ -464,10 +464,10 @@ describe("resume import while the deferred visual scan runs", () => {
       },
       replaceResumeImportRunArtifacts: async (input) => {
         await base.replaceResumeImportRunArtifacts(input);
-        if (textStageFinalized && workspaceService) {
+        if (textStageFinalized && profileWork) {
           // Any setup save or refresh while the visual scan reconciles goes
           // through a snapshot read.
-          const snapshot = await workspaceService.getWorkspaceSnapshot();
+          const snapshot = await profileWork.read();
           expect(snapshot.resumeImportActive).toBe(true);
           seenDuringVisionStage.push(
             `${snapshot.latestResumeImportRun?.status}:${snapshot.latestResumeImportRun?.errorMessage ?? ""}`,
@@ -475,9 +475,9 @@ describe("resume import while the deferred visual scan runs", () => {
         }
       },
     };
-    workspaceService = createService(repository);
+    profileWork = createService(repository);
 
-    const snapshot = await runImport(workspaceService, seed);
+    const snapshot = await runImport(profileWork, seed);
     const textStageStatus = snapshot.latestResumeImportRun?.status;
     expect(["applied", "review_ready"]).toContain(textStageStatus);
 
@@ -499,14 +499,14 @@ describe("resume import while the deferred visual scan runs", () => {
     expect(run?.errorMessage).toBeNull();
     await vi.waitFor(async () =>
       expect(
-        (await workspaceService.getWorkspaceSnapshot()).resumeImportActive,
+        (await profileWork.read()).resumeImportActive,
       ).toBe(false),
     );
   });
 
   test("a visual scan that fails midway leaves the text import applied, not stopped", async () => {
     const seed = createFreshStartSeed();
-    const base = createInMemoryJobFinderRepository(seed);
+    const base = await createSeededRepository(seed);
     let textStageFinalized = false;
     let failedOnce = false;
     const repository: JobFinderRepository = {
@@ -528,9 +528,9 @@ describe("resume import while the deferred visual scan runs", () => {
         await base.replaceResumeImportRunArtifacts(input);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
 
-    const snapshot = await runImport(workspaceService, seed);
+    const snapshot = await runImport(profileWork, seed);
     const textStageStatus = snapshot.latestResumeImportRun?.status;
     expect(["applied", "review_ready"]).toContain(textStageStatus);
 
@@ -543,7 +543,7 @@ describe("resume import while the deferred visual scan runs", () => {
     );
     expect(failedOnce).toBe(true);
 
-    const after = await workspaceService.getWorkspaceSnapshot();
+    const after = await profileWork.read();
     expect(after.latestResumeImportRun?.status).toBe(textStageStatus);
     expect(after.latestResumeImportRun?.errorMessage).toBeNull();
     expect(after.latestResumeImportRun?.warnings).not.toContain(

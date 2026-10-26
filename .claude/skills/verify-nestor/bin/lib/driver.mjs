@@ -545,8 +545,6 @@ function context(extra = {}) {
       return result.rows;
     },
     tables: () => tables(launch.userDataDir, path.join(stateDir, "db-copy")),
-    workspace: async () =>
-      (await mainPage()).evaluate(() => window.nestor.jobFinder.getWorkspace()),
     browserPages: () =>
       app.evaluate(({ webContents }) =>
         webContents.getAllWebContents().map((w) => ({

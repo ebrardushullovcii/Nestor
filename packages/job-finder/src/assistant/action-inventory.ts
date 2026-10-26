@@ -28,25 +28,21 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "home.summary",
     screen: "Home",
     action: "See where the search stands",
-    channels: [
-      "job-finder:get-workspace",
-      "job-finder:get-workspace-bootstrap",
-      "job-finder:sync-workspace",
-    ],
+    channels: ["home:summary"],
     coverage: tools("get_workspace_summary"),
   },
   {
     id: "home.pause",
     screen: "Home",
     action: "Pause or resume Job Finder",
-    channels: ["job-finder:set-activity-control"],
+    channels: ["activity:feed"],
     coverage: tools("pause_activity"),
   },
   {
     id: "home.search_now",
     screen: "Home",
     action: "Search now",
-    channels: ["job-finder:run-agent-discovery", "job-finder:run-discovery"],
+    channels: ["jobs:run"],
     coverage: tools("start_search"),
   },
 
@@ -55,7 +51,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "profile.edit_fields",
     screen: "Profile",
     action: "Edit basics, headline, summary, contact, skills, target roles",
-    channels: ["job-finder:save-profile", "job-finder:save-workspace-inputs"],
+    channels: ["jobs:run"],
     coverage: tools("read_profile", "edit_profile", "undo_change"),
   },
   {
@@ -63,14 +59,14 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Profile",
     action:
       "Add, edit, merge, split or remove work history, education, certifications",
-    channels: ["job-finder:save-profile"],
+    channels: ["jobs:run"],
     coverage: tools("edit_profile"),
   },
   {
     id: "profile.edit_background",
     screen: "Profile",
     action: "Projects, links, languages, proof points",
-    channels: ["job-finder:save-profile"],
+    channels: ["jobs:run"],
     coverage: tools("edit_profile"),
   },
   {
@@ -78,10 +74,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Profile",
     action:
       "Search preferences: roles, locations, work modes, pay, excluded places",
-    channels: [
-      "job-finder:save-search-preferences",
-      "job-finder:save-workspace-inputs",
-    ],
+    channels: ["jobs:run"],
     coverage: tools("edit_profile"),
   },
   {
@@ -89,9 +82,9 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Profile",
     action: "Import a resume",
     channels: [
-      "job-finder:import-resume",
+      "profile-workflow:import-resume",
       "job-finder:cancel-import-resume",
-      "job-finder:analyze-profile-from-resume",
+      "profile-workflow:run",
     ],
     coverage: tools("import_resume"),
   },
@@ -99,21 +92,21 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "profile.import_review",
     screen: "Profile",
     action: "Keep, dismiss or clear an import suggestion",
-    channels: ["job-finder:apply-profile-setup-review-action"],
+    channels: ["profile-workflow:run"],
     coverage: tools("read_profile", "resolve_import_suggestion"),
   },
   {
     id: "profile.timeline_repair",
     screen: "Profile",
     action: "Accept or undo a work-history date repair",
-    channels: ["job-finder:apply-resume-timeline-repair-action"],
+    channels: ["profile-workflow:run"],
     coverage: tools("edit_profile"),
   },
   {
     id: "profile.setup_state",
     screen: "Setup",
     action: "Finish guided setup",
-    channels: ["job-finder:save-profile-setup-state"],
+    channels: ["profile-workflow:run"],
     coverage: tools("read_profile", "finish_profile_setup"),
   },
   {
@@ -161,16 +154,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "profile.source_check",
     screen: "Profile › Sources",
     action: "Check a source, review and accept learned instructions",
-    channels: [
-      "job-finder:run-source-debug",
-      "job-finder:cancel-source-debug",
-      "job-finder:get-source-debug-run",
-      "job-finder:get-source-debug-run-details",
-      "job-finder:list-source-debug-runs",
-      "job-finder:save-source-instruction-artifact",
-      "job-finder:accept-source-instruction-draft",
-      "job-finder:verify-source-instructions",
-    ],
+    channels: ["profile-workflow:check-site", "profile-workflow:run"],
     coverage: tools(
       "check_source",
       "get_site",
@@ -186,12 +170,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "profile.legacy_copilot",
     screen: "Profile",
     action: "Old Profile chat (retired)",
-    channels: [
-      "job-finder:send-profile-copilot-message",
-      "job-finder:apply-profile-copilot-patch-group",
-      "job-finder:reject-profile-copilot-patch-group",
-      "job-finder:undo-profile-revision",
-    ],
+    channels: [],
     coverage: tools("edit_profile", "undo_change"),
   },
 
@@ -242,7 +221,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "discovery.open_listing",
     screen: "Find jobs",
     action: "Open the listing",
-    channels: ["job-finder:open-browser-session"],
+    channels: ["browser:command"],
     coverage: tools("browser_open", "open_in_app"),
   },
 
@@ -258,7 +237,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "shortlist.remove",
     screen: "Shortlisted",
     action: "Remove from shortlist",
-    channels: ["job-finder:remove-job-from-review"],
+    channels: ["jobs:run"],
     coverage: tools("move_jobs"),
   },
   // Store commands are shared with Shortlisted; their runtime tests exercise them over MCP.
@@ -416,17 +395,14 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "settings.ai_behavior",
     screen: "Settings",
     action: "AI behavior section",
-    channels: ["job-finder:update-ai-behavior"],
+    channels: ["jobs:run"],
     coverage: tools("update_ai_behavior"),
   },
   {
     id: "settings.applying",
     screen: "Settings",
     action: "Apply mode, template, font, letters",
-    channels: [
-      "job-finder:update-application-defaults",
-      "job-finder:save-settings",
-    ],
+    channels: ["jobs:run"],
     coverage: tools("update_apply_settings"),
   },
   {
@@ -434,36 +410,30 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Settings",
     action:
       "Keep sessions, search only, collapse the side menu with the assistant",
-    channels: ["job-finder:update-workspace-behavior"],
+    channels: ["jobs:run"],
     coverage: tools("update_workspace_behavior"),
   },
   {
     id: "settings.theme",
     screen: "Settings",
     action: "Appearance theme and text size",
-    channels: ["job-finder:update-appearance-theme"],
+    channels: ["jobs:run"],
     coverage: tools("set_appearance", "action_zoom"),
   },
   {
     id: "settings.diagnostics",
     screen: "Settings",
-    action: "Export diagnostics, performance, reset",
+    action: "Export diagnostics, reset",
     channels: [
       "job-finder:export-diagnostics",
-      "job-finder:get-performance-snapshot",
       "job-finder:reset-workspace",
       "job-finder:get-startup-reset-recovery",
-      "job-finder:get-startup-database-recovery",
-      "job-finder:dismiss-startup-database-recovery-notice",
     ],
     coverage: tools(
       "action_export_diagnostics",
-      "action_get_performance_snapshot",
       "action_reset_workspace",
       "action_reset_browser",
       "action_get_startup_reset_recovery",
-      "action_get_startup_database_recovery",
-      "action_dismiss_startup_database_recovery_notice",
     ),
   },
   {
@@ -480,10 +450,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Browser",
     action:
       "Look, read, click, type, choose, scroll, go back, upload, open popups",
-    channels: [
-      "job-finder:open-browser-session",
-      "job-finder:check-browser-session",
-    ],
+    channels: ["browser:command"],
     coverage: tools(
       "browser_observe",
       "browser_read_text",

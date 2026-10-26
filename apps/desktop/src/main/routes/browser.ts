@@ -10,8 +10,8 @@ import {
   DesktopBrowserViewportSchema,
 } from "@nestor/contracts";
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
-
-import { publishJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
+import { getJobStore } from "../services/job-store";
+import { scoreUnscoredJobs } from "../services/job-commands";
 
 export function registerBrowserRoutes(ipc: IpcMain): void {
   // The browser loads after the first window; each call waits for it here.
@@ -34,16 +34,35 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
     );
     if (!page)
       throw new Error("Wait for this page to finish loading, then try again.");
-    // The old workspace service loads on first use, not with main.
-    const { getJobFinderWorkspaceService } =
-      await import("../services/job-finder/workspace-service");
-    const service = await getJobFinderWorkspaceService();
-    const result = await service.addJobFromBrowserPage({
+    // Job Finder's AI loads on first use, not with main.
+    const [
+      { readJobFromBrowserPage },
+      { savePageJobs },
+      { startJobFinderRuntime },
+    ] = await Promise.all([
+      import("@nestor/job-finder"),
+      import("@nestor/job-finder/job-commands"),
+      import("../services/job-finder/runtime"),
+    ]);
+    const { aiClient } = await startJobFinderRuntime();
+    const posting = await readJobFromBrowserPage(aiClient, {
       html: page.value,
       pageUrl: page.url,
     });
-    publishJobFinderWorkspaceUpdate(event.sender);
-    return AddBrowserJobResultSchema.parse(result);
+    const [jobId] = savePageJobs(getJobStore(), {
+      postings: [posting],
+      pageUrl: page.url,
+    }).ids;
+    if (jobId === undefined)
+      throw new Error("This job could not be saved. Try again.");
+    // The job is saved now; its fit is judged in the background.
+    scoreUnscoredJobs();
+    return AddBrowserJobResultSchema.parse({
+      jobId: String(jobId),
+      title: posting.title,
+      company: posting.company,
+      planName: null,
+    });
   });
   ipc.handle("browser:get-state", async (event) =>
     (await owner(event)).getState(),

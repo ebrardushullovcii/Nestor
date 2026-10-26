@@ -135,10 +135,6 @@ const workspaceAliases = {
     currentDir,
     "../../packages/db/src/launch-context.ts",
   ),
-  "@nestor/db/workspace-commits": path.resolve(
-    currentDir,
-    "../../packages/db/src/workspace-commits.ts",
-  ),
   "@nestor/db": dbPath,
   "@nestor/live-assistant": liveAssistantPath,
   "@nestor/job-finder/job-commands": path.resolve(
@@ -193,14 +189,6 @@ const mainConfig = {
     rollupOptions: {
       input: {
         index: path.resolve(currentDir, "src/main/bootstrap.ts"),
-        "workspace-database-startup-worker": path.resolve(
-          currentDir,
-          "src/main/setup/workspace-database-startup-worker.ts",
-        ),
-        "workspace-query-reader": path.resolve(
-          currentDir,
-          "src/main/setup/workspace-query-reader.ts",
-        ),
         "discovery-cpu-worker": path.resolve(
           currentDir,
           "src/main/services/job-finder/discovery-cpu-worker.ts",

@@ -3,7 +3,7 @@ import type { PrintToPDFOptions } from "electron";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { JobFinderDocumentManager } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "./job-finder-document-manager";
-import { createApplyQueueDemoState } from "./job-finder-demo-state";
+import { createDocumentTestSeed } from "./document-test-seed.test-support";
 import { renderResumeTemplateHtml } from "../../shared/job-finder-resume-renderer";
 
 const mocks = vi.hoisted(() => ({
@@ -94,7 +94,7 @@ beforeEach(() => {
   mocks.load.mockResolvedValue(undefined);
   mocks.print.mockResolvedValue(Buffer.from("synthetic PDF"));
   mocks.count.mockResolvedValue(2);
-  const seed = createApplyQueueDemoState();
+  const seed = createDocumentTestSeed();
   input = {
     job: seed.savedJobs[0]!,
     profile: seed.profile,

@@ -13,7 +13,6 @@ import {
 } from "@nestor/contracts";
 import type {
   JobFinderRepository,
-  JobFinderRepositorySeed,
 } from "../repository-types";
 import type { JobStore } from "./job-store";
 import type { ProfileStore } from "./profile-store";
@@ -260,25 +259,5 @@ export function createProfileImportStore(
         }),
       ),
   };
-  const reset = (seed: JobFinderRepositorySeed) =>
-    store.transaction(() => {
-      for (const table of [
-        "profile_import_runs",
-        "profile_import_documents",
-        "profile_import_candidates",
-      ])
-        store.sql(`DELETE FROM ${table}`).run();
-      for (const row of seed.resumeImportRuns) writeRun(row);
-      for (const row of seed.resumeImportDocumentBundles) writeDocument(row);
-      for (const row of seed.resumeImportFieldCandidates) writeCandidate(row);
-    });
-  return {
-    methods,
-    reset,
-    state: () => ({
-      resumeImportRuns: runs(),
-      resumeImportDocumentBundles: documents(),
-      resumeImportFieldCandidates: candidates(),
-    }),
-  };
+  return { methods };
 }

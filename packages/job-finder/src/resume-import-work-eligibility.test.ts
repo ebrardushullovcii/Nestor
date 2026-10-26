@@ -7,12 +7,12 @@ import {
   createAiClient,
   createFreshStartSeedProfile,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 function bundle(fullText: string) {
   return createTestBundle({ fullText });
@@ -175,12 +175,12 @@ function importInput(seed: ReturnType<typeof createSeed>, text: string) {
 describe("importing a resume that states work eligibility", () => {
   test("fills empty eligibility answers so setup and applications never ask again", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(seed, ALEX_WITH_ELIGIBILITY),
     );
 
@@ -202,12 +202,12 @@ describe("importing a resume that states work eligibility", () => {
         requiresVisaSponsorship: true,
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(seed, ALEX_WITH_ELIGIBILITY),
     );
 
@@ -234,11 +234,11 @@ describe("confirming eligibility review items", () => {
         requiresVisaSponsorship: true,
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
-    const imported = await workspaceService.runResumeImport(
+    const imported = await profileWork.runResumeImport(
       importInput(seed, ALEX_WITH_ELIGIBILITY),
     );
     const items = imported.profileSetupState.reviewItems.filter(
@@ -254,7 +254,7 @@ describe("confirming eligibility review items", () => {
     expect(sponsorshipItem).toBeDefined();
     expect(countriesItem).toBeDefined();
 
-    let snapshot = await workspaceService.applyProfileSetupReviewAction(
+    let snapshot = await profileWork.applyProfileSetupReviewAction(
       sponsorshipItem!.id,
       "confirm",
     );
@@ -263,7 +263,7 @@ describe("confirming eligibility review items", () => {
     );
 
     // The person sets it back by hand.
-    snapshot = await workspaceService.saveProfile({
+    snapshot = await profileWork.saveProfile({
       ...snapshot.profile,
       workEligibility: {
         ...snapshot.profile.workEligibility,
@@ -272,7 +272,7 @@ describe("confirming eligibility review items", () => {
     });
     expect(snapshot.profile.workEligibility.requiresVisaSponsorship).toBe(true);
 
-    snapshot = await workspaceService.applyProfileSetupReviewAction(
+    snapshot = await profileWork.applyProfileSetupReviewAction(
       countriesItem!.id,
       "confirm",
     );
@@ -301,12 +301,12 @@ describe("where guided setup opens after an import", () => {
       "London, UK",
       "alex@example.com",
     ].join("\n");
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(seed, text),
     );
 
@@ -341,12 +341,12 @@ describe("where guided setup opens after an import", () => {
         },
       ],
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(
         seed,
         ["Alex Vanguard", "Senior systems designer", "alex@example.com"].join(
@@ -360,12 +360,12 @@ describe("where guided setup opens after an import", () => {
 
   test("leaves a finished setup alone", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(seed, ALEX_WITH_ELIGIBILITY),
     );
 
@@ -388,7 +388,7 @@ describe("education and certificates the model names in its own words", () => {
     ].join("\n");
     const seed = createSeed();
     seed.profile = { ...seed.profile, education: [], certifications: [] };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -460,7 +460,7 @@ describe("education and certificates the model names in its own words", () => {
       },
     });
 
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(seed, text),
     );
 
@@ -585,12 +585,12 @@ describe("importing again into a profile the person has edited", () => {
       "Certifications",
       "AWS Certified Solutions Architect - Associate (2022)",
     ].join("\n");
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_reimport",
@@ -666,14 +666,14 @@ describe("importing again after setup was finished", () => {
       "March 2021 - Present",
       "- Led the migration of the settlement service to Go microservices.",
     ].join("\n");
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: createAiClient(),
     });
-    const before = await workspaceService.getWorkspaceSnapshot();
+    const before = await profileWork.read();
     expect(before.profileSetupState.status).toBe("completed");
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_reimport_split",
@@ -736,7 +736,7 @@ describe("importing again after setup was finished", () => {
       "Backend Engineer",
       "2021-03 - 2023-12",
     ].join("\n");
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -781,7 +781,7 @@ describe("importing again after setup was finished", () => {
       },
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_reimport_new_role",

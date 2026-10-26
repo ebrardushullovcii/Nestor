@@ -7,9 +7,9 @@ import {
 } from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createWorkspaceServiceHarness,
+  createProfileServiceHarness,
   createSeed,
-} from "../workspace-service.test-support";
+} from "../profile-service.test-support";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
 import {
   toConversationTool,
@@ -21,7 +21,7 @@ import { collectPageJobsTool } from "./tools/browser-tools";
 import { recordInstructionTool } from "./tools/application-tools";
 
 function harness() {
-  const { workspaceService } = createWorkspaceServiceHarness();
+  const { service } = createProfileServiceHarness();
   const sets: AssistantResultSet[] = [];
   let serial = 0;
   const now = "2026-10-01T10:00:00.000Z";
@@ -36,7 +36,7 @@ function harness() {
       company: `Company ${name}`,
     });
   const extract = vi
-    .spyOn(workspaceService, "extractJobsFromPageText")
+    .spyOn(service, "extractJobsFromPageText")
     .mockResolvedValueOnce([posting("A")])
     .mockResolvedValueOnce([posting("B")]);
   const lease = {
@@ -86,10 +86,10 @@ function harness() {
     grants: { save: saveGrant },
   } as unknown as AssistantTurnSession;
   const context: AssistantToolContext = {
-    service: workspaceService,
+    service,
     session,
     ports: {
-      ...assistantTestReads(workspaceService),
+      ...assistantTestReads(service),
       browser: {},
       publishWorkspaceUpdate: vi.fn(),
     } as unknown as AssistantHostPorts,

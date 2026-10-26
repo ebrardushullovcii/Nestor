@@ -2,17 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ProfileWorkflowCheckSiteInputSchema,
   ProfileWorkflowCommandSchema,
-  type JobFinderWorkspaceSnapshot,
+  type SourceDebugRunRecord,
 } from "@nestor/contracts";
 
 vi.mock("../services/job-store", () => ({ getJobStore: vi.fn() }));
 const { describeResumeImport, describeSiteCheck } =
   await import("./profile-workflow");
 
-type Runs = Pick<
-  JobFinderWorkspaceSnapshot,
-  "activeSourceDebugRun" | "recentSourceDebugRuns"
->;
 const run = (state: string, extra: object = {}) =>
   ({
     id: `run_${state}`,
@@ -22,7 +18,7 @@ const run = (state: string, extra: object = {}) =>
     finalSummary: null,
     manualPrerequisiteSummary: null,
     ...extra,
-  }) as unknown as Runs["recentSourceDebugRuns"][number];
+  }) as unknown as SourceDebugRunRecord;
 
 describe("profile workflow commands", () => {
   it("accepts only the listed commands, each with its own input", () => {
@@ -52,40 +48,21 @@ describe("profile workflow commands", () => {
 
 describe("describeSiteCheck", () => {
   it.each([
-    [[], "The site check finished without saving reusable guidance."],
-    [[run("idle")], "Checking this site now."],
-    [[run("running")], "Still checking this site."],
+    [null, "The site check finished without saving reusable guidance."],
+    [run("idle"), "Checking this site now."],
+    [run("running"), "Still checking this site."],
     [
-      [run("failed", { finalSummary: "Blocked by a sign-in." })],
+      run("paused_manual", { manualPrerequisiteSummary: "Sign in first." }),
+      "Sign in first.",
+    ],
+    [
+      run("failed", { finalSummary: "Blocked by a sign-in." }),
       "Blocked by a sign-in.",
     ],
-    [
-      [run("cancelled")],
-      "The site check was cancelled before it could finish.",
-    ],
-    [
-      [run("completed", { finalSummary: "Saved guidance." })],
-      "Saved guidance.",
-    ],
-  ])("%#", (runs, sentence) => {
-    expect(
-      describeSiteCheck(
-        { activeSourceDebugRun: null, recentSourceDebugRuns: runs },
-        "7",
-      ),
-    ).toBe(sentence);
-  });
-
-  it("reads only the checked site's runs", () => {
-    expect(
-      describeSiteCheck(
-        {
-          activeSourceDebugRun: null,
-          recentSourceDebugRuns: [run("failed", { targetId: "8" })],
-        },
-        "7",
-      ),
-    ).toBe("The site check finished without saving reusable guidance.");
+    [run("cancelled"), "The site check was cancelled before it could finish."],
+    [run("completed", { finalSummary: "Saved guidance." }), "Saved guidance."],
+  ])("%#", (checked, sentence) => {
+    expect(describeSiteCheck(checked)).toBe(sentence);
   });
 });
 
@@ -94,7 +71,7 @@ describe("describeResumeImport", () => {
     ({
       profile: { baseResume: { fileName: "cv.pdf", extractionStatus } },
       latestResumeImportRun: errorMessage ? { errorMessage } : null,
-    }) as unknown as JobFinderWorkspaceSnapshot;
+    }) as unknown as Parameters<typeof describeResumeImport>[0];
 
   it("only a ready import claims extracted details", () => {
     expect(describeResumeImport(imported("ready"))).toContain(

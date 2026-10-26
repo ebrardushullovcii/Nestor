@@ -1,7 +1,7 @@
 import { approveOriginalResumesForTests } from "@nestor/db/job-store";
 import { describe, expect, it } from "vitest";
 
-import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { createProfileServiceHarness } from "../../profile-service.test-support";
 import { assistantTestReads } from "../store-reads.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
@@ -19,7 +19,7 @@ const portsFor = (service: object) =>
 
 describe("settings and application standing the assistant reports", () => {
   it("switches the app to dark mode itself", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const session = {
       assertCurrent: () => undefined,
       recordChange: () =>
@@ -30,16 +30,16 @@ describe("settings and application standing the assistant reports", () => {
     } as unknown as AssistantTurnSession;
     const result = await setAppearanceTool.execute(
       { theme: "dark" },
-      { service: workspaceService, session, ports: portsFor(workspaceService) },
+      { service, session, ports: portsFor(service) },
     );
     expect(result.summary).toBe("Appearance is now dark.");
     expect(
-      (await workspaceService.getWorkspaceSnapshot()).settings.appearanceTheme,
+      (await service.read()).settings.appearanceTheme,
     ).toBe("dark");
   });
 
   it("turns off folding the side menu while the assistant is open", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const summaries: string[] = [];
     const session = {
       assertCurrent: () => undefined,
@@ -58,9 +58,9 @@ describe("settings and application standing the assistant reports", () => {
       updateWorkspaceBehaviorTool.input.parse({
         collapseSideMenuWithAssistant: false,
       }),
-      { service: workspaceService, session, ports: portsFor(workspaceService) },
+      { service, session, ports: portsFor(service) },
     );
-    const settings = (await workspaceService.getWorkspaceSnapshot()).settings;
+    const settings = (await service.read()).settings;
     expect(settings.collapseSideMenuWithAssistant).toBe(false);
     expect(settings.keepSessionAlive).toBeDefined();
     expect(summaries).toEqual([
@@ -69,8 +69,8 @@ describe("settings and application standing the assistant reports", () => {
   });
 
   it("says applications already filling keep going when work is paused", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const reads = assistantTestReads(workspaceService);
+    const { service } = createProfileServiceHarness();
+    const reads = assistantTestReads(service);
     const { ids } = reads.store.saveFoundJobs({
       searchId: null,
       jobs: [
@@ -105,9 +105,9 @@ describe("settings and application standing the assistant reports", () => {
     const paused = await pauseActivityTool.execute(
       { paused: true, finishCurrent: false },
       {
-        service: workspaceService,
+        service,
         session,
-        ports: portsFor(workspaceService),
+        ports: portsFor(service),
       },
     );
     expect(paused.summary).toContain(

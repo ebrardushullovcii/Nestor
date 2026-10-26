@@ -19,7 +19,8 @@ import {
 
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
-import { onJobFinderWorkspaceUpdate } from "../job-finder/workspace-updates";
+import { onJobFinderChange } from "../job-finder/changes";
+import { getJobStore } from "../job-store";
 import { createAssistantWorkspaceCommands } from "./workspace-commands";
 import { createAssistantHostPorts } from "./assistant-ports";
 
@@ -127,9 +128,16 @@ export function getAssistantHost(): Promise<AssistantSessionHost> {
       stallAfterMs: 25_000,
     });
     unsubscribeWorkspaceUpdates?.();
-    unsubscribeWorkspaceUpdates = onJobFinderWorkspaceUpdate(() =>
+    const stopProfileChanges = onJobFinderChange(() =>
       host.notifyWorkspaceChanged(),
     );
+    const stopStoreChanges = getJobStore().onChange(() =>
+      host.notifyWorkspaceChanged(),
+    );
+    unsubscribeWorkspaceUpdates = () => {
+      stopProfileChanges();
+      stopStoreChanges();
+    };
     await host.recover().catch((error: unknown) => {
       console.warn("[assistant] Recovery after restart failed", error);
     });

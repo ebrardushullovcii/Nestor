@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { createProfileServiceHarness } from "../../profile-service.test-support";
 import {
   ASSISTANT_SYSTEM_PROMPT,
   buildContextBlock,
@@ -11,8 +11,8 @@ import { listDocumentsTool } from "./profile-tools";
 
 describe("what the model is told (R1, R4, R5)", () => {
   it("knows attached files are used for applications", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
+    const { service } = createProfileServiceHarness();
+    const snapshot = await service.read();
     const block = buildContextBlock({
       context: {
         screen: "settings",
@@ -48,9 +48,9 @@ describe("what the model is told (R1, R4, R5)", () => {
   });
 
   it("does not ask for an extra proposal on every reply by default", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const digest = buildProfileDigest(
-      await workspaceService.getWorkspaceSnapshot(),
+      await service.read(),
     );
     expect(digest).not.toContain("add exactly one closely related improvement");
     expect(digest).toContain("Never add one during profile setup");
@@ -58,7 +58,7 @@ describe("what the model is told (R1, R4, R5)", () => {
   });
 
   it("names screens as the app shows them", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const block = buildContextBlock({
       context: {
         screen: "review_queue",
@@ -74,7 +74,7 @@ describe("what the model is told (R1, R4, R5)", () => {
         capturedAt: "2026-09-28T00:00:00.000Z",
       } as never,
       resultSets: [],
-      snapshot: await workspaceService.getWorkspaceSnapshot(),
+      snapshot: await service.read(),
       plan: null,
       grants: [],
       pendingQuestions: [],

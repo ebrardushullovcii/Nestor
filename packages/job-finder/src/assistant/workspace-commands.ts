@@ -1,8 +1,8 @@
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
+import type { ProfileService } from "../profile-service";
 
-/** Remaining mutations and scoped import reads; snapshots are deliberately unavailable. */
+/** The profile work the assistant runs; each answers with what it did. */
 export type AssistantWorkspaceCommands = Pick<
-  JobFinderWorkspaceService,
+  ProfileService,
   | "acceptSourceInstructionDraft"
   | "analyzeProfileFromResume"
   | "applyAssistantProfileOperations"
@@ -15,9 +15,7 @@ export type AssistantWorkspaceCommands = Pick<
   | "getSourceDebugRun"
   | "getSourceDebugRunDetails"
   | "listSourceDebugRuns"
-  | "queueJobForReview"
   | "rejectProfileCopilotPatchGroup"
-  | "removeJobFromReview"
   | "runSourceDebug"
   | "saveProfile"
   | "saveProfileAndSearchPreferences"
@@ -27,7 +25,6 @@ export type AssistantWorkspaceCommands = Pick<
   | "saveSourceInstructionArtifact"
   | "setActivityControl"
   | "undoAssistantProfileChange"
-  | "undoAssistantResumeChange"
   | "undoAssistantSettingsChange"
   | "undoProfileRevision"
   | "updateAiBehavior"

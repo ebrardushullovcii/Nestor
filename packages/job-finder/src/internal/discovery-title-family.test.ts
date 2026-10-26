@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MatchAssessment, SavedJob } from "@nestor/contracts";
-import { createSavedJob } from "../workspace-service.test-fixtures";
+import { createSavedJob } from "../test-fixtures";
 import { getDiscoveryResultGroup } from "../discovery-result-bands";
 import {
   isTargetTitleFamily,

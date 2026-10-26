@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { access, copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  JobFinderWorkspaceSnapshotSchema,
   canRetrySavedResumeImport,
+  type CandidateProfile,
   type ResumeImportProgressEvent,
   type ResumeImportRun,
   type ResumeSourceDocument,
@@ -14,7 +14,7 @@ import {
   getPdfPageCount,
 } from "../../adapters/resume-document";
 import { generateResumeVisionImages } from "../../adapters/resume-vision-images";
-import { getJobFinderWorkspaceService } from "./workspace-service";
+import { startJobFinderRuntime } from "./runtime";
 import { getJobFinderDocumentsDirectory } from "./paths";
 
 export interface ImportResumeFromSourcePathOptions {
@@ -44,6 +44,12 @@ export function resolveResumeWorkingCopyPath(input: {
     return null;
   }
   return path.join(input.documentsDirectory, `${timestamp}_${fileName}`);
+}
+
+/** The profile an import left, with the run that wrote it. */
+export interface ImportedResume {
+  profile: CandidateProfile;
+  latestResumeImportRun: ResumeImportRun | null;
 }
 
 export class ResumeImportRetryUnavailableError extends Error {}
@@ -78,7 +84,7 @@ export async function assertResumeFileOpens(
 export async function retryInterruptedResumeImport(
   latestRun: ResumeImportRun | null,
   options: Omit<ImportResumeFromSourcePathOptions, "fileName"> = {},
-) {
+): Promise<ImportedResume> {
   if (!latestRun || !canRetrySavedResumeImport(latestRun)) {
     throw new ResumeImportRetryUnavailableError(
       "There is no failed import to try again. Choose your resume file to import it.",
@@ -115,7 +121,7 @@ export function isDesktopResumeImportActive(): boolean {
 export async function importResumeFromSourcePath(
   sourcePath: string,
   options: ImportResumeFromSourcePathOptions = {},
-) {
+): Promise<ImportedResume> {
   activeDesktopImports += 1;
   try {
     return await importResumeFile(sourcePath, options);
@@ -127,9 +133,13 @@ export async function importResumeFromSourcePath(
 async function importResumeFile(
   sourcePath: string,
   options: ImportResumeFromSourcePathOptions,
-) {
+): Promise<ImportedResume> {
   const targetDirectory = getJobFinderDocumentsDirectory();
-  const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
+  const { profileService, repository } = await startJobFinderRuntime();
+  const readImported = async (): Promise<ImportedResume> => ({
+    profile: await repository.getProfile(),
+    latestResumeImportRun: await repository.getLatestResumeImportRun(),
+  });
   const useVision = options.useVision ?? true;
   // The four stages are the ones the contract names, in the order they run, so
   // the renderer can show "step 2 of 4" instead of one label that sits frozen
@@ -258,16 +268,19 @@ async function importResumeFile(
       ? "Reading your resume and filling in your profile. Anything that would replace details you already saved waits for your review."
       : "Checking what can be recovered from this file.",
   );
-  const snapshot = await jobFinderWorkspaceService
+  const snapshot = await profileService
     .runResumeImport({
       baseResume,
       ...(options.signal ? { signal: options.signal } : {}),
       documentBundle: extractedResume.bundle,
       importWarnings: [...extractedResume.warnings, ...visionWarnings],
-      visionArtifact: generatedVisionArtifact.artifact,
+      ...(generatedVisionArtifact.artifact
+        ? { visionArtifact: generatedVisionArtifact.artifact }
+        : {}),
     })
+    .then(readImported)
     .catch(async (error: unknown) => {
-      const saved = await jobFinderWorkspaceService.getWorkspaceSnapshot();
+      const saved = await readImported();
       if (
         saved.profile.baseResume.id === resumeId &&
         saved.latestResumeImportRun?.sourceResumeId === resumeId &&
@@ -286,5 +299,5 @@ async function importResumeFile(
         ? "Saving the imported resume and review items."
         : "Saving the import issue and recovery guidance.",
   );
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  return snapshot;
 }

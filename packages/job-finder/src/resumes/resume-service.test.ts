@@ -14,7 +14,7 @@ import {
 } from "@nestor/db/job-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { createResumeService, type ResumeServiceDeps } from "./resume-service";
 import { writeResume } from "./write-resume";
 

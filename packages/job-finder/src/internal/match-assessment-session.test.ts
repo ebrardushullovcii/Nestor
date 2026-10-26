@@ -4,7 +4,7 @@ import {
   type JobPosting,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import {
   MATCH_ASSESSMENT_POSTING_INPUT_FIELDS,
   type MatchAssessmentPostingInput,

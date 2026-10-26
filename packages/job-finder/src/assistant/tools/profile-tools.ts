@@ -1085,14 +1085,6 @@ export async function undoReceipt(
         conflicts.push(...receipt.fieldLabels);
       else throw error;
     }
-  } else if (receipt.target === "resume_draft") {
-    const result = await service.undoAssistantResumeChange({
-      jobId: receipt.targetId ?? "",
-      entries: receipt.entries,
-      reason: `Undid assistant change: ${receipt.summary}`,
-    });
-    undone = result.undoneLabels;
-    conflicts = result.conflictLabels;
   } else {
     const profileEntries = strip("profile");
     const preferenceEntries = strip("search_preferences");

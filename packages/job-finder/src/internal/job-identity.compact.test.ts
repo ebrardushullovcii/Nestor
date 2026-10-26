@@ -4,7 +4,7 @@ import {
   readPreparedSavedJobIdentity,
   writeDiscoveryPreparation,
 } from "@nestor/contracts";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { toSightingIdentityInput } from "./matching";
 import {

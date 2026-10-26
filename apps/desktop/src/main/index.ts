@@ -13,7 +13,6 @@ import {
 } from "./setup/desktop-startup";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
-import { createWorkspaceQueryHost } from "./setup/workspace-query-host";
 import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-instance";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
@@ -107,9 +106,6 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
-const workspaceQueryHost = hasSingleInstanceLock
-  ? createWorkspaceQueryHost()
-  : null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -172,15 +168,6 @@ function loadJobFinderRoutes(): Promise<void> {
   );
 }
 
-function loadJobFinderBootstrapRoutes(): Promise<void> {
-  return import("./setup/register-job-finder-bootstrap-routes").then(
-    ({ registerJobFinderBootstrapDesktopRoutes }) => {
-      registerJobFinderBootstrapDesktopRoutes(ipcMain);
-      recordStartupDiagnostic("Job Finder bootstrap routes registered");
-    },
-  );
-}
-
 function loadJobFinderAssetRoutes(): Promise<void> {
   return import("./setup/register-job-finder-asset-routes").then(
     ({ registerJobFinderAssetDesktopRoutes }) => {
@@ -202,7 +189,6 @@ function loadLiveAssistantRoutes(): Promise<void> {
 function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
-    workspaceQueryHost?.attach(window);
     attachEmbeddedBrowserWhenLoaded(window);
     registerFinishedWorkWindow(window);
     return window;
@@ -219,17 +205,9 @@ function createMainWindowSafely(): BrowserWindow | null {
 // waits on the readiness channel before invoking any deferred feature route.
 // Loading begins on the first feature call, after the renderer has had an
 // opportunity to paint its honest loading state, without exposing an IPC race.
-let jobFinderBootstrapRoutesPromise: Promise<void> | null = null;
 let jobFinderRoutesPromise: Promise<void> | null = null;
 let jobFinderAssetRoutesPromise: Promise<void> | null = null;
 let liveAssistantRoutesPromise: Promise<void> | null = null;
-
-function ensureJobFinderBootstrapRoutesReady(): Promise<void> {
-  jobFinderBootstrapRoutesPromise ??= hasSingleInstanceLock
-    ? loadJobFinderBootstrapRoutes()
-    : Promise.resolve();
-  return jobFinderBootstrapRoutesPromise;
-}
 
 function ensureJobFinderRoutesReady(): Promise<void> {
   jobFinderRoutesPromise ??= hasSingleInstanceLock
@@ -255,7 +233,6 @@ function ensureLiveAssistantRoutesReady(): Promise<void> {
 if (hasSingleInstanceLock) {
   registerCoreDesktopRoutes(
     ipcMain,
-    ensureJobFinderBootstrapRoutesReady,
     ensureJobFinderRoutesReady,
     ensureJobFinderAssetRoutesReady,
     ensureLiveAssistantRoutesReady,
@@ -347,13 +324,13 @@ async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
     return;
   }
 
-  const { shutdownJobFinderWorkspaceService } = await jobFinderServicesPromise;
+  const { shutdownJobFinderRuntime } = await jobFinderServicesPromise;
   // The assistant's running turns are marked interrupted before the
-  // workspace they work on closes.
+  // work they started stops.
   const { shutdownAssistantHost } =
     await import("./services/assistant/assistant-service");
   await shutdownAssistantHost();
-  await shutdownJobFinderWorkspaceService();
+  await shutdownJobFinderRuntime();
 }
 
 async function shutdownLiveAssistantIfLoaded(): Promise<void> {
@@ -405,19 +382,15 @@ app.on("before-quit", (event) => {
   // Actual service shutdown begins: the deferred-init latch is permanent
   // from here on, so no cancel or late release can resurrect it mid-teardown.
   deferredBackgroundInit.commitQuitTeardown();
-  // The read connection must release the WAL before the writer closes and
-  // records its clean-close fingerprint.
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
     async () => {
-      await workspaceQueryHost?.close();
-      // The assistant or scheduler may itself be waiting for the opening view.
+      // The assistant may itself be waiting for Job Finder to start.
       // Cancel that wait before awaiting either service's shutdown.
       if (jobFinderServicesPromise) {
-        const { beginJobFinderWorkspaceShutdown } =
-          await jobFinderServicesPromise;
-        beginJobFinderWorkspaceShutdown();
+        const { beginJobFinderShutdown } = await jobFinderServicesPromise;
+        beginJobFinderShutdown();
       }
       await Promise.all([
         shutdownJobFinderServicesIfLoaded(),
@@ -433,7 +406,7 @@ app.on("before-quit", (event) => {
   ).then((result) => {
     if (result.status === "failed") {
       console.warn(
-        "[Desktop] Failed to shut down Job Finder workspace service before quit.",
+        "[Desktop] Failed to shut down Job Finder before quit.",
         result.error,
       );
     }

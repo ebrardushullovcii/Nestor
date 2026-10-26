@@ -5,7 +5,7 @@ import {
   type MatchAssessment,
   type SavedJob,
 } from "@nestor/contracts";
-import { createSavedJob } from "../workspace-service.test-fixtures";
+import { createSavedJob } from "../test-fixtures";
 import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { toSightingIdentityInput } from "./matching";
 import {

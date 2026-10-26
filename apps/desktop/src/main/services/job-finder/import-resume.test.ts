@@ -1,11 +1,10 @@
 import {
   CandidateProfileSchema,
-  JobFinderWorkspaceSnapshotSchema,
-  JobSearchCampaignSchema,
   ResumeImportRunSchema,
   ResumeImportVisionArtifactSchema,
-  getDefaultCampaignConfiguration,
+  createFreshStartCandidateProfile,
   type ResumeDocumentBundle,
+  type ResumeImportRun,
   type ResumeImportProgressEvent,
   type ResumeSourceDocument,
 } from "@nestor/contracts";
@@ -14,7 +13,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 
 const {
   mockMkdir,
@@ -22,7 +20,7 @@ const {
   mockReadFile,
   mockExtractResumeDocument,
   mockGenerateResumeVisionImages,
-  mockGetJobFinderWorkspaceService,
+  mockStartJobFinderRuntime,
   mockGetJobFinderDocumentsDirectory,
   mockGetPdfPageCount,
 } = vi.hoisted(() => ({
@@ -31,7 +29,7 @@ const {
   mockReadFile: vi.fn(() => Promise.resolve(Buffer.from("saved resume bytes"))),
   mockExtractResumeDocument: vi.fn(),
   mockGenerateResumeVisionImages: vi.fn(),
-  mockGetJobFinderWorkspaceService: vi.fn(),
+  mockStartJobFinderRuntime: vi.fn(),
   mockGetJobFinderDocumentsDirectory: vi.fn(),
   mockGetPdfPageCount: vi.fn(() => Promise.resolve(1)),
 }));
@@ -58,8 +56,8 @@ vi.mock("../../adapters/resume-vision-images", () => ({
   generateResumeVisionImages: mockGenerateResumeVisionImages,
 }));
 
-vi.mock("./workspace-service", () => ({
-  getJobFinderWorkspaceService: mockGetJobFinderWorkspaceService,
+vi.mock("./runtime", () => ({
+  startJobFinderRuntime: mockStartJobFinderRuntime,
 }));
 
 vi.mock("./paths", () => ({
@@ -151,106 +149,49 @@ function createTestBundle(fullText: string): ResumeDocumentBundle {
   };
 }
 
-function createSnapshot(baseResume: ResumeSourceDocument) {
-  const state = createEmptyJobFinderRepositoryState();
-  const generatedAt = "2026-04-10T00:00:00.000Z";
-  const campaign = JobSearchCampaignSchema.parse({
-    id: "campaign-test",
-    name: "Test campaign",
-    mode: "precision",
-    status: "active",
-    createdAt: generatedAt,
-    updatedAt: generatedAt,
-    searchPreferences: state.searchPreferences,
-    sourceTargetIds: [],
-    ...getDefaultCampaignConfiguration("precision"),
-    progress: { lastUpdatedAt: generatedAt },
-  });
-  return JobFinderWorkspaceSnapshotSchema.parse({
-    module: "job-finder",
-    generatedAt,
-    agentProvider: {
-      kind: "deterministic",
-      role: "chat",
-      ready: true,
-      label: "Test AI",
-      model: null,
-      baseUrl: null,
-      modelContextWindowTokens: null,
-      reservedHeadroomTokens: null,
-      requestTimeoutMs: null,
-      detail: "Test AI",
-    },
-    visionProvider: null,
-    availableResumeTemplates: [],
+interface ImportedState {
+  profile: ReturnType<typeof createFreshStartCandidateProfile>;
+  latestResumeImportRun: ResumeImportRun | null;
+}
+
+function createSnapshot(baseResume: ResumeSourceDocument): ImportedState {
+  return {
     profile: CandidateProfileSchema.parse({
-      ...state.profile,
+      ...createFreshStartCandidateProfile(),
       baseResume,
     }),
-    searchPreferences: state.searchPreferences,
-    profileSetupState: state.profileSetupState,
-    browserSession: {
-      source: "target_site",
-      status: "ready",
-      driver: "catalog_seed",
-      label: "Ready",
-      detail: "Ready",
-      lastCheckedAt: "2026-04-10T00:00:00.000Z",
-    },
-    sourceAccessPrompts: [],
-    discoverySessions: [],
-    activeSourceDebugRun: null,
-    recentSourceDebugRuns: [],
-    discoveryJobs: [],
-    selectedDiscoveryJobId: null,
-    reviewQueue: [],
-    selectedReviewJobId: null,
-    tailoredAssets: [],
-    resumeDrafts: [],
-    resumeExportArtifacts: [],
-    resumeResearchArtifacts: [],
-    applyRuns: [],
-    applyJobResults: [],
-    applicationRecords: [],
-    applicationAttempts: [],
-    sourceInstructionArtifacts: [],
     latestResumeImportRun: null,
-    latestResumeImportReviewCandidates: [],
-    profileCopilotMessages: [],
-    profileRevisions: [],
-    selectedApplyRunId: null,
-    selectedApplicationRecordId: null,
-    campaigns: [campaign],
-    activeCampaignId: campaign.id,
-    dashboard: {
-      generatedAt,
-      activeCampaignId: campaign.id,
-      activeCampaignCount: 1,
-      jobsFoundToday: 0,
-      jobsAwaitingReview: 0,
-      applicationsReadyForApproval: 0,
-      applicationsAppliedToday: 0,
-      applicationsAppliedThisWeek: 0,
-      needsYouCount: 0,
-      upcomingInterviews: 0,
-      upcomingFollowUps: 0,
-      responseRate: null,
-      interviewRate: null,
-      sourceHealth: {
-        healthy: 0,
-        needsAttention: 0,
-        running: 0,
-        total: 0,
-      },
-      backgroundOperationCount: 0,
-      recommendedNextAction: {
-        label: "Find jobs",
-        detail: "Start the test campaign.",
-        route: "/job-finder/discovery",
+  };
+}
+
+/**
+ * The runtime an import runs on: what the fake import resolves with is what
+ * the store holds afterwards; a failed import leaves `saved()`.
+ */
+function runtimeFor(service: {
+  runResumeImport: (input: {
+    baseResume: ResumeSourceDocument;
+  }) => Promise<ImportedState>;
+  saved?: () => Promise<ImportedState>;
+}) {
+  let state: ImportedState | null = null;
+  return {
+    profileService: {
+      runResumeImport: async (input: { baseResume: ResumeSourceDocument }) => {
+        try {
+          state = await service.runResumeImport(input);
+        } catch (error) {
+          state = (await service.saved?.()) ?? null;
+          throw error;
+        }
       },
     },
-    settings: state.settings,
-  });
+    repository: {
+      getProfile: () => Promise.resolve(state!.profile),
+      getLatestResumeImportRun: () =>
+        Promise.resolve(state?.latestResumeImportRun ?? null),
+    },
+  };
 }
 
 async function createTempResumeFile(fileName = "resume.pdf") {
@@ -277,8 +218,6 @@ describe("importResumeFromSourcePath", () => {
         ({ baseResume }: { baseResume: ResumeSourceDocument }) =>
           Promise.resolve(createSnapshot(baseResume)),
       ),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
     const progressEvents: ResumeImportProgressEvent[] = [];
     const onProgress = (event: ResumeImportProgressEvent) => {
@@ -289,7 +228,7 @@ describe("importResumeFromSourcePath", () => {
     mockMkdir.mockResolvedValue(undefined);
     mockCopyFile.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(targetDirectory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockExtractResumeDocument.mockResolvedValue({
       textContent: bundle.fullText,
       bundle,
@@ -304,9 +243,9 @@ describe("importResumeFromSourcePath", () => {
 
       expect(isDesktopResumeImportActive()).toBe(false);
       expect(mockGenerateResumeVisionImages).not.toHaveBeenCalled();
-      expect(workspaceService.runResumeImport).toHaveBeenCalledWith(
-        expect.objectContaining({ visionArtifact: null }),
-      );
+      expect(
+        workspaceService.runResumeImport.mock.calls[0]?.[0],
+      ).not.toHaveProperty("visionArtifact");
       const importInput = workspaceService.runResumeImport.mock.calls[0]?.[0];
       expect(importInput?.baseResume.sha256).toBe(
         "13d86dad73044606649fdd2bdc61f0ba7373885639a4c9589afd0da2ed82bbcd",
@@ -337,15 +276,13 @@ describe("importResumeFromSourcePath", () => {
         ({ baseResume }: { baseResume: ResumeSourceDocument }) =>
           Promise.resolve(createSnapshot(baseResume)),
       ),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
     const progressEvents: ResumeImportProgressEvent[] = [];
 
     mockMkdir.mockResolvedValue(undefined);
     mockCopyFile.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(targetDirectory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockExtractResumeDocument.mockResolvedValue({
       textContent: null,
       bundle: extractedBundle,
@@ -358,7 +295,6 @@ describe("importResumeFromSourcePath", () => {
         onProgress: (event) => progressEvents.push(event),
       });
 
-      expect(workspaceService.saveProfile).not.toHaveBeenCalled();
       expect(workspaceService.runResumeImport).toHaveBeenCalledTimes(1);
       const [resumeImportInput] =
         workspaceService.runResumeImport.mock.calls[0] ?? [];
@@ -406,14 +342,12 @@ describe("importResumeFromSourcePath", () => {
         ({ baseResume }: { baseResume: ResumeSourceDocument }) =>
           Promise.resolve(createSnapshot(baseResume)),
       ),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
 
     mockMkdir.mockResolvedValue(undefined);
     mockCopyFile.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(targetDirectory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockExtractResumeDocument.mockResolvedValue({
       textContent: bundle.fullText,
       bundle,
@@ -424,9 +358,9 @@ describe("importResumeFromSourcePath", () => {
       await importResumeFromSourcePath(filePath);
 
       expect(mockGenerateResumeVisionImages).not.toHaveBeenCalled();
-      expect(workspaceService.runResumeImport).toHaveBeenCalledWith(
-        expect.objectContaining({ visionArtifact: null }),
-      );
+      expect(
+        workspaceService.runResumeImport.mock.calls[0]?.[0],
+      ).not.toHaveProperty("visionArtifact");
       const importInput = workspaceService.runResumeImport.mock.calls[0]?.[0];
       expect(importInput?.baseResume.sha256).toBe(
         "13d86dad73044606649fdd2bdc61f0ba7373885639a4c9589afd0da2ed82bbcd",
@@ -446,8 +380,6 @@ describe("importResumeFromSourcePath", () => {
         ({ baseResume }: { baseResume: ResumeSourceDocument }) =>
           Promise.resolve(createSnapshot(baseResume)),
       ),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
     const visionArtifact = ResumeImportVisionArtifactSchema.parse({
       id: "vision_artifact_test",
@@ -463,7 +395,7 @@ describe("importResumeFromSourcePath", () => {
     mockMkdir.mockResolvedValue(undefined);
     mockCopyFile.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(targetDirectory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockExtractResumeDocument.mockResolvedValue({
       textContent: bundle.fullText,
       bundle,
@@ -495,12 +427,10 @@ describe("a damaged PDF", () => {
       await createTempResumeFile("broken-resume.pdf");
     const workspaceService = {
       runResumeImport: vi.fn(),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
     mockMkdir.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(directory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockGetPdfPageCount.mockRejectedValueOnce(
       new Error("Invalid PDF structure"),
     );
@@ -569,13 +499,11 @@ describe("importing a stopped import's file again", () => {
         ({ baseResume }: { baseResume: ResumeSourceDocument }) =>
           Promise.resolve(createSnapshot(baseResume)),
       ),
-      getWorkspaceSnapshot: vi.fn(),
-      saveProfile: vi.fn(),
     };
     mockMkdir.mockResolvedValue(undefined);
     mockCopyFile.mockResolvedValue(undefined);
     mockGetJobFinderDocumentsDirectory.mockReturnValue(documentsDirectory);
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
+    mockStartJobFinderRuntime.mockResolvedValue(runtimeFor(workspaceService));
     mockExtractResumeDocument.mockResolvedValue({
       textContent: bundle.fullText,
       bundle,
@@ -671,27 +599,29 @@ test("R3-041 returns the saved failed import so retry is visible immediately", a
   });
   mockMkdir.mockResolvedValue(undefined);
   mockCopyFile.mockResolvedValue(undefined);
-  mockGetJobFinderWorkspaceService.mockResolvedValue({
-    runResumeImport: vi.fn(
-      ({ baseResume }: { baseResume: ResumeSourceDocument }) => {
-        failedSnapshot = createSnapshot({
-          ...baseResume,
-          extractionStatus: "failed",
-        });
-        failedSnapshot.latestResumeImportRun = ResumeImportRunSchema.parse({
-          id: "outage",
-          sourceResumeId: baseResume.id,
-          sourceResumeFileName: baseResume.fileName,
-          trigger: "import",
-          status: "failed",
-          startedAt: baseResume.uploadedAt,
-          errorMessage: "The AI connection failed. Your file is saved.",
-        });
-        return Promise.reject(new Error("The AI connection failed."));
-      },
-    ),
-    getWorkspaceSnapshot: () => Promise.resolve(failedSnapshot),
-  });
+  mockStartJobFinderRuntime.mockResolvedValue(
+    runtimeFor({
+      runResumeImport: vi.fn(
+        ({ baseResume }: { baseResume: ResumeSourceDocument }) => {
+          failedSnapshot = createSnapshot({
+            ...baseResume,
+            extractionStatus: "failed",
+          });
+          failedSnapshot.latestResumeImportRun = ResumeImportRunSchema.parse({
+            id: "outage",
+            sourceResumeId: baseResume.id,
+            sourceResumeFileName: baseResume.fileName,
+            trigger: "import",
+            status: "failed",
+            startedAt: baseResume.uploadedAt,
+            errorMessage: "The AI connection failed. Your file is saved.",
+          });
+          return Promise.reject(new Error("The AI connection failed."));
+        },
+      ),
+      saved: () => Promise.resolve(failedSnapshot),
+    }),
+  );
   try {
     const result = await importResumeFromSourcePath(filePath, {
       useVision: false,

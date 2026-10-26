@@ -10,11 +10,8 @@ vi.mock("electron", () => ({
   shell: { openPath: vi.fn().mockResolvedValue("") },
 }));
 
-vi.mock("../services/job-finder/workspace-service", () => ({
-  getJobFinderWorkspaceService: vi.fn(),
-}));
-vi.mock("../services/job-finder/create-workspace-service", () => ({
-  getJobFinderRepositoryForWorkspaceService: vi.fn(),
+vi.mock("../services/job-finder/runtime", () => ({
+  startJobFinderRuntime: vi.fn(),
 }));
 vi.mock("../services/job-finder/candidate-asset-library-instance", () => ({
   getCandidateAssetLibrary: vi.fn(),
@@ -24,12 +21,11 @@ import { shell } from "electron";
 import {
   ResumeSourceDocumentSchema,
   CandidateAssetListResultSchema,
+  createFreshStartCandidateProfile,
 } from "@nestor/contracts";
 import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
-import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";
-import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
-import { createEmptyJobFinderRepositoryState } from "../adapters/job-finder-initial-state";
+import { startJobFinderRuntime } from "../services/job-finder/runtime";
 import { registerCandidateAssetRouteHandlers } from "./candidate-assets";
 
 type RouteHandler = (
@@ -162,26 +158,14 @@ describe("candidate asset IPC routes", () => {
         handlers.set(channel, handler),
       ),
     } as unknown as IpcMain;
-    const getWorkspaceSnapshot = vi.fn(() => {
-      throw new Error("Canonical read is forbidden for the original resume");
-    });
-    const getWorkspaceProjection = vi.fn();
-    const service = { getWorkspaceSnapshot, getWorkspaceProjection };
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue(
-      service as unknown as Awaited<
-        ReturnType<typeof getJobFinderWorkspaceService>
-      >,
-    );
     const profile = {
-      ...createEmptyJobFinderRepositoryState().profile,
+      ...createFreshStartCandidateProfile(),
       baseResume: source,
     };
     const getProfile = vi.fn().mockResolvedValue(profile);
-    vi.mocked(getJobFinderRepositoryForWorkspaceService).mockReturnValue({
-      getProfile,
-    } as unknown as NonNullable<
-      ReturnType<typeof getJobFinderRepositoryForWorkspaceService>
-    >);
+    vi.mocked(startJobFinderRuntime).mockResolvedValue({
+      repository: { getProfile },
+    } as unknown as Awaited<ReturnType<typeof startJobFinderRuntime>>);
     vi.mocked(getCandidateAssetLibrary).mockReturnValue(
       new CandidateAssetLibrary(path.join(temporaryDirectory, "assets")),
     );
@@ -216,11 +200,6 @@ describe("candidate asset IPC routes", () => {
         assetId: "other_source",
       }),
     ).toEqual({ outcome: "not_found" });
-    expect(getJobFinderRepositoryForWorkspaceService).toHaveBeenCalledWith(
-      service,
-    );
     expect(getProfile).toHaveBeenCalledTimes(3);
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
-    expect(getWorkspaceProjection).not.toHaveBeenCalled();
   });
 });

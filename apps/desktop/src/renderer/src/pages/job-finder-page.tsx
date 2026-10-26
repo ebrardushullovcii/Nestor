@@ -20,22 +20,13 @@ import {
   UserRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
 
-// The recovery notice reads its state after the first screen, so its code
-// (and the schema it checks that state with) loads then too.
-const StartupDatabaseRecoveryNotice = lazy(async () => ({
-  default: (
-    await import("@renderer/features/job-finder/components/startup-database-recovery-notice")
-  ).StartupDatabaseRecoveryNotice,
-}));
-
-export type { JobFinderPageContext } from "./job-finder-page-context";
 export {
   JobFinderHomeRoute,
   JobFinderProfileRoute,
@@ -220,16 +211,12 @@ export function JobFinderPage() {
           platform={INITIAL_PLATFORM}
           stageCounts={stageCounts}
           startupContext={startupContext}
-          workspace={null}
         >
           {jobFinderPageOutlet}
         </MemoizedJobFinderShell>
       </AssistantProvider>
       {/* The window-close responder is mounted once by
           withJobFinderWindowCloseGuard above this tree. */}
-      <Suspense fallback={null}>
-        <StartupDatabaseRecoveryNotice />
-      </Suspense>
     </ThemeProvider>,
   );
 }

@@ -3,7 +3,6 @@ import { openJobStore } from "./job-store/job-store";
 import { createProfileWorkspace } from "./job-store/profile-workspace";
 import { createPreferencesStore } from "./job-store/preferences-store";
 import { readLaunchContext } from "./launch-context";
-import { createSeed } from "./test-fixtures";
 
 test("first launch and later scoped changes use the row stores without an old workspace", async () => {
   const store = openJobStore(":memory:");
@@ -12,7 +11,7 @@ test("first launch and later scoped changes use the row stores without an old wo
       workspace: "none",
       profileSetupState: { status: "not_started" },
     });
-    const profile = createProfileWorkspace(store, createSeed());
+    const profile = createProfileWorkspace(store);
     createPreferencesStore(store).settings.patch({
       fields: { appearanceTheme: "dark" },
     });

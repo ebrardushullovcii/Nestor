@@ -5,12 +5,12 @@ import {
   buildResumeAnalysisCacheIdentity,
   resumeAnalysisCacheIdentitiesMatch,
 } from "./internal/resume-analysis-cache";
-import { createTestBundle } from "./workspace-service.resume-analysis.shared";
+import { createTestBundle } from "./resume-import.test-support";
 import {
   createAiClient,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 
 const SOURCE_SHA = "a".repeat(64);
 
@@ -36,12 +36,12 @@ describe("resume analysis cache", () => {
     const { seed, profile, bundle } = createCacheInput();
     const aiClient = createAiClient();
     const extractionSpy = vi.spyOn(aiClient, "extractResumeImportStage");
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile },
       aiClient,
     });
 
-    const first = await workspaceService.runResumeImport({
+    const first = await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: bundle,
     });
@@ -53,7 +53,7 @@ describe("resume analysis cache", () => {
     // both so the second run's context matches the first.
     await repository.saveProfile(profile);
     await repository.saveSearchPreferences(seed.searchPreferences);
-    const second = await workspaceService.runResumeImport({
+    const second = await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: bundle,
     });
@@ -72,12 +72,12 @@ describe("resume analysis cache", () => {
     const { seed, profile, bundle } = createCacheInput();
     const aiClient = createAiClient();
     const extractionSpy = vi.spyOn(aiClient, "extractResumeImportStage");
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile },
       aiClient,
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: bundle,
     });
@@ -88,7 +88,7 @@ describe("resume analysis cache", () => {
       baseResume: { ...profile.baseResume, sha256: "b".repeat(64) },
     });
     await repository.saveProfile(changedBytesProfile);
-    const changedBytes = await workspaceService.runResumeImport({
+    const changedBytes = await profileWork.runResumeImport({
       baseResume: changedBytesProfile.baseResume,
       documentBundle: bundle,
     });
@@ -102,7 +102,7 @@ describe("resume analysis cache", () => {
         ? { ...bundle.parserManifest, manifestVersion: "019-test-v2" }
         : undefined,
     };
-    const changedParser = await workspaceService.runResumeImport({
+    const changedParser = await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: changedParserBundle,
     });
@@ -186,12 +186,12 @@ describe("resume analysis cache", () => {
         }
         return baseExtract(input);
       });
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile },
       aiClient,
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: bundle,
     });
@@ -199,7 +199,7 @@ describe("resume analysis cache", () => {
     expect(callsAfterPartialRun).toBeGreaterThan(0);
 
     await repository.saveProfile(profile);
-    const retry = await workspaceService.runResumeImport({
+    const retry = await profileWork.runResumeImport({
       baseResume: profile.baseResume,
       documentBundle: bundle,
     });
@@ -210,7 +210,7 @@ describe("resume analysis cache", () => {
 
     const callsAfterRetry = extractionSpy.mock.calls.length;
     await repository.saveProfile(profile);
-    const refresh = await workspaceService.analyzeProfileFromResume();
+    const refresh = await profileWork.analyzeProfileFromResume();
     expect(extractionSpy.mock.calls.length).toBeGreaterThan(callsAfterRetry);
     expect(refresh.latestResumeImportRun?.trigger).toBe("refresh");
     expect(refresh.latestResumeImportRun?.analysisCacheIdentity).toBeNull();

@@ -20,7 +20,7 @@ import {
   type ResumeImportVisionArtifact,
 } from "@nestor/contracts";
 
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 export { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
 export {
   countResumeImportCandidates,
@@ -65,13 +65,13 @@ import {
  * resume (ADR 0041). Without one (tests, or a build with no AI at all) the
  * rule reader stands in: regex literals beside the built-in stage reader.
  */
-function readsWithoutModel(ctx: Pick<WorkspaceServiceContext, "aiClient">) {
+function readsWithoutModel(ctx: Pick<ProfileContext, "aiClient">) {
   return ctx.aiClient.getStatus().kind === "deterministic";
 }
 
 /** The rule reader's fill-ins for experience records, only without a model. */
 function withRuleReaderMarkers(
-  ctx: Pick<WorkspaceServiceContext, "aiClient">,
+  ctx: Pick<ProfileContext, "aiClient">,
   bundle: Parameters<typeof enrichExperienceCandidatesFromNearbyMarkers>[0],
   candidates: ResumeImportFieldCandidate[],
 ): ResumeImportFieldCandidate[] {
@@ -232,7 +232,7 @@ function isSameStoredResumeDocument(
  * supersedes and must not replace whatever is there now.
  */
 async function readSupersededBaseResume(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   expectedProfileRevision: number,
 ): Promise<CandidateProfile["baseResume"] | null> {
   const current = await ctx.repository.getProfileWithRevision();
@@ -262,7 +262,7 @@ async function readSupersededBaseResume(
  * wait in review, which is the behaviour that predates the attach.
  */
 async function attachImportedBaseResumeAfterStaleFinalization(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   currentProfile: CandidateProfile;
   currentRevision: number;
   supersededBaseResume: CandidateProfile["baseResume"] | null;
@@ -303,7 +303,7 @@ async function attachImportedBaseResumeAfterStaleFinalization(input: {
 }
 
 async function finalizeResumeImportRunAtRevision(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   expectedProfileRevision: number;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
@@ -641,7 +641,7 @@ function resumeImportStageFailureOutcome(
   };
 }
 
-function visionTimeoutMsFor(ctx: WorkspaceServiceContext): number {
+function visionTimeoutMsFor(ctx: ProfileContext): number {
   const timeoutMs = ctx.visionProvider?.getStatus().requestTimeoutMs;
 
   return typeof timeoutMs === "number" &&
@@ -670,7 +670,7 @@ function removeVisionDeferredWarnings(warnings: readonly string[]): string[] {
 }
 
 function createVisionTimeoutResult(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   message: string,
 ): ResumeVisionExtractionResult {
   const status = ctx.visionProvider?.getStatus();
@@ -689,7 +689,7 @@ function createVisionTimeoutResult(
 }
 
 function createTimedOutVisionResult(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   timeoutMs: number,
 ): ResumeVisionExtractionResult {
   return createVisionTimeoutResult(ctx, visionBranchTimeoutMessage(timeoutMs));
@@ -698,7 +698,7 @@ function createTimedOutVisionResult(
 function withVisionBranchDeadline(
   promise: Promise<ResumeVisionBranchResult>,
   timeoutMs: number,
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   options: { unrefTimer?: boolean } = {},
 ): Promise<ResumeVisionBranchResult> {
   let timer: NodeJS.Timeout | null = null;
@@ -813,7 +813,7 @@ function preserveCurrentCandidateDecisions(
 }
 
 async function preserveLatestCandidateDecisions(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   runId: string,
   candidates: readonly ResumeImportFieldCandidate[],
 ): Promise<ResumeImportFieldCandidate[]> {
@@ -881,11 +881,11 @@ const OPTIONAL_EVIDENCE_UNREAD_MESSAGE =
 
 // Background readers share the run's artifacts, but never hold this lock while asking the model.
 const deferredArtifactTransitions = new WeakMap<
-  WorkspaceServiceContext,
+  ProfileContext,
   Promise<void>
 >();
 function withDeferredArtifactTransition<T>(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   operation: () => Promise<T>,
 ): Promise<T> {
   const previous = deferredArtifactTransitions.get(ctx) ?? Promise.resolve();
@@ -900,7 +900,7 @@ function withDeferredArtifactTransition<T>(
   return next;
 }
 async function keepCurrentEvidenceArtifacts(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   run: ResumeImportRun,
   candidates: readonly ResumeImportFieldCandidate[],
 ) {
@@ -952,9 +952,9 @@ async function keepCurrentEvidenceArtifacts(
   return { run: mergedRun, candidates: mergedCandidates };
 }
 async function replaceDeferredVisionArtifacts(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: Parameters<
-    WorkspaceServiceContext["repository"]["replaceResumeImportRunArtifacts"]
+    ProfileContext["repository"]["replaceResumeImportRunArtifacts"]
   >[0],
 ) {
   return withDeferredArtifactTransition(ctx, async () => {
@@ -972,7 +972,7 @@ async function replaceDeferredVisionArtifacts(
 }
 
 async function completeDeferredVisionBranch(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   promise: Promise<ResumeVisionBranchResult>;
   bundle: ResumeDocumentBundle;
   run: ResumeImportRun;
@@ -1386,7 +1386,7 @@ function hasReviewableTextVisionConflict(
 }
 
 async function maybeAdjudicateResumeImportCandidates(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: {
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
@@ -1502,13 +1502,13 @@ type ResumeImportWorkflowResult = {
 const activeResumeImportCounts = new WeakMap<object, number>();
 
 export function isResumeImportActiveInProcess(
-  ctx: Pick<WorkspaceServiceContext, "repository">,
+  ctx: Pick<ProfileContext, "repository">,
 ): boolean {
   return (activeResumeImportCounts.get(ctx.repository) ?? 0) > 0;
 }
 
 export async function runResumeImportWorkflow(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: ResumeImportWorkflowInput,
 ): Promise<ResumeImportWorkflowResult> {
   const key = ctx.repository;
@@ -1529,7 +1529,7 @@ export async function runResumeImportWorkflow(
 }
 
 async function runResumeImportWorkflowInProcess(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: ResumeImportWorkflowInput,
 ): Promise<ResumeImportWorkflowResult> {
   const expectedProfileRevision = input.expectedProfileRevision;

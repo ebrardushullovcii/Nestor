@@ -8,6 +8,7 @@ import { PROFILE_WORKFLOW_SCHEMA } from "./profile-workspace";
 import { SITE_INSTRUCTIONS_SCHEMA } from "./site-instructions";
 import { ACTIVITY_CONTROL_SCHEMA } from "./activity-control";
 import { SEND_GUARDS_SCHEMA } from "./send-guards";
+import { PREPARED_FORMS_SCHEMA } from "./prepared-forms";
 /**
  * The Job Finder store: one SQLite file, one row per job.
  *
@@ -247,4 +248,5 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   SITE_INSTRUCTIONS_SCHEMA,
   ACTIVITY_CONTROL_SCHEMA,
   SEND_GUARDS_SCHEMA,
+  PREPARED_FORMS_SCHEMA,
 ];

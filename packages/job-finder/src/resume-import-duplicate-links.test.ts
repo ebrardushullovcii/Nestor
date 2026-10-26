@@ -9,8 +9,8 @@ import {
   DUPLICATE_LINK_REASON,
   reconcileCandidates,
 } from "./internal/resume-import-reconciliation";
-import { createSeed } from "./workspace-service.test-fixtures";
-import { createStageCandidate } from "./workspace-service.resume-analysis.shared";
+import { createSeed } from "./test-fixtures";
+import { createStageCandidate } from "./resume-import.test-support";
 
 const runId = "resume_import_run_duplicate_links";
 

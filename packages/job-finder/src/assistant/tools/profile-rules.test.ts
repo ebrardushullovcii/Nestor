@@ -9,8 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createSeed,
-  createWorkspaceServiceHarness,
-} from "../../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../../profile-service.test-support";
 import type { AssistantHostPorts } from "../ports";
 import { toConversationTool, type AssistantTurnSession } from "../tool-kit";
 import {
@@ -88,9 +88,9 @@ describe("profile editing rules", () => {
   });
 
   it("rejects the observed pasted-resume payload atomically with canonical field names", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = await workspaceService.getWorkspaceSnapshot();
-    const apply = vi.spyOn(workspaceService, "applyAssistantProfileOperations");
+    const { service } = createProfileServiceHarness();
+    const before = await service.read();
+    const apply = vi.spyOn(service, "applyAssistantProfileOperations");
     const input = editProfileTool.input.parse({
       summary: "Import pasted resume",
       operations: [
@@ -134,10 +134,10 @@ describe("profile editing rules", () => {
     });
     const error = await editProfileTool
       .execute(input, {
-        service: workspaceService,
+        service,
         session: {} as AssistantTurnSession,
         ports: assistantTestReads(
-          workspaceService,
+          service,
         ) as unknown as AssistantHostPorts,
       })
       .catch((caught: unknown) => caught as Error);
@@ -151,16 +151,16 @@ describe("profile editing rules", () => {
     expect((error as Error).message).toContain("projectUrl");
     expect((error as Error).message).toContain("operations[4].value.workModes");
     expect(apply).not.toHaveBeenCalled();
-    expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
+    expect((await service.read()).profile).toEqual(
       before.profile,
     );
     expect(
-      (await workspaceService.getWorkspaceSnapshot()).searchPreferences,
+      (await service.read()).searchPreferences,
     ).toEqual(before.searchPreferences);
   });
 
   it("rejects extra keys inside nested source records and otherwise-invalid upserts", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     for (const operation of [
       { operation: "upsert_education_record", record: { school: "School" } },
       {
@@ -186,10 +186,10 @@ describe("profile editing rules", () => {
             operations: [operation],
           }),
           {
-            service: workspaceService,
+            service,
             session: {} as AssistantTurnSession,
             ports: assistantTestReads(
-              workspaceService,
+              service,
             ) as unknown as AssistantHostPorts,
           },
         )
@@ -201,8 +201,8 @@ describe("profile editing rules", () => {
   });
 
   it("preserves valid partial updates, custom preference strings and suggestion drafts", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = await workspaceService.getWorkspaceSnapshot();
+    const { service } = createProfileServiceHarness();
+    const before = await service.read();
     const role = before.profile.experiences[0]!;
     const recordChange = vi.fn().mockResolvedValue({
       receipt: {
@@ -221,7 +221,7 @@ describe("profile editing rules", () => {
       createProposal,
     } as unknown as AssistantTurnSession;
     const ports = {
-      ...assistantTestReads(workspaceService),
+      ...assistantTestReads(service),
       publishWorkspaceUpdate: () => undefined,
     } as unknown as AssistantHostPorts;
     await editProfileTool.execute(
@@ -246,9 +246,9 @@ describe("profile editing rules", () => {
           },
         ],
       }),
-      { service: workspaceService, session, ports },
+      { service, session, ports },
     );
-    const after = await workspaceService.getWorkspaceSnapshot();
+    const after = await service.read();
     const savedRole = after.profile.experiences.find(
       (entry) => entry.id === role.id,
     )!;
@@ -278,7 +278,7 @@ describe("profile editing rules", () => {
           },
         ],
       }),
-      { service: workspaceService, session, ports },
+      { service, session, ports },
     );
     expect(createProposal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -294,7 +294,7 @@ describe("profile editing rules", () => {
       }),
     );
     expect(
-      (await workspaceService.getWorkspaceSnapshot()).profile.headline,
+      (await service.read()).profile.headline,
     ).toBe(after.profile.headline);
   });
 });
@@ -325,16 +325,16 @@ describe("sidebar resume import outcomes", () => {
         },
       };
       seed.searchPreferences = { ...seed.searchPreferences, workModes: [] };
-      const { workspaceService } = createWorkspaceServiceHarness({ seed });
+      const { service } = createProfileServiceHarness({ seed });
       const result = await readProfileTool.execute(
         { section: "basics" },
         {
-          service: workspaceService,
+          service,
           session: {
             firstProfileRead: () => Promise.resolve(false),
           } as unknown as AssistantTurnSession,
           ports: assistantTestReads(
-            workspaceService,
+            service,
           ) as unknown as AssistantHostPorts,
         },
       );
@@ -362,18 +362,18 @@ describe("sidebar resume import outcomes", () => {
       status: "in_progress",
       completedAt: null,
     };
-    const { workspaceService } = createWorkspaceServiceHarness({ seed });
-    const save = vi.spyOn(workspaceService, "saveProfileSetupState");
+    const { service } = createProfileServiceHarness({ seed });
+    const save = vi.spyOn(service, "saveProfileSetupState");
     const startApplications = vi.fn();
     const result = await finishProfileSetupTool.execute(
       {},
       {
-        service: workspaceService,
+        service,
         session: {
           assertCurrent: () => undefined,
         } as unknown as AssistantTurnSession,
         ports: {
-          ...assistantTestReads(workspaceService),
+          ...assistantTestReads(service),
           publishWorkspaceUpdate: () => undefined,
           startApplications,
         } as unknown as AssistantHostPorts,
@@ -384,7 +384,7 @@ describe("sidebar resume import outcomes", () => {
     expect(result.data).toMatchObject({
       setup: { status: "completed", canFinish: true },
     });
-    const after = await workspaceService.getWorkspaceSnapshot();
+    const after = await service.read();
     expect(after.profileSetupState.status).toBe("completed");
     expect(after.profileSetupState.completedAt).not.toBeNull();
     expect(after.profileSetupState.currentStep).toBe("targeting");
@@ -412,19 +412,19 @@ describe("sidebar resume import outcomes", () => {
         };
       if (missing === "headline")
         seed.profile = { ...seed.profile, headline: null };
-      const { workspaceService } = createWorkspaceServiceHarness({ seed });
-      const save = vi.spyOn(workspaceService, "saveProfileSetupState");
-      const before = await workspaceService.getWorkspaceSnapshot();
+      const { service } = createProfileServiceHarness({ seed });
+      const save = vi.spyOn(service, "saveProfileSetupState");
+      const before = await service.read();
       const error = await finishProfileSetupTool
         .execute(
           {},
           {
-            service: workspaceService,
+            service,
             session: {
               assertCurrent: () => undefined,
             } as unknown as AssistantTurnSession,
             ports: assistantTestReads(
-              workspaceService,
+              service,
             ) as unknown as AssistantHostPorts,
           },
         )
@@ -439,22 +439,22 @@ describe("sidebar resume import outcomes", () => {
       );
       expect(save).not.toHaveBeenCalled();
       expect(
-        (await workspaceService.getWorkspaceSnapshot()).profileSetupState,
+        (await service.read()).profileSetupState,
       ).toEqual(before.profileSetupState);
     },
   );
 
   it("explains textless scanned PDF evidence separately from unsupported standalone images", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const error = await readDocumentTool
       .execute(
         { documentId: "textless" },
         {
           ports: {
-            ...assistantTestReads(workspaceService),
+            ...assistantTestReads(service),
             readDocumentText: () => Promise.resolve(null),
           } as unknown as AssistantHostPorts,
-          service: workspaceService,
+          service,
           session: {} as AssistantTurnSession,
         },
       )
@@ -475,9 +475,9 @@ describe("sidebar resume import outcomes", () => {
       status: "in_progress",
       completedAt: null,
     };
-    const { workspaceService } = createWorkspaceServiceHarness({ seed });
+    const { service } = createProfileServiceHarness({ seed });
     const context = {
-      service: workspaceService,
+      service,
       session: {
         assertCurrent: () => undefined,
         firstProfileRead: () => Promise.resolve(true),
@@ -488,7 +488,7 @@ describe("sidebar resume import outcomes", () => {
           }),
       } as unknown as AssistantTurnSession,
       ports: {
-        ...assistantTestReads(workspaceService),
+        ...assistantTestReads(service),
         publishWorkspaceUpdate: () => undefined,
       } as unknown as AssistantHostPorts,
     };
@@ -520,13 +520,13 @@ describe("sidebar resume import outcomes", () => {
       },
     });
     expect(
-      (await workspaceService.getWorkspaceSnapshot()).profile.phone,
+      (await service.read()).profile.phone,
     ).toBeNull();
   });
 
   it("exposes all current scanned review evidence beyond the workspace's eight-candidate summary", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
+    const { service } = createProfileServiceHarness();
+    const snapshot = await service.read();
     const run = ResumeImportRunSchema.parse({
       id: "scan_run",
       sourceResumeId: snapshot.profile.baseResume.id,
@@ -580,7 +580,7 @@ describe("sidebar resume import outcomes", () => {
       runId: "old_run",
     });
     vi.spyOn(
-      assistantTestReads(workspaceService),
+      assistantTestReads(service),
       "readPersonalState",
     ).mockResolvedValue({
       ...snapshot,
@@ -589,7 +589,7 @@ describe("sidebar resume import outcomes", () => {
       latestResumeImportBundle: null,
     });
     const imports = vi
-      .spyOn(workspaceService, "getResumeImportState")
+      .spyOn(service, "getResumeImportState")
       .mockResolvedValue({
         activeVisionRunIds: [],
         resumeImportRuns: [
@@ -604,14 +604,14 @@ describe("sidebar resume import outcomes", () => {
         resumeImportFieldCandidates: [...candidates, stale],
       });
     const context = {
-      service: workspaceService,
+      service,
       session: {
         firstProfileRead: () => Promise.resolve(false),
         now: () => "2026-09-30T00:00:00.000Z",
         signal: new AbortController().signal,
       } as unknown as AssistantTurnSession,
       ports: assistantTestReads(
-        workspaceService,
+        service,
       ) as unknown as AssistantHostPorts,
     };
     await readProfileTool.execute({ section: "basics" }, context);
@@ -775,8 +775,8 @@ describe("sidebar resume import outcomes", () => {
   });
 
   it("reports only matching completed-import candidates, including vision-only details", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
+    const { service } = createProfileServiceHarness();
+    const snapshot = await service.read();
     const run = ResumeImportRunSchema.parse({
       id: "new_import",
       sourceResumeId: snapshot.profile.baseResume.id,
@@ -801,7 +801,7 @@ describe("sidebar resume import outcomes", () => {
       resumeImportDocumentBundles: [],
       resumeImportFieldCandidates: [],
     };
-    vi.spyOn(workspaceService, "getResumeImportState")
+    vi.spyOn(service, "getResumeImportState")
       .mockResolvedValueOnce(empty)
       .mockResolvedValueOnce({
         ...empty,
@@ -813,13 +813,13 @@ describe("sidebar resume import outcomes", () => {
     const result = await importResumeTool.execute(
       { documentId: "scan_document" },
       {
-        service: workspaceService,
+        service,
         session: {
           assertCurrent: () => undefined,
           signal: controller.signal,
         } as unknown as AssistantTurnSession,
         ports: {
-          ...assistantTestReads(workspaceService),
+          ...assistantTestReads(service),
           importResumeDocument,
           publishWorkspaceUpdate: () => undefined,
         } as unknown as AssistantHostPorts,
@@ -840,8 +840,8 @@ describe("sidebar resume import outcomes", () => {
   });
 
   it("does not credit existing facts or older import candidates to an empty new file", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
+    const { service } = createProfileServiceHarness();
+    const snapshot = await service.read();
     const old = ResumeImportRunSchema.parse({
       id: "old_import",
       sourceResumeId: snapshot.profile.baseResume.id,
@@ -872,19 +872,19 @@ describe("sidebar resume import outcomes", () => {
       resumeImportDocumentBundles: [],
       resumeImportFieldCandidates: [oldCandidate],
     };
-    vi.spyOn(workspaceService, "getResumeImportState")
+    vi.spyOn(service, "getResumeImportState")
       .mockResolvedValueOnce(state)
       .mockResolvedValueOnce({ ...state, resumeImportRuns: [old, current] });
     const result = await importResumeTool.execute(
       { documentId: "empty_document" },
       {
-        service: workspaceService,
+        service,
         session: {
           assertCurrent: () => undefined,
           signal: new AbortController().signal,
         } as unknown as AssistantTurnSession,
         ports: {
-          ...assistantTestReads(workspaceService),
+          ...assistantTestReads(service),
           importResumeDocument: () => Promise.resolve(),
           publishWorkspaceUpdate: () => undefined,
         } as unknown as AssistantHostPorts,
@@ -899,19 +899,19 @@ describe("sidebar resume import outcomes", () => {
   });
 
   it("does not publish a successful import after the port fails or is stopped", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const publishWorkspaceUpdate = vi.fn();
     await expect(
       importResumeTool.execute(
         { documentId: "stopped_document" },
         {
-          service: workspaceService,
+          service,
           session: {
             assertCurrent: () => undefined,
             signal: new AbortController().signal,
           } as unknown as AssistantTurnSession,
           ports: {
-            ...assistantTestReads(workspaceService),
+            ...assistantTestReads(service),
             importResumeDocument: () =>
               Promise.reject(new Error("Import stopped")),
             publishWorkspaceUpdate,

@@ -11,7 +11,7 @@ import {
 } from "@nestor/contracts";
 
 import { buildProfileSetupReviewItems } from "./profile-setup-review-items";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 function mergeReviewItems(
   storedItems: ProfileSetupState["reviewItems"],
@@ -81,7 +81,7 @@ export function summarizeReviewCandidates(
 }
 
 export async function deriveAndPersistProfileSetupState(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: {
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
@@ -169,7 +169,7 @@ export async function deriveAndPersistProfileSetupState(
  * is left alone.
  */
 export async function landProfileSetupAfterImport(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: { importStartedAt: string },
 ): Promise<void> {
   const [profile, rawSearchPreferences, storedState, latestRun] =

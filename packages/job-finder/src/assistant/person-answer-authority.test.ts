@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AssistantMessageSchema } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { editProfileTool } from "./tools/profile-tools";
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import { createProfileServiceHarness } from "../profile-service.test-support";
 import type { AssistantTurnSession } from "./tool-kit";
 import { assistantTestReads } from "./store-reads.test-support";
 import type { AssistantHostPorts } from "./ports";
@@ -149,8 +149,8 @@ describe("the person's answer authority", () => {
     ).rejects.toThrow("give or approve");
   });
   it("leaves Profile unchanged when an assistant tries to remember an unapproved zero", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = (await workspaceService.getWorkspaceSnapshot()).profile;
+    const { service } = createProfileServiceHarness();
+    const before = (await service.read()).profile;
     const session = {
       assertCurrent: () => undefined,
       assertPersonAnswerAuthority: () =>
@@ -173,16 +173,16 @@ describe("the person's answer authority", () => {
           ],
         }),
         {
-          service: workspaceService,
+          service,
           session,
           ports: {
-            ...assistantTestReads(workspaceService),
+            ...assistantTestReads(service),
             publishWorkspaceUpdate: vi.fn(),
           } as unknown as AssistantHostPorts,
         },
       ),
     ).rejects.toThrow("old answer bank is retired");
-    expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
+    expect((await service.read()).profile).toEqual(
       before,
     );
   });

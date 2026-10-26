@@ -2,7 +2,13 @@ import { Button } from "@renderer/components/ui/button";
 import { useModalFocusTrap } from "@renderer/features/job-finder/components/profile/use-modal-focus-trap";
 import { useId, useRef } from "react";
 import { createPortal } from "react-dom";
-import type { JobFinderLeaveConfirmation } from "./use-job-finder-page-controller";
+
+/** What leaving would lose, named for the person. */
+export type JobFinderLeaveConfirmation = {
+  title: string;
+  description: string;
+  reasons: string[];
+};
 
 /**
  * App-owned replacement for the native browser/Electron leave prompt raised by

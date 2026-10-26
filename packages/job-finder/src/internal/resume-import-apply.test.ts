@@ -6,7 +6,7 @@ import {
   type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
 
 const createdAt = "2026-08-02T10:00:00.000Z";

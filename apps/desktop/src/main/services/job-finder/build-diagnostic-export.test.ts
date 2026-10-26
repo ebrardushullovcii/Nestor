@@ -1,194 +1,67 @@
 import { describe, expect, it } from "vitest";
-import type {
-  JobFinderPerformanceSnapshot,
-  JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
-import { buildJobFinderDiagnosticExport } from "./build-diagnostic-export";
+import {
+  buildJobFinderDiagnosticExport,
+  type JobFinderDiagnosticFacts,
+} from "./build-diagnostic-export";
 
-const secretCorpus = [
-  "hunter2-secret-password",
-  "C:\\Users\\person\\private-resume.pdf",
-  "https://jobs.example/apply?token=super-secret",
-  "raw resume body private payload",
-  "data:image/png;base64,screenshot-secret",
-  "transcript audio bytes",
-  "browser-local-storage-secret",
-];
+const build = {
+  appVersion: "0.1.0",
+  electronVersion: "37.0.0",
+  chromiumVersion: "138.0.0",
+  nodeVersion: "22.0.0",
+  platform: "win32" as const,
+  architecture: "x64" as const,
+};
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
-  return {
-    profileSetupState: { status: "completed" },
-    browserSession: { status: "ready", detail: secretCorpus[6] },
-    siteCounts: { all: 1, enabled: 1, disabled: 0, needsAttention: 0 },
-    searchPreferences: {
-      discovery: { targets: [{ secret: secretCorpus[2] }] },
-    },
-    discoveryJobs: [{ description: secretCorpus[3] }],
-    reviewQueue: [],
-    applicationRecords: [],
-    applicationAttempts: [
-      {
-        executionTimings: [{ stage: "total", durationMs: 123 }],
-        visualEvidence: [{ dataUrl: secretCorpus[4] }],
-      },
-    ],
-    userActionRequests: [{ state: "resolved", credential: secretCorpus[0] }],
-    userActionEvents: [{}],
-    agentProvider: {
-      ready: true,
-      baseUrl: secretCorpus[2],
-      detail: secretCorpus[0],
-    },
-    visionProvider: { ready: false, detail: secretCorpus[4] },
-    latestResumeImportRun: {
-      state: "completed",
-      timing: { totalMs: 456 },
-      sourcePath: secretCorpus[1],
-      extractedText: secretCorpus[3],
-    },
-    resumeExportArtifacts: [{ filePath: secretCorpus[1] }],
-    applyJobResults: [{}],
-    recentSourceDebugRuns: [{}],
-  } as unknown as JobFinderWorkspaceSnapshot;
-}
-
-const performance = {
-  generatedAt: "2026-07-31T12:00:00.000Z",
-  latestDiscoveryRun: { summary: { durationMs: 789 } },
-  latestSourceDebugRun: { rawEvidence: secretCorpus.join("|") },
-  budgetEvaluations: [
-    {
-      id: "first-visible-p95",
-      status: "warning",
-      unit: "milliseconds",
-      observed: 4_000,
-      limit: 3_000,
-      sampleCount: 1,
-      minimumSamples: 5,
-      detail: secretCorpus.join("|"),
-    },
-  ],
-  evidence: [
-    {
-      area: "discovery",
-      measurementStatus: "available",
-      durationMs: 789,
-      recordedAt: "2026-07-31T12:00:00.000Z",
-      method: "discovery_run",
-      sampleCount: 1,
-      budgetStatus: "warning",
-      budgetEvaluationIds: ["first-visible-p95"],
-      stageDurations: [{ id: "discovery.extraction", durationMs: 500 }],
-    },
-    {
-      area: "renderer_commit",
-      measurementStatus: "unavailable",
-      durationMs: null,
-      recordedAt: null,
-      method: "none",
-      sampleCount: 0,
-      budgetStatus: "unavailable",
-      budgetEvaluationIds: [],
-      stageDurations: [],
-      unavailableReason: "no_recorded_measurement",
-    },
-  ],
-} as unknown as JobFinderPerformanceSnapshot;
+const facts: JobFinderDiagnosticFacts = {
+  profileSetupStatus: "completed",
+  browserStatus: "ready",
+  configuredSources: 3,
+  visibleJobs: 12,
+  shortlistedJobs: 2,
+  applications: { ready: 1, submitted: 2 },
+  unresolvedActions: 1,
+  approvedResumes: 2,
+  siteChecks: 1,
+  latestResumeImport: { durationMs: 456, ready: true },
+  agentReady: true,
+  visionReady: false,
+};
 
 describe("buildJobFinderDiagnosticExport", () => {
-  it("exports only aggregate allowlisted diagnostics and a truthful manifest", () => {
+  it("exports counts and readiness with a truthful manifest", () => {
     const diagnostic = buildJobFinderDiagnosticExport({
-      applications: {},
-      workspace: createWorkspace(),
-      performance,
-      generatedAt: "2026-07-31T12:00:00.000Z",
-      build: {
-        appVersion: "0.1.0",
-        electronVersion: "37.0.0",
-        chromiumVersion: "138.0.0",
-        nodeVersion: "22.0.0",
-        platform: "win32",
-        architecture: "x64",
-      },
+      facts,
+      build,
+      generatedAt: "2026-10-26T12:00:00.000Z",
     });
-
-    expect(diagnostic.timings).toEqual({
-      latestDiscoveryDurationMs: 789,
-      latestResumeImportDurationMs: 456,
-      latestApplyDurationMs: null,
+    expect(diagnostic.state.counts).toEqual({
+      configuredSources: 3,
+      visibleJobs: 12,
+      shortlistedJobs: 2,
+      applications: 3,
+      unresolvedActions: 1,
     });
-    expect(diagnostic.state.counts.configuredSources).toBe(1);
-    expect(diagnostic.performance).toEqual({
-      measurements: [
-        {
-          area: "discovery",
-          measurementStatus: "available",
-          durationMs: 789,
-          recordedAt: "2026-07-31T12:00:00.000Z",
-          sampleCount: 1,
-          budgetStatus: "warning",
-          stageDurations: [{ id: "discovery.extraction", durationMs: 500 }],
-        },
-        {
-          area: "renderer_commit",
-          measurementStatus: "unavailable",
-          durationMs: null,
-          recordedAt: null,
-          sampleCount: 0,
-          budgetStatus: "unavailable",
-          stageDurations: [],
-        },
-      ],
-      budgetEvaluations: [
-        {
-          id: "first-visible-p95",
-          status: "warning",
-          unit: "milliseconds",
-          observed: 4_000,
-          limit: 3_000,
-          sampleCount: 1,
-          minimumSamples: 5,
-        },
-      ],
+    expect(diagnostic.timings.latestResumeImportDurationMs).toBe(456);
+    expect(diagnostic.capabilities).toMatchObject({
+      browserReady: true,
+      originalResumeReady: true,
+      tailoredResumeCount: 2,
+      prepareOnlyApplicationCount: 1,
+      finalSubmissionAuthorized: false,
+      accountCreationAuthorized: false,
     });
     expect(diagnostic.redactionManifest).toMatchObject({
       policy: "strict_allowlist_v1",
       localOnly: true,
       transmitted: false,
     });
-    expect(diagnostic.capabilities).toMatchObject({
-      finalSubmissionAuthorized: false,
-      accountCreationAuthorized: false,
-    });
-    const serialized = JSON.stringify(diagnostic);
-    for (const secret of secretCorpus) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(serialized).not.toContain("filePath");
-    expect(serialized).not.toContain("baseUrl");
-    expect(serialized).not.toContain("visualEvidence");
   });
 
-  it("does not copy warning detail or arbitrary warning payloads", () => {
-    const diagnostic = buildJobFinderDiagnosticExport({
-      applications: {},
-      workspace: createWorkspace(),
-      performance,
-      build: {
-        appVersion: "0.1.0",
-        electronVersion: "37.0.0",
-        chromiumVersion: "138.0.0",
-        nodeVersion: "22.0.0",
-        platform: "win32",
-        architecture: "x64",
-      },
-    });
-    expect(diagnostic.warnings).toEqual([
-      {
-        category: "performance_budget",
-        code: "performance_budget_1",
-        status: "warning",
-      },
+  it("warns about each AI provider that is not ready", () => {
+    expect(
+      buildJobFinderDiagnosticExport({ facts, build }).warnings,
+    ).toEqual([
       {
         category: "provider_availability",
         code: "vision_not_ready",
@@ -196,37 +69,4 @@ describe("buildJobFinderDiagnosticExport", () => {
       },
     ]);
   });
-});
-
-it("exports waiting form memory without page contents", () => {
-  const memory = {
-    recordedAt: performance.generatedAt,
-    budgetBytes: 805306368,
-    totalBytes: 1024,
-    measurementComplete: true,
-    overBudget: false,
-    tabs: [
-      {
-        tabId: "synthetic",
-        processId: 42,
-        processBytes: 1024,
-        backgroundThrottled: true,
-      },
-    ],
-  };
-  const result = buildJobFinderDiagnosticExport({
-      applications: {},
-    workspace: createWorkspace(),
-    performance: { ...performance, waitingFormMemory: memory },
-    build: {
-      appVersion: "test",
-      electronVersion: "test",
-      chromiumVersion: "test",
-      nodeVersion: "test",
-      platform: "darwin",
-      architecture: "arm64",
-    },
-    generatedAt: performance.generatedAt,
-  });
-  expect(result.performance.waitingFormMemory).toEqual(memory);
 });

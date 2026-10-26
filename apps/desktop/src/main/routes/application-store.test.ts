@@ -18,7 +18,7 @@ vi.mock("../services/applications", () => ({
 vi.mock("../services/browser/embedded-browser", () => ({
   getEmbeddedBrowser: vi.fn(),
 }));
-vi.mock("../services/job-finder/workspace-service", () => ({
+vi.mock("../services/job-finder/runtime", () => ({
   startJobFinderRuntime: () => Promise.resolve({}),
 }));
 

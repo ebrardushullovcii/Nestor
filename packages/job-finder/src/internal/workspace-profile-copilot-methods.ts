@@ -48,7 +48,7 @@ import {
 } from "./resume-record-identity";
 import { createUniqueId } from "./shared";
 import { normalizeSearchPreferences } from "./workspace-helpers";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 function isSearchPreferencesPatchSafeForAutoApply(
   value: Extract<
@@ -958,25 +958,22 @@ export function buildRecentConversation(
 }
 
 export function createWorkspaceProfileCopilotMethods(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   getCurrentSetupStateContext: () => Promise<{
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
     profileSetupState: ProfileSetupState;
     latestResumeImportRun: Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["getLatestResumeImportRun"]
+        ProfileContext["repository"]["getLatestResumeImportRun"]
       >
     >;
     latestResumeImportAllCandidates: Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["listResumeImportFieldCandidates"]
+        ProfileContext["repository"]["listResumeImportFieldCandidates"]
       >
     >;
   }>;
-  getWorkspaceSnapshot: () => Promise<
-    Awaited<ReturnType<WorkspaceServiceContext["getWorkspaceSnapshot"]>>
-  >;
   /**
    * Writes the Settings half of the resume level exactly as Settings does,
    * so a job already on Shortlisted keeps the level it was given.
@@ -987,165 +984,7 @@ export function createWorkspaceProfileCopilotMethods(input: {
     commitResumeApplicationMode,
     ctx,
     getCurrentSetupStateContext,
-    getWorkspaceSnapshot,
   } = input;
-
-  async function persistProfileCopilotMessage(
-    content: string,
-    context: ProfileCopilotContext,
-    autoApplySafeGroups: boolean,
-  ) {
-    const { profile, searchPreferences, profileSetupState } =
-      await getCurrentSetupStateContext();
-    const existingMessages = await ctx.repository.listProfileCopilotMessages();
-    const contextKey = JSON.stringify(context);
-    const messagesInContext = existingMessages.filter(
-      (message) => JSON.stringify(message.context) === contextKey,
-    );
-    const lastInContext = messagesInContext.at(-1) ?? null;
-    // Asking again after the app closed mid-answer, or after the AI did not
-    // answer, answers the question already on screen instead of adding it a
-    // second time.
-    const unansweredRepeat =
-      lastInContext?.role === "user" &&
-      lastInContext.content.trim() === content.trim()
-        ? lastInContext
-        : null;
-    const userMessage: ProfileCopilotMessage = unansweredRepeat ?? {
-      id: createUniqueId("profile_copilot_user_message"),
-      role: "user",
-      content,
-      context,
-      patchGroups: [],
-      createdAt: new Date().toISOString(),
-    };
-    // Saved before the model is asked, so closing the app mid-answer keeps
-    // the question and the Assistant can offer to ask it again.
-    if (!unansweredRepeat) {
-      await ctx.repository.upsertProfileCopilotMessage(userMessage);
-    }
-    const relevantReviewItems = filterRelevantReviewItemsForContext({
-      context,
-      reviewItems: profileSetupState.reviewItems,
-    });
-    const settings = await ctx.repository.getSettings();
-    // Original lives in Settings, not in the preferences the Assistant reads.
-    // Without it the Assistant told a person on Original "you're already on
-    // Light" and could not move them either way.
-    const resumeApproach = resolveSavedResumeApproach({
-      resumeApplicationMode: settings.resumeApplicationMode,
-      tailoringMode: searchPreferences.tailoringMode,
-    });
-    const assistantReply = await ctx.aiClient.reviseCandidateProfile({
-      profile,
-      searchPreferences,
-      context,
-      relevantReviewItems,
-      request: content,
-      assistantBehavior: AiBehaviorPreferenceSchema.parse(
-        settings.aiBehavior ?? {},
-      ).profileAssistant,
-      resumeApproach,
-      conversationFacts: [
-        ...buildConversationFacts({
-          profile,
-          searchPreferences,
-          relevantReviewItems,
-          resumeApproach,
-        }),
-        ...buildPersonDecisionFacts(existingMessages),
-      ],
-      // One chat panel shows every step or tab of its surface, so "fix it"
-      // on Work history can refer to what was said on Basics.
-      recentConversation: buildRecentConversation(
-        existingMessages.filter(
-          (message) =>
-            message.context.surface === context.surface &&
-            message.id !== userMessage.id,
-        ),
-      ),
-    });
-    const modelUnavailable =
-      assistantReply.executionReceipt?.fallbackUsed === true &&
-      assistantReply.executionReceipt.stopReason === "permanent_failure";
-    if (modelUnavailable && assistantReply.patchGroups.length === 0) {
-      // Nothing useful came back, so nothing is recorded as an answer: the
-      // question stays on screen unanswered with Ask again under it. The
-      // renderer states the outage in plain words.
-      throw new Error(PROFILE_ASSISTANT_UNAVAILABLE_MESSAGE);
-    }
-    const assistantMessageId = createUniqueId(
-      "profile_copilot_assistant_message",
-    );
-    const normalizedAssistantReply = normalizeAssistantPatchGroups({
-      patchGroups: assistantReply.patchGroups,
-      context,
-      content: assistantReply.content,
-      assistantMessageId,
-      savedTailoringMode: searchPreferences.tailoringMode,
-      lists: { profile, searchPreferences },
-    });
-    const assistantContent = buildAssistantReplyContent({
-      content: normalizedAssistantReply.content,
-      patchGroups: normalizedAssistantReply.patchGroups,
-      proposalsWaitForReview: !autoApplySafeGroups,
-      modelUnavailable,
-      writtenByModel:
-        assistantReply.executionReceipt !== null &&
-        assistantReply.executionReceipt !== undefined &&
-        assistantReply.executionReceipt.fallbackUsed === false,
-      stoppedBeforeFinishing:
-        assistantReply.executionReceipt?.fallbackUsed === false &&
-        assistantReply.executionReceipt.stopReason !== "completed",
-    });
-    const assistantMessage: ProfileCopilotMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: assistantContent,
-      context,
-      patchGroups: normalizedAssistantReply.patchGroups.map((patchGroup) => {
-        const storedMode = getStoredPatchGroupApplyMode(patchGroup);
-        return setPatchGroupApplyMode(
-          patchGroup,
-          autoApplySafeGroups ? storedMode : "needs_review",
-        );
-      }),
-      executionAttribution: assistantReply.executionReceipt ?? null,
-      // Always after the question, even when a built-in reply lands in the
-      // same millisecond: the list sorts by time, then by id, and the
-      // assistant's id sorted ahead of the person's.
-      createdAt: new Date(
-        Math.max(Date.now(), Date.parse(userMessage.createdAt) + 1),
-      ).toISOString(),
-    };
-
-    await ctx.repository.upsertProfileCopilotMessage(assistantMessage);
-
-    for (const patchGroup of normalizedAssistantReply.patchGroups) {
-      if (autoApplySafeGroups && patchGroup.applyMode === "applied") {
-        await applyProfileCopilotPatchGroupInternal(patchGroup.id, {
-          messageId: assistantMessage.id,
-          patchGroup,
-        });
-      }
-    }
-
-    return getWorkspaceSnapshot();
-  }
-
-  function sendProfileCopilotMessage(
-    content: string,
-    context: ProfileCopilotContext = { surface: "general" },
-  ) {
-    return persistProfileCopilotMessage(content, context, true);
-  }
-
-  function proposeProfileCopilotChange(
-    content: string,
-    context: ProfileCopilotContext = { surface: "general" },
-  ) {
-    return persistProfileCopilotMessage(content, context, false);
-  }
 
   function applyPatchGroupOperationsToWorkspace(
     workspace: {
@@ -1649,14 +1488,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
             now,
           });
 
-        if (
-          hasResumeAffectingProfileChange(captured.profile, patched.profile)
-        ) {
-          await ctx.staleApprovedResumeDrafts(
-            "Profile details changed after approval and the resume needs a fresh review.",
-          );
-        }
-
         const refreshedLatestResumeImportReviewCandidates =
           currentSetupContext.latestResumeImportAllCandidates.filter(
             (candidate) =>
@@ -1759,7 +1590,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
 
   async function applyProfileCopilotPatchGroup(patchGroupId: string) {
     await applyProfileCopilotPatchGroupInternal(patchGroupId);
-    return getWorkspaceSnapshot();
   }
 
   async function rejectProfileCopilotPatchGroup(patchGroupId: string) {
@@ -1782,7 +1612,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
       throw new Error(`Unknown profile copilot patch group '${patchGroupId}'.`);
     }
 
-    return getWorkspaceSnapshot();
   }
 
   async function undoProfileRevision(revisionId: string) {
@@ -1879,16 +1708,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
       restoredFromRevisionId: targetRevision.id,
     });
 
-    if (
-      hasResumeAffectingProfileChange(
-        currentSetupContext.profile,
-        targetRevision.snapshotProfile,
-      )
-    ) {
-      await ctx.staleApprovedResumeDrafts(
-        "Profile details changed after approval and the resume needs a fresh review.",
-      );
-    }
 
     await commitProfileCopilotStateWithStaleRetry(ctx.repository, async () => {
       const captured = await ctx.repository.getProfileWithRevision();
@@ -1906,12 +1725,9 @@ export function createWorkspaceProfileCopilotMethods(input: {
       await commitResumeApplicationMode(restoredResumeApplicationMode);
     }
 
-    return getWorkspaceSnapshot();
   }
 
   return {
-    sendProfileCopilotMessage,
-    proposeProfileCopilotChange,
     applyAssistantProfilePatchGroup,
     applyProfileCopilotPatchGroup,
     rejectProfileCopilotPatchGroup,

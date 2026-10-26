@@ -3,7 +3,6 @@ import {
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileCopilotPatchGroupSchema,
-  ResumeDraftSchema,
   type AssistantChangeEntry,
   type AssistantChangeTarget,
   type CandidateProfile,
@@ -11,28 +10,12 @@ import {
   type JobSearchPreferences,
   type ProfileCopilotPatchOperation,
   type ResumeApplicationMode,
-  type ResumeDraft,
 } from "@nestor/contracts";
 
 import { diffValues, undoChangeEntries } from "../assistant/change-diff";
 import { commitProfileCopilotStateWithStaleRetry } from "./profile-commit-stale-conflict";
-import {
-  createMonotonicTimestamp,
-  preserveWorkHistoryReviewGuidance,
-} from "./resume-draft-commit-support";
-import {
-  buildResumeDraftRevision,
-  buildResumeDraftStateHash,
-  buildTailoredAssetBridge,
-  validateResumeDraft,
-} from "./resume-workspace-helpers";
-import { hasResumeAffectingProfileChange } from "./resume-workspace-staleness";
 import { createUniqueId } from "./shared";
-import {
-  ensureResumeDraft,
-  sanitizeAndCheckResumeDraft,
-} from "./workspace-application-resume-support";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 import {
   buildProfileRevision,
   nextProfileRevisionSequence,
@@ -42,7 +25,7 @@ import {
 /**
  * The shared assistant-edit operation (ADR 0037).
  *
- * Profile, search preferences, settings and resume drafts are changed with
+ * Profile, search preferences and settings are changed with
  * an expected starting state, the typed changes, validation and history
  * attribution, and committed atomically. Each commit returns the exact values
  * it touched so the assistant can keep an undo receipt; undo applies the
@@ -66,64 +49,6 @@ export interface AssistantProfileEditResult extends AssistantEditResult {
 export interface AssistantUndoResult {
   undoneLabels: string[];
   conflictLabels: string[];
-}
-
-export class AssistantEditConflictError extends Error {
-  constructor(
-    message: string,
-    readonly kind:
-      | "stale_revision"
-      | "original_resume"
-      | "no_change"
-      | "not_kept",
-  ) {
-    super(message);
-    this.name = "AssistantEditConflictError";
-  }
-}
-
-const RESUME_IGNORED_KEYS = ["updatedAt", "lastGeneratedContentHash"] as const;
-
-/** Every visible text in a draft, keyed by where it sits. */
-function resumeTextsByPlace(draft: ResumeDraft): Map<string, string> {
-  const texts = new Map<string, string>();
-  const put = (key: string, value: string | null | undefined) => {
-    const text = value?.replace(/\s+/gu, " ").trim();
-    if (text) texts.set(key, text);
-  };
-  for (const section of draft.sections) {
-    put(`section:${section.id}`, section.text);
-    for (const bullet of section.bullets)
-      put(`bullet:${bullet.id}`, bullet.text);
-    for (const entry of section.entries) {
-      put(`entry:${entry.id}`, entry.summary);
-      for (const bullet of entry.bullets)
-        put(`bullet:${bullet.id}`, bullet.text);
-    }
-  }
-  return texts;
-}
-
-/**
- * Texts the assistant wrote that the resume checker replaced or removed
- * while saving (for example a summary line with no saved evidence, which
- * falls back to the profile summary). Reporting such an edit as saved would
- * be false, so the caller refuses it instead.
- */
-export function findResumeTextsNotKept(input: {
-  before: ResumeDraft;
-  requested: ResumeDraft;
-  saved: ResumeDraft;
-}): string[] {
-  const before = resumeTextsByPlace(input.before);
-  const requested = resumeTextsByPlace(input.requested);
-  const saved = resumeTextsByPlace(input.saved);
-  const dropped: string[] = [];
-  for (const [place, text] of requested) {
-    if (before.get(place) === text) continue;
-    if (saved.get(place) !== text) dropped.push(text);
-  }
-  return dropped;
 }
 
 const PROFILE_LABELS: Record<string, string> = {
@@ -183,22 +108,8 @@ function labelFromPath(
   return base;
 }
 
-type ResumeProjection = Pick<
-  ResumeDraft,
-  "templateId" | "targetPageCount" | "identity" | "sections"
->;
-
-function projectResume(draft: ResumeDraft): ResumeProjection {
-  return {
-    templateId: draft.templateId,
-    targetPageCount: draft.targetPageCount,
-    identity: draft.identity,
-    sections: draft.sections,
-  };
-}
-
 export function createWorkspaceAssistantEditMethods(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   applyAssistantProfilePatchGroup: (
     patchGroup: ReturnType<typeof ProfileCopilotPatchGroupSchema.parse>,
     attribution: { messageId: string | null; reason: string },
@@ -207,15 +118,6 @@ export function createWorkspaceAssistantEditMethods(input: {
   saveSettings: (settings: JobFinderSettings) => Promise<unknown>;
 }) {
   const { ctx } = input;
-
-  function withDraftTransition<T>(
-    jobId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return ctx.withResumeDraftTransition
-      ? ctx.withResumeDraftTransition(jobId, operation)
-      : operation();
-  }
 
   async function applyAssistantProfileOperations(request: {
     operations: readonly ProfileCopilotPatchOperation[];
@@ -229,9 +131,7 @@ export function createWorkspaceAssistantEditMethods(input: {
       operations: request.operations,
       createdAt: new Date().toISOString(),
     });
-    const approvedDraftsBefore = (
-      await ctx.repository.listResumeDrafts()
-    ).filter((draft) => draft.status === "approved");
+    const approvedBefore = ctx.approvedResumeJobIds?.() ?? [];
     const applied = await input.applyAssistantProfilePatchGroup(patchGroup, {
       messageId: request.messageId,
       reason: `Assistant change: ${request.summary}`,
@@ -283,24 +183,12 @@ export function createWorkspaceAssistantEditMethods(input: {
         ],
       });
     }
-    let invalidatedApprovedResumeJobIds: string[] = [];
-    if (
-      approvedDraftsBefore.length > 0 &&
-      hasResumeAffectingProfileChange(
-        applied.profileBefore,
-        applied.profileAfter,
-      )
-    ) {
-      const draftsAfter = new Map(
-        (await ctx.repository.listResumeDrafts()).map((draft) => [
-          draft.id,
-          draft,
-        ]),
-      );
-      invalidatedApprovedResumeJobIds = approvedDraftsBefore.flatMap((draft) =>
-        draftsAfter.get(draft.id)?.status === "stale" ? [draft.jobId] : [],
-      );
-    }
+    // The job store sends a resume back for review in the same write that
+    // changes a fact it was built on.
+    const approvedAfter = new Set(ctx.approvedResumeJobIds?.() ?? []);
+    const invalidatedApprovedResumeJobIds = approvedBefore.filter(
+      (jobId) => !approvedAfter.has(jobId),
+    );
     return { changes, invalidatedApprovedResumeJobIds };
   }
 
@@ -315,8 +203,6 @@ export function createWorkspaceAssistantEditMethods(input: {
     reason: string;
   }): Promise<AssistantUndoResult> {
     let result: AssistantUndoResult = { undoneLabels: [], conflictLabels: [] };
-    let profileBefore: CandidateProfile | null = null;
-    let profileAfter: CandidateProfile | null = null;
     await commitProfileCopilotStateWithStaleRetry(ctx.repository, async () => {
       const [captured, searchPreferences, profileSetupState, revisions] =
         await Promise.all([
@@ -336,8 +222,6 @@ export function createWorkspaceAssistantEditMethods(input: {
       const nextProfile = CandidateProfileSchema.parse(profileUndo.next);
       const nextPreferences: JobSearchPreferences =
         JobSearchPreferencesSchema.parse(preferencesUndo.next);
-      profileBefore = captured.profile;
-      profileAfter = nextProfile;
       result = {
         undoneLabels: [...profileUndo.undone, ...preferencesUndo.undone].map(
           (entry) => entry.label ?? entry.path.join("."),
@@ -366,15 +250,6 @@ export function createWorkspaceAssistantEditMethods(input: {
         expectedProfileRevision: captured.revision,
       };
     });
-    if (
-      profileBefore &&
-      profileAfter &&
-      hasResumeAffectingProfileChange(profileBefore, profileAfter)
-    ) {
-      await ctx.staleApprovedResumeDrafts(
-        "Profile details changed after approval and the resume needs a fresh review.",
-      );
-    }
     return result;
   }
 
@@ -411,136 +286,10 @@ export function createWorkspaceAssistantEditMethods(input: {
     };
   }
 
-  async function commitResumeDraft(request: {
-    jobId: string;
-    before: ResumeDraft;
-    next: ResumeDraft;
-    actor: "assistant" | "restore";
-    mutationKind: "assistant_patch" | "restore";
-    reason: string;
-  }): Promise<ResumeDraft | null> {
-    const state = await ensureResumeDraft(ctx, request.jobId);
-    const sanitized = await sanitizeAndCheckResumeDraft(ctx, {
-      draft: request.next,
-      job: state.job,
-      profile: state.profile,
-    });
-    if (request.actor === "assistant") {
-      const notKept = findResumeTextsNotKept({
-        before: request.before,
-        requested: request.next,
-        saved: sanitized,
-      });
-      if (notKept.length > 0) {
-        throw new AssistantEditConflictError(
-          `Nothing was saved: the resume checker would not keep ${notKept
-            .slice(0, 3)
-            .map((text) => `"${text.slice(0, 160)}"`)
-            .join(
-              ", ",
-            )} (resume text drops first-person wording like "I" or "my", filler phrases, and claims the saved profile does not back). Reword it in the resume's neutral voice from the profile's facts, or add the fact to the profile first.`,
-          "not_kept",
-        );
-      }
-    }
-    if (
-      buildResumeDraftStateHash(sanitized) ===
-      buildResumeDraftStateHash(request.before)
-    ) {
-      return null;
-    }
-    const validation = validateResumeDraft({
-      draft: sanitized,
-      job: state.job,
-      profile: state.profile,
-      validatedAt: sanitized.updatedAt,
-    });
-    const previousValidation =
-      (
-        await ctx.repository.listResumeValidationResults(request.before.id)
-      )[0] ?? null;
-    const revisions = await ctx.repository.listResumeDraftRevisions(
-      request.before.id,
-    );
-    await ctx.repository.applyResumePatchWithRevision({
-      expectedDraftUpdatedAt: request.before.updatedAt,
-      draft: sanitized,
-      revision: buildResumeDraftRevision({
-        draft: request.before,
-        resultingDraft: sanitized,
-        createdAt: sanitized.updatedAt,
-        parentRevisionId: revisions[0]?.id ?? null,
-        actor: request.actor,
-        mutationKind: request.mutationKind,
-        reason: request.reason,
-      }),
-      validation: preserveWorkHistoryReviewGuidance({
-        validation,
-        previousValidation,
-        draft: sanitized,
-      }),
-      tailoredAsset: buildTailoredAssetBridge({
-        draft: sanitized,
-        job: state.job,
-        profile: state.profile,
-        existingAsset: state.tailoredAsset,
-        clearStoragePath: true,
-        templates: state.templates,
-      }),
-    });
-    return sanitized;
-  }
-
-  async function undoAssistantResumeChange(request: {
-    jobId: string;
-    entries: readonly AssistantChangeEntry[];
-    reason: string;
-  }): Promise<AssistantUndoResult> {
-    return withDraftTransition(request.jobId, async () => {
-      const state = await ensureResumeDraft(ctx, request.jobId);
-      const undo = undoChangeEntries(
-        projectResume(state.draft),
-        request.entries,
-        {
-          ignoreKeys: RESUME_IGNORED_KEYS,
-        },
-      );
-      const result: AssistantUndoResult = {
-        undoneLabels: undo.undone.map(
-          (entry) => entry.label ?? entry.path.join("."),
-        ),
-        conflictLabels: undo.conflicts.map(
-          (entry) => entry.label ?? entry.path.join("."),
-        ),
-      };
-      if (undo.undone.length === 0) return result;
-      const updatedAt = createMonotonicTimestamp(state.draft.updatedAt);
-      await commitResumeDraft({
-        jobId: request.jobId,
-        before: state.draft,
-        next: ResumeDraftSchema.parse({
-          ...state.draft,
-          ...undo.next,
-          status: "needs_review",
-          approvedAt: null,
-          approvedExportId: null,
-          staleReason:
-            "An assistant change was undone and the resume needs a fresh review.",
-          updatedAt,
-        }),
-        actor: "restore",
-        mutationKind: "restore",
-        reason: request.reason,
-      });
-      return result;
-    });
-  }
-
   return {
     applyAssistantProfileOperations,
     undoAssistantProfileChange,
     undoAssistantSettingsChange,
-    undoAssistantResumeChange,
   };
 }
 

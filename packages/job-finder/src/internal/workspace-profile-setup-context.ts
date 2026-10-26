@@ -23,7 +23,7 @@ import {
 } from "./resume-import-recovery";
 import { createUniqueId } from "./shared";
 import { normalizeSearchPreferences } from "./workspace-helpers";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 function buildBundleFromStoredResume(
   profile: CandidateProfile,
@@ -98,18 +98,18 @@ function getCandidateResolutionForReviewStatus(
 }
 
 async function syncLatestResumeImportCandidatesWithSetupState(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: {
     documentBundles: readonly ResumeDocumentBundle[];
     latestResumeImportRun: Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["getLatestResumeImportRun"]
+        ProfileContext["repository"]["getLatestResumeImportRun"]
       >
     >;
     profileSetupState: ProfileSetupState;
     candidates: readonly Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["listResumeImportFieldCandidates"]
+        ProfileContext["repository"]["listResumeImportFieldCandidates"]
       >
     >[number][];
   },
@@ -204,7 +204,7 @@ async function syncLatestResumeImportCandidatesWithSetupState(
 }
 
 export function createWorkspaceProfileSetupContextHelpers(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
 ) {
   function freezeDisplayValue(value: unknown): void {
     if (value === null || typeof value !== "object" || Object.isFrozen(value))

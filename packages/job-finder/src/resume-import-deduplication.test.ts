@@ -12,15 +12,15 @@ import {
 import {
   createFreshStartSeedProfile,
   createSeed,
-} from "./workspace-service.test-fixtures";
+} from "./test-fixtures";
 import {
   createAiClient,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 describe("resume import deduplication", () => {
   test("imports two complete jobs once when the model keeps their city in the employer name", async () => {
@@ -75,7 +75,7 @@ Frontend Engineer, Backend Engineer, Full-stack Engineer, Platform Engineer, Dat
 Preferred location: Remote worldwide or Berlin, Germany`;
     const seed = createSeed();
     const fallbackClient = createAiClient();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed: {
         ...seed,
         profile: { ...createFreshStartSeedProfile(), experiences: [] },
@@ -150,7 +150,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
         },
       },
     });
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_location_suffix_twins",
@@ -186,7 +186,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("reconciles duplicate experience candidates with different record ids into one review item", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: {
         ...seed,
         // The resume below is this person's own (Jamie Rivers).
@@ -281,7 +281,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_duplicate_experience_ids",
@@ -336,7 +336,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("keeps text import usable when the vision branch fails", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile: createFreshStartSeedProfile() },
       aiClient: {
         ...createAiClient(),
@@ -391,7 +391,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_text_when_vision_fails",
@@ -443,7 +443,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
   test("skips vision branch when local image generation produced no page images", async () => {
     const seed = createSeed();
     let visionCalls = 0;
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -520,7 +520,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_empty_vision_artifact",
@@ -559,7 +559,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("records configured vision provider failures even when fallback candidates are returned", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       visionProvider: {
         getStatus() {
@@ -591,7 +591,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_primary_vision_failure",
@@ -642,7 +642,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("times out a slow vision branch without waiting beyond text completion", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile: createFreshStartSeedProfile() },
       aiClient: {
         ...createAiClient(),
@@ -705,7 +705,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_slow_vision_timeout",
@@ -758,7 +758,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("does not wait for a hung vision branch with the default long provider deadline", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile: createFreshStartSeedProfile() },
       aiClient: {
         ...createAiClient(),
@@ -815,7 +815,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_hung_vision_default_deadline",
@@ -883,7 +883,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
         education: [],
       },
     };
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -972,7 +972,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_deferred_vision_success",
@@ -1038,7 +1038,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("preserves user review decisions when deferred vision completes", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -1127,7 +1127,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_deferred_preserve_review",
@@ -1239,7 +1239,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("persists text and vision branch failures when neither branch has candidates", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -1277,7 +1277,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
     });
 
     await expect(
-      workspaceService.runResumeImport({
+      profileWork.runResumeImport({
         baseResume: {
           ...seed.profile.baseResume,
           id: "resume_both_branch_failure_status",
@@ -1331,7 +1331,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("can produce review candidates when text extraction fails but vision succeeds", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -1393,7 +1393,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       },
     });
 
-    await workspaceService.runResumeImport({
+    await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_vision_only",
@@ -1912,7 +1912,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("auto-applies grounded fresh-start fields including inferred search preferences", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed: {
         ...seed,
         profile: {
@@ -1935,7 +1935,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       aiClient: createAiClient(),
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_placeholder_replace",
@@ -2019,7 +2019,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
   test("derives and auto-applies years of experience from dated work history on fresh-start imports", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed: {
         ...seed,
         profile: {
@@ -2065,7 +2065,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       "Jun 2015 - Aug 2016",
     ].join("\n");
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_date_derived_years_experience",

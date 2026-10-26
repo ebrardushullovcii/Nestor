@@ -44,7 +44,7 @@ import {
   shouldFinishSourceDebugEarly,
   synthesizeSourceInstructionArtifact,
 } from "./workspace-service-helpers";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 import {
   buildSourceDebugProgressEmitter,
   describeSourceDebugOpenFailure,
@@ -175,7 +175,7 @@ function buildSourceDebugCompactionPolicy(
 }
 
 export async function runSourceDebugWorkflow(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   targetId: string,
   signal?: AbortSignal,
   options?: {
@@ -482,7 +482,7 @@ export async function runSourceDebugWorkflow(
           }),
         });
         await ctx.persistSourceDebugRun(run);
-        return ctx.getWorkspaceSnapshot();
+        return run;
       }
 
       run = SourceDebugRunRecordSchema.parse({
@@ -1006,7 +1006,7 @@ export async function runSourceDebugWorkflow(
     });
 
     if (run.state === "paused_manual") {
-      return ctx.getWorkspaceSnapshot();
+      return run;
     }
 
     const settings = await ctx.repository.getSettings();
@@ -1042,7 +1042,7 @@ export async function runSourceDebugWorkflow(
         ...currentTarget,
         lastDebugRunId: run.id,
       }));
-      return ctx.getWorkspaceSnapshot();
+      return run;
     }
 
     const verification = SourceInstructionVerificationSchema.parse({
@@ -1276,7 +1276,7 @@ export async function runSourceDebugWorkflow(
     ctx.activeSourceDebugExecutionIdRef.current = null;
   }
 
-  return ctx.getWorkspaceSnapshot();
+  return run;
 }
 
 /** What each check phase is doing, in the words a source row can show. */

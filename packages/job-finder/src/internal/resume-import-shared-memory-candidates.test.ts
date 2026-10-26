@@ -5,7 +5,7 @@ import { promoteGroundedSharedMemoryCandidates } from "./resume-import-shared-me
 import {
   createStageCandidate,
   createTestBundle,
-} from "../workspace-service.resume-analysis.shared";
+} from "../resume-import.test-support";
 
 describe("promoteGroundedSharedMemoryCandidates", () => {
   test("drops proofs that repeat a work-history bullet verbatim, keeps richer proofs for review", () => {

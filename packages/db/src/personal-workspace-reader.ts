@@ -4,7 +4,6 @@ import {
   ResumeImportFieldCandidateSchema,
   ResumeDocumentBundleSchema,
 } from "@nestor/contracts";
-import type { JobFinderRepositorySeed } from "./repository-types";
 import type { JobStore } from "./job-store/job-store";
 import {
   createProfileWorkspace,
@@ -13,11 +12,8 @@ import {
 import { createActivityControlStore } from "./job-store/activity-control";
 
 /** Personal row-store reads never load job/application collections or old Profile values. */
-export function readPersonalWorkspaceState(
-  initial: JobFinderRepositorySeed,
-  store: JobStore,
-) {
-  const personal = createProfileWorkspace(store, initial);
+export function readPersonalWorkspaceState(store: JobStore) {
+  const personal = createProfileWorkspace(store);
   const activityControl = createActivityControlStore(store).read();
   return store.transaction(() => {
     // Read the newest import of any file, including a failed replacement file.

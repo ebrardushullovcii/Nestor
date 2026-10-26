@@ -8,10 +8,8 @@ import {
   describeFailure,
   FAILURE_SENTENCES,
   getJobFinderErrorDetail,
-  getJobFinderErrorMessage,
   TECHNICAL_DETAILS_LABEL,
-} from "./job-finder-error-message";
-import { STATUS_COPY_TABLES } from "./status-copy";
+} from "./describe-failure";
 
 /**
  * The guard for the Job Finder copy layer (RC-02, RC-03).
@@ -415,43 +413,6 @@ describe("allowlist mechanics", () => {
   });
 });
 
-describe("status vocabulary", () => {
-  const entries = Object.entries(STATUS_COPY_TABLES).flatMap(
-    ([table, labels]) =>
-      Object.entries(labels).map(
-        ([value, label]) => [table, value, label] as const,
-      ),
-  );
-
-  it("covers every enum value with copy", () => {
-    expect(entries.length).toBeGreaterThan(60);
-  });
-
-  it.each(entries)(
-    "%s.%s reads as copy, not a stored value",
-    (_t, _v, label) => {
-      expect(label).not.toMatch(/_/);
-      expect(label).not.toMatch(/^[a-z]/);
-      expect(label.trim()).toBe(label);
-      expect(label.length).toBeGreaterThan(2);
-    },
-  );
-
-  it("never renders a value by title-casing its identifier", () => {
-    // "Site login required" and "Prepare only" were what the title-caser
-    // produced at these exact sites.
-    expect(
-      STATUS_COPY_TABLES.APPLICATION_BLOCKER_LABELS.site_login_required,
-    ).toBe("The job site wants you to sign in first");
-    expect(STATUS_COPY_TABLES.APPLY_RUN_MODE_LABELS.copilot).toBe(
-      "Preparation",
-    );
-    expect(
-      STATUS_COPY_TABLES.RESUME_PATCH_OPERATION_LABELS.replace_section_bullets,
-    ).toBe("Rewrite the bullets in this section");
-  });
-});
-
 describe("failure copy", () => {
   const CLOSED_SET = Object.values(FAILURE_SENTENCES);
 
@@ -467,35 +428,6 @@ describe("failure copy", () => {
     '[ { "code": "custom", "message": "A compensation currency awaiting clarification must remain unset.", "path": [ "compensation", "currency" ] } ]',
   ];
 
-  it.each(INTERNAL_THROWS)(
-    "never lets internal text reach a screen: %s",
-    (thrown) => {
-      const copy = getJobFinderErrorMessage(
-        new Error(thrown),
-        "That did not finish.",
-      );
-
-      expect(copy).not.toBe(thrown);
-      expect(copy).not.toContain("remote method");
-      expect(copy).not.toMatch(/_/);
-      expect(CLOSED_SET).toContain(copy);
-    },
-  );
-
-  it("never lets Electron's transport wrapper reach a screen", () => {
-    // Before: this function returned everything after the wrapper, and 37 of
-    // the ~40 error sites did not call it at all, so the literal wrapper
-    // string could appear in a toast.
-    const copy = getJobFinderErrorMessage(
-      new Error(
-        "Error invoking remote method 'job-finder:start-apply-copilot-run': Error: The dedicated browser profile could not start.",
-      ),
-      "That did not finish.",
-    );
-
-    expect(copy).not.toContain("remote method");
-    expect(copy).not.toContain("job-finder:");
-  });
 
   it("explains an unusable resume and asks for another file", () => {
     const failure = describeFailure(
@@ -509,22 +441,7 @@ describe("failure copy", () => {
       "No resume details were found in this file. Choose another file.",
     );
   });
-  it("classifies a busy failure rather than naming the run", () => {
-    expect(
-      getJobFinderErrorMessage(
-        new Error(
-          "Error invoking remote method 'job-finder:apply': Error: Apply run 'a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d' is already executing.",
-        ),
-        "That did not finish.",
-      ),
-    ).toBe(FAILURE_SENTENCES.busy);
-  });
 
-  it("uses the caller's sentence when there is nothing readable", () => {
-    expect(getJobFinderErrorMessage(null, "The profile was not saved.")).toBe(
-      "The profile was not saved.",
-    );
-  });
 
   it("describeFailure never returns thrown text as the sentence", () => {
     for (const thrown of INTERNAL_THROWS) {

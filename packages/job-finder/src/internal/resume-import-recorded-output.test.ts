@@ -6,12 +6,12 @@ import {
   createAiClient,
   createSeed,
   createFreshStartSeedProfile,
-  createWorkspaceServiceHarness,
-} from "../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "../workspace-service.resume-analysis.shared";
+} from "../resume-import.test-support";
 
 // Synthetic source and recorded section responses exercise the model path,
 // including the field names that previously lost or misattributed these facts.
@@ -176,7 +176,7 @@ async function replay(refresh = false) {
   });
   const base = createAiClient();
   const seen: string[] = [];
-  const harness = createWorkspaceServiceHarness({
+  const harness = createProfileServiceHarness({
     seed,
     aiClient: {
       ...base,
@@ -193,9 +193,9 @@ async function replay(refresh = false) {
       },
     },
   });
-  if (refresh) await harness.workspaceService.analyzeProfileFromResume();
+  if (refresh) await harness.profileWork.analyzeProfileFromResume();
   else
-    await harness.workspaceService.runResumeImport({
+    await harness.profileWork.runResumeImport({
       baseResume: seed.profile.baseResume,
       documentBundle,
     });

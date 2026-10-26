@@ -14,7 +14,7 @@ import {
 import {
   createFreshStartSeedProfile,
   createSeed,
-} from "./workspace-service.test-fixtures";
+} from "./test-fixtures";
 
 describe("resume import benchmark", () => {
   test("aggregates benchmark metrics across cases", () => {

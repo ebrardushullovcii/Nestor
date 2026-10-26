@@ -11,7 +11,7 @@ import {
 import {
   createSeed,
   createSourceInstructionArtifact,
-} from "../workspace-service.test-fixtures";
+} from "../test-fixtures";
 
 describe("workspace profile-inferred search intent", () => {
   test("uses saved experience titles when explicit target roles are empty", () => {

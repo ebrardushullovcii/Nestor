@@ -12,15 +12,15 @@ import { toCandidate } from "./internal/resume-import-candidate-utils";
 import {
   createFreshStartSeedProfile,
   createSeed,
-} from "./workspace-service.test-fixtures";
+} from "./test-fixtures";
 import {
   createAiClient,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 import {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,
@@ -605,7 +605,7 @@ describe("resume import N-019 and N-043", () => {
   test.each(["plain_text", "textutil_docx", "pdfjs_text"] as const)(
     "stored import and replacement retain records with %s text",
     async (parser) => {
-      const { workspaceService } = createWorkspaceServiceHarness({
+      const { profileWork } = createProfileServiceHarness({
         seed: { ...seed, profile: profile() },
       });
       const documentBundle = createTestBundle({
@@ -618,11 +618,11 @@ describe("resume import N-019 and N-043", () => {
         textContent: text,
         fileName: "synthetic-usability.txt",
       };
-      const first = await workspaceService.runResumeImport({
+      const first = await profileWork.runResumeImport({
         baseResume,
         documentBundle,
       });
-      const second = await workspaceService.runResumeImport({
+      const second = await profileWork.runResumeImport({
         baseResume,
         documentBundle,
       });
@@ -915,7 +915,7 @@ describe("live import education and headline regressions", () => {
       }),
       evidenceText,
     });
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile: profile() },
       aiClient: {
         ...fallback,
@@ -997,7 +997,7 @@ describe("live import education and headline regressions", () => {
         },
       },
     });
-    const result = await workspaceService.runResumeImport({
+    const result = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "synthetic-live-regression",

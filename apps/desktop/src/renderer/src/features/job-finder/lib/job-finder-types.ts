@@ -1,28 +1,9 @@
 import type {
-  AppearanceTheme,
   CandidateAnswerKind,
   CandidateLinkKind,
-  CandidateProfile,
   CandidateReusableAnswer,
-  EditableSourceInstructionArtifact,
-  JobFinderOpenBrowserSessionInput,
-  JobFinderRendererWorkspaceSnapshot,
-  JobFinderSettings,
-  JobSearchPreferences,
   JobSourceAdapterKind,
-  ProfileCopilotContext,
-  ProfileSetupReviewAction,
-  ProfileSetupReviewActionOptions,
-  ProfileSetupState,
-  ResumeTimelineRepairAction,
-  RevealSavedFileResult,
-  SetJobFinderActivityControlInput,
-  SourceDebugProgressEvent,
-  SourceDebugRunDetails,
   SourceInstructionStatus,
-  UpdateAiBehaviorInput,
-  UpdateApplicationDefaultsInput,
-  UpdateWorkspaceBehaviorInput,
   WorkMode,
 } from "@nestor/contracts";
 
@@ -53,113 +34,6 @@ export type JobFinderAutoApplyQueueStartOutcome =
     }
   | { status: "failed"; message: string | null }
   | { status: "unknown" };
-
-export interface JobFinderShellActions {
-  analyzeProfileFromResume: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  openBrowserSession: (
-    input?: JobFinderOpenBrowserSessionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  checkBrowserSession: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  refreshWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  requestWorkspaceRefresh?: () => void;
-  resetBrowser: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  runSourceDebug: (
-    targetId: string,
-    onProgress?: (event: SourceDebugProgressEvent) => void,
-    options?: { readabilityTimeoutMs?: number },
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  getSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
-  saveSourceInstructionArtifact: (
-    targetId: string,
-    artifact: EditableSourceInstructionArtifact,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  acceptSourceInstructionDraft: (
-    targetId: string,
-    instructionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  verifySourceInstructions: (
-    targetId: string,
-    instructionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  importResume: (options?: {
-    retryInterrupted?: boolean;
-  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveProfile: (
-    profile: CandidateProfile,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveWorkspaceInputs: (
-    profile: CandidateProfile,
-    searchPreferences: JobSearchPreferences,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveSearchPreferences: (
-    searchPreferences: JobSearchPreferences,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  setActivityControl: (
-    input: SetJobFinderActivityControlInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveSettings: (
-    settings: JobFinderSettings,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  updateApplicationDefaults: (
-    input: UpdateApplicationDefaultsInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  updateWorkspaceBehavior: (
-    input: UpdateWorkspaceBehaviorInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  updateAiBehavior: (
-    input: UpdateAiBehaviorInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  updateAppearanceTheme: (
-    appearanceTheme: AppearanceTheme,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  saveProfileSetupState: (
-    profileSetupState: ProfileSetupState,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  applyProfileSetupReviewAction: (
-    reviewItemId: string,
-    action: ProfileSetupReviewAction,
-    options?: ProfileSetupReviewActionOptions,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  applyResumeTimelineRepairAction: (
-    runId: string,
-    proposalId: string,
-    action: ResumeTimelineRepairAction,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  sendProfileCopilotMessage: (
-    content: string,
-    context?: ProfileCopilotContext,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  applyProfileCopilotPatchGroup: (
-    patchGroupId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  rejectProfileCopilotPatchGroup: (
-    patchGroupId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  undoProfileRevision: (
-    revisionId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  assessJobListing: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  queueJobForReview: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  queueJobsForReview?: (
-    jobIds: readonly string[],
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  removeJobsFromReview?: (
-    jobIds: readonly string[],
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  removeJobFromReview: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /**
-   * Shows a file the app wrote in the OS file manager. The export already
-   * named the path and then left the person to find it by hand; nothing is
-   * opened or executed, only selected.
-   */
-  revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
-}
 
 export interface ScreenDefinition {
   id: JobFinderScreen;

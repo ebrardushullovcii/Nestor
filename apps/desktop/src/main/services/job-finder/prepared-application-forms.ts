@@ -1,24 +1,25 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type {
-  BrowserSessionRuntime,
-  PreparedApplicationFormStore,
-} from "@nestor/browser-runtime";
-import type {
-  ApplicationPageReopenProgress,
-  ApplicationPageState,
-} from "@nestor/contracts";
+import type { PreparedApplicationFormStore } from "@nestor/browser-runtime";
 import type { JobFinderRepository } from "@nestor/db";
+import { createPreparedFormsStore, type JobStore } from "@nestor/db/job-store";
 import type { CandidateAssetLibrary } from "./candidate-asset-library";
 
+/**
+ * Filled forms Apply left for the person, kept in the job store so a page a
+ * restart closed can be filled again. Each attached file is read back only
+ * if its bytes still match what was attached.
+ */
 export function createPreparedApplicationFormStore(
-  repository: JobFinderRepository,
+  store: JobStore,
+  repository: Pick<JobFinderRepository, "getProfile">,
   assets: Pick<CandidateAssetLibrary, "resolveForApplication">,
 ): PreparedApplicationFormStore {
+  const forms = createPreparedFormsStore(store);
   return {
-    get: (key) => repository.getPreparedApplicationForm(key),
-    save: (form) => repository.upsertPreparedApplicationForm(form),
-    delete: (key) => repository.deletePreparedApplicationForm(key),
+    get: (key) => Promise.resolve(forms.get(key)),
+    save: (form) => Promise.resolve(forms.save(form)),
+    delete: (key) => Promise.resolve(forms.delete(key)),
     async loadAttachment(file) {
       let bytes: Uint8Array;
       if (file.kind === "candidate_asset") {
@@ -36,74 +37,13 @@ export function createPreparedApplicationFormStore(
           throw new Error("Resume unavailable");
         bytes = await readFile(profile.baseResume.storagePath);
       } else {
-        const exports = await repository.listResumeExportArtifacts();
-        const artifact = exports.find((candidate) => candidate.id === file.id);
-        if (!artifact || artifact.sha256 !== file.sha256)
-          throw new Error("Resume unavailable");
-        bytes = await readFile(artifact.filePath);
+        // Applications attach their resume from the job store, never an
+        // old export.
+        throw new Error("Resume unavailable");
       }
       if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
         throw new Error("Attachment changed");
       return bytes;
-    },
-  };
-}
-
-/** Read-only availability checks never recreate a page or run preparation. */
-export function createApplicationPageAccess(
-  repository: JobFinderRepository,
-  runtime: BrowserSessionRuntime,
-) {
-  async function target(resultId: string) {
-    const [result] = await repository.listApplyJobResults({ id: resultId });
-    if (
-      !result ||
-      !["awaiting_review", "blocked"].includes(result.state) ||
-      result.blockerReason === "submission_outcome_uncertain" ||
-      result.privacyReceipt?.finalSubmitOccurred ||
-      ["submitted", "outcome_uncertain"].includes(
-        result.privacyReceipt?.submissionOutcome?.outcome ?? "",
-      )
-    )
-      return null;
-    const [job] = await repository.listSavedJobsByIds([result.jobId]);
-    if (!job || job.status === "archived") return null;
-    return job;
-  }
-  const unavailable = async (
-    resultId: string,
-  ): Promise<ApplicationPageState> => {
-    const saved = await repository.getPreparedApplicationForm(resultId);
-    return {
-      resultId,
-      state: "needs_preparing",
-      reason: saved?.reason ?? "application_finished",
-    };
-  };
-  return {
-    async getStates(
-      resultIds: readonly string[],
-    ): Promise<ApplicationPageState[]> {
-      return Promise.all(
-        resultIds.map(async (resultId) => {
-          const job = await target(resultId);
-          return job && runtime.getApplicationPageState
-            ? runtime.getApplicationPageState(job.source, resultId)
-            : unavailable(resultId);
-        }),
-      );
-    },
-    async reopen(
-      resultId: string,
-      onProgress: (progress: ApplicationPageReopenProgress) => void,
-    ): Promise<ApplicationPageState> {
-      const job = await target(resultId);
-      if (!job || !runtime.reopenApplicationPage) {
-        onProgress({ resultId, phase: "needs_preparing" });
-        return unavailable(resultId);
-      }
-      // Deliberately no call to preparation, continuation, authority or send.
-      return runtime.reopenApplicationPage(job.source, resultId, onProgress);
     },
   };
 }

@@ -6,12 +6,12 @@ import {
   createAiClient,
   createFreshStartSeedProfile,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 const TEXT = [
   "Robin Example",
@@ -143,12 +143,12 @@ const ROLE = {
 describe("resume import with a model (ADR 0041)", () => {
   test("the model's reading is the import; no rule reader adds candidates", async () => {
     const seed = freshSeed();
-    const { workspaceService, repository } = createWorkspaceServiceHarness({
+    const { profileWork, repository } = createProfileServiceHarness({
       seed,
       aiClient: modelClient({ identity_summary: IDENTITY, experience: [ROLE] }),
     });
 
-    const snapshot = await workspaceService.runResumeImport(importInput(seed));
+    const snapshot = await profileWork.runResumeImport(importInput(seed));
 
     expect(snapshot.profile.fullName).toBe("Robin Example");
     expect(snapshot.profile.email).toBe("robin@example.test");
@@ -161,7 +161,7 @@ describe("resume import with a model (ADR 0041)", () => {
 
   test("stated eligibility and work preferences the model read fill empty answers", async () => {
     const seed = freshSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: modelClient({
         identity_summary: [
@@ -189,7 +189,7 @@ describe("resume import with a model (ADR 0041)", () => {
       }),
     });
 
-    const snapshot = await workspaceService.runResumeImport(importInput(seed));
+    const snapshot = await profileWork.runResumeImport(importInput(seed));
 
     expect(snapshot.profile.workEligibility.authorizedWorkCountries).toEqual([
       "European Union",
@@ -206,12 +206,12 @@ describe("resume import with a model (ADR 0041)", () => {
       "experience",
       "The backend is temporarily overloaded.",
     );
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: modelClient({ identity_summary: IDENTITY, experience: unread }),
     });
 
-    const snapshot = await workspaceService.runResumeImport(importInput(seed));
+    const snapshot = await profileWork.runResumeImport(importInput(seed));
 
     expect(snapshot.profile.fullName).toBe("Robin Example");
     expect(snapshot.profile.experiences).toEqual([]);
@@ -233,11 +233,11 @@ describe("resume import with a model (ADR 0041)", () => {
         return modelClient(reads).extractResumeImportStage(input);
       },
     };
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: client,
     });
-    await workspaceService.runResumeImport(importInput(seed));
+    await profileWork.runResumeImport(importInput(seed));
 
     reads = {
       identity_summary: [
@@ -266,7 +266,7 @@ describe("resume import with a model (ADR 0041)", () => {
         },
       ],
     };
-    const snapshot = await workspaceService.runResumeImport(
+    const snapshot = await profileWork.runResumeImport(
       importInput(
         seed,
         "Dev Other\ndev@example.test\nExperience\nEngineer — Other Corp\n2020 - Present\n- Built a fictional service.",

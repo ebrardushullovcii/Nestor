@@ -4,7 +4,6 @@ import type { DesktopBrowserState } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
-import { clearJobDetailCache } from "@renderer/features/job-finder/hooks/use-job-detail";
 import { SettingsScreen } from "@renderer/features/job-finder/screens/settings/settings-screen";
 import { listLocalResumeTemplates } from "../../../../shared/job-finder-resume-catalog";
 import { useStoredSettings } from "./use-stored-settings";
@@ -60,12 +59,7 @@ export function StoredSettingsScreen() {
         availableResumeTemplates={RESUME_TEMPLATES}
         browser={browser}
         onResetWorkspace={async () => {
-          clearJobDetailCache();
-          try {
-            await window.nestor.jobFinder.resetWorkspace();
-          } finally {
-            clearJobDetailCache();
-          }
+          await window.nestor.jobFinder.resetWorkspace();
           // Reset leaves nothing set up, so guided setup opens next.
           void navigate("/job-finder/profile/setup");
         }}

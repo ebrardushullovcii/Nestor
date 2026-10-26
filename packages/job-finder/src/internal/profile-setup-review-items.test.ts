@@ -5,7 +5,7 @@ import {
   createFreshStartCandidateProfile,
   type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 import {
   buildProfileSetupReviewItems,
   resolvePendingReviewItemsAfterExplicitSave,

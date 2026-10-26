@@ -3,13 +3,13 @@ import { describe, expect, test, vi } from "vitest";
 import {
   createFreshStartSeedProfile,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 
 describe("resume import timing persistence", () => {
   test("persists measured stage and finalization timing without changing profile or candidates", async () => {
     const seed = createSeed();
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
+    const { repository, profileWork } = createProfileServiceHarness({
       seed: {
         ...seed,
         profile: {
@@ -48,7 +48,7 @@ describe("resume import timing persistence", () => {
         await persistMeasuredRun(run);
       });
 
-    const snapshot = await workspaceService.analyzeProfileFromResume();
+    const snapshot = await profileWork.analyzeProfileFromResume();
     const persistedRun = await repository.getLatestResumeImportRun();
     const persistedCandidates =
       await repository.listResumeImportFieldCandidates({

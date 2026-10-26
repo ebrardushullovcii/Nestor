@@ -10,8 +10,8 @@ vi.mock("electron", () => ({
   },
   dialog: {},
 }));
-vi.mock("../services/job-finder/workspace-service", () => ({
-  getJobFinderWorkspaceService: vi.fn(),
+vi.mock("../services/job-finder/runtime", () => ({
+  getProfileService: vi.fn(),
 }));
 const acknowledgeNavigation = vi.hoisted(() => vi.fn());
 vi.mock("../services/assistant/assistant-service", () => ({

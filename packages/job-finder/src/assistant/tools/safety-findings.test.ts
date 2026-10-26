@@ -10,8 +10,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createSeed,
-  createWorkspaceServiceHarness,
-} from "../../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../../profile-service.test-support";
 import type { AssistantBrowserLease, AssistantHostPorts } from "../ports";
 import { ASSISTANT_SYSTEM_PROMPT } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
@@ -30,10 +30,7 @@ import {
 import { openInAppTool } from "./workspace-tools";
 
 function world() {
-  const { workspaceService: service } = createWorkspaceServiceHarness();
-  // Test cases substitute canonical snapshots below; display reads see the
-  // same synthetic substitutions rather than the repository behind the spy.
-  service.getWorkspaceProjection = () => service.getWorkspaceSnapshot();
+  const { service } = createProfileServiceHarness();
   const changes: unknown[] = [];
   const openInApp = vi.fn<AssistantTurnSession["openInApp"]>(() =>
     Promise.resolve(),
@@ -297,8 +294,8 @@ describe("R3 assistant safety findings", () => {
 
   it("R3-008 preserves job sites across separate preference changes", async () => {
     const ctx = world();
-    const before = await ctx.service.getWorkspaceSnapshot();
-    expect(before.siteCounts.enabled).toBeGreaterThan(0);
+    const before = await ctx.service.read();
+    expect(before.enabledSiteCount).toBeGreaterThan(0);
     const behavior = AiBehaviorPreferenceSchema.parse(
       before.settings.aiBehavior ?? {},
     );
@@ -327,8 +324,8 @@ describe("R3 assistant safety findings", () => {
       },
       ctx,
     );
-    const after = await ctx.service.getWorkspaceSnapshot();
-    expect(after.siteCounts).toEqual(before.siteCounts);
+    const after = await ctx.service.read();
+    expect(after.enabledSiteCount).toEqual(before.enabledSiteCount);
     expect(after.searchPreferences.minimumSalaryUsd).toBe(120);
     await editProfileTool.execute(
       {
@@ -347,9 +344,9 @@ describe("R3 assistant safety findings", () => {
       },
       ctx,
     );
-    const combined = await ctx.service.getWorkspaceSnapshot();
+    const combined = await ctx.service.read();
     expect(combined.searchPreferences.minimumSalaryUsd).toBe(121);
-    expect(combined.siteCounts).toEqual(before.siteCounts);
+    expect(combined.enabledSiteCount).toEqual(before.enabledSiteCount);
     expect(JSON.stringify(ctx.changes)).not.toContain('"field":"targets"');
     expect(JSON.stringify(ctx.changes)).not.toContain(
       '"label":"Removed targets"',
@@ -397,7 +394,7 @@ describe("R3 assistant safety findings", () => {
         lastName: "Okoro",
       },
     });
-    expect((await ctx.service.getWorkspaceSnapshot()).profile).toMatchObject({
+    expect((await ctx.service.read()).profile).toMatchObject({
       firstName: "Sam",
       lastName: "Okoro",
     });
@@ -445,7 +442,7 @@ describe("R3 assistant safety findings", () => {
     );
     expect(result.data).toMatchObject({ defaultResumeLevel: "tailored" });
     expect(
-      (await ctx.service.getWorkspaceSnapshot()).searchPreferences
+      (await ctx.service.read()).searchPreferences
         .tailoringMode,
     ).toBe("balanced");
     // Reset the selected seed job to a discovered job before shortlisting under the saved default.
@@ -458,7 +455,7 @@ describe("R3 assistant safety findings", () => {
         resumeApplicationMode: null,
       },
     ];
-    const fresh = createWorkspaceServiceHarness({ seed }).workspaceService;
+    const fresh = createProfileServiceHarness({ seed }).service;
     await setDefaultResumeLevelTool.execute(
       { level: "light" },
       {
@@ -475,12 +472,6 @@ describe("R3 assistant safety findings", () => {
         ports: { ...ctx.ports, ...assistantTestReads(fresh) },
       },
     );
-    const shortlisted = await fresh.queueJobForReview(seed.savedJobs[0]!.id);
-    expect(
-      shortlisted.reviewQueue.find(
-        (item) => item.jobId === seed.savedJobs[0]!.id,
-      )?.resumeTailoringMode,
-    ).toBe("balanced");
   });
 
   it("R3-137 / R3-119 opens Background and rejects a resume destination masquerading as Applications", async () => {
@@ -559,7 +550,7 @@ describe("R3 assistant safety findings", () => {
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {
     const ctx = world();
-    const before = await ctx.service.getWorkspaceSnapshot();
+    const before = await ctx.service.read();
     const behavior = AiBehaviorPreferenceSchema.parse(
       before.settings.aiBehavior ?? {},
     );
@@ -581,7 +572,7 @@ describe("R3 assistant safety findings", () => {
       }),
       ctx,
     );
-    const after = await ctx.service.getWorkspaceSnapshot();
+    const after = await ctx.service.read();
     expect(result.data).toMatchObject({
       savedSettings: { applicationAutomationMode: "confirm_before_submit" },
     });
@@ -624,14 +615,14 @@ describe("R3 assistant safety findings", () => {
 
 it("partial AI settings never restore withdrawn declaration approvals", async () => {
   const ctx = world();
-  const before = await ctx.service.getWorkspaceSnapshot();
+  const before = await ctx.service.read();
   await ctx.service.updateAiBehavior({
     aiBehavior: {
       applying: { preApprovedDeclarations: [] },
       profileAssistant: { replyStyle: "conversational" },
     },
   });
-  const saved = await ctx.service.getWorkspaceSnapshot();
+  const saved = await ctx.service.read();
   const patch = updateAiBehaviorTool.input.parse({
     aiBehavior: { applying: { coverLetterPolicy: "when_possible" } },
   });
@@ -639,7 +630,7 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
     "preApprovedDeclarations",
   );
   await updateAiBehaviorTool.execute(patch, ctx);
-  const after = await ctx.service.getWorkspaceSnapshot();
+  const after = await ctx.service.read();
   expect(after.settings.aiBehavior?.applying.preApprovedDeclarations).toEqual(
     [],
   );
@@ -659,7 +650,7 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
     aiBehavior: { jobSearch: { selectivity: "wide_net" } },
   });
   expect(
-    (await ctx.service.getWorkspaceSnapshot()).settings.aiBehavior?.applying
+    (await ctx.service.read()).settings.aiBehavior?.applying
       .preApprovedDeclarations,
   ).toEqual([]);
 });

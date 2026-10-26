@@ -7,10 +7,7 @@ import {
   type ProfileCopilotMessage,
   type ProfileRevision,
 } from "@nestor/contracts";
-import type {
-  JobFinderRepository,
-  JobFinderRepositorySeed,
-} from "../repository-types";
+import type { JobFinderRepository } from "../repository-types";
 import {
   applyProfileCopilotMessagePatchFlags,
   findProfileCopilotMessageByPatchGroup,
@@ -51,10 +48,7 @@ type ProfileMethods = Pick<
   | "upsertProfileRevision"
 >;
 /** Profile workflows share the same transaction as the fields they edit. */
-export function createProfileWorkspace(
-  store: JobStore,
-  seed: JobFinderRepositorySeed,
-) {
+export function createProfileWorkspace(store: JobStore) {
   const profile = createProfileStore(store),
     preferences = createPreferencesStore(store);
   const imports = createProfileImportStore(store, profile, preferences);
@@ -160,39 +154,6 @@ export function createProfileWorkspace(
     )
       activityChanged();
   };
-  const reset = (input: JobFinderRepositorySeed) =>
-    store.transaction(() => {
-      profile.replace(input.profile);
-      preferences.goals.replace(input.searchPreferences);
-      preferences.settings.replace(input.settings);
-      imports.reset(input);
-      store.sql("DELETE FROM profile_setup_reviews").run();
-      store.sql("DELETE FROM profile_messages").run();
-      store.sql("DELETE FROM profile_history").run();
-      writeSetup(input.profileSetupState);
-      for (const row of input.profileCopilotMessages) writeMessage(row);
-      for (const row of input.profileRevisions) writeHistory(row);
-      changed();
-    });
-  store.transaction(() => {
-    if (profile.created) {
-      profile.replace(seed.profile);
-      imports.reset(seed);
-    }
-    if (preferences.goals.created)
-      preferences.goals.replace(seed.searchPreferences);
-    if (preferences.settings.created)
-      preferences.settings.replace(seed.settings);
-    if (!store.sql("SELECT id FROM profile_setup WHERE id=1").get()) {
-      writeSetup(seed.profileSetupState);
-      for (const row of seed.profileCopilotMessages) writeMessage(row);
-      for (const row of seed.profileRevisions) writeHistory(row);
-    }
-  });
-  if (profile.created)
-    store.transaction(() =>
-      store.sql("UPDATE profile_revision SET version=1 WHERE id=1").run(),
-    );
   const methods: ProfileMethods = {
     getProfile: () => Promise.resolve().then(() => current()),
     readProfileProjection: () => Promise.resolve().then(() => current()),
@@ -308,16 +269,6 @@ export function createProfileWorkspace(
     profile,
     preferences,
     methods: { ...methods, ...imports.methods },
-    reset,
-    state: () => ({
-      ...imports.state(),
-      profile: current(),
-      searchPreferences: preferences.goals.read(),
-      settings: preferences.settings.read(),
-      profileSetupState: setup(),
-      profileCopilotMessages: messages(),
-      profileRevisions: history(),
-    }),
   };
 }
 

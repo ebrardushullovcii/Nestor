@@ -26,7 +26,7 @@ import {
 } from "./resume-import-workflow";
 import { hasResumeAffectingProfileChange } from "./resume-workspace-staleness";
 import { normalizeSearchPreferences } from "./workspace-helpers";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 // Clearing an identity fact leaves it empty (null). Instructional placeholder
 // strings must never be re-persisted as candidate facts; UI surfaces render
@@ -137,32 +137,29 @@ function clearProfileRecordValue(
 }
 
 export function createWorkspaceProfileSetupReviewMethods(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   getCurrentSetupStateContext: () => Promise<{
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
     profileSetupState: ProfileSetupState;
     latestResumeImportRun: Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["getLatestResumeImportRun"]
+        ProfileContext["repository"]["getLatestResumeImportRun"]
       >
     >;
     latestResumeImportAllCandidates: Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["listResumeImportFieldCandidates"]
+        ProfileContext["repository"]["listResumeImportFieldCandidates"]
       >
     >;
     latestResumeImportBundles: readonly Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["listResumeImportDocumentBundles"]
+        ProfileContext["repository"]["listResumeImportDocumentBundles"]
       >
     >[number][];
   }>;
-  getWorkspaceSnapshot: () => Promise<
-    Awaited<ReturnType<WorkspaceServiceContext["getWorkspaceSnapshot"]>>
-  >;
 }) {
-  const { ctx, getCurrentSetupStateContext, getWorkspaceSnapshot } = input;
+  const { ctx, getCurrentSetupStateContext } = input;
 
   async function applyProfileSetupReviewAction(
     reviewItemId: string,
@@ -392,14 +389,6 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
     }
 
     if (
-      hasResumeAffectingProfileChange(currentSetupContext.profile, nextProfile)
-    ) {
-      await ctx.staleApprovedResumeDrafts(
-        "Profile details changed after approval and the resume needs a fresh review.",
-      );
-    }
-
-    if (
       JSON.stringify(nextProfile) !==
         JSON.stringify(currentSetupContext.profile) ||
       JSON.stringify(nextSearchPreferences) !==
@@ -436,7 +425,6 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
       ),
     });
 
-    return getWorkspaceSnapshot();
   }
 
   return {

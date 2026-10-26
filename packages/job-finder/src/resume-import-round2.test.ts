@@ -8,15 +8,15 @@ import { toCandidate } from "./internal/resume-import-candidate-utils";
 import {
   createFreshStartSeedProfile,
   createSeed,
-} from "./workspace-service.test-fixtures";
+} from "./test-fixtures";
 import {
   createAiClient,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 const now = "2026-10-02T10:00:00.000Z";
 function fixture(name: string, extension = "txt") {
@@ -401,7 +401,7 @@ describe("Round 2 resume import accuracy", () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const { repository, workspaceService } = createWorkspaceServiceHarness({
+      const { repository, profileWork } = createProfileServiceHarness({
         seed,
         aiClient: {
           ...client,
@@ -414,7 +414,7 @@ describe("Round 2 resume import accuracy", () => {
           },
         },
       });
-      const pending = workspaceService.runResumeImport({
+      const pending = profileWork.runResumeImport({
         baseResume: {
           ...seed.profile.baseResume,
           id: "maya",
@@ -488,7 +488,7 @@ describe("Round 2 resume import accuracy", () => {
     async (hallucinate) => {
       const source = fixture("notes");
       const seed = createSeed();
-      const { repository, workspaceService } = createWorkspaceServiceHarness({
+      const { repository, profileWork } = createProfileServiceHarness({
         seed,
         aiClient: hallucinate
           ? {
@@ -523,7 +523,7 @@ describe("Round 2 resume import accuracy", () => {
       });
       const before = await repository.getProfile();
       await expect(
-        workspaceService.runResumeImport({
+        profileWork.runResumeImport({
           baseResume: {
             ...seed.profile.baseResume,
             id: "notes",

@@ -80,7 +80,7 @@ export async function runAssistantLaneCase(
   options: { turnTimeoutMs?: number } = {},
 ): Promise<AssistantLaneCaseResult> {
   const started = Date.now();
-  const world = createAssistantLaneWorld(model);
+  const world = await createAssistantLaneWorld(model);
   try {
     let conversationId: string | null = null;
     for (const [index, turn] of evalCase.turns.entries()) {

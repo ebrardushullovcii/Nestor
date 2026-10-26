@@ -4,7 +4,7 @@ import {
 } from "@nestor/ai-providers";
 import { openJobStore } from "@nestor/db/job-store";
 import { expect, test, vi } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { createListingSearchEngine } from "./engine";
 
 test("passes remote location policy into fit and retains the model's changed score", async () => {

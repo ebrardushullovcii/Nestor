@@ -4,12 +4,12 @@ import { describeResumeImportStageFallback } from "./internal/resume-import-work
 import {
   createAiClient,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "./workspace-service.test-support";
+  createProfileServiceHarness,
+} from "./profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 const RESUME_TEXT = ["Jamie Rivers", "Staff Frontend Engineer"].join("\n");
 
@@ -22,7 +22,7 @@ const RESUME_TEXT = ["Jamie Rivers", "Staff Frontend Engineer"].join("\n");
 describe("degraded resume import stages", () => {
   test("records a truthful reason for each stage that fell back to the built-in reader", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -70,7 +70,7 @@ describe("degraded resume import stages", () => {
       },
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_stage_fallback",
@@ -121,7 +121,7 @@ describe("degraded resume import stages", () => {
 
   test("says nothing about a fallback when every stage reached the model", async () => {
     const seed = createSeed();
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { profileWork } = createProfileServiceHarness({
       seed,
       aiClient: {
         ...createAiClient(),
@@ -137,7 +137,7 @@ describe("degraded resume import stages", () => {
       },
     });
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         id: "resume_stage_clean",

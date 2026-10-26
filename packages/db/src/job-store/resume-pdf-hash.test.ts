@@ -44,6 +44,7 @@ it("records the hash of a resume approved before hashes were kept, once", () => 
     )
     .run(jobId);
   const resumes = createResumeStore(store);
+  expect(resumes.approvedJobIds()).toEqual([jobId]);
   expect(resumes.get(jobId)?.pdfSha256).toBeNull();
   resumes.rememberPdfHash(jobId, "a".repeat(64));
   expect(resumes.get(jobId)?.pdfSha256).toBe("a".repeat(64));

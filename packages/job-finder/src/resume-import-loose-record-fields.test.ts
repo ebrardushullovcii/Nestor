@@ -11,8 +11,8 @@ import {
   FOLDED_INTO_RECORD_REASON,
   reconcileCandidates,
 } from "./internal/resume-import-reconciliation";
-import { createSeed } from "./workspace-service.test-fixtures";
-import { createStageCandidate } from "./workspace-service.resume-analysis.shared";
+import { createSeed } from "./test-fixtures";
+import { createStageCandidate } from "./resume-import.test-support";
 
 const runId = "resume_import_run_loose_fields";
 

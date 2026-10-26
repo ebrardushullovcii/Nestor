@@ -1,7 +1,7 @@
 import { AiBehaviorPreferenceSchema } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { createProfileServiceHarness } from "../../profile-service.test-support";
 import { assistantTestReads } from "../store-reads.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
@@ -9,9 +9,9 @@ import { readSettingsTool, updateAiBehaviorTool } from "./settings-tools";
 
 describe("sidebar search settings", () => {
   it("exposes effective defaults and changes remote treatment without losing other choices", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
+    const { service } = createProfileServiceHarness();
     const ports = {
-      ...assistantTestReads(workspaceService),
+      ...assistantTestReads(service),
       publishWorkspaceUpdate: () => undefined,
     } as unknown as AssistantHostPorts;
     const session = {
@@ -22,8 +22,8 @@ describe("sidebar search settings", () => {
           part: { type: "notice", kind: "info", text: "Saved" },
         }),
     } as unknown as AssistantTurnSession;
-    const context = { service: workspaceService, session, ports };
-    const before = await workspaceService.getWorkspaceSnapshot();
+    const context = { service, session, ports };
+    const before = await service.read();
     const behavior = AiBehaviorPreferenceSchema.parse(
       before.settings.aiBehavior ?? {},
     );
@@ -52,7 +52,7 @@ describe("sidebar search settings", () => {
       }),
       context,
     );
-    const after = await workspaceService.getWorkspaceSnapshot();
+    const after = await service.read();
     expect(after.settings.aiBehavior).toMatchObject({
       profileAssistant: behavior.profileAssistant,
       applying: behavior.applying,

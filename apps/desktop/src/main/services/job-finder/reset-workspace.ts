@@ -11,15 +11,12 @@ import {
 } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import type { JobFinderRepository } from "@nestor/db";
 import type { JobFinderActivityControl } from "@nestor/contracts";
 import {
   RESET_IN_PROGRESS_PAUSE,
   createActivityControlStore,
   resetJobStore,
 } from "@nestor/db/job-store";
-import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import {
   getJobFinderResetIntentFilePath,
   getJobFinderResetInvalidIntentMarkerFilePath,
@@ -39,7 +36,6 @@ import {
   type JobFinderResetIntent,
   type JobFinderResetIntentEntry,
 } from "./reset-intent-marker";
-import { getJobFinderWorkspaceService } from "./workspace-service";
 
 export {
   getJobFinderStartupResetRecoveryFact,
@@ -683,12 +679,10 @@ export async function completeJobFinderWorkspaceReset(
   await sweepStaleJobFinderResetArtifacts();
 }
 
-export async function recoverPendingJobFinderWorkspaceReset(
-  repository: Pick<JobFinderRepository, "reset">,
-): Promise<JobFinderResetRecoveryOutcome> {
+export async function recoverPendingJobFinderWorkspaceReset(): Promise<JobFinderResetRecoveryOutcome> {
   let outcome: JobFinderResetRecoveryOutcome;
   try {
-    outcome = await recoverPendingJobFinderWorkspaceResetOutcome(repository);
+    outcome = await recoverPendingJobFinderWorkspaceResetOutcome();
   } catch (error) {
     recordStartupResetRecoveryFact({
       status: "degraded",
@@ -706,9 +700,7 @@ export async function recoverPendingJobFinderWorkspaceReset(
   return outcome;
 }
 
-async function recoverPendingJobFinderWorkspaceResetOutcome(
-  repository: Pick<JobFinderRepository, "reset">,
-): Promise<JobFinderResetRecoveryOutcome> {
+async function recoverPendingJobFinderWorkspaceResetOutcome(): Promise<JobFinderResetRecoveryOutcome> {
   const markerPath = getJobFinderResetIntentFilePath();
 
   let markerStats;
@@ -760,21 +752,7 @@ async function recoverPendingJobFinderWorkspaceResetOutcome(
     };
   }
 
-  const movedEntries = await moveResetIntentSourcesToTrash(intent);
-
-  try {
-    await repository.reset(createEmptyJobFinderRepositoryState());
-  } catch (error) {
-    throw await compensateFailedResetFileMoves(error, [
-      ...movedEntries,
-      ...intent.entries.filter(
-        (entry) =>
-          !movedEntries.some(
-            (movedEntry) => movedEntry.sourcePath === entry.sourcePath,
-          ),
-      ),
-    ]);
-  }
+  await moveResetIntentSourcesToTrash(intent);
 
   // Like the reset itself: the job store and the Assistant's store are
   // cleared before the marker goes. A failure keeps the marker.
@@ -878,9 +856,11 @@ async function resetAssistantStoreWithJobs(): Promise<void> {
   await resetAssistantStore();
 }
 
-export async function resetJobFinderBrowser() {
-  const service = await getJobFinderWorkspaceService();
-  await service.setActivityControl({ paused: true, reason: "Browser reset" });
+export async function resetJobFinderBrowser(): Promise<void> {
+  const { getProfileService } = await import("./runtime");
+  await (
+    await getProfileService()
+  ).setActivityControl({ paused: true, reason: "Browser reset" });
   const { shutdownAssistantHost } =
     await import("../assistant/assistant-service");
   await shutdownAssistantHost();
@@ -890,51 +870,33 @@ export async function resetJobFinderBrowser() {
   // Restore/reset replaces the old browser state, including its person-close
   // latch. Activity stays globally paused until the person resumes it.
   browser.clearPersonPause();
-  return service.getWorkspaceSnapshot();
 }
 
-export async function resetJobFinderWorkspace() {
-  const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-  // Stop all workspace work before closing pages so late completions cannot
-  // repopulate the workspace. A failed clear must never report success.
+/**
+ * Deletes everything Job Finder keeps: its files, the job store and the
+ * Assistant's history. Job Finder's runtime stops first so no late write
+ * lands in the cleared store, and starts again once the reset is done.
+ */
+export async function resetJobFinderWorkspace(): Promise<void> {
+  const { getProfileService, shutdownJobFinderRuntime, startJobFinderRuntime } =
+    await import("./runtime");
+  // Stop all work before closing pages so late completions cannot
+  // repopulate the store. A failed clear must never report success.
   const { shutdownAssistantHost } =
     await import("../assistant/assistant-service");
   await shutdownAssistantHost();
   await discardJobSearch();
-  await jobFinderWorkspaceService.setActivityControl({
+  await (
+    await getProfileService()
+  ).setActivityControl({
     paused: true,
     reason: "Resetting workspace",
   });
   const browser = getEmbeddedBrowser();
   await browser.close(true);
   await clearBrowserSession();
-  let completedIntent: JobFinderResetIntent | undefined;
-  let snapshot: unknown;
-
-  try {
-    snapshot = await jobFinderWorkspaceService.resetWorkspace(
-      createEmptyJobFinderRepositoryState(),
-      {
-        beforeStateReset: async () => {
-          completedIntent = await beginJobFinderWorkspaceResetFileMoves();
-        },
-      },
-    );
-  } catch (error) {
-    if (completedIntent && !(error instanceof JobFinderResetFileMoveError)) {
-      throw new Error(
-        "Job Finder workspace reset stopped after your files were set aside but before the workspace database change could be confirmed. Nothing was deleted and no reset was undone; the pending reset is kept exactly where it is and will finish safely the next time the app starts.",
-        { cause: error },
-      );
-    }
-    throw error;
-  }
-
-  if (!completedIntent) {
-    throw new Error(
-      "Job Finder workspace reset completed without recording its file-move intent.",
-    );
-  }
+  await shutdownJobFinderRuntime();
+  const intent = await beginJobFinderWorkspaceResetFileMoves();
 
   // Before the reset is marked done, so a failure leaves the marker for the
   // next start to finish both (see `getJobStore` and the recovery below).
@@ -954,11 +916,12 @@ export async function resetJobFinderWorkspace() {
       { cause: error },
     );
   }
-  await completeJobFinderWorkspaceReset(completedIntent);
-  const parsed = JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  await completeJobFinderWorkspaceReset(intent);
   // The very last step: every earlier failure leaves work paused.
   lowerPauseAfterReset();
-  return parsed;
+  void startJobFinderRuntime().catch((error: unknown) => {
+    console.warn("[Desktop] Job Finder did not start after the reset.", error);
+  });
 }
 
 /**

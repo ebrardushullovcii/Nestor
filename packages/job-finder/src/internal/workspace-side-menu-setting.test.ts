@@ -1,15 +1,15 @@
 import { collapsesSideMenuWithAssistant } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import { createProfileServiceHarness } from "../profile-service.test-support";
 
 describe("side menu setting", () => {
   it("is on by default and saved through the workspace behavior update", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const before = await workspaceService.getWorkspaceSnapshot();
+    const { profileWork } = createProfileServiceHarness();
+    const before = await profileWork.read();
     expect(collapsesSideMenuWithAssistant(before.settings)).toBe(true);
 
-    const off = await workspaceService.updateWorkspaceBehavior({
+    const off = await profileWork.updateWorkspaceBehavior({
       collapseSideMenuWithAssistant: false,
     });
     expect(off.settings.collapseSideMenuWithAssistant).toBe(false);
@@ -17,7 +17,7 @@ describe("side menu setting", () => {
       before.settings.keepSessionAlive,
     );
 
-    const on = await workspaceService.updateWorkspaceBehavior({
+    const on = await profileWork.updateWorkspaceBehavior({
       collapseSideMenuWithAssistant: true,
     });
     expect(collapsesSideMenuWithAssistant(on.settings)).toBe(true);

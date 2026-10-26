@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, test } from "vitest";
-import { jobDescriptionToText } from "./job-description-text";
 import {
   formatDateOnly,
   formatTimestamp,
@@ -59,18 +58,6 @@ describe("getDefaultProfileRoute", () => {
         lastResumedAt: "2026-04-15T00:00:00.000Z",
       }),
     ).toBe("/job-finder/profile");
-  });
-});
-
-describe("jobDescriptionToText", () => {
-  test("strips encoded html markup from stored job descriptions", () => {
-    expect(
-      jobDescriptionToText(
-        '&lt;div class="content-intro"&gt;&lt;h2&gt;&lt;strong&gt;About Remote&lt;/strong&gt;&lt;/h2&gt;&lt;div&gt;Remote is solving modern organizations&apos; biggest challenge.&lt;/div&gt;&lt;/div&gt;',
-      ),
-    ).toBe(
-      "About Remote Remote is solving modern organizations' biggest challenge.",
-    );
   });
 });
 

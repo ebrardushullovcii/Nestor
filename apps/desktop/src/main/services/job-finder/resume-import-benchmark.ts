@@ -10,6 +10,8 @@ import {
 import {
   ResumeImportBenchmarkCaseSchema,
   ResumeImportBenchmarkRequestSchema,
+  JobSearchPreferencesSchema,
+  createFreshStartCandidateProfile,
   type CandidateProfile,
   type JobSearchPreferences,
   type ResumeDocumentBundle,
@@ -22,7 +24,6 @@ import {
   runResumeImportBenchmark,
 } from "@nestor/job-finder";
 
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { extractResumeDocument } from "../../adapters/resume-document";
 import { detectResumeDocumentFileKind } from "../../adapters/resume-document/worker";
 import { generateResumeVisionImages } from "../../adapters/resume-vision-images";
@@ -416,11 +417,11 @@ function resolveBenchmarkCases(
 }
 
 function buildBenchmarkProfile(fileName: string): CandidateProfile {
-  const emptyState = createEmptyJobFinderRepositoryState();
+  const profile = createFreshStartCandidateProfile();
   return {
-    ...emptyState.profile,
+    ...profile,
     baseResume: {
-      ...emptyState.profile.baseResume,
+      ...profile.baseResume,
       id: `resume_benchmark_${Date.now()}`,
       fileName,
       uploadedAt: new Date().toISOString(),
@@ -429,7 +430,12 @@ function buildBenchmarkProfile(fileName: string): CandidateProfile {
 }
 
 function buildBenchmarkSearchPreferences(): JobSearchPreferences {
-  return createEmptyJobFinderRepositoryState().searchPreferences;
+  return JobSearchPreferencesSchema.parse({
+    workModes: [],
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+  });
 }
 
 function buildAiClient(

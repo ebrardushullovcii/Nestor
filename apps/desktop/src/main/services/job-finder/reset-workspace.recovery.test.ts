@@ -1,8 +1,6 @@
 import {
-  chmod,
   mkdir,
   mkdtemp,
-  open,
   readdir,
   readFile,
   rename,
@@ -15,9 +13,9 @@ import {
 import os from "node:os";
 import path from "node:path";
 import type * as CryptoModule from "node:crypto";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
+import { createFreshStartCandidateProfile } from "@nestor/contracts";
+import { createJobFinderRepository, resetJobStore } from "@nestor/db/job-store";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import {
   beginJobFinderWorkspaceResetFileMoves,
   getJobFinderStartupResetRecoveryFact,
@@ -26,7 +24,7 @@ import {
   sweepStaleJobFinderResetArtifacts,
   type JobFinderResetRecoveryOutcome,
 } from "./reset-workspace";
-import { closeJobStore } from "../job-store";
+import { closeJobStore, getJobStore } from "../job-store";
 
 const { crashToken } = vi.hoisted(() => ({
   crashToken: "crash-sim-0001",
@@ -41,6 +39,11 @@ vi.mock("electron", () => ({
   },
 }));
 
+// The Assistant's own store is cleared with the jobs; its reset is not under
+// test here, and loading the assistant would only slow the first case.
+vi.mock("../assistant/assistant-service", () => ({
+  resetAssistantStore: () => Promise.resolve(),
+}));
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof CryptoModule>();
   return {
@@ -129,10 +132,10 @@ async function createCrashWorkspace() {
   };
 }
 
-function createSeededRepository(input: { danglingResumePath: string }) {
-  const seed = createEmptyJobFinderRepositoryState();
-  seed.profile.baseResume = {
-    ...seed.profile.baseResume,
+async function createSeededRepository(input: { danglingResumePath: string }) {
+  const profile = createFreshStartCandidateProfile();
+  profile.baseResume = {
+    ...profile.baseResume,
     id: "resume_crash_fixture",
     fileName: "Casey Resume.pdf",
     uploadedAt: "2026-08-01T10:00:00.000Z",
@@ -143,7 +146,9 @@ function createSeededRepository(input: { danglingResumePath: string }) {
     extractionStatus: "ready",
     analysisWarnings: [],
   };
-  return createInMemoryJobFinderRepository(seed);
+  const repository = createJobFinderRepository(getJobStore());
+  await repository.saveProfile(profile);
+  return repository;
 }
 
 const resetSourceOrder = [
@@ -197,7 +202,7 @@ async function writeIntentMarker(input: {
 }
 
 async function expectConvergedEmptyState(input: {
-  repository: ReturnType<typeof createSeededRepository>;
+  repository: Awaited<ReturnType<typeof createSeededRepository>>;
   outcome: JobFinderResetRecoveryOutcome;
   workspace: Awaited<ReturnType<typeof createCrashWorkspace>>;
 }) {
@@ -250,9 +255,9 @@ async function expectConvergedEmptyState(input: {
     ),
   ).rejects.toMatchObject({ code: "ENOENT" });
 
-  await expect(
-    recoverPendingJobFinderWorkspaceReset(repository),
-  ).resolves.toEqual({ status: "idle" });
+  await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+    status: "idle",
+  });
 }
 
 describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
@@ -262,13 +267,13 @@ describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
       userDataDirectory: workspace.userDataDirectory,
       movedSourceCount: 0,
     });
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
     await expect(stat(markerPath)).resolves.toBeTruthy();
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     await expectConvergedEmptyState({ repository, outcome, workspace });
   });
@@ -279,13 +284,13 @@ describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
       userDataDirectory: workspace.userDataDirectory,
       movedSourceCount: 1,
     });
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
     await expect(stat(markerPath)).resolves.toBeTruthy();
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     await expectConvergedEmptyState({ repository, outcome, workspace });
   });
@@ -296,13 +301,13 @@ describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
       userDataDirectory: workspace.userDataDirectory,
       movedSourceCount: 3,
     });
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
     await expect(stat(markerPath)).resolves.toBeTruthy();
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     await expectConvergedEmptyState({ repository, outcome, workspace });
   });
@@ -313,13 +318,13 @@ describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
       userDataDirectory: workspace.userDataDirectory,
       movedSourceCount: resetSourceOrder.length,
     });
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
     await expect(stat(markerPath)).resolves.toBeTruthy();
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     await expectConvergedEmptyState({ repository, outcome, workspace });
   });
@@ -330,14 +335,14 @@ describe("recoverPendingJobFinderWorkspaceReset crash simulations", () => {
       userDataDirectory: workspace.userDataDirectory,
       movedSourceCount: resetSourceOrder.length,
     });
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
-    await repository.reset(createEmptyJobFinderRepositoryState());
+    resetJobStore(getJobStore());
 
     await expect(stat(markerPath)).resolves.toBeTruthy();
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     await expectConvergedEmptyState({ repository, outcome, workspace });
   });
@@ -351,11 +356,11 @@ describe("recoverPendingJobFinderWorkspaceReset invalid marker handling", () => 
       "job-finder-reset-intent.json",
     );
     await writeFile(markerPath, "{ not valid json", "utf8");
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     expect(outcome.status).toBe("quarantined");
     if (outcome.status !== "quarantined") {
@@ -386,9 +391,9 @@ describe("recoverPendingJobFinderWorkspaceReset invalid marker handling", () => 
       path.join(workspace.documentsDirectory, "resume.pdf"),
     );
 
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "idle" });
+    await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+      status: "idle",
+    });
   });
 
   test("quarantines an oversized marker without reading its contents or moving data paths", async () => {
@@ -398,11 +403,11 @@ describe("recoverPendingJobFinderWorkspaceReset invalid marker handling", () => 
       "job-finder-reset-intent.json",
     );
     await writeFile(markerPath, "x".repeat(64 * 1024 + 1), "utf8");
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     expect(outcome.status).toBe("quarantined");
     if (outcome.status !== "quarantined") {
@@ -424,16 +429,16 @@ describe("recoverPendingJobFinderWorkspaceReset invalid marker handling", () => 
     expect((await repository.getProfile()).baseResume.storagePath).toBe(
       path.join(workspace.documentsDirectory, "resume.pdf"),
     );
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "idle" });
+    await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+      status: "idle",
+    });
   });
 });
 
 describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
   test("a failure before any successful rename removes the marker so the next launch wipes nothing", async () => {
     const workspace = await createCrashWorkspace();
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
     const trashRootPath = path.join(workspace.userDataDirectory, "trash");
@@ -462,9 +467,9 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       stat(workspace.browserProfileCookiePath),
     ).resolves.toBeTruthy();
 
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "idle" });
+    await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+      status: "idle",
+    });
     expect((await repository.getProfile()).baseResume.storagePath).toBe(
       path.join(workspace.documentsDirectory, "resume.pdf"),
     );
@@ -472,7 +477,7 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
 
   test("rolls back every earlier rename across the expanded scope when the final move fails mid-reset", async () => {
     const workspace = await createCrashWorkspace();
-    const repository = createSeededRepository({
+    const repository = await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
     const blockedTrashProfileDirectory = path.join(
@@ -518,9 +523,9 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       ),
     ).rejects.toMatchObject({ code: "ENOENT" });
 
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "idle" });
+    await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+      status: "idle",
+    });
     expect((await repository.getProfile()).baseResume.storagePath).toBe(
       path.join(workspace.documentsDirectory, "resume.pdf"),
     );
@@ -565,7 +570,7 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       "dir",
     );
 
-    const repository = createSeededRepository({
+    await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
@@ -574,7 +579,7 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       movedSourceCount: 2,
     });
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     expect(outcome).toEqual({ status: "completed", token: crashToken });
     await expect(stat(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
@@ -595,143 +600,6 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       readFile(path.join(externalAssetsDirectory, "external-asset.txt")),
     ).resolves.toEqual(Buffer.from("external asset bytes that must survive"));
     await expect(stat(externalAssetsDirectory)).resolves.toBeTruthy();
-  });
-
-  test("restores every set-aside file and removes the marker when the database reset rejects after the moves", async () => {
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    const workspace = await createCrashWorkspace();
-    const repository = createSeededRepository({
-      danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
-    });
-    const rejectingResetRepository = {
-      getProfile: () => repository.getProfile(),
-      reset: vi
-        .fn<ReturnType<typeof createSeededRepository>["reset"]>()
-        .mockRejectedValueOnce(new Error("simulated database failure")),
-    };
-
-    try {
-      await writeIntentMarker({
-        userDataDirectory: workspace.userDataDirectory,
-        movedSourceCount: resetSourceOrder.length,
-      });
-
-      let caughtError: unknown;
-      try {
-        await recoverPendingJobFinderWorkspaceReset(rejectingResetRepository);
-      } catch (error) {
-        caughtError = error;
-      }
-
-      expect(caughtError).toBeInstanceOf(JobFinderResetFileMoveError);
-      const resetFileMoveError = caughtError as JobFinderResetFileMoveError;
-      expect(resetFileMoveError.restoredAllMovedSources).toBe(true);
-      expect(resetFileMoveError.markerRemoved).toBe(true);
-      expect(warnSpy).toHaveBeenCalled();
-
-      await expect(readFile(workspace.generatedResumePath)).resolves.toEqual(
-        Buffer.from("%PDF-1.4 generated resume bytes"),
-      );
-      await expect(readFile(workspace.candidateAssetsPath)).resolves.toEqual(
-        Buffer.from("candidate asset bytes"),
-      );
-      await expect(
-        readFile(workspace.applicationDocumentsPath),
-      ).resolves.toEqual(Buffer.from("application document bytes"));
-      await expect(
-        stat(workspace.browserProfileCookiePath),
-      ).resolves.toBeTruthy();
-      await expect(
-        stat(
-          path.join(
-            workspace.userDataDirectory,
-            "job-finder-reset-intent.json",
-          ),
-        ),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      expect(getJobFinderStartupResetRecoveryFact()).toMatchObject({
-        status: "degraded",
-        reason: "reset_recovery_failed",
-        quarantinedFileName: null,
-      });
-      expect(rejectingResetRepository.reset).toHaveBeenCalledTimes(1);
-
-      await expect(
-        recoverPendingJobFinderWorkspaceReset(repository),
-      ).resolves.toEqual({ status: "idle" });
-      expect(rejectingResetRepository.reset).toHaveBeenCalledTimes(1);
-      expect((await repository.getProfile()).baseResume.storagePath).toBe(
-        path.join(workspace.documentsDirectory, "resume.pdf"),
-      );
-      await expect(readFile(workspace.candidateAssetsPath)).resolves.toEqual(
-        Buffer.from("candidate asset bytes"),
-      );
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  test("retains the marker with explicit guidance when compensation cannot restore a moved directory", async () => {
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    const workspace = await createCrashWorkspace();
-    const repository = createSeededRepository({
-      danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
-    });
-    const markerPath = path.join(
-      workspace.userDataDirectory,
-      "job-finder-reset-intent.json",
-    );
-
-    try {
-      await writeIntentMarker({
-        userDataDirectory: workspace.userDataDirectory,
-        movedSourceCount: resetSourceOrder.length,
-      });
-      const unblockDocumentRestores = await blockDocumentRestores(
-        workspace.userDataDirectory,
-      );
-      const failingRepository = {
-        getProfile: () => repository.getProfile(),
-        reset: vi
-          .fn<ReturnType<typeof createSeededRepository>["reset"]>()
-          .mockRejectedValueOnce(new Error("simulated database failure")),
-      };
-
-      let caughtError: unknown;
-      try {
-        await recoverPendingJobFinderWorkspaceReset(failingRepository);
-      } catch (error) {
-        caughtError = error;
-      }
-
-      expect(caughtError).toBeInstanceOf(JobFinderResetFileMoveError);
-      const resetFileMoveError = caughtError as JobFinderResetFileMoveError;
-      expect(resetFileMoveError.restoredAllMovedSources).toBe(false);
-      expect(resetFileMoveError.markerRemoved).toBe(false);
-      expect(resetFileMoveError.unrestoredSourcePathCount).toBe(3);
-      const warningMessages = warnSpy.mock.calls.map((call) => String(call[0]));
-      expect(
-        warningMessages.some(
-          (message) =>
-            message.includes("could not be restored") &&
-            message.includes("next startup completes the reset"),
-        ),
-      ).toBe(true);
-
-      await expect(stat(markerPath)).resolves.toBeTruthy();
-
-      await unblockDocumentRestores();
-      await expect(
-        recoverPendingJobFinderWorkspaceReset(repository),
-      ).resolves.toEqual({ status: "completed", token: crashToken });
-      await expect(stat(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      warnSpy.mockRestore();
-    }
   });
 
   test("retains pending trash across sweeps and restarts when an invalid marker coexists with set-aside files", async () => {
@@ -756,11 +624,11 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
       "{ not valid json",
       "utf8",
     );
-    const repository = createSeededRepository({
+    await createSeededRepository({
       danglingResumePath: path.join(workspace.documentsDirectory, "resume.pdf"),
     });
 
-    const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+    const outcome = await recoverPendingJobFinderWorkspaceReset();
 
     expect(outcome.status).toBe("quarantined");
     if (outcome.status !== "quarantined") {
@@ -787,9 +655,9 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
     await expect(stat(heldTrashDirectory)).resolves.toBeTruthy();
 
     await utimes(heldTrashDirectory, epochStaleTime(), epochStaleTime());
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "idle" });
+    await expect(recoverPendingJobFinderWorkspaceReset()).resolves.toEqual({
+      status: "idle",
+    });
     await sweepStaleJobFinderResetArtifacts();
     await expect(stat(heldTrashDirectory)).resolves.toBeTruthy();
     await expect(
@@ -801,60 +669,6 @@ describe("beginJobFinderWorkspaceResetFileMoves compensation", () => {
     );
   });
 });
-
-/**
- * Stops compensation from putting the document directories back.
- *
- * POSIX takes the write bit off their parent. Windows has no POSIX mode bits,
- * so a read-only parent stops nothing there; occupying each restore
- * destination does, and proves the same thing — the rollback rename fails and
- * the marker has to stay for the next startup.
- */
-async function blockDocumentRestores(
-  userDataDirectory: string,
-): Promise<() => Promise<void>> {
-  const documentsDirectory = path.join(userDataDirectory, "documents");
-
-  if (process.platform !== "win32") {
-    await chmod(documentsDirectory, 0o555);
-    return async () => {
-      await chmod(documentsDirectory, 0o755);
-    };
-  }
-
-  const heldFiles = [
-    path.join(
-      userDataDirectory,
-      "trash",
-      `job-finder-reset-${crashToken}`,
-      "documents",
-      "resumes",
-      "generated",
-      "resume.pdf",
-    ),
-    path.join(
-      userDataDirectory,
-      "trash",
-      `job-finder-reset-${crashToken}`,
-      "documents",
-      "candidate-assets",
-      "headshot.png",
-    ),
-    path.join(
-      userDataDirectory,
-      "trash",
-      `job-finder-reset-${crashToken}`,
-      "documents",
-      "application-documents",
-      "cover-letter.pdf",
-    ),
-  ];
-  const handles = await Promise.all(heldFiles.map((file) => open(file, "r")));
-
-  return async () => {
-    await Promise.all(handles.map((handle) => handle.close()));
-  };
-}
 
 function epochStaleTime() {
   return new Date(Date.now() - 2 * 60 * 60 * 1000);

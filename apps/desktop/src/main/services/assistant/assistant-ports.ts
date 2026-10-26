@@ -29,8 +29,8 @@ import {
 } from "../job-finder/import-resume";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
-import { publishJobFinderWorkspaceUpdate } from "../job-finder/workspace-updates";
-import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
+import { notifyJobFinderChange } from "../job-finder/changes";
+import { getProfileService } from "../job-finder/runtime";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { assistantAppCommands } from "./app-commands";
@@ -229,11 +229,11 @@ export function createAssistantHostPorts(input: {
     resolveApprovedJobs: (selection) =>
       Promise.resolve(getApplicationStore().selectedJobIds(selection)),
     async checkSource(targetId, options) {
-      const service = await getJobFinderWorkspaceService();
+      const service = await getProfileService();
       await service.runSourceDebug(targetId, options?.signal, () =>
-        publishJobFinderWorkspaceUpdate(),
+        notifyJobFinderChange(),
       );
-      publishJobFinderWorkspaceUpdate();
+      notifyJobFinderChange();
     },
     async listDocuments() {
       const resumes = await listResumeDocuments();
@@ -294,7 +294,7 @@ export function createAssistantHostPorts(input: {
     },
     async importResumeDocument(documentId, options) {
       options?.signal?.throwIfAborted();
-      const service = await getJobFinderWorkspaceService();
+      const service = await getProfileService();
       const resolved = await library.resolveForApplication(documentId);
       const bytes = await resolved.loadVerifiedBytes();
       options?.signal?.throwIfAborted();
@@ -310,10 +310,10 @@ export function createAssistantHostPorts(input: {
           readProfile,
         });
       } finally {
-        publishJobFinderWorkspaceUpdate();
+        notifyJobFinderChange();
       }
     },
-    publishWorkspaceUpdate: () => publishJobFinderWorkspaceUpdate(),
+    publishWorkspaceUpdate: () => notifyJobFinderChange(),
   };
   if (input.browserHost === "embedded") {
     ports.browser = createAssistantBrowserPort(

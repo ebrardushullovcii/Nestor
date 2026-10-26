@@ -33,7 +33,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type {
   DesktopWindowControlsState,
-  JobFinderRendererWorkspaceSnapshot,
   JobStageCounts,
   LaunchContext,
   SuiteModule,
@@ -49,7 +48,6 @@ import {
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/cn";
 import type { JobFinderScreen } from "../lib/job-finder-types";
-import type { JobFinderSaveState } from "@renderer/pages/job-finder-save-state";
 import { JobFinderSaveStatus } from "./job-finder-save-status";
 import {
   JOB_FINDER_GLOBAL_SEARCH_LABEL,
@@ -97,18 +95,13 @@ const StartupResetRecoveryBanner = lazy(async () => ({
 
 interface JobFinderShellProps {
   children: ReactNode;
-  onDismissSavedStatus?: () => void;
   onNavigate?: (path: string) => void;
-  onRetrySave?: () => void;
   platform: "darwin" | "linux" | "win32";
-  saveState?: JobFinderSaveState;
   /** Jobs per stage in the job store, for the list badges. */
   stageCounts?: JobStageCounts | null;
   needsYouCount?: number;
-  /** Settings and setup state read at launch, before any old workspace. */
+  /** Settings and setup state read at launch. */
   startupContext?: LaunchContext | null;
-  /** The old whole workspace, once a screen that needs it has loaded it. */
-  workspace: JobFinderRendererWorkspaceSnapshot | null;
 }
 
 const screenRouteMap: Record<Exclude<JobFinderScreen, "profile">, string> = {
@@ -470,19 +463,14 @@ function getActiveScreen(pathname: string): JobFinderScreen {
 
 export function JobFinderShell({
   children,
-  onDismissSavedStatus,
   onNavigate,
-  onRetrySave,
   platform,
-  saveState,
   stageCounts = null,
   needsYouCount = 0,
   startupContext = null,
-  workspace,
 }: JobFinderShellProps) {
-  const settings = workspace?.settings ?? startupContext?.settings ?? {};
-  const profileSetupState =
-    workspace?.profileSetupState ?? startupContext?.profileSetupState ?? null;
+  const settings = startupContext?.settings ?? {};
+  const profileSetupState = startupContext?.profileSetupState ?? null;
   const isMac = platform === "darwin";
   const isWindows = platform === "win32";
   const location = useLocation();
@@ -1885,15 +1873,6 @@ export function JobFinderShell({
           </div>
         </div>
       </aside>
-
-      {saveState && onRetrySave ? (
-        <JobFinderSaveStatus
-          layoutKey={location.pathname}
-          onDismissSaved={onDismissSavedStatus}
-          onRetry={onRetrySave}
-          saveState={saveState}
-        />
-      ) : null}
 
       {isGlobalSearchOpen ? (
         <JobFinderGlobalSearchDialog

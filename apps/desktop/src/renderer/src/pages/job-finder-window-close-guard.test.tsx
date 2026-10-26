@@ -9,7 +9,6 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import {
   afterAll,
   afterEach,
@@ -20,7 +19,6 @@ import {
   it,
   vi,
 } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   JobFinderWindowCloseGuard,
   applyJobFinderWindowCloseGuard,
@@ -28,7 +26,6 @@ import {
   setPendingCloseSave,
 } from "./job-finder-window-close-guard";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
-import { useJobFinderPageController } from "./use-job-finder-page-controller";
 import { resetJobFinderOverlaysForTests } from "../features/job-finder/lib/job-finder-overlay-ownership";
 
 type CloseResolution = {
@@ -466,82 +463,5 @@ describe("JobFinderWindowCloseGuard under an active overlay", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-  });
-});
-
-describe("controller-owned close-guard mirror lifetime", () => {
-  function configureReadyBootstrap(): void {
-    const nestor = window.nestor as unknown as {
-      ping: () => Promise<{ ok: true; platform: "darwin" }>;
-      jobFinder: Record<string, unknown>;
-    };
-    nestor.ping = () =>
-      Promise.resolve({ ok: true as const, platform: "darwin" as const });
-    const readyWorkspace = {
-      hydration: { phase: "complete", deferredCollections: [] },
-      activeCampaignId: "campaign_1",
-      campaigns: [],
-      discoveryJobs: [],
-      discoverySessions: [],
-      sourceAccessPrompts: [],
-      reviewQueue: [],
-      tailoredAssets: [],
-      applicationRecords: [],
-      applicationAttempts: [],
-      applyRuns: [],
-      applyJobResults: [],
-      selectedDiscoveryJobId: null,
-      selectedReviewJobId: null,
-      selectedApplicationRecordId: null,
-      selectedApplyRunId: null,
-      settings: { appearanceTheme: "system" },
-      profileSetupState: { status: "completed", reviewItems: [] },
-      profileCopilotMessages: [],
-    } as unknown as JobFinderRendererWorkspaceSnapshot;
-    nestor.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
-      Promise.resolve(readyWorkspace),
-    );
-  }
-
-  it("mirrors dirtiness to main while mounted and clears protection on unmount", async () => {
-    const bridge = installCloseBridgeMock();
-    configureReadyBootstrap();
-
-    let controller: ReturnType<typeof useJobFinderPageController> | null = null;
-    function ControllerProbe() {
-      controller = useJobFinderPageController();
-      return null;
-    }
-
-    const router = createMemoryRouter(
-      [{ path: "/job-finder", element: <ControllerProbe /> }],
-      { initialEntries: ["/job-finder"] },
-    );
-    const view = render(<RouterProvider router={router} />);
-
-    await waitFor(() => {
-      expect(controller).not.toBeNull();
-      expect(controller?.workspaceState.status).toBe("ready");
-    });
-    expect(getJobFinderWindowCloseConfirmation()).toBeNull();
-    expect(bridge.guardStates).toEqual([]);
-
-    act(() => {
-      controller?.context?.onProfileSurfaceDirtyChange(true);
-    });
-
-    await waitFor(() => {
-      expect(getJobFinderWindowCloseConfirmation()).toEqual({
-        title: "Leave this page?",
-        description: "Your unsaved changes will be lost.",
-        reasons: ["Unsaved profile or setup changes"],
-      });
-    });
-    expect(bridge.guardStates.at(-1)).toEqual({ blocked: true });
-
-    view.unmount();
-
-    expect(getJobFinderWindowCloseConfirmation()).toBeNull();
-    expect(bridge.guardStates.at(-1)).toEqual({ blocked: false });
   });
 });

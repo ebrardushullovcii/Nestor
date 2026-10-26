@@ -5,8 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  JobListRowSchema,
-  type JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -46,73 +44,6 @@ const windowControlsState = {
 } as const;
 
 /**
- * A workspace with something in every population the shell badges, so a
- * regression cannot hide behind an empty collection.
- */
-function createCountedWorkspace(): JobFinderRendererWorkspaceSnapshot {
-  const job = JobListRowSchema.parse({
-    id: "job_1",
-    source: "target_site",
-    sourceJobId: "synthetic",
-    canonicalUrl: "https://example.test/synthetic",
-    title: "Engineer I",
-    company: "Acme",
-    location: "Remote",
-    workMode: ["remote"],
-    applyPath: "external_redirect",
-    easyApplyEligible: false,
-    salaryText: null,
-    discoveredAt: "2026-10-13T00:00:00.000Z",
-    status: "discovered",
-    matchAssessment: { score: 80 },
-  });
-  return {
-    applicationRecords: [{ jobId: "job_1" }, { jobId: "job_2" }],
-    campaigns: [
-      { id: "campaign_1", jobIds: ["job_1", "job_2"], name: "My plan" },
-      { id: "campaign_2", jobIds: [], name: "Second plan" },
-    ],
-    activeCampaignId: "campaign_1",
-    campaignNotifications: [],
-    discoveryJobs: [
-      job,
-      { ...job, id: "job_2", company: "Globex", title: "Engineer II" },
-    ],
-    intelligence: {
-      companies: [
-        {
-          id: "company_1",
-          mergeReviewCandidates: [{ decision: "pending" }],
-        },
-        { id: "company_2", mergeReviewCandidates: [] },
-      ],
-      groupedDecisions: [],
-      outcomeEvents: [{ id: "outcome_1" }],
-      resumeStrategies: [{ id: "strategy_1" }],
-      safeguards: {
-        abnormalFailurePauses: [],
-        companyApplicationCaps: [{ id: "cap_1", limitReached: true }],
-        contradictoryAnswerDetections: [],
-        listingSignals: [],
-        preparedBatchSampleReviews: [],
-        safeguardDismissals: [],
-        simultaneousApplicationConflicts: [],
-        updatedAt: null,
-      },
-    },
-    profileSetupState: {
-      completedAt: null,
-      currentStep: "import",
-      lastResumedAt: null,
-      reviewItems: [],
-      status: "not_started",
-    },
-    reviewQueue: [{ jobId: "job_1" }],
-    userActionRequests: [{ id: "request_1", state: "pending" }],
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
-}
-
-/**
  * The shell renders the wide sidebar and the compact top navigation from the
  * same definitions and hides the wrong one with CSS, so both are in the DOM at
  * every width in jsdom. Width therefore only decides which surface a user
@@ -127,17 +58,14 @@ const COUNTED_STAGES = {
   applied: 2,
 };
 
-function renderShell(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-  stageCounts = COUNTED_STAGES,
-) {
+function renderShell(stageCounts = COUNTED_STAGES) {
   return render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
       <JobFinderShell
         needsYouCount={1}
         platform="win32"
         stageCounts={stageCounts}
-        workspace={workspace}
+       
       >
         <div>Current screen</div>
       </JobFinderShell>
@@ -184,7 +112,7 @@ afterEach(() => {
 
 describe("shell destination counts", () => {
   it("renders a visibly distinct treatment for attention counts", () => {
-    renderShell(createCountedWorkspace());
+    renderShell();
 
     const sidebar = getSidebar();
     const findJobs = within(sidebar).getByRole("button", {
@@ -216,33 +144,7 @@ describe("shell destination counts", () => {
   });
 
   it("never renders a badge at zero", () => {
-    const workspace = createCountedWorkspace();
-    // Empty every population the shell badges.
-    (workspace as unknown as Record<string, unknown>).applicationRecords = [];
-    (workspace as unknown as Record<string, unknown>).reviewQueue = [];
-    (workspace as unknown as Record<string, unknown>).discoveryJobs = [];
-    (workspace as unknown as Record<string, unknown>).userActionRequests = [];
-    (workspace as unknown as Record<string, unknown>).campaigns = [
-      { id: "campaign_1", jobIds: [], name: "Default plan" },
-    ];
-    (workspace as unknown as Record<string, unknown>).intelligence = {
-      companies: [{ id: "company_1", mergeReviewCandidates: [] }],
-      groupedDecisions: [],
-      outcomeEvents: [],
-      resumeStrategies: [],
-      safeguards: {
-        abnormalFailurePauses: [],
-        companyApplicationCaps: [],
-        contradictoryAnswerDetections: [],
-        listingSignals: [],
-        preparedBatchSampleReviews: [],
-        safeguardDismissals: [],
-        simultaneousApplicationConflicts: [],
-        updatedAt: null,
-      },
-    };
-
-    renderShell(workspace, {
+    renderShell({
       found: 0,
       hidden: 0,
       shortlisted: 0,
@@ -267,7 +169,7 @@ describe("shell destination counts", () => {
   });
 
   it("paints one identical count class at 1439px and 1441px", () => {
-    renderShell(createCountedWorkspace());
+    renderShell();
 
     // 1439px paints the compact top navigation; 1441px paints the sidebar.
     const compactCount = within(getCompactNavigation())
@@ -287,7 +189,7 @@ describe("shell destination counts", () => {
   });
 
   it("gives the More trigger the same pill class as its neighbours", () => {
-    renderShell(createCountedWorkspace());
+    renderShell();
 
     const navigation = getCompactNavigation();
     const moreButton = within(navigation).getByRole("button", {
@@ -329,7 +231,7 @@ describe("shell chrome ownership", () => {
   });
 
   it("declares one route-section gap token on the route wrapper", () => {
-    renderShell(createCountedWorkspace());
+    renderShell();
 
     const container = document.querySelector<HTMLElement>(
       "[data-job-finder-route-container]",
