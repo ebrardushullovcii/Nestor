@@ -15,10 +15,15 @@ import {
 const BANNER_DISMISSED_STORAGE_KEY_PREFIX =
   "nestor.startup-reset-recovery-banner-dismissed-v1:";
 
-function readBannerDismissed(dismissalKey: string): boolean {
+type DismissalStorage = "localStorage" | "sessionStorage";
+
+function readBannerDismissed(
+  storage: DismissalStorage,
+  dismissalKey: string,
+): boolean {
   try {
     return (
-      localStorage.getItem(
+      window[storage].getItem(
         `${BANNER_DISMISSED_STORAGE_KEY_PREFIX}${dismissalKey}`,
       ) === "1"
     );
@@ -27,9 +32,12 @@ function readBannerDismissed(dismissalKey: string): boolean {
   }
 }
 
-function persistBannerDismissed(dismissalKey: string) {
+function persistBannerDismissed(
+  storage: DismissalStorage,
+  dismissalKey: string,
+) {
   try {
-    localStorage.setItem(
+    window[storage].setItem(
       `${BANNER_DISMISSED_STORAGE_KEY_PREFIX}${dismissalKey}`,
       "1",
     );
@@ -88,21 +96,22 @@ export function StartupResetRecoveryBanner() {
       ? `${fact.completedAt}:${fact.token}`
       : `${fact.reason}:${fact.quarantinedFileName ?? "none"}`;
 
-  // An unreadable marker carries nothing that tells one failure from the
-  // next, so its dismissal lasts this session only: a later failure shows.
-  const remembersDismissal = !(
-    fact.status === "degraded" && fact.reason === "marker_unreadable"
-  );
-  if (
-    dismissedKeys.has(dismissalKey) ||
-    (remembersDismissal && readBannerDismissed(dismissalKey))
-  ) {
+  // An unreadable marker is one incident, reported first when the store opens
+  // and again once the old workspace quarantines it. Dismissing either covers
+  // both for this session, across screens; a failure on a later launch shows
+  // again. Other notices stay dismissed for good.
+  const unreadableMarker =
+    fact.status === "degraded" && canRetryJobFinderReset(fact.reason);
+  const [storage, storedKey]: [DismissalStorage, string] = unreadableMarker
+    ? ["sessionStorage", "unreadable-marker"]
+    : ["localStorage", dismissalKey];
+  if (dismissedKeys.has(storedKey) || readBannerDismissed(storage, storedKey)) {
     return null;
   }
 
   function dismissBanner() {
-    if (remembersDismissal) persistBannerDismissed(dismissalKey);
-    setDismissedKeys((current) => new Set(current).add(dismissalKey));
+    persistBannerDismissed(storage, storedKey);
+    setDismissedKeys((current) => new Set(current).add(storedKey));
   }
 
   const canRetry =

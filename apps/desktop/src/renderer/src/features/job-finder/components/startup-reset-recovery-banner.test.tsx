@@ -44,6 +44,7 @@ function renderBanner() {
 afterEach(() => {
   cleanup();
   window.localStorage?.clear();
+  window.sessionStorage?.clear();
   vi.clearAllMocks();
 });
 
@@ -255,7 +256,7 @@ describe("StartupResetRecoveryBanner", () => {
     expect(screen.queryByRole("button", { name: "Reset again" })).toBeNull();
   });
 
-  it("forgets a dismissed unreadable-marker notice, so a later failure shows again", async () => {
+  it("keeps an unreadable-marker notice dismissed for the session only", async () => {
     installDesktopBridge();
     getStartupResetRecovery.mockResolvedValue({
       status: "degraded",
@@ -272,7 +273,23 @@ describe("StartupResetRecoveryBanner", () => {
     expect(screen.queryByText("A reset didn't finish")).toBeNull();
     expect(window.localStorage.length).toBe(0);
 
+    // The next screen mounts the banner again, now with the same marker
+    // quarantined by the old workspace's recovery; it stays dismissed.
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_quarantined_malformed",
+      quarantinedFileName: "job-finder-reset-intent.invalid-a.json",
+    });
     view.unmount();
+    const next = renderBanner();
+    await waitFor(() =>
+      expect(getStartupResetRecovery).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.queryByText("A reset didn't finish")).toBeNull();
+
+    // A later launch is a new session, where a failure shows again.
+    next.unmount();
+    window.sessionStorage.clear();
     renderBanner();
     await screen.findByText("A reset didn't finish");
   });
