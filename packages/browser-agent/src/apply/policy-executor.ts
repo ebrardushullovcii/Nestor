@@ -5,7 +5,7 @@ import {
   requiresSavedOpinionAnswer,
 } from "./answer-evidence";
 import {
-  asksListingDiscovery,
+  asksListingDiscoveryControl,
   listingDiscoveryAnswer,
 } from "./listing-discovery-answer";
 import {
@@ -667,7 +667,7 @@ async function decideAnswer(input: {
   // an incompatible remembered referral. The normal permission gate still runs.
   const discovery =
     (!deps.classifyQuestions || control.answerTags?.kind === "other") &&
-    asksListingDiscovery(questionPrompt(control))
+    asksListingDiscoveryControl(control)
       ? listingDiscoveryAnswer(control, config.sources, input.controls)
       : null;
   const value = formatGithubAnswer(
@@ -785,7 +785,7 @@ async function decideAnswer(input: {
     };
     // Only requested writing reaches the independent claim checker below.
   }
-  if (asksListingDiscovery(questionPrompt(control))) {
+  if (asksListingDiscoveryControl(control)) {
     const answer = listingDiscoveryAnswer(
       control,
       config.sources,

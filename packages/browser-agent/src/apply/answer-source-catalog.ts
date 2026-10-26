@@ -1,6 +1,6 @@
 import { inferAttestationKind } from "./control-classification";
 import {
-  asksListingDiscovery,
+  asksListingDiscoveryControl,
   listingDiscoveryAnswer,
 } from "./listing-discovery-answer";
 import type {
@@ -608,7 +608,7 @@ export function classifyAnswerPermission(input: {
   if (
     !source &&
     tags.kind === "other" &&
-    asksListingDiscovery(`${input.control.groupLabel} ${input.control.label}`)
+    asksListingDiscoveryControl(input.control)
   )
     source = {
       id: "listingDiscovery",
@@ -677,10 +677,7 @@ export function classifyAnswerPermission(input: {
     return exactSaved
       ? { kind: "literal", source }
       : deny("This question needs your own unchanged answer.");
-  if (
-    tags.kind === "other" &&
-    asksListingDiscovery(`${input.control.groupLabel} ${input.control.label}`)
-  ) {
+  if (tags.kind === "other" && asksListingDiscoveryControl(input.control)) {
     const recorded = listingDiscoveryAnswer(
       input.control,
       input.sources,
@@ -688,7 +685,7 @@ export function classifyAnswerPermission(input: {
     );
     if (
       recorded?.value === input.answer &&
-      (input.control.kind !== "radio" ||
+      (!["radio", "checkbox"].includes(input.control.kind) ||
         [input.control.label, input.control.value].includes(input.answer))
     )
       return {

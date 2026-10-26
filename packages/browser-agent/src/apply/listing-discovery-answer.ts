@@ -13,6 +13,25 @@ export function asksListingDiscovery(question: string): boolean {
   );
 }
 
+function isChoiceGroupControl(control: ApplyFormControl): boolean {
+  return (
+    !!control.choiceGroupKey &&
+    (control.kind === "radio" ||
+      (control.kind === "checkbox" &&
+        control.answerControlType === "multi_choice"))
+  );
+}
+
+/** A section title never turns its ordinary child fields into source questions. */
+export function asksListingDiscoveryControl(
+  control: ApplyFormControl,
+): boolean {
+  return (
+    asksListingDiscovery(control.label) ||
+    (isChoiceGroupControl(control) && asksListingDiscovery(control.groupLabel))
+  );
+}
+
 function sourceCategory(label: string): "board" | "company" | null {
   // Read the source's recorded description, never an employer/provider allow-list.
   if (/\bjob[ -]?boards?\b/iu.test(label)) return "board";
@@ -34,18 +53,17 @@ export function listingDiscoveryAnswer(
   const source = sources.listingDiscovery;
   if (!source?.label.trim()) return null;
   let value = source.label.trim();
-  const options =
-    control.kind === "radio" && control.choiceGroupKey
-      ? siblings
-          .filter(
-            (candidate) =>
-              candidate.kind === "radio" &&
-              candidate.choiceGroupKey === control.choiceGroupKey &&
-              candidate.visible &&
-              !candidate.disabled,
-          )
-          .map((candidate) => candidate.label || candidate.value)
-      : control.options;
+  const options = isChoiceGroupControl(control)
+    ? siblings
+        .filter(
+          (candidate) =>
+            candidate.kind === control.kind &&
+            candidate.choiceGroupKey === control.choiceGroupKey &&
+            candidate.visible &&
+            !candidate.disabled,
+        )
+        .map((candidate) => candidate.label || candidate.value)
+    : control.options;
   if (options.length) {
     const category = sourceCategory(source.label);
     let host = "";

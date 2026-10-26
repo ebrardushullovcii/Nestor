@@ -238,9 +238,81 @@ test("Send rechecks the source category against the actual options, without acce
   }
 });
 
-test.each([false, true])(
-  "a source radio selects only the approved option (typed gate: %s)",
-  async (typed) => {
+test.each([null, "listingDiscovery"])(
+  "a source section never authorizes its referral-name child (sourceId: %s)",
+  async (sourceId) => {
+    const control = {
+      ...field.controls[0],
+      kind: "text" as const,
+      label: "Employee referral name",
+      groupLabel: "How did you hear about this job?",
+      options: [],
+      answerControlType: "text" as const,
+    };
+    const observation = { ...field, controls: [control] };
+    const fillText = vi.fn(() =>
+      Promise.resolve({ ok: true as const, observedValue: "Local job board" }),
+    );
+    const checkWrittenAnswer = vi.fn(() =>
+      Promise.resolve({ supported: true, reason: "Lying checker" }),
+    );
+    const config = {
+      sources: sources(
+        "Local job board",
+        "https://listing.example.test/jobs/1",
+      ),
+      application: { jobId: "1", applicationId: "1", startingUrl: field.url! },
+      authority: {
+        mode: "prepare_only",
+        submitAuthorized: false,
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "pause_for_user",
+        allowedOrigins: [],
+      },
+      hands: { observe: () => Promise.resolve(observation), fillText },
+      siteLabel: "Synthetic employer",
+    } as unknown as ApplyAgentConfig;
+    const outcome = await executeApplyProposal(
+      { tool: "type", ref: control.ref, text: "Local job board" },
+      field.signature,
+      {
+        config,
+        now,
+        guardState: createApplyGuardState(),
+        checkWrittenAnswer,
+        classifyQuestions: () =>
+          Promise.resolve(
+            new Map([
+              [
+                "How did you hear about this job? — Employee referral name",
+                {
+                  asksAboutPay: false,
+                  declarationKind: null,
+                  answerTags: {
+                    kind: "other" as const,
+                    country: null,
+                    sourceId,
+                  },
+                },
+              ],
+            ]),
+          ),
+      },
+    );
+    expect(outcome.kind).toBe("suggestion");
+    expect(fillText).not.toHaveBeenCalled();
+    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  [false, "radio"],
+  [true, "radio"],
+  [false, "checkbox"],
+  [true, "checkbox"],
+] as const)(
+  "a source choice selects only the approved option (typed gate: %s, kind: %s)",
+  async (typed, kind) => {
     const src = sources(
       "Local job board",
       "https://listing.example.test/jobs/1",
@@ -248,13 +320,16 @@ test.each([false, true])(
     const controls = ["Job board", "Referral", "Other"].map((label, index) => ({
       ...field.controls[0],
       ref: `r${index}`,
-      kind: "radio" as const,
+      kind,
       groupLabel: "How did you hear about this job?",
       label,
       value: label,
       options: [],
       choiceGroupKey: "source",
-      answerControlType: "single_choice" as const,
+      answerControlType:
+        kind === "radio"
+          ? ("single_choice" as const)
+          : ("multi_choice" as const),
     }));
     const observation = { ...field, controls };
     const setToggle = vi.fn((ref: string, checked: boolean) => {
