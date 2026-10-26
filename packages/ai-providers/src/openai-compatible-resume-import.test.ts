@@ -413,3 +413,239 @@ test("saved-context compaction preserves negative and numeric facts and all none
   expect(sent).not.toHaveProperty("existingProfile.summary");
   expect(sent).not.toHaveProperty("existingProfile.skills");
 });
+
+describe("compact candidate wire rows", () => {
+  const extract = (candidate: unknown, bundle = documentBundle) =>
+    extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle: bundle,
+      },
+      status,
+      timeoutMs: 1000,
+      fetchModelJson: () => Promise.resolve({ candidates: [candidate] }),
+    });
+
+  test("equals a released object while copying the cited source verbatim", async () => {
+    const object = {
+      target: "identity.fullName",
+      label: "Full name",
+      value: "Elian Morava",
+      sourceBlockIds: ["block_1"],
+      evidenceText: documentBundle.blocks[0]!.text,
+      confidence: 0.98,
+    };
+    expect(
+      await extract([
+        object.target,
+        object.value,
+        object.sourceBlockIds,
+        object.confidence,
+      ]),
+    ).toEqual(await extract(object));
+  });
+
+  test("keeps real ambiguity, normalization and review metadata", async () => {
+    const metadata = {
+      label: "Full name",
+      normalizedValue: "ELIAN MORAVA",
+      notes: ["Source uses capitals."],
+      alternatives: ["Elian Morava"],
+      evidenceText: "Elian Morava",
+    };
+    expect(
+      await extract([
+        "identity.fullName",
+        "Elian Morava",
+        ["block_1"],
+        0.97,
+        metadata,
+      ]),
+    ).toEqual(
+      await extract({
+        target: "identity.fullName",
+        value: "Elian Morava",
+        sourceBlockIds: ["block_1"],
+        confidence: 0.97,
+        ...metadata,
+      }),
+    );
+  });
+
+  test.each([false, 0, null])(
+    "preserves literal %s without treating it as missing",
+    async (value) => {
+      expect(
+        (await extract(["identity.yearsExperience", value, ["block_1"], 0.8]))
+          .candidates[0]?.value,
+      ).toBe(value);
+    },
+  );
+
+  test("copies distinct source blocks in order without truncation or quote rewriting", async () => {
+    const bundle = {
+      ...documentBundle,
+      blocks: [
+        documentBundle.blocks[0]!,
+        {
+          ...documentBundle.blocks[0]!,
+          id: "block_2",
+          text: "Additional literal evidence. ".repeat(100),
+        },
+      ],
+    };
+    const result = await extract(
+      [
+        "identity.fullName",
+        "Elian Morava",
+        ["block_2", "block_1", "block_2"],
+        0.9,
+      ],
+      bundle,
+    );
+    expect(result.candidates[0]?.sourceBlockIds).toEqual([
+      "block_2",
+      "block_1",
+    ]);
+    expect(result.candidates[0]?.evidenceText).toBe(
+      bundle.blocks[1]!.text + "\n" + bundle.blocks[0]!.text,
+    );
+  });
+
+  test("requires an explicit model quote when the parser has no source blocks", async () => {
+    const bundle = { ...documentBundle, blocks: [] };
+    expect(
+      (await extract(["identity.fullName", "Elian Morava", [], 0.9], bundle))
+        .candidates,
+    ).toEqual([]);
+    expect(
+      (
+        await extract(
+          [
+            "identity.fullName",
+            "Elian Morava",
+            [],
+            0.9,
+            { evidenceText: "Elian Morava" },
+          ],
+          bundle,
+        )
+      ).candidates[0]?.evidenceText,
+    ).toBe("Elian Morava");
+  });
+
+  test("rejects unknown/malformed rows, including targets in other languages", async () => {
+    const foreignTarget =
+      String.fromCodePoint(0x8eab, 0x4efd) +
+      "." +
+      String.fromCodePoint(0x59d3, 0x540d);
+    const rows: unknown[] = [
+      [],
+      ["identity.fullName"],
+      ["unknown.fullName", "Name", ["block_1"], 0.9],
+      [foreignTarget, "Name", ["block_1"], 0.9],
+      ["identity.fullName", "Name", ["missing"], 0.9],
+      ["identity.fullName", "Name", [1], 0.9],
+      ["identity.fullName", "Name", ["block_1"], 1.1],
+      ["identity.fullName", "Name", ["block_1"], "0.9"],
+      ["identity.fullName", "Name", ["block_1"], 0.9, "metadata"],
+      ["identity.fullName", "Name", ["block_1"], 0.9, {}, "extra"],
+    ];
+    for (const row of rows) expect((await extract(row)).candidates).toEqual([]);
+  });
+
+  test("metadata cannot replace authoritative value, target, confidence or source ids", async () => {
+    const result = await extract([
+      "identity.fullName",
+      "Elian Morava",
+      ["block_1"],
+      0.9,
+      {
+        target: "contact.email",
+        value: "wrong",
+        confidence: 1,
+        sourceBlockIds: ["missing"],
+      },
+    ]);
+    expect(result.candidates[0]).toMatchObject({
+      target: { section: "identity", key: "fullName" },
+      value: "Elian Morava",
+      confidence: 0.9,
+      sourceBlockIds: ["block_1"],
+    });
+  });
+
+  test.each(["bare", "envelope-one", "envelope-list"])(
+    "accepts a %s compact row without confusing it with a list of rows",
+    async (shape) => {
+      const result = await extractOpenAiCompatibleResumeImportStage({
+        stageInput: {
+          stage: "identity_summary",
+          existingProfile: createProfile(),
+          existingSearchPreferences: createPreferences(),
+          documentBundle,
+        },
+        status,
+        timeoutMs: 1000,
+        fetchModelJson: () => {
+          const row = ["identity.fullName", "Elian Morava", ["block_1"], 0.9];
+          return Promise.resolve(
+            shape === "bare"
+              ? row
+              : { candidates: shape === "envelope-one" ? row : [row] },
+          );
+        },
+      });
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.value).toBe("Elian Morava");
+    },
+  );
+});
+
+test("compact rows keep non-ASCII source values and reject generated unknown structure", async () => {
+  const text = String.fromCodePoint(0x674e, 0x660e);
+  const bundle = {
+    ...documentBundle,
+    blocks: [{ ...documentBundle.blocks[0]!, text }],
+  };
+  const run = (candidate: unknown) =>
+    extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle: bundle,
+      },
+      status,
+      timeoutMs: 1000,
+      fetchModelJson: () => Promise.resolve({ candidates: [candidate] }),
+    });
+  for (const confidence of [0, 1])
+    expect(
+      (await run(["identity.fullName", text, ["block_1"], confidence]))
+        .candidates[0]?.value,
+    ).toBe(text);
+  for (let index = 0; index < 50; index++) {
+    expect(
+      (
+        await run([
+          String.fromCodePoint(0x400 + index) + ".fullName",
+          text,
+          ["block_1"],
+          0.9,
+        ])
+      ).candidates,
+    ).toEqual([]);
+    expect(
+      (await run(["identity.fullName", text, ["unknown_" + index], 0.9]))
+        .candidates,
+    ).toEqual([]);
+  }
+  for (const confidence of [-1, 1.1, Infinity, NaN, undefined])
+    expect(
+      (await run(["identity.fullName", text, ["block_1"], confidence]))
+        .candidates,
+    ).toEqual([]);
+});

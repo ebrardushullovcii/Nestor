@@ -155,9 +155,66 @@ function normalizeTarget(
   };
 }
 
-function normalizeCandidate(
+/** Private model-wire form. The stored candidate schema stays unchanged. */
+function expandCompactCandidate(
   value: unknown,
+  blocks: readonly { id: string; text: string }[],
+): unknown {
+  if (!Array.isArray(value)) return value;
+  if (value.length < 4 || value.length > 5) return undefined;
+  const [targetValue, canonical, rawIds, confidence, extra] =
+    value as unknown[];
+  const target = normalizeTarget(targetValue);
+  if (
+    !target ||
+    !Array.isArray(rawIds) ||
+    !rawIds.every(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    ) ||
+    typeof confidence !== "number" ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1 ||
+    (extra !== undefined &&
+      (!extra || typeof extra !== "object" || Array.isArray(extra)))
+  )
+    return undefined;
+  const metadata = (extra ?? {}) as Record<string, unknown>;
+  const sourceBlockIds = [...new Set(rawIds)];
+  const byId = new Map(blocks.map((block) => [block.id, block.text]));
+  if (sourceBlockIds.some((id) => !byId.has(id))) return undefined;
+  const explicitQuote =
+    typeof metadata.evidenceText === "string" && metadata.evidenceText.trim()
+      ? metadata.evidenceText
+      : null;
+  if (!sourceBlockIds.length && !explicitQuote) return undefined;
+  const labelKey = target.key === "record" ? target.section : target.key;
+  const label = labelKey
+    .replace(/([a-z])([A-Z])/gu, "$1 $2")
+    .replace(/_/gu, " ")
+    .toLowerCase();
+  return {
+    ...metadata,
+    target,
+    value: canonical,
+    label:
+      typeof metadata.label === "string"
+        ? metadata.label
+        : label[0]!.toUpperCase() + label.slice(1),
+    confidence,
+    sourceBlockIds,
+    // Source text is bookkeeping: copy the model-cited blocks verbatim,
+    // without parsing their meaning or inventing any candidate value.
+    evidenceText:
+      explicitQuote ?? sourceBlockIds.map((id) => byId.get(id)!).join("\n"),
+  };
+}
+
+function normalizeCandidate(
+  raw: unknown,
+  blocks: readonly { id: string; text: string }[],
 ): ResumeImportFieldCandidateDraft | undefined {
+  const value = expandCompactCandidate(raw, blocks);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -296,9 +353,9 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       "You extract structured resume import candidates from parsed document blocks.",
       'Return JSON only, as one object: {"candidates":[...],"notes":[...]}. Never return a bare candidate or a bare array.',
       "Use only the provided document as evidence.",
-      "Each candidate needs target, a short human label, value, evidenceText, sourceBlockIds and confidence. Use a compact target string section.key or section.key.recordId. Existing object targets remain accepted.",
-      "Return the grounded canonical value once in value. Omit normalizedValue when it would repeat value; include it only for a meaningful alternative normalization. Preserve original wording in evidenceText. Omit empty notes and alternatives, but retain every real ambiguity, alternative and conflict choice. Record values need only their id and evidenced fields; absent fields receive the existing schema defaults.",
-      'Example response: {"candidates":[{"target":"identity.fullName","label":"Full name","value":"Jane Doe","evidenceText":"Jane Doe","sourceBlockIds":["block_1"],"confidence":0.98}]}',
+      "Return each candidate as [target, value, sourceBlockIds, confidence], with an optional fifth metadata object. Target is section.key or section.key.recordId; confidence is between 0 and 1. Existing candidate objects remain accepted.",
+      "Return the grounded canonical value once. Cite the exact sourceBlockIds; their complete text is retained verbatim as evidence, so do not repeat it. Metadata can supply evidenceText for a more precise quote or when the document has no blocks, a helpful label, meaningful normalizedValue, notes, alternatives, conflictChoices or visualEvidence. Retain every real ambiguity and alternative. Omit empty metadata and duplicate normalizedValue. Record values need only their id and evidenced fields; absent fields receive the existing schema defaults.",
+      'Example response: {"candidates":[["identity.fullName","Jane Doe",["block_1"],0.98]]}. With no blocks, use an object candidate with an exact evidenceText quote, or metadata.evidenceText; never guess source ids.',
       "Omitted saved profile/preference fields are empty or unknown, never new evidence. Explicit false and zero are preserved. Compare all provided saved facts before proposing replacements.",
       "Only use sourceBlockIds that exist in the input block list.",
       "Confidence must be a number between 0 and 1.",
@@ -342,12 +399,14 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
   // the production route, where a complete experience record was dropped
   // for its wrapping alone. Accept all three shapes.
   const normalizedPayload: Record<string, unknown> = Array.isArray(payload)
-    ? { candidates: payload }
+    ? { candidates: normalizeTarget(payload[0]) ? [payload] : payload }
     : payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
       : {};
   const rawCandidates: unknown[] = Array.isArray(normalizedPayload.candidates)
-    ? normalizedPayload.candidates
+    ? normalizeTarget(normalizedPayload.candidates[0])
+      ? [normalizedPayload.candidates]
+      : normalizedPayload.candidates
     : normalizedPayload.candidates &&
         typeof normalizedPayload.candidates === "object"
       ? [normalizedPayload.candidates]
@@ -362,7 +421,9 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       analysisProviderKind: "openai_compatible",
       analysisProviderLabel: input.status.label,
       candidates: rawCandidates
-        .map((candidate) => normalizeCandidate(candidate))
+        .map((candidate) =>
+          normalizeCandidate(candidate, input.stageInput.documentBundle.blocks),
+        )
         .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
           Boolean(candidate),
         )
@@ -454,7 +515,12 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
       : {};
   const candidates = Array.isArray(normalizedPayload.candidates)
     ? normalizedPayload.candidates
-        .map((candidate) => normalizeCandidate(candidate))
+        .map((candidate) =>
+          normalizeCandidate(
+            candidate,
+            input.adjudicationInput.documentBundle.blocks,
+          ),
+        )
         .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
           Boolean(candidate),
         )
