@@ -666,7 +666,7 @@ export function classifyAnswerPermission(input: {
       "own_words",
     ].includes(tags.kind) ||
     requiresOwnWords(input.control.label) ||
-    (tags.kind === "motivation" &&
+    (["motivation", "factual_summary"].includes(tags.kind) &&
       ownWordsAppliesToQuestion(
         `${input.control.groupLabel}\n${input.pageInstructions}`,
         input.control.label,
@@ -773,8 +773,15 @@ export function classifyAnswerPermission(input: {
     knownLiteralField(source, input.control)
   )
     return { kind: "literal", source };
-  // Only an affirmative motivation classification authorizes generated writing.
+  // Only an affirmative writing classification reaches the claim checker.
   if (tags.kind === "motivation" && source.purpose === "writing")
+    return { kind: "writing", source };
+  if (
+    tags.kind === "factual_summary" &&
+    input.control.kind === "long_text" &&
+    !fieldNamesAnotherPerson(input.control) &&
+    (source.id === "resume.text" || source.purpose === "profile")
+  )
     return { kind: "writing", source };
   return deny(
     "This value is not a verbatim answer from a known-safe matching source.",
