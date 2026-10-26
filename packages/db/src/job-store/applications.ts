@@ -376,14 +376,19 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /** Open lost its page: refill for review, never revive permission to send. */
-    reprepareForReview(id: number, attempt: number): boolean {
+    reprepareForReview(
+      id: number,
+      attempt: number,
+      reason = "Restoring the form for your review.",
+    ): boolean {
       return store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state='queued', mode='confirm_before_submit',
-          queued_at=?, updated_at=?, error='Restoring the form for your review.'
+          queued_at=?, updated_at=?, error=?
           WHERE id=? AND attempt=? AND state='ready' AND submitted_at IS NULL RETURNING job_id`).get(
             Date.now(),
             Date.now(),
+            reason.slice(0, 2000),
             id,
             attempt,
           ) as { job_id: number } | undefined;
@@ -412,7 +417,7 @@ export function createApplicationStore(store: JobStore) {
       store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state = 'ready', error = ?, updated_at = ?
-          WHERE id = ? AND attempt = ? AND state = 'submitting' RETURNING job_id`).get(
+          WHERE id = ? AND attempt = ? AND state IN ('ready', 'submitting') RETURNING job_id`).get(
             reason.slice(0, 2000),
             Date.now(),
             id,

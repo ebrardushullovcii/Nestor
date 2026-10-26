@@ -1,4 +1,5 @@
 import { ApplyAgentTimingSchema } from "./agent-timing";
+import { ApplicationAnswerDependenciesSchema } from "./application-answer-dependencies";
 import { z } from "zod";
 
 import { ApplicationAutomationModeSchema } from "./application-authority";
@@ -2303,6 +2304,7 @@ export type ApplyExecutionModelUse = z.infer<
 >;
 
 export const ApplyExecutionResultSchema = z.object({
+  answerDependencies: ApplicationAnswerDependenciesSchema.optional(),
   state: ApplicationAttemptStateSchema,
   summary: NonEmptyStringSchema,
   detail: NonEmptyStringSchema,

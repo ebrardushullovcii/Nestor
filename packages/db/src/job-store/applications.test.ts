@@ -119,6 +119,53 @@ function question(
 }
 
 describe("applications on the job store", () => {
+  it("keeps a one-application pay answer local, and reuses only an explicitly remembered answer on other forms", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+    const [first, second, later] = [
+      applications.claimNext()!,
+      applications.claimNext()!,
+      applications.claimNext()!,
+    ] as const;
+    const memory = applications.needsYou;
+    const query = {
+      key: "salary",
+      prompt: "Annual salary expectation",
+      reusePrompt: true,
+      kind: "salary_expectation" as const,
+    };
+    const ask = (row: typeof first) =>
+      memory.request(
+        question(row.id, row.attempt, {
+          scope: {},
+          key: query.key,
+          fieldKey: query.key,
+          prompt: query.prompt,
+          input: "number",
+          reusePrompt: true,
+        }),
+      );
+    const read = (id: number) =>
+      memory
+        .answersForQuestions(id, [query], "https://jobs.example.test")
+        .map((answer) => answer.answer);
+    const local = ask(first);
+    if (local.status !== "needs_you") throw new Error("Missing pay question");
+    memory.answer({ id: local.task.id, answer: "50000", remember: false });
+    expect(read(first.id)).toEqual(["50000"]);
+    expect(memory.listAnswers({}).total).toBe(0);
+    expect(readSavedApplicationAnswers(jobs)).toEqual([]);
+    expect(read(second.id)).toEqual([]);
+    const next = ask(second);
+    if (next.status !== "needs_you")
+      throw new Error("Local pay answer leaked to another application");
+    expect(next.task.id).not.toBe(local.task.id);
+    memory.answer({ id: next.task.id, answer: "52000", remember: true });
+    expect(ask(later)).toEqual({ status: "answered", answer: "52000" });
+    expect(read(later.id)).toEqual(["52000"]);
+    expect(read(first.id)).toEqual(["50000"]);
+  });
+
   it("returns an unusable remembered answer to one shared question and waits for its correction", () => {
     const { jobs, applications } = open();
     applications.applyJobs({ selection: { ids: add(jobs, 2) } });

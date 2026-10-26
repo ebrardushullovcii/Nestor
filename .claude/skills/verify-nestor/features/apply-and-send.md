@@ -31,7 +31,7 @@ Use live AI, synthetic profile/resume data and this instance's replica URLs. See
 ## Gotchas
 
 - The browser peek covers the app. Escape closes it; an unfocused instance may park pages in a hidden browser window, so use shot --target browser.
-- A restart closes prepared browser pages. Ready rows remain ready, but Open can report the retained form unavailable. Refill an unsent synthetic form before testing Send; do not mistake a stored Ready row for an open browser page. An armed send interrupted without confirmation stays uncertain and cannot be retried automatically.
+- A restart closes prepared browser pages. Open restores the filled form when it can verify the saved fields and attachments; otherwise it refills in Fill mode for review. An armed send interrupted without confirmation stays uncertain and cannot be retried automatically.
 - Queued, ready and submitted are different states. A tracker status or a tool-list assertion is not proof of an application send.
 - Never send to a non-loopback site. The verify-nestor send guard and submissions.jsonl prove where writes went.
 

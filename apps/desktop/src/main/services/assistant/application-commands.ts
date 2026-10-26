@@ -137,14 +137,21 @@ export function assistantApplicationCommands() {
           session.assertCurrent();
           await session.releaseBrowserLease?.();
           const sent = await runApplicationCommand("send_application", target);
+          const details = await runApplicationCommand(
+            "get_application_details",
+            target,
+          );
           return {
             summary: sent
               ? "The site confirmed the application was sent."
-              : "Sending was not confirmed. Check the application details before doing anything else.",
-            data: await runApplicationCommand(
-              "get_application_details",
-              target,
-            ),
+              : details?.application.state === "submitted"
+                ? "The site already confirmed this application. It was not sent again."
+                : details?.application.state === "uncertain"
+                  ? "Sending was not confirmed. Check the application details before doing anything else."
+                  : details?.application.error
+                    ? `Not sent: ${details.application.error}`
+                    : "The application was not sent. Check its current work state before trying again.",
+            data: details,
           };
         },
       };

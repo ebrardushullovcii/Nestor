@@ -56,6 +56,11 @@ import type { JobFinderRepository } from "@nestor/db";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 import { toResumeJob } from "../resumes/write-resume";
 import { describeFormQuestion, toKnownFormAnswer } from "./questions";
+import {
+  applicationAnswerDependencies,
+  applicationAnswersUnchanged,
+  profileFactsDigest,
+} from "./answer-dependencies";
 import { resolveApplicationAttachmentsForExecution } from "../internal/workspace-application-attachments";
 import type { CandidateAssetResolver } from "../internal/workspace-service-contracts";
 
@@ -150,11 +155,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       state: "ready",
       ...(reason ? { error: reason } : {}),
     });
-    applications.submissionRefused(
-      row.id,
-      row.attempt,
-      reason ?? "The form is ready for your click.",
-    );
+    if (reason || applications.getApplication(row.id)?.state === "submitting")
+      applications.submissionRefused(
+        row.id,
+        row.attempt,
+        reason ?? "The form is ready for your click.",
+      );
     if (applications.getApplication(row.id)?.state !== "ready") return;
     await browser.handApplicationPageToPerson?.(
       "target_site",
@@ -184,13 +190,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ? "autonomous_submit"
       : "confirm_before_submit";
   }
-
-  const factsDigest = (profile: CandidateProfile) =>
-    createHash("sha256")
-      .update(
-        JSON.stringify({ profile, answers: readSavedApplicationAnswers(jobs) }),
-      )
-      .digest("hex");
 
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
     const job = jobs.getJob(row.jobId);
@@ -230,7 +229,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     signal.throwIfAborted();
     if (!current(row)) return;
     const previous = applications.getWork(row.id);
-    const profileDigest = factsDigest(savedProfile);
+    const profileDigest = profileFactsDigest(savedProfile);
     if (
       !applications.setResumeArtifact(
         row.id,
@@ -301,6 +300,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         answerRecords: [],
       },
     );
+    const letterAnswers = readSavedApplicationAnswers(jobs, [
+      "self_intro",
+      "career_transition",
+      "availability",
+      "notice_period",
+      "travel",
+    ]);
+    const answerDependencies = applicationAnswerDependencies(
+      applications.needsYou,
+      row.id,
+      origin,
+      letterAnswers,
+    );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       job: toResumeJob(job),
       profile,
@@ -362,7 +374,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           ) === JSON.stringify(behavior.preApprovedDeclarations) &&
           (latest.settings.salaryDisclosure ?? "pause_for_user") ===
             (settings.salaryDisclosure ?? "pause_for_user") &&
-          factsDigest(latest.profile) === profileDigest
+          profileFactsDigest(latest.profile) === profileDigest &&
+          applicationAnswersUnchanged(
+            applications.needsYou,
+            row.id,
+            origin,
+            answerDependencies.snapshot(),
+          )
         );
       },
       applyAllowedOrigins: [...allowedOrigins],
@@ -410,13 +428,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             profile,
             settings,
             searchPreferences,
-            reusableAnswers: readSavedApplicationAnswers(jobs, [
-              "self_intro",
-              "career_transition",
-              "availability",
-              "notice_period",
-              "travel",
-            ]),
+            reusableAnswers: letterAnswers,
           }),
           readReusableAnswers: (questions) => {
             const byKey = new Map(
@@ -426,9 +438,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               ]),
             );
             return Promise.resolve(
-              applications.needsYou
-                .answersForQuestions(
-                  row.id,
+              answerDependencies
+                .read(
                   questions.map((question) => ({
                     ...describeFormQuestion(question, job),
                     prompt: question.prompt,
@@ -446,7 +457,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       ? (question.kind as CandidateAnswerKind)
                       : "other",
                   })),
-                  origin,
                 )
                 .map((answer) =>
                   toKnownFormAnswer(
@@ -472,7 +482,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       !applications.saveWork(row.id, {
         attempt: row.attempt,
         resumeArtifact: artifact,
-        execution: result,
+        execution: {
+          ...result,
+          answerDependencies: answerDependencies.snapshot(),
+        },
         reviewCard: review,
         authorityEnvelopeId: envelope?.id ?? null,
         profileDigest,
@@ -592,13 +605,42 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           if (
             !current(row) ||
             (!personClicked &&
-              (await modeFor(row, settings)) !== "autonomous_submit") ||
-            factsDigest(profile) !== profileDigest
+              (await modeFor(row, settings)) !== "autonomous_submit")
           ) {
             await leaveForPerson(
               row,
-              "The Apply setting, Profile or saved answers changed. Review the filled form before sending it.",
+              "The Apply setting changed. The filled form is ready for your review.",
             );
+            return;
+          }
+          const job = jobs.getJob(row.jobId);
+          if (!job || job.stage !== "resume")
+            return leaveForPerson(
+              row,
+              "This job no longer has an approved resume ready to apply.",
+            );
+          const origin = new URL(job.applyUrl ?? job.url).origin;
+          const proof = applications.getWork(row.id)?.execution
+            .answerDependencies;
+          const factsUnchanged = (latestProfile: CandidateProfile) =>
+            profileFactsDigest(latestProfile) === profileDigest &&
+            applicationAnswersUnchanged(
+              applications.needsYou,
+              row.id,
+              origin,
+              proof,
+            );
+          if (!factsUnchanged(profile)) {
+            await leaveForPerson(row);
+            await closePage(row.id, row.attempt);
+            if (
+              applications.reprepareForReview(
+                row.id,
+                row.attempt,
+                "The Profile or saved answers for this form need checking again. Refilling it for your review; it will not send automatically.",
+              )
+            )
+              void wake();
             return;
           }
           const activeEnvelopes =
@@ -656,7 +698,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       artifact.filePath &&
                     (personClicked ||
                       (await modeFor(row, latest)) === "autonomous_submit") &&
-                    factsDigest(latestProfile) === profileDigest &&
+                    factsUnchanged(latestProfile) &&
                     (await input.veto(facts))
                   );
                 },
