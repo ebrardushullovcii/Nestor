@@ -127,11 +127,12 @@ test.each([false, true])(
       allowed: true,
       containsFile: true,
     });
-    for (const [badKey, badPolicyKey] of [
+    const refusedKeys: ReadonlyArray<readonly [string, string]> = [
       [`${key}/Taylor`, key],
       [key, `${key}/Morgan`],
       [`${key}/90000`, key],
-    ]) {
+    ];
+    for (const [badKey, badPolicyKey] of refusedKeys) {
       const request = {
         ...input,
         ...(await multipart(
