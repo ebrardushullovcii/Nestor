@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AssistantConversationView,
+  AssistantOperation,
   DesktopAssistantBridge,
 } from "@nestor/contracts";
 import type { Page } from "playwright";
@@ -22,6 +23,7 @@ export interface BuiltAppAction {
   observe(
     page: Page,
     reply: AssistantConversationView,
+    context: { operations: readonly AssistantOperation[] },
   ): Promise<readonly OutcomeAssertion[]>;
 }
 export interface BuiltAppBatch {
@@ -44,7 +46,9 @@ export interface BuiltAppEnvironment {
 }
 
 /** Earlier receipts in the same conversation cannot credit a later write. */
-export function currentRequestChanges(view: AssistantConversationView) {
+export function currentRequestChanges(
+  view: Pick<AssistantConversationView, "messages">,
+) {
   const user = view.messages.findLastIndex(
     (message) => message.role === "user" && message.origin === "sidebar",
   );
@@ -108,6 +112,10 @@ export async function runBuiltAppOutcomes(options: {
   prior?: readonly ObservedAction[];
   shot(name: string): Promise<unknown>;
   note(text: string): Promise<unknown>;
+  readOperations?(
+    reply: AssistantConversationView,
+    batchId: string,
+  ): Promise<AssistantOperation[]>;
 }) {
   const observations: ObservedAction[] = [...(options.prior ?? [])];
   // Validate all IDs before asking chat to change any app state.
@@ -136,6 +144,7 @@ export async function runBuiltAppOutcomes(options: {
   await persist();
   for (const batch of options.batches) {
     let reply: AssistantConversationView | undefined;
+    let operations: AssistantOperation[] = [];
     let turnError: string | undefined;
     try {
       await options.note(`Starting chat outcome batch: ${batch.id}`);
@@ -152,6 +161,7 @@ export async function runBuiltAppOutcomes(options: {
         path.join(options.evidenceDir, `${batch.id}-conversation.json`),
         `${JSON.stringify(reply, null, 2)}\n`,
       );
+      operations = (await options.readOperations?.(reply, batch.id)) ?? [];
     } catch (error) {
       turnError = error instanceof Error ? error.message : String(error);
     }
@@ -160,7 +170,9 @@ export async function runBuiltAppOutcomes(options: {
       let error = turnError;
       if (reply) {
         try {
-          assertions = await action.observe(options.page, reply);
+          assertions = await action.observe(options.page, reply, {
+            operations,
+          });
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);
         }
@@ -176,6 +188,14 @@ export async function runBuiltAppOutcomes(options: {
           : {}),
         ...(error ? { error } : {}),
       };
+      const gap = operations.find(
+        (operation) =>
+          operation.toolName === "report_missing_capability" &&
+          operation.status === "committed" &&
+          operation.resultSummary,
+      );
+      if (gap && !judgeAction(observation).passed)
+        observation.unsupportedReason = `The requested outcome was absent and the Assistant recorded a missing capability (${gap.id}): ${gap.resultSummary}`;
       observations.push(observation);
       const judged = judgeAction(observation);
       await options.note(

@@ -6,6 +6,7 @@ import type {
   DesktopJobsBridge,
   DesktopProfileWorkflowBridge,
 } from "@nestor/contracts";
+import { AssistantOperationSchema } from "@nestor/contracts";
 import { ACTION_INVENTORY } from "./inventory";
 import { runBuiltAppOutcomes, type BuiltAppBatch } from "./built-app";
 import { navigationOutcomeCases, shellOutcomeCases } from "./view-cases";
@@ -32,6 +33,10 @@ interface VerifyContext {
   sites: { url: string };
   shot(name: string): Promise<unknown>;
   note(text: string): Promise<unknown>;
+  db(
+    table: string,
+    options: { limit: number; pattern: string; name: string },
+  ): unknown[];
 }
 export function allBatches(
   replicaOrigin = "http://127.0.0.1:1",
@@ -273,6 +278,38 @@ export async function run(
     batches,
     shot: (name) => ctx.shot(name),
     note: (text) => ctx.note(text),
+    readOperations: (reply, batchId) => {
+      const userIndex = reply.messages.findLastIndex(
+        (message) => message.role === "user" && message.origin === "sidebar",
+      );
+      const turnId =
+        reply.messages[userIndex]?.turnId ??
+        reply.messages.slice(userIndex + 1).find((message) => message.turnId)
+          ?.turnId;
+      if (!turnId)
+        throw Error("No current chat turn id for operation evidence");
+      const rows = ctx.db("assistant_records", {
+        limit: 2_000,
+        pattern: turnId,
+        name: `${batchId}-operations`,
+      });
+      return Promise.resolve(
+        rows.flatMap((row) => {
+          if (
+            !row ||
+            typeof row !== "object" ||
+            !("kind" in row) ||
+            row.kind !== "operation" ||
+            !("data" in row)
+          )
+            return [];
+          const parsed = AssistantOperationSchema.safeParse(row.data);
+          return parsed.success && parsed.data.turnId === turnId
+            ? [parsed.data]
+            : [];
+        }),
+      );
+    },
   });
   const lines = [
     `Assistant outcomes: ${state.build.head}`,

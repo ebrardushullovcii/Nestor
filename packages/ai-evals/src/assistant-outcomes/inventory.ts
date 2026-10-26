@@ -327,7 +327,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "profile.setup_state",
     screen: "Setup",
     action: "Finish guided setup",
-    channels: ["job-finder:save-profile-setup-state"],
+    channels: ["profile-workflow:run"],
     coverage: {
       kind: "tools",
       tools: ["read_profile", "finish_profile_setup"],
