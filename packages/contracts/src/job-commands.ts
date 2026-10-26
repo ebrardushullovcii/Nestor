@@ -172,11 +172,12 @@ export interface JobCommandOutputs {
 
 export type JobCommandOutput<K extends JobCommandName> = JobCommandOutputs[K];
 
-export const JOBS_RUN_CHANNEL = "jobs:run";
-export const JOBS_CHANGED_CHANNEL = "jobs:changed";
-export const JOBS_SEARCH_STATUS_CHANNEL = "jobs:search-status";
-/** A window asks once to hear changes and search progress. */
-export const JOBS_SUBSCRIBE_CHANNEL = "jobs:subscribe";
+export {
+  JOBS_CHANGED_CHANNEL,
+  JOBS_RUN_CHANNEL,
+  JOBS_SEARCH_STATUS_CHANNEL,
+  JOBS_SUBSCRIBE_CHANNEL,
+} from "./ipc-channels";
 
 /** The renderer's typed bridge to the job commands. */
 export interface DesktopJobsBridge {

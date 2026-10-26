@@ -8,7 +8,7 @@ export const HOME_ACTIVITY_DAYS = 28;
 /** The window "sent recently" covers, for where those applications stand now. */
 export const HOME_RECENT_DAYS = 30;
 
-export const HOME_SUMMARY_CHANNEL = "home:summary";
+export { HOME_SUMMARY_CHANNEL } from "./ipc-channels";
 
 export const HomeSummaryInputSchema = z
   .object({

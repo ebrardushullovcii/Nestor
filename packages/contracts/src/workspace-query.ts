@@ -28,7 +28,7 @@ export interface LaunchContext {
   profileSetupState: ProfileSetupState | null;
 }
 
-export const LAUNCH_CONTEXT_CHANNEL = "launch:context";
+export { LAUNCH_CONTEXT_CHANNEL } from "./ipc-channels";
 
 export interface WorkspaceJobListingActivity {
   jobId: string;

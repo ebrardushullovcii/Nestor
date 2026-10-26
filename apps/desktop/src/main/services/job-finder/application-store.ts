@@ -1,3 +1,4 @@
+import { JobChangeSchema } from "@nestor/contracts";
 import {
   createApplicationStore,
   type ApplicationStore,
@@ -22,9 +23,15 @@ export function getApplicationStore(): ApplicationStore {
         )
       )
         return;
+      // Checked here, since the preload passes it through.
+      const checked = JobChangeSchema.safeParse(change);
+      if (!checked.success) return;
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.webContents.isDestroyed()) {
-          window.webContents.send("job-finder:applications-changed", change);
+          window.webContents.send(
+            "job-finder:applications-changed",
+            checked.data,
+          );
         }
       }
     });

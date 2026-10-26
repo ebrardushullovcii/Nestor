@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { BrowserWindow } from "electron";
 import { resolveAssistantModelRouteFromEnvironment } from "@nestor/ai-providers";
-import type { AssistantEvent } from "@nestor/contracts";
+import { AssistantEventSchema, type AssistantEvent } from "@nestor/contracts";
 import {
   createAssistantRepository,
   type AssistantRepository,
@@ -92,9 +92,12 @@ export function resolveAssistantModel(
 }
 
 function publish(event: AssistantEvent): void {
+  // Checked here, since the preload passes events through.
+  const checked = AssistantEventSchema.safeParse(event);
+  if (!checked.success) return;
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-      window.webContents.send(ASSISTANT_EVENT_CHANNEL, event);
+      window.webContents.send(ASSISTANT_EVENT_CHANNEL, checked.data);
     }
   }
 }

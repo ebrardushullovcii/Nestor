@@ -4,6 +4,9 @@ import {
   AddBrowserJobResultSchema,
   DesktopBrowserCommandSchema,
   DesktopBrowserImportInputSchema,
+  DesktopBrowserImportResultSchema,
+  DesktopBrowserImportSourcesSchema,
+  DesktopBrowserSnapshotSchema,
   DesktopBrowserViewportSchema,
 } from "@nestor/contracts";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
@@ -34,9 +37,8 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
     if (!page)
       throw new Error("Wait for this page to finish loading, then try again.");
     // The old workspace service loads on first use, not with main.
-    const { getJobFinderWorkspaceService } = await import(
-      "../services/job-finder/workspace-service"
-    );
+    const { getJobFinderWorkspaceService } =
+      await import("../services/job-finder/workspace-service");
     const service = await getJobFinderWorkspaceService();
     const result = await service.addJobFromBrowserPage({
       html: page.value,
@@ -57,19 +59,23 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
     assertOwner(event);
     host.setViewport(DesktopBrowserViewportSchema.parse(input));
   });
-  ipc.handle("browser:capture-page", (event) => {
+  ipc.handle("browser:capture-page", async (event) => {
     assertOwner(event);
-    return host.captureActivePage();
+    return DesktopBrowserSnapshotSchema.parse(await host.captureActivePage());
   });
-  ipc.handle("browser:list-import-sources", (event) => {
+  ipc.handle("browser:list-import-sources", async (event) => {
     assertOwner(event);
-    return listBrowserImportSources();
+    return DesktopBrowserImportSourcesSchema.parse(
+      await listBrowserImportSources(),
+    );
   });
   ipc.handle("browser:import-from-browser", async (event, input: unknown) => {
     assertOwner(event);
-    return importSignInsFromBrowser(
-      host,
-      DesktopBrowserImportInputSchema.parse(input),
+    return DesktopBrowserImportResultSchema.parse(
+      await importSignInsFromBrowser(
+        host,
+        DesktopBrowserImportInputSchema.parse(input),
+      ),
     );
   });
 }
