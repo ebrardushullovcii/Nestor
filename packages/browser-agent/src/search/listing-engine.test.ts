@@ -921,3 +921,23 @@ test("a known employer beside a breadcrumb still needs the real location read", 
   expect(result.jobs[0]?.location).toBe("Berlin");
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
+
+test.each([404, 410, 500])(
+  "a browser HTTP %s remains unreadable without an AI navigation attempt",
+  async (status) => {
+    const fallback = vi.fn(() =>
+      Promise.reject(Error("No navigation on error pages")),
+    );
+    const result = await collectSource({
+      source,
+      lane: "browser",
+      readPage: () => Promise.reject(new DiscoveryPageReadError(status)),
+      navigateFallback: fallback,
+    });
+    expect(result.complete).toBe(false);
+    expect(result.cards).toEqual([]);
+    expect(result.needsYou).not.toBe(true);
+    expect(result.notes.join(" ")).toContain(`HTTP ${status}`);
+    expect(fallback).not.toHaveBeenCalled();
+  },
+);

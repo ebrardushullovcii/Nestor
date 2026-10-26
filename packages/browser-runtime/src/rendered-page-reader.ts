@@ -1,3 +1,4 @@
+import { DiscoveryPageReadError } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
 
 /** A fresh read-only tab. It never reuses a person's page or a prepared form. */
@@ -26,7 +27,12 @@ export async function readRenderedPageHtml(
   try {
     await options.onPage?.(page);
     options.signal?.throwIfAborted();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    if (response && response.status() >= 400)
+      throw new DiscoveryPageReadError(response.status());
     // Let script-loaded content finish. Busy sites still get a bounded read.
     if (!options.ready)
       await page

@@ -16,7 +16,9 @@ it.skipIf(!existsSync(executablePath))(
       new URL("./fixtures/script-rendered-listing.html", import.meta.url),
       "utf8",
     );
-    const server = createServer((_request, response) => {
+    const server = createServer((request, response) => {
+      const errorStatus = /\/status\/(\d{3})/u.exec(request.url ?? "");
+      if (errorStatus) response.statusCode = Number(errorStatus[1]);
       response.setHeader("Content-Type", "text/html");
       response.end(html);
     });
@@ -39,6 +41,15 @@ it.skipIf(!existsSync(executablePath))(
       );
       expect(result.html).toContain("Hours vary from 20 to 30");
       expect(context.pages()).toEqual([personPage]);
+      for (const status of [401, 403, 404, 410, 500]) {
+        await expect(
+          readRenderedPageHtml(
+            context,
+            `http://127.0.0.1:${address.port}/status/${status}`,
+          ),
+        ).rejects.toMatchObject({ status });
+        expect(context.pages()).toEqual([personPage]);
+      }
       await expect(
         readRenderedPageHtml(context, "file:///private/tmp/a"),
       ).rejects.toThrow("website");
