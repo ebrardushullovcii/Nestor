@@ -195,6 +195,21 @@ describe("resumes on the store", () => {
     expect(store.getJob(id)?.stage).toBe("applied");
   });
 
+  it("undoes approval and then its preceding edit, each against the exact restored version", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const before = service.get(id).resume!;
+    const edit = service.saveDraft(
+      id,
+      { ...before.draft!, targetPageCount: 3 },
+      before.updatedAt,
+    );
+    const approval = await service.approve(id);
+    service.undoChange(id, approval.undoId!);
+    expect(service.undoChange(id, edit.undoId!).draft).toEqual(before.draft);
+  });
+
   it("does not approve a draft edited while its PDF is rendering", async () => {
     const { store, service, id, renderResumeArtifact } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });

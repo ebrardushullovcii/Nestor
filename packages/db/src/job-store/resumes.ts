@@ -342,6 +342,13 @@ export function createResumeStore(store: JobStore): ResumeStore {
           now,
           changeId,
         );
+        // Restoring an exact earlier version makes that version's own inverse current again.
+        sql(`UPDATE resume_changes SET expected_updated_at=?
+          WHERE job_id=? AND expected_updated_at=? AND undone_at IS NULL`).run(
+          now,
+          jobId,
+          before.updated_at,
+        );
         changed(jobId, [change.before_stage, change.after_stage]);
         return toStoredResume(require(jobId));
       });
