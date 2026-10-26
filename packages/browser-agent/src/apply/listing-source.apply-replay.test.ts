@@ -5,6 +5,7 @@ import { classifyAnswerPermission } from "./answer-source-catalog";
 import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
 import { listingDiscoveryAnswer } from "./listing-discovery-answer";
 import type { ApplyAgentConfig } from "./types";
+import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 
 const now = () => new Date("2026-10-26T00:00:00.000Z");
 const field = buildApplyFormObservation(
@@ -186,4 +187,52 @@ test("Workday source reaches the picker once after the typed gate, with the save
     control.ref,
     "Job board",
   );
+});
+
+test("Send rechecks the source category against the actual options, without accepting a saved referral", async () => {
+  const question = "My Information — How did you hear about this job?";
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [
+                  {
+                    index: 0,
+                    kind: "other",
+                    country: null,
+                    sourceId: "listingDiscovery",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    ),
+  };
+  for (const answer of ["Job board", "Referral"]) {
+    const result = await checkClassifiedApplicationAnswers({
+      client,
+      sources: sources(
+        "Local job board",
+        "https://listing.example.test/board/",
+      ),
+      payDisclosed: false,
+      answers: [{ question, answer }],
+      formControls: field.controls,
+      formContext: {
+        pageText: "My Information",
+        fields: [{ question, value: answer }],
+      },
+    });
+    expect(result[0]?.supported).toBe(answer === "Job board");
+  }
 });

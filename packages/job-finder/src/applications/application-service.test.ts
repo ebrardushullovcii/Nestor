@@ -360,6 +360,9 @@ it("passes the job's current site notes and learned Apply instructions to prepar
     label: "Replica",
     url: "https://replica.test/board",
   });
+  expect(f.execute.mock.calls[0]![1].job.canonicalUrl).toBe(
+    "https://replica.test/jobs/0",
+  );
 });
 
 it.each(["paused", "failed"] as const)(
