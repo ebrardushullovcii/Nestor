@@ -180,6 +180,9 @@ function config(
     },
     siteLabel: "the careers site",
     now: () => new Date("2026-09-14T10:00:00.000Z"),
+    // Most of these tests walk a form step by step, which only Send for me
+    // does; Fill in for me's own tests turn this off.
+    intermediateWritesAuthorized: true,
     ...overrides,
   };
 }
@@ -3874,6 +3877,40 @@ test("one response can enter contact facts, tick an approved declaration and att
   expect(updates).toBe(1);
 });
 
+test("in Fill a Continue link is handed to the person, never followed; the form's own address opens", async () => {
+  const source = page({
+    links: [
+      {
+        index: 0,
+        label: "Continue",
+        href: "https://apply.example.test/api/submit?applicationId=42",
+        target: "",
+        visible: true,
+        topOffset: 10,
+      },
+    ],
+  });
+  const input = config(source, { intermediateWritesAuthorized: false });
+  const followLink = vi.fn(input.hands.followLink);
+  const navigate = vi.fn(input.hands.navigate);
+  input.hands.followLink = followLink;
+  input.hands.navigate = navigate;
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      {
+        name: "navigate",
+        args: { url: "https://apply.example.test/form" },
+      },
+      { name: "follow_link", args: { ref: "l0" } },
+      { name: "finish", args: { reason: "Filled." } },
+    ]),
+  );
+  expect(navigate).toHaveBeenCalledOnce();
+  expect(followLink).not.toHaveBeenCalled();
+  expect(result.pauses[0]?.summary).toContain('Press "Continue" on the site');
+});
+
 describe("fill_fields visible steps", () => {
   const field = (index: number, label: string): RawApplyControl => ({
     ...nameControl(),
@@ -3942,6 +3979,101 @@ describe("fill_fields visible steps", () => {
       },
     } satisfies LLMClient;
   }
+
+  test("Workday in Fill: fills My Information, hands Save and continue to the person, and sends nothing", async () => {
+    const source = page({
+      stepLabel: "1. My Information",
+      controls: [
+        field(0, "First name"),
+        field(1, "Last name"),
+        field(2, "City"),
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Save and continue",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    const { input, writes } = writable(source);
+    input.intermediateWritesAuthorized = false;
+    let pressed = 0;
+    input.hands.clickElement = () => {
+      // The site saves the page before it moves on; the fence refuses the
+      // save, so the page stays where it is.
+      pressed += 1;
+      return Promise.resolve({ ok: true, observedValue: "clicked" });
+    };
+    let attempt: {
+      kind: "network_request";
+      method: string;
+      url: string;
+      at: string;
+      carriedPreparedValue: boolean;
+    } | null = null;
+    const click = input.hands.clickElement;
+    input.hands.clickElement = async (ref) => {
+      const result = await click(ref);
+      attempt = {
+        kind: "network_request",
+        method: "POST",
+        url: "https://apply.example.test/workday/api/save",
+        at: `2026-10-26T10:00:0${pressed}.000Z`,
+        carriedPreparedValue: true,
+      };
+      return result;
+    };
+    input.safety = {
+      readBlockedAttempt: () => {
+        const next = attempt;
+        attempt = null;
+        return Promise.resolve(next);
+      },
+      registerPreparedValue: () => Promise.resolve(),
+      openIntermediateWriteWindow: () => Promise.resolve(),
+      closeIntermediateWriteWindow: () => Promise.resolve(),
+      closeUploadWindow: () => Promise.resolve(),
+      checkServiceWorker: () => Promise.resolve(null),
+    };
+    // A model that would press "Save and continue" forever if let.
+    let calls = 0;
+    const model = {
+      chatWithTools: (messages, definitions) => {
+        const check = supportedChecks(messages, definitions);
+        if (check) return check;
+        calls += 1;
+        return Promise.resolve({
+          toolCalls: [
+            call(
+              "fill_fields",
+              {
+                fields: [
+                  { tool: "type", ref: "c0", text: "Robin" },
+                  { tool: "type", ref: "c1", text: "Ashford" },
+                  // The profile's own city: the answer gate needs a source.
+                  { tool: "type", ref: "c2", text: "Manchester" },
+                ],
+                thenContinue: "a0",
+              },
+              `fill_${calls}`,
+            ),
+          ],
+        });
+      },
+    } satisfies LLMClient;
+    const result = await runApplyAgent(input, model);
+    expect(writes.slice(0, 3)).toEqual(["c0", "c1", "c2"]);
+    // Fill never presses the form's own buttons; the person does.
+    expect(pressed).toBe(0);
+    expect(calls).toBeLessThanOrEqual(8);
+    expect(result.pauses).toHaveLength(1);
+    expect(result.pauses[0]?.blocker?.code).toBe("site_saves_as_you_go");
+    expect(result.pauses[0]?.summary).toBe(
+      'Job Finder filled what it could on this page. Press "Save and continue" on the site yourself, then continue and Job Finder fills the next page.',
+    );
+  });
 
   test.each([false, true])(
     "text batches settle once and retain only kept answers (clearing=%s)",

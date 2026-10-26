@@ -259,6 +259,39 @@ export interface ApplyServiceWorkerFinding {
  * guard stopped something. Neither layer can skip the other: there is no way
  * to reach the page except through these operations.
  */
+/**
+ * The request a permit was issued for. A Playwright `Request` fits; the
+ * judgment compares it by identity with the response's own request.
+ */
+export interface ApplyPermitCarrier {
+  method(): string;
+  url(): string;
+  frame(): { url(): string };
+}
+
+/**
+ * What let one upload request through the prepare-only fence, kept on the
+ * request so the response judgment can require it: no permit, no confirmed
+ * attachment. Only the runtime issues one. In Fill in for me an upload is the
+ * only write that leaves without the person's own click.
+ */
+export interface ApplyRequestPermit {
+  actionKind: "upload";
+  frameOrigin: string;
+  /** Upper case. */
+  method: string;
+  /** The request's full URL. */
+  endpoint: string;
+  authorizedCarrier: ApplyPermitCarrier;
+  /** The exact file the runtime put in the file input. */
+  file: { field: string | null; name: string; size: number; sha256: string };
+  /**
+   * "file": this request carries the file. "presign": it asks for somewhere
+   * to put it, and attaches nothing by itself.
+   */
+  uploadLeg: "file" | "presign";
+}
+
 export interface ApplyPageSession extends ApplyRawPageHands {
   /**
    * Installs the guard that stops a prepare-only run from transmitting
@@ -283,6 +316,11 @@ export interface ApplyPageSession extends ApplyRawPageHands {
    */
   openIntermediateWriteWindow: () => Promise<void>;
   closeIntermediateWriteWindow: () => Promise<void>;
+  /**
+   * Lets an upload already on its way finish, then shuts the attachment
+   * window, so a later press cannot carry the selected file.
+   */
+  closeUploadWindow: () => Promise<void>;
   /**
    * Presses one exact form action through a short, single-request guard
    * window. The workflow layer must first prove that the action is an

@@ -243,6 +243,9 @@ async function ledgerleafRun(conditionalContact = false) {
   };
   const input: ApplyAgentConfig = {
     hands,
+    // Most of these tests walk a form step by step, which only Send for me
+    // does; Fill in for me's own tests turn this off.
+    intermediateWritesAuthorized: true,
     modelQuestionClassification: true,
     authority: {
       mode: "prepare_only",

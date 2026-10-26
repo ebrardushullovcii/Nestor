@@ -242,8 +242,9 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       const { page } = await newGuardedPage();
       await page.goto(`${site.baseUrl}/real-shape`);
       const session = createPlaywrightApplyPageSession({ page });
+      // Fill in for me: no save authority, so only the upload may leave.
       await session.installPrepareOnlyGuard({
-        intermediateMutationsAuthorized: true,
+        intermediateMutationsAuthorized: false,
         attachmentUploadsAuthorized: true,
         allowedOrigins: [],
       });
@@ -251,7 +252,6 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       await registerPrepareOnlyPreparedValue(page, realShapes.name);
       await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
       await registerPrepareOnlyPreparedValue(page, realShapes.lastName);
-      await openPrepareOnlyIntermediateMutationWindow(page);
       const file = {
         name: realShapes.fileName,
         mimeType: "application/pdf",
@@ -545,10 +545,10 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       const app = await startTrackedServer();
       app.registerHtml(
         "/sign-in",
-        `<a id="register" href="/register">Create account</a>`,
+        `<a id="register" href="/account">Create account</a>`,
       );
       app.registerHtml(
-        "/register",
+        "/account",
         `<form action="/create-account" method="post">
            <input name="email" value="person@example.test">
            <button id="create" type="submit">Create account</button>
@@ -560,7 +560,7 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
 
       // The person follows the site to its account page and creates one.
       await page.click("#register");
-      await page.waitForURL(`${app.baseUrl}/register`);
+      await page.waitForURL(`${app.baseUrl}/account`);
       await page.waitForTimeout(200);
       await page.click("#create");
       await page.waitForTimeout(400);
@@ -568,7 +568,7 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
 
       // Locked again (a continuation starts): the next document stays shut.
       await closePrepareOnlyFinalActionWindow(page);
-      await page.goto(`${app.baseUrl}/register`);
+      await page.goto(`${app.baseUrl}/account`);
       await page.waitForTimeout(200);
       await page.click("#create");
       await page.waitForTimeout(300);
@@ -581,13 +581,13 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
     async () => {
       const app = await startTrackedServer();
       app.registerHtml(
-        "/early-submit",
+        "/early-form",
         `<form id="f" action="/record-submit" method="post"><input name="a" value="x"></form>
          <script>document.getElementById('f').submit();</script>`,
       );
       const { page } = await newGuardedPage();
 
-      await page.goto(`${app.baseUrl}/early-submit`);
+      await page.goto(`${app.baseUrl}/early-form`);
       await page.waitForTimeout(500);
 
       expect(requestHitsFor(app.hits, "/record-submit")).toHaveLength(0);
@@ -1311,7 +1311,8 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       await page.click("#telemetry");
       await page.waitForTimeout(500);
 
-      expect(requestHitsFor(app.hits, "/simple.gif")).toHaveLength(1);
+      // Fill in for me lets no analytics out, page views included.
+      expect(requestHitsFor(app.hits, "/simple.gif")).toHaveLength(0);
     },
   );
 
@@ -1404,7 +1405,9 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
           (attempt.url ?? "").includes("/analytics"),
         ),
       ).toBeUndefined();
-      expect(requestHitsFor(app.hits, "/analytics")).toHaveLength(1);
+      // Fill in for me lets no analytics post out either; it is refused
+      // quietly, since it carries nothing of the person's.
+      expect(requestHitsFor(app.hits, "/analytics")).toHaveLength(0);
       expect(
         app.hits.filter((hit) => hit.method !== "GET" && hit.method !== "POST"),
       ).toHaveLength(0);

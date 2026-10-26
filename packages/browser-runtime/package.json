@@ -17,6 +17,7 @@
     "@nestor/ai-providers": "workspace:*",
     "@nestor/browser-agent": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "graphql": "^16",
     "playwright": "^1.63.0"
   }
 }

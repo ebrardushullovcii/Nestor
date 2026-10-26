@@ -590,6 +590,9 @@ test("batch W: four-step saved-answer fill call count", async () => {
       },
     ]);
   s.config.runControl = { maxSteps: 20, noProgressStepLimit: 5 };
+  // Walking four steps is Send for me: Fill in for me hands the first
+  // Continue to the person instead.
+  s.config.intermediateWritesAuthorized = true;
   const kinds: string[] = [];
   let chars = 0;
   const client = {

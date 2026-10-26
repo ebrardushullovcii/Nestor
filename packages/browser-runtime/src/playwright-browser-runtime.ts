@@ -78,6 +78,7 @@ import {
   ensurePrepareOnlyMutationGuard,
   closePrepareOnlyAuthorizedFormActionWindow,
   closePrepareOnlyFinalActionWindow,
+  allowPrepareOnlyRunNavigation,
   openPrepareOnlyFinalActionWindow,
   installServiceWorkerRegisterGuardInPage,
   loadVerifiedResumeBytes,
@@ -1000,6 +1001,7 @@ async function navigatePageToTarget(input: {
     return false;
   }
 
+  allowPrepareOnlyRunNavigation(input.page, input.targetUrl);
   await input.page.goto(input.targetUrl, {
     waitUntil: "domcontentloaded",
     ...(input.timeout ? { timeout: input.timeout } : {}),
@@ -2647,6 +2649,7 @@ export function createBrowserAgentRuntime(
         try {
           page = await context.newPage();
           await ensurePrepareOnlyMutationGuard(page, false);
+          allowPrepareOnlyRunNavigation(page, applicationUrl);
           await page.goto(applicationUrl, {
             waitUntil: "domcontentloaded", timeout: 15_000,
           });
@@ -2662,6 +2665,7 @@ export function createBrowserAgentRuntime(
         }
       }
       // Re-enter with GET; never replay a credential, challenge or application POST.
+      allowPrepareOnlyRunNavigation(page, applicationUrl ?? page.url());
       await page.goto(applicationUrl ?? page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
     },
     async armApplicationFormAction(_source, input) {
@@ -3598,6 +3602,7 @@ export function createBrowserAgentRuntime(
 
         if (!hasSourceCatalog && !warmPageReusable) {
           if (navigationTarget) {
+            allowPrepareOnlyRunNavigation(page, navigationTarget);
             const response = await page.goto(navigationTarget, {
               waitUntil: "domcontentloaded",
             }).catch((error: unknown) => {

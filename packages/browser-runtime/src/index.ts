@@ -57,6 +57,7 @@ export {
 export {
   buildPreparationResult,
   ensurePrepareOnlyMutationGuard,
+  getPrepareOnlyRequestPermit,
   loadVerifiedResumeBytes,
 } from "./playwright-application-flow";
 

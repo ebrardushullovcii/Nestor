@@ -131,6 +131,7 @@ function taskLocalSignInSession(onSubmitted: () => void): ApplyPageSession {
     registerPreparedValue: () => Promise.resolve(),
     openIntermediateWriteWindow: () => Promise.resolve(),
     closeIntermediateWriteWindow: () => Promise.resolve(),
+    closeUploadWindow: () => Promise.resolve(),
     clickAuthorizedFormAction: () => {
       signedIn = true;
       onSubmitted();
