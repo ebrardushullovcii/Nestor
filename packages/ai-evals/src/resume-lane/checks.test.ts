@@ -69,7 +69,9 @@ describe("resume lane checks", () => {
       ]),
       source: SOURCE,
       listing: LISTING,
+      title: "Frontend Engineer",
       company: "Datadog",
+      yearsExperience: 5,
     });
     expect(found.map((fact) => `${fact.kind}:${fact.value}`)).toEqual([
       "number:40",
@@ -83,7 +85,9 @@ describe("resume lane checks", () => {
         draft: draft(["Led architecture for a React platform."], "Go Engineer"),
         source: SOURCE,
         listing: LISTING,
+        title: "Frontend Engineer",
         company: "Datadog",
+        yearsExperience: 5,
       }),
     ).toEqual([]);
   });
@@ -106,32 +110,29 @@ describe("resume lane checks", () => {
   });
 
   it("says when a level does not behave as named", () => {
-    const shape = (
-      rewrittenShare: number,
-      coverage: number,
-      headline: string,
-    ) => ({
-      rewrittenShare,
-      truthfulKeywordCoverage: coverage,
+    const shape = (editSize: number, headline: string, inventedCount = 0) => ({
+      editSize,
+      truthfulKeywordCoverage: 0.5,
       headline,
       unchanged: false,
+      inventedCount,
     });
     expect(
       levelVerdicts(
         {
-          original: { ...shape(0, 0, ""), unchanged: true },
-          light: shape(0.7, 0.2, "Senior Software Engineer"),
-          tailored: shape(0.4, 0.2, "Senior Software Engineer"),
-          aggressive: shape(0.8, 0.6, "Staff Software Engineer"),
+          original: { ...shape(0, ""), unchanged: true },
+          light: shape(0.4, "Senior Software Engineer"),
+          tailored: shape(0.3, "Senior Software Engineer"),
+          aggressive: shape(0.6, "Staff Software Engineer", 2),
         },
         "Senior Software Engineer",
         "Staff Software Engineer - Frontend",
       ),
     ).toEqual({
       original: null,
-      light: "Light rewrote 70% of lines.",
-      tailored: "Tailored did not go further than Light.",
-      aggressive: null,
+      light: "Light edited 40% of words (at most 25%).",
+      tailored: "Tailored edited 30%, no more than Light's 40%.",
+      aggressive: "2 invented facts.",
     });
   });
 });

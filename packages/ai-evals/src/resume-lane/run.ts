@@ -18,6 +18,7 @@ import {
   type ResumeLaneCase,
 } from "./cases";
 import {
+  LIGHT_MAX_EDIT,
   flagsLeft,
   inventedFacts,
   levelShape,
@@ -55,16 +56,26 @@ export function tokensUsed(captures: readonly EvalHttpCapture[]) {
   let completion = 0;
   for (const capture of captures) {
     const body = capture.responseBody ?? "";
-    const usages = [...body.matchAll(/"usage"\s*:\s*(\{[^{}]*\})/gu)];
-    const last = usages.at(-1)?.[1];
-    if (!last) continue;
-    try {
-      const usage = JSON.parse(last) as Record<string, unknown>;
-      prompt += Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
-      completion += Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-    } catch {
-      // A usage record split across chunks is skipped, not guessed.
+    const payloads = body.trimStart().startsWith("{")
+      ? [body]
+      : body
+          .split(/\r?\n/u)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .filter((line) => line && line !== "[DONE]");
+    let usage: Record<string, unknown> | null = null;
+    for (const payload of payloads) {
+      try {
+        const parsed = JSON.parse(payload) as { usage?: unknown };
+        if (parsed.usage && typeof parsed.usage === "object")
+          usage = parsed.usage as Record<string, unknown>;
+      } catch {
+        // Not JSON: a keep-alive or a cut-off chunk.
+      }
     }
+    if (!usage) continue;
+    prompt += Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
+    completion += Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
   }
   return { prompt, completion };
 }
@@ -99,6 +110,81 @@ const documentManager = {
   discardResumeArtifact: () => Promise.resolve(),
 };
 
+function caseInputs(evalCase: ResumeLaneCase) {
+  const listing = readRecordedListings().get(evalCase.listingId);
+  if (!listing) throw new Error(`No recorded listing ${evalCase.listingId}.`);
+  const source = readPersonaResume(evalCase.persona);
+  const profile = profileFromResumeText(evalCase.persona, source, NOW);
+  return { listing, source, profile };
+}
+
+interface Written {
+  level: ResumeLevel;
+  draft: ResumeDraft | null;
+  error: string | null;
+  seconds: number;
+  modelCalls: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Scores one case's drafts at every level; the same for a live run and a saved one. */
+export function scoreCase(
+  evalCase: ResumeLaneCase,
+  written: readonly Written[],
+): ResumeLaneResult[] {
+  const { listing, source, profile } = caseInputs(evalCase);
+  const scored = written.map((entry) => {
+    const facts = entry.draft
+      ? inventedFacts({
+          draft: entry.draft,
+          source,
+          listing: listing.description,
+          title: listing.title,
+          company: listing.company,
+          yearsExperience: profile.yearsExperience,
+        })
+      : [];
+    const shape = levelShape({
+      draft: entry.draft,
+      source,
+      listing: listing.description,
+      title: listing.title,
+    });
+    return { entry, facts, shape };
+  });
+  const verdicts = levelVerdicts(
+    Object.fromEntries(
+      scored.map(({ entry, facts, shape }) => [
+        entry.level,
+        {
+          ...shape,
+          unchanged: entry.level === "original" && !entry.draft && !entry.error,
+          inventedCount: facts.length,
+        },
+      ]),
+    ),
+    profile.headline ?? "",
+    listing.title,
+  );
+  return scored.map(({ entry, facts, shape }) => ({
+    caseId: evalCase.id,
+    level: entry.level,
+    draft: entry.draft,
+    error: entry.error,
+    seconds: entry.seconds,
+    modelCalls: entry.modelCalls,
+    promptTokens: entry.promptTokens,
+    completionTokens: entry.completionTokens,
+    inventedFacts: facts,
+    levelProblem: entry.error
+      ? `failed: ${entry.error}`
+      : (verdicts[entry.level] ?? null),
+    flagsLeft: flagsLeft(entry.draft),
+    shape,
+  }));
+}
+
 /**
  * Writes every case at every level with the configured model, the same
  * `writeResume` the resume service runs, and scores each draft.
@@ -107,14 +193,10 @@ export async function runResumeLane(
   cases: readonly ResumeLaneCase[] = RESUME_LANE_CASES,
   onResult: (result: ResumeLaneResult) => void = () => undefined,
 ): Promise<ResumeLaneResult[]> {
-  const listings = readRecordedListings();
   const aiClient = createJobFinderAiClientFromEnvironment();
   const results: ResumeLaneResult[] = [];
   for (const evalCase of cases) {
-    const listing = listings.get(evalCase.listingId);
-    if (!listing) throw new Error(`No recorded listing ${evalCase.listingId}.`);
-    const source = readPersonaResume(evalCase.persona);
-    const profile = profileFromResumeText(evalCase.persona, source, NOW);
+    const { listing, profile } = caseInputs(evalCase);
     const store = openJobStore(":memory:");
     const [jobId] = store.saveFoundJobs({
       searchId: null,
@@ -143,10 +225,7 @@ export async function runResumeLane(
     }).added;
     const job = store.getJob(jobId!)!;
     store.close();
-    const shapes: Partial<
-      Record<ResumeLevel, LevelShape & { unchanged: boolean }>
-    > = {};
-    const caseResults: ResumeLaneResult[] = [];
+    const written: Written[] = [];
     for (const level of RESUME_LEVELS) {
       const started = performance.now();
       let draft: ResumeDraft | null = null;
@@ -160,35 +239,8 @@ export async function runResumeLane(
               { aiClient, documentManager },
               {
                 profile,
-                searchPreferences: JobSearchPreferencesSchema.parse({
-                  targetRoles: [listing.title],
-                  jobFamilies: [],
-                  locations: [],
-                  excludedLocations: [],
-                  workModes: [],
-                  seniorityLevels: [],
-                  minimumSalaryUsd: null,
-                  targetSalaryUsd: null,
-                  salaryCurrency: "USD",
-                  targetIndustries: [],
-                  targetCompanyStages: [],
-                  employmentTypes: [],
-                  approvalMode: "review_before_submit",
-                  tailoringMode: "balanced",
-                  companyBlacklist: [],
-                  companyWhitelist: [],
-                  discovery: { historyLimit: 5, targets: [] },
-                }),
-                settings: JobFinderSettingsSchema.parse({
-                  resumeTemplateId: TEMPLATE.id,
-                  resumeFormat: "pdf",
-                  fontPreset: "inter_requisite",
-                  appearanceTheme: "system",
-                  humanReviewRequired: true,
-                  keepSessionAlive: false,
-                  allowAutoSubmitOverride: false,
-                  discoveryOnly: false,
-                }),
+                searchPreferences: searchPreferences(listing.title),
+                settings: SETTINGS,
                 job,
                 level,
               },
@@ -201,43 +253,18 @@ export async function runResumeLane(
         captures =
           (caught as { captures?: readonly EvalHttpCapture[] }).captures ?? [];
       }
-      const shape = levelShape({
-        draft,
-        source,
-        listing: listing.description,
-      });
-      shapes[level] = { ...shape, unchanged: level === "original" && !draft };
       const tokens = tokensUsed(captures);
-      const result: ResumeLaneResult = {
-        caseId: evalCase.id,
+      written.push({
         level,
+        draft,
         error,
-        inventedFacts: draft
-          ? inventedFacts({
-              draft,
-              source,
-              listing: listing.description,
-              company: listing.company,
-            })
-          : [],
-        levelProblem: null,
-        flagsLeft: flagsLeft(draft),
-        shape,
         seconds: (performance.now() - started) / 1000,
         modelCalls: captures.length,
         promptTokens: tokens.prompt,
         completionTokens: tokens.completion,
-        draft,
-      };
-      caseResults.push(result);
+      });
     }
-    const verdicts = levelVerdicts(
-      shapes,
-      profile.headline ?? "",
-      listing.title,
-    );
-    for (const result of caseResults) {
-      result.levelProblem = verdicts[result.level] ?? null;
+    for (const result of scoreCase(evalCase, written)) {
       results.push(result);
       onResult(result);
     }
@@ -245,7 +272,59 @@ export async function runResumeLane(
   return results;
 }
 
+/** Scores a saved run again (after a check changes) without calling the model. */
+export function rescoreResumeLane(
+  saved: readonly ResumeLaneResult[],
+): ResumeLaneResult[] {
+  return RESUME_LANE_CASES.flatMap((evalCase) => {
+    const rows = saved.filter((row) => row.caseId === evalCase.id);
+    return rows.length ? scoreCase(evalCase, rows) : [];
+  });
+}
+
+function searchPreferences(title: string) {
+  return JobSearchPreferencesSchema.parse({
+    targetRoles: [title],
+    jobFamilies: [],
+    locations: [],
+    excludedLocations: [],
+    workModes: [],
+    seniorityLevels: [],
+    minimumSalaryUsd: null,
+    targetSalaryUsd: null,
+    salaryCurrency: "USD",
+    targetIndustries: [],
+    targetCompanyStages: [],
+    employmentTypes: [],
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    companyBlacklist: [],
+    companyWhitelist: [],
+    discovery: { historyLimit: 5, targets: [] },
+  });
+}
+
+const SETTINGS = JobFinderSettingsSchema.parse({
+  resumeTemplateId: TEMPLATE.id,
+  resumeFormat: "pdf",
+  fontPreset: "inter_requisite",
+  appearanceTheme: "system",
+  humanReviewRequired: true,
+  keepSessionAlive: false,
+  allowAutoSubmitOverride: false,
+  discoveryOnly: false,
+});
+
 const pct = (value: number) => `${Math.round(value * 100)}%`;
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length === 0) return 0;
+  return sorted.length % 2
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
 
 /** The baseline table: one row per level, then every finding. */
 export function formatResumeLaneReport(
@@ -257,23 +336,29 @@ export function formatResumeLaneReport(
     "",
     `${results.length} resumes from ${new Set(results.map((r) => r.caseId)).size} cases, ${new Date().toISOString().slice(0, 10)}.`,
     "",
-    "| Level | Resumes | Invented facts | Level as named | Flags left | Rewritten | Truthful keywords | Avg s | Avg calls | Avg tokens in/out |",
+    `As named: 0 invented facts at every level, and Original unchanged; Light keeps the headline and edits at most ${pct(LIGHT_MAX_EDIT)} of words; Tailored edits more than Light; Aggressive edits at least as much as Tailored and leads with the role.`,
+    "",
+    "| Level | Resumes | Invented facts | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const level of RESUME_LEVELS) {
     const rows = results.filter((result) => result.level === level);
-    const avg = (pick: (row: ResumeLaneResult) => number) =>
-      rows.length
-        ? rows.reduce((sum, row) => sum + pick(row), 0) / rows.length
-        : 0;
+    const mid = (pick: (row: ResumeLaneResult) => number) =>
+      median(rows.map(pick));
     lines.push(
-      `| ${level} | ${rows.length}${rows.some((row) => row.error) ? ` (${rows.filter((row) => row.error).length} failed)` : ""} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(avg((row) => row.shape.rewrittenShare))} | ${pct(avg((row) => row.shape.truthfulKeywordCoverage))} | ${avg((row) => row.seconds).toFixed(1)} | ${avg((row) => row.modelCalls).toFixed(1)} | ${Math.round(avg((row) => row.promptTokens))}/${Math.round(avg((row) => row.completionTokens))} |`,
+      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
     );
   }
-  lines.push("", "## Findings", "");
+  const written = results.filter((row) => row.level !== "original");
+  lines.push(
+    "",
+    `Median write time over the ${written.length} written resumes: ${median(written.map((row) => row.seconds)).toFixed(1)} s.`,
+    "",
+    "## Findings",
+    "",
+  );
   for (const result of results) {
     const notes = [
-      ...(result.error ? [`failed: ${result.error}`] : []),
       ...(result.levelProblem ? [result.levelProblem] : []),
       ...result.inventedFacts.map(
         (fact) => `invented ${fact.kind} "${fact.value}" in: ${fact.line}`,
