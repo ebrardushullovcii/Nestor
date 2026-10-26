@@ -5,6 +5,7 @@ import {
   cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
   type ApplicationAttemptQuestion,
+  type ApplyWriteResult,
 } from "@nestor/contracts";
 
 import {
@@ -30,7 +31,6 @@ import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
 import type {
-  ApplyWriteResult,
   ApplyAgentConfig,
   ApplyAnswer,
   ApplyAttachedDocument,
@@ -1850,7 +1850,7 @@ export async function executeApplyProposal(
                   : savedRule.optionFallback.primary,
               kind: control.questionKind,
               sourceKind: "answer_library",
-              sourceId: `answerLibrary.${savedRule!.id}`,
+              sourceId: `answerLibrary.${savedRule.id}`,
               provenanceLabel: "your saved picker fallback rule",
               groundedIn: ["your saved picker fallback rule"],
             },

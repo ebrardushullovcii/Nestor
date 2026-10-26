@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalStoredField } from "./stored-json";
 import {
   CandidateAnswerKindSchema,
   SavedOptionFallbackSchema,
@@ -13,7 +14,10 @@ export const ApplicationAnswerDependenciesSchema = z.object({
       reusePrompt: z.boolean(),
       kind: CandidateAnswerKindSchema.default("other"),
       answer: z.string(),
-      optionFallback: SavedOptionFallbackSchema.nullable().optional(),
+      optionFallback: optionalStoredField(
+        SavedOptionFallbackSchema.nullable(),
+        null,
+      ),
     }),
   ),
   context: z.array(
@@ -21,7 +25,10 @@ export const ApplicationAnswerDependenciesSchema = z.object({
       id: z.number().int().positive(),
       kind: CandidateAnswerKindSchema,
       answer: z.string(),
-      optionFallback: SavedOptionFallbackSchema.nullable().optional(),
+      optionFallback: optionalStoredField(
+        SavedOptionFallbackSchema.nullable(),
+        null,
+      ),
       roleFamilies: z.array(z.string()),
       proofEntryIds: z.array(z.string()),
     }),

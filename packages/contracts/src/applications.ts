@@ -259,7 +259,10 @@ export const NeedsYouDetailsSchema = z.object({
 });
 export type NeedsYouDetails = z.infer<typeof NeedsYouDetailsSchema>;
 export const SavedFormAnswerSummarySchema = z.object({
-  optionFallback: SavedOptionFallbackSchema.nullable().optional(),
+  optionFallback: optionalStoredField(
+    SavedOptionFallbackSchema.nullable(),
+    null,
+  ),
   key: z.string().min(1),
   kind: CandidateAnswerKindSchema,
   label: z.string(),
@@ -412,3 +415,4 @@ export const UpsertSavedFormAnswerInputSchema =
 export type UpsertSavedFormAnswerInput = z.input<
   typeof UpsertSavedFormAnswerInputSchema
 >;
+import { optionalStoredField } from "./stored-json";

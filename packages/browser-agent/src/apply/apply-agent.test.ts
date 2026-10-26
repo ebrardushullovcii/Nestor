@@ -6439,10 +6439,10 @@ test.each(fallbackReplay.cases)(
         },
       },
     ];
-    const write = vi.fn(async (_ref: string, value: string) => {
+    const write = vi.fn((_ref: string, value: string) => {
       source.controls[0].value = value;
       source.controls[0].selectedOptionLabel = value;
-      return { ok: true as const, observedValue: value };
+      return Promise.resolve({ ok: true as const, observedValue: value });
     });
     input.hands.chooseOption = write;
     const result = await runApplyAgent(
@@ -6497,7 +6497,7 @@ test("resumed picker replay never counts leftover search text as a confirmed ans
     )[0]?.answerOptions,
   ).toEqual(pickerReplay.options);
   const input = makeInput();
-  const selected = pickerReplay.options[0]!;
+  const selected = pickerReplay.options[0];
   input.sources.reusableAnswers = [
     {
       id: "application-country",

@@ -1,3 +1,4 @@
+import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 
 import {
@@ -213,7 +214,10 @@ export const SavedOptionFallbackSchema = z
 export type SavedOptionFallback = z.infer<typeof SavedOptionFallbackSchema>;
 
 export const CandidateReusableAnswerSchema = z.object({
-  optionFallback: SavedOptionFallbackSchema.nullable().optional(),
+  optionFallback: optionalStoredField(
+    SavedOptionFallbackSchema.nullable(),
+    null,
+  ),
   needsConfirmation: z.boolean().optional(),
   id: NonEmptyStringSchema,
   kind: CandidateAnswerKindSchema.default("other"),

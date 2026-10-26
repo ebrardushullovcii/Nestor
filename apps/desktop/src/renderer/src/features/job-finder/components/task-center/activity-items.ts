@@ -46,6 +46,16 @@ const APPLICATION_WORDS: Record<
     badge: "Stopped",
     detail: "Stopped before sending",
   },
+  skipped: {
+    status: "stopped",
+    badge: "Skipped",
+    detail: "Your saved rule skipped this application",
+  },
+  blocked: {
+    status: "stopped",
+    badge: "Blocked",
+    detail: "The site refused this browser; open the job in your browser",
+  },
   failed: { status: "failed", badge: "Failed", detail: "Could not apply" },
   uncertain: {
     status: "failed",

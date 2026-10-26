@@ -85,10 +85,10 @@ export function createActivityStore(store: JobStore) {
       );
       const applications = (
         sql(
-          `SELECT a.id, a.job_id, j.title, j.company, a.state, a.updated_at, a.error
+          `SELECT a.id, a.job_id, j.title, j.company, COALESCE(a.disposition,a.state) AS state, a.updated_at, a.error
            FROM applications a JOIN jobs j ON j.id = a.job_id
            WHERE a.state IN ('queued', 'running', 'submitting')
-              OR (a.state IN ('ready', 'submitted', 'stopped', 'failed', 'uncertain')
+              OR ((a.state IN ('ready', 'submitted', 'stopped', 'failed', 'uncertain') OR a.disposition='blocked')
                   AND a.updated_at >= ?)
            ORDER BY a.state IN ('queued', 'running', 'submitting') DESC, a.updated_at DESC
            LIMIT ${LIMIT}`,
