@@ -15,7 +15,6 @@ const startedAt = "2026-08-09T10:00:00.000Z";
 const completedAt = "2026-08-09T10:00:08.000Z";
 
 function createWorkspace(): EvidenceWorkspace {
-
   return {
     latestResumeImportRun: ResumeImportRunSchema.parse({
       id: "resume-import-performance",
@@ -71,13 +70,13 @@ describe("buildJobFinderPerformanceSnapshot", () => {
       durationMs: 0,
       budgetStatus: "not_evaluated",
     });
-    // Searches run on the job store; the old run timings are gone.
+    // Searches and applications run on the job store; the old run timings
+    // are gone.
     expect(byArea.get("discovery")).toMatchObject({
       measurementStatus: "unavailable",
     });
     expect(byArea.get("application_preparation")).toMatchObject({
-      measurementStatus: "available",
-      durationMs: 8_000,
+      measurementStatus: "unavailable",
     });
     expect(byArea.get("persistence")).toMatchObject({
       measurementStatus: "available",
@@ -92,7 +91,6 @@ describe("buildJobFinderPerformanceSnapshot", () => {
     expect(byArea.get("ipc")?.durationMs).toBeNull();
     expect(byArea.get("renderer_commit")?.durationMs).toBeNull();
   });
-
 
   it("aggregates generation, IPC, and renderer observations into the same ordered snapshot", () => {
     const snapshot = buildJobFinderPerformanceSnapshot({
@@ -114,9 +112,7 @@ describe("buildJobFinderPerformanceSnapshot", () => {
           area: "ipc",
           durationMs: 14,
           recordedAt: completedAt,
-          stageDurations: [
-            { id: "ipc.workspace_round_trip", durationMs: 14 },
-          ],
+          stageDurations: [{ id: "ipc.workspace_round_trip", durationMs: 14 }],
         },
         {
           area: "renderer_commit",
@@ -156,6 +152,4 @@ describe("buildJobFinderPerformanceSnapshot", () => {
       durationMs: 7,
     });
   });
-
 });
-

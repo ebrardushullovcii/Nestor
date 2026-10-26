@@ -21,10 +21,7 @@ import {
 import { ApplicationCrmSettingsSchema } from "./application-crm";
 import {
   ApplyJobResultSchema,
-  ApplyJobResultSummarySchema,
-  ApplyJobResultListRowSchema,
   ApplyRunSchema,
-  ApplyRunSummarySchema,
   ApplySubmitApprovalSchema,
   ApplicationAnswerRecordSchema,
   ApplicationArtifactRefSchema,
@@ -57,7 +54,6 @@ import {
   SavedJobSchema,
   TailoredAssetSchema,
   TailoredAssetSummarySchema,
-  ApplicationAttemptListRowSchema,
 } from "./discovery";
 import { CandidateProfileSchema } from "./profile";
 import {
