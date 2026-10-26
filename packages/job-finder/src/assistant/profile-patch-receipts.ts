@@ -6,8 +6,11 @@ import {
   GoalFieldsSchema,
   GoalListsSchema,
   type UpsertProfileRecordInputSchema,
+  type RemoveProfileRecordCommandInputSchema,
+  type SetWorkPermissionsInputSchema,
   ProfileOverviewSchema,
   type ProfileEditBatch,
+  type ProfileEditResult,
   type ProfileRecord,
   type ProfileRecordPage,
   type ProfileRecordQuery,
@@ -158,6 +161,23 @@ export function profilePatchReceipts(
           "get_profile_record for this id",
         );
       },
+      remove_profile_record: (
+        input: z.infer<typeof RemoveProfileRecordCommandInputSchema>,
+        context: AssistantToolContext,
+      ) => {
+        input.expected = requireRead(
+          plan(context).records.get(recordKey(input.collection, input.id)),
+          "get_profile_record for this id",
+        );
+      },
+      set_work_permissions: (
+        input: z.infer<typeof SetWorkPermissionsInputSchema>,
+        context: AssistantToolContext,
+      ) => {
+        input.expected =
+          requireRead(plan(context).profile, "get_profile")
+            .limitedWorkPermissions ?? [];
+      },
       patch_settings: async (input: PatchSettingsInput) => {
         settings.set(
           input,
@@ -166,6 +186,60 @@ export function profilePatchReceipts(
       },
     },
     results: {
+      set_work_permissions: (
+        value: ProfileOverview,
+        _input: unknown,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).profile = ProfileOverviewSchema.parse(value);
+        return { summary: "Updated work permissions.", data: value };
+      },
+      patch_profile_goals: (
+        value: JobSearchPreferences,
+        _input: unknown,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).goals = JobSearchPreferencesSchema.parse(value);
+        return { summary: "Updated Profile goals.", data: value };
+      },
+      upsert_profile_record: (
+        value: ProfileRecord,
+        _input: unknown,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).records.set(
+          recordKey(value.collection, value.record.id),
+          value,
+        );
+        return { summary: "Saved Profile record.", data: value };
+      },
+      remove_profile_record: (
+        value: { removed: boolean },
+        input: RemoveProfileRecordInput,
+        context: AssistantToolContext,
+      ) => {
+        plan(context).records.set(recordKey(input.collection, input.id), null);
+        return {
+          summary: value.removed
+            ? "Removed Profile record."
+            : "Profile record is already absent.",
+          data: value,
+        };
+      },
+      commit_profile_edits: (
+        value: ProfileEditResult,
+        input: ProfileEditBatch,
+        context: AssistantToolContext,
+      ) => {
+        const current = plan(context);
+        current.profile = ProfileOverviewSchema.parse(value.profile);
+        current.goals = JobSearchPreferencesSchema.parse(value.goals);
+        for (const row of input.upsert)
+          current.records.set(recordKey(row.collection, row.record.id), row);
+        for (const row of input.remove)
+          current.records.set(recordKey(row.collection, row.id), null);
+        return { summary: "Saved Profile edits.", data: value };
+      },
       get_profile: (
         value: ProfileOverview,
         _input: unknown,
@@ -215,6 +289,7 @@ export function profilePatchReceipts(
         input: PatchProfileInput,
         context: AssistantToolContext,
       ) => {
+        plan(context).profile = ProfileOverviewSchema.parse(value);
         const before = profiles.get(input);
         profiles.delete(input);
         if (!before) throw Error("The Profile change was not captured.");

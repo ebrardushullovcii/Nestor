@@ -362,7 +362,7 @@ export function openJobStore(filePath: string): JobStore {
     unscoredJobIds: (limit) =>
       (
         sql(
-          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'hidden') AND fit_score = -1
+          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'resume', 'hidden') AND fit_score = -1
            ORDER BY found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),

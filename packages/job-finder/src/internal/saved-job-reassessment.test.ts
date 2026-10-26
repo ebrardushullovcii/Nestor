@@ -2,6 +2,35 @@ import { expect, test, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { reassessSavedJobs } from "./saved-job-reassessment";
+import * as matching from "./matching";
+
+test("saved-job reassessment reads the current Settings policy for its scorer", async () => {
+  const { repository } = createWorkspaceServiceHarness();
+  const settings = await repository.getSettings();
+  await repository.saveSettings({
+    ...settings,
+    aiBehavior: {
+      ...settings.aiBehavior!,
+      jobSearch: {
+        ...settings.aiBehavior!.jobSearch,
+        remoteCountsAsAnyLocation: false,
+      },
+    },
+  });
+  const calculate = vi.spyOn(matching, "createMatchAssessment");
+  try {
+    await reassessSavedJobs(reassessmentContext(repository));
+    expect(calculate.mock.calls.length).toBeGreaterThan(0);
+    expect(
+      calculate.mock.calls.every(
+        ([, preferences]) =>
+          preferences.discovery.remoteCountsAsAnyLocation === false,
+      ),
+    ).toBe(true);
+  } finally {
+    calculate.mockRestore();
+  }
+});
 
 test("unchanged goals reuse validated rows without a whole-job delta or discovery commit", async () => {
   const { repository } = createWorkspaceServiceHarness();

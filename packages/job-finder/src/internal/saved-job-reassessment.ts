@@ -4,6 +4,7 @@ import { createMatchAssessmentSession } from "./match-assessment-session";
 import { createMatchAssessment } from "./matching";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
 
 /** A listing getter may parse a large body; yield after each job. */
 const JOBS_PER_TURN = 1;
@@ -59,12 +60,13 @@ export async function reassessSavedJobs(
     Partial<Pick<WorkspaceServiceContext, "isWorkspaceClosing">>,
 ): Promise<boolean> {
   const closing = () => ctx.isWorkspaceClosing?.() === true;
-  const [profile, searchPreferences] = await Promise.all([
+  const [profile, searchPreferences, settings] = await Promise.all([
     ctx.repository.getProfile(),
     ctx.repository.getSearchPreferences(),
+    ctx.repository.getSettings(),
   ]);
   const preferences = enrichSearchPreferencesFromProfile(
-    searchPreferences,
+    withSettingsFitBehavior(searchPreferences, settings),
     profile,
   );
   const session = createMatchAssessmentSession({

@@ -14,6 +14,7 @@ import {
 } from "./match-assessment-session";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
 
 /**
  * Legacy verdict stamp to verdict fingerprint, for every set of goals a
@@ -38,8 +39,11 @@ export function buildLegacyVerdictFingerprintMap(input: {
   const map = new Map<string, string>();
   for (const raw of goals) {
     for (const preferences of [
-      raw,
-      enrichSearchPreferencesFromProfile(raw, input.profile),
+      withSettingsFitBehavior(raw, input.settings),
+      enrichSearchPreferencesFromProfile(
+        withSettingsFitBehavior(raw, input.settings),
+        input.profile,
+      ),
     ]) {
       const context = createMatchAssessmentContextFingerprint(
         input.profile,

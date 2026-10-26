@@ -32,6 +32,7 @@ import {
 import type { SQLInputValue } from "node:sqlite";
 
 import type { JobStore } from "./job-store";
+import { createProfileStore } from "./profile-store";
 import { toFilterSql, toIso } from "./job-list";
 import { createNeedsYouStore } from "./needs-you";
 
@@ -90,6 +91,9 @@ export const HAS_APPROVED_RESUME = `EXISTS (
   SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
 
 export function createApplicationStore(store: JobStore) {
+  // Retired approvals must be revoked before any Apply reader can queue them,
+  // including callers that have not opened Profile or the workspace yet.
+  createProfileStore(store);
   const { sql } = store;
   const changed = (ids: number[] | null = null) =>
     store.notify({

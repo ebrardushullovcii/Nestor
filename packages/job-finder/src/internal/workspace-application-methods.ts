@@ -1,4 +1,5 @@
 import { readWorkspaceApplicationAnswers } from "./workspace-application-answer-execution";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
 import { jobSiteTarget } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -114,9 +115,7 @@ import {
 } from "./workspace-application-user-action";
 import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { resolvePrepareOnlyIntermediateMutationAuthority } from "./prepare-only-intermediate-mutation-authority";
-import {
-  withApplicationRecordTransition,
-} from "./application-crm";
+import { withApplicationRecordTransition } from "./application-crm";
 import type {
   ApplicationAutomationMode,
   ApplicationReviewCard,
@@ -624,26 +623,23 @@ export function createWorkspaceApplicationMethods(
       if (!options.force && !alreadyRead && !jobNeedsListingDetail(job)) {
         return;
       }
-      const [profile, profilePreferences, campaignState] = await Promise.all([
-        ctx.repository.getProfile(),
-        ctx.repository.getSearchPreferences(),
-        ctx.repository.getCampaignState(),
-      ]);
+      const [profile, profilePreferences, campaignState, settings] =
+        await Promise.all([
+          ctx.repository.getProfile(),
+          ctx.repository.getSearchPreferences(),
+          ctx.repository.getCampaignState(),
+          ctx.repository.getSettings(),
+        ]);
       const assessmentPlanId = campaignState?.activeCampaignId ?? null;
-      const activePlan = campaignState?.campaigns.find(
-        (plan) => plan.id === assessmentPlanId,
+      const searchPreferences = enrichSearchPreferencesFromProfile(
+        withSettingsFitBehavior(profilePreferences, settings),
+        profile,
       );
-      const searchPreferences = activePlan
-        ? activePlan.searchPreferences
-        : profilePreferences;
       const session = createMatchAssessmentSession({
         profile,
         // Scored with the same remote setting a search uses, so reading the
         // listing on shortlist does not flip the job's location verdict.
-        searchPreferences: enrichSearchPreferencesFromProfile(
-          searchPreferences,
-          profile,
-        ),
+        searchPreferences,
         calculate: createMatchAssessment,
       });
       if (
@@ -662,7 +658,7 @@ export function createWorkspaceApplicationMethods(
         const assessed = await createMatchAssessmentAsync(
           ctx.aiClient,
           profile,
-          enrichSearchPreferencesFromProfile(searchPreferences, profile),
+          searchPreferences,
           job,
           signal,
           // Shortlisting asked for the job, not for this read.
@@ -700,7 +696,7 @@ export function createWorkspaceApplicationMethods(
             const assessed = await createMatchAssessmentAsync(
               ctx.aiClient,
               profile,
-              enrichSearchPreferencesFromProfile(searchPreferences, profile),
+              searchPreferences,
               posting,
               signal,
               // Only "Judge fit" waits on this read.
@@ -825,16 +821,6 @@ export function createWorkspaceApplicationMethods(
   // awaits to keep the check atomic against concurrent approvals.
   const activeStagedApplyJobClaims = new Map<string, string>();
 
-
-
-
-
-
-
-
-
-
-
   async function withApplyRunTransition<T>(
     runId: string,
     operation: () => Promise<T>,
@@ -858,7 +844,6 @@ export function createWorkspaceApplicationMethods(
       }
     }
   }
-
 
   // Lock ordering: run, CRM, consent, and request transitions are acquired
   // first; this per-job application-record tail is only ever acquired inside
@@ -884,7 +869,6 @@ export function createWorkspaceApplicationMethods(
       },
     );
   }
-
 
   const resumeDraftTransitionTails = new Map<string, Promise<void>>();
 
@@ -912,8 +896,6 @@ export function createWorkspaceApplicationMethods(
   }
   // Assistant edits queue on the same per-job transition tail.
   ctx.withResumeDraftTransition = withResumeDraftTransition;
-
-
 
   function validateApplyTemplate(input: {
     templateId: string;
@@ -1313,7 +1295,6 @@ export function createWorkspaceApplicationMethods(
       },
     );
   }
-
 
   function buildApplyVisualExecutionOptions(input: {
     enabled: boolean;
@@ -2668,7 +2649,6 @@ export function createWorkspaceApplicationMethods(
     }
   }
 
-
   /**
    * The person stepped into or paused the browser. Every later job would
    * meet the same paused browser, so the batch stops instead of writing a
@@ -2793,7 +2773,6 @@ export function createWorkspaceApplicationMethods(
         }),
     );
   }
-
 
   async function executeSafeApplyRun(
     input: {
@@ -3127,6 +3106,5 @@ export function createWorkspaceApplicationMethods(
       }
       return ctx.getWorkspaceSnapshot();
     },
-
   };
 }

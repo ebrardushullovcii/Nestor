@@ -563,6 +563,23 @@ it("rejects Assistant edits when a screen saved the same facts after the plannin
         })
       )?.record,
     ).toMatchObject({ title: "Screen saved" });
+    await expect(
+      call("remove_profile_record", { collection: "experiences", id: "work" }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    const permissions = [
+      {
+        country: "DE",
+        conditions: "20 hours per week",
+        requiresFutureSponsorship: null,
+      },
+    ];
+    await run("set_work_permissions", { rows: permissions });
+    await expect(
+      call("set_work_permissions", { rows: [] }),
+    ).rejects.toMatchObject({ kind: "conflict" });
+    expect((await run("get_profile", {})).limitedWorkPermissions).toEqual(
+      permissions,
+    );
     // A later save to a different field does not block a scoped chat edit.
     await call("get_profile", {});
     await run("patch_profile", { fields: { headline: "Another screen edit" } });
@@ -572,6 +589,44 @@ it("rejects Assistant edits when a screen saved the same facts after the plannin
     expect((await run("get_profile", {})).fields.headline).toBe(
       "Another screen edit",
     );
+    await call("get_profile", {});
+    await call("patch_profile", {
+      fields: { headline: "Assistant first edit" },
+    });
+    await call("patch_profile", {
+      fields: { headline: "Assistant second edit" },
+    });
+    expect((await run("get_profile", {})).fields.headline).toBe(
+      "Assistant second edit",
+    );
+    await call("set_work_permissions", { rows: [] });
+    await call("set_work_permissions", { rows: permissions });
+    await call("get_profile_goals", {});
+    await call("patch_profile_goals", {
+      lists: { targetRoles: ["First role"] },
+    });
+    await call("patch_profile_goals", {
+      lists: { targetRoles: ["Second role"] },
+    });
+    expect((await run("get_profile_goals", {})).targetRoles).toEqual([
+      "Second role",
+    ]);
+    await call("get_profile_record", { collection: "experiences", id: "own" });
+    await call("upsert_profile_record", {
+      collection: "experiences",
+      record: { ...record, id: "own" },
+    });
+    await call("upsert_profile_record", {
+      collection: "experiences",
+      record: { ...record, id: "own", title: "Second own edit" },
+    });
+    await call("remove_profile_record", {
+      collection: "experiences",
+      id: "own",
+    });
+    expect(
+      await run("get_profile_record", { collection: "experiences", id: "own" }),
+    ).toBeNull();
   } finally {
     await mcp.close();
     store.close();

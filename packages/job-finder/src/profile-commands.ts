@@ -124,13 +124,31 @@ export function createProfileCommandHandlers(
           );
         return profile.records.upsert(input);
       }),
-    remove_profile_record: ({ collection, id }) => ({
-      removed: profile.records.remove(collection, id),
-    }),
-    set_work_permissions: ({ rows }) => {
-      profile.setWorkPermissions(rows);
-      return profile.overview();
-    },
+    remove_profile_record: ({ collection, id, expected }) =>
+      store.transaction(() => {
+        if (
+          expected !== undefined &&
+          JSON.stringify(profile.records.get(collection, id)) !==
+            JSON.stringify(expected)
+        )
+          throw new ProfileEditConflictError(
+            "The saved Profile record changed while you were editing it. Reload this record and try again.",
+          );
+        return { removed: profile.records.remove(collection, id) };
+      }),
+    set_work_permissions: ({ rows, expected }) =>
+      store.transaction(() => {
+        if (
+          expected !== undefined &&
+          JSON.stringify(profile.overview().limitedWorkPermissions) !==
+            JSON.stringify(expected)
+        )
+          throw new ProfileEditConflictError(
+            "Work permissions changed while you were editing them. Reload Profile and try again.",
+          );
+        profile.setWorkPermissions(rows);
+        return profile.overview();
+      }),
     get_profile_goals: () => preferences.goals.read(),
     patch_profile_goals: (input) => {
       preferences.goals.patch(input);

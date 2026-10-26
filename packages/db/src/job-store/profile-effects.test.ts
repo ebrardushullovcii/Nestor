@@ -79,6 +79,9 @@ test("changing remote location policy retires active fit scores without changing
   });
   expect(store.getJob(1)?.fitScore).toBeNull();
   expect(store.getJob(1)?.fit).toBeNull();
+  expect(store.getJob(1)?.stage).toBe("resume");
+  expect(store.unscoredJobIds(10)).toContain(1);
+  expect(store.unscoredJobIds(10)).not.toContain(2);
   expect(store.getJob(2)?.fitScore).toBe(90);
   expect(resumes.get(1)).toEqual(draft);
 });

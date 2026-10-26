@@ -5,6 +5,8 @@ import {
   ProfileRecordQuerySchema,
   ProfileRecordSchema,
   RemoveProfileRecordInputSchema,
+  RemoveProfileRecordCommandInputSchema,
+  SetWorkPermissionsInputSchema,
   PatchProfileInputSchema,
   type ProfileOverview,
   type ProfileRecord,
@@ -120,18 +122,15 @@ export const PROFILE_COMMANDS = {
   },
   remove_profile_record: {
     effect: "local_write",
-    description: "Removes only the named Profile record.",
-    input: RemoveProfileRecordInputSchema,
+    description:
+      "Removes only the named Profile record. Read get_profile_record before planning a removal; Assistant writes reject a record changed since that read.",
+    input: RemoveProfileRecordCommandInputSchema,
   },
   set_work_permissions: {
     effect: "local_write",
     description:
-      "Saves the person's limited work permissions and explicit sponsorship conditions. Does not infer work authorization.",
-    input: z
-      .object({
-        rows: CandidateWorkEligibilitySchema.shape.limitedWorkPermissions.unwrap(),
-      })
-      .strict(),
+      "Saves the person's limited work permissions and explicit sponsorship conditions. Read get_profile before planning the edit; Assistant writes reject changes since that read. Does not infer work authorization.",
+    input: SetWorkPermissionsInputSchema,
   },
   get_profile_goals: {
     effect: "read",

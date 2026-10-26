@@ -208,6 +208,16 @@ export const RemoveProfileRecordInputSchema = z
 export type RemoveProfileRecordInput = z.infer<
   typeof RemoveProfileRecordInputSchema
 >;
+export const RemoveProfileRecordCommandInputSchema =
+  RemoveProfileRecordInputSchema.extend({
+    expected: ProfileRecordSchema.nullable().optional(),
+  });
+export const SetWorkPermissionsInputSchema = z
+  .object({
+    rows: CandidateWorkEligibilitySchema.shape.limitedWorkPermissions.unwrap(),
+    expected: CandidateWorkEligibilitySchema.shape.limitedWorkPermissions,
+  })
+  .strict();
 /** Resume text and private file paths are main-process inputs, never a Profile list payload. */
 export const ProfileResumeMetadataSchema = ResumeSourceDocumentSchema.omit({
   storagePath: true,

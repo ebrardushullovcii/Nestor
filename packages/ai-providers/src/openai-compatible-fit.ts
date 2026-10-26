@@ -35,6 +35,7 @@ export function buildFitEvidenceInstructions(): string {
     "Use the person's plain labels in explanations. Write Yes and No facts as ordinary sentences, never field names, key=value text or true/false flags.",
     "Read Limited work permissions by country: Conditions describe present permission, and Will need sponsorship later describes future work, not necessarily the present job. Compare the job type, hours and dates with every permit condition. Limited permission is neither unrestricted authorization nor absent permission. Unresolved conditions require review_before_applying with a clear question for the person.",
     "Compare country-limited remote work with the person's current location, countries where they can work, sponsorship needs and saved eligibility answers. Remote does not mean worldwide: Accepting remote work outside preferred places never overrides a country restriction or work permission. Do not infer authorization from residence, education or past employers.",
+    "Respect Remote work can be outside preferred places: when false, remote alone does not match a preferred place. A different listed place is a preferences conflict and lowers an otherwise matching job's score. When true, remote work available in the person's country or region can match their preferred places. Hiring restrictions and work permission always apply.",
     "For hybrid or onsite work, compare the actual office city and required attendance with saved locations and relocation facts. Willingness to relocate is not permission to work there. A material place or eligibility mismatch must appear in preferencesExplanation, gaps and summary and prevent an unqualified strong_fit or apply_with_original recommendation. If eligibility is not known, say what must be confirmed.",
     "Compare the pay basis: base salary (also the default when absent) means guaranteed pay, and total on-target earnings means pay including commission. Keep base and OTE amounts separate. An 80,000 base / 160,000 OTE listing meets a 160,000 total on-target earnings floor, but not a 160,000 base salary floor. Normalize the person's interval and listing pay to the same yearly basis and currency; compare the advertised minimum of the matching band, not its maximum. Unclear basis, interval or currency needs review; do not invent conversion rates or count OTE as guaranteed pay. Never assume billable hours or days for an hourly or daily contract rate: if conversion to a monthly or yearly minimum needs a workload the listing does not state, the comparison is unresolved. Explain the comparison.",
     "Compare Shift preference (day or night means only those shifts; any or absent means flexible) and Weekly hours Minimum/Maximum with the listing's schedule. Explain conflicting shifts or weekly hours in preferencesExplanation, gaps and summary and avoid an unqualified strong_fit. Missing schedule evidence is unknown, not alignment.",
@@ -265,6 +266,10 @@ function compactGoals(preferences: JobSearchPreferences) {
     "Preferred companies": preferences.companyWhitelist,
     "Seniority levels": preferences.seniorityLevels,
     "Preferred places": preferences.locations,
+    "Remote work can be outside preferred places":
+      preferences.discovery.remoteCountsAsAnyLocation !== false,
+    "Only jobs matching hard criteria":
+      preferences.discovery.collectOnlyHardCriteriaMatches ?? false,
     "Places to exclude": preferences.excludedLocations,
     "Work modes": preferences.workModes,
     "Employment types": preferences.employmentTypes,

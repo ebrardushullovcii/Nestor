@@ -23,6 +23,26 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("revokes retired approvals before Apply even when Profile has never been constructed", () => {
+  const jobs = openJobStore(":memory:");
+  stores.push(jobs);
+  jobs.db
+    .exec(`INSERT INTO jobs(id,stage,stage_at,title,company,location,found_at,seen_at,source_label,url)
+    VALUES(1,'resume',1,'Analyst','Synthetic','Berlin',1,1,'Board','https://example.test/jobs/retired');
+    INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path)
+    VALUES(1,'tailored','ready',1,1,'C:/synthetic/approved.pdf');`);
+  const applications = createApplicationStore(jobs);
+  expect(applications.applyJobs({ selection: { ids: [1] } })).toEqual({
+    queued: 0,
+    unchanged: 0,
+    notApproved: 1,
+  });
+  expect(
+    jobs.sql("SELECT approved_at FROM resumes WHERE job_id=1").get()
+      ?.approved_at,
+  ).toBeNull();
+});
+
 it("persists guarded answer Undo without retracting answers that released applications", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
   folders.push(folder);
