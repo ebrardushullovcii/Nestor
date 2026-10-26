@@ -145,7 +145,8 @@ export function isPlainMotivationIntent(text: string): boolean {
     /^I (?:am (?:excited|interested|motivated) (?:about|in|by|to)|(?:would like|hope|want) to|would welcome) (.+)$/iu.exec(
       normalized,
     );
-  if (!intent) return false;
+  const body = intent?.[1];
+  if (!body) return false;
   // Only connective words about future participation. No personal qualities,
   // possession, qualifications, named entities, numbers or history fit here.
   const words = new Set(
@@ -153,7 +154,7 @@ export function isPlainMotivationIntent(text: string): boolean {
       " ",
     ),
   );
-  const remainder = intent[1]
+  const remainder = body
     .replace(/[.,!]/gu, " ")
     .toLowerCase()
     .trim()
