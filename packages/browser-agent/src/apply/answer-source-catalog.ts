@@ -180,6 +180,8 @@ const contactLabels: Record<string, readonly string[]> = {
     "country of residence",
     "residence country",
     "current country",
+    "what country are you based in",
+    "what is your current country of residence",
   ],
   "profile.yearsExperience": [
     "years of experience",
