@@ -1,5 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { collectSource, readListings } from "./listing-engine";
+import {
+  ATS_FEED_PAGE_LIMIT,
+  collectAtsFeed,
+  readAtsListing,
+} from "./ats-public-feed";
 const client = {
   chatWithTools: vi.fn(() => Promise.reject(new Error("No model needed"))),
 };
@@ -18,7 +23,7 @@ test("public paginated directory streams all cards; only a plausible card reads 
         return Promise.resolve({
           finalUrl: url,
           html: JSON.stringify({
-            total: offset ? 0 : 21,
+            total: 21,
             jobPostings: Array.from({ length: offset ? 1 : 20 }, (_, i) => ({
               title: "Data Analyst " + (offset + i),
               externalPath: "/job/Berlin/Analyst_" + (offset + i),
@@ -116,6 +121,9 @@ test("public widget merges locations by vacancy and supplies full requirements w
   );
   const inventory = await collectSource({ source, readPage });
   expect(inventory.cards).toHaveLength(1);
+  expect(inventory.complete).toBe(false);
+  expect(inventory.requiresBrowser).toBe(true);
+  expect(inventory.notes.join(" ")).toContain("did not report a total");
   expect(inventory.cards[0].locationHint).toContain("Germany");
   expect(inventory.cards[0].locationHint).toContain("United Kingdom");
   const read = await readListings({ cards: inventory.cards, readPage, client });
@@ -173,3 +181,146 @@ test.each([
     expect(inventory.notes.join(" ")).toContain("coverage incomplete");
   },
 );
+
+const workday = {
+  id: "bounded",
+  label: "Synthetic",
+  url: "https://synthetic.wd1.myworkdayjobs.com/Careers",
+};
+test("a growing feed stops at the page cap and reports incomplete coverage", async () => {
+  const readPage = vi.fn(
+    (url: string, options: { jsonQuery?: Record<string, unknown> }) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: JSON.stringify({
+          total: 100000,
+          jobPostings: [
+            {
+              title: "Engineer",
+              externalPath: "/job/Engineer_" + String(options.jsonQuery?.offset),
+            },
+          ],
+        }),
+      }),
+  );
+  const result = await collectAtsFeed({ source: workday, readPage });
+  expect(readPage).toHaveBeenCalledTimes(ATS_FEED_PAGE_LIMIT);
+  expect(result).toMatchObject({
+    pagesRead: ATS_FEED_PAGE_LIMIT,
+    complete: false,
+    requiresBrowser: true,
+  });
+  expect(result?.notes.join(" ")).toContain("page limit");
+});
+
+test("a shrinking Workday total stays incomplete even when all initially reported rows arrive", async () => {
+  const result = await collectAtsFeed({
+    source: workday,
+    readPage: (url, options) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: JSON.stringify({
+          total: options.jsonQuery?.offset ? 0 : 2,
+          jobPostings: [
+            {
+              title: "Engineer",
+              externalPath: "/job/Engineer_" + String(options.jsonQuery?.offset),
+            },
+          ],
+        }),
+      }),
+  });
+  expect(result?.cards).toHaveLength(2);
+  expect(result?.complete).toBe(false);
+  expect(result?.notes.join(" ")).toContain("total shrank");
+});
+
+test("one malformed Workday row keeps the valid cards and makes coverage incomplete", async () => {
+  const result = await collectAtsFeed({
+    source: workday,
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: JSON.stringify({
+          total: 4,
+          jobPostings: [
+            null,
+            { title: "Broken URL", externalPath: "/job/%invalid" },
+            { title: "Wrong route", externalPath: "/not-a-job" },
+            { title: "Engineer", externalPath: "/job/Engineer_1" },
+          ],
+        }),
+      }),
+  });
+  expect(result?.cards.some((card) => card.title === "Engineer")).toBe(true);
+  expect(result?.complete).toBe(false);
+  expect(result?.notes.join(" ")).toContain("malformed listing");
+});
+
+test("a provider detail tolerates a title suffix, and an uncorroborated detail falls through to HTML", async () => {
+  const card = {
+    url: workday.url + "/job/Engineer_1",
+    title: "Frontend Engineer",
+    text: "Frontend Engineer",
+    sourceId: "bounded",
+    sourceLabel: "Synthetic",
+    cardFingerprint: "synthetic",
+  };
+  const api = (title: string) =>
+    JSON.stringify({
+      jobPostingInfo: {
+        title,
+        jobDescription: "<p>Build React applications.</p>",
+      },
+      hiringOrganization: { name: "Synthetic" },
+    });
+  const first = await readAtsListing(
+    {
+      readPage: (url) =>
+        Promise.resolve({
+          finalUrl: url,
+          html: api("Frontend Engineer (Remote)"),
+        }),
+    },
+    card,
+  );
+  expect(first?.listingText).toContain("Build React applications.");
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: url.includes("/wday/cxs/")
+        ? api("Unrelated vacancy")
+        : `<h1>Frontend Engineer</h1><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: "Frontend Engineer", hiringOrganization: { name: "Synthetic" }, description: "<p>Build React applications with accessible TypeScript interfaces.</p>" })}</script><p>Build React applications with accessible TypeScript interfaces.</p>`,
+    }),
+  );
+  const metadataClient = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: JSON.stringify({
+          jobs: [
+            {
+              id: 0,
+              title: card.title,
+              company: "Synthetic",
+              location: "Remote",
+              workModes: ["remote"],
+              sourceJobId: null,
+              employmentType: null,
+              seniority: null,
+              salaryText: null,
+              closed: false,
+            },
+          ],
+        }),
+      }),
+    ),
+  };
+  const result = await readListings({
+    cards: [card],
+    readPage,
+    client: metadataClient,
+  });
+  expect(result.failures).toEqual([]);
+  expect(result.jobs[0]?.description).toContain("Build React applications");
+  expect(readPage.mock.calls.map(([url]) => url)).toContain(card.url);
+});

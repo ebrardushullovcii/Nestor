@@ -6,6 +6,7 @@ import type {
 import { fingerprint } from "./listing-html";
 import { htmlToPlainText } from "./listing-detail-extraction";
 type Data = Record<string, unknown>;
+export const ATS_FEED_PAGE_LIMIT = 250;
 type Address = { board: string; endpoint: string; detail: string | null };
 type Detail = {
   title: string;
@@ -211,7 +212,9 @@ export async function collectAtsFeed(
   const cards = new Map<string, ListingCard>();
   let pagesRead = 0,
     total: number | null = null;
-  for (let offset = 0; ; ) {
+  const issues = new Set<string>();
+  for (let offset = 0; pagesRead < ATS_FEED_PAGE_LIMIT; ) {
+    input.signal?.throwIfAborted();
     const jsonQuery = board.adapter.query?.(offset),
       page = await input.readPage(board.adapter.listUrl(board), {
         signal: input.signal,
@@ -223,22 +226,27 @@ export async function collectAtsFeed(
     if (!Array.isArray(rows))
       throw new Error("The public provider feed did not return its listings.");
     const reported = board.adapter.total(data);
-    // Later pages may omit the total or report zero; never lose observed inventory.
+    if (reported !== null && total !== null && reported < total)
+      issues.add("The reported total shrank during pagination.");
     total = reported === null ? null : Math.max(total ?? 0, reported);
     const fresh: ListingCard[] = [];
     for (const value of rows as unknown[]) {
       const row = object(value),
-        title = string(row.title),
+        title = string(row.title);
+      let facts: ReturnType<Adapter["card"]>;
+      try {
         facts = board.adapter.card(data, row, board);
-      if (
-        !title ||
-        !facts.url ||
-        !board.adapter.match(new URL(facts.url))?.detail ||
-        new URL(facts.url).origin !== new URL(board.board).origin
-      )
-        throw new Error(
-          "The public provider feed returned an invalid listing title or URL.",
-        );
+        const url = new URL(facts.url);
+        if (
+          !title.trim() ||
+          !board.adapter.match(url)?.detail ||
+          url.origin !== new URL(board.board).origin
+        )
+          throw new Error("Invalid listing title or URL.");
+      } catch {
+        issues.add("A malformed listing was skipped.");
+        continue;
+      }
       const previous = cards.get(facts.url),
         location =
           previous?.locationHint && previous.locationHint !== facts.location
@@ -262,17 +270,30 @@ export async function collectAtsFeed(
     offset += rows.length;
     if (total === null || offset >= total || !rows.length || !fresh.length)
       break;
+    if (pagesRead === ATS_FEED_PAGE_LIMIT)
+      issues.add(
+        `Pagination stopped at the ${ATS_FEED_PAGE_LIMIT}-page limit.`,
+      );
   }
-  const complete = cards.size > 0 && (total === null || cards.size >= total);
+  if (total === null)
+    issues.add(
+      "The provider did not report a total; this page cannot prove complete coverage.",
+    );
+  const complete =
+    cards.size > 0 &&
+    total !== null &&
+    cards.size >= total &&
+    issues.size === 0;
   return {
     cards: [...cards.values()],
     lane: "http",
     provider: board.adapter.provider,
     pagesRead,
     complete,
-    requiresBrowser: total !== null && cards.size < total,
+    requiresBrowser: !complete,
     notes: [
       `${cards.size} distinct listings collected from ${pagesRead} public provider pages${total !== null ? `; ${total} reported by the site` : ""}; ${complete ? "all reported listings covered" : "coverage incomplete"}.`,
+      ...issues,
     ],
   };
 }
@@ -284,36 +305,57 @@ export async function readAtsListing(
 ): Promise<ListingCard | null> {
   const board = boardOf(card.url);
   if (!board?.detail) return null;
-  const page = await input.readPage(board.adapter.detailUrl(board), {
-      signal: input.signal,
-    }),
-    data = object(JSON.parse(page.html)),
-    facts = board.adapter.detail(data, card);
-  if (
-    !facts.title ||
-    !facts.company ||
-    !facts.description ||
-    facts.title.trim().toLowerCase() !== card.title.trim().toLowerCase()
-  )
-    throw new Error(
-      "The public listing detail did not corroborate its title, employer and full text.",
-    );
-  return {
-    ...card,
-    title: facts.title,
-    listingText: [facts.title, facts.company, facts.location, facts.description]
-      .filter(Boolean)
-      .join("\n\n"),
-    closed: facts.closed,
-    ...(facts.sourceJobId ? { sourceJobId: facts.sourceJobId } : {}),
-    providerFacts: {
-      company: facts.company,
-      location: facts.location,
-      workModes: facts.remote ? ["remote"] : facts.hybrid ? ["hybrid"] : [],
-      employmentType: facts.employmentType,
-      salaryText: null,
-      applyUrl: card.url,
-      postedAt: facts.postedAt,
-    },
-  };
+  try {
+    const page = await input.readPage(board.adapter.detailUrl(board), {
+        signal: input.signal,
+      }),
+      data = object(JSON.parse(page.html)),
+      facts = board.adapter.detail(data, card);
+    if (
+      !facts.title ||
+      !facts.company ||
+      !facts.description ||
+      !compatibleTitles(facts.title, card.title)
+    )
+      return null;
+    return {
+      ...card,
+      title: facts.title,
+      listingText: [
+        facts.title,
+        facts.company,
+        facts.location,
+        facts.description,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      closed: facts.closed,
+      ...(facts.sourceJobId ? { sourceJobId: facts.sourceJobId } : {}),
+      providerFacts: {
+        company: facts.company,
+        location: facts.location,
+        workModes: facts.remote ? ["remote"] : facts.hybrid ? ["hybrid"] : [],
+        employmentType: facts.employmentType,
+        salaryText: null,
+        applyUrl: card.url,
+        postedAt: facts.postedAt,
+      },
+    };
+  } catch {
+    input.signal?.throwIfAborted();
+    return null;
+  }
+}
+
+function compatibleTitles(a: string, b: string): boolean {
+  const words = (value: string) =>
+    new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+  const left = words(a),
+    right = words(b);
+  return (
+    left.size > 0 &&
+    right.size > 0 &&
+    ([...left].every((word) => right.has(word)) ||
+      [...right].every((word) => left.has(word)))
+  );
 }
