@@ -562,30 +562,6 @@ export function createWorkspaceApplicationMethods(
     }
   }
 
-  type DirectApplyExecutionClaim = {
-    jobId: string;
-    applicationRecordId: string;
-    runId: string;
-    resultId: string;
-    controller: AbortController;
-  };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   const resumeDraftTransitionTails = new Map<string, Promise<void>>();
 
   async function withResumeDraftTransition<T>(

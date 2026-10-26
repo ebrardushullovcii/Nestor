@@ -576,7 +576,7 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
   );
 });
 
-it("recovers interrupted preparation but holds an interrupted send for confirmation", async () => {
+it("recovers interrupted preparation but holds an interrupted send for confirmation, and a restart resends nothing", async () => {
   const f = await setup(2);
   f.applications.applyJobs({ selection: { ids: f.ids } });
   const sending = f.applications.claimNext()!;
@@ -586,6 +586,23 @@ it("recovers interrupted preparation but holds an interrupted send for confirmat
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
   expect(f.applications.getApplication(sending.id)?.state).toBe("uncertain");
   expect(f.applications.getApplication(filling.id)?.attempt).toBe(2);
+  // Only the interrupted preparation runs again; the interrupted send is
+  // neither replayed nor re-authorized, now or after another restart.
+  expect(f.execute.mock.calls.map(([, input]) => input.job.id)).toEqual([
+    String(filling.jobId),
+  ]);
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(f.applications.getApplication(sending.id)?.state).toBe("uncertain");
+  expect(
+    f.execute.mock.calls.filter(
+      ([, input]) => input.job.id === String(sending.jobId),
+    ),
+  ).toEqual([]);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
 it("automatically carries every waiting page on after one site sign-in and MFA, checking each checkpoint", async () => {

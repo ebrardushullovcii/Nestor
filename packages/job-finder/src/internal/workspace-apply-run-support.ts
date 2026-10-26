@@ -21,7 +21,6 @@ import {
   type ApplicationReviewCard,
   type ApplicationResumeArtifact,
   type BrowserVisualEvidenceSummary,
-  type JobFinderWorkspaceSnapshot,
   type SavedJob,
 } from "@nestor/contracts";
 
