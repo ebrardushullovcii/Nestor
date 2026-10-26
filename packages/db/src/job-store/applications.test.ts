@@ -388,6 +388,24 @@ describe("applications on the job store", () => {
     ).toEqual({ queued: 0, unchanged: 1, notApproved: 2 });
   });
 
+  it("claims and freezes only jobs whose resume is still approved", () => {
+    const { jobs, applications } = open();
+    const [kept, unapproved] = add(jobs, 2);
+    applications.applyJobs({ selection: { ids: [kept!, unapproved!] } });
+    jobs
+      .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
+      .run(unapproved!);
+
+    expect(
+      applications.selectedJobIds({
+        filter: { stage: "resume" },
+        except: [],
+      }),
+    ).toEqual([kept]);
+    expect(applications.claimNext()?.jobId).toBe(kept);
+    expect(applications.claimNext()).toBeNull();
+  });
+
   it("queues ids or the complete Approved filter once, skips unapproved jobs, and pages the queue", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 7);

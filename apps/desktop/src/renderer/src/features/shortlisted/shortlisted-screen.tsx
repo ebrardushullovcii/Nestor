@@ -39,6 +39,10 @@ const FILTER_ID = "shortlisted-filter";
  * here. Read each one, edit it if you like, and approve it; Apply takes the
  * approved ones at once.
  */
+function needApproval(count: number): string {
+  return `${plural(count, "job")} need${count === 1 ? "s" : ""} an approved resume`;
+}
+
 export function ShortlistedScreen() {
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
@@ -223,11 +227,15 @@ export function ShortlistedScreen() {
           title:
             result.queued > 0
               ? `Applying to ${plural(result.queued, "job")}`
-              : "Those jobs are already being applied to",
+              : result.unchanged > 0
+                ? "Those jobs are already being applied to"
+                : needApproval(result.notApproved),
           description:
-            result.notApproved > 0
-              ? `${plural(result.notApproved, "job")} had no approved resume and stayed here.`
-              : "Each one moves to Applications once it is sent.",
+            result.queued === 0 && result.unchanged === 0
+              ? "Approve a resume, then apply."
+              : result.notApproved > 0
+                ? `${needApproval(result.notApproved)} and stayed here.`
+                : "Each one moves to Applications once it is sent.",
         });
       } catch (error) {
         showToast({ title: describeError(error), tone: "warning" });

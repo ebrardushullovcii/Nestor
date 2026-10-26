@@ -11,6 +11,7 @@ import {
 } from "@nestor/contracts";
 
 import type { JobStore } from "./job-store";
+import { HAS_APPROVED_RESUME } from "./applications";
 import { toIso } from "./job-list";
 import { createTrackerStore } from "./tracker";
 
@@ -144,6 +145,7 @@ export function createHomeStore(store: JobStore) {
         resumes,
         readyToApply: count(
           `SELECT COUNT(*) AS n FROM jobs j WHERE j.stage = 'resume'
+           AND ${HAS_APPROVED_RESUME}
            AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)`,
         ),
         applyWorking: count(

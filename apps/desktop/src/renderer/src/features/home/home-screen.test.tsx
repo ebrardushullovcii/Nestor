@@ -5,6 +5,7 @@ import { createApplicationStore } from "@nestor/db/applications";
 import {
   createHomeStore,
   createTrackerStore,
+  approveOriginalResumesForTests,
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -54,7 +55,7 @@ beforeEach(() => {
     searchId: null,
     jobs: [1, 2, 3, 4].map(job),
   }));
-  store.setStage(ids.slice(0, 3), "resume");
+  approveOriginalResumesForTests(store, ids.slice(0, 3));
   createApplicationStore(store).applyJobs({
     selection: { ids: ids.slice(0, 2) },
   });

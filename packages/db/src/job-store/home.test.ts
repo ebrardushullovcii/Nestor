@@ -87,6 +87,15 @@ describe("Home summary", () => {
     expect(home.applyWorking).toBe(1);
     expect(home.jobs.found).toBe(1);
     expect(home.foundToday).toBe(1);
+
+    // A job in Approved without an approval is not ready to apply.
+    store
+      .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
+      .run(ids[4]!);
+    expect(
+      createHomeStore(store).summary({ utcOffsetMinutes: 60 }, now)
+        .readyToApply,
+    ).toBe(0);
   });
 
   it("counts only unfinished applications as Apply's work", () => {
