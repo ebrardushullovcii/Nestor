@@ -393,6 +393,17 @@ function permitConditionsFit(
       /^(?:up to |maximum |max |no more than )?(\d+(?:\.\d+)?) hours?(?: per week| weekly)$/iu.exec(
         permission.conditions.trim(),
       );
+    // Count broadly before parsing. A second or unfamiliar hours statement
+    // must not disappear merely because the strict parser cannot read it.
+    const mentions =
+      (sources.posting.description ?? "").match(
+        /(?<!\p{L})(?:hours?|hrs?)\b|\bfull[\s\p{Pd}]*time\b/giu,
+      ) ?? [];
+    const weeklyMentions =
+      (sources.posting.description ?? "").match(
+        /weekly|per[\s\p{Pd}]*week|a\s+week|\/\s*(?:week|wk)\b/giu,
+      ) ?? [];
+    if (mentions.length !== 1 || weeklyMentions.length !== 1) return false;
     const hours = (sources.posting.description ?? "")
       .split(/\n|;|(?<=[.!?])\s+/u)
       .flatMap((sentence) => {

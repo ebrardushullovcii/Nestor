@@ -1078,3 +1078,58 @@ test("a remembered legal Yes is rechecked against the current job's permit condi
   src.profile.workEligibility.limitedWorkPermissions = [];
   expect(decide().kind).toBe("literal");
 });
+
+test.each([
+  "This role requires 15 hours per week. During peak periods you must work 40 hours per week.",
+  "This role requires 15 hours per week. During peak periods you must work 40 hrs a week.",
+  "This role requires 15 hours per week. Full-time work is required during peak periods.",
+  "This role requires 15 hours per week. Full‑time work is required during peak periods.",
+  "This role requires 15 hours per week. During peak periods you must work 30–40 hrs weekly.",
+  "This role requires 15 hours per week. During peak periods you must work 40 a week.",
+])(
+  "a conflicting or unreadable hours mention cannot be discarded: %s",
+  (description) => {
+    const src = sources();
+    src.posting.description = description;
+    src.profile.workEligibility.limitedWorkPermissions = [
+      {
+        country: "United Kingdom",
+        conditions: "Maximum 20 hours per week",
+        requiresFutureSponsorship: false,
+      },
+    ];
+    const label = "Are you authorized to work in the UK?";
+    src.reusableAnswers = [
+      {
+        id: "part-time",
+        question: label,
+        label,
+        kind: "work_authorization",
+        answer: "Yes",
+        roleFamilies: [],
+        proofEntryIds: [],
+        applicationScope: {
+          resultId: null,
+          applicationRecordId: null,
+          location: "United Kingdom",
+        },
+      },
+    ];
+    const s = setup(field(label), src),
+      control = s.observation().controls[0];
+    expect(
+      classifyAnswerPermission({
+        control,
+        controls: [control],
+        tags: {
+          kind: "work_auth",
+          country: "GB",
+          sourceId: "answerLibrary.part-time",
+        },
+        sources: src,
+        answer: "Yes",
+        pageInstructions: "",
+      }).kind,
+    ).toBe("needs_you");
+  },
+);
