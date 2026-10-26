@@ -40,6 +40,9 @@ const JOB_FINDER_STARTUP_RESET_RECOVERY_PENDING_TRASH_QUARANTINED_MESSAGE =
 const JOB_FINDER_STARTUP_RESET_RECOVERY_PENDING_TRASH_NOT_QUARANTINED_MESSAGE =
   "An unreadable workspace reset marker was found during startup but could not be moved aside while set-aside reset files were still pending, so recovery paused and every pending file stays retained. Nothing will be deleted automatically.";
 
+const JOB_FINDER_STARTUP_RESET_RECOVERY_UNREADABLE_MESSAGE =
+  "A reset you started didn't finish, and Nestor couldn't read how far it got, so it deleted nothing. Your jobs, applications and profile are still here.";
+
 const JOB_FINDER_STARTUP_RESET_RECOVERY_FAILED_MESSAGE =
   "A previously interrupted workspace reset could not be finished during startup, so recovery paused. Your workspace files are retained and nothing was deleted automatically.";
 
@@ -60,6 +63,8 @@ export function buildJobFinderStartupResetRecoveryDegradedDetail(input: {
         ? messages.quarantined
         : messages.notQuarantined,
     );
+  } else if (input.reason === "marker_unreadable") {
+    segments.push(JOB_FINDER_STARTUP_RESET_RECOVERY_UNREADABLE_MESSAGE);
   } else if (input.reason === "marker_quarantined_with_pending_trash") {
     segments.push(
       input.quarantinedFileName
@@ -84,6 +89,17 @@ export function buildJobFinderStartupResetRecoveryDegradedDetail(input: {
   }
 
   return segments.join(" ");
+}
+
+/** Whether the person can simply start the reset again: nothing was set aside. */
+export function canRetryJobFinderReset(
+  reason: JobFinderStartupResetRecoveryDegradedReason,
+): boolean {
+  return (
+    reason === "marker_unreadable" ||
+    reason === "marker_quarantined_malformed" ||
+    reason === "marker_quarantined_oversized"
+  );
 }
 
 /**

@@ -29,6 +29,8 @@ const {
   mockClearBrowserStorage,
   mockClearBrowserCache,
   mockSetActivityControl,
+  mockResetJobStore,
+  mockDiscardJobSearch,
 } = vi.hoisted(() => ({
   mockMkdir: vi.fn(),
   mockOpen: vi.fn(),
@@ -55,7 +57,13 @@ const {
   mockClearBrowserStorage: vi.fn(),
   mockClearBrowserCache: vi.fn(),
   mockSetActivityControl: vi.fn(),
+  mockResetJobStore: vi.fn(),
+  mockDiscardJobSearch: vi.fn(),
 }));
+
+vi.mock("@nestor/db/job-store", () => ({ resetJobStore: mockResetJobStore }));
+vi.mock("../job-store", () => ({ getJobStore: () => ({ store: true }) }));
+vi.mock("../job-commands", () => ({ discardJobSearch: mockDiscardJobSearch }));
 
 vi.mock("../assistant/assistant-service", () => ({
   shutdownAssistantHost: vi.fn(),
@@ -398,6 +406,32 @@ describe("resetJobFinderWorkspace", () => {
     await resetJobFinderWorkspace();
     expect(order).toEqual(["pause", "close", "storage", "cache", "records"]);
     expect(mockCloseBrowser).toHaveBeenCalledWith(true);
+  });
+
+  test("stops the search first and clears the job store before marking the reset done", async () => {
+    const markerRemoved = () =>
+      mockRm.mock.calls.some(([target]) => target === intentMarkerPath);
+    let removedBeforeStoreReset: boolean | null = null;
+    mockResetJobStore.mockImplementationOnce(() => {
+      removedBeforeStoreReset = markerRemoved();
+    });
+    await resetJobFinderWorkspace();
+    expect(mockDiscardJobSearch).toHaveBeenCalledTimes(1);
+    expect(mockResetJobStore).toHaveBeenCalledWith({ store: true });
+    expect(removedBeforeStoreReset).toBe(false);
+    expect(markerRemoved()).toBe(true);
+  });
+
+  test("keeps the reset marker so the next start clears the store when clearing it fails", async () => {
+    mockResetJobStore.mockImplementationOnce(() => {
+      throw new Error("database is locked");
+    });
+    await expect(resetJobFinderWorkspace()).rejects.toThrow(
+      "Restart Nestor to finish the reset",
+    );
+    expect(mockRm).not.toHaveBeenCalledWith(intentMarkerPath, {
+      force: true,
+    });
   });
 
   test("does not delete records or report success when browser clearing fails", async () => {

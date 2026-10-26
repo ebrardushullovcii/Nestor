@@ -12,14 +12,10 @@ import {
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JobFinderRepository } from "@nestor/db";
+import { resetJobStore } from "@nestor/db/job-store";
 import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
-import type { JobFinderStartupResetRecoveryFact } from "../../../shared/job-finder-startup-reset-recovery";
 import {
-  getApplicationDocumentsDirectory,
-  getBrowserAgentProfileDirectory,
-  getCandidateAssetsDirectory,
-  getJobFinderDocumentsDirectory,
   getJobFinderResetIntentFilePath,
   getJobFinderResetInvalidIntentMarkerFilePath,
   getJobFinderResetTrashDirectory,
@@ -27,14 +23,28 @@ import {
   getJobFinderUserDataDirectory,
   resolveJobFinderWorkspaceRelativePath,
 } from "./paths";
+import {
+  JOB_FINDER_RESET_TRASH_DIRECTORY_PREFIX,
+  MAX_RESET_INTENT_MARKER_BYTES,
+  RESET_INTENT_MARKER_VERSION,
+  isRecord,
+  listResetSourceRelativePaths,
+  parseResetIntentMarker,
+  recordStartupResetRecoveryFact,
+  type JobFinderResetIntent,
+  type JobFinderResetIntentEntry,
+} from "./reset-intent-marker";
 import { getJobFinderWorkspaceService } from "./workspace-service";
-import { getEmbeddedBrowser } from "../browser/embedded-browser";
 
-const RESET_INTENT_MARKER_VERSION = 1;
-const JOB_FINDER_RESET_TRASH_DIRECTORY_PREFIX = "job-finder-reset-";
-const RESET_INTENT_TOKEN_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
-const MAX_RESET_INTENT_ENTRY_PATH_LENGTH = 512;
-const MAX_RESET_INTENT_MARKER_BYTES = 64 * 1024;
+export {
+  getJobFinderStartupResetRecoveryFact,
+  type JobFinderResetIntent,
+  type JobFinderResetIntentEntry,
+} from "./reset-intent-marker";
+import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { discardJobSearch } from "../job-commands";
+import { getJobStore } from "../job-store";
+
 const RESET_TRASH_DIRECTORY_NAME_PATTERN =
   /^job-finder-reset-[a-zA-Z0-9-]{8,64}$/;
 const RESET_MARKER_TEMP_FILE_NAME_PATTERN =
@@ -48,16 +58,6 @@ const RESET_QUARANTINE_SIDECAR_TEMP_FILE_NAME_PATTERN = new RegExp(
   `^job-finder-reset-intent\\.invalid-.+\\.json${RESET_QUARANTINE_SIDECAR_SUFFIX}\\.tmp$`,
 );
 const RESET_ARTIFACT_STALE_MS = 60 * 60 * 1000;
-
-export interface JobFinderResetIntentEntry {
-  sourcePath: string;
-  trashPath: string;
-}
-
-export interface JobFinderResetIntent {
-  token: string;
-  entries: readonly JobFinderResetIntentEntry[];
-}
 
 export type JobFinderResetRecoveryOutcome =
   | { status: "idle" }
@@ -94,24 +94,6 @@ export class JobFinderResetFileMoveError extends Error {
   }
 }
 
-let startupResetRecoveryFact: JobFinderStartupResetRecoveryFact = {
-  status: "idle",
-};
-
-export function getJobFinderStartupResetRecoveryFact(): JobFinderStartupResetRecoveryFact {
-  return startupResetRecoveryFact;
-}
-
-function recordStartupResetRecoveryFact(
-  fact: JobFinderStartupResetRecoveryFact,
-) {
-  startupResetRecoveryFact = fact;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function isNodeFileSystemNotFoundError(error: unknown): boolean {
   return isNodeErrorCode(error, "ENOENT");
 }
@@ -145,58 +127,6 @@ function buildFailedResetFileMoveMessage(input: {
     : "the pending reset marker was retained, so the next launch completes the reset during startup recovery";
 
   return `[Desktop] Job Finder workspace reset stopped before completion (${describeUnknownError(input.originalError)}); ${restorationDetail}, and ${markerDetail}.`;
-}
-
-function toPosixRelativePath(absolutePath: string): string {
-  return path
-    .relative(getJobFinderUserDataDirectory(), absolutePath)
-    .split(path.sep)
-    .join("/");
-}
-
-function isSafeWorkspaceRelativePath(candidate: unknown): boolean {
-  if (
-    typeof candidate !== "string" ||
-    candidate.length === 0 ||
-    candidate.length > MAX_RESET_INTENT_ENTRY_PATH_LENGTH ||
-    candidate.includes("\\") ||
-    candidate.includes("\0") ||
-    path.isAbsolute(candidate) ||
-    /^[a-zA-Z]:/.test(candidate)
-  ) {
-    return false;
-  }
-
-  const segments = candidate.split("/");
-  if (
-    segments.some(
-      (segment) => segment.length === 0 || segment === "." || segment === "..",
-    )
-  ) {
-    return false;
-  }
-
-  const resolvedDirectory = resolveJobFinderWorkspaceRelativePath(candidate);
-  const containment = path.relative(
-    getJobFinderUserDataDirectory(),
-    resolvedDirectory,
-  );
-
-  return (
-    containment.length > 0 &&
-    !containment.startsWith("..") &&
-    !path.isAbsolute(containment)
-  );
-}
-
-function listResetSourceRelativePaths(): readonly string[] {
-  return [
-    getJobFinderDocumentsDirectory(),
-    getCandidateAssetsDirectory(),
-    getApplicationDocumentsDirectory(),
-    getBrowserAgentProfileDirectory(),
-    path.join(getJobFinderUserDataDirectory(), "exports"),
-  ].map((sourceDirectory) => toPosixRelativePath(sourceDirectory));
 }
 
 function buildResetIntentEntries(token: string): JobFinderResetIntentEntry[] {
@@ -716,101 +646,6 @@ async function quarantineInvalidResetIntentMarker(
   return { quarantinedFileName, pendingTrashDirectoryNames };
 }
 
-function parseResetIntentMarker(rawMarker: string): JobFinderResetIntent {
-  function fail(reason: string): never {
-    throw new Error(
-      `[Desktop] Invalid Job Finder reset intent marker (${reason}); quarantining the marker without modifying any data paths.`,
-    );
-  }
-
-  let parsedMarker: unknown;
-  try {
-    parsedMarker = JSON.parse(rawMarker);
-  } catch {
-    fail("not valid JSON");
-  }
-
-  if (!isRecord(parsedMarker)) {
-    fail("marker is not an object");
-  }
-
-  const marker = parsedMarker;
-
-  if (marker.version !== RESET_INTENT_MARKER_VERSION) {
-    fail(`unsupported version ${String(marker.version)}`);
-  }
-
-  if (
-    typeof marker.token !== "string" ||
-    !RESET_INTENT_TOKEN_PATTERN.test(marker.token)
-  ) {
-    fail("invalid reset token");
-  }
-
-  const token = marker.token;
-
-  if (
-    typeof marker.createdAt !== "string" ||
-    Number.isNaN(Date.parse(marker.createdAt))
-  ) {
-    fail("invalid createdAt timestamp");
-  }
-
-  if (!Array.isArray(marker.entries) || marker.entries.length === 0) {
-    fail("entries must be a non-empty array");
-  }
-
-  const allowedSourcePaths = new Set(listResetSourceRelativePaths());
-  const seenSourcePaths = new Set<string>();
-  const entries: JobFinderResetIntentEntry[] = [];
-
-  for (const rawEntry of marker.entries) {
-    if (!isRecord(rawEntry)) {
-      fail("entry is not an object");
-    }
-
-    const sourcePath = rawEntry.sourcePath;
-
-    if (
-      typeof sourcePath !== "string" ||
-      !isSafeWorkspaceRelativePath(sourcePath)
-    ) {
-      fail("entry source path is not a safe workspace-relative path");
-    }
-
-    if (!allowedSourcePaths.has(sourcePath)) {
-      fail("entry source path is outside the managed reset allowlist");
-    }
-
-    if (seenSourcePaths.has(sourcePath)) {
-      fail("duplicate entry for a source path");
-    }
-
-    const trashPath = rawEntry.trashPath;
-
-    if (
-      typeof trashPath !== "string" ||
-      !isSafeWorkspaceRelativePath(trashPath)
-    ) {
-      fail("entry trash path is not a safe workspace-relative path");
-    }
-
-    const expectedTrashPath = `trash/${JOB_FINDER_RESET_TRASH_DIRECTORY_PREFIX}${token}/${sourcePath}`;
-
-    if (trashPath !== expectedTrashPath) {
-      fail("entry trash path does not match the tokenized trash layout");
-    }
-
-    seenSourcePaths.add(sourcePath);
-    entries.push({ sourcePath, trashPath });
-  }
-
-  return {
-    token,
-    entries,
-  };
-}
-
 export async function beginJobFinderWorkspaceResetFileMoves(): Promise<JobFinderResetIntent> {
   const token = randomUUID();
   const intent: JobFinderResetIntent = {
@@ -1024,6 +859,7 @@ export async function resetJobFinderWorkspace() {
   const { shutdownAssistantHost } =
     await import("../assistant/assistant-service");
   await shutdownAssistantHost();
+  await discardJobSearch();
   await jobFinderWorkspaceService.setActivityControl({
     paused: true,
     reason: "Resetting workspace",
@@ -1059,6 +895,16 @@ export async function resetJobFinderWorkspace() {
     );
   }
 
+  // Before the reset is marked done: if this fails, the next start clears the
+  // store (see `getJobStore`).
+  try {
+    resetJobStore(getJobStore());
+  } catch (error) {
+    throw new Error(
+      "Your files were removed, but your saved jobs and applications could not be cleared yet. Restart Nestor to finish the reset.",
+      { cause: error },
+    );
+  }
   await completeJobFinderWorkspaceReset(completedIntent);
   // Conversations about the old workspace go with it.
   try {

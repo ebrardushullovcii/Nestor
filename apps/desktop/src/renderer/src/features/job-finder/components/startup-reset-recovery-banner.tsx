@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { afterFirstScreen } from "../lib/after-first-screen";
+import { JOB_FINDER_ROUTE_PATHS } from "../lib/job-finder-route-hrefs";
 import { Button } from "@renderer/components/ui/button";
 import {
   JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_DETAIL,
   JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_MESSAGE,
   buildJobFinderStartupResetRecoveryDegradedDetail,
+  canRetryJobFinderReset,
   isJobFinderStartupResetRecoveryFact,
   type JobFinderStartupResetRecoveryFact,
 } from "../../../../../shared/job-finder-startup-reset-recovery";
@@ -36,6 +39,7 @@ function persistBannerDismissed(dismissalKey: string) {
 }
 
 export function StartupResetRecoveryBanner() {
+  const navigate = useNavigate();
   const [fact, setFact] = useState<JobFinderStartupResetRecoveryFact | null>(
     null,
   );
@@ -93,10 +97,14 @@ export function StartupResetRecoveryBanner() {
     setDismissedKeys((current) => new Set(current).add(dismissalKey));
   }
 
+  const canRetry =
+    fact.status === "degraded" && canRetryJobFinderReset(fact.reason);
   const heading =
     fact.status === "completed"
       ? JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_MESSAGE
-      : "Workspace startup recovery needs attention";
+      : canRetry
+        ? "A reset didn't finish"
+        : "Workspace startup recovery needs attention";
   const detail =
     fact.status === "completed"
       ? JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_DETAIL
@@ -119,7 +127,22 @@ export function StartupResetRecoveryBanner() {
         <p className="text-sm font-medium text-foreground">{heading}</p>
         <p className="text-sm text-foreground-soft">{detail}</p>
       </div>
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {canRetry ? (
+          <Button
+            className="text-xs font-medium normal-case tracking-normal"
+            onClick={() => {
+              void navigate(
+                `${JOB_FINDER_ROUTE_PATHS.settings}#settings-danger-zone`,
+              );
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Reset again
+          </Button>
+        ) : null}
         <Button
           aria-label="Dismiss workspace recovery message"
           className="text-xs font-medium normal-case tracking-normal"
