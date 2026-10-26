@@ -68,6 +68,10 @@ import {
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
 import { createQuestionOccurrences } from "./question-occurrences";
+import {
+  nationalityQuestionIdentity,
+  NATIONALITY_ANSWER_REASON,
+} from "./person-nationality";
 import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
 import {
   checkWrittenApplicationAnswer,
@@ -655,6 +659,29 @@ async function runMeasuredApplyAgent(
       if (control.disabled || (!control.visible && control.kind !== "file"))
         continue;
       const label = questionPrompt(control);
+      const nationality = nationalityQuestionIdentity(label);
+      const nationalitySaved = nationality
+        ? savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
+        : null;
+      if (
+        nationality &&
+        (!nationalitySaved ||
+          nationalityQuestionIdentity(nationalitySaved.question) !==
+            nationality)
+      ) {
+        control.answered = false;
+        if (control.value.trim())
+          pendingQuestions.set(
+            pendingQuestionKey(control),
+            buildPendingQuestion({
+              control,
+              jobId: runConfig.application.jobId,
+              detectedAt: next.observedAt,
+              siblings: next.controls,
+              reason: NATIONALITY_ANSWER_REASON,
+            }),
+          );
+      }
       const matchingQuestions = next.controls.filter(
         (entry) => questionPrompt(entry) === label,
       );

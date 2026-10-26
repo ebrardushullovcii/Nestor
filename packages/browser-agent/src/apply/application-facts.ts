@@ -9,6 +9,7 @@ import {
   formatGithubAnswer,
   githubUsername,
 } from "./github-username";
+import { requiresSavedNationalityAnswer } from "./person-nationality";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -304,6 +305,12 @@ export function storedFactFor(input: {
   value: string;
   storedFactId?: string | undefined;
 }): ApplyAnswer | null {
+  if (
+    requiresSavedNationalityAnswer(
+      `${input.control.groupLabel} ${input.control.label} ${input.control.placeholder}`,
+    )
+  )
+    return null;
   const wantsUsername = asksGithubUsername(input.control);
   const wanted = formatGithubAnswer(input.control, input.value).trim();
   const factId =

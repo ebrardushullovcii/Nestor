@@ -458,6 +458,53 @@ test.each(["upload", "type"] as const)(
   },
 );
 
+test.each(
+  ["Passport Country", "Citizenship", "Nationality"].flatMap((label) =>
+    [false, true].map((prefilled) => ({ label, prefilled })),
+  ),
+)(
+  "nationality refusal never retains residence in the review ($label, prefilled=$prefilled)",
+  async ({ label, prefilled }) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          label,
+          value: prefilled ? "Primary territory" : "",
+          required: true,
+        },
+      ],
+    });
+    const input = config(source);
+    input.sources.profile.currentRegion = "Primary territory";
+    input.sources.profile.currentCountry = "Primary territory";
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "type",
+          args: {
+            ref: "c0",
+            text: "Primary territory",
+            storedFactId: "profile.currentRegion",
+          },
+        },
+        { name: "finish", args: { reason: "Done" } },
+      ]),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(result.filled).toEqual([]);
+    expect(result.reviewFilled).toEqual([]);
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .some((question) => question.prompt.includes(label)),
+    ).toBe(true);
+    expect(source.controls[0].value).toBe(prefilled ? "Primary territory" : "");
+  },
+);
+
 test.each(["never", "when_required"] as const)(
   "an optional letter does not start a draft under %s",
   async (policy) => {

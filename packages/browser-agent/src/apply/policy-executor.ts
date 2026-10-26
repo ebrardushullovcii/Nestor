@@ -1,4 +1,8 @@
 import { questionClassificationKey } from "./question-classification";
+import {
+  nationalityQuestionIdentity,
+  NATIONALITY_ANSWER_REASON,
+} from "./person-nationality";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
@@ -655,6 +659,22 @@ async function decideAnswer(input: {
     control,
     config.sources.reusableAnswers,
   );
+  const nationalityQuestion = nationalityQuestionIdentity(
+    questionPrompt(control),
+  );
+  if (
+    nationalityQuestion &&
+    (!saved ||
+      nationalityQuestionIdentity(savedRecord?.question ?? "") !==
+        nationalityQuestion)
+  ) {
+    return {
+      kind: "leave",
+      reason: NATIONALITY_ANSWER_REASON,
+      suggestion: null,
+      permission: true,
+    };
+  }
   const isApplicationAnswer =
     isAnswerFromThisApplication(
       savedRecord,
@@ -843,7 +863,9 @@ function leaveUnansweredForPerson(input: {
     answer: suggestion,
     note: `"${questionPrompt(control)}" needs the person's answer. ${reason} Leave it unchanged and carry on with the rest of the form.`,
     question:
-      control.required || input.reason === OWN_WORDS_REASON
+      control.required ||
+      input.reason === OWN_WORDS_REASON ||
+      input.reason === NATIONALITY_ANSWER_REASON
         ? buildPendingQuestion({
             control,
             jobId: config.application.jobId,

@@ -6,6 +6,7 @@ import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
 import type { LLMClient } from "../agent/contracts";
 import { evidenceFitsQuestion } from "./answer-evidence";
 import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
+import k1 from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/answer-evidence-k1.json";
 
 const sources = {
   profile: CandidateProfileSchema.parse({
@@ -32,6 +33,61 @@ const sources = {
     description: "Engineering workflow tools",
   },
 };
+
+test.each(k1.cases)("K1 lying-checker replay: $name", async (entry) => {
+  const chatWithTools = vi
+    .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValue({
+      toolCalls: [
+        {
+          id: "lie",
+          type: "function",
+          function: {
+            name: "report_answer_checks",
+            arguments: JSON.stringify({
+              checks: [
+                {
+                  index: 0,
+                  supported: true,
+                  reason: "Supported",
+                  evidence: entry.evidence.map((evidence) => ({
+                    ...evidence,
+                    kind:
+                      evidence.source === "posting"
+                        ? "role_motivation"
+                        : "applicant_fact",
+                    claim: entry.answer,
+                  })),
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    });
+  const result = await checkWrittenApplicationAnswers({
+    client: { chatWithTools },
+    sources: {
+      ...sources,
+      resumeText: k1.resume,
+      profile: CandidateProfileSchema.parse({
+        ...sources.profile,
+        currentRegion: "Germany",
+        workEligibility: {
+          ...sources.profile.workEligibility,
+          authorizedWorkCountries: ["Germany", "France"],
+        },
+      }),
+    },
+    payDisclosed: false,
+    answers: [entry],
+  });
+  expect(result[0]?.supported).toBe(entry.supported);
+  for (const evidence of entry.evidence) {
+    if (evidence.source === "resume") expect(k1.resume).toContain(evidence.quote);
+    if (evidence.path === "/location/region") expect("Germany").toBe(evidence.quote);
+  }
+});
 
 test.each(ownWords.rules)(
   "Apply replay: the site's writing rule requires the person without a checker call: %s",

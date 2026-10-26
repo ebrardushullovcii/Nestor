@@ -1,0 +1,270 @@
+{
+  "resume": "3 years of experience using TypeScript. I led a team of 4 at Example Workshop. I worked at Example Workshop. I have used TypeScript since 2023. Four contributors work at Example Workshop.",
+  "cases": [
+    {
+      "name": "ordinary motivation",
+      "question": "Why do you want to join Example Workshop?",
+      "answer": "I am excited to build engineering workflow tools at Example Workshop.",
+      "supported": true,
+      "evidence": [
+        {
+          "source": "posting",
+          "path": "/company",
+          "quote": "Example Workshop"
+        },
+        {
+          "source": "posting",
+          "path": "/description",
+          "quote": "Engineering workflow tools"
+        }
+      ]
+    },
+    {
+      "name": "invented team and employer",
+      "question": "Why do you want to join us?",
+      "answer": "I led a team of 12 at GitLab.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "invented year",
+      "question": "Why do you want to join us?",
+      "answer": "I have used TypeScript since 2019.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "invented duration",
+      "question": "Why do you want to join us?",
+      "answer": "I bring 8 years of experience using TypeScript.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "invented organisation",
+      "question": "Why do you want to join us?",
+      "answer": "I worked at GitLab.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "I worked at Example Workshop."
+        }
+      ]
+    },
+    {
+      "name": "unrelated count is not team leadership",
+      "question": "Why do you want to join us?",
+      "answer": "I led a team of 4 at Example Workshop.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "Four contributors work at Example Workshop."
+        }
+      ]
+    },
+    {
+      "name": "supported concrete history",
+      "question": "Why do you want to join us?",
+      "answer": "I led a team of 4 at Example Workshop.",
+      "supported": true,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "I led a team of 4 at Example Workshop."
+        }
+      ]
+    },
+    {
+      "name": "used and using mean the same skill",
+      "question": "How many years have you used TypeScript?",
+      "answer": "3 years of experience using TypeScript",
+      "supported": true,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "go-to needs a saved answer",
+      "question": "What is your go-to testing tool?",
+      "answer": "TypeScript",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "best contact time needs a saved answer",
+      "question": "What is the best time to contact you?",
+      "answer": "09:00",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "top skill needs a saved answer",
+      "question": "What is your top skill?",
+      "answer": "TypeScript",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "preferred needs a saved answer",
+      "question": "What is your preferred programming language?",
+      "answer": "TypeScript",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "favorite needs a saved answer",
+      "question": "What is your favorite language?",
+      "answer": "TypeScript",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "favourite needs a saved answer",
+      "question": "What is your favourite language?",
+      "answer": "TypeScript",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "resume",
+          "path": "",
+          "quote": "3 years of experience using TypeScript."
+        }
+      ]
+    },
+    {
+      "name": "authorization country in question must match",
+      "question": "Are you authorized to work in the United States?",
+      "answer": "Yes",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/workEligibility/Countries where you can work/0",
+          "quote": "Germany"
+        }
+      ]
+    },
+    {
+      "name": "authorization country in answer must match",
+      "question": "Are you authorized to work in Germany?",
+      "answer": "I am authorized to work in France.",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/workEligibility/Countries where you can work/0",
+          "quote": "Germany"
+        }
+      ]
+    },
+    {
+      "name": "matching authorization country",
+      "question": "Are you authorized to work in Germany?",
+      "answer": "Yes",
+      "supported": true,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/workEligibility/Countries where you can work/0",
+          "quote": "Germany"
+        }
+      ]
+    },
+    {
+      "name": "Passport Country is not residence",
+      "question": "Passport Country",
+      "answer": "Germany",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/location/region",
+          "quote": "Germany"
+        }
+      ]
+    },
+    {
+      "name": "Citizenship is not residence",
+      "question": "Citizenship",
+      "answer": "Germany",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/location/region",
+          "quote": "Germany"
+        }
+      ]
+    },
+    {
+      "name": "Nationality is not residence",
+      "question": "Nationality",
+      "answer": "Germany",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/location/region",
+          "quote": "Germany"
+        }
+      ]
+    }
+  ]
+}

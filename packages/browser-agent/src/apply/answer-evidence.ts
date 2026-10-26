@@ -1,3 +1,4 @@
+import { requiresSavedNationalityAnswer } from "./person-nationality";
 /** Deterministic relevance checks. A positive model verdict cannot override these. */
 export interface AnswerEvidence {
   source: string;
@@ -16,7 +17,11 @@ const normalize = (value: string) =>
 const scalar = (value: string) =>
   /^(?:yes|no|true|false|[-+]?\d+(?:[.,]\d+)?\+?%?)$/iu.test(value.trim());
 const opinion =
-  /\b(?:favou?rites?|prefer(?:ence|red|s)?|like[sd]?|love[sd]?|hate[sd]?|enjoy\w*|want\w*|wish\w*|proud|passion\w*|excited|interested|strengths?|strongest)\b|\bwhy\b.*\b(?:join|apply|work)\b/iu;
+  /\b(?:like[sd]?|love[sd]?|hate[sd]?|enjoy\w*|want\w*|wish\w*|proud|passion\w*|excited|interested|strengths?|strongest)\b/iu;
+const preference =
+  /\b(?:go[\s-]*to|best\s+(?:time|contact\s+time)|top\s+skill|prefer(?:ence|red|s)?|favou?rites?)\b/iu;
+const motivation =
+  /\b(?:why|what)\b.*\b(?:join|apply|work|company|us|role|position|attracts?|appeals?|interests?)\b|\b(?:cover|application|motivation)\s+letter\b|\b(?:motivation|motivates|interested in (?:this|the) (?:role|position))\b/iu;
 
 function savedEvidence(
   entry: AnswerEvidence,
@@ -88,7 +93,7 @@ function skillYearClaim(
   // Keep the subject words, rather than allowing a listed skill plus total
   // career years to stand in for the duration of using that skill.
   const ignored = new Set(
-    "a an the of in with using and or how many years year yrs experience experienced professional professionally overall total career work working have has do you your i me my specifically hands on for describe tell us about application questions relevant development software engineering engineer".split(
+    "a an the of in with using used use and or how many long years year yrs experience experienced professional professionally overall total career work working have has do you your i me my ve specifically hands on for describe tell us about application questions relevant development software engineering engineer".split(
       " ",
     ),
   );
@@ -164,8 +169,23 @@ export function evidenceFitsQuestion(input: {
       normalize(saved.answer) === normalize(answer)
     );
   });
-  if (opinion.test(question) || opinion.test(answer)) return exactSaved;
-  const years = skillYearClaim(question, answer);
+  if (requiresSavedNationalityAnswer(question)) return exactSaved;
+  if (
+    preference.test(question) ||
+    preference.test(answer) ||
+    (!motivation.test(question) &&
+      (opinion.test(question) || opinion.test(answer)))
+  )
+    return exactSaved;
+  if (exactSaved) return true;
+  if (
+    !concreteClaimsSupported(answer, evidence) ||
+    !authorizationCountryMatches(question, answer, evidence)
+  )
+    return false;
+  const years = motivation.test(question)
+    ? null
+    : skillYearClaim(question, answer);
   const namedDuration =
     years &&
     evidence.some(
@@ -199,3 +219,7 @@ export function evidenceFitsQuestion(input: {
   if (years && !exactSaved && !namedDuration) return false;
   return true;
 }
+import {
+  authorizationCountryMatches,
+  concreteClaimsSupported,
+} from "./concrete-answer-claims";
