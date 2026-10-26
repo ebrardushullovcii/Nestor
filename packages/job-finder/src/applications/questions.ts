@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
+import { explicitApplicationCountry } from "@nestor/browser-agent";
 import type {
   ApplicationAttemptQuestion,
   RequestNeedsYouInput,
@@ -63,9 +64,12 @@ export function describeFormQuestion(
   const jobSpecific =
     question.kind === "cover_letter" ||
     question.repeatedAtDifferentStep === true;
+  const namedAuthorizationCountry =
+    question.kind === "work_authorization" &&
+    explicitApplicationCountry(question.prompt) !== null;
   const place = jobSpecific
     ? `job ${job.id}`
-    : geographic.has(question.kind)
+    : geographic.has(question.kind) && !namedAuthorizationCountry
       ? normalize(job.location) || `unknown place for job ${job.id}`
       : "";
   return {
@@ -73,7 +77,9 @@ export function describeFormQuestion(
     input,
     options: input === "choice" ? options : [],
     reusePrompt:
-      input !== "file" && !jobSpecific && !geographic.has(question.kind),
+      input !== "file" &&
+      !jobSpecific &&
+      (!geographic.has(question.kind) || namedAuthorizationCountry),
   };
 }
 

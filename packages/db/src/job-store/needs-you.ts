@@ -569,6 +569,15 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               local: true,
             },
           ];
+        if (question.reusePrompt && question.kind === "work_authorization") {
+          const alternatives =
+            sql(`SELECT count(DISTINCT lower(trim(answer))) AS n
+            FROM form_answers WHERE prompt_key=? AND needs_confirmation=0
+              AND country='' AND site_origin IN ('',?)`).get(key, origin) as {
+              n: number;
+            };
+          if (alternatives.n > 1) return [];
+        }
         let saved =
           sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND needs_confirmation=0 AND country='' AND site_origin IN ('',?)
           ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(

@@ -142,6 +142,14 @@ export function isPlainMotivationIntent(text: string): boolean {
   );
 }
 
+/** A question naming one country carries its own jurisdiction across postings. */
+export function explicitApplicationCountry(question: string): string | null {
+  const countries = countriesIn(question);
+  return countries.size === 1
+    ? (countries.values().next().value ?? null)
+    : null;
+}
+
 /** Concrete claims must be in the cited text, even when the checker lies about support. */
 export function concreteClaimsSupported(
   answer: string,
