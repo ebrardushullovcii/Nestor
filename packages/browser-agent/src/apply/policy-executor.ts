@@ -2969,6 +2969,7 @@ export function applicationLetterRequest(
       preference: config.letters!.preference,
     }),
     purpose: "cover_letter",
+    formControl: { ref: control.ref, question: questionPrompt(control) },
     delivery: coverLetterDeliveryFor(control),
     fileType: requiredLetterFileType(control),
     ...(approvedText ? { approvedText } : {}),

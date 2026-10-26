@@ -6538,6 +6538,183 @@ test.each([true, false])(
   },
 );
 
+test.each(["type", "fill_fields", "create_application_document"])(
+  "a classified letter uses its actual form field through %s",
+  async (tool) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          tagName: "textarea",
+          label: "Cover letter",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source, { modelQuestionClassification: true });
+    const wording =
+      "I am excited about this opportunity. I would like to join your team and contribute to this work. I would welcome the chance to contribute in this role. I am interested in working with your team and would welcome the opportunity to help.";
+    const provide = vi.fn<NonNullable<ApplyAgentConfig["letters"]>["provide"]>(
+      () =>
+        Promise.resolve({
+          ok: true as const,
+          text: wording,
+          document:
+            tool === "create_application_document"
+              ? {
+                  id: "letter",
+                  kind: "cover_letter" as const,
+                  label: "Your letter",
+                  fileName: "letter.pdf",
+                  mimeType: "application/pdf",
+                  loadBytes: () =>
+                    Promise.resolve(new TextEncoder().encode(wording)),
+                }
+              : null,
+        }),
+    );
+    input.letters = {
+      preference: {
+        tone: "direct",
+        length: "short",
+        language: null,
+        sample: null,
+      },
+      provide,
+    };
+    const flow = scriptedModel([
+      {
+        name: tool,
+        args:
+          tool === "fill_fields"
+            ? { fields: [{ tool: "type", ref: "c0", text: "ignored draft" }] }
+            : tool === "type"
+              ? { ref: "c0", text: "ignored draft" }
+              : {
+                  ref: "c0",
+                  instructions: "Write the requested cover letter.",
+                },
+      },
+      { name: "finish", args: { reason: "Done." } },
+    ]);
+    await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) =>
+        definitions[0]?.function.name === "report_question_kinds"
+          ? Promise.resolve({
+              toolCalls: [
+                {
+                  id: "read",
+                  type: "function",
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: JSON.stringify({
+                      plainIndexes: [0],
+                      flagged: [],
+                      tags: [
+                        {
+                          index: 0,
+                          kind: "motivation",
+                          country: null,
+                          sourceId: "resume.text",
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            })
+          : flow.chatWithTools(messages, definitions, options),
+    });
+    expect(provide).toHaveBeenCalledOnce();
+    expect(provide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        formControl: { ref: "c0", question: "Cover letter" },
+      }),
+    );
+    expect(provide.mock.calls[0]?.[0]?.prompt).not.toBe("Cover letter");
+    if (tool !== "create_application_document")
+      expect(source.controls[0].value).toBe(wording);
+  },
+);
+
+test.each(["own words", "wrong ref", "not a letter"])(
+  "letter generation refuses %s despite a willing writer",
+  async (shape) => {
+    const source = page({
+      bodyText: shape === "own words" ? "Write this yourself" : "Apply",
+      controls: [
+        {
+          ...nameControl(),
+          tagName: "textarea",
+          label: shape === "not a letter" ? "Personal story" : "Cover letter",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source, { modelQuestionClassification: true });
+    const provide = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        text: "I am excited about this opportunity.",
+        document: null,
+      }),
+    );
+    input.letters = {
+      preference: {
+        tone: "direct",
+        length: "short",
+        language: null,
+        sample: null,
+      },
+      provide,
+    };
+    const flow = scriptedModel([
+      {
+        name: "create_application_document",
+        args: {
+          ref: shape === "wrong ref" ? "c999" : "c0",
+          instructions: "Write a letter.",
+        },
+      },
+      {
+        name: "finish",
+        args: { reason: "Needs your answer", needsPerson: true },
+      },
+    ]);
+    await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) =>
+        definitions[0]?.function.name === "report_question_kinds"
+          ? Promise.resolve({
+              toolCalls: [
+                {
+                  id: "read",
+                  type: "function",
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: JSON.stringify({
+                      plainIndexes: [0],
+                      flagged: [],
+                      tags: [
+                        {
+                          index: 0,
+                          kind:
+                            shape === "own words" ? "own_words" : "motivation",
+                          country: null,
+                          sourceId: "resume.text",
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            })
+          : flow.chatWithTools(messages, definitions, options),
+    });
+    expect(provide).not.toHaveBeenCalled();
+    expect(source.controls[0].value).toBe("");
+  },
+);
+
 test("stored facts fill while earlier written and eligibility answers wait for their check", async () => {
   const source = page({
     controls: [

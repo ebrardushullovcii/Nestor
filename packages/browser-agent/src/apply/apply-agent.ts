@@ -389,19 +389,25 @@ async function runMeasuredApplyAgent(
           letters: {
             ...config.letters,
             provide: async (request) => {
+              const page = pageTools.state.observation;
+              const target = request.formControl;
+              const control = target
+                ? page?.controls.find(
+                    (control) =>
+                      control.ref === target.ref &&
+                      questionPrompt(control) === target.question &&
+                      isApplicationLetterOrStatement(control),
+                  )
+                : undefined;
               if (
                 !request.approvedText &&
                 ownWordsAppliesToQuestion(
                   formWritingInstructions(pageTools.state.observation),
-                  request.prompt,
+                  control ? questionPrompt(control) : request.prompt,
                 )
               )
                 return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
               if (!request.approvedText && classifyQuestions) {
-                const page = pageTools.state.observation;
-                const control = page?.controls.find(
-                  (control) => questionPrompt(control) === request.prompt,
-                );
                 if (!page || !control)
                   return {
                     ok: false,
@@ -416,7 +422,7 @@ async function runMeasuredApplyAgent(
                 const reading =
                   readings?.get(
                     questionClassificationKey(control, page.controls),
-                  ) ?? readings?.get(request.prompt);
+                  ) ?? readings?.get(questionPrompt(control));
                 const permission = classifyAnswerPermission({
                   control,
                   controls: page.controls,
@@ -2610,8 +2616,11 @@ async function runMeasuredApplyAgent(
             isApplicationLetterOrStatement(control) && !control.answered,
         ) ?? [];
       const control =
-        controls.find((entry) => entry.ref === args.ref) ??
-        (controls.length === 1 ? controls[0] : undefined);
+        typeof args.ref === "string"
+          ? controls.find((entry) => entry.ref === args.ref)
+          : controls.length === 1
+            ? controls[0]
+            : undefined;
       const approvedText = control
         ? approvedApplicationLetter(runConfig, control)
         : undefined;
@@ -2623,6 +2632,14 @@ async function runMeasuredApplyAgent(
       }
       const created = await runConfig.letters.provide({
         purpose,
+        ...(control
+          ? {
+              formControl: {
+                ref: control.ref,
+                question: questionPrompt(control),
+              },
+            }
+          : {}),
         prompt: `${grounding.prompt}\n\nRequested document: ${purpose.replace(/_/gu, " ")}\nForm request or revision: ${instructions}`,
         groundedIn: grounding.groundedIn,
         language: grounding.language,
