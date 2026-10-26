@@ -89,6 +89,22 @@ function toRow(row: Row): ApplicationRow {
 export const HAS_APPROVED_RESUME = `EXISTS (
   SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
 
+/** An outcome names this row's own job, application, run and attempt. */
+function isOwnSendLineage(
+  row: Pick<ApplicationRow, "id" | "jobId" | "attempt">,
+  outcome: Pick<
+    SubmissionOutcomeRecord,
+    "jobId" | "applicationRecordId" | "runId" | "resultId"
+  >,
+): boolean {
+  return (
+    outcome.jobId === String(row.jobId) &&
+    outcome.applicationRecordId === `application_${row.id}` &&
+    outcome.runId === `application_run_${row.id}` &&
+    outcome.resultId === `application_${row.id}_attempt_${row.attempt}`
+  );
+}
+
 export function createApplicationStore(store: JobStore) {
   const { sql } = store;
   const changed = (ids: number[] | null = null) =>
@@ -518,6 +534,26 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /**
+     * Whether this outcome is the person's word on this row's uncertain
+     * send: same job, application, run and attempt. Checked before anything
+     * else records the resolution, so a mismatch changes nothing.
+     */
+    canResolveUncertainSend(
+      id: number,
+      outcome: Pick<
+        SubmissionOutcomeRecord,
+        "jobId" | "applicationRecordId" | "runId" | "resultId"
+      >,
+    ): boolean {
+      const current = getApplication(id);
+      return (
+        !!current &&
+        current.state === "uncertain" &&
+        isOwnSendLineage(current, outcome)
+      );
+    },
+
+    /**
      * The person checked the site after a send whose outcome was uncertain.
      * Only their word moves the row: sent becomes Applied, not sent stops
      * here so nothing sends it again by itself.
@@ -530,12 +566,7 @@ export function createApplicationStore(store: JobStore) {
       return store.transaction(() => {
         const current = getApplication(id);
         if (!current || current.state !== "uncertain") return false;
-        if (
-          outcome.jobId !== String(current.jobId) ||
-          outcome.applicationRecordId !== `application_${id}` ||
-          outcome.runId !== `application_run_${id}` ||
-          outcome.resultId !== `application_${id}_attempt_${current.attempt}`
-        )
+        if (!isOwnSendLineage(current, outcome))
           throw new Error(
             "The outcome belongs to another application attempt.",
           );

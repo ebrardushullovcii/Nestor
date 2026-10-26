@@ -414,6 +414,19 @@ describe("applications on the job store", () => {
         outcome: "not_submitted",
       }),
     ).toThrow("another application attempt");
+    // The same check, asked first, so nothing else records a resolution
+    // the row would refuse.
+    const own = {
+      jobId: String(second.jobId),
+      applicationRecordId: `application_${second.id}`,
+      runId: `application_run_${second.id}`,
+      resultId: `application_${second.id}_attempt_${second.attempt}`,
+    };
+    expect(applications.canResolveUncertainSend(second.id, receipt)).toBe(
+      false,
+    );
+    expect(applications.canResolveUncertainSend(second.id, own)).toBe(true);
+    expect(applications.canResolveUncertainSend(first.id, own)).toBe(false);
     expect(
       applications.resolveUncertainSend(second.id, {
         ...receipt,

@@ -116,6 +116,11 @@ export interface CreateJobFinderApplicationAuthorityServiceOptions {
       receipt: SubmissionOutcomeRecord | null;
       pageUrl: string | null;
     } | null;
+    /** Whether `outcome` is the word on this exact uncertain send. */
+    canResolve(
+      applicationRecordId: string,
+      outcome: SubmissionOutcomeRecord,
+    ): boolean;
     resolve(
       applicationRecordId: string,
       outcome: SubmissionOutcomeRecord,
@@ -812,6 +817,21 @@ export function createJobFinderApplicationAuthorityService(
                 : "policy_decision",
           },
         });
+        // The store row is checked first: an outcome for another attempt
+        // records nothing, so the row cannot be left uncertain behind a
+        // resolution the authority record already took.
+        if (
+          options.applicationSends &&
+          !options.applicationSends.canResolve(
+            uncertainOutcome.applicationRecordId,
+            outcome,
+          )
+        )
+          return ResolveSubmissionOutcomeResultSchema.parse({
+            status: "blocked",
+            outcome: uncertainOutcome,
+            idempotency,
+          });
         const resolution = await repository.resolveSubmissionOutcome({
           expectedOutcomeId: uncertainOutcome.id,
           expectedIdempotencyRevision: idempotency.revision,
@@ -858,6 +878,15 @@ export function getJobFinderApplicationAuthorityService(): JobFinderApplicationA
           receipt: applications.getSubmissionReceipt(id),
           pageUrl: applications.getWork(id)?.reviewCard?.pageUrl ?? null,
         };
+      },
+      // A send that is not a store row (an older record) is the
+      // authority repository's alone to resolve.
+      canResolve: (applicationRecordId, outcome) => {
+        const id = storeApplicationId(applicationRecordId);
+        return (
+          id === null ||
+          getApplicationStore().canResolveUncertainSend(id, outcome)
+        );
       },
       resolve: (applicationRecordId, outcome) => {
         const id = storeApplicationId(applicationRecordId);
