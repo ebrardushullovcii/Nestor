@@ -163,6 +163,28 @@ function uploadReceipt(
   });
 }
 
+const PENDING_STATE =
+  /^(?:pending|queued|allocated|initiated|reserved|processing|in[-_\s]?progress|uploading|waiting|started|scheduled)$/iu;
+
+/** Whether an answer says its upload has not finished yet. */
+function uploadStillPending(value: unknown, depth = 0): boolean {
+  if (depth > 8 || !value || typeof value !== "object") return false;
+  return Object.entries(value).some(([name, item]) => {
+    const key = name.replace(/[-_\s]/gu, "").toLowerCase();
+    if (
+      ["status", "state", "uploadstatus", "uploadstate", "phase"].includes(
+        key,
+      ) &&
+      typeof item === "string" &&
+      PENDING_STATE.test(item.trim())
+    )
+      return true;
+    if (key === "complete" || key === "completed" || key === "done")
+      if (item === false) return true;
+    return uploadStillPending(item, depth + 1);
+  });
+}
+
 /** Acceptance is permit plus structural proof. Wording can only block it. */
 export async function inspectMutationResponse(
   response: InspectableMutationResponse,
@@ -179,12 +201,14 @@ export async function inspectMutationResponse(
   )
     return result("unconfirmed");
   const upload = isUpload(confirmation.permit);
+  // 202 and its kin: the storage took the request, not yet the file.
+  if (status !== 200 && status !== 201 && status !== 204)
+    return result("unconfirmed");
+  // S3 answers a finished POST with an empty 204, and a finished PutObject
+  // with an empty 200 and the object's ETag.
+  const empty = Number(headers["content-length"] ?? 0) === 0;
   if (status === 204)
-    return result(
-      upload && Number(headers["content-length"] ?? 0) === 0
-        ? "accepted"
-        : "unconfirmed",
-    );
+    return result(upload && empty ? "accepted" : "unconfirmed");
   if (Number(headers["content-length"] ?? 0) > 64_000)
     return result("unconfirmed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -194,6 +218,8 @@ export async function inspectMutationResponse(
       timer = setTimeout(() => resolve(null), 2000);
     }),
   ]).finally(() => clearTimeout(timer));
+  if (text !== null && !text.trim() && status === 200 && headers.etag?.trim())
+    return result(upload ? "accepted" : "unconfirmed");
   if (text === null || text.length > 64_000 || !text.trim())
     return result("unconfirmed");
   let body: unknown;
@@ -201,6 +227,9 @@ export async function inspectMutationResponse(
     body = JSON.parse(text);
     if (mutationResponseSaysError(body)) return result("refused", body);
     if (!withinInspectionDepth(body)) return result("unconfirmed", body);
+    // A handle for an upload that is still pending, queued or allocated is
+    // not a finished one.
+    if (uploadStillPending(body)) return result("unconfirmed", body);
     return result(
       upload && uploadReceipt(body) ? "accepted" : "unconfirmed",
       body,

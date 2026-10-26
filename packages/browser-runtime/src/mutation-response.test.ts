@@ -248,3 +248,38 @@ test("property: generated successful statuses and wording never substitute for a
       ).toBe(false);
     }
 });
+
+test.each([
+  [202, '{"uploadId":"up123","status":"pending"}', {}, "unconfirmed"],
+  [200, '{"uploadId":"up123","status":"queued"}', {}, "unconfirmed"],
+  [201, '{"upload":{"id":"up123","state":"allocated"}}', {}, "unconfirmed"],
+  [200, '{"uploadId":"up123","completed":false}', {}, "unconfirmed"],
+  [201, '{"uploadId":"up123","status":"complete"}', {}, "accepted"],
+  // S3 PutObject: an empty 200 with the object's ETag.
+  [200, "", { etag: '"9b2cf535f27731c974343645a3985328"' }, "accepted"],
+  [200, "", {}, "unconfirmed"],
+] as const)("%i %s %j is %s", async (status, body, headers, judgment) => {
+  expect(
+    (
+      await inspectMutationResponse({
+        status: () => status,
+        headers: () => ({ "content-type": "application/json", ...headers }),
+        text: () => Promise.resolve(body),
+      })
+    ).judgment,
+  ).toBe(judgment);
+});
+
+test("an empty 200 with an ETag confirms nothing without the upload permit", async () => {
+  expect(
+    (
+      await inspectStructuralResponse({
+        status: () => 200,
+        headers: () => ({ etag: '"abc"' }),
+        text: () => Promise.resolve(""),
+        url: () => endpoint,
+        request: () => carrier,
+      })
+    ).judgment,
+  ).toBe("unconfirmed");
+});
