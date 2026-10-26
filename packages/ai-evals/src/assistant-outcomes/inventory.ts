@@ -295,6 +295,18 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ),
   ...actions(
     "profile",
+    "Profile proposals",
+    ["edit_profile", "commit_profile_edits"],
+    [
+      [
+        "proposal_accept",
+        "Apply an explicitly approved local Profile proposal",
+      ],
+      ["proposal_reject", "Dismiss a local Profile proposal"],
+    ],
+  ),
+  ...actions(
+    "profile",
     "Work permissions",
     ["set_work_permissions", "undo_change"],
     [["work_permissions", "Edit limited work permissions with Undo"]],
@@ -862,6 +874,56 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     "A running turn cannot replace its own conversation; the person chooses when to start fresh.",
   ),
   excluded(
+    "history_close",
+    "Close conversation history",
+    "The person controls conversation presentation; closing history changes no app-domain data or navigation.",
+  ),
+  excluded(
+    "find_open",
+    "Open Find in this chat",
+    "This searches the person's conversation presentation, not app data; the person owns this chat chrome.",
+  ),
+  excluded(
+    "find_query",
+    "Enter the in-chat search query",
+    "The person controls local conversation search text; app-domain search is separately mapped.",
+  ),
+  excluded(
+    "find_match",
+    "Move to another in-chat match",
+    "Scrolling between conversation matches is chat presentation, outside app-domain actions.",
+  ),
+  excluded(
+    "find_close",
+    "Close Find in this chat",
+    "The person controls whether their conversation search field is open.",
+  ),
+  excluded(
+    "load_older",
+    "Load older chat messages",
+    "Conversation paging remains in the person's chat chrome; app-list paging is separately required.",
+  ),
+  excluded(
+    "jump_latest",
+    "Jump to latest chat messages",
+    "This is conversation scrolling, controlled by the person without changing app data.",
+  ),
+  excluded(
+    "compose_send",
+    "Compose and send a person message",
+    "Only the person's own input can authorize work; tools cannot manufacture or submit messages as the person.",
+  ),
+  excluded(
+    "dismiss_error",
+    "Dismiss a chat connection or turn error",
+    "Chat error disclosure remains controlled by the person; app-domain notices are separately mapped.",
+  ),
+  excluded(
+    "answer_question",
+    "Answer the Assistant's question as the person",
+    "The Assistant cannot supply or authorize its own person response; answering application questions from explicit person text is separately required in Needs you.",
+  ),
+  excluded(
     "select",
     "Select another conversation",
     "The person controls the active conversation; switching away would detach the running turn.",
@@ -903,13 +965,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ),
   excluded(
     "proposal_apply",
-    "Apply a confirmation proposal",
-    "Permission and external-action confirmation must be the person's explicit press; the Assistant cannot confirm itself.",
+    "Press a chat permission-confirmation control",
+    "Permission chrome remains the person's control; external actions authorized by actual person messages are separately mapped and still require the Apply guards. Local Profile proposal application is required separately.",
   ),
   excluded(
     "proposal_dismiss",
-    "Dismiss a confirmation proposal",
-    "The person controls pending permission cards; refusal wording does not count as operating this control.",
+    "Dismiss a chat permission-confirmation control",
+    "The person controls pending permission chrome; dismissing local Profile proposals is required separately.",
   ),
   excluded(
     "copy",
