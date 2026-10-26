@@ -459,6 +459,7 @@ function createHarnessModel(
     chatWithTools: (_messages, _tools, options) => {
       if (_tools[0]?.function.name === "report_answer_checks") {
         const asked = JSON.parse(String(_messages[1]?.content ?? "{}")) as {
+          applicant: Record<string, unknown>;
           answers?: unknown[];
         };
         return Promise.resolve({
@@ -467,6 +468,15 @@ function createHarnessModel(
               checks: (asked.answers ?? []).map((_, index) => ({
                 index,
                 supported: true,
+                evidence: [
+                  {
+                    kind: "applicant_fact",
+                    claim: "Scripted fixture verdict",
+                    source: "applicant",
+                    path: "",
+                    quote: JSON.stringify(asked.applicant),
+                  },
+                ],
                 reason:
                   "The fixture answer expresses motivation without adding personal history.",
               })),

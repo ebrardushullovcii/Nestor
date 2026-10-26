@@ -273,12 +273,15 @@ export async function checkWrittenApplicationAnswers(input: {
       const raw = entry as Record<string, unknown>;
       if (
         typeof raw.index === "number" &&
+        Number.isInteger(raw.index) &&
         raw.index >= 0 &&
         raw.index < input.answers.length &&
         typeof raw.supported === "boolean" &&
         typeof raw.reason === "string" &&
         raw.reason.trim()
       ) {
+        const proposedAnswer = input.answers[raw.index];
+        if (!proposedAnswer) continue;
         const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
         const verified =
           evidence.length > 0 &&
@@ -302,7 +305,7 @@ export async function checkWrittenApplicationAnswers(input: {
               item.source === "posting" &&
               (item.kind !== "role_motivation" ||
                 /^(?:yes|no|true|false|[\d\s.,+%-]+)$/iu.test(
-                  input.answers[raw.index as number].answer.trim(),
+                  proposedAnswer.answer.trim(),
                 ))
             )
               return false;
