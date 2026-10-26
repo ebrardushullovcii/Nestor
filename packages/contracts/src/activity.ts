@@ -1,5 +1,5 @@
 import type { ApplicationWorkState } from "./applications";
-import type { JobStage } from "./jobs";
+import type { JobStage, TriageStage } from "./jobs";
 import type { ResumeState } from "./resumes";
 
 /**
@@ -40,11 +40,28 @@ export interface ActivityApplication {
   error: string | null;
 }
 
+/** One of the person's own moves between lists, which Undo can put back. */
+export interface ActivityMove {
+  id: number;
+  at: string;
+  to: TriageStage;
+  /** Where the moved jobs came from. */
+  from: JobStage[];
+  count: number;
+  /** The first moved job, to name a move of one. */
+  title: string;
+  company: string;
+  /** How many of its jobs are still where the move put them. */
+  stillThere: number;
+}
+
 export interface ActivityFeed {
   /** Newest first: running ones, then those finished in the last day. */
   searches: ActivitySearch[];
   resumes: ActivityResume[];
   applications: ActivityApplication[];
+  /** The person's moves of the last day, newest first. */
+  moves: ActivityMove[];
   /** Everything running now, beyond the rows listed: the button's count. */
   running: number;
 }

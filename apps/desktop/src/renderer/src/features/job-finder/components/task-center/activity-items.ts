@@ -1,5 +1,6 @@
 import type {
   ActivityFeed,
+  ActivityMove,
   ApplicationWorkState,
   JobStage,
 } from "@nestor/contracts";
@@ -167,4 +168,23 @@ export function toActivityItems(feed: ActivityFeed): {
     running: items.filter((item) => item.status === "running").sort(newest),
     finished: items.filter((item) => item.status !== "running").sort(newest),
   };
+}
+
+/** What a move did, in the words its button used. */
+export function describeMove(move: ActivityMove): {
+  title: string;
+  detail: string;
+} {
+  const what = move.count === 1 ? move.title : plural(move.count, "job");
+  const title =
+    move.to === "shortlisted"
+      ? `Shortlisted ${what}`
+      : move.to === "hidden"
+        ? `Hid ${what}`
+        : `Moved ${what} back to Find jobs`;
+  const detail =
+    move.count === 1
+      ? move.company
+      : `${move.title} and ${plural(move.count - 1, "other")}`;
+  return { title, detail };
 }

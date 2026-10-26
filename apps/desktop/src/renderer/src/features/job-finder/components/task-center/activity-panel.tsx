@@ -1,10 +1,14 @@
 import { useState } from "react";
-import type { ActivityFeed } from "@nestor/contracts";
+import type { ActivityFeed, ActivityMove } from "@nestor/contracts";
 
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "../status-badge";
 import { refreshActivityFeed } from "../../lib/use-activity-feed";
-import { toActivityItems, type ActivityItem } from "./activity-items";
+import {
+  describeMove,
+  toActivityItems,
+  type ActivityItem,
+} from "./activity-items";
 
 const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v2";
 
@@ -47,6 +51,63 @@ function ActivityRow(props: {
           {item.detail}
         </span>
       </button>
+    </li>
+  );
+}
+
+function MoveRow(props: { move: ActivityMove }) {
+  const { move } = props;
+  const [undoing, setUndoing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { title, detail } = describeMove(move);
+  async function undo() {
+    setUndoing(true);
+    setError(null);
+    try {
+      await window.nestor.jobs.run("undo_move", { moveId: move.id });
+      // The move is spent; the next read drops it.
+      refreshActivityFeed();
+    } catch {
+      setError("Undo did not work. Try again.");
+      setUndoing(false);
+    }
+  }
+  return (
+    <li className="grid gap-1 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-2.5">
+      <span className="flex items-start justify-between gap-2">
+        <span className="grid min-w-0 gap-0.5">
+          <strong className="break-words font-semibold text-foreground">
+            {title}
+          </strong>
+          <span className="break-words text-(length:--text-small) text-foreground-soft">
+            {detail}
+          </span>
+        </span>
+        {move.stillThere > 0 ? (
+          <Button
+            disabled={undoing}
+            onClick={() => void undo()}
+            pending={undoing}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            Undo
+          </Button>
+        ) : (
+          <span className="shrink-0 text-(length:--text-small) text-foreground-muted">
+            Moved on since
+          </span>
+        )}
+      </span>
+      {error ? (
+        <span
+          className="text-(length:--text-small) text-destructive"
+          role="alert"
+        >
+          {error}
+        </span>
+      ) : null}
     </li>
   );
 }
@@ -137,6 +198,18 @@ export function ActivityPanel(props: {
           <ul className="grid gap-2">
             {visibleFinished.map((item) => (
               <ActivityRow item={item} key={item.id} onOpen={open} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {props.feed.moves.length > 0 ? (
+        <section aria-label="Your recent moves" className="grid gap-2">
+          <h3 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+            Your recent moves
+          </h3>
+          <ul className="grid gap-2">
+            {props.feed.moves.map((move) => (
+              <MoveRow key={move.id} move={move} />
             ))}
           </ul>
         </section>

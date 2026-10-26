@@ -1,11 +1,13 @@
 import type {
   ActivityApplication,
   ActivityFeed,
+  ActivityMove,
   ActivityResume,
   ActivitySearch,
   ApplicationWorkState,
   JobStage,
   ResumeState,
+  TriageStage,
 } from "@nestor/contracts";
 
 import type { JobStore } from "./job-store";
@@ -118,7 +120,43 @@ export function createActivityStore(store: JobStore) {
               WHERE state IN ('queued', 'running', 'submitting')) AS n`,
         ).get() as { n: number }
       ).n;
-      return { searches, resumes, applications, running };
+      const moves = (
+        sql(
+          `SELECT m.id, m.at, m.to_stage,
+             (SELECT group_concat(DISTINCT i.from_stage) FROM job_move_items i
+              WHERE i.move_id = m.id) AS from_stages,
+             (SELECT COUNT(*) FROM job_move_items i WHERE i.move_id = m.id) AS count,
+             (SELECT COUNT(*) FROM job_move_items i JOIN jobs j ON j.id = i.job_id
+              WHERE i.move_id = m.id AND j.stage = m.to_stage) AS still_there,
+             j.title, j.company
+           FROM job_moves m
+           JOIN jobs j ON j.id = (SELECT MIN(job_id) FROM job_move_items i
+                                  WHERE i.move_id = m.id)
+           WHERE m.at >= ?
+           ORDER BY m.id DESC LIMIT ${LIMIT}`,
+        ).all(since) as {
+          id: number;
+          at: number;
+          to_stage: TriageStage;
+          from_stages: string;
+          count: number;
+          still_there: number;
+          title: string;
+          company: string;
+        }[]
+      ).map(
+        (row): ActivityMove => ({
+          id: row.id,
+          at: toIso(row.at),
+          to: row.to_stage,
+          from: row.from_stages.split(",") as JobStage[],
+          count: row.count,
+          title: row.title,
+          company: row.company,
+          stillThere: row.still_there,
+        }),
+      );
+      return { searches, resumes, applications, moves, running };
     },
   };
 }
