@@ -12,6 +12,7 @@ import {
   ApplicationAuthorityStopConditionsSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   ApplyExecutionResultSchema,
+  SubmissionOutcomeRecordSchema,
   type FoundJob,
   type ApplyExecutionResult,
   type RawApplyPage,
@@ -94,11 +95,18 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function setup(count: number, concurrency?: number) {
+async function setup(
+  count: number,
+  concurrency?: number,
+  options: { onDisk?: boolean } = {},
+) {
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
   const imported = path.join(directory, "imported.txt");
   await writeFile(imported, "Synthetic imported resume");
-  const jobs = openJobStore(":memory:");
+  const dbPath = options.onDisk
+    ? path.join(directory, "job-finder.sqlite")
+    : ":memory:";
+  const jobs = openJobStore(dbPath);
   const resumes = createResumeStore(jobs);
   const applications = createApplicationStore(jobs);
   const seed = createSeed();
@@ -212,13 +220,18 @@ async function setup(count: number, concurrency?: number) {
   cleanups.push(async () => {
     service.stop();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    jobs.close();
+    try {
+      jobs.close();
+    } catch {
+      // A restart test closed it already.
+    }
     await rm(directory, { recursive: true, force: true });
   });
   return {
     service,
     applications,
     jobs,
+    dbPath,
     ids,
     imported,
     seed,
@@ -576,32 +589,81 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
   );
 });
 
-it("recovers interrupted preparation but holds an interrupted send for confirmation, and a restart resends nothing", async () => {
-  const f = await setup(2);
+it("recovers interrupted preparation, settles an interrupted send from its saved outcome or holds it for confirmation, and a restart from disk resends nothing", async () => {
+  const f = await setup(3, undefined, { onDisk: true });
   f.applications.applyJobs({ selection: { ids: f.ids } });
-  const sending = f.applications.claimNext()!;
-  f.applications.beginSubmission(sending.id, sending.attempt);
+  const unknown = f.applications.claimNext()!;
+  f.applications.beginSubmission(unknown.id, unknown.attempt);
+  const confirmed = f.applications.claimNext()!;
+  f.applications.beginSubmission(confirmed.id, confirmed.attempt);
   const filling = f.applications.claimNext()!;
+  // The site confirmed one send before the app closed; its outcome was
+  // saved. The other send has no saved outcome.
+  const at = new Date().toISOString();
+  vi.mocked(
+    f.deps.authorityRepository.listSubmissionOutcomeRecords,
+  ).mockImplementation(({ jobId } = {}) =>
+    Promise.resolve(
+      jobId === String(confirmed.jobId)
+        ? [
+            SubmissionOutcomeRecordSchema.parse({
+              id: "receipt",
+              preflightId: "preflight",
+              idempotencyKey: "send",
+              authorityEnvelopeId: "permission",
+              authorityRevision: 1,
+              jobId: String(confirmed.jobId),
+              applicationRecordId: `application_${confirmed.id}`,
+              runId: `application_run_${confirmed.id}`,
+              resultId: `application_${confirmed.id}_attempt_${confirmed.attempt}`,
+              outcome: "submitted",
+              attemptedAt: at,
+              verifiedAt: at,
+              evidence: [
+                {
+                  id: "employer",
+                  kind: "employer_site_state",
+                  observedAt: at,
+                  destination: {
+                    origin: "https://replica.test",
+                    safePath: "/thanks",
+                  },
+                  artifactRefId: null,
+                  summary: "The employer confirmed receipt.",
+                },
+              ],
+              retry: { eligible: false, blockReason: "submission_confirmed" },
+            }),
+          ]
+        : [],
+    ),
+  );
   await f.service.start();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  expect(f.applications.getApplication(sending.id)?.state).toBe("uncertain");
+  expect(f.applications.getApplication(unknown.id)?.state).toBe("uncertain");
+  expect(f.applications.getApplication(confirmed.id)?.state).toBe("submitted");
   expect(f.applications.getApplication(filling.id)?.attempt).toBe(2);
-  // Only the interrupted preparation runs again; the interrupted send is
-  // neither replayed nor re-authorized, now or after another restart.
+
+  // The app closes mid-preparation and opens again on the same file.
+  f.service.stop();
+  f.jobs.close();
+  const jobs = openJobStore(f.dbPath);
+  const applications = createApplicationStore(jobs);
+  const restarted = createApplicationService({ ...f.deps, jobs, applications });
+  cleanups.unshift(() => {
+    restarted.stop();
+    jobs.close();
+  });
+  await restarted.start();
+  // Only the interrupted preparation runs again. Neither send is replayed
+  // or re-authorized, now or after the restart.
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(applications.getApplication(unknown.id)?.state).toBe("uncertain");
+  expect(applications.getApplication(confirmed.id)?.state).toBe("submitted");
   expect(f.execute.mock.calls.map(([, input]) => input.job.id)).toEqual([
     String(filling.jobId),
+    String(filling.jobId),
   ]);
-  f.service.stop();
-  const restarted = createApplicationService(f.deps);
-  cleanups.unshift(() => restarted.stop());
-  await restarted.start();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(f.applications.getApplication(sending.id)?.state).toBe("uncertain");
-  expect(
-    f.execute.mock.calls.filter(
-      ([, input]) => input.job.id === String(sending.jobId),
-    ),
-  ).toEqual([]);
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 

@@ -330,14 +330,24 @@ export default async function assistantHarness(qa) {
   let answered = 0;
   const started = Date.now();
   let submitted = null;
+  // Applications live on the job store: a row reaches "submitted" only
+  // after the site confirmed it.
+  const applications = () =>
+    qa.page.evaluate(async () => {
+      const { rows } = await window.nestor.jobFinder.listApplications({
+        limit: 50,
+      });
+      return Promise.all(
+        rows.map((row) =>
+          window.nestor.jobFinder.getApplicationDetails({ id: row.id }),
+        ),
+      );
+    });
   for (;;) {
-    const snapshot = await workspace(qa);
-    const application = snapshot.applicationRecords.find(
-      (entry) => entry.jobId === "job_ready",
-    );
-    const state = `${application?.status ?? ""} ${application?.lastAttemptState ?? ""}`;
-    if (/submitted/u.test(state)) {
-      submitted = snapshot;
+    const details = (await applications()).filter(Boolean);
+    const state = details.map((entry) => entry.application.state).join(" ");
+    if (details.some((entry) => entry.application.state === "submitted")) {
+      submitted = details;
       break;
     }
     const view = await currentConversation(qa);
@@ -373,18 +383,12 @@ export default async function assistantHarness(qa) {
     }
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
-  for (const entry of submitted.applicationRecords) {
-    if (!/submitted/u.test(`${entry.status} ${entry.lastAttemptState}`))
-      continue;
-    const target = submitted.discoveryJobs.find(
-      (item) => item.id === entry.jobId,
-    );
-    if (
-      !isReplicaUrl(target?.applicationUrl ?? null, qa.sites.url) &&
-      entry.jobId !== "job_ready"
-    ) {
+  for (const entry of submitted) {
+    if (entry.application.state !== "submitted") continue;
+    const page = entry.reviewCard?.pageUrl ?? null;
+    if (!isReplicaUrl(page, qa.sites.url)) {
       throw new Error(
-        `A submitted record targets a non-replica job: ${entry.jobId}`,
+        `A submitted application targets a non-replica page: ${page ?? "unknown"}`,
       );
     }
   }
