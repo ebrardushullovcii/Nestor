@@ -775,6 +775,31 @@ test("known contact links bind their profile field name, and listing answers bin
     "needs_you",
   );
 });
+test.each([
+  ["Local job board", "https://listings.example.test/jobs/1", "Job board"],
+  ["Company careers page", "https://example.test/jobs/1", "Company website"],
+  ["Example", "https://example.test/careers/", "Other"],
+  ["Example", "https://example.test/board/", "Other"],
+])(
+  "maps recorded listing provenance onto the form options: %s",
+  (label, url, answer) => {
+    const sources = source();
+    sources.listingDiscovery = { label, url };
+    const field = {
+      ...control("How did you hear about this job?"),
+      kind: "select" as const,
+      options: ["Job board", "Company website", "Referral", "Other"],
+    };
+    const tags = {
+      kind: "other",
+      country: null,
+      sourceId: "listingDiscovery",
+    } as const;
+    expect(decide(sources, field, tags, answer).kind).toBe("literal");
+    expect(decide(sources, field, tags, "Referral").kind).toBe("needs_you");
+  },
+);
+
 test("own-words text is used unchanged from the exact saved question", () => {
   const sources = source(),
     field = control("Responda com suas próprias palavras");

@@ -356,7 +356,108 @@ it("passes the job's current site notes and learned Apply instructions to prepar
     "Use the guest application.",
     "[Apply] Upload the resume before continuing.",
   ]);
+  expect(f.execute.mock.calls[0]![1].listingDiscovery).toEqual({
+    label: "Replica",
+    url: "https://replica.test/jobs/0",
+  });
+  expect(f.execute.mock.calls[0]![1].job.canonicalUrl).toBe(
+    "https://replica.test/jobs/0",
+  );
 });
+
+it("keeps the sighting's historical source after its configured site URL changes", async () => {
+  const f = await setup(1),
+    sites = createJobSitesStore(f.jobs);
+  sites.add({ text: "https://original-board.test/" });
+  const source = sites.list().rows[0]!;
+  f.jobs
+    .sql(
+      "UPDATE job_sightings SET source_id=?, url=?, source_label=? WHERE job_id=?",
+    )
+    .run(
+      String(source.id),
+      "https://original-board.test/jobs/1",
+      "Original job board",
+      f.ids[0]!,
+    );
+  sites.update({
+    id: source.id,
+    url: "https://different-board.test/",
+    label: "Different source",
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute.mock.calls[0]![1].listingDiscovery).toEqual({
+    label: "Original job board",
+    url: "https://original-board.test/jobs/1",
+  });
+  expect(f.execute.mock.calls[0]![1].job.canonicalUrl).toBe(
+    "https://replica.test/jobs/0",
+  );
+});
+
+it.each(["paused", "failed"] as const)(
+  "a %s preparation never restarts on the same saved answer, including after restart",
+  async (state) => {
+    const f = await setup(1);
+    const question = ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state,
+      questions: [
+        {
+          id: "source",
+          prompt: "My Information — How did you hear about this job? *",
+          kind: "other",
+          answerControlType: "single_choice",
+          answerOptions: ["Job board", "Company website", "Referral", "Other"],
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    }).questions[0]!;
+    const job = f.jobs.getJob(f.ids[0]!)!;
+    const known = describeFormQuestion(question, job);
+    f.applications.needsYou.remember({
+      key: known.key,
+      input: known.input,
+      options: known.options,
+      prompt: question.prompt,
+      answer: "Job board",
+      kind: "other",
+      scope: {},
+    });
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    expect((await preparation.readAnswers!([question]))[0]?.answer).toBe(
+      "Job board",
+    );
+    f.releases.shift()!(
+      ApplyExecutionResultSchema.parse({
+        ...ready(),
+        state,
+        questions: [question],
+      }),
+    );
+    const expectedState = state === "paused" ? "needs_you" : "failed";
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe(
+        expectedState,
+      ),
+    );
+    f.service.stop();
+    const restarted = createApplicationService(f.deps);
+    cleanups.unshift(() => restarted.stop());
+    await restarted.start();
+    expect(f.applications.listApplications().rows[0]?.state).toBe(
+      expectedState,
+    );
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.applications.needsYou.list().total).toBe(
+      state === "paused" ? 1 : 0,
+    );
+  },
+);
 
 it("Fill lets no save out, keeps uploading while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
   const f = await setup(1);

@@ -1387,7 +1387,7 @@ test.each([false, true])(
     };
     const result = await runApplyAgent(testConfig, model);
     expect(checks).toBe(1);
-    expect(writerTurn).toBe(2);
+    expect(writerTurn).toBe(required ? 1 : 2);
     expect(fillText).not.toHaveBeenCalled();
     expect(result.outcome).toBe(required ? "paused" : "prepared");
     expect(
@@ -3754,7 +3754,7 @@ describe("apply readiness regressions", () => {
     });
   });
 
-  test("a later wizard step drops the older handoff even when it reuses the ref", async () => {
+  test("a refused required declaration waits for its answer before another wizard step", async () => {
     const source = page({
       controls: [
         {
@@ -3789,7 +3789,8 @@ describe("apply readiness regressions", () => {
       result.pauses
         .flatMap((pause) => pause.questions ?? [])
         .map((question) => question.prompt),
-    ).toEqual(["Are you willing to relocate?"]);
+    ).toEqual(["I consent to a background check"]);
+    expect(input.hands.clickElement).not.toHaveBeenCalled();
   });
 
   test("missing candidate facts remain a resumable handoff after the model reports stuck", async () => {
@@ -6699,6 +6700,217 @@ test("an explicit stored-fact reference with a changed value still gets checked"
   expect(result.outcome).toBe("paused");
 });
 
+test.each(["fill_fields", "separate tools"])(
+  "a refused source question is handed over once while the rest fills (%s)",
+  async (mode) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          label: "How did you hear about this job?",
+          groupLabel: "My Information",
+          tagName: "select",
+          value: "",
+          options: ["Referral"],
+        },
+        { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+      ],
+    });
+    const input = config(source);
+    input.sources.listingDiscovery = {
+      label: "Local job board",
+      url: "https://listing.example.test/board/",
+    };
+    const choose = vi.spyOn(input.hands, "chooseOption"),
+      fill = vi.spyOn(input.hands, "fillText");
+    const fields: FillFieldsEntry[] = [
+      { tool: "select", ref: "c0", option: "Referral" },
+      { tool: "type", ref: "c1", text: "Robin Ashford" },
+    ];
+    const model: LLMClient =
+      mode === "fill_fields"
+        ? repeatingModel("fill_fields", { fields })
+        : {
+            chatWithTools: () =>
+              Promise.resolve({
+                toolCalls: fields.map(({ tool, ...args }, index) => ({
+                  id: `call${index}`,
+                  type: "function",
+                  function: { name: tool, arguments: JSON.stringify(args) },
+                })),
+              }),
+          };
+    const result = await runApplyAgent(input, model);
+    expect(result.outcome).toBe("paused");
+    expect(result.modelTurns).toBeLessThanOrEqual(2);
+    expect(choose).not.toHaveBeenCalled();
+    expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
+    const questions = result.pauses.flatMap((pause) => pause.questions ?? []);
+    expect(questions).toHaveLength(1);
+    expect(questions[0].answerOptions).toEqual(["Referral"]);
+  },
+);
+
+test.each([false, true])(
+  "a rejected name typo can be corrected from Profile (typed gate: %s)",
+  async (typed) => {
+    const source = page({ controls: [{ ...nameControl(), value: "" }] });
+    const input = config(source, { modelQuestionClassification: typed });
+    const fill = vi.spyOn(input.hands, "fillText");
+    const flow = scriptedModel([
+      { name: "type", args: { ref: "c0", text: "Robin Ashworth" } },
+      { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
+      { name: "finish", args: { reason: "The recorded name is filled." } },
+    ]);
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) => {
+        if (definitions[0]?.function.name !== "report_question_kinds")
+          return flow.chatWithTools(messages, definitions, options);
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: {
+                name: "report_question_kinds",
+                arguments: JSON.stringify({
+                  plainIndexes: [0],
+                  flagged: [],
+                  tags: [
+                    {
+                      index: 0,
+                      kind: "other",
+                      country: null,
+                      sourceId: "profile.fullName",
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+    expect(fill).toHaveBeenCalledExactlyOnceWith("c0", "Robin Ashford");
+    expect(result.outcome).toBe("prepared");
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  },
+);
+
+test("held questions do not hide a required invalid email from correction", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        tagName: "select",
+        label: "How did you hear about this job?",
+        value: "",
+        options: ["Referral"],
+      },
+      {
+        ...nameControl(),
+        index: 1,
+        id: "email",
+        name: "email",
+        inputType: "email",
+        label: "Email",
+        value: "invalid@",
+        invalid: true,
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.profile.email = "robin.replay@example.test";
+  input.sources.listingDiscovery = {
+    label: "Local job board",
+    url: "https://listing.example.test/jobs/1",
+  };
+  const original = input.hands.fillText;
+  input.hands.fillText = (ref, value) => {
+    source.controls[1].invalid = false;
+    return original(ref, value);
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "select", args: { ref: "c0", option: "Referral" } },
+      { name: "type", args: { ref: "c1", text: "robin.replay@example.test" } },
+      {
+        name: "finish",
+        args: {
+          reason: "One source question needs the person.",
+          needsPerson: true,
+        },
+      },
+    ]),
+  );
+  expect(source.controls[1].value).toBe("robin.replay@example.test");
+  expect(result.outcome).toBe("paused");
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .map((question) => question.prompt),
+  ).toEqual(["How did you hear about this job?"]);
+});
+
+test("a changed proposal for a refused field costs no second fact check while another field fills", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), label: "Why this role?", value: "" },
+      { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+    ],
+  });
+  const input = config(source),
+    fill = vi.spyOn(input.hands, "fillText");
+  const flow = scriptedModel([
+    { name: "type", args: { ref: "c0", text: "I have led space missions." } },
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          { tool: "type", ref: "c0", text: "I have piloted spacecraft." },
+          { tool: "type", ref: "c1", text: "Robin Ashford" },
+        ],
+      },
+    },
+  ]);
+  let checks = 0;
+  const result = await runApplyAgent(input, {
+    chatWithTools: (messages, definitions, options) => {
+      if (definitions[0]?.function.name !== "report_answer_checks")
+        return flow.chatWithTools(messages, definitions, options);
+      checks++;
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "check",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: false,
+                    reason: "No applicant evidence.",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    },
+  });
+  expect(checks).toBe(1);
+  expect(result.modelTurns).toBe(3); // Two form turns and one independent check.
+  expect(result.outcome).toBe("paused");
+  expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toHaveLength(
+    1,
+  );
+});
+
 test("the same question and value are checked only once across batch and single-field retries", async () => {
   const source = page({
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
@@ -6764,7 +6976,7 @@ test("the same question and value are checked only once across batch and single-
   expect(fill).not.toHaveBeenCalled();
 });
 
-test("the same eligibility question on another page asks before a second answer check", async () => {
+test("an unsupported eligibility answer waits once instead of navigating to another form", async () => {
   const source = page({
     controls: [
       {
@@ -6846,8 +7058,10 @@ test("the same eligibility question on another page asks before a second answer 
       .flatMap(
         (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
       )
-      .some((question) => question.repeatedAtDifferentStep),
-  ).toBe(true);
+      .map((question) => question.prompt),
+  ).toEqual(["Are you authorized to work here?"]);
+  expect(source.url).toBe("https://apply.example.test/form");
+  expect(turns).toBe(1);
 });
 
 test("a letter that needs review joins the other questions while the run fills the rest", async () => {

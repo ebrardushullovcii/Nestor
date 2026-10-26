@@ -107,6 +107,7 @@ import type {
   ApplyAttachedDocument,
   ApplyFilledControl,
   ApplyFormObservation,
+  ApplyFormControl,
   ApplyDocument,
   ApplyPause,
   ApplyProposal,
@@ -345,6 +346,7 @@ async function runMeasuredApplyAgent(
   const timeline: { at: string; text: string }[] = [];
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
+  const heldAnswerKeys = new Set<string>();
   // A run that stops for the person (a check only they can pass) is first
   // asked once to fill the fields it already knows, so the person is left
   // only the part the agent could not do.
@@ -510,6 +512,24 @@ async function runMeasuredApplyAgent(
     const next = JSON.stringify(answers);
     if (next !== currentReusableAnswers) {
       answerChecks.clear();
+      // Only a changed answer for this question releases its earlier refusal.
+      for (const [key, pending] of pendingQuestions) {
+        const controls = pageTools.state.observation?.controls ?? [];
+        const control = controls.find(
+          (entry) => questionPrompt(entry) === pending.prompt,
+        );
+        if (!control) continue;
+        const previous = savedAnswerForQuestion(
+          control,
+          runConfig.sources.reusableAnswers,
+          controls,
+        );
+        const updated = savedAnswerForQuestion(control, answers, controls);
+        if (updated && updated.answer !== previous?.answer) {
+          pendingQuestions.delete(key);
+          heldAnswerKeys.delete(key);
+        }
+      }
       runConfig.sources.reusableAnswers = answers;
       currentReusableAnswers = next;
     }
@@ -554,6 +574,11 @@ async function runMeasuredApplyAgent(
       (candidate) => candidate.ref === proposal.ref,
     );
     if (!control) return null;
+    if (
+      heldAnswerKeys.has(pendingQuestionKey(control)) &&
+      pendingQuestions.has(pendingQuestionKey(control))
+    )
+      return null;
     if (
       control.repeatedQuestion &&
       !savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
@@ -651,6 +676,57 @@ async function runMeasuredApplyAgent(
     control.choiceGroupKey
       ? `${control.kind}:${control.choiceGroupKey}`
       : control.ref;
+  // This only decides whether another proposal is worth trying. Every actual
+  // write still goes through the executor and its current permission gate.
+  const independentLiteral = (
+    control: ApplyFormControl,
+    observation: ApplyFormObservation,
+    proposed?: string,
+  ): string | null => {
+    if (
+      guardState.openPickers.has(pickerQuestionKey(control)) ||
+      pickerExhausted(guardState, control)
+    )
+      return null;
+    const readings = classifyQuestions?.settled(
+      observation.controls,
+      JSON.stringify({ instructions: formWritingInstructions(observation) }),
+    );
+    const reading =
+      readings?.get(questionClassificationKey(control, observation.controls)) ??
+      readings?.get(questionPrompt(control));
+    if (classifyQuestions && !reading?.answerTags) return null;
+    for (const source of answerSourceCatalog(runConfig.sources)) {
+      const value = proposed ?? source.value;
+      if (!value.trim()) continue;
+      const permission = classifyAnswerPermission({
+        control: {
+          ...control,
+          attestationKind: reading?.declarationKind ?? control.attestationKind,
+        },
+        controls: observation.controls,
+        tags: reading?.answerTags ?? {
+          kind: "other",
+          country: null,
+          sourceId: source.id,
+        },
+        sources: runConfig.sources,
+        answer: value,
+        pageInstructions: formWritingInstructions(observation),
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+      });
+      if (permission.kind !== "literal") continue;
+      if (
+        !payDisclosed &&
+        (reading?.asksAboutPay ||
+          control.questionKind === "salary_expectation") &&
+        !permission.source.id.startsWith("answerLibrary.application_")
+      )
+        continue;
+      return value;
+    }
+    return null;
+  };
   // Every file this run has seen held in a field, across the form's steps.
   // A refusal on step one stays a refusal when the run reaches the last step:
   // readiness reads only the current page, so this is what keeps it.
@@ -842,7 +918,7 @@ async function runMeasuredApplyAgent(
         !current ||
         current.disabled ||
         (!current.visible && current.kind !== "file") ||
-        holdsAnswer(current)
+        (holdsAnswer(current) && !current.invalid)
       )
         pendingQuestions.delete(key);
     }
@@ -982,7 +1058,7 @@ async function runMeasuredApplyAgent(
       ) {
         observedAnswers.delete(fieldKey);
       }
-      if (holdsAnswer(control))
+      if (holdsAnswer(control) && !control.invalid)
         pendingQuestions.delete(pendingQuestionKey(control));
     }
     // However many files the site refused, on this step or an earlier one,
@@ -1023,7 +1099,27 @@ async function runMeasuredApplyAgent(
   let modelObservation: ApplyFormObservation | null = null;
   let observationNeeded = false;
   const renderObservation = (observation: ApplyFormObservation): string => {
-    const text = describeObservationUpdate(observation, modelObservation);
+    const waiting = observation.controls.filter(
+      (control) =>
+        heldAnswerKeys.has(pendingQuestionKey(control)) &&
+        pendingQuestions.has(pendingQuestionKey(control)),
+    );
+    const recoverable = waiting.flatMap((control) => {
+      const value = independentLiteral(control, observation);
+      return value === null ? [] : [{ control, value }];
+    });
+    const withPerson = waiting.filter(
+      (control) =>
+        !recoverable.some((entry) => entry.control.ref === control.ref),
+    );
+    const text =
+      describeObservationUpdate(observation, modelObservation) +
+      (withPerson.length
+        ? `\nAlready waiting for the person; do not retry these fields: ${withPerson.map((control) => `${control.ref} (${questionPrompt(control)})`).join("; ")}. Fill the remaining fields, then finish with needsPerson: true.`
+        : "") +
+      (recoverable.length
+        ? `\nCorrect the earlier unsupported proposals using these matching recorded answers: ${recoverable.map(({ control, value }) => `${control.ref}: ${JSON.stringify(value)}`).join("; ")}. Every correction still goes through the answer check.`
+        : "");
     // Observations may be mutated by classification; retain an independent snapshot.
     modelObservation = structuredClone(observation);
     timingRecord.setObservationChars(text.length);
@@ -1123,18 +1219,30 @@ async function runMeasuredApplyAgent(
             ? `${outcome.note}\n\nThe page now:\n\n${describeObservation(outcome.observation)}`
             : outcome.note,
         };
-      case "suggestion":
+      case "suggestion": {
         syncObservation(outcome.observation);
+        const control = outcome.observation.controls.find(
+          (candidate) => candidate.ref === outcome.controlRef,
+        );
         if (outcome.question) {
-          const control = outcome.observation.controls.find(
-            (candidate) => candidate.ref === outcome.controlRef,
-          );
           pendingQuestions.set(
             control ? pendingQuestionKey(control) : outcome.controlRef,
             outcome.question,
           );
+          if (
+            control &&
+            !guardState.openPickers.has(pickerQuestionKey(control))
+          )
+            heldAnswerKeys.add(pendingQuestionKey(control));
         }
-        return { kind: "ok", stopBatch: true, content: outcome.note };
+        return {
+          kind: "ok",
+          stopBatch: !(
+            control && heldAnswerKeys.has(pendingQuestionKey(control))
+          ),
+          content: outcome.note,
+        };
+      }
       case "refused":
         syncObservation(outcome.observation);
         return {
@@ -1688,6 +1796,45 @@ async function runMeasuredApplyAgent(
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
     await refreshReusableAnswers();
+    const current = pageTools.state.observation;
+    const control =
+      "ref" in proposal
+        ? current?.controls.find((entry) => entry.ref === proposal.ref)
+        : undefined;
+    const pending =
+      control && heldAnswerKeys.has(pendingQuestionKey(control))
+        ? pendingQuestions.get(pendingQuestionKey(control))
+        : undefined;
+    if (
+      current &&
+      control &&
+      pending &&
+      (proposal.tool === "type" ||
+        proposal.tool === "select" ||
+        proposal.tool === "set_checkbox") &&
+      independentLiteral(
+        control,
+        current,
+        proposal.tool === "type"
+          ? proposal.text
+          : proposal.tool === "select"
+            ? proposal.option
+            : control.kind === "radio" ||
+                control.answerControlType === "multi_choice"
+              ? control.label || control.value
+              : proposal.checked
+                ? "Yes"
+                : "No",
+      ) === null
+    )
+      return {
+        kind: "suggestion",
+        answer: null,
+        controlRef: control.ref,
+        question: pending,
+        note: "This question is already waiting for the person's answer. Continue with other fields; do not retry it.",
+        observation: current,
+      };
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =
@@ -2755,11 +2902,13 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
-    // A required picker out of attempts is the person's; once every other
-    // required gap is theirs too, another model call cannot change that.
-    // An optional one is left blank and does not hold the run.
+    // Once every remaining field is held for the person, another model turn
+    // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: () => {
       const current = pageTools.state.observation;
+      const answerHeld = [...heldAnswerKeys].some((key) =>
+        pendingQuestions.has(key),
+      );
       const exhausted = current?.controls.some(
         (control) =>
           control.required &&
@@ -2768,10 +2917,24 @@ async function runMeasuredApplyAgent(
       );
       if (
         !current ||
-        !exhausted ||
+        (!answerHeld && !exhausted) ||
         !pendingQuestions.size ||
-        unresolvedRequiredControls(current).some(
-          (control) => !pendingQuestions.has(pendingQuestionKey(control)),
+        (answerHeld
+          ? current.controls.filter(
+              (control) =>
+                control.required ||
+                !["checkbox", "radio", "file"].includes(control.kind),
+            )
+          : unresolvedRequiredControls(current)
+        ).some(
+          (control) =>
+            control.visible &&
+            !control.disabled &&
+            !control.readOnly &&
+            (!holdsAnswer(control) || control.invalid) &&
+            control.kind !== "other" &&
+            (!pendingQuestions.has(pendingQuestionKey(control)) ||
+              independentLiteral(control, current) !== null),
         )
       )
         return null;
