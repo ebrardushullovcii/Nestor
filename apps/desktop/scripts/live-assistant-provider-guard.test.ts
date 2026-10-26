@@ -38,15 +38,13 @@ async function readRepositoryFile(relativePath: string): Promise<string> {
 }
 
 describe("Live Assistant capture harness provider defaults", () => {
-  it("uses the typed apply-copilot preload action object", async () => {
+  it("seeds its application in the job store, not through the old Apply bridge", async () => {
     const source = await readRepositoryFile(
       path.posix.join("apps", "desktop", "scripts", captureScriptName),
     );
 
-    expect(source).toContain(
-      'startApplyCopilotRun({\n        jobId: "job_ready",\n        visualCheckpointsEnabled: false,',
-    );
-    expect(source).not.toContain('startApplyCopilotRun("job_ready")');
+    expect(source).toContain("loadApplicationsStoreDemo({");
+    expect(source).not.toContain("startApplyCopilotRun");
   });
 
   it("defaults to deterministic providers instead of configured", async () => {

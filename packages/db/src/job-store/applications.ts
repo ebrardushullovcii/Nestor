@@ -530,6 +530,15 @@ export function createApplicationStore(store: JobStore) {
       return store.transaction(() => {
         const current = getApplication(id);
         if (!current || current.state !== "uncertain") return false;
+        if (
+          outcome.jobId !== String(current.jobId) ||
+          outcome.applicationRecordId !== `application_${id}` ||
+          outcome.runId !== `application_run_${id}` ||
+          outcome.resultId !== `application_${id}_attempt_${current.attempt}`
+        )
+          throw new Error(
+            "The outcome belongs to another application attempt.",
+          );
         const sent = outcome.outcome === "submitted";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
           submission_outcome_id = ?, submission_outcome_json = ?, error = ? WHERE id = ?`).run(

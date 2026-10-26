@@ -21,7 +21,6 @@ import {
   createActionRunners,
   createDiscoveryWorkspaceRefreshCoordinator,
   createPrimaryPageActions,
-  describePreparedApplicationSubmitResult,
   clearJobFinderNavigationHint,
   noteJobFinderNavigation,
   setJobFinderStatusRoute,
@@ -35,43 +34,6 @@ import {
   invalidatePendingActionScope,
   jobFinderPendingActions,
 } from "./job-finder-pending-actions";
-
-describe("describePreparedApplicationSubmitResult", () => {
-  const snapshotWith = (
-    outcome: "submitted" | "outcome_uncertain",
-    state: "submitted" | "blocked",
-  ) =>
-    ({
-      applyJobResults: [
-        {
-          id: "result_1",
-          jobId: "job_1",
-          state,
-          summary: "Submission outcome needs manual verification.",
-          updatedAt: "2026-09-21T12:00:00.000Z",
-          privacyReceipt: { submissionOutcome: { outcome } },
-        },
-      ],
-    }) as unknown as JobFinderRendererWorkspaceSnapshot;
-
-  it("reports sent only for a confirmed submitted outcome", () => {
-    expect(
-      describePreparedApplicationSubmitResult(
-        snapshotWith("submitted", "submitted"),
-        "job_1",
-      ),
-    ).toBe("Application sent.");
-  });
-
-  it("does not report success when the employer outcome is uncertain", () => {
-    expect(
-      describePreparedApplicationSubmitResult(
-        snapshotWith("outcome_uncertain", "blocked"),
-        "job_1",
-      ),
-    ).toContain("did not confirm");
-  });
-});
 
 describe("createActionRunners", () => {
   it("removes route ownership without dropping saved-file action state", () => {

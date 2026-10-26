@@ -351,19 +351,25 @@ async function runCapture() {
       }
 
       await window.nestor.jobFinder.test.loadApplyQueueDemo();
-      const snapshot = await window.nestor.jobFinder.startApplyCopilotRun({
-        jobId: "job_ready",
-        visualCheckpointsEnabled: false,
+      // An application in Applications, on the job store: the interview
+      // write-back lands there as a tracker event on that job.
+      const { approvedIds } =
+        await window.nestor.jobFinder.test.loadApplicationsStoreDemo({
+          sourceUrl: "http://127.0.0.1/",
+          trackApplications: true,
+        });
+      const jobId = approvedIds[0];
+      const application = await window.nestor.tracker.run("get_application", {
+        jobId,
       });
-      const record = snapshot.applicationRecords.find(
-        (entry) => entry.jobId === "job_ready",
-      );
-      if (!record) {
-        throw new Error(
-          "Expected a Job Finder application record for job_ready.",
-        );
+      if (!application) {
+        throw new Error("Expected an Applications row for the demo job.");
       }
-      return record;
+      return {
+        id: String(jobId),
+        title: application.job.title,
+        company: application.job.company,
+      };
     });
 
     const linkedJobContext = {
@@ -926,13 +932,10 @@ async function runCapture() {
       .waitFor({
         timeout: 10000,
       });
-    const jobFinderWriteBackWorkspace = await window.evaluate(() =>
-      window.nestor.jobFinder.getWorkspace(),
+    const writeBackApplicationRecord = await window.evaluate(
+      (jobId) => window.nestor.tracker.run("get_application", { jobId }),
+      Number(jobFinderApplicationRecord.id),
     );
-    const writeBackApplicationRecord =
-      jobFinderWriteBackWorkspace.applicationRecords.find(
-        (record) => record.id === jobFinderApplicationRecord.id,
-      );
     await window.evaluate(
       (sessionId) => window.nestor.liveAssistant.deleteSession(sessionId),
       annotatedSession.id,
@@ -1198,12 +1201,12 @@ async function runCapture() {
         annotatedSession.transcriptAnnotations[0]?.originalText ===
         annotatedSession.transcriptSegments[0]?.text,
       jobFinderMarkedInterviewed:
-        writeBackApplicationRecord?.status === "interview",
+        writeBackApplicationRecord?.row.status === "interview",
       jobFinderFollowUpNoteAdded:
         writeBackApplicationRecord?.events.some(
           (event) =>
-            event.title === "Interview follow-up note added" &&
-            event.detail.includes("thank-you note"),
+            event.title === "Interview follow-up note" &&
+            (event.body ?? "").includes("thank-you note"),
         ) ?? false,
       exportFileName: exportResult.fileName,
       exportContainsTranscript: exportResult.content.includes("## Transcript"),

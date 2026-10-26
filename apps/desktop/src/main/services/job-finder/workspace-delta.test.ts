@@ -412,7 +412,7 @@ describe("Job Finder workspace delta tracker", () => {
     });
   });
 
-  it("sends changed jobs and applications and falls back for a stale baseline", () => {
+  it("sends changed jobs and falls back for a stale baseline", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();
     const createJobs = () =>
       Array.from({ length: 4 }, (_, index) => ({
@@ -427,16 +427,6 @@ describe("Job Finder workspace delta tracker", () => {
           compensation: { currency: "USD", minimum: 90_000 + index },
           skills: ["typescript", "sql", `specialty-${index % 20}`],
         },
-      }));
-    const createApplications = () =>
-      Array.from({ length: 3 }, (_, index) => ({
-        id: `application-${index}`,
-        jobId: `job-${index}`,
-        status: "prepared",
-        answers: [
-          { id: `answer-${index}-1`, value: `Candidate response ${index}` },
-          { id: `answer-${index}-2`, value: "Authorized local-only evidence" },
-        ],
       }));
 
     const initialJobs = createJobs();
@@ -457,27 +447,17 @@ describe("Job Finder workspace delta tracker", () => {
     };
     currentJobs.push(addedJob);
 
-    const initialApplications = createApplications();
-    const currentApplications = createApplications().slice(0, -1);
-    const changedApplication = {
-      ...currentApplications[1]!,
-      status: "interviewing",
-    };
-    currentApplications[1] = changedApplication;
-
     const initial = createWorkspace({
       generatedAt: "2026-08-09T10:00:00.000Z",
       jobIds: [],
       selectedJobId: "job-0",
       discoveryJobs: initialJobs,
-      applicationRecords: initialApplications,
     });
     const current = createWorkspace({
       generatedAt: "2026-08-09T10:01:00.000Z",
       jobIds: [],
       selectedJobId: "job-4",
       discoveryJobs: currentJobs,
-      applicationRecords: currentApplications,
     });
 
     tracker.synchronize(null, initial);
@@ -492,10 +472,6 @@ describe("Job Finder workspace delta tracker", () => {
         discoveryJobs: {
           upserts: [changedJob, addedJob],
           removedIds: ["job-0"],
-        },
-        applicationRecords: {
-          upserts: [changedApplication],
-          removedIds: ["application-2"],
         },
       },
     });

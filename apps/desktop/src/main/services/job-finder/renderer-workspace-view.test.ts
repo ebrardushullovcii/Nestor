@@ -1,6 +1,4 @@
 import {
-  ApplicationAttemptSchema,
-  ApplyJobResultSchema,
   DiscoveryJobViewSchema,
   JobListRowSchema,
   TailoredAssetSchema,
@@ -105,75 +103,20 @@ describe("renderer workspace list projection", () => {
       contentText: body,
       previewSections: [{ heading: "Summary", lines: [body] }],
     });
-    const result = ApplyJobResultSchema.parse({
-      id: "result",
-      runId: "run",
-      jobId: "job",
-      state: "skipped",
-      summary: "Skipped",
-      detail: "Synthetic",
-      startedAt: at,
-      updatedAt: at,
-      visualObservationSets: [
-        {
-          id: "observation",
-          snapshotId: "snapshot",
-          observedAt: at,
-          purpose: "apply_checkpoint",
-          providerKind: "deterministic",
-          providerLabel: "Synthetic",
-          summary: body,
-        },
-      ],
-    });
-    const attempt = ApplicationAttemptSchema.parse({
-      id: "attempt",
-      jobId: "job",
-      state: "cancelled",
-      summary: "Cancelled",
-      detail: "Synthetic",
-      startedAt: at,
-      updatedAt: at,
-      completedAt: at,
-      outcome: "archived",
-      nextActionLabel: null,
-      checkpoints: [
-        {
-          id: "checkpoint",
-          at,
-          label: "Captured",
-          detail: body,
-          state: "cancelled",
-        },
-      ],
-      visualObservationSets: result.visualObservationSets,
-    });
     const workspace = {
       ...workspaceWith(),
       tailoredAssets: [asset],
-      applyJobResults: [result],
-      applicationAttempts: [attempt],
     };
     const sent = toRendererWorkspaceSnapshot(workspace);
     expect(sent.tailoredAssets[0]).not.toHaveProperty("contentText");
     expect(sent.tailoredAssets[0]).not.toHaveProperty("previewSections");
-    expect(sent.applyJobResults[0]).not.toHaveProperty("visualObservationSets");
-    expect(sent.applicationAttempts[0]).not.toHaveProperty("checkpoints");
     expect(JSON.stringify(sent)).not.toContain(body);
     expect(asset.previewSections[0]?.lines[0]).toBe(body);
-    expect(result.visualObservationSets[0]?.summary).toBe(body);
-    expect(attempt.checkpoints[0]?.detail).toBe(body);
     Object.freeze(asset);
-    Object.freeze(result);
-    Object.freeze(attempt);
     Object.freeze(workspace.tailoredAssets);
-    Object.freeze(workspace.applyJobResults);
-    Object.freeze(workspace.applicationAttempts);
     const warm = toRendererWorkspaceSnapshot(workspace);
     const again = toRendererWorkspaceSnapshot(workspace);
     expect(again.tailoredAssets).toBe(warm.tailoredAssets);
-    expect(again.applyJobResults).toBe(warm.applyJobResults);
-    expect(again.applicationAttempts).toBe(warm.applicationAttempts);
   });
 
   it("retains unchanged row references and invalidates detail on body-only changes", () => {

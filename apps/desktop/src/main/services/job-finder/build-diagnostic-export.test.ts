@@ -97,6 +97,7 @@ const performance = {
 describe("buildJobFinderDiagnosticExport", () => {
   it("exports only aggregate allowlisted diagnostics and a truthful manifest", () => {
     const diagnostic = buildJobFinderDiagnosticExport({
+      applications: {},
       workspace: createWorkspace(),
       performance,
       generatedAt: "2026-07-31T12:00:00.000Z",
@@ -113,7 +114,7 @@ describe("buildJobFinderDiagnosticExport", () => {
     expect(diagnostic.timings).toEqual({
       latestDiscoveryDurationMs: 789,
       latestResumeImportDurationMs: 456,
-      latestApplyDurationMs: 123,
+      latestApplyDurationMs: null,
     });
     expect(diagnostic.performance).toEqual({
       measurements: [
@@ -168,6 +169,7 @@ describe("buildJobFinderDiagnosticExport", () => {
 
   it("does not copy warning detail or arbitrary warning payloads", () => {
     const diagnostic = buildJobFinderDiagnosticExport({
+      applications: {},
       workspace: createWorkspace(),
       performance,
       build: {
@@ -211,6 +213,7 @@ it("exports waiting form memory without page contents", () => {
     ],
   };
   const result = buildJobFinderDiagnosticExport({
+      applications: {},
     workspace: createWorkspace(),
     performance: { ...performance, waitingFormMemory: memory },
     build: {
