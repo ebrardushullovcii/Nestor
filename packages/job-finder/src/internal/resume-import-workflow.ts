@@ -1,4 +1,5 @@
 import { resumeImportSavedAnswers } from "./resume-import-saved-answers";
+import { createConcurrencyLimiter } from "@nestor/core";
 import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
@@ -1789,36 +1790,44 @@ async function runResumeImportWorkflowInProcess(
           (typeof RESUME_IMPORT_STAGES)[number],
           number
         >();
-        const stagePromises = RESUME_IMPORT_STAGES.map((stage) => {
-          const stageStartedAtMs = performance.now();
-          return Promise.resolve()
-            .then(async () => {
-              const stageInput = {
-                stage,
-                existingProfile: input.profile,
-                existingSearchPreferences: input.searchPreferences,
-                documentBundle: bundle,
-              };
-              const result = ResumeImportStageExtractionResultSchema.parse(
-                await ctx.aiClient.extractResumeImportStage(stageInput),
-              );
-              if (result.stage !== stage)
-                throw new Error(
-                  `The provider returned ${result.stage} instead of ${stage}.`,
+        // Core fields enter first. Optional evidence still runs as soon as a
+        // slot is free, without competing in the initial burst of model reads.
+        const stageLimiter = createConcurrencyLimiter(
+          readsWithoutModel(ctx) ? 4 : 3,
+        );
+        const stagePromises = RESUME_IMPORT_STAGES.map((stage) =>
+          stageLimiter.run(() => {
+            input.signal?.throwIfAborted();
+            const stageStartedAtMs = performance.now();
+            return Promise.resolve()
+              .then(async () => {
+                const stageInput = {
+                  stage,
+                  existingProfile: input.profile,
+                  existingSearchPreferences: input.searchPreferences,
+                  documentBundle: bundle,
+                };
+                const result = ResumeImportStageExtractionResultSchema.parse(
+                  await ctx.aiClient.extractResumeImportStage(stageInput),
                 );
-              // An empty shared-memory read is a completed read: the resume
-              // simply holds nothing reusable to suggest. It used to trigger
-              // a second full read and then fail the stage, spending another
-              // model call to report the absence as an error.
-              return result;
-            })
-            .finally(() => {
-              stageDurations.set(
-                stage,
-                Math.max(0, Math.round(performance.now() - stageStartedAtMs)),
-              );
-            });
-        });
+                if (result.stage !== stage)
+                  throw new Error(
+                    `The provider returned ${result.stage} instead of ${stage}.`,
+                  );
+                // An empty shared-memory read is a completed read: the resume
+                // simply holds nothing reusable to suggest. It used to trigger
+                // a second full read and then fail the stage, spending another
+                // model call to report the absence as an error.
+                return result;
+              })
+              .finally(() => {
+                stageDurations.set(
+                  stage,
+                  Math.max(0, Math.round(performance.now() - stageStartedAtMs)),
+                );
+              });
+          }),
+        );
         const evidenceIndex = RESUME_IMPORT_STAGES.indexOf("shared_memory");
         const evidencePromise = stagePromises[evidenceIndex]!;
         const evidence = observePromise(
