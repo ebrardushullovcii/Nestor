@@ -264,6 +264,19 @@ it("measures inferred listing and years stretches removed or flagged by the unch
   const years = "Engineer with six years of experience.";
   const unflagged = "Built services with Go.";
   const finalDraft = draft([tech]);
+  const ordinaryStretch = "Reliable collaborator.";
+  finalDraft.claimChecks = [
+    {
+      contentHash: resumeClaimContentHash(ordinaryStretch),
+      verdict: "stretch",
+      reason:
+        "Plausible detail, not a sanctioned technology or years rounding.",
+      evidenceIds: [],
+      fix: null,
+      evidenceKey: null,
+      checkedAt: AT,
+    },
+  ];
   const capture = (request: unknown, responseBody: string) =>
     ({ requestBody: JSON.stringify(request), responseBody }) as EvalHttpCapture;
   const writer = capture(
@@ -283,6 +296,7 @@ it("measures inferred listing and years stretches removed or flagged by the unch
                       bullets: [
                         { text: tech, inferred: true },
                         { text: years, inferred: true },
+                        { text: ordinaryStretch, inferred: true },
                       ],
                     },
                   ],
@@ -304,6 +318,7 @@ it("measures inferred listing and years stretches removed or flagged by the unch
               { id: "line_1", text: tech },
               { id: "line_2", text: years },
               { id: "line_3", text: unflagged },
+              { id: "line_4", text: ordinaryStretch },
             ],
           }),
         },
@@ -316,6 +331,11 @@ it("measures inferred listing and years stretches removed or flagged by the unch
             content: JSON.stringify({
               checks: [
                 { id: "line_1", verdict: "stretch", reason: "Listing tool." },
+                {
+                  id: "line_4",
+                  verdict: "stretch",
+                  reason: "Plausible detail.",
+                },
                 {
                   id: "line_2",
                   verdict: "unsupported",

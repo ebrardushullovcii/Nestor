@@ -219,7 +219,7 @@ export function stretchCheckReport(input: {
       ...input,
       level: "aggressive",
       draft: { ...input.draft, sections: [section] },
-    }).stretches;
+    }).stretches.filter((stretch) => stretch.kind !== "model");
     if (!stretches.length) continue;
     const flagged = verdicts.some((check) => check.verdict !== "supported");
     if (
