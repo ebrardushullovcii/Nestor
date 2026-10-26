@@ -1,9 +1,10 @@
 import { Navigate, createHashRouter } from "react-router-dom";
 import { lazy, Suspense, type ReactNode } from "react";
-import { ApplicationsScreen } from "../features/applications/applications-screen";
-import { FindJobsScreen } from "../features/find-jobs/find-jobs-screen";
-import { ShortlistedScreen } from "../features/shortlisted/shortlisted-screen";
-import { NeedsYouScreen } from "../features/needs-you/needs-you-screen";
+import {
+  createSharedRouteLoader,
+  lazyScreen,
+  preloadWhenIdle,
+} from "@renderer/lib/lazy-screen";
 import {
   JobFinderPage,
   JobFinderProfileRoute,
@@ -12,6 +13,35 @@ import {
   JobFinderSettingsRoute,
 } from "../pages/job-finder-page";
 import { JobFinderHomeRoute } from "../pages/job-finder-page-routes";
+
+// Home is in the startup bundle; the other store screens are their own
+// chunks, fetched once the window is idle or on the first visit.
+const loadFindJobsScreen = createSharedRouteLoader(async () => ({
+  default: (await import("../features/find-jobs/find-jobs-screen"))
+    .FindJobsScreen,
+}));
+const loadShortlistedScreen = createSharedRouteLoader(async () => ({
+  default: (await import("../features/shortlisted/shortlisted-screen"))
+    .ShortlistedScreen,
+}));
+const loadNeedsYouScreen = createSharedRouteLoader(async () => ({
+  default: (await import("../features/needs-you/needs-you-screen"))
+    .NeedsYouScreen,
+}));
+const loadApplicationsScreen = createSharedRouteLoader(async () => ({
+  default: (await import("../features/applications/applications-screen"))
+    .ApplicationsScreen,
+}));
+preloadWhenIdle([
+  loadFindJobsScreen,
+  loadShortlistedScreen,
+  loadApplicationsScreen,
+  loadNeedsYouScreen,
+]);
+const FindJobsScreen = lazyScreen(loadFindJobsScreen);
+const ShortlistedScreen = lazyScreen(loadShortlistedScreen);
+const NeedsYouScreen = lazyScreen(loadNeedsYouScreen);
+const ApplicationsScreen = lazyScreen(loadApplicationsScreen);
 
 const loadLiveAssistantRoutes = () =>
   import("../features/live-assistant/live-assistant-page");

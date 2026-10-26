@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
-import { AssistantSidebar } from "../assistant/assistant-sidebar";
+import { AssistantSidebarSlot } from "../assistant/assistant-sidebar-slot";
 import { AssistantToggle } from "../assistant/assistant-toggle";
 import { useAssistant } from "../assistant/assistant-provider";
 import { useAssistantSideMenuCollapse } from "../assistant/use-assistant-side-menu-collapse";
@@ -59,9 +59,7 @@ import {
 } from "./job-finder-global-search";
 import { JobFinderTaskCenter } from "./task-center/job-finder-task-center";
 import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
-import {
-  toDestinationBadgeCount,
-} from "../lib/destination-counts";
+import { toDestinationBadgeCount } from "../lib/destination-counts";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
@@ -1960,7 +1958,7 @@ export function JobFinderShell({
       />
       {/* The assistant docks on the right; the content gives it its width
           instead of being covered (ADR 0037). */}
-      <AssistantSidebar />
+      <AssistantSidebarSlot />
       <div
         className={SHELL_CONTENT_CLASS}
         data-job-finder-shell-content

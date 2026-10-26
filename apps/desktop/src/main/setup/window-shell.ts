@@ -10,7 +10,7 @@ import {
 } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { DesktopWindowControlsStateSchema } from "@nestor/contracts";
+import type { DesktopWindowControlsState } from "@nestor/contracts";
 import {
   bindMainWindowStatePersistence,
   loadMainWindowState,
@@ -358,13 +358,15 @@ export function bindMainWindowNavigationGuards(
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
 
-export function getWindowControlsState(window: BrowserWindow) {
-  return DesktopWindowControlsStateSchema.parse({
+export function getWindowControlsState(
+  window: BrowserWindow,
+): DesktopWindowControlsState {
+  return {
     isFullScreen: window.isFullScreen(),
     isMaximized: window.isMaximized() || window.isFullScreen(),
     isMinimizable: window.isMinimizable(),
     isClosable: window.isClosable(),
-  });
+  };
 }
 
 export function sendWindowControlsState(window: BrowserWindow) {
