@@ -1,5 +1,4 @@
 import { getJobStore } from "../job-store";
-import { existsSync } from "node:fs";
 import {
   JOB_COMMANDS,
   RESUME_COMMANDS,
@@ -24,9 +23,7 @@ import { runApplicationCommand } from "../application-commands";
 import { runNeedsYouCommand } from "../../routes/needs-you";
 import { runTrackerCommand } from "../../routes/tracker";
 import { readPersonalWorkspaceState } from "@nestor/db";
-import { prepareWorkspaceScreenReads } from "../../setup/workspace-database-startup";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
-import { getJobFinderWorkspaceFilePath } from "../job-finder/paths";
 import { isDesktopResumeImportActive } from "../job-finder/import-resume";
 import { listLocalResumeTemplates } from "../../../shared/job-finder-resume-renderer";
 
@@ -57,12 +54,8 @@ export async function runAssistantReadCommand<K extends AssistantReadCommand>(
 
 export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"] =
   async () => {
-    await prepareWorkspaceScreenReads();
-    const initial = createEmptyJobFinderRepositoryState();
-    const file = getJobFinderWorkspaceFilePath();
     const personal = readPersonalWorkspaceState(
-      existsSync(file) ? file : null,
-      initial,
+      createEmptyJobFinderRepositoryState(),
       getJobStore(),
     );
     const sites = await runJobCommand("list_sites", {

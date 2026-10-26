@@ -1,6 +1,8 @@
 import { notifyWorkspaceCommit } from "./workspace-commits";
 import { openJobStore } from "./job-store/job-store";
 import { createProfileWorkspace } from "./job-store/profile-workspace";
+import { createSiteInstructionsStore } from "./job-store/site-instructions";
+import { createActivityControlStore } from "./job-store/activity-control";
 import {
   parseSavedJobsWithPreparation,
   readSavedJobFingerprintBatch,
@@ -25,7 +27,6 @@ import {
   ApplicationReplayCheckpointSchema,
   ApplicationAuthorityEnvelopeSchema,
   ApprovedApplicationAnswerSnapshotSchema,
-  JobFinderActivityControlSchema,
   ApplyQueueSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
@@ -36,7 +37,6 @@ import {
   SourceDebugEvidenceRefSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
-  SourceInstructionArtifactSchema,
   SubmissionArmedMarkerSchema,
   SubmissionExecutionGrantSchema,
   SubmissionIdempotencyRecordSchema,
@@ -582,6 +582,10 @@ export async function createFileJobFinderRepository(
   const profileStore =
     options.store ?? openJobStore(`${options.filePath}.jobs.sqlite`);
   const profileWorkspace = createProfileWorkspace(profileStore, normalizedSeed);
+  // Site instructions and the pause live in the job store; the old file's
+  // tables are no longer read.
+  const siteInstructions = createSiteInstructionsStore(profileStore);
+  const activityControl = createActivityControlStore(profileStore);
   const stopProfileUpdates = profileStore.onChange((change) => {
     if (["profile", "profile_activity", "settings"].includes(change.cause))
       notifyWorkspaceCommit(database);
@@ -592,6 +596,7 @@ export async function createFileJobFinderRepository(
       profileCopilotMessages:
         await profileWorkspace.methods.listProfileCopilotMessages(),
       profileRevisions: await profileWorkspace.methods.listProfileRevisions(),
+      sourceInstructionArtifacts: siteInstructions.list(),
     }),
     ...profileWorkspace.methods,
     ...createApplicationAnswerSnapshotRepositoryMethods({
@@ -886,6 +891,8 @@ export async function createFileJobFinderRepository(
         cloneValue({
           ...readState(database, normalizedSeed),
           ...profileWorkspace.state(),
+          sourceInstructionArtifacts: siteInstructions.list(),
+          activityControl: activityControl.read(),
         }),
       ),
     async close() {
@@ -905,6 +912,10 @@ export async function createFileJobFinderRepository(
       await stopBackups();
       try {
         profileWorkspace.reset(nextState);
+        profileStore.transaction(() => {
+          siteInstructions.replace(nextState.sourceInstructionArtifacts);
+          activityControl.save(nextState.activityControl);
+        });
         if (automaticBackup.beforeReset) {
           const backup = await createWorkspaceResetDatabaseBackup({
             database,
@@ -1953,35 +1964,15 @@ export async function createFileJobFinderRepository(
       );
     },
     listSourceInstructionArtifacts() {
-      return Promise.resolve(
-        cloneValue(
-          listValues(
-            database,
-            "source_instruction_artifacts",
-            SourceInstructionArtifactSchema,
-          ),
-        ),
-      );
+      return Promise.resolve(siteInstructions.list());
     },
     upsertSourceInstructionArtifact(artifact) {
-      const normalizedArtifact = SourceInstructionArtifactSchema.parse(
-        cloneValue(artifact),
-      );
-      return context.upsertPersistedValue(
-        "source_instruction_artifacts",
-        normalizedArtifact,
-      );
+      siteInstructions.upsert(artifact);
+      return Promise.resolve();
     },
     deleteSourceInstructionArtifactsForTarget(targetId) {
-      runImmediateTransaction(database, () => {
-        database
-          .prepare(
-            "DELETE FROM source_instruction_artifacts WHERE json_extract(value, '$.targetId') = ?",
-          )
-          .run(targetId);
-      });
-
-      return secureDatabaseFile(options.filePath);
+      siteInstructions.deleteForSite(targetId);
+      return Promise.resolve();
     },
     listSourceDebugEvidenceRefs() {
       return Promise.resolve(
@@ -2146,22 +2137,11 @@ export async function createFileJobFinderRepository(
       return secureDatabaseFile(options.filePath);
     },
     getActivityControl() {
-      return Promise.resolve(
-        getSingletonValue(
-          database,
-          "activity_control",
-          JobFinderActivityControlSchema,
-        ) ?? JobFinderActivityControlSchema.parse({}),
-      );
+      return Promise.resolve(activityControl.read());
     },
-    saveActivityControl(activityControl) {
-      const normalized = JobFinderActivityControlSchema.parse(
-        cloneValue(activityControl),
-      );
-      runImmediateTransaction(database, () => {
-        saveSingletonValue(database, "activity_control", normalized);
-      });
-      return secureDatabaseFile(options.filePath);
+    saveActivityControl(control) {
+      activityControl.save(control);
+      return Promise.resolve();
     },
     getApplyQueue() {
       return Promise.resolve(

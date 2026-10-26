@@ -14,6 +14,7 @@ import {
   ResumeImportRunSchema,
   ProfileEditsDraftSchema,
   ProfileSetupStateSchema,
+  SourceInstructionArtifactSchema,
 } from "@nestor/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -52,6 +53,7 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   ResumeImportRunSchema,
   ProfileEditsDraftSchema,
   ProfileSetupStateSchema,
+  SourceInstructionArtifactSchema,
 };
 
 const FIXTURES: Record<string, string> = {
@@ -70,6 +72,7 @@ const FIXTURES: Record<string, string> = {
   ResumeImportRunSchema: "resume-import-run",
   ProfileEditsDraftSchema: "profile-edits-draft",
   ProfileSetupStateSchema: "profile-setup-state",
+  SourceInstructionArtifactSchema: "source-instruction-artifact",
 };
 
 const fixtureDir = path.join(__dirname, "stored-json");
