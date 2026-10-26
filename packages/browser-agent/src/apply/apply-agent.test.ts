@@ -6739,6 +6739,64 @@ test("a refused source question is handed over once while the rest of the batch 
   expect(questions[0].answerOptions).toEqual(["Referral"]);
 });
 
+test("a changed proposal for a refused field costs no second fact check while another field fills", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), label: "Why this role?", value: "" },
+      { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+    ],
+  });
+  const input = config(source),
+    fill = vi.spyOn(input.hands, "fillText");
+  const flow = scriptedModel([
+    { name: "type", args: { ref: "c0", text: "I have led space missions." } },
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          { tool: "type", ref: "c0", text: "I have piloted spacecraft." },
+          { tool: "type", ref: "c1", text: "Robin Ashford" },
+        ],
+      },
+    },
+  ]);
+  let checks = 0;
+  const result = await runApplyAgent(input, {
+    chatWithTools: (messages, definitions, options) => {
+      if (definitions[0]?.function.name !== "report_answer_checks")
+        return flow.chatWithTools(messages, definitions, options);
+      checks++;
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "check",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: false,
+                    reason: "No applicant evidence.",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    },
+  });
+  expect(checks).toBe(1);
+  expect(result.modelTurns).toBe(3); // Two form turns and one independent check.
+  expect(result.outcome).toBe("paused");
+  expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toHaveLength(
+    1,
+  );
+});
+
 test("the same question and value are checked only once across batch and single-field retries", async () => {
   const source = page({
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],

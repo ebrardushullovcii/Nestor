@@ -574,6 +574,11 @@ async function runMeasuredApplyAgent(
     );
     if (!control) return null;
     if (
+      heldAnswerKeys.has(pendingQuestionKey(control)) &&
+      pendingQuestions.has(pendingQuestionKey(control))
+    )
+      return null;
+    if (
       control.repeatedQuestion &&
       !savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
     )
