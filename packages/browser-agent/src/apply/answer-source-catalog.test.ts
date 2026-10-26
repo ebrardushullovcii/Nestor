@@ -262,4 +262,7 @@ test("own-words text is used unchanged from the exact saved question", () => {
   expect(decide(sources, field, tags, "Improved generated words.").kind).toBe(
     "needs_you",
   );
+  expect(decide(sources, field, tags, " My unchanged words. ").kind).toBe(
+    "needs_you",
+  );
 });

@@ -338,7 +338,7 @@ export function classifyAnswerPermission(input: {
     input.sources.reusableAnswers,
     input.controls,
   );
-  let savedValueMatches = source.value.trim() === input.answer.trim();
+  let savedValueMatches = source.value === input.answer;
   if (input.control.answerControlType === "multi_choice" && saved) {
     try {
       const choices: unknown = JSON.parse(saved.answer);
