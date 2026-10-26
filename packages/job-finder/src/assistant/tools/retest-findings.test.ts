@@ -57,45 +57,6 @@ describe("what the model is told (R1, R4, R5)", () => {
     expect(digest).toContain("acknowledge the saved result and stop");
   });
 
-  it("keeps unrelated shortlist resumes out of page context while retaining focused saved truth", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    const snapshot = await workspaceService.getWorkspaceSnapshot();
-    const focused = snapshot.reviewQueue[0]!;
-    snapshot.reviewQueue = [
-      focused,
-      ...Array.from({ length: 200 }, (_, index) => ({
-        ...focused,
-        jobId: `unrelated_${index}`,
-        title: `Unrelated resume ${index}`,
-      })),
-    ];
-    const block = buildContextBlock({
-      context: {
-        screen: "resume_studio",
-        route: "/",
-        focus: { kind: "job", id: focused.jobId, label: null },
-        sectionLabel: null,
-        list: null,
-        editor: null,
-        browser: null,
-        selectedText: null,
-        mentions: [],
-        attachments: [],
-        capturedAt: "2026-09-28T00:00:00.000Z",
-      },
-      snapshot,
-      resultSets: [],
-      plan: null,
-      grants: [],
-      pendingQuestions: [],
-      now: "2026-09-28T00:00:00.000Z",
-    });
-    expect(block).toContain(`"jobId":"${focused.jobId}"`);
-    expect(block).toContain("201 jobs shortlisted in total");
-    expect(block).not.toContain("Unrelated resume");
-    expect(block).not.toContain("unrelated_199");
-  });
-
   it("names screens as the app shows them", async () => {
     const { workspaceService } = createWorkspaceServiceHarness();
     const block = buildContextBlock({

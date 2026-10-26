@@ -1,3 +1,4 @@
+import { assistantTestReads } from "../store-reads.test-support";
 import { randomUUID } from "node:crypto";
 import {
   AiBehaviorPreferenceSchema,
@@ -76,6 +77,7 @@ function world() {
       ),
   } as unknown as AssistantTurnSession;
   const ports = {
+    ...assistantTestReads(service),
     publishWorkspaceUpdate,
   } as unknown as AssistantHostPorts;
   return {
@@ -265,53 +267,55 @@ describe("R3 assistant safety findings", () => {
     },
   );
 
-  it("R3-016 inspects the saved binding without person handoff or a visible-tab lease", async () => {
+  it.each(["ready", "stopped"] as const)(
+    "reads a %s application's exact retained form without leasing, showing or focusing a tab",
+    async (state) => {
+      const ctx = world();
+      ctx.ports.readCommand = vi.fn(() =>
+        Promise.resolve([{ id: 7, attempt: 2, state }]),
+      ) as unknown as AssistantHostPorts["readCommand"];
+      const visibleTab = vi.fn();
+      const inspectApplication = vi.fn(() =>
+        Promise.resolve(page("http://127.0.0.1:47950/spruce/apply/1")),
+      );
+      const leaseTab = vi.fn();
+      ctx.ports.browser = { visibleTab, lease: leaseTab, inspectApplication };
+      const browserLease = vi.fn();
+      ctx.session.browserLease = browserLease;
+      const observed = await browserUseApplicationTool.execute(
+        { jobId: "3" },
+        ctx,
+      );
+      expect(inspectApplication).toHaveBeenCalledWith(
+        "application_7_attempt_2",
+      );
+      expect(browserLease).not.toHaveBeenCalled();
+      expect(leaseTab).not.toHaveBeenCalled();
+      expect(visibleTab).not.toHaveBeenCalled();
+      expect(observed.data).toMatchObject({
+        url: "http://127.0.0.1:47950/spruce/apply/1",
+      });
+      expect(observed.summary).toContain("nothing was sent");
+    },
+  );
+
+  it("refuses to inspect an application being sent or already sent", async () => {
     const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.applyJobResults = [
-      ApplyJobResultSchema.parse({
-        id: "result",
-        jobId: "job_ready",
-        runId: "run",
-        applicationRecordId: "record",
-        state: "awaiting_review",
-        summary: "Ready",
-        detail: "Filled synthetic form",
-        startedAt: "2026-10-04T12:00:00.000Z",
-        updatedAt: "2026-10-04T12:00:00.000Z",
-      }),
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const inspect = vi
-      .spyOn(ctx.service, "inspectPreparedApplicationPage")
-      .mockResolvedValue(page("http://127.0.0.1:47950/spruce/apply/1"));
-    const focus = vi.spyOn(ctx.service, "focusPreparedApplicationPage");
-    const visibleTab = vi.fn(() => ({
-      tabId: "unrelated",
-      url: page().url!,
-      title: "Unrelated",
-    }));
-    ctx.ports.browser = { visibleTab, lease: vi.fn() };
-    const browserLease = vi.fn();
-    ctx.session.browserLease = browserLease;
-    const observed = await browserUseApplicationTool.execute(
-      { jobId: "job_ready" },
-      ctx,
-    );
-    expect(inspect).toHaveBeenCalledWith({
-      jobId: "job_ready",
-      runId: "run",
-      resultId: "result",
-      applicationRecordId: "record",
-    });
-    expect(focus).not.toHaveBeenCalled();
-    expect(visibleTab).not.toHaveBeenCalled();
-    expect(browserLease).not.toHaveBeenCalled();
-    expect(observed.summary).toContain("read-only");
-    snapshot.applyJobResults = [];
-    await expect(
-      browserUseApplicationTool.execute({ jobId: "job_ready" }, ctx),
-    ).rejects.toThrow("Nothing was opened or restored");
+    for (const state of ["submitting", "submitted"]) {
+      ctx.ports.readCommand = vi.fn(() =>
+        Promise.resolve([{ id: 7, attempt: 2, state }]),
+      ) as unknown as AssistantHostPorts["readCommand"];
+      const inspectApplication = vi.fn();
+      ctx.ports.browser = {
+        visibleTab: vi.fn(),
+        lease: vi.fn(),
+        inspectApplication,
+      };
+      await expect(
+        browserUseApplicationTool.execute({ jobId: "3" }, ctx),
+      ).rejects.toThrow("no prepared form");
+      expect(inspectApplication).not.toHaveBeenCalled();
+    }
   });
 
   it("inspection closes all form/submit windows before reading the exact saved application", async () => {
@@ -563,11 +567,19 @@ describe("R3 assistant safety findings", () => {
     const fresh = createWorkspaceServiceHarness({ seed }).workspaceService;
     await setDefaultResumeLevelTool.execute(
       { level: "light" },
-      { ...ctx, service: fresh },
+      {
+        ...ctx,
+        service: fresh,
+        ports: { ...ctx.ports, ...assistantTestReads(fresh) },
+      },
     );
     await setDefaultResumeLevelTool.execute(
       { level: "tailored" },
-      { ...ctx, service: fresh },
+      {
+        ...ctx,
+        service: fresh,
+        ports: { ...ctx.ports, ...assistantTestReads(fresh) },
+      },
     );
     const shortlisted = await fresh.queueJobForReview(seed.savedJobs[0]!.id);
     expect(
@@ -660,9 +672,6 @@ describe("R3 assistant safety findings", () => {
       "does not expose that pay control",
     );
   });
-
-
-
 });
 
 it("partial AI settings never restore withdrawn declaration approvals", async () => {
@@ -706,8 +715,6 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
       .preApprovedDeclarations,
   ).toEqual([]);
 });
-
-
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {
   const ctx = world();

@@ -3,6 +3,7 @@ import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
+import type { ApplicationService } from "@nestor/job-finder/applications";
 import {
   createApplicationPageAccess,
   createPreparedApplicationFormStore,
@@ -591,9 +592,31 @@ export function createDesktopBrowserRuntime(
   };
 }
 
-export async function createJobFinderWorkspaceServiceAsync(
+/**
+ * Everything Job Finder runs on below the old workspace service: the
+ * repository, AI, browser and documents, with the resume writer and Apply
+ * started on them. App start runs this after the first screen, so queued
+ * resumes and an interrupted send carry on without any old screen loading.
+ */
+export interface JobFinderRuntime {
+  jobFinderRepository: JobFinderRepository;
+  aiClient: ReturnType<typeof createDesktopJobFinderAiClient>;
+  visionProvider: ReturnType<typeof createDesktopResumeVisionProvider>;
+  browserRuntime: ReturnType<typeof createDesktopBrowserRuntime>;
+  resumeDraftProcessor: ReturnType<typeof createResumeDraftProcessor>;
+  documentManager: ReturnType<typeof createLocalJobFinderDocumentManager>;
+  exportFileVerifier: ReturnType<typeof createLocalResumeExportFileVerifier>;
+  researchAdapter:
+    | ReturnType<typeof createDesktopResumeResearchAdapter>
+    | undefined;
+  usesEmbeddedBrowser: boolean;
+  fetchListingHtml: ReturnType<typeof withBrowserSignInRetry>;
+  applicationService: ApplicationService;
+}
+
+export async function createJobFinderRuntimeAsync(
   envOverrides?: Partial<NodeJS.ProcessEnv>,
-) {
+): Promise<JobFinderRuntime> {
   const env = {
     ...process.env,
     ...(envOverrides ?? {}),
@@ -732,6 +755,38 @@ export async function createJobFinderWorkspaceServiceAsync(
       return control.paused && control.pauseBehavior !== "finish_current";
     },
   });
+  return {
+    jobFinderRepository,
+    aiClient,
+    visionProvider,
+    browserRuntime,
+    resumeDraftProcessor,
+    documentManager,
+    exportFileVerifier,
+    researchAdapter,
+    usesEmbeddedBrowser,
+    fetchListingHtml,
+    applicationService,
+  };
+}
+
+export async function createJobFinderWorkspaceServiceAsync(
+  envOverrides?: Partial<NodeJS.ProcessEnv>,
+  started?: JobFinderRuntime,
+) {
+  const {
+    jobFinderRepository,
+    aiClient,
+    visionProvider,
+    browserRuntime,
+    resumeDraftProcessor,
+    documentManager,
+    exportFileVerifier,
+    researchAdapter,
+    usesEmbeddedBrowser,
+    fetchListingHtml,
+    applicationService,
+  } = started ?? (await createJobFinderRuntimeAsync(envOverrides));
   const workspaceService = createJobFinderWorkspaceService({
     jobSites: createJobSitesStore(getJobStore()),
     readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),

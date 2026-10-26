@@ -903,3 +903,25 @@ it("keeps access checks scoped to a site and does not skip another unanswered qu
   expect(applications.getApplication(rows[0]!.id)?.state).toBe("queued");
   expect(applications.getApplication(rows[1]!.id)?.state).toBe("needs_you");
 });
+
+it("knows the page of an unsent prepared form after a restart, and forgets it once sent", () => {
+  const { jobs, applications } = open();
+  const [id] = add(jobs, 1);
+  applications.applyJobs({ selection: { ids: [id!] } });
+  const row = applications.claimNext()!;
+  const pageUrl = "https://jobs.example.test/apply/1";
+  jobs
+    .sql(
+      `INSERT INTO application_details (application_id, attempt, resume_artifact_json, review_json, profile_digest)
+       VALUES (?, ?, '{}', ?, 'digest')`,
+    )
+    .run(row.id, row.attempt, JSON.stringify({ siteLabel: "Jobs", pageUrl }));
+  expect(applications.holdsFormAt(pageUrl)).toBe(true);
+  expect(applications.holdsFormAt("https://jobs.example.test/other")).toBe(
+    false,
+  );
+  jobs
+    .sql("UPDATE applications SET state = 'submitted' WHERE id = ?")
+    .run(row.id);
+  expect(applications.holdsFormAt(pageUrl)).toBe(false);
+});

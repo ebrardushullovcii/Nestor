@@ -1,14 +1,10 @@
+import { assistantTestReads } from "../store-reads.test-support";
 import { randomUUID } from "node:crypto";
-import {
-  type JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import { type JobFinderWorkspaceSnapshot } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";
-import {
-  ASSISTANT_SYSTEM_PROMPT,
-  buildContextBlock,
-} from "../prompt";
+import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { getWorkspaceSummaryTool } from "./workspace-tools";
 
@@ -30,6 +26,7 @@ function world() {
     ),
   } as unknown as AssistantTurnSession;
   const ports = {
+    ...assistantTestReads(service),
     publishWorkspaceUpdate: vi.fn(),
   } as unknown as AssistantHostPorts;
   return { service, session, ports };
@@ -130,7 +127,6 @@ it("R3-125 gives source explanations and the current sending boundary before req
     "An employer form may save entered answers",
   );
 });
-
 
 it("R3-214 describes a combined Undo for edits sharing one receipt", () => {
   expect(ASSISTANT_SYSTEM_PROMPT).toContain("share one combined Undo action");

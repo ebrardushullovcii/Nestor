@@ -1,6 +1,9 @@
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
-import { needsYouCommandTools } from "@nestor/job-finder";
+import {
+  needsYouCommandTools,
+  type RunNeedsYouCommand,
+} from "@nestor/job-finder";
 import {
   createDeterministicJobFinderAiClient,
   resolveAssistantModelRouteFromEnvironment,
@@ -18,6 +21,7 @@ import {
   type AssistantEvent,
   type AssistantMessage,
   type JobCommandOutputs,
+  type JobCommandName,
   type JobFinderRepositoryState,
   type JobFinderWorkspaceSnapshot,
   type SavedJob,
@@ -25,9 +29,17 @@ import {
 import {
   createAssistantRepository,
   createInMemoryJobFinderRepository,
+  type JobFinderRepository,
 } from "@nestor/db";
-import { openJobStore, type JobStore } from "@nestor/db/job-store";
-import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
+import {
+  openJobStore,
+  createTrackerStore,
+  type JobStore,
+} from "@nestor/db/job-store";
+import {
+  createJobCommandRunner,
+  savePageJobs,
+} from "@nestor/job-finder/job-commands";
 import {
   AssistantSessionHost,
   assistantCommandTools,
@@ -282,10 +294,51 @@ function laneJobStore(): { store: JobStore; ids: Map<string, number> } {
 function recordingPorts(
   recorder: AssistantLaneRecorder,
   store: JobStore,
-  needsYouCommands: NonNullable<AssistantHostPorts["commands"]>,
+  needsYou: RunNeedsYouCommand,
+  repository: JobFinderRepository,
 ): AssistantHostPorts {
   const runJobCommand = createJobCommandRunner({ store });
+  const tracker = createTrackerStore(store);
   return {
+    savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
+    readCommand: async (name, input) => {
+      if (name === "list_applications")
+        return tracker.list(input as never) as never;
+      if (name === "needs_you_counts" || name === "application_needs")
+        return (await needsYou(name, input)) as never;
+      return (await runJobCommand(name as JobCommandName, input)) as never;
+    },
+    async readPersonalState() {
+      const [
+        profile,
+        searchPreferences,
+        settings,
+        profileSetupState,
+        activityControl,
+        latestResumeImportRun,
+      ] = await Promise.all([
+        repository.getProfile(),
+        repository.getSearchPreferences(),
+        repository.getSettings(),
+        repository.getProfileSetupState(),
+        repository.getActivityControl(),
+        repository.getLatestResumeImportRun(),
+      ]);
+      return {
+        profile,
+        searchPreferences,
+        settings,
+        profileSetupState,
+        activityControl,
+        latestResumeImportRun,
+        latestResumeImportReviewCandidates: [],
+        latestResumeImportBundle: null,
+        enabledSiteCount: 0,
+        resumeImportActive: false,
+        availableResumeTemplates: [],
+        generatedAt: NOW,
+      };
+    },
     commands: [
       ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
         JOB_COMMANDS,
@@ -300,7 +353,7 @@ function recordingPorts(
         },
         { group: "jobs" },
       ),
-      ...needsYouCommands,
+      ...needsYouCommandTools(needsYou),
     ],
     checkSource: () => Promise.resolve(),
     listDocuments: () => Promise.resolve([]),
@@ -359,7 +412,7 @@ export function createAssistantLaneWorld(
   const host = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
     service,
-    ports: recordingPorts(recorder, jobs.store, needsYouCommandTools(needsYou)),
+    ports: recordingPorts(recorder, jobs.store, needsYou, repository),
     resolveModel: () => resolution,
     publish: (event) => events.push(event),
     stallAfterMs: 60_000,

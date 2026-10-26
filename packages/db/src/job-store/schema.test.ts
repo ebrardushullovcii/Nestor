@@ -43,6 +43,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   needs_you_counts: "kind n",
   needs_you_drafts: "task_id answer remember revision",
   needs_you_text: "prompt",
+  resume_pdf_assets: "job_id path approved_at sha256",
   resumes:
     "job_id level state updated_at error draft_json previous_json approved_at pdf_path",
   search_sources:

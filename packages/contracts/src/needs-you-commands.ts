@@ -4,6 +4,7 @@ import {
   AnswerNeedsYouResultSchema,
   ApplicationTargetSchema,
   NeedsYouCountsSchema,
+  NeedsYouTaskSchema,
   NeedsYouDetailsSchema,
   NeedsYouListQuerySchema,
   NeedsYouPageSchema,
@@ -33,6 +34,13 @@ const AnswerChangeSchema = z.object({
 });
 
 export const NEEDS_YOU_COMMANDS = {
+  application_needs: {
+    effect: "read",
+    description:
+      "The current questions and browser steps for one exact application work id.",
+    input: ApplicationTargetSchema,
+    output: z.array(NeedsYouTaskSchema),
+  },
   list_needs_you: {
     effect: "read",
     description:

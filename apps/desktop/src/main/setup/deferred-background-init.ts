@@ -11,6 +11,8 @@ export interface DeferredBackgroundInitOptions {
   scheduleDelayMs?: number;
   advancedInterviewSurfacesEnabled: boolean;
   loadJobFinderServices: () => Promise<{
+    /** The resume writer and Apply, on their own runtime. */
+    startJobFinderRuntime: () => PromiseLike<unknown>;
     getJobFinderWorkspaceService: () => PromiseLike<unknown>;
   }>;
   loadCandidateAssetLibraryModule: () => Promise<{
@@ -100,7 +102,13 @@ export function createDeferredBackgroundInitController(
   const initializeJobFinderWorkspace = () => {
     void options
       .loadJobFinderServices()
-      .then(async ({ getJobFinderWorkspaceService }) => {
+      .then(async ({ startJobFinderRuntime, getJobFinderWorkspaceService }) => {
+        if (quitHasBegun()) {
+          return;
+        }
+        // Queued resumes and an interrupted send carry on from here, whether
+        // or not an old screen ever loads.
+        await startJobFinderRuntime();
         if (quitHasBegun()) {
           return;
         }

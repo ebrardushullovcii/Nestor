@@ -20,6 +20,7 @@ export {
 } from "./application-authority-service";
 export {
   getJobFinderWorkspaceService,
+  startJobFinderRuntime,
   beginJobFinderWorkspaceShutdown,
   setJobFinderWorkspaceServiceTestEnv,
   shutdownJobFinderWorkspaceService,

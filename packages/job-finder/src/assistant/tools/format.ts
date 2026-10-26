@@ -1,7 +1,3 @@
-import {
-  listResumeReviewsNeeded,
-  listFinalApplicationActions,
-} from "../attention";
 import { isProvisionalMatchAssessment } from "../../discovery-ordering";
 import { getFitEvidenceDepth } from "../../discovery-result-bands";
 import type {
@@ -9,7 +5,6 @@ import type {
   ApplicationCrmInterview,
   AssistantMessagePart,
   DiscoveryJobView,
-  JobFinderWorkspaceSnapshot,
   ReviewQueueItem,
   SavedJob,
 } from "@nestor/contracts";
@@ -145,27 +140,6 @@ export function compactApplication(record: ApplicationRecord) {
   };
 }
 
-/** Every saved job the snapshot knows, deduplicated by id. */
-export function allJobs(
-  snapshot: JobFinderWorkspaceSnapshot,
-): DiscoveryJobView[] {
-  const byId = new Map<string, DiscoveryJobView>();
-  for (const job of [
-    ...snapshot.discoveryJobs,
-    ...snapshot.companyJobs,
-  ]) {
-    if (!byId.has(job.id)) byId.set(job.id, job);
-  }
-  return [...byId.values()];
-}
-
-export function findJob(
-  snapshot: JobFinderWorkspaceSnapshot,
-  jobId: string,
-): DiscoveryJobView | null {
-  return allJobs(snapshot).find((job) => job.id === jobId) ?? null;
-}
-
 export function jobRowsPart(input: {
   jobs: readonly (SavedJob | DiscoveryJobView)[];
   title: string | null;
@@ -214,72 +188,6 @@ export function applicationRowsPart(input: {
 
 export function plural(count: number, noun: string, pluralNoun = `${noun}s`) {
   return `${count} ${count === 1 ? noun : pluralNoun}`;
-}
-
-export function unresolvedUserActions(snapshot: JobFinderWorkspaceSnapshot) {
-  return snapshot.userActionRequests.filter(
-    (request) =>
-      !["resolved", "cancelled", "skipped", "expired", "superseded"].includes(
-        request.state,
-      ),
-  );
-}
-
-/** Lowercase letters and digits only, for comparing company names and titles. */
-export function comparableName(value: string | null | undefined): string {
-  return (value ?? "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/gu, " ")
-    .trim();
-}
-
-export interface JobCaveats {
-  /** The person excluded this employer. */
-  excludedEmployer: boolean;
-  /** Another saved job with the same title and listing text already has an application. */
-  alreadyAppliedAs: { jobId: string; status: string } | null;
-}
-
-/**
- * Facts a job pick must respect (employer exclusions, and ADR 0030's one
- * listing per job: the same posting found on two sites is one job).
- */
-export function createJobCaveats(snapshot: JobFinderWorkspaceSnapshot) {
-  const excluded = new Set(
-    snapshot.searchPreferences.companyBlacklist.map(comparableName),
-  );
-  const jobs = allJobs(snapshot);
-  const byId = new Map(jobs.map((job) => [job.id, job]));
-  const applied: { job: DiscoveryJobView; status: string }[] = [];
-  for (const record of snapshot.applicationRecords) {
-    const job = byId.get(record.jobId);
-    if (job) applied.push({ job, status: record.status });
-  }
-  const descriptionKey = (job: DiscoveryJobView) =>
-    comparableName(job.description).slice(0, 240);
-  return (job: DiscoveryJobView): JobCaveats => {
-    const title = comparableName(job.title);
-    const twin = applied.find(
-      (entry) =>
-        entry.job.id !== job.id &&
-        comparableName(entry.job.title) === title &&
-        (comparableName(entry.job.company) === comparableName(job.company) ||
-          (descriptionKey(job).length > 40 &&
-            descriptionKey(entry.job) === descriptionKey(job))),
-    );
-    const ownRecord = snapshot.applicationRecords.find(
-      (record) => record.jobId === job.id,
-    );
-    return {
-      excludedEmployer: excluded.has(comparableName(job.company)),
-      alreadyAppliedAs: ownRecord
-        ? { jobId: job.id, status: ownRecord.status }
-        : twin
-          ? { jobId: twin.job.id, status: twin.status }
-          : null,
-    };
-  };
 }
 
 /**
@@ -337,27 +245,4 @@ export function interviewForModel(interview: ApplicationCrmInterview) {
       ? localDateTime(interview.endsAt, interview.timeZone)
       : null,
   };
-}
-
-/** Reviews and final sends are person-owned actions even without a browser request. */
-export function outstandingReviews(snapshot: JobFinderWorkspaceSnapshot) {
-  const resumes = listResumeReviewsNeeded(snapshot).map((item) => ({
-    kind: "resume_review",
-    jobId: item.jobId,
-    title: item.title,
-    company: item.company,
-    reason: item.resumeLinesToDecide
-      ? "Decide which resume lines to keep"
-      : "Review the unapproved resume draft",
-    route: RESUME_ROUTE(item.jobId),
-  }));
-  const applications = listFinalApplicationActions(snapshot).map((record) => ({
-    kind: "application_send",
-    jobId: record.jobId,
-    title: record.title,
-    company: record.company,
-    reason: "Review the prepared form and send it",
-    route: APPLICATION_ROUTE(record.id),
-  }));
-  return [...resumes, ...applications];
 }

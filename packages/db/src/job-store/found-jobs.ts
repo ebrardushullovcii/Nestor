@@ -124,6 +124,7 @@ export function writeFoundJobs(
   const hidden: number[] = [];
   const merged = new Set<number>();
   const mergedStages = new Set<JobStage>();
+  const ids: number[] = [];
   const findKey = sql(
     "SELECT k.job_id, j.stage FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
   );
@@ -221,6 +222,7 @@ export function writeFoundJobs(
       if (job.hiddenReason) hidden.push(id);
       else added.push(id);
     }
+    ids.push(id);
     addSighting.run(
       id,
       job.url,
@@ -259,5 +261,5 @@ export function writeFoundJobs(
   }
   // A job new in this batch and seen again later in it is still just new.
   for (const id of [...added, ...hidden]) merged.delete(id);
-  return { added, hidden, merged: [...merged], mergedStages };
+  return { added, hidden, merged: [...merged], ids, mergedStages };
 }

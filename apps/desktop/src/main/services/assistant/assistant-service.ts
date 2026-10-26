@@ -20,7 +20,7 @@ import {
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
 import { onJobFinderWorkspaceUpdate } from "../job-finder/workspace-updates";
-import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
+import { createAssistantWorkspaceCommands } from "./workspace-commands";
 import { createAssistantHostPorts } from "./assistant-ports";
 
 /**
@@ -36,14 +36,28 @@ let unsubscribeWorkspaceUpdates: (() => void) | null = null;
 
 /** A stored application can only narrow the person's current sidebar instruction. */
 export async function assistantApplicationMode(input: {
-  conversationId: string; jobId: number; mode: ApplicationAutomationMode;
+  conversationId: string;
+  jobId: number;
+  mode: ApplicationAutomationMode;
 }): Promise<ApplicationAutomationMode | null> {
-  repository ??= createAssistantRepository({ filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite") });
-  const [decision] = decideUnderGrants({ grants: await repository.listGrants(input.conversationId),
-    jobIds: [String(input.jobId)], action: "prepare", savedMode: input.mode });
+  repository ??= createAssistantRepository({
+    filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite"),
+  });
+  const [decision] = decideUnderGrants({
+    grants: await repository.listGrants(input.conversationId),
+    jobIds: [String(input.jobId)],
+    action: "prepare",
+    savedMode: input.mode,
+  });
   if (!decision?.allowed || !decision.mode) return null;
-  const strength = { prepare_only: 0, confirm_before_submit: 1, autonomous_submit: 2 } as const;
-  return strength[decision.mode] < strength[input.mode] ? decision.mode : input.mode;
+  const strength = {
+    prepare_only: 0,
+    confirm_before_submit: 1,
+    autonomous_submit: 2,
+  } as const;
+  return strength[decision.mode] < strength[input.mode]
+    ? decision.mode
+    : input.mode;
 }
 
 function isEnabled(value: string | undefined): boolean {
@@ -59,10 +73,7 @@ export function resolveAssistantModel(
     isDesktopTestApiEnabled(env) &&
     !isEnabled(env.NESTOR_TEST_API_USE_LIVE_AI)
   ) {
-    const delay = Number.parseInt(
-      env.NESTOR_TEST_ASSISTANT_DELAY_MS ?? "",
-      10,
-    );
+    const delay = Number.parseInt(env.NESTOR_TEST_ASSISTANT_DELAY_MS ?? "", 10);
     return {
       kind: "ready",
       handle: createScriptedAssistantModelHandle(
@@ -98,7 +109,7 @@ function browserHost(env: NodeJS.ProcessEnv): "embedded" | "external" {
 
 export function getAssistantHost(): Promise<AssistantSessionHost> {
   hostPromise ??= (async () => {
-    const service = await getJobFinderWorkspaceService();
+    const service = createAssistantWorkspaceCommands();
     repository ??= createAssistantRepository({
       filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite"),
     });

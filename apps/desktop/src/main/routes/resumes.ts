@@ -1,3 +1,5 @@
+import { getJobStore } from "../services/job-store";
+import { listLocalResumeTemplates } from "../../shared/job-finder-resume-renderer";
 import {
   RESUMES_EXPORT_PDF_CHANNEL,
   RESUMES_PREVIEW_CHANNEL,
@@ -17,14 +19,13 @@ import {
 } from "./resume-export-path";
 
 /**
- * The resume service starts with the workspace's AI client and renderer;
- * it and the resume code load on first use, so registering these routes at
- * startup stays cheap.
+ * The resume service starts with the Job Finder runtime (AI client and
+ * renderer); it and the resume code load on first use, so registering these
+ * routes at startup stays cheap.
  */
 async function resumeService() {
-  const { getJobFinderWorkspaceService } =
-    await import("../services/job-finder");
-  await getJobFinderWorkspaceService();
+  const { startJobFinderRuntime } = await import("../services/job-finder");
+  await startJobFinderRuntime();
   const { getResumeService } = await import("../services/resumes");
   return getResumeService();
 }
@@ -37,10 +38,13 @@ export async function runResumeCommand<K extends ResumeCommandName>(
   input: unknown,
 ) {
   if (!runner) {
-    const { createResumeCommandRunner } = await import(
-      "@nestor/job-finder/resumes"
+    const { createResumeCommandRunner, createResumeCommandReads } =
+      await import("@nestor/job-finder/resumes");
+    runner ??= createResumeCommandRunner(resumeService, () =>
+      Promise.resolve(
+        createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
+      ),
     );
-    runner ??= createResumeCommandRunner(resumeService);
   }
   return runner(name, input);
 }

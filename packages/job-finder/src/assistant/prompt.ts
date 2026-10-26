@@ -1,3 +1,4 @@
+import type { AssistantPersonalState } from "./store-reads";
 import { resolveProfileResumeLevel } from "../resumes/write-resume";
 import { describeProfileAssistantBehavior } from "@nestor/ai-providers";
 import type {
@@ -5,13 +6,11 @@ import type {
   AssistantInstructionGrant,
   AssistantResultSet,
   AssistantTaskPlan,
-  JobFinderWorkspaceSnapshot,
   ResumeLevel,
 } from "@nestor/contracts";
 import {
   AiBehaviorPreferenceSchema,
   ASSISTANT_SCREEN_LABELS,
-  isRunnableJobDiscoveryTarget,
 } from "@nestor/contracts";
 import type { AssistantWorkState } from "./work-state";
 
@@ -56,37 +55,23 @@ export const ASSISTANT_SYSTEM_PROMPT = [
     .join(", ")}; never by routes or ids like review_queue or review-queue.`,
 ].join("\n\n");
 
-/** Search requirements, separate from guided setup and application readiness. */
 export function getAssistantSearchReadiness(
-  snapshot: JobFinderWorkspaceSnapshot,
+  state: Pick<AssistantPersonalState, "enabledSiteCount" | "activityControl">,
 ) {
-  const enabledSources = snapshot.searchPreferences.discovery.targets
-    .filter(isRunnableJobDiscoveryTarget)
-    .map((source) => ({
-      id: source.id,
-      label: source.label,
-      url: source.startingUrl,
-    }));
-  const missingRequirements: string[] = [];
-  if (enabledSources.length === 0)
-    missingRequirements.push(
-      "Add or enable at least one valid public job-source URL before searching.",
-    );
-  if (snapshot.activityControl.paused)
-    missingRequirements.push(
-      "Background work is paused; ask whether to resume before starting a search.",
-    );
-  if (snapshot.browserSession.driver === "catalog_seed")
-    missingRequirements.push(
-      "Current-source searching is temporarily unavailable; try again in a moment.",
-    );
-  else if (snapshot.browserSession.status === "blocked")
-    missingRequirements.push(
-      "The Job Finder browser needs attention before the next search.",
-    );
+  const missingRequirements = [
+    ...(state.enabledSiteCount
+      ? []
+      : [
+          "Add or enable at least one valid public job-source URL before searching.",
+        ]),
+    ...(state.activityControl.paused
+      ? [
+          "Background work is paused; ask whether to resume before starting a search.",
+        ]
+      : []),
+  ];
   return {
-    enabledSourceCount: enabledSources.length,
-    enabledSources,
+    enabledSourceCount: state.enabledSiteCount,
     missingRequirements,
     canStartSearch: missingRequirements.length === 0,
     resumeRequired: false,
@@ -104,13 +89,19 @@ export function resumeLevelLabel(level: ResumeLevel): string {
 }
 
 export function defaultResumeLevelLabel(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: Pick<
+    AssistantPersonalState,
+    "profile" | "searchPreferences" | "settings"
+  >,
 ): string {
   return resumeLevelLabel(resolveProfileResumeLevel(snapshot));
 }
 
 export function buildProfileDigest(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: Pick<
+    AssistantPersonalState,
+    "profile" | "searchPreferences" | "settings"
+  >,
 ): string {
   const profile = snapshot.profile;
   const preferences = snapshot.searchPreferences;
@@ -235,13 +226,15 @@ function describeList(
 export function buildContextBlock(input: {
   context: AssistantContextReference | null;
   resultSets: readonly AssistantResultSet[];
-  snapshot: JobFinderWorkspaceSnapshot;
+  snapshot: Pick<
+    AssistantPersonalState,
+    "profile" | "searchPreferences" | "settings"
+  >;
   work?: AssistantWorkState;
   plan: AssistantTaskPlan | null;
   grants: readonly AssistantInstructionGrant[];
   pendingQuestions: readonly string[];
   now: string;
-  storeCommands?: boolean;
 }): string {
   const lines: string[] = [
     `Time: ${input.now}`,
@@ -321,63 +314,10 @@ export function buildContextBlock(input: {
   lines.push(
     `Current saved sending mode: ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}. Searching does not apply; use read_settings for any sending-policy detail.`,
   );
-  if (input.storeCommands) {
-    lines.push(
-      "Jobs, resumes and searches use the app store. Read current counts with stage_counts, search progress with search_status, resumes with get_resume and Applications with list_applications/get_application. A resume is not required for searching. Old conversation counts are not current facts.",
-    );
-  } else {
-    const searchReadiness = getAssistantSearchReadiness(snapshot);
-    lines.push(
-      `Search readiness: ${
-        searchReadiness.canStartSearch
-          ? `ready to search ${searchReadiness.enabledSourceCount} enabled valid source(s)`
-          : searchReadiness.missingRequirements.join(" ")
-      }. A resume is not required for searching.`,
-    );
-    if (input.work) lines.push(`Live work: ${JSON.stringify(input.work)}`);
-    const drafts = new Map(
-      snapshot.resumeDrafts.map((draft) => [draft.jobId, draft]),
-    );
-    const focused = new Set([
-      context?.focus?.id,
-      ...input.resultSets.flatMap((set) => set.itemIds),
-      ...(context?.mentions.map((mention) => mention.id) ?? []),
-    ]);
-    const relevantResumes = snapshot.reviewQueue.filter((item) =>
-      focused.has(item.jobId),
-    );
-    const resumeStates = relevantResumes.slice(0, 40).map((item) => {
-      const draft = drafts.get(item.jobId);
-      const mode =
-        item.resumeApplicationMode ?? snapshot.settings.resumeApplicationMode;
-      return {
-        jobId: item.jobId,
-        title: item.title,
-        company: item.company,
-        mode,
-        level:
-          mode === "original_resume"
-            ? "original"
-            : (item.resumeTailoringMode ??
-              snapshot.searchPreferences.tailoringMode),
-        revision: draft?.updatedAt ?? null,
-        approval: item.resumeReview.status,
-        approved: mode !== "original_resume" && draft?.status === "approved",
-        linesToDecide: item.resumeLinesToDecide ?? 0,
-      };
-    });
-    lines.push(
-      `Current saved resume states for referenced jobs (not earlier conversation claims): ${JSON.stringify(resumeStates)}. ${snapshot.reviewQueue.length} jobs shortlisted in total; use read_resume for ${relevantResumes.length > 40 ? "remaining referenced and " : ""}other jobs.`,
-    );
-  }
-  const runningApply = snapshot.applyRuns.filter(
-    (run) => run.state === "running",
+  lines.push(
+    "Read current store state with stage_counts, search_status, list_sites, get_job, get_resume, list_applications and list_needs_you. A resume is not required for searching. Earlier conversation counts are not current facts.",
   );
-  if (runningApply.length > 0) {
-    lines.push(
-      `Application batches running: ${runningApply.map((run) => run.id).join(", ")}.`,
-    );
-  }
+  if (input.work) lines.push(`Live work: ${JSON.stringify(input.work)}`);
   if (input.plan && input.plan.status === "active") {
     lines.push(
       `Checklist "${input.plan.title}": ${input.plan.steps

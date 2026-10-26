@@ -1,5 +1,5 @@
+import type { AssistantPersonalState } from "./store-reads";
 import type {
-  JobFinderWorkspaceSnapshot,
   ProfileCopilotPatchOperation,
   ResumeDraft,
   ResumeDraftPatch,
@@ -68,7 +68,10 @@ function recordName(value: unknown, fallback: string) {
 /** Exact replacements are derived from typed payloads, rather than model prose. */
 export function profileProposalPreview(
   operation: ProfileCopilotPatchOperation,
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: Pick<
+    AssistantPersonalState,
+    "profile" | "searchPreferences" | "settings" | "profileSetupState"
+  >,
 ) {
   const profile = record(snapshot.profile);
   const preferences = record(snapshot.searchPreferences);

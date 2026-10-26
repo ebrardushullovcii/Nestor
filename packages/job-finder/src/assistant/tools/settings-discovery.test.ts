@@ -2,6 +2,7 @@ import { AiBehaviorPreferenceSchema } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { assistantTestReads } from "../store-reads.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
 import { readSettingsTool, updateAiBehaviorTool } from "./settings-tools";
@@ -10,6 +11,7 @@ describe("sidebar search settings", () => {
   it("exposes effective defaults and changes remote treatment without losing other choices", async () => {
     const { workspaceService } = createWorkspaceServiceHarness();
     const ports = {
+      ...assistantTestReads(workspaceService),
       publishWorkspaceUpdate: () => undefined,
     } as unknown as AssistantHostPorts;
     const session = {
