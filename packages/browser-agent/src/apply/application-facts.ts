@@ -1,4 +1,7 @@
-import type { CandidateReusableAnswer } from "@nestor/contracts";
+import {
+  normalizeFormQuestionPrompt,
+  type CandidateReusableAnswer,
+} from "@nestor/contracts";
 
 import { normalizeSignal } from "./control-classification";
 import type {
@@ -341,7 +344,7 @@ export function savedAnswerForQuestion(
         .join(" — "),
       control.placeholder,
     ]
-      .map((text) => normalizeSignal(text))
+      .map(normalizeFormQuestionPrompt)
       .filter((text) => text.length > 0),
   );
   return (
@@ -349,11 +352,12 @@ export function savedAnswerForQuestion(
       (saved) =>
         !saved.needsConfirmation &&
         saved.id.startsWith("application_") &&
-        asked.has(normalizeSignal(saved.question)),
+        asked.has(normalizeFormQuestionPrompt(saved.question)),
     ) ??
     reusableAnswers.find(
       (saved) =>
-        !saved.needsConfirmation && asked.has(normalizeSignal(saved.question)),
+        !saved.needsConfirmation &&
+        asked.has(normalizeFormQuestionPrompt(saved.question)),
     ) ??
     null
   );

@@ -341,10 +341,22 @@ export interface FormAnswerMatch {
   roleFamilies?: string[];
   proofEntryIds?: string[];
 }
+/** Page legends describe the wizard, not the question or its answer's scope. */
+export function cleanFormQuestionPrompt(value: string): string {
+  const parts = value
+    .trim()
+    .replace(/^application\s*-\s*/iu, "")
+    .split(/\s*[—–]\s*|\s+-\s+|\r?\n/u);
+  const chrome = (part: string) =>
+    /^(?:job\s+)?application(?:\s+form)?$/iu.test(part.trim()) ||
+    /^step\s+\d+\s*(?:of|\/)\s*\d+\b/iu.test(part.trim());
+  while (parts.length && chrome(parts[0]!)) parts.shift();
+  return parts.join(" — ").trim();
+}
+
 export function normalizeFormQuestionPrompt(value: string): string {
-  return value
+  return (cleanFormQuestionPrompt(value) || value)
     .toLocaleLowerCase("en")
-    .replace(/^application\s*[—–-]\s*/u, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }

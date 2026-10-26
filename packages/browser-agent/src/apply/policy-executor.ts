@@ -2,6 +2,8 @@ import { questionClassificationKey } from "./question-classification";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
+  cleanFormQuestionPrompt,
+  normalizeFormQuestionPrompt,
   type ApplicationAttemptQuestion,
 } from "@nestor/contracts";
 
@@ -255,8 +257,8 @@ export function fileFieldHoldsOtherFile(
 }
 
 export function questionPrompt(control: ApplyFormControl): string {
-  const label = control.label.trim();
-  const group = control.groupLabel.trim();
+  const label = cleanFormQuestionPrompt(control.label) || control.label.trim();
+  const group = cleanFormQuestionPrompt(control.groupLabel);
   // File tasks name the input, without its fieldset legend or required marker.
   if (control.kind === "file") {
     return label.replace(/[\s*:]+$/u, "").replace(/\s+upload$/iu, "") || "file";
@@ -454,7 +456,8 @@ function savedSuggestion(
   }
   const sourceLabel =
     saved &&
-    normalizeSignal(saved.question) === normalizeSignal(questionPrompt(control))
+    normalizeFormQuestionPrompt(saved.question) ===
+      normalizeFormQuestionPrompt(questionPrompt(control))
       ? "your answer to this question"
       : `your saved answer "${saved?.label || saved?.question}"`;
   return saved

@@ -166,6 +166,49 @@ describe("applications on the job store", () => {
     expect(read(first.id)).toEqual(["50000"]);
   });
 
+  it("reuses saved pay answers when a wizard wraps the same questions in progress headings", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [prompt, answer] of [
+      ["Annual salary expectation", "50000"],
+      ["Salary currency", "GBP"],
+      ["Notice period", "One month"],
+    ]) {
+      memory.remember({
+        key: prompt!,
+        prompt: prompt!,
+        answer: answer!,
+        input: "text",
+        scope: {},
+        options: [],
+      });
+      const wrapped = `Step 3 of 6: Compensation — ${prompt} *`;
+      expect(
+        memory
+          .answersForQuestions(
+            row.id,
+            [{ key: prompt!, prompt: wrapped, reusePrompt: true }],
+            "https://jobs.example.test",
+          )
+          .map((found) => found.answer),
+      ).toEqual([answer]);
+      expect(
+        memory.request(
+          question(row.id, row.attempt, {
+            key: prompt!,
+            prompt: wrapped,
+            reusePrompt: true,
+            scope: {},
+            input: "text",
+          }),
+        ),
+      ).toEqual({ status: "answered", answer });
+    }
+    expect(memory.list().total).toBe(0);
+  });
+
   it("returns an unusable remembered answer to one shared question and waits for its correction", () => {
     const { jobs, applications } = open();
     applications.applyJobs({ selection: { ids: add(jobs, 2) } });
