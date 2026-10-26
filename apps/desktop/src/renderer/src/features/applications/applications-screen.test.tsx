@@ -185,7 +185,7 @@ describe("Applications", () => {
     });
     expect(
       screen
-        .getByRole("button", { name: "Board", exact: true })
+        .getByRole("button", { name: "Board" })
         .getAttribute("aria-pressed"),
     ).toBe("true");
   });
