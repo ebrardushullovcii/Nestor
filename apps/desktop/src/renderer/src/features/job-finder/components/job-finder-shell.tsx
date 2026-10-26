@@ -65,7 +65,10 @@ import {
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_CLASS,
 } from "../lib/job-finder-shell-gutters";
-import { buildJobFinderGlobalSearchEntries } from "../lib/build-job-finder-global-search-entries";
+import {
+  SCREEN_ENTRIES,
+  searchSavedJobs,
+} from "../lib/build-job-finder-global-search-entries";
 import type { JobFinderGlobalSearchEntry } from "../lib/job-finder-global-search";
 import {
   formatJobFinderShortcutCombo,
@@ -87,8 +90,6 @@ import {
   JOB_FINDER_SHORTCUTS_DIALOG_LABEL,
   JobFinderShortcutsDialog,
 } from "./job-finder-shortcuts-dialog";
-import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
-import { requestLegacyWorkspace } from "../lib/legacy-workspace-demand";
 
 interface JobFinderShellProps {
   children: ReactNode;
@@ -566,23 +567,6 @@ export function JobFinderShell({
     observer.observe(actions);
     return () => observer.disconnect();
   }, []);
-  // The palette index is only ever read by the open dialog, so it is built on
-  // demand (at idle once the palette shows, or by the first query), once per
-  // workspace, and never while the palette is closed.
-  const loadGlobalSearchEntries = useMemo(() => {
-    let entries: readonly JobFinderGlobalSearchEntry[] | null = null;
-    return () => {
-      if (!workspace) {
-        // The palette still searches the old workspace; opening it loads it.
-        requestLegacyWorkspace();
-        return [];
-      }
-      // The palette lists every job: one full read if the lists fell behind.
-      readFullWorkspaceIfBehind();
-      return (entries ??= buildJobFinderGlobalSearchEntries(workspace));
-    };
-  }, [workspace]);
-
   const activeScreen = useMemo(
     () => getActiveScreen(location.pathname),
     [location.pathname],
@@ -1921,7 +1905,8 @@ export function JobFinderShell({
 
       {isGlobalSearchOpen ? (
         <JobFinderGlobalSearchDialog
-          entries={loadGlobalSearchEntries}
+          entries={SCREEN_ENTRIES}
+          searchMore={searchSavedJobs}
           focusRequest={globalSearchFocusRequest}
           onClose={() => setIsGlobalSearchOpen(false)}
           onNavigate={handleGlobalSearchNavigate}

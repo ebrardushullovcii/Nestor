@@ -1,14 +1,8 @@
 import { matchesCollectionSearch } from "../components/collection-search-toolbar";
 
-export type JobFinderGlobalSearchKind =
-  | "application"
-  | "company"
-  | "document"
-  | "job"
-  | "screen";
+export type JobFinderGlobalSearchKind = "application" | "job" | "screen";
 
 export interface JobFinderGlobalSearchEntry {
-  campaignId?: string | null;
   href: string;
   id: string;
   kind: JobFinderGlobalSearchKind;
@@ -26,33 +20,36 @@ const kindOrder: readonly JobFinderGlobalSearchKind[] = [
   "screen",
   "job",
   "application",
-  "company",
-  "document",
 ];
 
+/**
+ * Groups the entries matching `query`, in kind order. `found` holds entries
+ * another search already matched (the job store's own text search), so
+ * they are kept as they are.
+ */
 export function searchJobFinderEntries(
   entries: readonly JobFinderGlobalSearchEntry[],
   query: string,
-  options: { campaignId?: string | null; limit?: number } = {},
+  options: {
+    found?: readonly JobFinderGlobalSearchEntry[];
+    limit?: number;
+  } = {},
 ): readonly JobFinderGlobalSearchGroup[] {
   const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
-  const matches = entries.filter(
-    (entry) =>
-      // Screens belong to no plan; they are found under any plan.
-      (!options.campaignId ||
-        entry.kind === "screen" ||
-        entry.campaignId === options.campaignId) &&
+  const matches = [
+    ...entries.filter((entry) =>
       matchesCollectionSearch(query, [
         entry.title,
         entry.subtitle,
         entry.kind,
         ...entry.metadata,
       ]),
-  );
+    ),
+    ...(options.found ?? []),
+  ];
 
-  // Jobs are built before applications and resumes. Reserve one place for
-  // each matching kind so a large job collection cannot hide every result
-  // from the other parts of the workspace.
+  // Reserve one place for each matching kind so many results of one kind
+  // cannot hide every result of the others.
   const selected = new Set<JobFinderGlobalSearchEntry>();
   if (matches[0]) selected.add(matches[0]);
   for (const kind of kindOrder) {
