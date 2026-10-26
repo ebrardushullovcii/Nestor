@@ -4,7 +4,6 @@ import {
   RESUMES_EXPORT_PDF_CHANNEL,
   RESUMES_PREVIEW_CHANNEL,
   RESUMES_RUN_CHANNEL,
-  ResumePdfExportInputSchema,
   ResumePreviewInputSchema,
   type ResumeCommandName,
   type ResumePdfExportResult,
@@ -32,6 +31,23 @@ async function resumeService() {
 
 let runner: RunResumeCommand | null = null;
 
+async function exportResumePdf(
+  service: Awaited<ReturnType<typeof resumeService>>,
+  jobId: number,
+): Promise<ResumePdfExportResult> {
+  const { job, resume } = service.get(jobId);
+  const target = await chooseResumeExportPath(
+    null,
+    buildResumeExportDefaultPath(
+      resume?.level === "original" ? "Resume" : "Tailored Resume",
+      job.title,
+      job.company,
+    ),
+  );
+  if (!target) return { outputPath: null };
+  return { outputPath: await service.exportPdf(jobId, target) };
+}
+
 /** The same commands the Shortlisted screen uses; the Assistant calls this. */
 export async function runResumeCommand<K extends ResumeCommandName>(
   name: K,
@@ -40,10 +56,13 @@ export async function runResumeCommand<K extends ResumeCommandName>(
   if (!runner) {
     const { createResumeCommandRunner, createResumeCommandReads } =
       await import("@nestor/job-finder/resumes");
-    runner ??= createResumeCommandRunner(resumeService, () =>
-      Promise.resolve(
-        createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
-      ),
+    runner ??= createResumeCommandRunner(
+      resumeService,
+      () =>
+        Promise.resolve(
+          createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
+        ),
+      exportResumePdf,
     );
   }
   return runner(name, input);
@@ -90,20 +109,7 @@ export function registerResumeRoutes(ipcMain: IpcMain): void {
     RESUMES_EXPORT_PDF_CHANNEL,
     async (event, payload: unknown): Promise<ResumePdfExportResult> => {
       if (!fromMainFrame(event)) throw new Error("Not allowed.");
-      const { jobId } = ResumePdfExportInputSchema.parse(payload);
-      const service = await resumeService();
-      const { job, resume } = service.get(jobId);
-      const level = resume?.level ?? "tailored";
-      const target = await chooseResumeExportPath(
-        event.sender,
-        buildResumeExportDefaultPath(
-          level === "original" ? "Resume" : "Tailored Resume",
-          job.title,
-          job.company,
-        ),
-      );
-      if (!target) return { outputPath: null };
-      return { outputPath: await service.exportPdf(jobId, target) };
+      return runResumeCommand("export_resume_pdf", payload);
     },
   );
 }

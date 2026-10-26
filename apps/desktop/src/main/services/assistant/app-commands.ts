@@ -299,6 +299,12 @@ export function assistantAppCommands() {
           approve_resume: ["action_approve_resumes"],
         },
         results: {
+          export_resume_pdf: (value) => ({
+            summary: value.outputPath
+              ? `Exported the saved resume PDF to ${value.outputPath}.`
+              : "PDF export cancelled. No file was written.",
+            data: value,
+          }),
           list_shortlisted: async (page, _input, { session }) => {
             await session.createResultSet({
               kind: "jobs",

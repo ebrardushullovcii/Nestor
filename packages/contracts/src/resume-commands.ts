@@ -50,7 +50,12 @@ export const RESUME_COMMANDS = {
     effect: "local_write",
     description:
       "Puts back the resume, level and approval a level change replaced.",
-    input: z.object({ jobId: JobIdSchema, changeId: z.string().min(1).max(100).optional() }).strict(),
+    input: z
+      .object({
+        jobId: JobIdSchema,
+        changeId: z.string().min(1).max(100).optional(),
+      })
+      .strict(),
   },
   rewrite_resume: {
     effect: "local_write",
@@ -62,6 +67,12 @@ export const RESUME_COMMANDS = {
     effect: "local_write",
     description:
       "Approves a written resume. The job moves to the resume stage, where Apply can take it at once.",
+    input: z.object({ jobId: JobIdSchema }).strict(),
+  },
+  export_resume_pdf: {
+    effect: "local_write",
+    description:
+      "Exports the job's saved resume as a PDF using the app's Save dialog. The person chooses the file location; cancellation writes nothing. Does not save unsaved typing, approve the resume or apply to the job.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
 } as const satisfies Record<string, AppCommandDefinition>;
@@ -96,6 +107,7 @@ export interface ResumeCommandOutputs {
   undo_resume_level: StoredResume;
   rewrite_resume: StoredResume | null;
   approve_resume: StoredResume;
+  export_resume_pdf: ResumePdfExportResult;
 }
 
 export type ResumeCommandOutput<K extends ResumeCommandName> =

@@ -74,7 +74,7 @@ export async function chooseSavePath(
 
 /** Download PDF: the resume, named after the job. */
 export function chooseResumeExportPath(
-  sender: WebContents,
+  sender: WebContents | null,
   defaultPath: string,
 ): Promise<string | null> {
   // Not "tailored": the same dialog opens for a document nothing could be
