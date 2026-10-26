@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.8.0",
   "scripts": {
+    "apply:eval": "node packages/ai-evals/scripts/run-apply-replay.mjs",
     "dev": "node scripts/run-turbo.mjs dev --parallel",
     "desktop:dev": "pnpm --filter @nestor/desktop dev",
     "desktop:start": "pnpm --filter @nestor/desktop start",
