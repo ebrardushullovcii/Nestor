@@ -110,5 +110,151 @@
       "path": "/workday/api/save",
       "body": "{\"step\":2,\"final\":false,\"draft\":true,\"complete\":false,\"fieldAnswers\":{}}"
     }
+  ],
+  "completionProbes": [
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"sent\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"applied\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"state\":\"final\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"phase\":\"final\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"finalStep\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"publish\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"\\u0073ubmitted\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"\\u0073tatus\":\"\\u0073ent\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"\\\\u0073ubmitted\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"completed\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"complete\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"done\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"phase\":\"complete\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"completed\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"isCompleted\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"is_completed\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"application_completed\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"send\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"confirm\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"submit\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"finish\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"apply\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"operationName\":\"ApplyForJob\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"operationName\":\"FinishApplication\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"operation_name\":\"SubmitCandidate\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"operationName\":\"CompleteApplication\"}"
+    },
+    {
+      "path": "/v1/jobs/42/candidates",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/applicants",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/applicants/",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/candidates/create",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"completed\",\"fieldAnswers\":{\"draft\":true}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"complete\",\"fieldAnswers\":{\"final\":false}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"done\",\"step\":4,\"totalSteps\":4,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"completed\",\"stepIndex\":3,\"totalSteps\":4,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"completed\",\"status\":\"saved\",\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "mutation ApplyForJob { fieldAnswers }"
+    }
   ]
 }

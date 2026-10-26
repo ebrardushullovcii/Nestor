@@ -26,6 +26,8 @@ import {
   getBlockedPrepareOnlyAttempts,
   openPrepareOnlyAuthorizedFormActionWindow,
   openPrepareOnlyIntermediateMutationWindow,
+  closePrepareOnlyAttachmentUploadWindow,
+  allowPrepareOnlyRunNavigation,
   openPrepareOnlyAttachmentUploadWindow,
   registerPrepareOnlyPreparedValue,
   readPrepareOnlyIntermediateWriteCount,
@@ -1723,6 +1725,7 @@ export function createPlaywrightApplyPageMechanics(
         // Asking for the address the link already publishes, rather than
         // clicking it, keeps the hop a plain read: no popup, no script, and
         // nothing the page can turn into a write.
+        allowPrepareOnlyRunNavigation(page, target.toString());
         await page.goto(target.toString(), {
           waitUntil: "domcontentloaded",
           // Short on purpose: a hop that does not answer quickly is a hop
@@ -1761,6 +1764,7 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: true, url: page.url() };
       }
       try {
+        allowPrepareOnlyRunNavigation(page, target.toString());
         await page.goto(target.toString(), {
           waitUntil: "domcontentloaded",
           timeout: 20_000,
@@ -1853,6 +1857,7 @@ export function createPlaywrightApplyPageMechanics(
       }
       await opened.close().catch(() => undefined);
       try {
+        allowPrepareOnlyRunNavigation(page, url);
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: 20_000,
@@ -1909,16 +1914,74 @@ export function createPlaywrightApplyPageSession(input: {
 
   return {
     ...mechanics,
+    setToggle: async (ref, checked) => {
+      // A radio or checkbox sends its value ("PT") and its page shows a label
+      // ("Portugal"): the guard has to know both before it is activated.
+      const control = controlLocator(page, ref);
+      const declared = control
+        ? await control
+            .evaluate((element) => {
+              const input =
+                element instanceof HTMLInputElement
+                  ? element
+                  : element.querySelector("input");
+              if (!input || !["radio", "checkbox"].includes(input.type))
+                return [];
+              const label =
+                input.labels?.[0]?.textContent ??
+                input.getAttribute("aria-label") ??
+                "";
+              // What the control submits: its value, or the browser's "on"
+              // when it has no value attribute.
+              return [input.value, label];
+            })
+            .catch(() => [] as string[])
+        : [];
+      if (checked)
+        for (const value of declared)
+          if (value.trim())
+            await registerPrepareOnlyPreparedValue(page, value).catch(
+              () => undefined,
+            );
+      return mechanics.setToggle(ref, checked);
+    },
+    chooseOption: async (ref, optionLabel) => {
+      // A native select sends its option's value ("PT"), not the label the
+      // run declared ("Portugal"): the guard has to know both.
+      const control = controlLocator(page, ref);
+      const value = control
+        ? await control
+            .evaluate((element, label) => {
+              if (!(element instanceof HTMLSelectElement)) return null;
+              const wanted = label.trim();
+              return (
+                [...element.options].find(
+                  (option) =>
+                    option.label.trim() === wanted ||
+                    option.text.trim() === wanted,
+                )?.value ?? null
+              );
+            }, optionLabel)
+            .catch(() => null)
+        : null;
+      if (value?.trim())
+        await registerPrepareOnlyPreparedValue(page, value).catch(
+          () => undefined,
+        );
+      return mechanics.chooseOption(ref, optionLabel);
+    },
     uploadFile: async (ref, file) => {
       const control = controlLocator(page, ref);
-      if (
-        control &&
-        (await control.evaluate(
-          (element) =>
-            element instanceof HTMLInputElement && element.type === "file",
-        ))
-      )
-        await openPrepareOnlyAttachmentUploadWindow(page, file);
+      // The file input's own name or id, or false when it is not one.
+      const fileField = control
+        ? await control.evaluate((element) =>
+            element instanceof HTMLInputElement && element.type === "file"
+              ? element.name || element.id || null
+              : false,
+          )
+        : false;
+      if (fileField !== false)
+        await openPrepareOnlyAttachmentUploadWindow(page, file, fileField);
       return mechanics.uploadFile(ref, file);
     },
     installPrepareOnlyGuard: async (guardInput) => {
@@ -1952,6 +2015,7 @@ export function createPlaywrightApplyPageSession(input: {
     openIntermediateWriteWindow: async () => {
       await openPrepareOnlyIntermediateMutationWindow(page);
     },
+    closeUploadWindow: () => closePrepareOnlyAttachmentUploadWindow(page),
     closeIntermediateWriteWindow: () =>
       closePrepareOnlyIntermediateMutationWindow(page),
     clickAuthorizedFormAction: async (ref) => {

@@ -56,6 +56,7 @@ export function guardApplicationPreparationSession(
       guard(() => session.openIntermediateWriteWindow()),
     // Cleanup must still close a short write window when a run was aborted.
     closeIntermediateWriteWindow: () => session.closeIntermediateWriteWindow(),
+    closeUploadWindow: () => session.closeUploadWindow(),
     clickAuthorizedFormAction: (ref) =>
       guard(() => session.clickAuthorizedFormAction(ref)),
     checkServiceWorker: () => guard(() => session.checkServiceWorker()),

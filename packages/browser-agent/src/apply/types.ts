@@ -333,6 +333,11 @@ export interface ApplySafetyHooks {
   /** Opens the short window in which the site may save the field just filled. */
   openIntermediateWriteWindow: () => Promise<void>;
   closeIntermediateWriteWindow: () => Promise<void>;
+  /**
+   * Lets an upload on its way finish, then shuts the attachment window.
+   * Called before every press that is not a field write.
+   */
+  closeUploadWindow?: () => Promise<void>;
   /** Rechecks for a background worker that could change the page. */
   checkServiceWorker: () => Promise<ApplyServiceWorkerFinding | null>;
 }

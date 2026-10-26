@@ -1,3 +1,5 @@
+import { readGraphQlRequest } from "./graphql-request";
+
 /**
  * Page-owned reads during unauthorized preparation.
  *
@@ -73,7 +75,9 @@ export function requestUrlCarriesPreparedValue(
 }
 
 /** Generic telemetry/monitoring request shapes that never represent a form submission. */
-export function isTelemetryRequestUrl(value: string | null | undefined): boolean {
+export function isTelemetryRequestUrl(
+  value: string | null | undefined,
+): boolean {
   if (!value) return false;
   let parsed: URL;
   try {
@@ -83,9 +87,8 @@ export function isTelemetryRequestUrl(value: string | null | undefined): boolean
   }
   const hostname = parsed.hostname.toLowerCase();
   const pathname = parsed.pathname.toLowerCase();
-  const telemetrySubdomain = /^(?:analytics|beacon|metrics|rum|sa|telemetry)\./u.test(
-    hostname,
-  );
+  const telemetrySubdomain =
+    /^(?:analytics|beacon|metrics|rum|sa|telemetry)\./u.test(hostname);
   const trackingPixel = /(?:^|\/)(?:pixel|simple)(?:\.gif)?$/u.test(pathname);
   const pageViewSignal =
     parsed.searchParams.has("page_id") ||
@@ -120,25 +123,32 @@ export function isTelemetryRequestUrl(value: string | null | undefined): boolean
 export function isGraphQlReadBody(
   bodyText: string | null | undefined,
 ): boolean {
-  if (!bodyText || bodyText.length > 65_536) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    return false;
-  }
-  const operations = Array.isArray(parsed) ? parsed : [parsed];
-  if (operations.length === 0) return false;
-  return operations.every((operation) => {
-    if (typeof operation !== "object" || operation === null) return false;
-    const query = (operation as { query?: unknown }).query;
-    if (typeof query !== "string") return false;
-    const document = query.replace(/#[^\n]*/g, " ").trim();
-    return (
-      /^(?:query\b|\{)/u.test(document) &&
-      !/\b(?:mutation|subscription)\b/u.test(document)
-    );
-  });
+  // The server runs the operation the parser sees; a query is a read.
+  const operations = readGraphQlRequest(bodyText);
+  return (
+    operations !== null &&
+    operations.every((operation) => operation.type === "query")
+  );
+}
+
+/**
+ * Whether any of these values is, or carries, an answer the run wrote. Short
+ * answers ("PT", a select's value) count only as the whole value.
+ */
+export function valuesCarryPreparedValue(
+  values: readonly string[],
+  preparedValues: readonly string[],
+): boolean {
+  const exact = new Set(
+    preparedValues
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0),
+  );
+  return values.some(
+    (value) =>
+      exact.has(value.trim().toLowerCase()) ||
+      carriesPreparedValue(value, preparedValues),
+  );
 }
 
 export interface PageOwnedReadRequest {

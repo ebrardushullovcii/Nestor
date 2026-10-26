@@ -7,7 +7,11 @@ import {
   classifyAttachmentUpload,
   type AttachmentUploadWindow,
 } from "./application-attachment-upload-policy";
-import type { ApplyUploadFile } from "@nestor/contracts";
+import type { ApplyRequestPermit, ApplyUploadFile } from "@nestor/contracts";
+import {
+  classifyStrictFillRead,
+  uploadHopStaysOnEndpoint,
+} from "./application-fill-request-policy";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type {
@@ -100,6 +104,105 @@ function isNetworkLayerPageOwnedRead(
   });
 }
 
+/** Why the fence let each upload through; see `getPrepareOnlyRequestPermit`. */
+const prepareOnlyRequestPermits = new WeakMap<Request, ApplyRequestPermit>();
+
+/**
+ * The permit the prepare-only fence issued for an upload request. No permit
+ * means the fence never let the request out as an upload.
+ */
+export function getPrepareOnlyRequestPermit(
+  request: Request,
+): ApplyRequestPermit | null {
+  return prepareOnlyRequestPermits.get(request) ?? null;
+}
+
+function exactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Marks the exact address the run itself is about to open, so the fence
+ * knows that one navigation is the run's own (it may be the form at
+ * `/apply`). The grant is used up by that navigation: anything opened later,
+ * even the same address, was started by the page and is checked as such.
+ */
+export function allowPrepareOnlyRunNavigation(page: Page, url: string): void {
+  prepareOnlyNetworkGuardStates.get(page)?.runNavigations.add(exactUrl(url));
+}
+
+function requestFrameOrigin(request: Request): string | null {
+  try {
+    return new URL(request.frame().url()).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sends a request Fill allowed without letting the browser follow its
+ * redirects on its own: Playwright never routes a redirect hop, so each hop
+ * is fetched here and only when `hopAllowed` lets that exact address and
+ * method through. A navigation that redirected is handed to the browser as
+ * one redirect to the checked final address. Returns false when a hop was
+ * refused; nothing was sent there.
+ */
+async function forwardCheckingHops(
+  route: Route,
+  request: Request,
+  hopAllowed: (url: string, method: string, body: string | null) => boolean,
+): Promise<boolean> {
+  let url = request.url();
+  let method = request.method();
+  let postData: Buffer | undefined = request.postDataBuffer() ?? undefined;
+  // A later hop may be another site: it never gets this request's cookies or
+  // credentials; the context's own jar decides what it sends there.
+  const hopHeaders = Object.fromEntries(
+    Object.entries(request.headers()).filter(
+      ([name]) => !/^(?:cookie|authorization)$/iu.test(name),
+    ),
+  );
+  for (let hop = 0; hop < 6; hop++) {
+    const response = await route.fetch({
+      url,
+      method,
+      ...(hop > 0 ? { headers: hopHeaders } : {}),
+      ...(postData ? { postData } : {}),
+      maxRedirects: 0,
+    });
+    const status = response.status();
+    if (status < 300 || status >= 400 || status === 304) {
+      if (hop > 0 && request.isNavigationRequest())
+        await route.fulfill({ status: 302, headers: { location: url } });
+      else await route.fulfill({ response });
+      return true;
+    }
+    let next: string;
+    try {
+      next = new URL(response.headers()["location"] ?? "", url).href;
+    } catch {
+      return false;
+    }
+    if (
+      status === 303 ||
+      ((status === 301 || status === 302) && method !== "GET")
+    ) {
+      method = "GET";
+      postData = undefined;
+    }
+    if (!hopAllowed(next, method, postData?.toString("utf8") ?? null))
+      return false;
+    url = next;
+  }
+  return false;
+}
+
 export interface PrepareOnlyGuardSnapshot {
   installed: boolean;
   blockedAttempts: PrepareOnlyBlockedAttempt[];
@@ -110,6 +213,8 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
   {
     blockedAttempts: PrepareOnlyBlockedAttempt[];
     preparedValues: Set<string>;
+    /** Exact addresses the run is about to open, each good for one navigation. */
+    runNavigations: Set<string>;
     allowedIntermediateRequests: WeakSet<Request>;
     verifiedIntermediateWriteCount: number;
     intermediateMutationsAuthorized: boolean;
@@ -1443,6 +1548,7 @@ export async function ensurePrepareOnlyMutationGuard(
     networkGuardState = {
       blockedAttempts: [],
       preparedValues: new Set<string>(),
+      runNavigations: new Set<string>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       intermediateMutationsAuthorized,
@@ -1520,18 +1626,62 @@ export async function ensurePrepareOnlyMutationGuard(
         await route.abort("blockedbyclient");
       };
 
+      // Fill in for me: nothing that writes leaves without the person's own
+      // click, except the selected resume below. Saves are allowed only
+      // under Send for me's own authority.
+      const strictFill = !networkGuardState!.intermediateMutationsAuthorized;
       if (
-        (PREPARE_ONLY_SAFE_METHODS.has(method) &&
+        !strictFill &&
+        ((PREPARE_ONLY_SAFE_METHODS.has(method) &&
           !PREPARE_ONLY_DENIED_RESOURCE_TYPES.has(resourceType) &&
           !(
             PREPARE_ONLY_QUERY_GUARDED_RESOURCE_TYPES.has(resourceType) &&
             request.url().includes("?")
           )) ||
-        isNetworkLayerPageOwnedRead(request, [
-          ...networkGuardState!.preparedValues,
-        ])
+          isNetworkLayerPageOwnedRead(request, [
+            ...networkGuardState!.preparedValues,
+          ]))
       ) {
         await route.continue();
+        return;
+      }
+      const navigation = request.isNavigationRequest()
+        ? networkGuardState!.runNavigations.delete(exactUrl(request.url()))
+          ? ("run" as const)
+          : ("page" as const)
+        : undefined;
+      if (
+        strictFill &&
+        classifyStrictFillRead({
+          method,
+          resourceType,
+          url: request.url(),
+          bodyText: request.postData(),
+          preparedValues: [...networkGuardState!.preparedValues],
+          ...(navigation ? { navigation } : {}),
+        }).allowed
+      ) {
+        let forwarded = false;
+        try {
+          forwarded = await forwardCheckingHops(
+            route,
+            request,
+            (url, hopMethod, body) =>
+              classifyStrictFillRead({
+                method: hopMethod,
+                resourceType,
+                url,
+                bodyText: body,
+                preparedValues: [...networkGuardState!.preparedValues],
+                // A redirect of the run's own navigation is still the run's.
+                ...(navigation ? { navigation } : {}),
+              }).allowed,
+          );
+        } catch {
+          await route.abort("failed").catch(() => undefined);
+          return;
+        }
+        if (!forwarded) await denyRequest();
         return;
       }
 
@@ -1553,9 +1703,55 @@ export async function ensurePrepareOnlyMutationGuard(
         preparedValues: [...networkGuardState!.preparedValues],
       });
       if (attachment.allowed) {
-        networkGuardState!.attachmentUploadWindow!.remainingRequests -= 1;
+        const grant = networkGuardState!.attachmentUploadWindow!;
+        grant.remainingRequests -= 1;
         networkGuardState!.allowedIntermediateRequests.add(request);
-        await route.continue();
+        prepareOnlyRequestPermits.set(request, {
+          actionKind: "upload",
+          frameOrigin: requestFrameOrigin(request) ?? grant.sourceOrigin,
+          method,
+          endpoint: request.url(),
+          authorizedCarrier: request,
+          file: {
+            field: grant.field ?? null,
+            name: grant.fileName,
+            size: grant.byteLength,
+            sha256: grant.sha256,
+          },
+          uploadLeg: attachment.containsFile ? "file" : "presign",
+        });
+        let forwarded = false;
+        try {
+          forwarded = await forwardCheckingHops(
+            route,
+            request,
+            (url) =>
+              uploadHopStaysOnEndpoint(request.url(), url, [
+                ...networkGuardState!.preparedValues,
+              ]) !== null,
+          );
+        } catch {
+          await route.abort("failed").catch(() => undefined);
+          return;
+        }
+        if (!forwarded) {
+          // The upload reached its endpoint, which then pointed somewhere
+          // else. That hop is never followed.
+          prepareOnlyRequestPermits.delete(request);
+          await denyRequest();
+        }
+        return;
+      }
+      if (strictFill) {
+        const carries =
+          requestUrlCarriesPreparedValue(request.url(), [
+            ...networkGuardState!.preparedValues,
+          ]) ||
+          carriesPreparedValue(request.postData(), [
+            ...networkGuardState!.preparedValues,
+          ]);
+        if (carries) await denyRequest();
+        else await route.abort("blockedbyclient");
         return;
       }
       // A Send-authorized, same-origin draft save can include the form's file
@@ -1820,6 +2016,7 @@ export async function closePrepareOnlyIntermediateMutationWindow(
 export async function openPrepareOnlyAttachmentUploadWindow(
   page: Page,
   file: ApplyUploadFile,
+  field: string | null = null,
 ): Promise<void> {
   const guard = prepareOnlyNetworkGuardStates.get(page);
   const origin = new URL(page.url()).origin;
@@ -1839,6 +2036,7 @@ export async function openPrepareOnlyAttachmentUploadWindow(
     sha256: createHash("sha256").update(file.bytes).digest("hex"),
     expiresAtMs: Date.now() + 15_000,
     remainingRequests: 2,
+    field,
   };
   guard.attachmentUploadWindow = grant;
   for (const frame of page.frames()) {
@@ -1856,12 +2054,40 @@ export async function openPrepareOnlyAttachmentUploadWindow(
   }
 }
 
+/**
+ * Lets an upload already on its way finish, then shuts the attachment
+ * window everywhere, so the next press (a "Done", a "Next") cannot carry the
+ * selected file out with it.
+ */
+export async function closePrepareOnlyAttachmentUploadWindow(
+  page: Page,
+): Promise<void> {
+  const guard = prepareOnlyNetworkGuardStates.get(page);
+  if (!guard?.attachmentUploadWindow) return;
+  await page
+    .waitForLoadState("networkidle", { timeout: 1_500 })
+    .catch(() => undefined);
+  guard.attachmentUploadWindow = null;
+  for (const frame of page.frames()) {
+    await frame
+      .evaluate(() => {
+        const state = (window as unknown as Record<string, unknown>)[
+          "__nestorPrepareOnlyMutationGuardV1"
+        ] as { attachmentUploadWindow: unknown } | undefined;
+        if (state) state.attachmentUploadWindow = null;
+      })
+      .catch(() => undefined);
+  }
+}
+
 export async function registerPrepareOnlyPreparedValue(
   page: Page,
   value: string,
 ): Promise<void> {
+  // Short values ("PT", a select's option value) are kept too; they are
+  // matched only as a whole value, never as a substring.
   const normalized = value.trim();
-  if (normalized.length < 3) return;
+  if (!normalized) return;
   const networkGuardState = prepareOnlyNetworkGuardStates.get(page);
   if (!networkGuardState) {
     throw new Error("Prepare-only network guard is not installed.");
@@ -1920,6 +2146,7 @@ export function recordPrepareOnlyRunInterruption(
     const createdState = {
       blockedAttempts: [],
       preparedValues: new Set<string>(),
+      runNavigations: new Set<string>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       intermediateMutationsAuthorized: false,

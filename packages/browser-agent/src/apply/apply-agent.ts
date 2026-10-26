@@ -45,6 +45,8 @@ import {
   executeApplyProposal,
   guardStop,
   fileFieldHoldsOtherFile,
+  fillMayOpen,
+  pressOnSitePause,
   questionPrompt,
   pickerExhausted,
   pickerQuestionKey,
@@ -2484,6 +2486,42 @@ async function runMeasuredApplyAgent(
         .map<AgentLoopTool>((tool) => ({
           ...tool,
           execute: async (rawArguments, context) => {
+            // Fill in for me opens only the form and the page it is on; any
+            // other link or address (a "Continue", a step) is the person's.
+            const name = tool.definition.function.name;
+            if (
+              (name === "follow_link" || name === "navigate") &&
+              config.intermediateWritesAuthorized !== true
+            ) {
+              let args: Record<string, unknown> = {};
+              try {
+                args = JSON.parse(rawArguments || "{}") as Record<
+                  string,
+                  unknown
+                >;
+              } catch {
+                args = {};
+              }
+              const seen = pageTools.state.observation;
+              const link =
+                name === "follow_link"
+                  ? seen?.links.find((entry) => entry.ref === args.ref)
+                  : undefined;
+              const href =
+                name === "navigate"
+                  ? typeof args.url === "string"
+                    ? args.url
+                    : ""
+                  : (link?.href ?? "");
+              if (!fillMayOpen(config, seen?.url ?? null, href)) {
+                const pause = pressOnSitePause(
+                  link?.label ? `"${link.label}"` : href || "that link",
+                );
+                pauses.push(pause);
+                note(pause.summary);
+                return { kind: "stop", reason: pause.summary, data: pause };
+              }
+            }
             const result = await tool.execute(rawArguments, context);
             const current = pageTools.state.observation;
             if (current) syncObservation(current);

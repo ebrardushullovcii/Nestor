@@ -156,3 +156,35 @@ describe("intermediate application mutation policy", () => {
     );
   });
 });
+
+describe("the second net refuses the Apply agent's completion probes in a Send for me save window", () => {
+  // Batch R: completion, action and operation shapes, and collection
+  // creates, as recorded and carrying an answer.
+  const fill = (body: string) =>
+    body.replace(
+      '"fieldAnswers":{}',
+      '"fieldAnswers":{"name":"Synthetic Applicant"}',
+    );
+  test.each(finalMutationReplay.completionProbes)(
+    "refuses $path $body",
+    ({ path, body }) => {
+      for (const variant of [body, fill(body)])
+        expect(
+          classifyIntermediateMutationRequest({
+            authorized: true,
+            bodyText: variant,
+            method: "POST",
+            nowMs: 1_000,
+            resourceKind: "fetch",
+            url: `https://apply.example.com${path}`,
+            window: {
+              expectedOrigin: "https://apply.example.com",
+              expiresAtMs: 2_000,
+              remainingRequests: 2,
+            },
+          }).allowed,
+          variant,
+        ).toBe(false);
+    },
+  );
+});

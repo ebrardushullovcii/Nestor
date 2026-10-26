@@ -373,8 +373,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
+      // Fill in for me lets no save out: the only write that leaves without
+      // the person's own click is the selected resume (attachment rules).
+      // Saves are Send for me's, under its own authority.
       intermediateMutationsAuthorized:
-        !envelope || envelope.intermediateMutationsAuthorized,
+        envelope?.intermediateMutationsAuthorized === true,
       attachmentUploadsAuthorized: true,
       // No envelope: the browser pins each live form frame's own origin.
       // An envelope, when present, continues to narrow those destinations.
@@ -385,8 +388,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ) => {
         if (
           purpose === "answers" &&
-          envelope &&
-          !envelope.intermediateMutationsAuthorized
+          envelope?.intermediateMutationsAuthorized !== true
         )
           return false;
         if (

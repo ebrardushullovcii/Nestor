@@ -1345,15 +1345,15 @@ async function reviewGuard(
 }
 
 /**
- * The pause for a form that cannot go on without saving to the site.
+ * The handover where Fill in for me stops pressing.
  *
- * Reached only when the form actually refused to take an answer or to move on
- * after a save was blocked. The person is offered the one thing that would
- * change it: letting this site save as they go — their choice, not a flag.
+ * Fill never presses the form's own buttons (Next, Continue, Save, Add):
+ * any of them could send the application, and nothing tells which. So the
+ * run fills what is on the page and hands the press to the person; continuing
+ * afterwards picks the run up on the page they reached.
  */
-function savesAsYouGoPause(host: string | null): ApplyPause {
-  const summary =
-    "This site saves your answers as you type, and Job Finder is not allowed to let it.";
+export function pressOnSitePause(pressed: string): ApplyPause {
+  const summary = `Job Finder filled what it could on this page. Press ${pressed} on the site yourself, then continue and Job Finder fills the next page.`;
   return {
     code: "site_tried_to_send",
     summary,
@@ -1361,13 +1361,64 @@ function savesAsYouGoPause(host: string | null): ApplyPause {
     blocker: {
       code: "site_saves_as_you_go",
       summary,
-      detail: host
-        ? `The form sends each answer to ${host} as it is typed. Those were blocked, so the form would not carry on.`
-        : "The form sends each answer to the site as it is typed. Those were blocked, so the form would not carry on.",
-      nextActionLabel: "Allow saving on this site",
-      host,
+      detail: `In Fill in for me Job Finder never presses the form's own buttons, because one of them could send your application. ${pressed} is yours to press.`,
+      nextActionLabel: `Press ${pressed} on the site, then continue`,
+      host: null,
     },
   };
+}
+
+/** Clickable roles that are part of answering one field, not of the form. */
+const FIELD_PART_ROLES = new Set([
+  "combobox",
+  "option",
+  "listbox",
+  "radio",
+  "checkbox",
+  "switch",
+  "menuitemradio",
+  "menuitemcheckbox",
+  "treeitem",
+]);
+
+/** Whether pressing this is part of filling a field rather than the form's own button. */
+/**
+ * Whether Fill in for me may open this address itself: only the application
+ * form it was started on, or the page it is on. Any other link (a
+ * "Continue", a step) is the person's, like any other button.
+ */
+export function fillMayOpen(
+  config: Pick<ApplyAgentConfig, "application">,
+  currentUrl: string | null,
+  href: string,
+): boolean {
+  const address = (value: string | null | undefined) => {
+    if (!value) return null;
+    try {
+      const url = new URL(value, currentUrl ?? undefined);
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return null;
+    }
+  };
+  const target = address(href);
+  return (
+    target !== null &&
+    (target === address(currentUrl) ||
+      target === address(config.application.startingUrl))
+  );
+}
+
+function pressFillsAField(
+  config: ApplyAgentConfig,
+  observation: ApplyFormObservation,
+  ref: string,
+): boolean {
+  if (findControl(observation, ref)) return true;
+  const link = observation.links.find((entry) => entry.ref === ref);
+  if (link) return fillMayOpen(config, observation.url, link.href);
+  const clickable = observation.clickables.find((entry) => entry.ref === ref);
+  return clickable ? FIELD_PART_ROLES.has(clickable.role.toLowerCase()) : false;
 }
 
 function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
@@ -1681,6 +1732,16 @@ export async function executeApplyProposal(
           observation,
         };
       }
+      // Fill in for me presses nothing but parts of a field (and links,
+      // which only open pages). A Next, Continue or Save is the person's.
+      if (
+        deps.config.intermediateWritesAuthorized !== true &&
+        !pressFillsAField(config, observation, proposal.ref)
+      )
+        return {
+          kind: "paused",
+          pause: pressOnSitePause(describeRef(observation, proposal.ref)),
+        };
       const livePage = await config.hands.observe();
       const personOwnedBlocker = livePage.blocker?.requiresPerson
         ? livePage.blocker
@@ -1702,7 +1763,9 @@ export async function executeApplyProposal(
           },
         };
       }
-      const blockedSavesBefore = deps.guardState.blockedSaveCount;
+      // A press is never a field write: let the selected file finish
+      // uploading, then shut its window so this press cannot carry it.
+      await config.safety?.closeUploadWindow?.().catch(() => undefined);
       const write = await writeUnderGuard(deps, {
         declaredValue: null,
         write: () => config.hands.clickElement(proposal.ref),
@@ -1753,25 +1816,6 @@ export async function executeApplyProposal(
         };
       }
       const after = await config.hands.observe();
-      // Moving on is where a blocked save stops being harmless: the site
-      // wanted to save before it would advance, and the page has not.
-      const blockedOnThisMove =
-        deps.guardState.blockedSaveCount > blockedSavesBefore;
-      // Only a run that is not allowed to let the site save can be stuck
-      // here. When saving is allowed a blocked save is a page quirk the
-      // agent works around, not a reason to stop.
-      if (
-        deps.config.intermediateWritesAuthorized !== true &&
-        (blockedOnThisMove || deps.guardState.lastBlockedSave !== null) &&
-        after.signature === observation.signature
-      ) {
-        return {
-          kind: "paused",
-          pause: savesAsYouGoPause(
-            deps.guardState.lastBlockedSave?.host ?? null,
-          ),
-        };
-      }
       const movedOrigin = await authorizeOrigin(after, reason, deps);
       if (movedOrigin.refuse) {
         return retreat(

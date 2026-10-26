@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readGraphQlRequest, variableStrings } from "./graphql-request";
 import { FINAL_ACTION_SIGNAL as finalSignal } from "./application-intermediate-mutation-policy";
 import {
   carriesPreparedValue,
@@ -13,6 +14,8 @@ export interface AttachmentUploadWindow {
   mimeType: string;
   expiresAtMs: number;
   remainingRequests: number;
+  /** The file input's own name or id, when it has one. */
+  field?: string | null;
 }
 
 const uploadSignal =
@@ -63,86 +66,51 @@ function uploadMetadata(
     if (/^(?:input|file|metadata)$/iu.test(key))
       return item === null || uploadMetadata(item, grant);
     if (/^(?:file_?name|name)$/iu.test(key)) return item === grant.fileName;
-    if (/^(?:file_?size|size)$/iu.test(key)) return item === grant.byteLength;
+    if (/^(?:file_?size|size|content_?length)$/iu.test(key))
+      return item === grant.byteLength;
     if (/^(?:mime_?type|content_?type)$/iu.test(key))
       return item === grant.mimeType;
+    // Ashby names the board and the upload's purpose: short words, never an
+    // answer (checked by the caller).
+    if (/^(?:organizationHostedJobsPageName|fileUploadContext)$/u.test(key))
+      return typeof item === "string" && /^[\w.-]{1,100}$/u.test(item);
     return false;
   });
 }
 
-/** Recognize only a file-upload handle operation, never application/user writes. */
-function presignRequest(body: string, grant: AttachmentUploadWindow): boolean {
+const UPLOAD_HANDLE_FIELD =
+  /^(?:(?:get|create|prepare|request)?(?:file|attachment)?upload(?:handle|url|target|token|session)|presign(?:file)?upload)$/iu;
+
+/**
+ * Recognize only a file-upload handle operation, never application or user
+ * writes. Read with the GraphQL parser: one operation whose single root field
+ * asks for an upload handle, every argument a variable, no variable
+ * defaults, and variables that describe the selected file and nothing else.
+ */
+function presignRequest(
+  body: string,
+  grant: AttachmentUploadWindow,
+  preparedAnswers: readonly string[],
+): boolean {
   if (body.length > 16_384 || finalSignal.test(splitCase(body))) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return false;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-    return false;
-  const value = parsed as Record<string, unknown>;
+  const operations = readGraphQlRequest(body);
+  if (operations?.length !== 1) return false;
+  const operation = operations[0]!;
   if (
-    Object.keys(value).some(
-      (key) => !["operationName", "query", "variables"].includes(key),
-    ) ||
-    typeof value.query !== "string" ||
-    !uploadMetadata(value.variables ?? {}, grant)
+    operation.type === "subscription" ||
+    operation.rootFields.length !== 1 ||
+    !UPLOAD_HANDLE_FIELD.test(operation.rootFields[0]!.name.value) ||
+    operation.inlineArguments > 0 ||
+    operation.variableDefaults > 0 ||
+    !uploadMetadata(operation.variables ?? {}, grant)
   )
     return false;
-  const tokens =
-    value.query.match(
-      /"(?:\\.|[^"\\])*"|#[^\r\n]*|[_A-Za-z][_0-9A-Za-z]*|[{}():$]/gu,
-    ) ?? [];
-  let depth = 0,
-    args = 0,
-    roots = 0,
-    complete = false;
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-    if (token.startsWith("#")) continue;
-    if (token === "(") {
-      args++;
-      continue;
-    }
-    if (token === ")") {
-      args--;
-      continue;
-    }
-    if (token === "{") {
-      depth++;
-      continue;
-    }
-    if (token === "}") {
-      depth--;
-      if (depth === 0) {
-        if (tokens.slice(i + 1).some((token) => !token.startsWith("#")))
-          return false;
-        complete = true;
-        break;
-      }
-      continue;
-    }
-    if (depth === 0) continue;
-    if (args > 0) {
-      if (tokens[i + 1] === ":" && tokens[i + 2] !== "$") return false;
-      continue;
-    }
-    if (depth !== 1 || token === ":") continue;
-    if (tokens[i + 1] === ":") {
-      i++;
-      continue;
-    } // Alias; inspect the actual field next.
-    if (token === "__typename") continue;
-    if (
-      !/^(?:(?:get|create|prepare|request)?(?:file|attachment)?upload(?:handle|url|target|token|session)|presign(?:file)?upload)$/iu.test(
-        token,
-      )
-    )
-      return false;
-    roots++;
-  }
-  return complete && roots === 1;
+  const carried = variableStrings(operation.variables).filter(
+    (value) => value !== grant.fileName,
+  );
+  return !carried.some((value) =>
+    containsPreparedAnswer(value, preparedAnswers),
+  );
 }
 
 function storageMetadata(
@@ -323,7 +291,7 @@ export async function classifyAttachmentUpload(input: {
   if (
     url.origin === grant.sourceOrigin &&
     /\bapplication\/json\b/iu.test(input.contentType) &&
-    presignRequest(new TextDecoder().decode(input.body), grant)
+    presignRequest(new TextDecoder().decode(input.body), grant, preparedAnswers)
   )
     return { allowed: true, containsFile: false };
   let storageSignature = [...url.searchParams.keys()].some((key) =>

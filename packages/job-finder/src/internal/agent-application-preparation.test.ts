@@ -299,6 +299,7 @@ function session(bodyText = "Apply for the role"): ApplyPageSession {
     registerPreparedValue: () => Promise.resolve(),
     openIntermediateWriteWindow: () => Promise.resolve(),
     closeIntermediateWriteWindow: () => Promise.resolve(),
+    closeUploadWindow: () => Promise.resolve(),
     clickAuthorizedFormAction: () =>
       Promise.resolve({ ok: true, observedValue: "clicked" }),
     readIntermediateWriteCount: () => 0,
@@ -961,6 +962,7 @@ describe("each mode, end to end through the seam", () => {
       registerPreparedValue: () => Promise.resolve(),
       openIntermediateWriteWindow: () => Promise.resolve(),
       closeIntermediateWriteWindow: () => Promise.resolve(),
+      closeUploadWindow: () => Promise.resolve(),
       clickAuthorizedFormAction: () =>
         Promise.resolve({ ok: true, observedValue: "clicked" }),
       readIntermediateWriteCount: () => 0,

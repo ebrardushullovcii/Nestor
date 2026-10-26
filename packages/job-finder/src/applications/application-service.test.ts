@@ -340,7 +340,7 @@ it("passes the job's current site notes and learned Apply instructions to prepar
   ]);
 });
 
-it("keeps filling while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
+it("Fill lets no save out, keeps uploading while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
   const f = await setup(1);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
@@ -348,11 +348,11 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   const recheck =
     f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
   expect(f.execute.mock.calls[0]![1]).toMatchObject({
-    intermediateMutationsAuthorized: true,
+    intermediateMutationsAuthorized: false,
     attachmentUploadsAuthorized: true,
     intermediateMutationAllowedOrigins: [],
   });
-  expect(await recheck("https://replica.test")).toBe(true);
+  expect(await recheck("https://replica.test")).toBe(false);
   expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.applications.needsYou.remember({
     key: "salary",
@@ -367,7 +367,7 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   expect(await recheck("https://replica.test", "attachment")).toBe(false);
 });
 
-it("keeps non-final saves frame-pinned without a final envelope in either mode", async () => {
+it("without a send envelope Send for me fills strictly too: no saves, uploads frame-pinned", async () => {
   const f = await setup(1);
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
@@ -376,7 +376,7 @@ it("keeps non-final saves frame-pinned without a final envelope in either mode",
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   const input = f.execute.mock.calls[0]![1];
   expect(input).toMatchObject({
-    intermediateMutationsAuthorized: true,
+    intermediateMutationsAuthorized: false,
     submitAuthorized: false,
     intermediateMutationAllowedOrigins: [],
   });
@@ -385,20 +385,14 @@ it("keeps non-final saves frame-pinned without a final envelope in either mode",
       "https://replica.test",
       "answers",
     ),
-  ).toBe(true);
+  ).toBe(false);
   expect(
     await input.recheckIntermediateMutationAuthority!(
       "https://unrelated.test",
-      "answers",
+      "attachment",
     ),
   ).toBe(false);
   f.seed.settings.applicationAutomationMode = "confirm_before_submit";
-  expect(
-    await input.recheckIntermediateMutationAuthority!(
-      "https://replica.test",
-      "answers",
-    ),
-  ).toBe(true);
   expect(
     await input.recheckIntermediateMutationAuthority!(
       "https://replica.test",

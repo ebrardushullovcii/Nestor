@@ -155,6 +155,9 @@ function configFor(
   return {
     hands,
     config: {
+      // Most of these tests walk a form step by step, which only Send for me
+      // does; Fill in for me's own tests turn this off.
+      intermediateWritesAuthorized: true,
       hands,
       accountCreationAuthorized: overrides.accountCreationAuthorized,
       authority: authority(overrides.authority),
@@ -2488,37 +2491,171 @@ describe("a site that saves as you go", () => {
     expect(guardState.blockedSaveCount).toBe(1);
   });
 
-  test("a blocked save that stops the form moving on pauses, and names the site", async () => {
+  test.each([
+    "Next",
+    "Continue",
+    "Save and continue",
+    "Save",
+    "Done",
+    "Absenden",
+    "Add another",
+    "Accept cookies",
+    "✓",
+    "",
+  ])("in Fill, %j is never pressed: the person gets it", async (label) => {
     const page = rawPage({
       controls: [rawControl({ index: 0, label: "First Name", value: "Robin" })],
-      actions: [
-        { index: 0, label: "Continue", visible: true, disabled: false },
-      ],
+      actions: [{ index: 0, label, visible: true, disabled: false }],
     });
-    const { config } = configFor(page);
-    const guardState = createApplyGuardState();
-
+    let pressed = 0;
+    const { config } = configFor(page, {
+      hands: {
+        clickElement: () => {
+          pressed += 1;
+          return Promise.resolve({ ok: true, observedValue: "clicked" });
+        },
+      },
+    });
     const outcome = await executeApplyProposal(
       { tool: "click", ref: "a0" },
       observationOf(page).signature,
       {
-        config: { ...config, safety: safetyThatBlocksOneSave() },
+        config: {
+          ...config,
+          intermediateWritesAuthorized: false,
+          safety: safetyThatBlocksOneSave(),
+        },
         now,
-        guardState,
+        guardState: createApplyGuardState(),
       },
     );
-
-    expect(outcome.kind).toBe("paused");
-    if (outcome.kind === "paused") {
-      expect(outcome.pause.blocker?.code).toBe("site_saves_as_you_go");
-      expect(outcome.pause.blocker?.summary).toBe(
-        "This site saves your answers as you type, and Job Finder is not allowed to let it.",
-      );
-      expect(outcome.pause.blocker?.nextActionLabel).toBe(
-        "Allow saving on this site",
-      );
-      expect(outcome.pause.blocker?.host).toBe("boards.example.test");
+    expect(pressed).toBe(0);
+    // A label the run reads as the send ends at Ready; anything else is
+    // handed to the person.
+    if (outcome.kind !== "ready_to_send") {
+      expect(outcome.kind).toBe("paused");
+      if (outcome.kind === "paused")
+        expect(outcome.pause.blocker?.nextActionLabel).toMatch(
+          /on the site, then continue$/u,
+        );
     }
+  });
+
+  test.each([
+    ["https://apply.example.test/api/submit?applicationId=42", 0],
+    ["https://apply.example.test/form/step-2", 0],
+    // The form it was started on, and this same page, are its own to open.
+    ["https://apply.example.test/form#questions", 1],
+  ])("in Fill, a link to %s is pressed %i times", async (href, presses) => {
+    const page = rawPage({
+      links: [
+        {
+          index: 0,
+          label: "Continue",
+          href,
+          target: "",
+          visible: true,
+          topOffset: 10,
+        },
+      ],
+    });
+    let pressed = 0;
+    const { config } = configFor(page, {
+      hands: {
+        clickElement: () => {
+          pressed += 1;
+          return Promise.resolve({ ok: true, observedValue: "clicked" });
+        },
+      },
+    });
+    const outcome = await executeApplyProposal(
+      { tool: "click", ref: "l0" },
+      observationOf(page).signature,
+      {
+        config: {
+          ...config,
+          intermediateWritesAuthorized: false,
+          safety: safetyThatBlocksOneSave(),
+        },
+        now,
+        guardState: createApplyGuardState(),
+      },
+    );
+    expect(pressed).toBe(presses);
+    if (!presses) expect(outcome.kind).toBe("paused");
+  });
+
+  test("in Fill, a picker's option is still pressed: it answers a field", async () => {
+    const page = rawPage({
+      clickables: [
+        {
+          index: 0,
+          label: "Portugal",
+          role: "option",
+          tagName: "li",
+          visible: true,
+          topOffset: 0,
+        },
+      ],
+    });
+    let pressed = 0;
+    const { config } = configFor(page, {
+      hands: {
+        clickElement: () => {
+          pressed += 1;
+          return Promise.resolve({ ok: true, observedValue: "clicked" });
+        },
+      },
+    });
+    await executeApplyProposal(
+      { tool: "click", ref: "e0" },
+      observationOf(page).signature,
+      {
+        config: {
+          ...config,
+          intermediateWritesAuthorized: false,
+          safety: safetyThatBlocksOneSave(),
+        },
+        now,
+        guardState: createApplyGuardState(),
+      },
+    );
+    expect(pressed).toBe(1);
+  });
+
+  test("a press shuts the upload window first, so it cannot carry the selected file", async () => {
+    const page = rawPage({
+      actions: [{ index: 0, label: "Done", visible: true, disabled: false }],
+    });
+    const events: string[] = [];
+    const { config } = configFor(page, {
+      hands: {
+        clickElement: () => {
+          events.push("press");
+          return Promise.resolve({ ok: true, observedValue: "clicked" });
+        },
+      },
+    });
+    await executeApplyProposal(
+      { tool: "click", ref: "a0" },
+      observationOf(page).signature,
+      {
+        config: {
+          ...config,
+          safety: {
+            ...safetyThatBlocksOneSave(),
+            readBlockedAttempt: () => Promise.resolve(null),
+            closeUploadWindow: () => {
+              events.push("close upload");
+              return Promise.resolve();
+            },
+          },
+        },
+        now,
+        guardState: createApplyGuardState(),
+      },
+    );
+    expect(events).toEqual(["close upload", "press"]);
   });
 
   test("the page sending the form itself still stops everything", async () => {
