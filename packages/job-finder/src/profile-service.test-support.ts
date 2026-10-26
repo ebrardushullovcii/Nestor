@@ -151,6 +151,8 @@ export function withProfileView(
     >;
   } = {},
 ) {
+  // Reads as the app's Profile route does: setup is brought up to date
+  // (an import the app closed on is marked interrupted), then the store read.
   const read = async () => {
     await options.ready;
     await service.refreshProfileSetup();
@@ -209,6 +211,7 @@ export function createProfileServiceHarness(
     documentManager?: ReturnType<typeof createDocumentManager>;
     onResumeEvidenceFinished?: () => void;
     sourceAccess?: ProfileServiceOptions["sourceAccess"];
+    onExplicitUserStart?: ProfileServiceOptions["onExplicitUserStart"];
   } = {},
 ) {
   const seed = options.seed ?? createSeed();
@@ -233,6 +236,9 @@ export function createProfileServiceHarness(
       ? { onResumeEvidenceFinished: options.onResumeEvidenceFinished }
       : {}),
     ...(options.sourceAccess ? { sourceAccess: options.sourceAccess } : {}),
+    ...(options.onExplicitUserStart
+      ? { onExplicitUserStart: options.onExplicitUserStart }
+      : {}),
   });
   const profileWork = withProfileView(service, repository, {
     ready: seeded,

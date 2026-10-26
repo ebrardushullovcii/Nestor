@@ -112,22 +112,35 @@ export async function retryInterruptedResumeImport(
   });
 }
 
-let activeDesktopImports = 0;
+const activeDesktopImports = new Map<Promise<unknown>, AbortController>();
 
 export function isDesktopResumeImportActive(): boolean {
-  return activeDesktopImports > 0;
+  return activeDesktopImports.size > 0;
 }
 
-export async function importResumeFromSourcePath(
+/**
+ * Stops every import this window started and waits for each to end, so a
+ * reset never races a file copy or profile write it is about to clear.
+ */
+export async function stopDesktopResumeImports(): Promise<void> {
+  for (const controller of activeDesktopImports.values()) controller.abort();
+  await Promise.allSettled([...activeDesktopImports.keys()]);
+}
+
+export function importResumeFromSourcePath(
   sourcePath: string,
   options: ImportResumeFromSourcePathOptions = {},
 ): Promise<ImportedResume> {
-  activeDesktopImports += 1;
-  try {
-    return await importResumeFile(sourcePath, options);
-  } finally {
-    activeDesktopImports -= 1;
-  }
+  const controller = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal;
+  const work = importResumeFile(sourcePath, { ...options, signal });
+  activeDesktopImports.set(work, controller);
+  void work
+    .finally(() => activeDesktopImports.delete(work))
+    .catch(() => undefined);
+  return work;
 }
 
 async function importResumeFile(
@@ -195,6 +208,7 @@ async function importResumeFile(
     sourceFileKind !== "markdown";
 
   await assertResumeFileOpens(sourcePath, fileName);
+  options.signal?.throwIfAborted();
   await copyFile(sourcePath, targetPath);
   const sourceSha256 = createHash("sha256")
     .update(await readFile(targetPath))
@@ -229,6 +243,7 @@ async function importResumeFile(
     extractResumeDocument(targetPath, extractionInput),
     generatedVisionArtifactPromise,
   ]);
+  options.signal?.throwIfAborted();
   const visionWarnings = generatedVisionArtifact.warnings;
   const extractionStatus = extractedResume.textContent
     ? "not_started"

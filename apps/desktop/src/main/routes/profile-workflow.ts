@@ -20,11 +20,18 @@ const requests = () => import("./profile-workflow-requests");
 const runtime = () => import("../services/job-finder/runtime");
 
 async function readState(): Promise<ProfileWorkflowState> {
-  const [{ readPersonalWorkspaceState }, { isDesktopResumeImportActive }] =
-    await Promise.all([
-      import("@nestor/db"),
-      import("../services/job-finder/import-resume"),
-    ]);
+  const [
+    { readPersonalWorkspaceState },
+    { isDesktopResumeImportActive },
+    { getProfileService },
+  ] = await Promise.all([
+    import("@nestor/db"),
+    import("../services/job-finder/import-resume"),
+    runtime(),
+  ]);
+  // Brings setup up to date first: review items the import left, and an
+  // import the app closed on marked interrupted so it can be tried again.
+  await (await getProfileService()).refreshProfileSetup();
   const personal = readPersonalWorkspaceState(getJobStore());
   return {
     profileSetupState: personal.profileSetupState,

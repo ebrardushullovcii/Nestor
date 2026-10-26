@@ -33,6 +33,7 @@ const {
   mockSavePause,
   mockDiscardJobSearch,
   mockResetAssistantStore,
+  mockStopImports,
 } = vi.hoisted(() => ({
   mockMkdir: vi.fn(),
   mockOpen: vi.fn(),
@@ -64,6 +65,7 @@ const {
   mockSavePause: vi.fn(),
   mockDiscardJobSearch: vi.fn(),
   mockResetAssistantStore: vi.fn(),
+  mockStopImports: vi.fn(),
 }));
 
 vi.mock("@nestor/db/job-store", () => ({
@@ -160,6 +162,10 @@ vi.mock("./paths", () => ({
   getJobFinderUserDataDirectory: mockGetJobFinderUserDataDirectory,
   resolveJobFinderWorkspaceRelativePath:
     mockResolveJobFinderWorkspaceRelativePath,
+}));
+
+vi.mock("./import-resume", () => ({
+  stopDesktopResumeImports: mockStopImports,
 }));
 
 vi.mock("./runtime", () => ({
@@ -337,6 +343,7 @@ beforeEach(() => {
     setActivityControl: mockSetActivityControl,
   });
   mockShutdownRuntime.mockResolvedValue(undefined);
+  mockStopImports.mockResolvedValue(undefined);
   mockStartRuntime.mockResolvedValue({});
 });
 
@@ -438,12 +445,30 @@ describe("resetJobFinderWorkspace", () => {
       order.push("cache");
       return Promise.resolve();
     });
+    mockStopImports.mockImplementationOnce(() => {
+      order.push("imports");
+      return Promise.resolve();
+    });
     mockShutdownRuntime.mockImplementationOnce(() => {
       order.push("stop");
       return Promise.resolve();
     });
+    mockWriteFile.mockImplementationOnce(() => {
+      order.push("files");
+      return Promise.resolve();
+    });
     await resetJobFinderWorkspace();
-    expect(order).toEqual(["pause", "close", "storage", "cache", "stop"]);
+    // Resume imports end before Job Finder stops, and both before anything
+    // is set aside or cleared.
+    expect(order).toEqual([
+      "pause",
+      "close",
+      "storage",
+      "cache",
+      "imports",
+      "stop",
+      "files",
+    ]);
     expect(mockCloseBrowser).toHaveBeenCalledWith(true);
   });
 

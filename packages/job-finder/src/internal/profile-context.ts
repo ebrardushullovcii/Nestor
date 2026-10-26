@@ -40,6 +40,8 @@ export interface ProfileContext {
   activeSourceDebugPromiseRef: MutableRef<Promise<unknown> | null>;
   activeResumeVisionRunIds: Set<string>;
   activeResumeEvidenceRunIds: Set<string>;
+  /** Late import branches still running, which stopping must wait for. */
+  backgroundWork: Set<Promise<unknown>>;
   onResumeEvidenceFinished?: () => void;
   saveJobSiteMetadata: (
     targetId: string,

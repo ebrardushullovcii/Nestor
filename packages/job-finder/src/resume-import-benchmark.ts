@@ -1047,6 +1047,7 @@ async function createBenchmarkContext(input: {
     activeSourceDebugPromiseRef: { current: null },
     activeResumeVisionRunIds: new Set<string>(),
     activeResumeEvidenceRunIds: new Set<string>(),
+    backgroundWork: new Set<Promise<unknown>>(),
     saveJobSiteMetadata: () =>
       Promise.reject(
         new Error("Source metadata is not used by resume import."),

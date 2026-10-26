@@ -51,10 +51,6 @@ const jobFinderDiscoveryResultBandsPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/discovery-result-bands.ts",
 );
-const jobFinderPlanSafeguardPausesPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/plan-safeguard-pauses.ts",
-);
 const jobFinderResumeRecordIdentityPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/resume-record-identity.ts",
@@ -62,14 +58,6 @@ const jobFinderResumeRecordIdentityPath = path.resolve(
 const jobFinderResumeIdentityPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/internal/resume-identity.ts",
-);
-const jobFinderApplyRunRecoveryPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/internal/workspace-apply-run-recovery.ts",
-);
-const jobFinderSourceHealthPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/source-health.ts",
 );
 const jobFinderApplicationSubmissionRuntimeMainPath = path.resolve(
   currentDir,
@@ -159,9 +147,6 @@ const workspaceAliases = {
   "@nestor/job-finder/resume-record-identity":
     jobFinderResumeRecordIdentityPath,
   "@nestor/job-finder/resume-identity": jobFinderResumeIdentityPath,
-  "@nestor/job-finder/apply-run-recovery": jobFinderApplyRunRecoveryPath,
-  "@nestor/job-finder/source-health": jobFinderSourceHealthPath,
-  "@nestor/job-finder/plan-safeguard-pauses": jobFinderPlanSafeguardPausesPath,
   "@nestor/job-finder": jobFinderPath,
   "@nestor/knowledge-base": knowledgeBasePath,
   "@nestor/os-integration": osIntegrationPath,

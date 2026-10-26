@@ -53,6 +53,9 @@ export async function runAssistantReadCommand<K extends AssistantReadCommand>(
 
 export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"] =
   async () => {
+    // Setup brought up to date first, as the Profile route reads it.
+    const { getProfileService } = await import("../job-finder/runtime");
+    await (await getProfileService()).refreshProfileSetup();
     const personal = readPersonalWorkspaceState(getJobStore());
     const sites = await runJobCommand("list_sites", {
       filter: "enabled",

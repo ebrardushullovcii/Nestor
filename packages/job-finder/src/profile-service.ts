@@ -83,6 +83,11 @@ export interface ProfileServiceOptions {
   /** Called after the pause changes, so the host's browser and Apply follow it. */
   onActivityControlChanged?: (control: JobFinderActivityControl) => void;
   /**
+   * A person starting browser work by hand, such as Check site: the host
+   * lets its browser open again after the person closed it.
+   */
+  onExplicitUserStart?: () => void | Promise<void>;
+  /**
    * Site sign-ins the person owes: a site check that stops at a sign-in page
    * asks for one in Needs you, and a check that gets through settles it.
    */
@@ -131,6 +136,7 @@ export function createProfileService(options: ProfileServiceOptions) {
     activeSourceDebugPromiseRef,
     activeResumeVisionRunIds: new Set(),
     activeResumeEvidenceRunIds: new Set(),
+    backgroundWork: new Set(),
     saveJobSiteMetadata(targetId, updater) {
       return Promise.resolve().then(() => {
         const site = jobSites?.get(Number(targetId));
@@ -247,13 +253,11 @@ export function createProfileService(options: ProfileServiceOptions) {
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences | null,
   ): Promise<void> {
-    const [currentProfile, currentPreferences, setupState] = await Promise.all(
-      [
-        repository.getProfile(),
-        repository.getSearchPreferences().then(normalizeSearchPreferences),
-        repository.getProfileSetupState(),
-      ],
-    );
+    const [currentProfile, currentPreferences, setupState] = await Promise.all([
+      repository.getProfile(),
+      repository.getSearchPreferences().then(normalizeSearchPreferences),
+      repository.getProfileSetupState(),
+    ]);
     const nextProfile = normalizeProfileBeforeSave(
       currentProfile,
       CandidateProfileSchema.parse(profile),
@@ -295,9 +299,34 @@ export function createProfileService(options: ProfileServiceOptions) {
     return promise;
   }
 
+  /**
+   * A person starting browser work. It refuses while work is paused: only an
+   * explicit Resume, or the last step of a finished reset, lowers a pause.
+   */
   async function requireActivityEnabled(): Promise<void> {
     if ((await repository.getActivityControl()).paused)
       throw new Error("Background work is paused. Resume it, then try again.");
+    await options.onExplicitUserStart?.();
+  }
+
+  // Stopping (app quit, Reset everything) cancels every import and waits for
+  // it, so nothing an import was still reading lands in a cleared store.
+  const importStop = new AbortController();
+  const importsInFlight = new Set<Promise<unknown>>();
+  function trackImport<T>(
+    signal: AbortSignal | undefined,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    if (importStop.signal.aborted)
+      return Promise.reject(new Error("Job Finder is closing."));
+    const promise = work(
+      signal ? AbortSignal.any([signal, importStop.signal]) : importStop.signal,
+    );
+    importsInFlight.add(promise);
+    void promise
+      .finally(() => importsInFlight.delete(promise))
+      .catch(() => undefined);
+    return promise;
   }
 
   const sourceDebugStore = createWorkspaceSourceDebugStoreMethods(ctx);
@@ -356,96 +385,101 @@ export function createProfileService(options: ProfileServiceOptions) {
       visionArtifact?: ResumeImportVisionArtifact;
       signal?: AbortSignal;
     }): Promise<void> {
-      const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);
-      const documentBundle = ResumeDocumentBundleSchema.parse(
-        input.documentBundle,
-      );
-      const searchPreferences = await repository.getSearchPreferences();
-      const atStart = await repository.getProfileWithRevision();
-      if (!baseResume.textContent && !input.visionArtifact?.pages.length) {
-        const warnings = uniqueStrings([
-          ...baseResume.analysisWarnings,
-          ...documentBundle.warnings,
-          ...(input.importWarnings ?? []),
-          "Paste plain-text resume content below if you want the agent to extract profile details from this file.",
-        ]);
-        await repository.commitProfileUpdate(
-          (current) => {
-            const normalized = normalizeProfileBeforeSave(current, {
-              ...current,
-              baseResume,
-            });
-            return CandidateProfileSchema.parse({
-              ...normalized,
-              baseResume: {
-                ...normalized.baseResume,
-                analysisWarnings: warnings,
-              },
-            });
-          },
-          { expectedRevision: atStart.revision },
+      return trackImport(input.signal, async (signal) => {
+        const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);
+        const documentBundle = ResumeDocumentBundleSchema.parse(
+          input.documentBundle,
         );
-        return;
-      }
-      const importStartedAt = new Date().toISOString();
-      await runResumeImportWorkflow(ctx, {
-        profile: normalizeProfileBeforeSave(atStart.profile, {
-          ...atStart.profile,
-          baseResume,
-        }),
-        ...(input.signal ? { signal: input.signal } : {}),
-        searchPreferences,
-        documentBundle,
-        trigger: "import",
-        expectedProfileRevision: atStart.revision,
-        ...(input.importWarnings
-          ? { importWarnings: input.importWarnings }
-          : {}),
-        ...(input.visionArtifact
-          ? { visionArtifact: input.visionArtifact }
-          : {}),
+        const searchPreferences = await repository.getSearchPreferences();
+        const atStart = await repository.getProfileWithRevision();
+        if (!baseResume.textContent && !input.visionArtifact?.pages.length) {
+          const warnings = uniqueStrings([
+            ...baseResume.analysisWarnings,
+            ...documentBundle.warnings,
+            ...(input.importWarnings ?? []),
+            "Paste plain-text resume content below if you want the agent to extract profile details from this file.",
+          ]);
+          await repository.commitProfileUpdate(
+            (current) => {
+              const normalized = normalizeProfileBeforeSave(current, {
+                ...current,
+                baseResume,
+              });
+              return CandidateProfileSchema.parse({
+                ...normalized,
+                baseResume: {
+                  ...normalized.baseResume,
+                  analysisWarnings: warnings,
+                },
+              });
+            },
+            { expectedRevision: atStart.revision },
+          );
+          return;
+        }
+        const importStartedAt = new Date().toISOString();
+        await runResumeImportWorkflow(ctx, {
+          profile: normalizeProfileBeforeSave(atStart.profile, {
+            ...atStart.profile,
+            baseResume,
+          }),
+          signal,
+          searchPreferences,
+          documentBundle,
+          trigger: "import",
+          expectedProfileRevision: atStart.revision,
+          ...(input.importWarnings
+            ? { importWarnings: input.importWarnings }
+            : {}),
+          ...(input.visionArtifact
+            ? { visionArtifact: input.visionArtifact }
+            : {}),
+        });
+        await landProfileSetupAfterImport(ctx, { importStartedAt });
       });
-      await landProfileSetupAfterImport(ctx, { importStartedAt });
     },
 
     async analyzeProfileFromResume(): Promise<void> {
-      const [atStart, searchPreferences] = await Promise.all([
-        repository.getProfileWithRevision(),
-        repository.getSearchPreferences(),
-      ]);
-      const { profile } = atStart;
-      if (!profile.baseResume.textContent) {
-        await repository.commitProfileUpdate(
-          (current) =>
-            CandidateProfileSchema.parse({
-              ...current,
-              baseResume: {
-                ...current.baseResume,
-                extractionStatus: "needs_text",
-                lastAnalyzedAt: null,
-                analysisWarnings: [
-                  "Paste plain-text resume content to let the agent extract candidate details.",
-                ],
-              },
-            }),
-          { expectedRevision: atStart.revision },
-        );
-        throw new Error(
-          "Resume text is required before the profile agent can extract candidate details.",
-        );
-      }
-      const latestBundle =
-        (
-          await repository.listResumeImportDocumentBundles({
-            sourceResumeId: profile.baseResume.id,
-          })
-        )[0] ?? buildBundleFromStoredResume(profile);
-      await runResumeImportWorkflow(ctx, {
-        profile,
-        searchPreferences,
-        documentBundle: latestBundle,
-        trigger: "refresh",
-        expectedProfileRevision: atStart.revision,
+      return trackImport(undefined, async (signal) => {
+        const [atStart, searchPreferences] = await Promise.all([
+          repository.getProfileWithRevision(),
+          repository.getSearchPreferences(),
+        ]);
+        const { profile } = atStart;
+        if (!profile.baseResume.textContent) {
+          await repository.commitProfileUpdate(
+            (current) =>
+              CandidateProfileSchema.parse({
+                ...current,
+                baseResume: {
+                  ...current.baseResume,
+                  extractionStatus: "needs_text",
+                  lastAnalyzedAt: null,
+                  analysisWarnings: [
+                    "Paste plain-text resume content to let the agent extract candidate details.",
+                  ],
+                },
+              }),
+            { expectedRevision: atStart.revision },
+          );
+          throw new Error(
+            "Resume text is required before the profile agent can extract candidate details.",
+          );
+        }
+        const latestBundle =
+          (
+            await repository.listResumeImportDocumentBundles({
+              sourceResumeId: profile.baseResume.id,
+            })
+          )[0] ?? buildBundleFromStoredResume(profile);
+        await runResumeImportWorkflow(ctx, {
+          profile,
+          searchPreferences,
+          documentBundle: latestBundle,
+          trigger: "refresh",
+          expectedProfileRevision: atStart.revision,
+          signal,
+        });
       });
     },
 
@@ -557,7 +591,10 @@ export function createProfileService(options: ProfileServiceOptions) {
                 ...current.profileAssistant,
                 ...patch.aiBehavior.profileAssistant,
               },
-              jobSearch: { ...current.jobSearch, ...patch.aiBehavior.jobSearch },
+              jobSearch: {
+                ...current.jobSearch,
+                ...patch.aiBehavior.jobSearch,
+              },
               applying: { ...current.applying, ...patch.aiBehavior.applying },
             });
       const coverLetter =
@@ -693,10 +730,19 @@ export function createProfileService(options: ProfileServiceOptions) {
         onProgress,
       );
     },
-    /** Stops a running site check, for app shutdown. */
+    /**
+     * Stops a running site check and every resume import, late branches
+     * included, and waits until none of them can write again. For app
+     * shutdown and Reset everything; the service takes no imports after.
+     */
     async stop(): Promise<void> {
       activeSourceDebugAbortControllerRef.current?.abort();
-      await Promise.allSettled([activeSourceDebugPromiseRef.current]);
+      importStop.abort();
+      await Promise.allSettled([
+        activeSourceDebugPromiseRef.current,
+        ...importsInFlight,
+        ...ctx.backgroundWork,
+      ]);
     },
     async cancelSourceDebug(runId: string): Promise<void> {
       if (

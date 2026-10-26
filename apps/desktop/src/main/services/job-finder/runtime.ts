@@ -500,6 +500,11 @@ async function createJobFinderRuntime(
       return latest !== null && latest.state !== "running";
     },
     approvedResumeJobIds: () => resumes.approvedJobIds().map(String),
+    // A deliberate start after the person closed the browser may open it
+    // again.
+    ...(usesEmbeddedBrowser
+      ? { onExplicitUserStart: () => getEmbeddedBrowser().clearPersonPause() }
+      : {}),
     onActivityControlChanged: (control) => {
       applicationService.wake();
       // Home pauses new work at the queue boundary. Keep the browser
@@ -510,6 +515,11 @@ async function createJobFinderRuntime(
           control.paused && control.pauseBehavior !== "finish_current",
         );
     },
+  });
+  // An import the app closed on is marked interrupted, so it can be tried
+  // again, before any screen reads it.
+  await profileService.refreshProfileSetup().catch((error: unknown) => {
+    console.warn("[Desktop] Could not bring profile setup up to date.", error);
   });
   if (usesEmbeddedBrowser) {
     const browser = getEmbeddedBrowser();

@@ -982,6 +982,8 @@ async function completeDeferredVisionBranch(input: {
   baselineProfile: CandidateProfile;
   baselineSearchPreferences: JobSearchPreferences;
   visionTimeoutMs: number;
+  /** A stopped import writes nothing more, even from this late branch. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const { ctx, promise, bundle, runId, now, textCandidates, visionTimeoutMs } =
     input;
@@ -992,13 +994,11 @@ async function completeDeferredVisionBranch(input: {
   let run = input.run;
 
   try {
-    const visionBranch = await withVisionBranchDeadline(
-      promise,
-      visionTimeoutMs,
-      ctx,
-      {
+    const visionBranch = await waitForImport(
+      withVisionBranchDeadline(promise, visionTimeoutMs, ctx, {
         unrefTimer: true,
-      },
+      }),
+      input.signal,
     );
     const currentCandidates =
       await ctx.repository.listResumeImportFieldCandidates({ runId });
@@ -1285,6 +1285,7 @@ async function completeDeferredVisionBranch(input: {
       });
     }
   } catch (error) {
+    if (input.signal?.aborted) return;
     const message = messageFromUnknownError(
       error,
       "Deferred resume vision branch failed.",
@@ -1321,13 +1322,16 @@ function scheduleDeferredVisionBranchCompletion(
   input: Parameters<typeof completeDeferredVisionBranch>[0],
 ): Promise<void> {
   input.ctx.activeResumeVisionRunIds.add(input.runId);
-  return completeDeferredVisionBranch(input)
+  const work = completeDeferredVisionBranch(input)
     .catch((error: unknown) => {
       console.error("Deferred resume vision branch completion failed.", error);
     })
     .finally(() => {
       input.ctx.activeResumeVisionRunIds.delete(input.runId);
+      input.ctx.backgroundWork.delete(work);
     });
+  input.ctx.backgroundWork.add(work);
+  return work;
 }
 
 function modelRolesFor(run: ResumeImportRun): ResumeImportModelRoleState {
@@ -2526,12 +2530,16 @@ async function runResumeImportWorkflowInProcess(
           (candidate) => candidate.sourceKind !== "vision_omni",
         ),
         visionTimeoutMs,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     }
 
     if (deferredEvidenceState.promise) {
       ctx.activeResumeEvidenceRunIds.add(runId);
-      void deferredEvidenceState.promise
+      const evidenceWork: Promise<void> = waitForImport(
+        deferredEvidenceState.promise,
+        input.signal,
+      )
         .then((evidence) =>
           withDeferredArtifactTransition(ctx, async () => {
             if (input.signal?.aborted) return;
@@ -2621,13 +2629,19 @@ async function runResumeImportWorkflowInProcess(
             });
           }),
         )
-        .catch((error: unknown) =>
-          console.error("Optional resume evidence could not be saved.", error),
-        )
+        .catch((error: unknown) => {
+          if (!input.signal?.aborted)
+            console.error(
+              "Optional resume evidence could not be saved.",
+              error,
+            );
+        })
         .finally(() => {
           ctx.activeResumeEvidenceRunIds.delete(runId);
+          ctx.backgroundWork.delete(evidenceWork);
           ctx.onResumeEvidenceFinished?.();
         });
+      ctx.backgroundWork.add(evidenceWork);
     }
     return {
       profile: finalization.profile,

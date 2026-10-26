@@ -895,6 +895,11 @@ export async function resetJobFinderWorkspace(): Promise<void> {
   const browser = getEmbeddedBrowser();
   await browser.close(true);
   await clearBrowserSession();
+  // A resume import still reading would otherwise write its file and text
+  // back into the cleared store. Stop it, and the runtime's own imports and
+  // site checks, and wait for all of them first.
+  const { stopDesktopResumeImports } = await import("./import-resume");
+  await stopDesktopResumeImports();
   await shutdownJobFinderRuntime();
   const intent = await beginJobFinderWorkspaceResetFileMoves();
 
