@@ -170,7 +170,9 @@ export function parseJobSiteUrls(input: string): {
   let duplicates = 0;
   const duplicateUrls = new Set<string>();
 
-  for (const rawValue of input.split(/[\n,]+/u)) {
+  for (const rawValue of input.split(
+    /\r?\n|,\s*(?=https?:\/\/)|,\s+(?=[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:[/:]|\s|$))/iu,
+  )) {
     const value = rawValue.trim();
     if (!value) continue;
     // Addresses cannot contain literal spaces. A list entered without a

@@ -23,6 +23,8 @@ export function createHttpPageReader(
     )
       throw new Error("Only website pages can be read.");
     if (readOptions.rendered) {
+      if (readOptions.jsonQuery)
+        throw new Error("A JSON search query cannot navigate a browser page.");
       if (!options.readRendered)
         throw new Error("This listing needs a browser read.");
       return options.readRendered(url, readOptions);
@@ -36,11 +38,20 @@ export function createHttpPageReader(
           const timeout = AbortSignal.timeout(options.timeoutMs ?? 15000);
           const signal = AbortSignal.any([timeout, queueSignal]);
           const response = await request(url, {
-            method: "GET",
+            method: readOptions.jsonQuery ? "POST" : "GET",
             signal,
+            ...(readOptions.jsonQuery
+              ? {
+                  body: JSON.stringify(readOptions.jsonQuery),
+                  redirect: "error" as const,
+                }
+              : {}),
             headers: {
               Accept:
                 "text/html, application/json, application/xml;q=0.9, */*;q=0.5",
+              ...(readOptions.jsonQuery
+                ? { "Content-Type": "application/json" }
+                : {}),
             },
           });
           if (

@@ -33,7 +33,8 @@ import {
   listingPageText,
 } from "./listing-detail-extraction";
 import { blockedByCheck } from "./bot-check";
-import { collectPublicFeed, publicBoardFeed } from "./public-board-feed";
+import { collectPublicFeed } from "./public-board-feed";
+import { readAtsListing } from "./ats-public-feed";
 
 export interface ListingEngineModel {
   client: LLMClient;
@@ -165,19 +166,7 @@ export async function collectSource(
   try {
     const feed =
       input.lane === "browser" ? null : await collectPublicFeed(input);
-    if (feed) {
-      await input.onPage?.(feed);
-      return {
-        cards: feed,
-        lane: "http",
-        provider: publicBoardFeed(input.source.url)?.provider ?? "http",
-        pagesRead: 1,
-        complete: true,
-        notes: [
-          `${feed.length} listings collected from the public provider feed.`,
-        ],
-      };
-    }
+    if (feed) return feed;
   } catch {
     input.signal?.throwIfAborted(); /* The public board page is the fallback when its feed is unavailable. */
   }
@@ -202,8 +191,9 @@ export async function collectSource(
           });
           if (feed) {
             recognized = true;
-            for (const card of feed) cards.set(card.url, card);
-            await input.onPage?.(feed);
+            for (const card of feed.cards) cards.set(card.url, card);
+            if (!feed.complete) complete = false;
+            notes.push(...feed.notes);
             return;
           }
         }
@@ -230,7 +220,7 @@ export async function collectSource(
         if (
           !parsed.cards.length &&
           /\b(?:no (?:current |open |available )?(?:jobs|positions|vacancies)|(?:0|zero) (?:open )?(?:jobs|positions|vacancies))\b/iu.test(
-            page.html,
+            listingPageText(page.html),
           )
         ) {
           recognized = true;
@@ -297,13 +287,21 @@ export async function collectSource(
       cards: [...cards.values()],
       lane: "browser",
       pagesRead: visited.size + fallback.pagesRead,
-      complete: fallback.complete,
-      notes: [...notes, ...fallback.notes],
+      complete: cards.size > 0 && fallback.complete,
+      notes: [
+        ...notes,
+        ...fallback.notes,
+        ...(cards.size
+          ? []
+          : [
+              "No listings were read; coverage could not be confirmed. Open the site or check its jobs-board URL.",
+            ]),
+      ],
       ...(fallback.needsYou ? { needsYou: true } : {}),
     };
   }
   notes.push(
-    `${cards.size} listings collected from ${visited.size} pages; ${complete && recognized ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected from ${visited.size} pages; ${complete && recognized && cards.size > 0 ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],
@@ -311,7 +309,7 @@ export async function collectSource(
     requiresBrowser: !recognized || !complete,
     ...(needsAccess ? { accessBlocked: true } : {}),
     pagesRead: visited.size,
-    complete: complete && recognized,
+    complete: complete && recognized && cards.size > 0,
     notes,
   };
 }
@@ -545,8 +543,11 @@ export async function readListings(
       let page: { html: string; finalUrl: string } | null = null;
       let lastError: unknown;
       let authenticatedCard: ListingCard | null = null;
-      for (const candidate of group) {
+      for (const original of group) {
+        let candidate = original;
         try {
+          if (input.lane !== "browser" && !candidate.listingText)
+            candidate = (await readAtsListing(input, candidate)) ?? candidate;
           const alternative =
             (input.lane === "browser" ? undefined : candidate.listingPage) ??
             (candidate.listingText
@@ -638,7 +639,9 @@ export async function readListings(
         throw new Error("The page did not contain readable listing text.");
       return {
         card,
-        aliases: group.filter((alias) => alias !== card),
+        aliases: group.filter(
+          (alias) => alias.url !== card.url || alias.sourceId !== card.sourceId,
+        ),
         page,
         body,
         structured,
