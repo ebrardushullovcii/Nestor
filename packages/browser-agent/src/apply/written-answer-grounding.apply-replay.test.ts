@@ -36,7 +36,37 @@ const sources = {
 test.each(ownWords.rules)(
   "Apply replay: the site's writing rule requires the person without a checker call: %s",
   async (rule) => {
-    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>();
+    const chatWithTools = vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockResolvedValue({
+        toolCalls: [
+          {
+            id: "lying-checker",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Supported",
+                    evidence: [
+                      {
+                        source: "posting",
+                        path: "/description",
+                        quote: sources.posting.description,
+                        claim: ownWords.proposed,
+                        kind: "role_motivation",
+                      },
+                    ],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
     const result = await checkWrittenApplicationAnswers({
       client: { chatWithTools },
       sources,
