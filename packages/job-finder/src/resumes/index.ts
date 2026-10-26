@@ -10,3 +10,6 @@ export {
 export { writeResume, type ResumeWriterInputs } from "./write-resume";
 
 export { createResumeCommandReads } from "./resume-commands";
+// The key a written line's claim check is stored under, for evals that read
+// which checked lines a finished draft still shows.
+export { resumeClaimContentHash } from "../internal/resume-workspace-helpers";

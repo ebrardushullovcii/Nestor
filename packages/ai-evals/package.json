@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "assistant-lane": "node scripts/run-assistant-lane.mjs",
-    "search-relevance": "node scripts/run-search-relevance.mjs"
+    "search-relevance": "node scripts/run-search-relevance.mjs",
+    "resume-lane": "node scripts/run-resume-lane.mjs"
   },
   "dependencies": {
     "@nestor/ai-providers": "workspace:*",
