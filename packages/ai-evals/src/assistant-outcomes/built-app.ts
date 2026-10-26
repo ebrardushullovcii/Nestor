@@ -118,10 +118,14 @@ export async function runBuiltAppOutcomes(options: {
       `${JSON.stringify(buildOutcomeReport(ACTION_INVENTORY, observations), null, 2)}\n`,
     );
   };
+  // Keep the full denominator even if the process is interrupted before the
+  // first chat completes. Later checkpoints replace these unexercised cases.
+  await persist();
   for (const batch of options.batches) {
     let reply: AssistantConversationView | undefined;
     let turnError: string | undefined;
     try {
+      await options.note(`Starting chat outcome batch: ${batch.id}`);
       await options.page.keyboard.press("Escape");
       await batch.prepare?.(options.page);
       const composer = options.page.locator("[data-assistant-composer]");

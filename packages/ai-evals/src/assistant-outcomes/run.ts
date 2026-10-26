@@ -1,7 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ElectronApplication, Page } from "playwright";
-import type { DesktopJobsBridge } from "@nestor/contracts";
+import type {
+  ApplicationStoreDemoResult,
+  DesktopJobsBridge,
+  DesktopProfileWorkflowBridge,
+} from "@nestor/contracts";
 import { ACTION_INVENTORY } from "./inventory";
 import { runBuiltAppOutcomes, type BuiltAppBatch } from "./built-app";
 import { navigationOutcomeCases, shellOutcomeCases } from "./view-cases";
@@ -127,29 +131,73 @@ export async function run(
   if (state.net !== "replica" || state.guard !== "verified")
     throw Error("Replica network guard did not pass");
   const page = await ctx.page;
+  page.setDefaultTimeout(10_000);
   // Preconditions only. The actual requests below go through the visible composer.
   await page.evaluate(
     async (origin) => {
-      const test = (
+      const bridge = (
         window as unknown as {
           nestor: {
+            jobs: DesktopJobsBridge;
+            profileWorkflow: DesktopProfileWorkflowBridge;
             jobFinder: {
               test: {
-                loadAgentOwnedBrowserDemo(input: object): Promise<unknown>;
+                loadApplicationsStoreDemo(input: {
+                  sourceUrl: string;
+                  trackApplications: boolean;
+                }): Promise<ApplicationStoreDemoResult>;
               };
             };
           };
         }
-      ).nestor.jobFinder.test;
-      await test.loadAgentOwnedBrowserDemo({
+      ).nestor;
+      await bridge.jobs.run("patch_profile", {
+        fields: {
+          firstName: "Alex",
+          lastName: "Synthetic",
+          fullName: "Alex Synthetic",
+          email: "alex@example.test",
+          headline: "Synthetic software engineer",
+          currentLocation: "Budapest, Hungary",
+          currentCountry: "Hungary",
+          timeZone: "Europe/Budapest",
+          "workEligibility.requiresVisaSponsorship": false,
+        },
+        lists: {
+          skills: ["TypeScript"],
+          "workEligibility.authorizedWorkCountries": ["Hungary"],
+        },
+      });
+      await bridge.jobs.run("patch_profile_goals", {
+        lists: {
+          targetRoles: ["Software Engineer"],
+          locations: ["Remote"],
+          workModes: ["remote"],
+        },
+      });
+      await bridge.jobs.run("add_sites", { text: origin + "/board/" });
+      const setup = await bridge.profileWorkflow.run({ type: "read" });
+      await bridge.profileWorkflow.run({
+        type: "save_setup_state",
+        state: {
+          ...setup.state.profileSetupState,
+          status: "completed",
+          currentStep: "targeting",
+          completedAt: new Date().toISOString(),
+          reviewItems: [],
+        },
+      });
+      await bridge.jobFinder.test.loadApplicationsStoreDemo({
         sourceUrl: origin + "/board/",
-        applicationUrl: origin + "/employer-a/apply/1",
-        jobTitle: "Full-stack Engineer, Cloud Gardens",
-        jobCompany: "Cloud Garden Workshop",
+        trackApplications: true,
       });
     },
     ctx.sites.url.replace(/\/$/u, ""),
   );
+  // Re-read launch context after seeding, rather than leaving the first-run
+  // shell on its cached Guided setup destination.
+  await page.reload();
+  await page.locator("[data-job-finder-shell]").waitFor();
   const synthetic = await page.evaluate(() =>
     (
       window as unknown as { nestor: { jobs: DesktopJobsBridge } }
