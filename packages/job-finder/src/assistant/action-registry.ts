@@ -1,6 +1,6 @@
 import * as C from "@nestor/contracts";
 import type { z, ZodTypeAny } from "zod";
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
+import type { AssistantWorkspaceCommands } from "./workspace-commands";
 import type { AssistantToolGroup } from "./tool-kit";
 
 export type JobFinderActionSafety =
@@ -9,7 +9,7 @@ export type JobFinderActionSafety =
   | "confirm"
   | "application";
 export interface JobFinderActionContext {
-  service: JobFinderWorkspaceService;
+  service: AssistantWorkspaceCommands;
   /** Desktop-owned operations, shared with the existing IPC handlers. */
   host?: (actionId: string, input: unknown) => Promise<unknown>;
 }
@@ -217,31 +217,6 @@ export const JOB_FINDER_ACTIONS = {
     "files",
     "local",
     "Reveal an exported file in the file manager.",
-  ),
-  "read-action-state": action(
-    C.JobFinderReadActionStateInputSchema,
-    "workspace",
-    "read",
-    "Read search rules, notifications, the Apply queue or tracker settings.",
-    async (i, c) => {
-      const snapshot = await (c.service.getWorkspaceProjection?.() ??
-        c.service.getWorkspaceSnapshot());
-      if (i.scope === "apply_queue") return snapshot.applyQueue;
-      if (i.scope === "tracker_settings")
-        return snapshot.settings.applicationCrm;
-      const values: readonly unknown[] =
-        i.scope === "notifications" ? snapshot.campaignNotifications : [];
-      const filtered = i.id
-        ? values.filter(
-            (v) => v && typeof v === "object" && "id" in v && v.id === i.id,
-          )
-        : values;
-      return {
-        total: filtered.length,
-        rows: filtered.slice(i.cursor, i.cursor + i.limit),
-        next: i.cursor + i.limit < filtered.length ? i.cursor + i.limit : null,
-      };
-    },
   ),
   "candidate-assets:import": desktopAction(
     "candidate-assets:import",

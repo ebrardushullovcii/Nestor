@@ -75,6 +75,14 @@ test("900 source results page on demand and repeat totals distinguish listings f
 
 test.each([
   [
+    "The site took too long to respond. Open it to check it loads, then retry the search. Other sites continue normally.",
+    "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.",
+  ],
+  [
+    "page.goto: Timeout 20000ms exceeded.",
+    "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.",
+  ],
+  [
     "page.goto: net::ERR_CONNECTION_REFUSED.",
     "This site could not be reached. Check its address and your connection.",
   ],

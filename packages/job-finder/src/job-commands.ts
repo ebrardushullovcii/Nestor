@@ -1,5 +1,7 @@
 import {
   JOB_COMMANDS,
+  type JobPosting,
+  type SaveFoundJobsResult,
   type JobCommandName,
   type JobCommandOutputs,
   type JobSearchSettings,
@@ -20,6 +22,57 @@ export interface JobSearchControl {
   status(): JobSearchStatus;
   /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
   scoreUnscored(): Promise<number>;
+}
+
+/**
+ * Saves postings the Assistant read from a browser page into Find jobs. Only
+ * verified collections reach this (save_page_jobs, apply_here, page-item
+ * grants); it is not a model tool. A posting that matches a saved job keeps
+ * that job's stage. `applyOnThisPage` is the person choosing where to apply:
+ * the job applies on this page's form even when it was saved from another
+ * site first.
+ */
+export function savePageJobs(
+  store: JobStore,
+  input: {
+    postings: readonly JobPosting[];
+    pageUrl: string;
+    applyOnThisPage?: boolean;
+  },
+): SaveFoundJobsResult {
+  const site = new URL(input.pageUrl).hostname;
+  return store.transaction(() => {
+    const saved = store.saveFoundJobs({
+      searchId: null,
+      jobs: input.postings.map((posting) => ({
+        title: posting.title,
+        company: posting.company,
+        location: posting.location,
+        workModes: posting.workMode,
+        url: posting.canonicalUrl,
+        applyUrl: posting.applicationUrl,
+        sourceId: `page:${site}`,
+        sourceLabel: site,
+        sourceJobId: posting.sourceJobId,
+        postedAt: posting.postedAt,
+        salaryText: posting.salaryText,
+        salaryMin: posting.normalizedCompensation.minAmount ?? null,
+        salaryMax: posting.normalizedCompensation.maxAmount ?? null,
+        salaryCurrency: posting.normalizedCompensation.currency ?? null,
+        seniority: posting.seniority,
+        employmentType: posting.employmentType,
+        summary: posting.summary,
+        description: posting.description,
+      })),
+    });
+    const [posting] = input.postings;
+    const [id] = saved.ids;
+    if (input.applyOnThisPage && input.postings.length === 1 && posting && id)
+      store
+        .sql("UPDATE jobs SET apply_url = ? WHERE id = ?")
+        .run(posting.applicationUrl ?? input.pageUrl, id);
+    return saved;
+  });
 }
 
 type Handlers = {

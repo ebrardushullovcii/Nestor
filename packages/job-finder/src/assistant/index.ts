@@ -9,6 +9,13 @@ export type {
   AssistantBrowserPort,
   AssistantHostPorts,
 } from "./ports";
+export type {
+  AssistantReadCommand,
+  AssistantReadInput,
+  AssistantReadOutput,
+  AssistantPersonalState,
+  RunAssistantReadCommand,
+} from "./store-reads";
 export {
   createAssistantModelHandle,
   createScriptedAssistantModelHandle,
@@ -38,3 +45,5 @@ export {
   needsYouCommandTools,
   type RunNeedsYouCommand,
 } from "./needs-you-commands";
+
+export type { AssistantWorkspaceCommands } from "./workspace-commands";

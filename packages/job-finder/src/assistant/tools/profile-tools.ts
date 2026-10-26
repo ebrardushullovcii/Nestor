@@ -1,3 +1,5 @@
+import { buildProfileSetupReviewItems } from "../../internal/profile-setup-review-items";
+import type { AssistantPersonalState } from "../store-reads";
 import { findBulletsOnTwoCards } from "@nestor/ai-providers";
 import {
   NonEmptyStringSchema,
@@ -12,7 +14,6 @@ import {
   type AssistantChangeTarget,
   type AssistantMessagePart,
   type CandidateProfile,
-  type JobFinderWorkspaceSnapshot,
   type JobSearchPreferences,
   type ProfileCopilotPatchOperation,
   type ResumeImportFieldCandidate,
@@ -279,11 +280,12 @@ function preferences(searchPreferences: JobSearchPreferences) {
   };
 }
 
-function setupReadiness(snapshot: JobFinderWorkspaceSnapshot) {
+function setupReadiness(snapshot: AssistantPersonalState) {
   const readiness = evaluateProfileSetupReadiness(
     snapshot.profile,
     snapshot.searchPreferences,
   );
+  readiness.hasDiscoverySource = snapshot.enabledSiteCount > 0;
   const blockers = getProfileSetupReadinessBlockers(readiness);
   const missingWorkEligibilityAnswers = [
     ...(!snapshot.profile.workEligibility.authorizedWorkCountries.some(
@@ -306,7 +308,17 @@ function setupReadiness(snapshot: JobFinderWorkspaceSnapshot) {
         ]
       : []),
   ];
-  const requiredReviewItems = snapshot.profileSetupState.reviewItems
+  // Built as the Profile screen builds them, from the latest import's open
+  // candidates: without them a pending item on an empty field was dropped
+  // and Finish looked possible.
+  const requiredReviewItems = buildProfileSetupReviewItems({
+    currentState: snapshot.profileSetupState,
+    profile: snapshot.profile,
+    searchPreferences: snapshot.searchPreferences,
+    candidates: snapshot.latestResumeImportReviewCandidates,
+    documentBundle: snapshot.latestResumeImportBundle,
+    now: snapshot.generatedAt,
+  })
     .filter(isProfileSetupFinishBlockingReviewItem)
     .map((item) => ({
       id: item.id,
@@ -519,7 +531,7 @@ export const readProfileTool = defineTool({
       : "Reading your profile",
   effect: "read",
   async execute(input, { service, session, ports }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await ports.readPersonalState();
     const work = readAssistantWorkState(ports, snapshot);
     const { profile, searchPreferences } = snapshot;
     const pendingReview = snapshot.profileSetupState.reviewItems.filter(
@@ -644,7 +656,7 @@ export const finishProfileSetupTool = defineTool({
   label: () => "Finishing profile setup",
   effect: "local_write",
   async execute(_input, { service, session, ports }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await ports.readPersonalState();
     const setup = setupReadiness(snapshot);
     if (setup.status === "completed") {
       return {
@@ -680,7 +692,7 @@ export const finishProfileSetupTool = defineTool({
     }
     session.assertCurrent();
     const now = new Date().toISOString();
-    const updated = await service.saveProfileSetupState({
+    await service.saveProfileSetupState({
       ...snapshot.profileSetupState,
       status: "completed",
       currentStep: "targeting",
@@ -688,7 +700,7 @@ export const finishProfileSetupTool = defineTool({
       lastResumedAt: now,
     });
     ports.publishWorkspaceUpdate();
-    const savedSetup = setupReadiness(updated);
+    const savedSetup = setupReadiness(await ports.readPersonalState());
     if (savedSetup.status !== "completed") {
       throw new AssistantToolError(
         "missing_information",
@@ -923,8 +935,8 @@ export const editProfileTool = defineTool({
       : `Updating your profile: ${argText(input.summary).slice(0, 80)}`,
   effect: "local_write",
   async execute(input, context) {
-    const { service, session } = context;
-    const snapshot = await service.getWorkspaceSnapshot();
+    const { service, session, ports } = context;
+    const snapshot = await ports.readPersonalState();
     const operations = parseOperations(
       input.operations,
       snapshot.profile,
@@ -987,7 +999,7 @@ export const editProfileTool = defineTool({
       summary: input.summary,
       messageId: session.sourceMessage?.id ?? null,
     });
-    const savedSnapshot = await service.getWorkspaceSnapshot();
+    const savedSnapshot = await ports.readPersonalState();
     const setup = setupReadiness(savedSnapshot);
     const recorded = await recordEditChanges(
       context,
@@ -1272,7 +1284,7 @@ export const importResumeTool = defineTool({
     });
     session.assertCurrent();
     const [snapshot, imported] = await Promise.all([
-      service.getWorkspaceSnapshot(),
+      ports.readPersonalState(),
       service.getResumeImportState(),
     ]);
     const matchingRun = imported.resumeImportRuns

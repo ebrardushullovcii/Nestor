@@ -32,14 +32,6 @@ export const JobFinderEditSourceInputSchema = z
 export const JobFinderRemoveSourceInputSchema = z
   .object({ sourceId: NonEmptyStringSchema })
   .strict();
-export const JobFinderReadActionStateInputSchema = z
-  .object({
-    scope: z.enum(["notifications", "apply_queue", "tracker_settings"]),
-    id: NonEmptyStringSchema.optional(),
-    cursor: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(25).default(10),
-  })
-  .strict();
 export const JobFinderZoomInputSchema = z
   .object({ command: z.enum(["in", "out", "reset"]) })
   .strict();

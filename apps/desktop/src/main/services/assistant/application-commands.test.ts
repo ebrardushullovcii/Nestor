@@ -19,12 +19,13 @@ vi.mock("../job-finder/application-store", () => ({
 vi.mock("../job-store", () => ({ getJobStore: () => jobs }));
 vi.mock("../job-finder/workspace-service", () => ({
   getJobFinderWorkspaceService: () => Promise.resolve({}),
-}));
-vi.mock("../job-finder/create-workspace-service", () => ({
-  getJobFinderRepositoryForWorkspaceService: () => ({
-    getSettings: () => Promise.resolve({ applicationAutomationMode: mode }),
-    getActivityControl: () => Promise.resolve({ paused }),
-  }),
+  startJobFinderRuntime: () =>
+    Promise.resolve({
+      jobFinderRepository: {
+        getSettings: () => Promise.resolve({ applicationAutomationMode: mode }),
+        getActivityControl: () => Promise.resolve({ paused }),
+      },
+    }),
 }));
 vi.mock("../job-finder/test-api", () => ({
   isDesktopTestApiEnabled: () => false,

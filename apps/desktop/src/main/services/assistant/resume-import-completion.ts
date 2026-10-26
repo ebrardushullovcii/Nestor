@@ -2,18 +2,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   hasProfileSetupPlaceholderValue,
   type CandidateProfile,
-  type JobFinderWorkspaceSnapshot,
+  type ResumeImportRun,
 } from "@nestor/contracts";
 import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 
-type ImportSnapshot = Pick<
-  JobFinderWorkspaceSnapshot,
-  "profile" | "latestResumeImportRun" | "visionProvider"
->;
-
-type ImportService = Pick<JobFinderWorkspaceService, "getResumeImportState"> & {
-  getWorkspaceSnapshot(): Promise<ImportSnapshot>;
+type ImportSnapshot = {
+  profile: CandidateProfile;
+  latestResumeImportRun: ResumeImportRun | null;
+  visionProvider?: { requestTimeoutMs?: number | null } | null;
 };
+type ImportService = Pick<JobFinderWorkspaceService, "getResumeImportState">;
 
 function hasProfileDetails(profile: CandidateProfile): boolean {
   return (
@@ -41,7 +39,10 @@ function hasProfileDetails(profile: CandidateProfile): boolean {
 export async function waitForAssistantResumeImport(
   service: ImportService,
   imported: ImportSnapshot,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    readProfile: () => Promise<CandidateProfile>;
+  },
 ): Promise<void> {
   options.signal?.throwIfAborted();
   const sourceResumeId = imported.profile.baseResume.id;
@@ -72,9 +73,9 @@ export async function waitForAssistantResumeImport(
   // An active run can finish during the preceding repository read. Read again
   // after observing its removal so results cannot predate the profile commit.
   state = await service.getResumeImportState();
-  const completed = await service.getWorkspaceSnapshot();
+  const completedProfile = await options.readProfile();
   options.signal?.throwIfAborted();
-  if (completed.profile.baseResume.id !== sourceResumeId) {
+  if (completedProfile.baseResume.id !== sourceResumeId) {
     throw new Error(
       "Another resume replaced this import. Its details were not confirmed as the current profile.",
     );
@@ -85,7 +86,7 @@ export async function waitForAssistantResumeImport(
   const usableCandidates =
     (completedRun?.candidateCounts.autoApplied ?? 0) +
     (completedRun?.candidateCounts.needsReview ?? 0);
-  if (usableCandidates === 0 && !hasProfileDetails(completed.profile)) {
+  if (usableCandidates === 0 && !hasProfileDetails(completedProfile)) {
     throw new Error(
       "The resume file was saved, but no usable profile details were recovered. Try a clearer copy or provide the resume text.",
     );

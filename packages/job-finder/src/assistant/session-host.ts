@@ -45,12 +45,11 @@ import {
   type AssistantTaskPlan,
   type AssistantTurn,
   type AssistantUndoChangeResult,
-  type JobFinderWorkspaceSnapshot,
   type ProfileCopilotPatchOperation,
 } from "@nestor/contracts";
 import type { AssistantRepository } from "@nestor/db";
 
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
+import type { AssistantWorkspaceCommands } from "./workspace-commands";
 import {
   assembleModelInput,
   AssistantContextOverflowError,
@@ -60,7 +59,6 @@ import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
 import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
 import { readRunStatus } from "./run-watch";
 import { closeStoppedTurn } from "./turn-closure";
-import { allJobs, createJobCaveats } from "./tools/format";
 import {
   AssistantToolError,
   assistantModelToolDefinition,
@@ -109,7 +107,7 @@ export type AssistantModelResolution =
 
 export interface AssistantSessionHostOptions {
   repository: AssistantRepository;
-  service: JobFinderWorkspaceService;
+  service: AssistantWorkspaceCommands;
   ports: AssistantHostPorts;
   resolveModel: () => AssistantModelResolution;
   publish: (event: AssistantEvent) => void;
@@ -244,7 +242,7 @@ export class AssistantSessionHost {
   }
 
   private readonly repository: AssistantRepository;
-  private readonly service: JobFinderWorkspaceService;
+  private readonly service: AssistantWorkspaceCommands;
   private readonly ports: AssistantHostPorts;
   private readonly options: AssistantSessionHostOptions;
   private readonly live = new Map<string, LiveTurn>();
@@ -602,23 +600,19 @@ export class AssistantSessionHost {
     await this.clearIdleActivity(conversationId);
   }
 
-  private readWorkspaceSnapshot(): Promise<JobFinderWorkspaceSnapshot> {
-    return (
-      this.service.getWorkspaceProjection?.() ??
-      this.service.getWorkspaceSnapshot()
-    );
+  private readPersonalState() {
+    return this.ports.readPersonalState();
   }
 
   private async cancelRun(run: AssistantRunRef): Promise<void> {
     try {
-      // Searches stop through the stop_search command, not a run ref.
-      if (run.kind === "discovery") return;
-      else if (run.kind === "apply_batch" || run.kind === "apply_run") {
-        await this.service.cancelApplyRun(run.id);
-      } else if (run.kind === "apply_queue") {
-        await this.ports.executeAction?.("control-apply-queue", {
-          action: "stop",
-          queueId: run.id,
+      if (run.kind === "discovery") {
+        await this.ports.executeAction?.("stop-search", {});
+      } else if (
+        ["apply_batch", "apply_run", "apply_queue"].includes(run.kind)
+      ) {
+        await this.ports.executeAction?.("stop-application", {
+          id: Number(run.id),
         });
       } else if (run.kind === "source_check") {
         await this.service.cancelSourceDebug(run.id);
@@ -794,9 +788,8 @@ export class AssistantSessionHost {
         },
         takeSteering: () => this.takeSteering(live),
         assembleMessages: async (turnMessages) => {
-          const current = await this.readWorkspaceSnapshot();
+          const current = await this.readPersonalState();
           const currentContext = buildContextBlock({
-            storeCommands: Boolean(this.ports.commands?.length),
             context: live.sourceMessage?.context ?? null,
             resultSets: live.sourceMessage
               ? await this.resultSetsFor(live.sourceMessage)
@@ -958,7 +951,7 @@ export class AssistantSessionHost {
     hostNote?: string,
   ): Promise<AgentLoopMessage> {
     const conversationId = live.turn.conversationId;
-    const snapshot = await this.readWorkspaceSnapshot();
+    const snapshot = await this.readPersonalState();
     const resultSets = live.sourceMessage
       ? await this.resultSetsFor(live.sourceMessage)
       : [];
@@ -971,7 +964,6 @@ export class AssistantSessionHost {
     this.answeredElsewhere.delete(conversationId);
     const block = [
       buildContextBlock({
-        storeCommands: Boolean(this.ports.commands?.length),
         context: live.sourceMessage?.context ?? null,
         resultSets,
         snapshot,
@@ -1012,9 +1004,8 @@ export class AssistantSessionHost {
         // The newest message the person typed is what authorizes from here on.
         live.sourceMessage = message;
         const resultSets = await this.resultSetsFor(message);
-        const snapshot = await this.readWorkspaceSnapshot();
+        const snapshot = await this.readPersonalState();
         const block = buildContextBlock({
-          storeCommands: Boolean(this.ports.commands?.length),
           context: message.context,
           resultSets,
           snapshot,
@@ -1771,28 +1762,30 @@ export class AssistantSessionHost {
         const lease = await this.ports.browser.lease({
           tabId,
           ...(applicationResultId ? { applicationResultId } : {}),
+          // The edit already happened; its tracker note is best-effort, so a
+          // job with no tracker row yet does not turn the edit into an error.
           onApplicationChange: async (recordId, field) => {
-            const snapshot = await this.readWorkspaceSnapshot();
-            const record = snapshot.applicationRecords.find(
-              (record) => record.id === recordId,
-            );
-            if (!record)
-              throw new Error("The application record is no longer available.");
-            const at = this.now();
-            await this.service.mutateApplicationCrm({
-              applicationRecordId: recordId,
-              expectedRevision: record.crm?.revision ?? 0,
-              actor: "assistant",
-              mutation: {
-                type: "add_note",
-                note: {
-                  id: session.createId("assistant_browser_edit"),
-                  body: `Assistant changed ${field.slice(0, 160)} in the prepared form. Nothing was sent.`,
-                  createdAt: at,
-                  updatedAt: at,
-                },
-              },
-            });
+            try {
+              const application = await this.ports.readCommand(
+                "get_application_details",
+                { id: Number(recordId) },
+              );
+              const command = this.ports.commands?.find(
+                (command) => command.name === "add_event",
+              );
+              if (application && command)
+                await command.execute(
+                  {
+                    jobId: application.application.jobId,
+                    kind: "note",
+                    title: "Prepared form edited",
+                    body: `Assistant changed ${field.slice(0, 160)} in the prepared form. Nothing was sent.`,
+                  },
+                  { service: this.service, ports: this.ports, session },
+                );
+            } catch (error) {
+              this.log("Could not note a prepared-form edit", error);
+            }
             this.ports.publishWorkspaceUpdate();
           },
           conversationId,
@@ -1977,12 +1970,12 @@ export class AssistantSessionHost {
    * told on its next turn.
    */
   async closeQuestionsAnsweredElsewhere(): Promise<void> {
-    if (this.linkedQuestions.size === 0 || !this.ports.readNeed) return;
+    if (this.linkedQuestions.size === 0) return;
     for (const [key, link] of [...this.linkedQuestions]) {
       const id = Number(link.requestId);
       if (!Number.isSafeInteger(id) || id <= 0) continue;
       try {
-        if (await this.ports.readNeed(id)) continue;
+        if (await this.ports.readCommand("get_need", { id })) continue;
       } catch {
         continue;
       }
@@ -2023,9 +2016,7 @@ export class AssistantSessionHost {
     const startedAt = Date.now();
     const check = this.checkWatchesOnce().finally(() => {
       this.watchCheckInFlight = null;
-      // A watched search sends updates several times a second and each check
-      // rebuilds the whole workspace; resting twice as long as the check
-      // took keeps the watch from rebuilding it nonstop.
+      // Coalesce bursts of updates while following only each watch's store rows.
       const finishedAt = Date.now();
       this.watchCheckRestUntil =
         finishedAt + Math.min(8_000, 2 * (finishedAt - startedAt));
@@ -2040,15 +2031,15 @@ export class AssistantSessionHost {
       this.watchTimer = null;
       return;
     }
-    let snapshot;
-    try {
-      snapshot = await this.readWorkspaceSnapshot();
-    } catch {
-      return;
-    }
     for (const [key, watch] of [...this.watches]) {
       if (this.watches.get(key) !== watch) continue;
-      const status = readRunStatus(snapshot, watch.run);
+      let status;
+      try {
+        status = await readRunStatus(this.ports, watch.run);
+      } catch {
+        continue;
+      }
+      if (status.jobIds) watch.run.jobIds = status.jobIds;
       if (!status.done) {
         if (watch.resumedAt !== undefined || watch.reportedHandoff)
           watch.seenWorking = true;
@@ -2507,50 +2498,72 @@ export class AssistantSessionHost {
   // ---------------------------------------------------------------------------
 
   async searchMentions(query: string): Promise<AssistantMentionCandidate[]> {
-    const snapshot = await this.readWorkspaceSnapshot();
-    const words = query.toLowerCase().split(/\s+/u).filter(Boolean);
-    const hit = (text: string) =>
-      words.every((word) => text.toLowerCase().includes(word));
     const candidates: AssistantMentionCandidate[] = [];
-    const seen = new Set<string>();
-    const caveatsFor = createJobCaveats(snapshot);
-    for (const job of [...snapshot.discoveryJobs, ...snapshot.companyJobs]) {
-      if (seen.has(job.id) || !hit(`${job.title} ${job.company}`)) continue;
+    const jobStages = ["found", "shortlisted", "resume", "applied"] as const;
+    const [personal, applications, jobPages, resumePages] = await Promise.all([
+      this.ports.readPersonalState(),
+      this.ports.readCommand("list_applications", { text: query, limit: 10 }),
+      Promise.all(
+        jobStages.map((stage) =>
+          this.ports.readCommand("list_jobs", {
+            stage,
+            text: query,
+            limit: 10,
+          }),
+        ),
+      ),
+      Promise.all(
+        (["shortlisted", "resume"] as const).map((stage) =>
+          this.ports.readCommand("list_shortlisted", {
+            stage,
+            text: query,
+            limit: 10,
+          }),
+        ),
+      ),
+    ]);
+    const jobs = jobPages.flatMap((page) => page.rows);
+    const resumes = resumePages.flatMap((page) => page.rows);
+    const comparable = (name: string) =>
+      name
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[^a-z0-9]+/gu, " ")
+        .trim();
+    const excluded = new Set(
+      personal.searchPreferences.companyBlacklist.map(comparable),
+    );
+    for (const job of jobs) {
       // Excluded employers stay out of suggestions unless already in play.
-      if (job.status === "discovered" && caveatsFor(job).excludedEmployer)
+      if (job.stage === "found" && excluded.has(comparable(job.company)))
         continue;
-      seen.add(job.id);
       candidates.push({
         kind: "job",
-        id: job.id,
+        id: String(job.id),
         label: `${job.title} at ${job.company}`.slice(0, 300),
         detail: job.location.slice(0, 300),
       });
     }
-    for (const record of snapshot.applicationRecords) {
-      if (!hit(`${record.title} ${record.company} application`)) continue;
+    for (const row of applications.rows)
       candidates.push({
         kind: "application",
-        id: record.id,
-        label: `Application: ${record.title} at ${record.company}`.slice(
-          0,
-          300,
-        ),
-        detail: record.lastActionLabel.slice(0, 300),
+        id: String(row.id),
+        label: `Application: ${row.title} at ${row.company}`.slice(0, 300),
+        detail: row.status,
       });
-    }
-    for (const draft of snapshot.resumeDrafts) {
-      const job = snapshot.reviewQueue.find(
-        (entry) => entry.jobId === draft.jobId,
-      );
-      if (!job || !hit(`${job.title} ${job.company} resume`)) continue;
+    for (const row of resumes)
       candidates.push({
         kind: "resume",
-        id: draft.jobId,
-        label: `Resume for ${job.title} at ${job.company}`.slice(0, 300),
-        detail: draft.status,
+        id: String(row.id),
+        label: `Resume for ${row.title} at ${row.company}`.slice(0, 300),
+        detail: row.resume?.state ?? "Not written",
       });
-    }
+    const hit = (text: string) =>
+      query
+        .toLowerCase()
+        .split(/\s+/u)
+        .filter(Boolean)
+        .every((word) => text.toLowerCase().includes(word));
     try {
       for (const document of await this.ports.listDocuments()) {
         if (!hit(document.originalName)) continue;
@@ -2606,9 +2619,6 @@ export class AssistantSessionHost {
    * yet read start their turn. Nothing uncertain is replayed.
    */
   async recover(): Promise<void> {
-    let applicationSnapshot:
-      | Awaited<ReturnType<JobFinderWorkspaceService["getWorkspaceSnapshot"]>>
-      | undefined;
     for (const turn of await this.repository.listTurnsByStatus([
       "running",
       "queued",
@@ -2650,14 +2660,26 @@ export class AssistantSessionHost {
           });
           continue;
         }
-        const applicationStatus =
-          operation.run.kind === "apply_batch" ||
-          operation.run.kind === "apply_run"
-            ? readRunStatus(
-                (applicationSnapshot ??= await this.readWorkspaceSnapshot()),
-                run,
-              )
-            : null;
+        // A watch that can no longer be read (its run is gone or was saved
+        // in an older shape) ends here; it must not stop the others.
+        let applicationStatus: Awaited<
+          ReturnType<typeof readRunStatus>
+        > | null = null;
+        try {
+          applicationStatus =
+            operation.run.kind === "apply_batch" ||
+            operation.run.kind === "apply_run"
+              ? await readRunStatus(this.ports, run)
+              : null;
+        } catch {
+          await this.repository.upsertOperation({
+            ...operation,
+            status: "failed",
+            resultSummary: "This watch could not be read after the restart.",
+            endedAt: this.now(),
+          });
+          continue;
+        }
         this.watches.set(key, {
           conversationId: conversation.id,
           run,
@@ -2773,30 +2795,36 @@ export class AssistantSessionHost {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, 6);
     if (sets.length === 0) return null;
-    let snapshot: JobFinderWorkspaceSnapshot | null = null;
-    try {
-      snapshot = await this.readWorkspaceSnapshot();
-    } catch {
-      snapshot = null;
-    }
-    const titleOf = (id: string): string | null => {
-      if (!snapshot) return null;
-      const job = allJobs(snapshot).find((entry) => entry.id === id);
-      if (job) return `${job.title} at ${job.company}`;
-      const application = snapshot.applicationRecords.find(
-        (entry) => entry.id === id,
-      );
-      return application
-        ? `${application.title} at ${application.company}`
-        : null;
-    };
+    const titles = new Map<string, string>();
+    await Promise.all(
+      sets.flatMap((set) =>
+        set.itemIds.slice(0, 12).map(async (id) => {
+          if (!/^\d+$/u.test(id)) return;
+          const key = `${set.kind}:${id}`;
+          try {
+            const value =
+              set.kind === "applications"
+                ? await this.ports.readCommand("get_application", {
+                    jobId: Number(id),
+                  })
+                : await this.ports.readCommand("get_job", { id: Number(id) });
+            if (value) {
+              const job = "job" in value ? value.job : value;
+              titles.set(key, `${job.title} at ${job.company}`);
+            }
+          } catch {
+            /* A removed row keeps its frozen position. */
+          }
+        }),
+      ),
+    );
     const lines = [
       "Lists shown earlier, newest first. Their order is fixed: position n always means the same record.",
     ];
     for (const set of sets) {
       lines.push(`${set.label} (result set ${set.id}, ${set.createdAt}):`);
       set.itemIds.slice(0, 12).forEach((id, index) => {
-        const title = titleOf(id);
+        const title = titles.get(`${set.kind}:${id}`);
         lines.push(`  ${index + 1}. ${title ? `${title} ` : ""}[${id}]`);
       });
       if (set.itemIds.length > 12) {

@@ -1694,6 +1694,13 @@ export class EmbeddedBrowser {
     });
   }
 
+  isApplicationTab(tabId: string): boolean {
+    return [...this.ownedTabs].some(
+      ([owner, tabs]) =>
+        /^application_\d+_attempt_\d+$/u.test(owner) && tabs.has(tabId),
+    );
+  }
+
   isApplicationPageLent(owner: string): boolean {
     return [...(this.ownedTabs.get(owner) ?? [])].some((tabId) =>
       this.lentTabs.has(tabId),

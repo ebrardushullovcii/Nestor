@@ -476,14 +476,17 @@ describe("JobFinderGlobalSearch", () => {
     let answer: (found: {
       entries: typeof sampleEntries;
       incomplete: boolean;
+      failed: boolean;
     }) => void = () => undefined;
     const searchMore = vi.fn(
       () =>
-        new Promise<{ entries: typeof sampleEntries; incomplete: boolean }>(
-          (resolve) => {
-            answer = resolve;
-          },
-        ),
+        new Promise<{
+          entries: typeof sampleEntries;
+          incomplete: boolean;
+          failed: boolean;
+        }>((resolve) => {
+          answer = resolve;
+        }),
     );
     render(
       <JobFinderGlobalSearch
@@ -496,14 +499,54 @@ describe("JobFinderGlobalSearch", () => {
     await waitFor(() => expect(searchMore).toHaveBeenCalledWith("platform"));
     expect(screen.getByText("Searching your saved jobs…")).toBeTruthy();
     expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
-    answer({ entries: [sampleEntries[0]!], incomplete: false });
+    answer({ entries: [sampleEntries[0]!], incomplete: false, failed: false });
     expect(
       await screen.findByRole("option", { name: /Platform Engineer/ }),
     ).toBeTruthy();
     expect(screen.getByText("1 result")).toBeTruthy();
   });
 
-  it("says the saved jobs could not be searched when the store fails", async () => {
+  it("says the saved jobs could not be searched when the store fails, and tries again", async () => {
+    const searchMore = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("database is locked"))
+      .mockResolvedValue({
+        entries: [sampleEntries[0]!],
+        incomplete: false,
+        failed: false,
+      });
+    const settings = {
+      href: "/job-finder/settings",
+      id: "screen:settings",
+      kind: "screen" as const,
+      metadata: [],
+      subtitle: "Applying, AI, appearance",
+      title: "Settings",
+    };
+    render(
+      <JobFinderGlobalSearch
+        entries={[settings]}
+        onNavigate={vi.fn()}
+        searchMore={searchMore}
+      />,
+    );
+    typeQuery("settings");
+    // A screen still matches; the banner speaks only for the saved jobs.
+    expect(
+      await screen.findByText("Your saved jobs could not be searched."),
+    ).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Settings/ })).toBeTruthy();
+    expect(screen.queryByText("Searching your saved jobs…")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(searchMore).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("option", { name: /Platform Engineer/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no count over a failed search with nothing to show", async () => {
     const searchMore = vi.fn(() =>
       Promise.reject(new Error("database is locked")),
     );
@@ -515,18 +558,18 @@ describe("JobFinderGlobalSearch", () => {
       />,
     );
     typeQuery("platform");
-    expect(
-      await screen.findByText(
-        "Your saved jobs could not be searched. Try again.",
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByText("Searching your saved jobs…")).toBeNull();
+    await screen.findByText("Your saved jobs could not be searched.");
+    expect(screen.queryByText("0 results")).toBeNull();
     expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
   });
 
   it("shows what came back when part of the search fails", async () => {
     const searchMore = vi.fn(() =>
-      Promise.resolve({ entries: [sampleEntries[0]!], incomplete: true }),
+      Promise.resolve({
+        entries: [sampleEntries[0]!],
+        incomplete: true,
+        failed: false,
+      }),
     );
     render(
       <JobFinderGlobalSearch

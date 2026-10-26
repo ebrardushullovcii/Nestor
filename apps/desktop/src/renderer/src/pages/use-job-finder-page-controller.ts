@@ -43,8 +43,6 @@ import {
 } from "./use-job-finder-page-controller-actions";
 import {
   getJobFinderWorkspaceSelection,
-  getLatestApplicationAttempt,
-  useApplicationSelection,
   useRetainedSelection,
 } from "./use-job-finder-page-controller-helpers";
 import { applyJobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
@@ -490,13 +488,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
       collectionReady: selectionsCollectionReady,
     },
   });
-  const [selectedApplicationRecordId, setSelectedApplicationRecordId] =
-    useApplicationSelection(
-      workspaceState.status === "ready"
-        ? workspaceState.workspace.selectedApplicationRecordId
-        : null,
-    );
-
   const [profileSurfaceDirty, setProfileSurfaceDirty] = useState(false);
   const applyProfileSurfaceDirty = useCallback<
     Dispatch<SetStateAction<boolean>>
@@ -782,18 +773,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
     [selectedReviewItem?.resumeAssetId, workspace?.tailoredAssets],
   );
 
-  const { selectedApplicationAttempt, selectedApplicationRecord } = useMemo(
-    () =>
-      workspace
-        ? getLatestApplicationAttempt(workspace, selectedApplicationRecordId)
-        : { selectedApplicationAttempt: null, selectedApplicationRecord: null },
-    [
-      selectedApplicationRecordId,
-      workspace?.applicationRecords,
-      workspace?.applicationAttempts,
-    ],
-  );
-
   // Route-scoped view of the page action status: a message is visible only on
   // the route that owns it. The raw state is kept intact so in-flight actions
   // can complete without racing a disposal; the ownership ref is stamped by
@@ -840,8 +819,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
       requestApplyCopilotVisualCheckpoints: (request) => {
         setApplyCopilotVisualCheckpointRequest(request);
       },
-      selectedApplicationAttempt,
-      selectedApplicationRecord,
       selectedDiscoveryJob,
       selectedReviewItem,
       selectedReviewJob,
@@ -855,7 +832,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
       onProfileSurfaceDraftEdited: noteProfileSurfaceDraftEdited,
       onCancelImportResume: () => cancelImportResumeIfWaiting(true),
       onSettingsDraftEdited: noteSettingsDraftEdited,
-      setSelectedApplicationRecordId,
       setSelectedDiscoveryJobId,
       setSelectedReviewJobId,
       sourceDebugRunIdRef,
@@ -879,8 +855,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
     saveCoordinator,
     saveState,
     importResumeGuardMessage,
-    selectedApplicationAttempt,
-    selectedApplicationRecord,
     selectedDiscoveryJob,
     selectedReviewItem,
     selectedReviewJob,

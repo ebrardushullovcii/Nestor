@@ -12,40 +12,11 @@ import {
   type AssistantToolDefinition,
 } from "../tool-kit";
 
-function compactResult(value: unknown, input: unknown): unknown {
-  if (!value || typeof value !== "object" || !("discoveryJobs" in value))
-    return value;
-  const snapshot = value as Awaited<
-    ReturnType<AssistantToolContext["service"]["getWorkspaceSnapshot"]>
-  >;
-  const record =
-    input && typeof input === "object"
-      ? (input as Record<string, unknown>)
-      : {};
-  return {
-    activeCampaignId: snapshot.activeCampaignId,
-    activityControl: snapshot.activityControl,
-    applyQueue: snapshot.applyQueue,
-    ...(record.campaignId
-      ? {
-          campaign: snapshot.campaigns.find(
-            (campaign) => campaign.id === record.campaignId,
-          ),
-        }
-      : {}),
-    ...(record.applicationRecordId
-      ? {
-          application: snapshot.applicationRecords.find(
-            (application) => application.id === record.applicationRecordId,
-          ),
-        }
-      : {}),
-    counts: {
-      found: snapshot.discoveryJobs.length,
-      shortlisted: snapshot.reviewQueue.length,
-      applications: snapshot.applicationRecords.length,
-    },
-  };
+function compactResult(value: unknown): unknown {
+  // Legacy mutation return values are display payloads, never a read source.
+  return value && typeof value === "object" && "discoveryJobs" in value
+    ? { saved: true }
+    : value;
 }
 
 export async function executeRegisteredAssistantAction(
@@ -95,7 +66,7 @@ export async function executeRegisteredAssistantAction(
       : {}),
   });
   if (action.safety !== "read") context.ports.publishWorkspaceUpdate();
-  const data = compactResult(result, parsed);
+  const data = compactResult(result);
   if (
     result &&
     typeof result === "object" &&

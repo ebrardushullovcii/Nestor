@@ -34,7 +34,7 @@ function harness(input: { active?: boolean; accepted?: number } = {}) {
   };
   const service = {
     getResumeImportState: vi.fn(() => Promise.resolve({ ...state })),
-    getWorkspaceSnapshot: vi.fn(() => Promise.resolve(snapshot)),
+    readProfile: vi.fn(() => Promise.resolve(profile)),
   };
   return { run, profile, snapshot, state, service };
 }
@@ -43,14 +43,14 @@ describe("sidebar resume import completion", () => {
   test("waits through reconciliation even when vision already says completed", async () => {
     const h = harness({ active: true });
     let finished = false;
-    const waiting = waitForAssistantResumeImport(h.service, h.snapshot).then(
-      () => {
-        finished = true;
-      },
-    );
+    const waiting = waitForAssistantResumeImport(h.service, h.snapshot, {
+      readProfile: h.service.readProfile,
+    }).then(() => {
+      finished = true;
+    });
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(finished).toBe(false);
-    expect(h.service.getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(h.service.readProfile).not.toHaveBeenCalled();
     h.profile.fullName = "Alex Scan";
     h.run.candidateCounts.autoApplied = 1;
     h.state.activeVisionRunIds = [];
@@ -67,19 +67,25 @@ describe("sidebar resume import completion", () => {
     h.state.activeVisionRunIds = ["unrelated-import"];
     expect(h.profile.baseResume.extractionStatus).toBe("needs_text");
     await expect(
-      waitForAssistantResumeImport(h.service, h.snapshot),
+      waitForAssistantResumeImport(h.service, h.snapshot, {
+        readProfile: h.service.readProfile,
+      }),
     ).resolves.toBeUndefined();
   });
 
   test("reports an empty import truthfully while preserving an existing profile", async () => {
     const empty = harness();
     await expect(
-      waitForAssistantResumeImport(empty.service, empty.snapshot),
+      waitForAssistantResumeImport(empty.service, empty.snapshot, {
+        readProfile: empty.service.readProfile,
+      }),
     ).rejects.toThrow("no usable profile details were recovered");
     const existing = harness();
     existing.profile.fullName = "Alex Existing";
     await expect(
-      waitForAssistantResumeImport(existing.service, existing.snapshot),
+      waitForAssistantResumeImport(existing.service, existing.snapshot, {
+        readProfile: existing.service.readProfile,
+      }),
     ).resolves.toBeUndefined();
     expect(existing.profile.fullName).toBe("Alex Existing");
   });
@@ -89,9 +95,11 @@ describe("sidebar resume import completion", () => {
     if (!h.run.modelRoles) throw new Error("Expected model roles");
     h.run.modelRoles.vision.timeoutMs = 25;
     await expect(
-      waitForAssistantResumeImport(h.service, h.snapshot),
+      waitForAssistantResumeImport(h.service, h.snapshot, {
+        readProfile: h.service.readProfile,
+      }),
     ).rejects.toThrow("visual scan is still finishing");
-    expect(h.service.getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(h.service.readProfile).not.toHaveBeenCalled();
   });
 
   test("Stop aborts the wait without claiming import success", async () => {
@@ -100,24 +108,24 @@ describe("sidebar resume import completion", () => {
     const waiting = expect(
       waitForAssistantResumeImport(h.service, h.snapshot, {
         signal: controller.signal,
+        readProfile: h.service.readProfile,
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
     controller.abort();
     await waiting;
-    expect(h.service.getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(h.service.readProfile).not.toHaveBeenCalled();
   });
 
   test("a superseded import does not report the replacement's profile as its own result", async () => {
     const h = harness({ accepted: 1 });
-    h.service.getWorkspaceSnapshot.mockResolvedValue({
-      ...h.snapshot,
-      profile: {
-        ...h.profile,
-        baseResume: { ...h.profile.baseResume, id: "replacement-resume" },
-      },
+    h.service.readProfile.mockResolvedValue({
+      ...h.profile,
+      baseResume: { ...h.profile.baseResume, id: "replacement-resume" },
     });
     await expect(
-      waitForAssistantResumeImport(h.service, h.snapshot),
+      waitForAssistantResumeImport(h.service, h.snapshot, {
+        readProfile: h.service.readProfile,
+      }),
     ).rejects.toThrow("Another resume replaced this import");
   });
 });

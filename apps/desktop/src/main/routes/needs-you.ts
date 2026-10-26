@@ -10,16 +10,16 @@ import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { runJobCommand } from "../services/job-commands";
 
 /**
- * Apply's service starts inside the old workspace service; both load on
- * first use rather than with main.
+ * Apply's service starts with the Job Finder runtime; both load on first
+ * use rather than with main.
  */
 async function applicationService() {
-  const [{ getJobFinderWorkspaceService }, { getApplicationService }] =
+  const [{ startJobFinderRuntime }, { getApplicationService }] =
     await Promise.all([
       import("../services/job-finder/workspace-service"),
       import("../services/applications"),
     ]);
-  await getJobFinderWorkspaceService();
+  await startJobFinderRuntime();
   return getApplicationService();
 }
 
@@ -59,7 +59,19 @@ export async function runNeedsYouCommand<K extends NeedsYouCommandName>(
   name: K,
   input: unknown,
 ): Promise<NeedsYouCommandOutput<K>> {
-  return run(name, input);
+  const result = await run(name, input);
+  if (
+    [
+      "answer_need",
+      "save_form_answer",
+      "create_form_answer",
+      "upsert_form_answer",
+    ].includes(name) &&
+    getApplicationStore().listApplications({ state: "queued", limit: 1 }).rows
+      .length
+  )
+    await applicationService();
+  return result;
 }
 export function registerNeedsYouRoutes(ipcMain: IpcMain): void {
   ipcMain.handle(NEEDS_YOU_RUN_CHANNEL, (event, request: unknown) => {

@@ -1,7 +1,5 @@
-import type {
-  AssistantMessagePart,
-  JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import type { AssistantPersonalState } from "../store-reads";
+import type { AssistantMessagePart } from "@nestor/contracts";
 import {
   AiBehaviorPreferenceSchema,
   ApplicationAttestationKindSchema,
@@ -45,8 +43,8 @@ const SETTINGS_LABELS: Record<string, string> = {
  */
 async function recordSettingsChange(
   context: AssistantToolContext,
-  before: JobFinderWorkspaceSnapshot,
-  after: JobFinderWorkspaceSnapshot,
+  before: AssistantPersonalState,
+  after: AssistantPersonalState,
   summary: string,
 ): Promise<{ parts: AssistantMessagePart[]; receiptId: string | null }> {
   const labelFor = (path: readonly string[]) =>
@@ -96,8 +94,8 @@ export const readSettingsTool = defineTool({
   input: z.object({}).passthrough(),
   label: () => "Reading your settings",
   effect: "read",
-  async execute(_input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+  async execute(_input, { ports }) {
+    const snapshot = await ports.readPersonalState();
     return {
       summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}. Profile > Preferences resume level: ${defaultResumeLevelLabel(snapshot)}.`,
       data: {
@@ -144,9 +142,10 @@ export const updateApplySettingsTool = defineTool({
   label: () => "Changing your applying settings",
   effect: "local_write",
   async execute(input, context) {
-    const before = await context.service.getWorkspaceSnapshot();
+    const before = await context.ports.readPersonalState();
     context.session.assertCurrent();
-    const after = await context.service.updateApplicationDefaults(input);
+    await context.service.updateApplicationDefaults(input);
+    const after = await context.ports.readPersonalState();
     const recorded = await recordSettingsChange(
       context,
       before,
@@ -200,9 +199,10 @@ export const updateAiBehaviorTool = defineTool({
   label: () => "Changing AI behavior settings",
   effect: "local_write",
   async execute(input, context) {
-    const before = await context.service.getWorkspaceSnapshot();
+    const before = await context.ports.readPersonalState();
     context.session.assertCurrent();
-    const after = await context.service.updateAiBehavior(input);
+    await context.service.updateAiBehavior(input);
+    const after = await context.ports.readPersonalState();
     const recorded = await recordSettingsChange(
       context,
       before,
@@ -247,9 +247,10 @@ export const updateWorkspaceBehaviorTool = defineTool({
   label: () => "Changing workspace settings",
   effect: "local_write",
   async execute(input, context) {
-    const before = await context.service.getWorkspaceSnapshot();
+    const before = await context.ports.readPersonalState();
     context.session.assertCurrent();
-    const after = await context.service.updateWorkspaceBehavior(input);
+    await context.service.updateWorkspaceBehavior(input);
+    const after = await context.ports.readPersonalState();
     const recorded = await recordSettingsChange(
       context,
       before,
@@ -286,9 +287,10 @@ export const setAppearanceTool = defineTool({
   label: (input) => `Switching to ${argText(input.theme)} appearance`,
   effect: "local_write",
   async execute(input, context) {
-    const before = await context.service.getWorkspaceSnapshot();
+    const before = await context.ports.readPersonalState();
     context.session.assertCurrent();
-    const after = await context.service.updateAppearanceTheme(input.theme);
+    await context.service.updateAppearanceTheme(input.theme);
+    const after = await context.ports.readPersonalState();
     const recorded = await recordSettingsChange(
       context,
       before,
@@ -335,18 +337,26 @@ export const pauseActivityTool = defineTool({
         ? { pauseBehavior: "finish_current" as const }
         : {}),
     });
-    const after = await service.getWorkspaceSnapshot();
+    const after = await ports.readPersonalState();
     const work = readAssistantWorkState(ports, after);
+    // Applications already filling or sending finish; pausing stops the next.
+    const finishing = input.paused
+      ? (
+          await Promise.all(
+            (["running", "submitting"] as const).map((state) =>
+              ports.readCommand("list_application_work", { state, limit: 1 }),
+            ),
+          )
+        ).some((page) => page.rows.length > 0)
+      : false;
     ports.publishWorkspaceUpdate();
     return {
       summary: input.paused
-        ? `Background work is paused.${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${after.applyRuns.some((run) => run.state === "running") ? " Current applications are still finishing." : ""}${after.activeSourceDebugRun?.state === "running" ? " The source check is still running; it was not stopped." : ""}`
+        ? `Background work is paused.${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${finishing ? " Current applications are still finishing." : ""}`
         : "Resumed.",
       data: {
         activityPaused: after.activityControl.paused,
-        finishingApplications: after.applyRuns
-          .filter((run) => run.state === "running")
-          .map((run) => ({ id: run.id, jobIds: run.jobIds })),
+
         resumeImport: work.resumeImport,
       },
     };
@@ -378,7 +388,7 @@ export const setDefaultResumeLevelTool = defineTool({
       { resumeApproach: approach[input.level] },
       context,
     );
-    const saved = await context.service.getWorkspaceSnapshot();
+    const saved = await context.ports.readPersonalState();
     const actual =
       saved.settings.resumeApplicationMode === "original_resume"
         ? "original"

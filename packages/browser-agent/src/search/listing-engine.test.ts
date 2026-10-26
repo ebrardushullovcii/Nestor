@@ -534,7 +534,8 @@ test.each(["http", "browser"] as const)(
       navigateFallback: fallback,
     });
     expect(inventory.cards).toEqual([]);
-    expect(inventory.complete).toBe(true);
+    expect(inventory.complete).toBe(false);
+    expect(inventory.notes.join(" ")).toContain("coverage incomplete");
     expect(inventory.needsYou).not.toBe(true);
     expect(fallback).not.toHaveBeenCalled();
   },
@@ -941,3 +942,24 @@ test.each([404, 410, 500])(
     expect(fallback).not.toHaveBeenCalled();
   },
 );
+
+test("zero cards can never inherit complete coverage from browser navigation", async () => {
+  const inventory = await collectSource({
+    source,
+    lane: "browser",
+    readPage: () =>
+      Promise.resolve({
+        html: '<div id="root"></div>',
+        finalUrl: source.url,
+      }),
+    navigateFallback: () =>
+      Promise.resolve({
+        cards: [],
+        pagesRead: 1,
+        complete: true,
+        notes: ["Finished"],
+      }),
+  });
+  expect(inventory.complete).toBe(false);
+  expect(inventory.notes.join(" ")).toContain("No listings were read");
+});

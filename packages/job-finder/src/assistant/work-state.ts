@@ -1,13 +1,16 @@
+import type { AssistantPersonalState } from "./store-reads";
 import {
   isInterruptedResumeImportRun,
   isResumeImportRunInProgress,
-  type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import type { AssistantHostPorts } from "./ports";
 
 export function readAssistantWorkState(
   ports: AssistantHostPorts,
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: Pick<
+    AssistantPersonalState,
+    "latestResumeImportRun" | "resumeImportActive"
+  >,
 ) {
   const latest = snapshot.latestResumeImportRun;
   const importing =
@@ -38,4 +41,3 @@ export function readAssistantWorkState(
 export type AssistantWorkState = Awaited<
   ReturnType<typeof readAssistantWorkState>
 >;
-

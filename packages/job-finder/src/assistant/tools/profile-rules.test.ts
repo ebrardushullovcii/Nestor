@@ -1,3 +1,4 @@
+import { assistantTestReads } from "../store-reads.test-support";
 import {
   ProfileCopilotPatchOperationSchema,
   ProfileReviewItemSchema,
@@ -135,7 +136,9 @@ describe("profile editing rules", () => {
       .execute(input, {
         service: workspaceService,
         session: {} as AssistantTurnSession,
-        ports: {} as AssistantHostPorts,
+        ports: assistantTestReads(
+          workspaceService,
+        ) as unknown as AssistantHostPorts,
       })
       .catch((caught: unknown) => caught as Error);
     expect(error).toMatchObject({ kind: "invalid_input" });
@@ -185,7 +188,9 @@ describe("profile editing rules", () => {
           {
             service: workspaceService,
             session: {} as AssistantTurnSession,
-            ports: {} as AssistantHostPorts,
+            ports: assistantTestReads(
+              workspaceService,
+            ) as unknown as AssistantHostPorts,
           },
         )
         .catch((caught: unknown) => caught as Error);
@@ -216,6 +221,7 @@ describe("profile editing rules", () => {
       createProposal,
     } as unknown as AssistantTurnSession;
     const ports = {
+      ...assistantTestReads(workspaceService),
       publishWorkspaceUpdate: () => undefined,
     } as unknown as AssistantHostPorts;
     await editProfileTool.execute(
@@ -332,7 +338,9 @@ describe("sidebar resume import outcomes", () => {
           session: {
             firstProfileRead: () => Promise.resolve(false),
           } as unknown as AssistantTurnSession,
-          ports: {} as AssistantHostPorts,
+          ports: assistantTestReads(
+            workspaceService,
+          ) as unknown as AssistantHostPorts,
         },
       );
       const setup = (
@@ -370,6 +378,7 @@ describe("sidebar resume import outcomes", () => {
           assertCurrent: () => undefined,
         } as unknown as AssistantTurnSession,
         ports: {
+          ...assistantTestReads(workspaceService),
           publishWorkspaceUpdate: () => undefined,
           startApplications,
         } as unknown as AssistantHostPorts,
@@ -428,7 +437,9 @@ describe("sidebar resume import outcomes", () => {
             session: {
               assertCurrent: () => undefined,
             } as unknown as AssistantTurnSession,
-            ports: {} as AssistantHostPorts,
+            ports: assistantTestReads(
+              workspaceService,
+            ) as unknown as AssistantHostPorts,
           },
         )
         .catch((caught: unknown) => caught as Error);
@@ -454,6 +465,7 @@ describe("sidebar resume import outcomes", () => {
         { documentId: "textless" },
         {
           ports: {
+            ...assistantTestReads(workspaceService),
             readDocumentText: () => Promise.resolve(null),
           } as unknown as AssistantHostPorts,
           service: workspaceService,
@@ -493,6 +505,7 @@ describe("sidebar resume import outcomes", () => {
           }),
       } as unknown as AssistantTurnSession,
       ports: {
+        ...assistantTestReads(workspaceService),
         publishWorkspaceUpdate: () => undefined,
       } as unknown as AssistantHostPorts,
     };
@@ -583,9 +596,15 @@ describe("sidebar resume import outcomes", () => {
       id: "old_scan",
       runId: "old_run",
     });
-    vi.spyOn(workspaceService, "getWorkspaceSnapshot").mockResolvedValue(
-      snapshot,
-    );
+    vi.spyOn(
+      assistantTestReads(workspaceService),
+      "readPersonalState",
+    ).mockResolvedValue({
+      ...snapshot,
+      enabledSiteCount: 1,
+      latestResumeImportReviewCandidates: [],
+      latestResumeImportBundle: null,
+    });
     const imports = vi
       .spyOn(workspaceService, "getResumeImportState")
       .mockResolvedValue({
@@ -608,7 +627,9 @@ describe("sidebar resume import outcomes", () => {
         now: () => "2026-09-30T00:00:00.000Z",
         signal: new AbortController().signal,
       } as unknown as AssistantTurnSession,
-      ports: {} as AssistantHostPorts,
+      ports: assistantTestReads(
+        workspaceService,
+      ) as unknown as AssistantHostPorts,
     };
     await readProfileTool.execute({ section: "basics" }, context);
     expect(imports).not.toHaveBeenCalled();
@@ -815,6 +836,7 @@ describe("sidebar resume import outcomes", () => {
           signal: controller.signal,
         } as unknown as AssistantTurnSession,
         ports: {
+          ...assistantTestReads(workspaceService),
           importResumeDocument,
           publishWorkspaceUpdate: () => undefined,
         } as unknown as AssistantHostPorts,
@@ -879,6 +901,7 @@ describe("sidebar resume import outcomes", () => {
           signal: new AbortController().signal,
         } as unknown as AssistantTurnSession,
         ports: {
+          ...assistantTestReads(workspaceService),
           importResumeDocument: () => Promise.resolve(),
           publishWorkspaceUpdate: () => undefined,
         } as unknown as AssistantHostPorts,
@@ -905,6 +928,7 @@ describe("sidebar resume import outcomes", () => {
             signal: new AbortController().signal,
           } as unknown as AssistantTurnSession,
           ports: {
+            ...assistantTestReads(workspaceService),
             importResumeDocument: () =>
               Promise.reject(new Error("Import stopped")),
             publishWorkspaceUpdate,

@@ -35,7 +35,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
   // whether the Task Center is open, regardless of how the last toggle
   // happened (summary click, Escape, outside press, or task navigation).
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const feed = useActivityFeed();
+  const { feed, failed } = useActivityFeed();
   const running = feed?.running ?? 0;
   const [openError, setOpenError] = useState<string | null>(null);
 
@@ -173,7 +173,11 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           }
         >
           {isPanelOpen ? (
-            <ActivityPanel feed={feed} onOpen={(href) => void openWork(href)} />
+            <ActivityPanel
+              failed={failed}
+              feed={feed}
+              onOpen={(href) => void openWork(href)}
+            />
           ) : null}
         </Suspense>
         {openError ? (

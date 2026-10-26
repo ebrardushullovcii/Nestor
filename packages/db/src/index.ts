@@ -72,3 +72,4 @@ export {
   type AssistantTranscriptItem,
 } from "./assistant-repository";
 export { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";
+export { readPersonalWorkspaceState } from "./personal-workspace-reader";

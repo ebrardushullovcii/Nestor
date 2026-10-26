@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { createPlaywrightApplyPageMechanics } from "@nestor/browser-runtime";
-import type {
-  ApplyRawPageHands,
-  JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import type { ApplyRawPageHands, ApplicationDetails } from "@nestor/contracts";
 import type {
   AssistantBrowserLease,
   AssistantBrowserPort,
@@ -52,11 +49,43 @@ async function popupsOf(page: Page): Promise<Page[]> {
 
 export function createAssistantBrowserPort(
   browser: EmbeddedBrowser,
-  readWorkspace: () => Promise<JobFinderWorkspaceSnapshot>,
+  readApplication: (id: number) => Promise<ApplicationDetails | null>,
+  holdsFormAt: (url: string) => boolean,
 ): AssistantBrowserPort {
+  /** The tabs of one attempt that still carry its preparation mark. */
+  const markedTabs = async (applicationResultId: string) => {
+    const matches: string[] = [];
+    for (const tabId of browser.getApplicationTabIds(applicationResultId)) {
+      const mark = await browser.readTab<string | null>(
+        tabId,
+        `window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication')`,
+      );
+      if (mark?.value === applicationResultId) matches.push(tabId);
+    }
+    return matches;
+  };
   return {
     async show() {
       await browser.command({ type: "open" });
+    },
+    async inspectApplication(applicationResultId) {
+      const [tabId, ...others] = await markedTabs(applicationResultId);
+      if (!tabId || others.length > 0) return null;
+      const page = await findPageForTab(
+        browser,
+        await browser.connect(),
+        tabId,
+      );
+      if (!page) return null;
+      const raw = await createPlaywrightApplyPageMechanics(page).readPage();
+      return {
+        ...raw,
+        controls: raw.controls.map((control) =>
+          control.inputType.toLowerCase() === "password"
+            ? { ...control, value: "" }
+            : control,
+        ),
+      };
     },
     visibleTab() {
       const state = browser.getState();
@@ -69,30 +98,22 @@ export function createAssistantBrowserPort(
       input.signal?.throwIfAborted();
       let preparedRecordId: string | null = null;
       if (input.applicationResultId) {
-        const snapshot = await readWorkspace();
-        const result = snapshot.applyJobResults.find(
-          (result) => result.id === input.applicationResultId,
+        const identity = /^application_(\d+)_attempt_(\d+)$/u.exec(
+          input.applicationResultId,
         );
+        const details = identity
+          ? await readApplication(Number(identity[1]))
+          : null;
         if (
-          !result?.applicationRecordId ||
-          !["awaiting_review", "blocked"].includes(result.state) ||
-          result.privacyReceipt?.submissionOutcome?.outcome ===
-            "outcome_uncertain"
+          !details ||
+          details.application.attempt !== Number(identity![2]) ||
+          !["ready", "needs_you"].includes(details.application.state)
         )
           throw new Error(
             "This application is not waiting for editing. Check its send outcome first.",
           );
-        preparedRecordId = result.applicationRecordId;
-        const matches: string[] = [];
-        for (const tabId of browser.getApplicationTabIds(
-          input.applicationResultId,
-        )) {
-          const mark = await browser.readTab<string | null>(
-            tabId,
-            `window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication')`,
-          );
-          if (mark?.value === input.applicationResultId) matches.push(tabId);
-        }
+        preparedRecordId = String(details.application.id);
+        const matches = await markedTabs(input.applicationResultId);
         input.signal?.throwIfAborted();
         if (matches.length !== 1)
           throw new Error(
@@ -178,34 +199,13 @@ export function createAssistantBrowserPort(
                 .catch(() => null);
               guard();
               if (binding) return true;
-              const snapshot = await readWorkspace();
-              guard();
-              // With no exact mark, protect a page still referenced by a saved
-              // preparation. URL matches are only a conservative refusal, never
+              // With no exact mark, protect a page a saved application still
+              // points at. A URL match is only a conservative refusal, never
               // evidence that this is the application's retained tab.
-              const records = new Set(
-                snapshot.applicationRecords.map((record) => record.id),
-              );
-              return (
-                snapshot.applicationRecords.some(
-                  (record) =>
-                    record.lastAttemptState !== "submitted" &&
-                    record.replaySummary.lastUrl === current.url(),
-                ) ||
-                snapshot.applyJobResults.some(
-                  (result) =>
-                    result.applicationRecordId !== null &&
-                    records.has(result.applicationRecordId) &&
-                    result.reviewCard?.pageUrl === current.url(),
-                ) ||
-                snapshot.userActionRequests.some(
-                  (request) =>
-                    request.scope.type === "application" &&
-                    request.scope.applicationRecordId !== null &&
-                    records.has(request.scope.applicationRecordId) &&
-                    request.actionUrl === current.url(),
-                )
-              );
+              if (holdsFormAt(current.url())) return true;
+              const tabId = await browser.identifyAutomationPage(current);
+              guard();
+              return !tabId || browser.isApplicationTab(tabId);
             };
             const requireEditableTab = async (fieldsOnly = false) => {
               guard();

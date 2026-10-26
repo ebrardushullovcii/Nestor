@@ -17,7 +17,7 @@ import type { ConversationTool } from "@nestor/agent-runtime";
 import { JobPostingSchema } from "@nestor/contracts";
 import type { z, ZodTypeAny } from "zod";
 
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
+import type { AssistantWorkspaceCommands } from "./workspace-commands";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
 
 /**
@@ -201,14 +201,9 @@ export interface AssistantTurnSession {
 }
 
 export interface AssistantToolContext {
-  service: JobFinderWorkspaceService;
+  service: AssistantWorkspaceCommands;
   ports: AssistantHostPorts;
   session: AssistantTurnSession;
-}
-
-/** Display reads borrow the service's view; canonical writes remain service-owned. */
-export function readAssistantWorkspace(service: JobFinderWorkspaceService) {
-  return service.getWorkspaceProjection?.() ?? service.getWorkspaceSnapshot();
 }
 
 export interface AssistantToolDefinition<
@@ -432,11 +427,11 @@ async function resolvePageJobReferences(
     );
     if (!posting.success) return itemId;
     context.session.assertCurrent();
-    const saved = await context.service.saveJobsFromPage({
+    const saved = await context.ports.savePageJobs({
       postings: [posting.data],
       pageUrl: set.pageUrl ?? "about:blank",
     });
-    const savedId = saved.savedJobIds[0];
+    const savedId = saved.ids[0]?.toString();
     if (!savedId) return itemId;
     // Only ids saved from a verified collected posting become grant targets.
     await context.session.createResultSet({

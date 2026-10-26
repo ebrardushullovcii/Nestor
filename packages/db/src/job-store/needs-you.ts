@@ -278,6 +278,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
   return {
     counts,
+    forApplication(id: number): NeedsYouTask[] {
+      return (
+        sql(`SELECT t.* FROM application_needs_you n
+        JOIN applications a ON a.id = n.application_id AND a.attempt = n.attempt
+        JOIN needs_you t ON t.id = n.task_id
+        WHERE a.id = ? AND t.resolved_at IS NULL ORDER BY t.id LIMIT 100`).all(
+          id,
+        ) as Task[]
+      ).map(toTask);
+    },
     changeAnswers<T>(work: () => T) {
       return store.transaction(() => {
         const change = undo.begin();

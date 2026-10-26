@@ -272,6 +272,8 @@ export interface SaveFoundJobsResult {
   hidden: number[];
   /** Jobs already saved that this batch saw again. Their stage is kept. */
   merged: number[];
+  /** The saved job for each input job, in input order. */
+  ids: number[];
 }
 
 export interface JobFitUpdate extends Omit<JobFit, "scoredAt"> {

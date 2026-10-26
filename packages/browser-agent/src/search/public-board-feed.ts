@@ -1,5 +1,10 @@
-import type { ListingCard, ListingSearchReader } from "@nestor/contracts";
+import type {
+  ListingCard,
+  ListingSearchReader,
+  SourceInventory,
+} from "@nestor/contracts";
 import { htmlToPlainText } from "./listing-detail-extraction";
+import { collectAtsFeed } from "./ats-public-feed";
 import { fingerprint } from "./listing-html";
 
 /** Provider protocols live here; orchestration never contains individual board rules. */
@@ -67,14 +72,19 @@ const string = (value: unknown): string =>
 export async function collectPublicFeed(
   input: ListingSearchReader & {
     source: { id: string; label: string; url: string };
+    onPage?: (cards: ListingCard[]) => Promise<void> | void;
   },
-): Promise<ListingCard[] | null> {
+): Promise<SourceInventory | null> {
+  const ats = await collectAtsFeed(input);
+  if (ats) return ats;
   const feed = publicBoardFeed(input.source.url);
   if (!feed) return null;
   const rows: unknown[] = [];
+  let pagesRead = 0;
   let next: string | null = feed.url;
   while (next) {
     const page = await input.readPage(next, { signal: input.signal });
+    pagesRead++;
     const payload: unknown = JSON.parse(page.html),
       root = object(payload);
     const items: unknown = feed.items ? root[feed.items] : payload;
@@ -98,7 +108,8 @@ export async function collectPublicFeed(
         .split("\n")[0]
         ?.replace(/\s*(?:[|–-]\s*)?(?:Jobs|Careers)\s*$/iu, "")
         .trim();
-  return rows
+  pagesRead++;
+  const cards = rows
     .filter((row) => object(row).isListed !== false)
     .map((row) => {
       const job = object(row),
@@ -189,4 +200,15 @@ export async function collectPublicFeed(
           : {}),
       };
     });
+  await input.onPage?.(cards);
+  return {
+    cards,
+    lane: "http",
+    provider: feed.provider,
+    pagesRead,
+    complete: cards.length > 0,
+    notes: [
+      `${cards.length} listings collected from the public provider feed; ${cards.length ? "all reported listings covered" : "coverage incomplete: no listings were read"}.`,
+    ],
+  };
 }

@@ -1,3 +1,4 @@
+import { assistantTestReads } from "./store-reads.test-support";
 import {
   AssistantMessageSchema,
   AssistantResultSetSchema,
@@ -88,6 +89,7 @@ function harness() {
     service: workspaceService,
     session,
     ports: {
+      ...assistantTestReads(workspaceService),
       browser: {},
       publishWorkspaceUpdate: vi.fn(),
     } as unknown as AssistantHostPorts,
@@ -103,8 +105,6 @@ function harness() {
 }
 
 describe("collected page-job references", () => {
-
-
   it("records a saved mapping before checking an instruction grant", async () => {
     const { context, sets, run, saveGrant } = harness();
     await collectPageJobsTool.execute({ single: false }, context);
@@ -115,13 +115,15 @@ describe("collected page-job references", () => {
     });
     expect(result).toMatchObject({ status: "done" });
     const saved = (
-      await context.service.getWorkspaceSnapshot()
-    ).discoveryJobs.find((job) => job.title === "A Engineer")!;
+      await context.ports.readCommand("list_jobs", { stage: "found" })
+    ).rows.find((job) => job.title === "A Engineer")!;
     expect(saveGrant).toHaveBeenCalledWith(
-      expect.objectContaining({ jobIds: [saved.id] }),
+      expect.objectContaining({ jobIds: [String(saved.id)] }),
     );
     expect(
-      sets.some((set) => set.kind === "jobs" && set.itemIds.includes(saved.id)),
+      sets.some(
+        (set) => set.kind === "jobs" && set.itemIds.includes(String(saved.id)),
+      ),
     ).toBe(true);
   });
 
@@ -137,7 +139,6 @@ describe("collected page-job references", () => {
       }),
     ).toMatchObject({ status: "done" });
   });
-
 
   it("keeps existing references when appending more jobs", async () => {
     const { context, sets } = harness();

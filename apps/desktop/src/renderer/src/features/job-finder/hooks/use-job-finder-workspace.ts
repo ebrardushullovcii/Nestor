@@ -1,24 +1,10 @@
 import type {
   AppearanceTheme,
-  ApplicationCrmBulkStageMutationInput,
-  ApplicationCrmExportInput,
-  ApplicationCrmMutationInput,
-  ApplicationCrmSettings,
-  ApplyGroupedManualAnswerInput,
   CandidateProfile,
-  ClearApplicationAnswerCommandInput,
   EditableSourceInstructionArtifact,
-  JobFinderApplicationStartTarget,
-  JobFinderApplyQueueActionInput,
-  JobFinderApplyQueueControlInput,
-  JobFinderApplyRunActionInput,
-  JobFinderApplyRunDetailsQuery,
   JobFinderJobDetail,
   JobFinderOpenBrowserSessionInput,
-  JobFinderPreparedApplicationPageInput,
-  JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
-  JobFinderReturnApplicationToShortlistInput,
   JobFinderSettings,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
@@ -28,18 +14,13 @@ import type {
   ProfileSetupReviewAction,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
-  ProjectGroupedManualAnswerCommand,
-  ResolveSubmissionOutcomeInput,
   ResumeImportProgressEvent,
   ResumeTimelineRepairAction,
-  SaveApplicationAnswerCommandInput,
   SetJobFinderActivityControlInput,
-  SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-  UserActionCommandInput,
   WorkspaceRevision,
 } from "@nestor/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -717,12 +698,6 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
           () => window.nestor.jobFinder.checkBrowserSession(),
           { allowDuringBootstrap: true },
         ),
-      performUserAction: (command: UserActionCommandInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.performUserAction(command),
-        ),
-      approveApply: (input: JobFinderApplicationStartTarget) =>
-        runWorkspaceAction(() => window.nestor.jobFinder.approveApply(input)),
       removeJobsFromReview: (jobIds: readonly string[]) =>
         runWorkspaceEntityMutation({
           type: "remove_jobs_from_review",
@@ -737,78 +712,6 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
       // OS file manager and returns what happened, so it never refreshes.
       revealSavedFile: (path: string) =>
         window.nestor.jobFinder.revealSavedFile(path),
-      startAutoApplyRun: (input: JobFinderApplicationStartTarget) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.startAutoApplyRun(input),
-        ),
-      startAutoApplyQueueRun: (
-        jobIds: JobFinderApplyQueueActionInput["jobIds"],
-        applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.startAutoApplyQueueRun(
-            jobIds,
-            applicationAutomationMode,
-          ),
-        ),
-      controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.controlApplyQueue(input),
-        ),
-      removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.removeFromApplyQueue(input),
-        ),
-      returnApplicationToShortlist: (
-        input: JobFinderReturnApplicationToShortlistInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.returnApplicationToShortlist(input),
-        ),
-      undoReturnApplicationToShortlist: (jobId: string) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.undoReturnApplicationToShortlist(jobId),
-        ),
-      approveApplyRun: (input: JobFinderApplyRunActionInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.approveApplyRun(input),
-        ),
-      cancelApplyRun: (input: JobFinderApplyRunActionInput) =>
-        runWorkspaceAction(() => window.nestor.jobFinder.cancelApplyRun(input)),
-      revokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.revokeApplyRunApproval(input),
-        ),
-      focusPreparedApplicationPage: (
-        input: JobFinderPreparedApplicationPageInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.focusPreparedApplicationPage(input),
-        ),
-      submitPreparedApplication: (input: { jobId: string }) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.submitPreparedApplication(input),
-        ),
-      sendPreparedApplications: (input: { jobIds: string[] }) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.sendPreparedApplications(input),
-        ),
-      mutateApplicationCrm: (input: ApplicationCrmMutationInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.mutateApplicationCrm(input),
-        ),
-      mutateApplicationCrmBulkStage: (
-        input: ApplicationCrmBulkStageMutationInput,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.mutateApplicationCrmBulkStage(input),
-        ),
-      runApplicationNoResponseAutomation: (settings?: ApplicationCrmSettings) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.runApplicationNoResponseAutomation(settings),
-        ),
-      exportApplicationCrm: (input: ApplicationCrmExportInput) =>
-        window.nestor.jobFinder.exportApplicationCrm(input),
       importResume: (options?: { retryInterrupted?: boolean }) => {
         const requestSequence = ++resumeImportRequestSequenceRef.current;
         setWorkspaceState((currentState) =>
@@ -885,30 +788,6 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
         ),
       getSourceDebugRunDetails: (runId: string) =>
         window.nestor.jobFinder.getSourceDebugRunDetails(runId),
-      getApplyRunDetails: (input: JobFinderApplyRunDetailsQuery) =>
-        window.nestor.jobFinder.getApplyRunDetails(input),
-      saveApplicationAnswer: (command: SaveApplicationAnswerCommandInput) =>
-        window.nestor.jobFinder.saveApplicationAnswer(command),
-      clearApplicationAnswer: (command: ClearApplicationAnswerCommandInput) =>
-        window.nestor.jobFinder.clearApplicationAnswer(command),
-      projectGroupedManualAnswer: (
-        command: ProjectGroupedManualAnswerCommand,
-      ) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.projectGroupedManualAnswer(command),
-        ),
-      applyGroupedManualAnswer: (input: ApplyGroupedManualAnswerInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.applyGroupedManualAnswer(input),
-        ),
-      snoozeGroupedDecision: (input: SnoozeGroupedDecisionInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.snoozeGroupedDecision(input),
-        ),
-      exportApplicationPacket: (input: JobFinderApplyRunDetailsQuery) =>
-        window.nestor.jobFinder.exportApplicationPacket(input),
-      resolveSubmissionOutcome: (input: ResolveSubmissionOutcomeInput) =>
-        window.nestor.jobFinder.resolveSubmissionOutcome(input),
       saveSourceInstructionArtifact: (
         targetId: string,
         artifact: EditableSourceInstructionArtifact,
@@ -972,10 +851,6 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
       updateAppearanceTheme: (appearanceTheme: AppearanceTheme) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.updateAppearanceTheme(appearanceTheme),
-        ),
-      updateTrackerCrm: (applicationCrm: ApplicationCrmSettings) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.updateTrackerCrm(applicationCrm),
         ),
       saveProfileSetupState: (profileSetupState: ProfileSetupState) =>
         runWorkspaceAction(() =>

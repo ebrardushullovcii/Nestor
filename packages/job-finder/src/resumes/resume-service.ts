@@ -1,17 +1,14 @@
+import { createResumeCommandReads } from "./resume-commands";
 import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
   isAiServiceBusy,
 } from "@nestor/ai-providers";
 import {
-  isResumeTemplateApplyEligible,
-  JobListQuerySchema,
   type ResumeCommandOutputs,
   type JobDetail,
-  type JobListQueryInput,
   type ResumeDraft,
   type ResumeLevel,
-  type ShortlistedPage,
 } from "@nestor/contracts";
 import { createAdaptiveConcurrencyLimiter } from "@nestor/core";
 import {
@@ -215,7 +212,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
       targetPath,
     });
     if (!artifact.storagePath) throw new Error("The PDF could not be written.");
-    return artifact.storagePath;
+    return { path: artifact.storagePath, sha256: artifact.sha256 };
   }
 
   return {
@@ -241,29 +238,9 @@ export function createResumeService(deps: ResumeServiceDeps) {
       for (const controller of running.values()) controller.abort();
     },
 
-    /** Shortlisted (`shortlisted`) or Approved (`resume`) jobs, a page at a time. */
-    list(query: JobListQueryInput): ShortlistedPage {
-      const page = store.listJobs(JobListQuerySchema.parse(query));
-      const statuses = resumes.statuses(page.rows.map((row) => row.id));
-      return {
-        ...page,
-        rows: page.rows.map((row) => ({
-          ...row,
-          resume: statuses.get(row.id) ?? null,
-        })),
-      };
-    },
-
-    get(jobId: number): ResumeView {
-      return {
-        job: requireJob(jobId),
-        resume: resumes.get(jobId),
-        templates: deps.documentManager
-          .listResumeTemplates()
-          .filter(isResumeTemplateApplyEligible)
-          .map(({ id, label }) => ({ id, label })),
-      };
-    },
+    ...createResumeCommandReads(store, () =>
+      deps.documentManager.listResumeTemplates(),
+    ),
 
     saveDraft(jobId: number, draft: ResumeDraft, expectedUpdatedAt: string) {
       // The editor's Reset order asks for date order; saving applies it.
@@ -297,16 +274,16 @@ export function createResumeService(deps: ResumeServiceDeps) {
       if (!resume || resume.state !== "ready") {
         throw new Error("This resume is still being written.");
       }
-      const pdfPath = resume.draft
+      const pdf = resume.draft
         ? await renderPdf(jobId, resume.draft, null)
         : null;
-      return resumes.approve(jobId, pdfPath);
+      return resumes.approve(jobId, pdf?.path ?? null, pdf?.sha256 ?? null);
     },
 
     async exportPdf(jobId: number, targetPath: string) {
       const draft = resumes.get(jobId)?.draft;
       if (!draft) throw new Error("This job sends your imported resume file.");
-      return renderPdf(jobId, draft, targetPath);
+      return (await renderPdf(jobId, draft, targetPath)).path;
     },
 
     async preview(jobId: number, draft: ResumeDraft, signal?: AbortSignal) {

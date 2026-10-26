@@ -1,71 +1,9 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
-import {
-  getLatestApplicationAttempt,
-  useApplicationSelection,
-  useRetainedSelection,
-} from "./use-job-finder-page-controller-helpers";
-
-describe("getLatestApplicationAttempt", () => {
-  it("selects the latest attempt for the exact application record, not a job sibling", () => {
-    const workspace = {
-      applicationRecords: [
-        { id: "application_a", jobId: "job_1" },
-        { id: "application_b", jobId: "job_1" },
-      ],
-      applicationAttempts: [
-        {
-          id: "attempt_b_newer",
-          applicationRecordId: "application_b",
-          jobId: "job_1",
-          updatedAt: "2026-08-23T12:00:00.000Z",
-        },
-        {
-          id: "attempt_a_latest",
-          applicationRecordId: "application_a",
-          jobId: "job_1",
-          updatedAt: "2026-08-23T11:00:00.000Z",
-        },
-        {
-          id: "attempt_a_older",
-          applicationRecordId: "application_a",
-          jobId: "job_1",
-          updatedAt: "2026-08-23T10:00:00.000Z",
-        },
-      ],
-    } as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    const result = getLatestApplicationAttempt(workspace, "application_a");
-
-    expect(result.selectedApplicationRecord?.id).toBe("application_a");
-    expect(result.selectedApplicationAttempt?.id).toBe("attempt_a_latest");
-  });
-
-  it("does not guess from array order when an explicit record is unavailable", () => {
-    const workspace = {
-      applicationRecords: [{ id: "application_a", jobId: "job_1" }],
-      applicationAttempts: [
-        {
-          id: "attempt_a",
-          applicationRecordId: "application_a",
-          jobId: "job_1",
-          updatedAt: "2026-08-23T11:00:00.000Z",
-        },
-      ],
-    } as unknown as JobFinderRendererWorkspaceSnapshot;
-
-    expect(
-      getLatestApplicationAttempt(workspace, "application_missing"),
-    ).toEqual({
-      selectedApplicationAttempt: null,
-      selectedApplicationRecord: null,
-    });
-  });
-});
+import { useRetainedSelection } from "./use-job-finder-page-controller-helpers";
 
 type RetainedSelectionInput = Parameters<typeof useRetainedSelection>[0];
 
@@ -452,22 +390,5 @@ describe("useRetainedSelection persistence", () => {
 
     // The pick stays in memory only; nothing is written without a scope.
     expect(storage.rawDocument()).toBeNull();
-  });
-});
-
-describe("application selection", () => {
-  it("restores once after hydration and keeps the user's choice during background updates", () => {
-    const { result, rerender } = renderHook(
-      ({ stored }: { stored: string | null }) =>
-        useApplicationSelection(stored),
-      { initialProps: { stored: null as string | null } },
-    );
-    rerender({ stored: "application_a" });
-    expect(result.current[0]).toBe("application_a");
-    act(() => result.current[1]("application_reviewed"));
-    rerender({ stored: "application_waiting" });
-    expect(result.current[0]).toBe("application_reviewed");
-    rerender({ stored: null });
-    expect(result.current[0]).toBe("application_reviewed");
   });
 });

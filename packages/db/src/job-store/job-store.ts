@@ -262,14 +262,16 @@ export function openJobStore(filePath: string): JobStore {
     },
 
     saveFoundJobs({ searchId, jobs }) {
-      if (jobs.length === 0) return { added: [], hidden: [], merged: [] };
+      if (jobs.length === 0)
+        return { added: [], hidden: [], merged: [], ids: [] };
       return transaction(() => {
-        const { added, hidden, merged, mergedStages } = writeFoundJobs(
-          sql,
-          searchId,
-          jobs,
-          Date.now(),
-        );
+        const {
+          added,
+          hidden,
+          merged,
+          ids: byInput,
+          mergedStages,
+        } = writeFoundJobs(sql, searchId, jobs, Date.now());
         const stages = new Set(mergedStages);
         if (added.length > 0) stages.add("found");
         if (hidden.length > 0) stages.add("hidden");
@@ -280,7 +282,7 @@ export function openJobStore(filePath: string): JobStore {
           ids: ids.length > CHANGE_ID_LIMIT ? null : ids,
           searchId,
         });
-        return { added, hidden, merged };
+        return { added, hidden, merged, ids: byInput };
       });
     },
 

@@ -306,7 +306,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "apply.send",
     screen: "Applications",
     action: "Send a ready form under the person's instruction and send guards",
-    channels: ["job-finder:send-prepared-applications"],
+    channels: ["job-finder:send-application"],
     coverage: tools("record_instruction", "send_application"),
   },
 

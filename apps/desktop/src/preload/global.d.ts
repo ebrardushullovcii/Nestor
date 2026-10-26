@@ -19,9 +19,6 @@ import type {
   JobChange,
   ApplicationStoreDemoResult,
   WorkspaceQueryApi,
-  ApplicationPageState,
-  ApplicationPageReopenProgress,
-  ReopenApplicationPageInput,
 } from "@nestor/contracts";
 import type {
   DesktopAssistantBridge,
@@ -30,23 +27,14 @@ import type {
   ApplicationAuthorityEnvelope,
   ApplicationAuthorityEnvelopeMutationResult,
   ApplicationAuthorityReadiness,
-  ApplicationCrmBulkStageMutationInput,
-  ApplicationCrmExportInput,
-  ApplicationCrmFileExportResult,
-  ApplicationCrmMutationInput,
-  ApplicationCrmSettings,
   ApplicationDocumentExportResult,
   ApplicationDocumentListResult,
   ApplicationDocumentRevision,
   ApplicationListPage,
   ApplicationListQuery,
-  ApplicationPageReopenProgress,
-  ApplicationPageState,
   ApplicationStoreDemoResult,
-  ApplyGroupedManualAnswerInput,
   ApplyJobsInput,
   ApplyJobsResult,
-  ApplyRunDetails,
   ApproveApplicationDocumentInput,
   ApproveCurrentApplicationAnswersInput,
   ApproveCurrentApplicationAnswersResult,
@@ -61,7 +49,6 @@ import type {
   CandidateAssetRestoreInput,
   CandidateAssetRestoreResult,
   CandidateProfile,
-  ClearApplicationAnswerCommandInput,
   CreateApplicationAuthorityEnvelopeInput,
   DesktopAssistantBridge,
   DesktopBrowserBridge,
@@ -94,22 +81,13 @@ import type {
   InterviewTranscriptSegmentInput,
   InterviewWorkspaceView,
   JobChange,
-  JobFinderApplicationPacketExportResult,
-  JobFinderApplicationStartTarget,
-  JobFinderApplyQueueActionInput,
-  JobFinderApplyQueueControlInput,
-  JobFinderApplyRunActionInput,
-  JobFinderApplyRunDetailsQuery,
   JobFinderDiagnosticExportResult,
   JobFinderInterviewFollowUpInput,
   JobFinderJobDetail,
   JobFinderOpenBrowserSessionInput,
   JobFinderPerformanceSnapshot,
-  JobFinderPreparedApplicationPageInput,
-  JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderRepositoryState,
-  JobFinderReturnApplicationToShortlistInput,
   JobFinderSettings,
   JobFinderStartupDatabaseRecoveryFact,
   JobFinderStartupResetRecoveryFact,
@@ -123,9 +101,7 @@ import type {
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
-  ProjectGroupedManualAnswerCommand,
   ProposeApplicationDocumentInput,
-  ReopenApplicationPageInput,
   ResolveSubmissionOutcomeInput,
   ResolveSubmissionOutcomeResult,
   ResumeDocumentBundle,
@@ -138,13 +114,10 @@ import type {
   ResumeTimelineRepairAction,
   RevealSavedFileResult,
   RevokeApplicationAuthorityEnvelopeInput,
-  SaveApplicationAnswerCommandInput,
   SaveInterviewSetupInput,
   SaveJobFinderWorkspaceInput,
-  SaveUserActionAnswerDraftInput,
   SendInterviewChatMessageInput,
   SetJobFinderActivityControlInput,
-  SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
@@ -153,7 +126,6 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateInterviewOverlayPreferenceInput,
   UpdateWorkspaceBehaviorInput,
-  UserActionCommandInput,
   WorkspaceQueryApi,
   WorkspaceRevision,
   WriteClipboardTextResult,
@@ -352,12 +324,6 @@ declare global {
           input?: JobFinderOpenBrowserSessionInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         checkBrowserSession: () => Promise<JobFinderWorkspaceSyncResult>;
-        saveUserActionAnswerDraft: (
-          input: SaveUserActionAnswerDraftInput,
-        ) => Promise<void>;
-        performUserAction: (
-          command: UserActionCommandInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         saveProfile: (
           profile: CandidateProfile,
         ) => Promise<JobFinderWorkspaceSyncResult>;
@@ -391,9 +357,6 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         updateAppearanceTheme: (
           appearanceTheme: AppearanceTheme,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        updateTrackerCrm: (
-          applicationCrm: ApplicationCrmSettings,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         saveProfileSetupState: (
           profileSetupState: ProfileSetupState,
@@ -439,29 +402,8 @@ declare global {
         getSourceDebugRunDetails: (
           runId: string,
         ) => Promise<SourceDebugRunDetails>;
-        getApplyRunDetails: (
-          input: JobFinderApplyRunDetailsQuery,
-        ) => Promise<ApplyRunDetails>;
-        saveApplicationAnswer: (
-          command: SaveApplicationAnswerCommandInput,
-        ) => Promise<ApplyRunDetails>;
-        clearApplicationAnswer: (
-          command: ClearApplicationAnswerCommandInput,
-        ) => Promise<ApplyRunDetails>;
-        projectGroupedManualAnswer: (
-          command: ProjectGroupedManualAnswerCommand,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        applyGroupedManualAnswer: (
-          input: ApplyGroupedManualAnswerInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        snoozeGroupedDecision: (
-          input: SnoozeGroupedDecisionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         exportDiagnostics: () => Promise<JobFinderDiagnosticExportResult>;
         getPerformanceSnapshot: () => Promise<JobFinderPerformanceSnapshot>;
-        exportApplicationPacket: (
-          input: JobFinderApplyRunDetailsQuery,
-        ) => Promise<JobFinderApplicationPacketExportResult>;
         saveSourceInstructionArtifact: (
           targetId: string,
           artifact: EditableSourceInstructionArtifact,
@@ -490,65 +432,6 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
         writeClipboardText: (text: string) => Promise<WriteClipboardTextResult>;
-        getApplicationPageStates: (
-          resultIds: string[],
-        ) => Promise<ApplicationPageState[]>;
-        reopenApplicationPage: (
-          input: ReopenApplicationPageInput,
-          onProgress?: (progress: ApplicationPageReopenProgress) => void,
-        ) => Promise<ApplicationPageState>;
-        startAutoApplyRun: (
-          input: JobFinderApplicationStartTarget,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        startAutoApplyQueueRun: (
-          jobIds: JobFinderApplyQueueActionInput["jobIds"],
-          applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        controlApplyQueue: (
-          input: JobFinderApplyQueueControlInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        removeFromApplyQueue: (
-          input: JobFinderRemoveFromApplyQueueInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        returnApplicationToShortlist: (
-          input: JobFinderReturnApplicationToShortlistInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        undoReturnApplicationToShortlist: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        approveApplyRun: (
-          input: JobFinderApplyRunActionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        cancelApplyRun: (
-          input: JobFinderApplyRunActionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        revokeApplyRunApproval: (
-          input: JobFinderApplyRunActionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        focusPreparedApplicationPage: (
-          input: JobFinderPreparedApplicationPageInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        submitPreparedApplication: (input: {
-          jobId: string;
-        }) => Promise<JobFinderWorkspaceSyncResult>;
-        sendPreparedApplications: (input: {
-          jobIds: string[];
-        }) => Promise<JobFinderWorkspaceSyncResult>;
-        approveApply: (
-          input: JobFinderApplicationStartTarget,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        mutateApplicationCrm: (
-          input: ApplicationCrmMutationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        mutateApplicationCrmBulkStage: (
-          input: ApplicationCrmBulkStageMutationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        runApplicationNoResponseAutomation: (
-          settings?: ApplicationCrmSettings,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        exportApplicationCrm: (
-          input: ApplicationCrmExportInput,
-        ) => Promise<ApplicationCrmFileExportResult>;
         test?: {
           loadApplicationsStoreDemo: (input: {
             sourceUrl: string;

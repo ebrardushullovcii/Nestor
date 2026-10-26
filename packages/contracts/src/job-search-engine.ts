@@ -35,6 +35,8 @@ export type ReadDiscoveryPostingPage = (
     signal?: AbortSignal | undefined;
     rendered?: boolean;
     ready?: (html: string) => boolean;
+    /** Read-only JSON search query from a provider adapter, never a form submission. */
+    jsonQuery?: Record<string, unknown>;
   },
 ) => Promise<{ html: string; finalUrl: string }>;
 

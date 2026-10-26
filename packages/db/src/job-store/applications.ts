@@ -234,6 +234,21 @@ export function createApplicationStore(store: JobStore) {
       ).map((row) => row.origin);
     },
 
+    /**
+     * Whether an application not yet sent keeps its prepared form at this
+     * exact address. Durable, so it still holds after a restart, when the
+     * browser no longer knows which tabs it filled.
+     */
+    holdsFormAt(url: string): boolean {
+      return Boolean(
+        sql(
+          `SELECT 1 FROM applications a JOIN application_details d ON d.application_id = a.id
+           WHERE a.state NOT IN ('submitted', 'uncertain')
+             AND json_extract(d.review_json, '$.pageUrl') = ? LIMIT 1`,
+        ).get(url),
+      );
+    },
+
     /** Details for one application, never part of a list or workspace snapshot. */
     getWork(id: number): ApplicationWork | null {
       const row = sql(

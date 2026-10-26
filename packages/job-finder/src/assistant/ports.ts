@@ -1,11 +1,16 @@
 import type {
   JobSelectionInput,
   ApplyRawPageHands,
+  RawApplyPage,
   CandidateAsset,
-  JobFinderJobDetail,
-  NeedsYouDetails,
+  JobPosting,
+  SaveFoundJobsResult,
 } from "@nestor/contracts";
 import type { AssistantToolDefinition } from "./tool-kit";
+import type {
+  AssistantPersonalState,
+  RunAssistantReadCommand,
+} from "./store-reads";
 
 /**
  * What the assistant needs from the host that is not a workspace-service
@@ -15,14 +20,16 @@ import type { AssistantToolDefinition } from "./tool-kit";
  * IPC routes call, so the assistant and the buttons take one path.
  */
 export interface AssistantHostPorts {
+  readCommand: RunAssistantReadCommand;
+  readPersonalState(): Promise<AssistantPersonalState>;
   /** Store commands registered by the host, shared with the screens. */
   commands?: readonly AssistantToolDefinition[];
-  /** One typed Needs you read, including source sign-in items. */
-  readNeed?(id: number): Promise<NeedsYouDetails | null>;
-  readJobDetail?(
-    jobId: string,
-    planId: string | null,
-  ): Promise<JobFinderJobDetail>;
+  /** Saves verified page postings (see `savePageJobs`); never a model tool. */
+  savePageJobs(input: {
+    postings: readonly JobPosting[];
+    pageUrl: string;
+    applyOnThisPage?: boolean;
+  }): Promise<SaveFoundJobsResult>;
   /** Only registered desktop actions; never raw IPC or arbitrary file access. */
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
   /** Includes reading the file before the domain import run is stored. */
@@ -48,7 +55,6 @@ export interface AssistantHostPorts {
     documentId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
-  /** Writes the tracker export where the person chooses; returns the path or null. */
   /** The browser, when the host has one. */
   browser?: AssistantBrowserPort;
   /** Makes app navigation visible while preserving every browser tab. */
@@ -88,6 +94,14 @@ export interface AssistantBrowserPort {
   show?(): Promise<void>;
   /** The tab on screen now, if the browser is open. */
   visibleTab(): { tabId: string; url: string; title: string | null } | null;
+  /**
+   * Reads the exact retained form of one application attempt without lending,
+   * showing or focusing its tab; passwords come back empty. Null when that
+   * form's tab is gone.
+   */
+  inspectApplication?(
+    applicationResultId: string,
+  ): Promise<RawApplyPage | null>;
   lease(input: {
     tabId: string | null;
     applicationResultId?: string;

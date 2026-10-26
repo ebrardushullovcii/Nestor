@@ -7,13 +7,9 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   getDiscoverySelectionIndex,
-  getLatestApplicationAttemptIndex,
   getReviewSelectionIndex,
 } from "./job-finder-page-selection";
-import {
-  getJobFinderWorkspaceSelection,
-  getLatestApplicationAttempt,
-} from "./use-job-finder-page-controller-helpers";
+import { getJobFinderWorkspaceSelection } from "./use-job-finder-page-controller-helpers";
 
 const ROW_COUNT = 3;
 
@@ -155,43 +151,5 @@ describe("Job Finder selection identity", () => {
         null,
       ).selectedDiscoveryJob,
     ).toBe(remaining[0]);
-  });
-
-  it("preserves attempt isolation, timestamp ties, invalid timestamps, and immutable updates", () => {
-    const fixture = createCollections();
-    const attempt = fixture.attempts.collection[0]!;
-    const attempts = [
-      { ...attempt, id: "invalid", updatedAt: "invalid" },
-      { ...attempt, id: "first" },
-      { ...attempt, id: "tie" },
-      {
-        ...attempt,
-        id: "sibling",
-        applicationRecordId: "record_1",
-        updatedAt: "2026-10-14T00:00:00.000Z",
-      },
-    ];
-    expect(getLatestApplicationAttemptIndex(attempts).get("record_0")?.id).toBe(
-      "first",
-    );
-    const next = [
-      ...attempts,
-      { ...attempt, id: "updated", updatedAt: "2026-10-15T00:00:00.000Z" },
-    ];
-    expect(getLatestApplicationAttemptIndex(next).get("record_0")?.id).toBe(
-      "updated",
-    );
-    expect(getLatestApplicationAttemptIndex(attempts).get("record_0")?.id).toBe(
-      "first",
-    );
-    expect(
-      getLatestApplicationAttempt(
-        { ...fixture.workspace, applicationAttempts: next },
-        "missing",
-      ),
-    ).toEqual({
-      selectedApplicationAttempt: null,
-      selectedApplicationRecord: null,
-    });
   });
 });

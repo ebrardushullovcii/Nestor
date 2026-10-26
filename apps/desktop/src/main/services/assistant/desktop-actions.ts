@@ -72,6 +72,16 @@ export async function executeDesktopJobFinderAction(
   if (actionId === "reset-browser") return resetJobFinderBrowser();
   if (actionId.startsWith("candidate-assets:"))
     return executeCandidateAssetAction(actionId, input);
+  if (actionId === "stop-search")
+    return (await import("../job-commands")).runJobCommand(
+      "stop_search",
+      input,
+    );
+  if (actionId === "stop-application")
+    return (await import("../application-commands")).runApplicationCommand(
+      "stop_application",
+      input,
+    );
   const service = await getJobFinderWorkspaceService();
   if (actionId === "get-tailored-asset") {
     const repository = (
