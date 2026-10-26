@@ -1,6 +1,8 @@
 import {
   SavedFormAnswerKeySchema,
   SavedFormAnswerChangeSchema,
+  NeedsYouSelectionQuerySchema,
+  type NeedsYouSelectionQuery,
   type SavedFormAnswerKey,
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
@@ -103,6 +105,27 @@ const matchText = (text: string) =>
   (text.match(/[\p{L}\p{N}]+/gu) ?? [])
     .map((word) => `"${word}"*`)
     .join(" AND ");
+function selectionFilter(
+  tab: "tasks" | "saved",
+  text: string,
+  kind: NeedsYouTask["kind"] | null,
+) {
+  const filters = tab === "tasks" ? ["resolved_at IS NULL"] : ["1"];
+  const params: SQLInputValue[] = [];
+  if (tab === "tasks" && kind !== null) {
+    filters.push("kind = ?");
+    params.push(kind);
+  }
+  if (text) {
+    const match = matchText(text);
+    const index = tab === "tasks" ? "needs_you_text" : "form_answers_text";
+    filters.push(
+      match ? `id IN (SELECT rowid FROM ${index} WHERE ${index} MATCH ?)` : "0",
+    );
+    if (match) params.push(match);
+  }
+  return { where: filters.join(" AND "), params };
+}
 function validateAnswer(
   task: Pick<Task, "input" | "options_json">,
   answer: string,
@@ -387,16 +410,24 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ).get(key, scope.country, scope.siteOrigin) as { id: number } | undefined;
       return row ? savedAnswer(row.id) : null;
     },
+    validateSelection(input: NeedsYouSelectionQuery) {
+      const { tab, ids, text, kind } =
+        NeedsYouSelectionQuerySchema.parse(input);
+      const table = tab === "tasks" ? "needs_you" : "form_answers";
+      const existing = selectionFilter(tab, "", null);
+      const matching = selectionFilter(tab, text, kind);
+      const read = ({ where, params }: ReturnType<typeof selectionFilter>) =>
+        (
+          sql(
+            `SELECT id FROM ${table} WHERE id IN (SELECT value FROM json_each(?)) AND ${where}`,
+          ).all(JSON.stringify(ids), ...params) as { id: number }[]
+        ).map((row) => row.id);
+      return { existingIds: read(existing), matchingIds: read(matching) };
+    },
     listAnswers(input: SavedFormAnswersQuery = {}): SavedFormAnswersPage {
       const query = SavedFormAnswersQuerySchema.parse(input);
       const countsNow = counts();
-      const match = matchText(query.text);
-      const where = query.text
-        ? match
-          ? "id IN (SELECT rowid FROM form_answers_text WHERE form_answers_text MATCH ?)"
-          : "0"
-        : "1";
-      const params: SQLInputValue[] = match && query.text ? [match] : [];
+      const { where, params } = selectionFilter("saved", query.text, null);
       const records =
         sql(`SELECT id,answer_key,kind,label,needs_confirmation,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
         FROM form_answers WHERE ${where} AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`).all(
@@ -714,22 +745,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     /** Oldest first: newly arriving cards never insert above the one being answered. */
     list(input: NeedsYouListQuery = {}): NeedsYouPage {
       const { after, limit, kind, text } = NeedsYouListQuerySchema.parse(input);
-      const match = matchText(text);
-      const filters = ["resolved_at IS NULL"];
-      const params: SQLInputValue[] = [];
-      if (kind !== null) {
-        filters.push("kind = ?");
-        params.push(kind);
-      }
-      if (text) {
-        filters.push(
-          match
-            ? "id IN (SELECT rowid FROM needs_you_text WHERE needs_you_text MATCH ?)"
-            : "0",
-        );
-        if (match) params.push(match);
-      }
-      const where = filters.join(" AND ");
+      const { where, params } = selectionFilter("tasks", text, kind);
       const records = sql(
         `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url
          FROM (SELECT * FROM needs_you WHERE ${where} AND id > ? ORDER BY id LIMIT ?) t

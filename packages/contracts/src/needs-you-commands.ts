@@ -33,7 +33,31 @@ const AnswerChangeSchema = z.object({
   answerChanges: z.array(SavedFormAnswerChangeSchema),
 });
 
+export const NeedsYouSelectionQuerySchema = z
+  .object({
+    tab: z.enum(["tasks", "saved"]),
+    ids: z.array(z.number().int().positive()).max(2000),
+    text: z.string().trim().max(200).default(""),
+    kind: NeedsYouListQuerySchema.shape.kind,
+  })
+  .strict();
+export type NeedsYouSelectionQuery = z.input<
+  typeof NeedsYouSelectionQuerySchema
+>;
+
 export const NEEDS_YOU_COMMANDS = {
+  validate_needs_you_selection: {
+    effect: "read",
+    description:
+      "Checks supplied task or saved-answer IDs against the complete store, independent of loaded pages. Returns existing IDs and those matching the current filters; it never changes selection or answers.",
+    input: NeedsYouSelectionQuerySchema,
+    output: z
+      .object({
+        existingIds: z.array(z.number().int().positive()),
+        matchingIds: z.array(z.number().int().positive()),
+      })
+      .strict(),
+  },
   application_needs: {
     effect: "read",
     description:

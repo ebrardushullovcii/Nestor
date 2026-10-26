@@ -22,6 +22,8 @@ export function createNeedsYouCommandRunner(
       input: NeedsYouCommandInput<K>,
     ) => NeedsYouCommandOutput<K> | Promise<NeedsYouCommandOutput<K>>;
   } = {
+    validate_needs_you_selection: (input) =>
+      getStore().needsYou.validateSelection(input),
     application_needs: ({ id }) => getStore().needsYou.forApplication(id),
     list_needs_you: (input) => getStore().needsYou.list(input),
     needs_you_counts: () => getStore().needsYou.counts(),
