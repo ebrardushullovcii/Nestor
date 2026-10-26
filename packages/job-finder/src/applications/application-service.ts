@@ -5,6 +5,7 @@ import {
   buildApplyFormObservation,
   canContinueApplicationAfterAccess,
   checkWrittenApplicationAnswers,
+  requiresSavedNationalityAnswer,
   inferQuestionKind,
   hasSubmissionConfirmationText,
   type ApplyAgentResult,
@@ -710,7 +711,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           // either automatic sending or the person's sidebar Send instruction.
           const card = applications.getWork(row.id)?.reviewCard;
           const written =
-            card?.answers.filter((answer) => answer.written) ?? [];
+            card?.answers.filter(
+              (answer) =>
+                answer.written ||
+                requiresSavedNationalityAnswer(answer.question),
+            ) ?? [];
           if (
             card?.letter &&
             !card.letter.groundedIn.includes(
@@ -759,35 +764,41 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 ),
               );
             const client = toApplyLlmClient(deps.aiClient);
-            const checks = client && form
-              ? await checkWrittenApplicationAnswers({
-                  client,
-                  sources: {
-                    profile,
-                    resumeText: profile.baseResume.textContent,
-                    reusableAnswers: saved,
-                    documents: [],
-                    posting: {
-                      title: job.title,
-                      company: job.company,
-                      location: job.location,
-                      description: job.description ?? "",
+            const checks =
+              client && form
+                ? await checkWrittenApplicationAnswers({
+                    client,
+                    sources: {
+                      profile,
+                      resumeText: profile.baseResume.textContent,
+                      reusableAnswers: saved,
+                      documents: [],
+                      posting: {
+                        title: job.title,
+                        company: job.company,
+                        location: job.location,
+                        description: job.description ?? "",
+                      },
                     },
-                  },
-                  answers: written,
-                  formContext: {
-                    pageText: form?.bodyText ?? "",
-                    fields: [],
-                  },
-                  payDisclosed:
-                    settings.salaryDisclosure === "answer_from_profile",
-                  signal,
-                }).catch(() => null)
-              : null;
+                    answers: written,
+                    formContext: {
+                      pageText: form?.bodyText ?? "",
+                      fields: [],
+                    },
+                    payDisclosed:
+                      settings.salaryDisclosure === "answer_from_profile",
+                    signal,
+                  }).catch(() => null)
+                : null;
             const rejected = questions.filter(
               (_question, index) => !checks?.[index]?.supported,
             );
             if (rejected.length) {
+              applications.discardReviewAnswers(
+                row.id,
+                row.attempt,
+                rejected.map((question) => question.prompt),
+              );
               // The new question supersedes the ungrounded generated value.
               // Do not immediately consume the same unusable saved answer.
               for (const question of rejected) {

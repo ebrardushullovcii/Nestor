@@ -408,6 +408,51 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /** A refused answer must no longer appear as a filled answer in the review. */
+    discardReviewAnswers(
+      id: number,
+      attempt: number,
+      questions: readonly string[],
+    ): boolean {
+      return store.transaction(() => {
+        const current = getApplication(id);
+        if (
+          !current ||
+          current.attempt !== attempt ||
+          !["running", "ready", "needs_you"].includes(current.state)
+        )
+          return false;
+        const row = sql(
+          "SELECT review_json FROM application_details WHERE application_id=? AND attempt=?",
+        ).get(id, attempt) as { review_json: string | null } | undefined;
+        if (!row?.review_json) return false;
+        const card = ApplicationReviewCardSchema.parse(
+          JSON.parse(row.review_json),
+        );
+        const refused = new Set(questions);
+        const answers = card.answers.filter(
+          (answer) => !refused.has(answer.question),
+        );
+        const refusedLetter =
+          card.letter &&
+          card.answers.some(
+            (answer) =>
+              refused.has(answer.question) &&
+              answer.answer === card.letter!.text,
+          );
+        const review = ApplicationReviewCardSchema.parse({
+          ...card,
+          answers,
+          ...(refusedLetter ? { letter: null } : {}),
+        });
+        sql(
+          "UPDATE application_details SET review_json=? WHERE application_id=? AND attempt=?",
+        ).run(JSON.stringify(review), id, attempt);
+        changed([current.jobId]);
+        return true;
+      });
+    },
+
     /** A question answered from memory needs another preparation, without a task. */
     continuePreparation(id: number, attempt: number): boolean {
       return store.transaction(() => {

@@ -962,6 +962,15 @@ function sendEnvelope(jobId: number, sha256: string) {
 
 it.each([
   ...replay.cases.map((entry) => ({ ...entry, rule: "" })),
+  ...["Passport Country", "Citizenship", "Nationality"].map((question) => ({
+    question,
+    answer: "Germany",
+    evidence: [
+      { source: "applicant", path: "/location/region", quote: "Germany" },
+    ],
+    rule: "",
+    written: false,
+  })),
   ...ownWords.rules.map((rule) => ({
     question: ownWords.question,
     answer: ownWords.proposed,
@@ -978,13 +987,14 @@ it.each([
     });
     f.seed.profile.yearsExperience = replay.applicant.yearsExperience;
     f.seed.profile.skills = replay.applicant.skills;
+    f.seed.profile.currentRegion = "Germany";
     f.seed.profile.workEligibility.requiresVisaSponsorship = false;
     preparation.answers = [
       {
         question: entry.question,
         answer: entry.answer,
         source: "Written for this application",
-        written: true,
+        written: "written" in entry ? entry.written : true,
         groundedIn: [],
       },
     ];
@@ -1035,6 +1045,7 @@ it.each([
     expect(action).not.toHaveBeenCalled();
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
     expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);
+    expect(f.applications.getWork(row.id)?.reviewCard?.answers).toEqual([]);
     expect(f.onError).not.toHaveBeenCalled();
   },
 );
