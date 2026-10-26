@@ -17,13 +17,17 @@ import {
 } from "@nestor/contracts";
 
 import {
-  withResumeClaimFixes,
+  settleResumeClaimLines,
   withResumeClaimChecks,
 } from "../internal/resume-claim-checks";
 import {
+  buildPersonsOwnResumeClaimMatcher,
+  buildResumeClaimDescriptors,
+  buildResumeClaimEvidenceBank,
   buildResumeDraftFromTailoredDraft,
   buildResumeRenderDocument,
   collectResumeWorkspaceEvidence,
+  resumeClaimContentHash,
   sanitizeResumeDraft,
   validateResumeDraft,
 } from "../internal/resume-workspace-helpers";
@@ -271,17 +275,62 @@ export async function writeResume(
     ),
     written.coreSkills,
   );
-  // The model checks every generated level, including Aggressive's hard limits.
-  // Choosing Aggressive accepts stretches; unsupported lines still take the
-  // checker's fix, return to saved wording or are left off (ADR 0051).
-  const checked = await withResumeClaimChecks({ ...check, draft: sanitized });
-  const settled = await withResumeClaimFixes({
-    ...check,
+  // Aggressive accepted stretching when the person chose it, so only its
+  // numbers are held to the evidence; the other levels have every written
+  // line checked by the model once. Either way a failed line takes the
+  // checker's fix, goes back to the person's own wording, or is left off.
+  const checked =
+    input.level === "aggressive"
+      ? withNumberChecks(sanitized, profile)
+      : await withResumeClaimChecks({ ...check, draft: sanitized });
+  const settled = settleResumeClaimLines({
     draft: checked,
+    profile,
     stretchesAreThePersons: input.level === "aggressive",
   });
   return {
-    ...sanitize(settled, written.coreSkills),
+    ...(settled ? sanitize(settled, written.coreSkills) : checked),
     status: "draft",
   };
+}
+
+const NUMBER = /\d[\d,.]*/gu;
+const numbersIn = (text: string) =>
+  (text.match(NUMBER) ?? []).map((value) =>
+    value.replace(/[,.]+$/u, "").replace(/,/gu, ""),
+  );
+
+/**
+ * Marks each written line that states a number the person's evidence does
+ * not have as unsupported, so settling restores or drops it.
+ */
+function withNumberChecks(
+  draft: ResumeDraft,
+  profile: CandidateProfile,
+): ResumeDraft {
+  const known = new Set(
+    [
+      ...buildResumeClaimEvidenceBank(profile).map((entry) => entry.text),
+      profile.baseResume.textContent ?? "",
+      // Aggressive may round evidenced years up by one.
+      ...(profile.yearsExperience
+        ? [`${profile.yearsExperience} ${profile.yearsExperience + 1}`]
+        : []),
+    ].flatMap(numbersIn),
+  );
+  const isPersonsOwn = buildPersonsOwnResumeClaimMatcher({ draft, profile });
+  const checkedAt = new Date().toISOString();
+  const claimChecks = buildResumeClaimDescriptors(draft)
+    .filter((line) => !isPersonsOwn(line))
+    .filter((line) => numbersIn(line.text).some((value) => !known.has(value)))
+    .map((line) => ({
+      contentHash: resumeClaimContentHash(line.text),
+      verdict: "unsupported" as const,
+      reason: "States a number the profile does not have.",
+      evidenceIds: [],
+      fix: null,
+      evidenceKey: null,
+      checkedAt,
+    }));
+  return { ...draft, claimChecks };
 }
