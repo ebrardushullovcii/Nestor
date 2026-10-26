@@ -104,6 +104,10 @@ describe("JSON the job store keeps", () => {
         ) as unknown;
         const result = schema.safeParse(row);
         expect(result.success ? [] : result.error.issues).toEqual([]);
-        if (result.success) expect(result.data).toMatchObject(row);
+        if (result.success) {
+          if (row !== null && typeof row === "object")
+            expect(result.data).toMatchObject(row);
+          else expect(result.data).toEqual(row);
+        }
       });
 });
