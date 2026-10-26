@@ -259,7 +259,7 @@ export function ResumePane(props: {
       {draft ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           <SegmentedControl<"read" | "edit">
-            className="self-start 2xl:hidden"
+            className={cn("self-start", !requestedMode && "2xl:hidden")}
             label="Read or edit the resume"
             onValueChange={setMode}
             options={[
@@ -270,7 +270,10 @@ export function ResumePane(props: {
           />
           <div className="flex min-h-0 flex-1 gap-4">
             <ResumeEditor
-              className={cn("2xl:flex", mode === "read" && "hidden")}
+              className={cn(
+                !requestedMode && "2xl:flex",
+                mode === "read" && "hidden",
+              )}
               disabled={busy || resume?.state === "writing"}
               draft={draft}
               onChange={view.edit}
@@ -278,7 +281,8 @@ export function ResumePane(props: {
             />
             <div
               className={cn(
-                "flex min-h-0 min-w-0 flex-1 2xl:flex",
+                "flex min-h-0 min-w-0 flex-1",
+                !requestedMode && "2xl:flex",
                 mode === "edit" && "hidden",
               )}
             >
