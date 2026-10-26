@@ -8,13 +8,15 @@ const AssistantSidebar = lazy(async () => ({
 
 /**
  * The docked assistant is its own chunk: it loads once the first screen is
- * shown, or at once when the sidebar was left open.
+ * shown, or at once when the sidebar was left open. Once loaded it stays
+ * mounted, so closing it early keeps its draft.
  */
 export function AssistantSidebarSlot() {
   const open = useAssistant()?.open ?? false;
-  const [firstScreenShown, setFirstScreenShown] = useState(false);
-  useEffect(() => afterFirstScreen(() => setFirstScreenShown(true)), []);
-  if (!open && !firstScreenShown) return null;
+  const [loaded, setLoaded] = useState(open);
+  if (open && !loaded) setLoaded(true);
+  useEffect(() => afterFirstScreen(() => setLoaded(true)), []);
+  if (!loaded) return null;
   return (
     <Suspense fallback={null}>
       <AssistantSidebar />

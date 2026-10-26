@@ -10,8 +10,8 @@ import type { JobFinderSaveState } from "./job-finder-save-state";
 /**
  * What the page reads from the old whole-workspace controller. The controller
  * is its own chunk, loaded only once a screen asks for the old workspace
- * (Profile, setup, Settings, Activity, the command palette); until then the
- * page draws from the store and this view stays null.
+ * (Profile, setup, Settings, Activity, the command palette); until then, and
+ * again once it unmounts, the page draws from the store and this view is null.
  */
 export interface LegacyControllerView {
   appearanceTheme: JobFinderSettings["appearanceTheme"] | null;
@@ -28,7 +28,10 @@ export interface LegacyControllerView {
 let view: LegacyControllerView | null = null;
 const listeners = new Set<() => void>();
 
-export function publishLegacyControllerView(next: LegacyControllerView): void {
+export function publishLegacyControllerView(
+  next: LegacyControllerView | null,
+): void {
+  if (view === next) return;
   view = next;
   for (const listener of listeners) listener();
 }

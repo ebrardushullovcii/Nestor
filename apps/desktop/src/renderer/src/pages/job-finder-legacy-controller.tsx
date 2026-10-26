@@ -69,6 +69,8 @@ export const JobFinderLegacyController = memo(
       workspace,
       workspaceState,
     ]);
+    // A later controller must not start from this one's ready view.
+    useLayoutEffect(() => () => publishLegacyControllerView(null), []);
 
     const latestContext = useRef(context);
     useLayoutEffect(() => {
