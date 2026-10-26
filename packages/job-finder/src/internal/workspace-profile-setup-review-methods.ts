@@ -24,7 +24,6 @@ import {
   applyResolvedResumeImportCandidatesToWorkspace,
   countResumeImportCandidates,
 } from "./resume-import-workflow";
-import { hasResumeAffectingProfileChange } from "./resume-workspace-staleness";
 import { normalizeSearchPreferences } from "./workspace-helpers";
 import type { ProfileContext } from "./profile-context";
 

@@ -5,7 +5,6 @@ import {
   ProfileCopilotPatchGroupSchema,
   type AssistantChangeEntry,
   type AssistantChangeTarget,
-  type CandidateProfile,
   type JobFinderSettings,
   type JobSearchPreferences,
   type ProfileCopilotPatchOperation,

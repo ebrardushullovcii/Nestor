@@ -1043,8 +1043,8 @@ export async function undoReceipt(
       message: "That job move can no longer be undone here.",
     };
   }
-  let undone: string[] = [];
-  let conflicts: string[] = [];
+  const undone: string[] = [];
+  const conflicts: string[] = [];
   if (receipt.target === "app_command") {
     const undo = receipt.undoCommand;
     const command = context.ports.commands?.find(

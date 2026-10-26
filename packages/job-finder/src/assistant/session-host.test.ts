@@ -1061,7 +1061,7 @@ describe("assistant session host", () => {
     const chat = vi.fn(() =>
       Promise.resolve({ content: "Current application status recorded." }),
     );
-    const { host, ports, harness } = setup({
+    const { host, ports } = setup({
       modelHandle: {
         ...createScriptedAssistantModelHandle(),
         createModel: () => ({ chatWithTools: chat }),

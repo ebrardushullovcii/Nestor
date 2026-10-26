@@ -19,24 +19,21 @@ describe("profile workspace setup completion", () => {
       profileSetupState: inProgressState,
     });
 
-    try {
-      const result = await deriveAndPersistProfileSetupState(
-        {
-          repository,
-          hasRunJobSearch: () => true,
-          jobSites: { counts: () => ({ enabled: 1 }) },
-        } as unknown as ProfileContext,
-        {
-          profile: seed.profile,
-          searchPreferences: seed.searchPreferences,
-          persistedState: inProgressState,
-          persist: false,
-        },
-      );
+    const result = await deriveAndPersistProfileSetupState(
+      {
+        repository,
+        hasRunJobSearch: () => true,
+        jobSites: { counts: () => ({ enabled: 1 }) },
+      } as unknown as ProfileContext,
+      {
+        profile: seed.profile,
+        searchPreferences: seed.searchPreferences,
+        persistedState: inProgressState,
+        persist: false,
+      },
+    );
 
-      expect(result.status).toBe("completed");
-      expect(result.completedAt).not.toBeNull();
-    } finally {
-    }
+    expect(result.status).toBe("completed");
+    expect(result.completedAt).not.toBeNull();
   });
 });

@@ -1,5 +1,4 @@
 import {
-  AiBehaviorPreferenceSchema,
   applyCompensationPreferenceChange,
   CandidateCertificationSchema,
   CandidateEducationSchema,
@@ -10,12 +9,9 @@ import {
   CandidateProjectSchema,
   CandidateProofBankEntrySchema,
   JobSearchPreferencesSchema,
-  ProfileCopilotPatchGroupSchema,
   ProfileSetupStateSchema,
   type CandidateProfile,
   type JobSearchPreferences,
-  type ProfileCopilotContext,
-  type ProfileCopilotRelevantReviewItem,
   type ProfileCopilotMessage,
   type ProfileCopilotPatchGroup,
   type ProfileRevision,
@@ -37,11 +33,8 @@ import {
 import { followPrimaryContacts } from "@nestor/contracts";
 import {
   MIRRORED_PROFILE_LIST_FIELDS,
-  mergeMirroredListHalves,
   mirrorProfileListEdits,
-  type MirroredProfileListField,
 } from "./profile-copilot-mirrored-lists";
-import { hasResumeAffectingProfileChange } from "./resume-workspace-staleness";
 import {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,
@@ -49,54 +42,6 @@ import {
 import { createUniqueId } from "./shared";
 import { normalizeSearchPreferences } from "./workspace-helpers";
 import type { ProfileContext } from "./profile-context";
-
-function isSearchPreferencesPatchSafeForAutoApply(
-  value: Extract<
-    ProfileCopilotPatchGroup["operations"][number],
-    { operation: "replace_search_preferences_fields" }
-  >["value"],
-): boolean {
-  // `tailoringMode` is not here: it is half of the resume level, which also
-  // moves a person off Original in Settings, so it waits for review exactly
-  // like `set_resume_approach`.
-  const safeScalarFields = new Set([
-    "minimumSalaryUsd",
-    "salaryCurrency",
-    "targetSalaryUsd",
-  ]);
-
-  const currencyIsValid =
-    value.salaryCurrency === undefined ||
-    value.salaryCurrency === null ||
-    /^[A-Z]{3}$/.test(value.salaryCurrency.trim().toUpperCase());
-  const salaryValuesAreValid = [value.minimumSalaryUsd, value.targetSalaryUsd]
-    .filter((entry): entry is number => entry !== undefined && entry !== null)
-    .every((entry) => Number.isInteger(entry) && entry >= 0);
-
-  return (
-    currencyIsValid &&
-    salaryValuesAreValid &&
-    Object.keys(value).every((key) => safeScalarFields.has(key))
-  );
-}
-
-function isCompensationPatchSafeForAutoApply(
-  value: Extract<
-    ProfileCopilotPatchGroup["operations"][number],
-    { operation: "replace_compensation_preferences_fields" }
-  >["value"],
-): boolean {
-  const amountsAreValid = [value.minimum, value.maximum]
-    .filter((entry): entry is number => entry !== undefined && entry !== null)
-    .every((entry) => Number.isInteger(entry) && entry >= 0);
-  const currencyIsComparable =
-    value.currencyStatus !== "needs_clarification" &&
-    value.currency !== null &&
-    value.currency !== undefined &&
-    /^[A-Z]{3}$/.test(value.currency);
-
-  return amountsAreValid && currencyIsComparable;
-}
 
 function hasValidPatchValues(patchGroup: ProfileCopilotPatchGroup): boolean {
   return patchGroup.operations.every((operation) => {
@@ -125,61 +70,6 @@ function hasValidPatchValues(patchGroup: ProfileCopilotPatchGroup): boolean {
 
     return currencyIsValid && salaryValuesAreValid;
   });
-}
-
-function isPatchGroupSafeForAutoApply(
-  patchGroup: ProfileCopilotPatchGroup,
-): boolean {
-  return patchGroup.operations.every((operation) => {
-    if (operation.operation === "replace_search_preferences_fields") {
-      return isSearchPreferencesPatchSafeForAutoApply(operation.value);
-    }
-
-    if (operation.operation === "replace_compensation_preferences_fields") {
-      return isCompensationPatchSafeForAutoApply(operation.value);
-    }
-
-    return (
-      operation.operation === "replace_identity_fields" ||
-      operation.operation === "replace_profile_list_fields" ||
-      operation.operation === "replace_work_eligibility_fields" ||
-      operation.operation === "replace_professional_summary_fields" ||
-      operation.operation === "replace_narrative_fields" ||
-      operation.operation === "replace_application_identity_fields" ||
-      operation.operation === "replace_skill_group_fields" ||
-      operation.operation === "resolve_review_items"
-    );
-  });
-}
-
-function describeCopilotContext(context: ProfileCopilotContext): string {
-  if (context.surface === "setup") {
-    return `setup ${context.step.replaceAll("_", " ")}`;
-  }
-
-  if (context.surface === "profile") {
-    return `${context.section} profile section`;
-  }
-
-  return "profile";
-}
-
-function formatPatchGroupSummaryList(
-  patchGroups: readonly ProfileCopilotPatchGroup[],
-): string {
-  const summaries = patchGroups
-    .slice(0, 2)
-    .map((patchGroup) => patchGroup.summary);
-
-  if (summaries.length === 0) {
-    return "";
-  }
-
-  if (patchGroups.length > summaries.length) {
-    return `${summaries.join(" and ")} and ${patchGroups.length - summaries.length} more`;
-  }
-
-  return summaries.join(" and ");
 }
 
 function findUniqueProfileCopilotPatchGroup(
@@ -212,21 +102,6 @@ function findUniqueProfileCopilotPatchGroup(
   }
 
   return match;
-}
-
-/** JSON with object keys sorted, so key order never makes two equal values differ. */
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
 }
 
 /**
@@ -271,194 +146,6 @@ export function routeTailoringModeThroughResumeApproach(
   return routed;
 }
 
-function normalizeAssistantPatchGroups(input: {
-  patchGroups: readonly ProfileCopilotPatchGroup[];
-  context: ProfileCopilotContext;
-  content: string;
-  assistantMessageId: string;
-  savedTailoringMode: TailoringMode;
-  /** The saved copies of target roles and locations the reply edits. */
-  lists: {
-    profile: Pick<CandidateProfile, MirroredProfileListField>;
-    searchPreferences: Pick<JobSearchPreferences, MirroredProfileListField>;
-  };
-}): {
-  patchGroups: ProfileCopilotPatchGroup[];
-  content: string;
-} {
-  // Groups left with nothing to change (only a repeated strength) are gone,
-  // and so is a group that repeats an earlier one in the same reply: the
-  // model sometimes calls the same tool twice, and a built-app run showed
-  // five cards for "add a target role", two of them exact copies.
-  const seenOperations = new Set<string>();
-  const routedPatchGroups = input.patchGroups.flatMap((patchGroup) => {
-    const operations = routeTailoringModeThroughResumeApproach(
-      patchGroup.operations,
-      input.savedTailoringMode,
-    );
-    const operationsKey = stableStringify(operations);
-    if (operations.length === 0 || seenOperations.has(operationsKey)) {
-      return [];
-    }
-    seenOperations.add(operationsKey);
-    return [{ original: patchGroup, routed: { ...patchGroup, operations } }];
-  });
-  // The same target-role or location change proposed once per stored copy
-  // is one card; the other copy follows when it is applied.
-  const mergedPatchGroups = mergeMirroredListHalves(
-    routedPatchGroups.map((entry) => ({
-      operations: entry.routed.operations,
-      summary: entry.routed.summary,
-      entry,
-    })),
-    input.lists,
-  ).map(({ summary, entry }) => ({
-    original: entry.original,
-    routed: { ...entry.routed, summary },
-  }));
-  const normalizedPatchGroups = mergedPatchGroups.map(({ routed }, index) => {
-    const parsedPatchGroup = ProfileCopilotPatchGroupSchema.parse(routed);
-    const normalizedPatchGroup = ProfileCopilotPatchGroupSchema.parse({
-      ...parsedPatchGroup,
-      // Provider-generated IDs are only proposal-local and may repeat on a
-      // later response. Persist an identity owned by this assistant message
-      // so the renderer can safely carry it across apply/reject/undo flows.
-      id: `${input.assistantMessageId}_patch_${index + 1}`,
-    });
-
-    if (
-      normalizedPatchGroup.applyMode === "applied" &&
-      !isPatchGroupSafeForAutoApply(normalizedPatchGroup)
-    ) {
-      return {
-        ...normalizedPatchGroup,
-        applyMode: "needs_review",
-      } satisfies ProfileCopilotPatchGroup;
-    }
-
-    return normalizedPatchGroup;
-  });
-
-  const downgradedPatchGroups = normalizedPatchGroups.filter(
-    (patchGroup, index) => {
-      const originalPatchGroup = mergedPatchGroups[index]?.original;
-      return (
-        originalPatchGroup?.applyMode === "applied" &&
-        patchGroup.applyMode === "needs_review"
-      );
-    },
-  );
-
-  if (downgradedPatchGroups.length === 0) {
-    return {
-      patchGroups: normalizedPatchGroups,
-      content: input.content,
-    };
-  }
-
-  const contextLabel = describeCopilotContext(input.context);
-  const downgradedSummary = formatPatchGroupSummaryList(downgradedPatchGroups);
-  const downgradedSuffix = downgradedSummary ? `: ${downgradedSummary}.` : ".";
-  const appliedCount = normalizedPatchGroups.filter(
-    (patchGroup) => patchGroup.applyMode === "applied",
-  ).length;
-
-  return {
-    patchGroups: normalizedPatchGroups,
-    content:
-      appliedCount > 0
-        ? `I applied the safest changes automatically and left higher-risk edits for review in the ${contextLabel} context${downgradedSuffix}`
-        : `I prepared higher-risk edits for review in the ${contextLabel} context instead of auto-applying them${downgradedSuffix}`,
-  };
-}
-
-function getStoredPatchGroupApplyMode(
-  patchGroup: ProfileCopilotPatchGroup,
-): ProfileCopilotPatchGroup["applyMode"] {
-  return patchGroup.applyMode === "applied"
-    ? "needs_review"
-    : patchGroup.applyMode;
-}
-
-function setPatchGroupApplyMode(
-  patchGroup: ProfileCopilotPatchGroup,
-  applyMode: ProfileCopilotPatchGroup["applyMode"],
-): ProfileCopilotPatchGroup {
-  return {
-    ...patchGroup,
-    applyMode,
-  };
-}
-
-function formatCopilotFactLabel(value: string): string {
-  return value
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (segment) => segment.toUpperCase());
-}
-
-function isBasicsSectionItem(item: ProfileCopilotRelevantReviewItem): boolean {
-  return (
-    item.target.domain === "identity" ||
-    item.target.domain === "professional_summary"
-  );
-}
-
-function isExperienceSectionItem(
-  item: ProfileCopilotRelevantReviewItem,
-): boolean {
-  return item.target.domain === "experience";
-}
-
-function isBackgroundSectionItem(
-  item: ProfileCopilotRelevantReviewItem,
-): boolean {
-  return [
-    "education",
-    "certification",
-    "project",
-    "link",
-    "language",
-    "proof_point",
-  ].includes(item.target.domain);
-}
-
-function isPreferencesSectionItem(
-  item: ProfileCopilotRelevantReviewItem,
-): boolean {
-  return [
-    "search_preferences",
-    "work_eligibility",
-    "application_identity",
-  ].includes(item.target.domain);
-}
-
-function filterRelevantReviewItemsForContext(input: {
-  context: ProfileCopilotContext;
-  reviewItems: ProfileSetupState["reviewItems"];
-}): ProfileCopilotRelevantReviewItem[] {
-  const { context, reviewItems } = input;
-
-  if (context.surface === "setup") {
-    return reviewItems.filter((item) => item.step === context.step);
-  }
-
-  if (context.surface === "profile") {
-    switch (context.section) {
-      case "basics":
-        return reviewItems.filter(isBasicsSectionItem);
-      case "experience":
-        return reviewItems.filter(isExperienceSectionItem);
-      case "background":
-        return reviewItems.filter(isBackgroundSectionItem);
-      case "preferences":
-        return reviewItems.filter(isPreferencesSectionItem);
-    }
-  }
-
-  return reviewItems.filter((item) => item.status === "pending");
-}
-
 /** The resume level Settings shows, from its two stored halves. */
 export function resolveSavedResumeApproach(input: {
   resumeApplicationMode: ResumeApplicationMode | null | undefined;
@@ -468,17 +155,6 @@ export function resolveSavedResumeApproach(input: {
     ? "original_resume"
     : input.tailoringMode;
 }
-
-const RESUME_APPROACH_FACT: Record<ResumeApproach, string> = {
-  original_resume:
-    "Resume level for new jobs (Settings): Original. Applications send the imported resume file unchanged; nothing in it can be edited.",
-  conservative:
-    "Resume level for new jobs (Settings): Light. Job Finder writes an editable resume for each job with small edits.",
-  balanced:
-    "Resume level for new jobs (Settings): Tailored. Job Finder writes an editable resume for each job with a fuller rewrite.",
-  aggressive:
-    "Resume level for new jobs (Settings): Aggressive. Job Finder writes an editable resume for each job that may stretch, with the person's confirmation.",
-};
 
 /**
  * The Settings half of the resume level a patch group leaves behind, or null
@@ -512,58 +188,6 @@ export function resolveResumeApplicationModeAfterPatchGroup(
     }
   }
   return next === current ? null : next;
-}
-
-function buildConversationFacts(input: {
-  profile: CandidateProfile;
-  searchPreferences: JobSearchPreferences;
-  relevantReviewItems: readonly ProfileCopilotRelevantReviewItem[];
-  resumeApproach?: ResumeApproach;
-}): string[] {
-  const facts: string[] = [];
-
-  if (input.resumeApproach) {
-    facts.push(RESUME_APPROACH_FACT[input.resumeApproach]);
-  }
-
-  if (input.profile.headline?.trim()) {
-    facts.push(`Headline: ${input.profile.headline.trim()}`);
-  }
-
-  if (input.profile.currentLocation?.trim()) {
-    facts.push(`Location: ${input.profile.currentLocation.trim()}`);
-  }
-
-  const compensation = input.searchPreferences.compensation;
-  if (compensation.minimum !== null || compensation.maximum !== null) {
-    facts.push(
-      `Compensation preference: ${compensation.minimum ?? "unset"} to ${compensation.maximum ?? "unset"} per ${compensation.interval} | currency: ${compensation.currency ?? "unset"} | currency status: ${compensation.currencyStatus}`,
-    );
-  }
-
-  input.profile.experiences.slice(0, 6).forEach((experience) => {
-    const company = experience.companyName ?? "Unknown company";
-    const title = experience.title ?? "Unknown title";
-    const startDate = experience.startDate ?? "unknown start";
-    const endDate = experience.isCurrent
-      ? "present"
-      : (experience.endDate ?? "unknown end");
-    const workMode =
-      experience.workMode.length > 0
-        ? experience.workMode.map(formatCopilotFactLabel).join(", ")
-        : "not set";
-    facts.push(
-      `Experience: ${title} at ${company} (${startDate} to ${endDate}) | work mode: ${workMode}`,
-    );
-  });
-
-  input.relevantReviewItems.slice(0, 6).forEach((item) => {
-    facts.push(
-      `Review item: ${item.label} | status: ${item.status} | step: ${item.step}${item.proposedValue ? ` | proposed: ${item.proposedValue}` : ""}`,
-    );
-  });
-
-  return facts;
 }
 
 export function buildProfileRevision(input: {
@@ -964,9 +588,7 @@ export function createWorkspaceProfileCopilotMethods(input: {
     searchPreferences: JobSearchPreferences;
     profileSetupState: ProfileSetupState;
     latestResumeImportRun: Awaited<
-      ReturnType<
-        ProfileContext["repository"]["getLatestResumeImportRun"]
-      >
+      ReturnType<ProfileContext["repository"]["getLatestResumeImportRun"]>
     >;
     latestResumeImportAllCandidates: Awaited<
       ReturnType<
@@ -980,11 +602,8 @@ export function createWorkspaceProfileCopilotMethods(input: {
    */
   commitResumeApplicationMode: (mode: ResumeApplicationMode) => Promise<void>;
 }) {
-  const {
-    commitResumeApplicationMode,
-    ctx,
-    getCurrentSetupStateContext,
-  } = input;
+  const { commitResumeApplicationMode, ctx, getCurrentSetupStateContext } =
+    input;
 
   function applyPatchGroupOperationsToWorkspace(
     workspace: {
@@ -1611,7 +1230,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
     if (!didUpdate) {
       throw new Error(`Unknown profile copilot patch group '${patchGroupId}'.`);
     }
-
   }
 
   async function undoProfileRevision(revisionId: string) {
@@ -1708,7 +1326,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
       restoredFromRevisionId: targetRevision.id,
     });
 
-
     await commitProfileCopilotStateWithStaleRetry(ctx.repository, async () => {
       const captured = await ctx.repository.getProfileWithRevision();
       return {
@@ -1724,7 +1341,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
     if (restoredResumeApplicationMode) {
       await commitResumeApplicationMode(restoredResumeApplicationMode);
     }
-
   }
 
   return {

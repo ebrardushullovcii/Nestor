@@ -5,7 +5,6 @@ import { createProfileServiceHarness } from "../../profile-service.test-support"
 import type { AssistantHostPorts } from "../ports";
 import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
-import { getWorkspaceSummaryTool } from "./workspace-tools";
 
 function world() {
   const { service } = createProfileServiceHarness();
