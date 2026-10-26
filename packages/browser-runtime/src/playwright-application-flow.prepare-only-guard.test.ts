@@ -2,6 +2,7 @@ import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays
 import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
 import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
 import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
+import { inspectPageMutationResponse } from "./mutation-response-body";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -549,6 +550,49 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
     );
   });
 
+  test.each(["fetch", "xhr"] as const)(
+    "embedded-response replay reads %s bodies without a request-finished event",
+    async (transport) => {
+      const app = await startTrackedServer();
+      app.registerHtml("/response-body-replay", "<p>Application form</p>");
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/response-body-replay`);
+      await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      const cases = [
+        ...responseReplay.refused.map((body) => ({ body, accepted: false })),
+        ...responseReplay.accepted.map((body) => ({ body, accepted: true })),
+      ];
+      for (const [index, entry] of cases.entries()) {
+        const url = `${app.baseUrl}/api/save-body-${index}`;
+        app.registerJson(`/api/save-body-${index}`, entry.body);
+        const response = page.waitForResponse(url);
+        await page.evaluate(
+          async ({ url, transport }) => {
+            const body = '{"fieldAnswers":{"name":"Synthetic Applicant"}}';
+            if (transport === "fetch")
+              await (await fetch(url, { method: "POST", body })).text();
+            else
+              await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", url);
+                xhr.onload = () => resolve();
+                xhr.onerror = () => reject(new Error("XHR failed"));
+                xhr.send(body);
+              });
+          },
+          { url, transport },
+        );
+        const observed = await response;
+        // Electron receives response but never resolves Playwright's body reader.
+        Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+        expect(await inspectPageMutationResponse(page, observed)).toEqual(
+          entry,
+        );
+      }
+    },
+  );
+
   test("a 2xx refusal never counts as a saved intermediate step", async () => {
     const app = await startTrackedServer();
     app.registerHtml("/response-replay", "<p>Application form</p>");
@@ -580,6 +624,34 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
     expect(app.hits.filter((hit) => hit.method === "POST")).toHaveLength(
       responseReplay.refused.length + 1,
     );
+  });
+
+  test("an ambiguous response-body fallback cannot borrow an identical request's success", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml("/ambiguous-body", "<p>Application form</p>");
+    app.registerJson("/api/save-identical", { saved: true });
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/ambiguous-body`);
+    await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    const response = page.waitForResponse(`${app.baseUrl}/api/save-identical`);
+    await page.evaluate(async () => {
+      await Promise.all(
+        [1, 2].map(async () =>
+          (
+            await fetch("/api/save-identical", {
+              method: "POST",
+              body: '{"fieldAnswers":{}}',
+            })
+          ).text(),
+        ),
+      );
+    });
+    const observed = await response;
+    Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+    expect(await inspectPageMutationResponse(page, observed)).toMatchObject({
+      accepted: false,
+    });
   });
 
   test(

@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { inspectMutationResponse } from "./mutation-response";
+import {
+  installMutationResponseBodyObserver,
+  inspectPageMutationResponse,
+} from "./mutation-response-body";
 import {
   classifyAttachmentUpload,
   type AttachmentUploadWindow,
@@ -1407,6 +1410,7 @@ async function ensureFramePrepareOnlyMutationGuard(
   intermediateMutationsAuthorized: boolean,
   finalActionWindowOpen: boolean,
 ): Promise<PrepareOnlyGuardSnapshot> {
+  await frame.evaluate(installMutationResponseBodyObserver);
   await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
@@ -1641,6 +1645,7 @@ export async function ensurePrepareOnlyMutationGuard(
   ];
 
   if (!networkGuardState.initScriptInstalled) {
+    await page.addInitScript(installMutationResponseBodyObserver);
     await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
       intermediateMutationsAuthorized: false,
       finalActionSignal: FINAL_ACTION_SIGNAL.source,
@@ -1662,7 +1667,7 @@ export async function ensurePrepareOnlyMutationGuard(
       if (!request) return;
       if (response.status() >= 300 && response.status() < 400) return;
       networkGuardState.allowedIntermediateRequests.delete(request);
-      void inspectMutationResponse(response)
+      void inspectPageMutationResponse(page, response)
         .then(({ accepted }) => {
           if (accepted) networkGuardState.verifiedIntermediateWriteCount += 1;
         })
