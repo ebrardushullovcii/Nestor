@@ -1017,7 +1017,7 @@ async function expectPostResetState(
 
   for (const { label, read, expected } of expectations) {
     if (label === "settings")
-      await expect(read(), label).resolves.toMatchObject(expected);
+      await expect(read(), label).resolves.toMatchObject(resetSeed.settings);
     else await expect(read(), label).resolves.toEqual(expected);
   }
 }
