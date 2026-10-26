@@ -30,6 +30,7 @@ import {
 import { TaskPane, describeError } from "./task-pane";
 import { SavedAnswerPane } from "./saved-answer-pane";
 import { SourceNeedPane } from "./source-need-pane";
+import { useNeedsSelection } from "./use-needs-selection";
 
 type Item = NeedsYouTask | SavedFormAnswerSummary;
 const EMPTY_COUNTS: NeedsYouCounts = {
@@ -191,21 +192,16 @@ export function NeedsYouScreen() {
   });
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
-  const shownIds = new Set(list.rows.map((row) => row.id));
-  const visibleSelection = {
-    ...selection,
-    ids: new Set([...selection.ids].filter((id) => shownIds.has(id))),
-  };
-  useEffect(() => {
-    if (list.loading) return;
-    const ids = new Set(list.rows.map((row) => row.id));
-    setSelection((current) => {
-      const valid = new Set([...current.ids].filter((id) => ids.has(id)));
-      return valid.size === current.ids.size
-        ? current
-        : { ...current, ids: valid };
-    });
-  }, [list.loading, list.rows, selection]);
+  const resolvedSelection = useNeedsSelection({
+    selection,
+    setSelection,
+    rows: list.rows,
+    loading: list.loading,
+    tab,
+    text,
+    kind,
+  });
+  const visibleSelection = resolvedSelection.selection;
   const selectedCount = countSelected(visibleSelection, list.total);
   const missing = useCallback((id: number) => {
     if (pinned.current === id) pinned.current = null;
@@ -324,6 +320,9 @@ export function NeedsYouScreen() {
             </p>
           ) : null}
           {list.error ? <p role="alert">{list.error}</p> : null}
+          {resolvedSelection.error ? (
+            <p role="alert">{resolvedSelection.error}</p>
+          ) : null}
         </div>
       }
     >
@@ -373,13 +372,21 @@ export function NeedsYouScreen() {
                 <Button
                   size="toolbar"
                   variant="outline"
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    resolvedSelection.pending ||
+                    Boolean(resolvedSelection.error)
+                  }
                   onClick={() => {
                     setBusy(true);
                     void forget(
-                      list.rows
-                        .filter((row) => isSelected(selection, row.id))
-                        .map((row) => row.id),
+                      selection.all
+                        ? list.rows
+                            .filter((row) =>
+                              isSelected(visibleSelection, row.id),
+                            )
+                            .map((row) => row.id)
+                        : [...visibleSelection.ids],
                       selection.all,
                     )
                       .catch((error) =>

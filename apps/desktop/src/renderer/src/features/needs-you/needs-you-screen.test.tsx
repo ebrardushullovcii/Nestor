@@ -160,6 +160,85 @@ function show(route = "/job-finder/actions", nextRoute?: string) {
   );
 }
 
+function savedAnswer(index: number) {
+  return applications.needsYou.remember({
+    key: `window-${index}`,
+    prompt: `Window question ${index}?`,
+    answer: `Synthetic answer ${index}`,
+    input: "text",
+    options: [],
+    scope: {},
+  });
+}
+
+it("keeps an unchecked answer when a new answer pushes it past the 50-row window, then forgets only the rest", async () => {
+  const kept = savedAnswer(0);
+  for (let index = 1; index < 50; index += 1) savedAnswer(index);
+  const before = applications.needsYou.savedAnswer(kept.id);
+  show(
+    `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "saved" }))}`,
+  );
+  const checkbox = await screen.findByRole("checkbox", {
+    name: `Select ${kept.prompt}`,
+  });
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select all 50 answers" }),
+  );
+  fireEvent.click(checkbox);
+  await screen.findByText("49 selected");
+  act(() => {
+    savedAnswer(50);
+  });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("checkbox", { name: `Select ${kept.prompt}` }),
+    ).toBeNull(),
+  );
+  await screen.findByText("50 selected");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Forget selected" }),
+    ).toHaveProperty("disabled", false),
+  );
+  expect(
+    JSON.parse(
+      document
+        .querySelector("[data-needs-list-state]")!
+        .getAttribute("data-needs-list-state")!,
+    ),
+  ).toMatchObject({ all: true, selectedIds: [kept.id] });
+  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  await waitFor(() =>
+    expect(applications.needsYou.listAnswers().total).toBe(1),
+  );
+  expect(applications.needsYou.savedAnswer(kept.id)).toEqual(before);
+});
+
+it("keeps a real explicit selection outside the loaded window and forgets that exact answer", async () => {
+  const chosen = savedAnswer(0);
+  for (let index = 1; index < 255; index += 1) savedAnswer(index);
+  const view = { tab: "saved", selectedIds: [chosen.id] };
+  const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`;
+  show(route);
+  await screen.findByText("1 selected");
+  expect(
+    screen.queryByRole("checkbox", { name: `Select ${chosen.prompt}` }),
+  ).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Forget selected" }),
+    ).toHaveProperty("disabled", false),
+  );
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "displayed" });
+  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  await waitFor(() =>
+    expect(applications.needsYou.savedAnswer(chosen.id)).toBeNull(),
+  );
+  expect(applications.needsYou.listAnswers().total).toBe(254);
+});
+
 it.each(["missing", "other tab", "outside filter"])(
   "does not confirm a selected ID that is %s",
   async (kind) => {
