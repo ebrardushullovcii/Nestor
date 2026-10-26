@@ -634,3 +634,42 @@ test("R3-041 returns the saved failed import so retry is visible immediately", a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("a reset stops an import whose document read never finishes, at once", async () => {
+  const { importResumeFromSourcePath, stopDesktopResumeImports } =
+    await import("./import-resume");
+  const { directory, filePath } = await createTempResumeFile();
+  const runResumeImport = vi.fn();
+  mockMkdir.mockResolvedValue(undefined);
+  mockCopyFile.mockResolvedValue(undefined);
+  mockGetJobFinderDocumentsDirectory.mockReturnValue(
+    path.join(directory, "documents"),
+  );
+  mockStartJobFinderRuntime.mockResolvedValue({
+    profileService: { runResumeImport },
+    repository: {},
+  });
+  mockExtractResumeDocument.mockReturnValue(new Promise(() => undefined));
+  try {
+    const importing = importResumeFromSourcePath(filePath, {
+      useVision: false,
+    });
+    void importing.catch(() => undefined);
+    await vi.waitFor(() =>
+      expect(mockExtractResumeDocument).toHaveBeenCalled(),
+    );
+
+    await expect(
+      Promise.race([
+        stopDesktopResumeImports().then(() => "stopped"),
+        new Promise((resolve) =>
+          setTimeout(() => resolve("still waiting"), 1000),
+        ),
+      ]),
+    ).resolves.toBe("stopped");
+    await expect(importing).rejects.toThrow();
+    expect(runResumeImport).not.toHaveBeenCalled();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

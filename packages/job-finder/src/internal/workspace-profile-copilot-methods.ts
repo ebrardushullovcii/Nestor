@@ -22,7 +22,6 @@ import {
   type TailoringMode,
 } from "@nestor/contracts";
 
-import type { ReviseCandidateProfileConversationTurn } from "@nestor/ai-providers";
 
 import { resolvePendingReviewItemsAfterExplicitSave } from "./profile-setup-review-items";
 import { deriveAndPersistProfileSetupState } from "./profile-workspace-state";
@@ -469,117 +468,6 @@ export interface AppliedProfilePatchGroup {
 
 export const PROFILE_ASSISTANT_UNAVAILABLE_MESSAGE =
   "The Assistant's AI provider is unavailable right now, so nothing was changed. Your question is kept; ask it again in a moment.";
-
-/** Placeholder the agent runtime starts from before the model writes anything. */
-const UNWRITTEN_ASSISTANT_CONTENT =
-  /^I need to inspect the saved profile before proposing a change\.?$/i;
-
-/**
- * The words shown with a reply.
- *
- * What the model wrote is kept: it is where the Assistant asks for a fact it
- * needs or says what it could not do. Replacing it with the list of proposal
- * titles (already on the cards below the reply) hid exactly that, so a reply
- * could drop half of what was asked without a word.
- *
- * Text the model did not write is not trusted to describe a proposal: the
- * built-in editor says "I applied one safe change" in its own mode, which is
- * false while the change waits for Apply & save. Such a reply, or one with no
- * words at all, is described from the proposals themselves.
- */
-export function buildAssistantReplyContent(input: {
-  content: string;
-  patchGroups: readonly ProfileCopilotPatchGroup[];
-  proposalsWaitForReview: boolean;
-  modelUnavailable: boolean;
-  /** The model wrote `content`; false for the built-in editor or a stub. */
-  writtenByModel: boolean;
-  /**
-   * The model's run stopped before it finished (it circled or ran out of
-   * turns), and the cards are what it had prepared by then.
-   */
-  stoppedBeforeFinishing?: boolean;
-}): string {
-  const written = input.content.trim();
-  const hasWrittenContent =
-    written.length > 0 && !UNWRITTEN_ASSISTANT_CONTENT.test(written);
-  const proposalCount = input.patchGroups.length;
-  const waitsForReview = input.proposalsWaitForReview && proposalCount > 0;
-  const outageNote = input.modelUnavailable
-    ? "The AI did not answer, so Job Finder's built-in editor prepared this."
-    : null;
-  const describedProposals =
-    proposalCount > 0
-      ? `I prepared ${proposalCount === 1 ? "this change" : `${proposalCount} changes`}${waitsForReview ? " for your review" : ""}: ${input.patchGroups.map((patchGroup) => patchGroup.summary).join("; ")}.`
-      : null;
-  const keepWritten =
-    hasWrittenContent && (input.writtenByModel || !waitsForReview);
-  const body = keepWritten ? written : (describedProposals ?? written);
-  // The proposal card carries Apply & save; the Profile chat hides this
-  // sentence whenever the cards are shown, and every other reader of the
-  // message still learns that nothing changed.
-  const reviewNote =
-    waitsForReview && !/nothing changed yet/i.test(body)
-      ? "Nothing changed yet."
-      : null;
-  // Kept cards from a run that stopped early may cover only part of what
-  // was asked; the person hears that instead of assuming it is all there.
-  const unfinishedNote =
-    input.stoppedBeforeFinishing && proposalCount > 0
-      ? "I stopped before finishing every step, so check that these cards cover all of your request."
-      : null;
-  return [outageNote, body, unfinishedNote, reviewNote]
-    .filter((part): part is string => Boolean(part && part.trim()))
-    .join(" ");
-}
-
-/**
- * Changes the person already applied or turned down, from the whole chat.
- * Asked "what is weak here" after removing a skill, the Assistant offered to
- * add that skill back: the removal had scrolled out of the recent turns.
- */
-export function buildPersonDecisionFacts(
-  messages: readonly ProfileCopilotMessage[],
-  limit = 20,
-): string[] {
-  return messages
-    .flatMap((message) => message.patchGroups)
-    .filter(
-      (patchGroup) =>
-        patchGroup.applyMode === "applied" ||
-        patchGroup.applyMode === "rejected",
-    )
-    .slice(-limit)
-    .map((patchGroup) =>
-      patchGroup.applyMode === "applied"
-        ? `The person applied: ${patchGroup.summary}. Do not propose undoing it unless they ask.`
-        : `The person turned down: ${patchGroup.summary}. Do not propose it again unless they ask.`,
-    );
-}
-
-/**
- * The last few turns in this conversation, so "fix it", "do the second one",
- * or "yes" refer to what the Assistant just said or proposed. The model sees
- * no transcript otherwise; each turn used to start from nothing.
- */
-export function buildRecentConversation(
-  messages: readonly ProfileCopilotMessage[],
-  limit = 8,
-): ReviseCandidateProfileConversationTurn[] {
-  return messages.slice(-limit).map((message) => ({
-    role: message.role,
-    content: message.content.slice(0, 2_000),
-    proposals: message.patchGroups.map((patchGroup) => ({
-      summary: patchGroup.summary,
-      status:
-        patchGroup.applyMode === "applied"
-          ? "applied"
-          : patchGroup.applyMode === "rejected"
-            ? "rejected"
-            : "waiting_for_review",
-    })),
-  }));
-}
 
 export function createWorkspaceProfileCopilotMethods(input: {
   ctx: ProfileContext;

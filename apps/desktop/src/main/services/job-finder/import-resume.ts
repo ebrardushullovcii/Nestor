@@ -52,6 +52,26 @@ export interface ImportedResume {
   latestResumeImportRun: ResumeImportRun | null;
 }
 
+/**
+ * Waits for one import step, or for the import to be stopped: a stop never
+ * waits on a file read or local image render, and their late result is
+ * dropped.
+ */
+function untilStopped<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Error("Import stopped."));
+    signal.addEventListener("abort", stop, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 export class ResumeImportRetryUnavailableError extends Error {}
 
 export class ResumeImportUnreadableFileError extends Error {}
@@ -207,11 +227,13 @@ async function importResumeFile(
     sourceFileKind !== "plain_text" &&
     sourceFileKind !== "markdown";
 
-  await assertResumeFileOpens(sourcePath, fileName);
-  options.signal?.throwIfAborted();
-  await copyFile(sourcePath, targetPath);
+  await untilStopped(
+    assertResumeFileOpens(sourcePath, fileName),
+    options.signal,
+  );
+  await untilStopped(copyFile(sourcePath, targetPath), options.signal);
   const sourceSha256 = createHash("sha256")
-    .update(await readFile(targetPath))
+    .update(await untilStopped(readFile(targetPath), options.signal))
     .digest("hex");
   reportProgress(
     "reading_document",
@@ -239,11 +261,13 @@ async function importResumeFile(
       }))
     : Promise.resolve({ artifact: null, warnings: [] });
 
-  const [extractedResume, generatedVisionArtifact] = await Promise.all([
-    extractResumeDocument(targetPath, extractionInput),
-    generatedVisionArtifactPromise,
-  ]);
-  options.signal?.throwIfAborted();
+  const [extractedResume, generatedVisionArtifact] = await untilStopped(
+    Promise.all([
+      extractResumeDocument(targetPath, extractionInput),
+      generatedVisionArtifactPromise,
+    ]),
+    options.signal,
+  );
   const visionWarnings = generatedVisionArtifact.warnings;
   const extractionStatus = extractedResume.textContent
     ? "not_started"

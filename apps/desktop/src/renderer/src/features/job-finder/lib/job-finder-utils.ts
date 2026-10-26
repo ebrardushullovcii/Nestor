@@ -216,9 +216,8 @@ export function formatWorkModeLabel(workMode: string): string {
  * "Awaiting Review" and, as the heading of every Assistant proposal card,
  * "Replace Section Bullets".
  *
- * The replacement is `lib/status-copy.ts`: an exhaustive
- * `Record<Enum, string>` table per enum, typed so a new variant fails
- * typecheck instead of reaching a screen.
+ * The replacement is an exhaustive `Record<Enum, string>` copy table per
+ * enum, typed so a new variant fails typecheck instead of reaching a screen.
  *
  * Its behaviour is deliberately unchanged, so every current caller still
  * compiles and renders exactly as before. The narrowing is enforced instead by
@@ -226,8 +225,7 @@ export function formatWorkModeLabel(workMode: string): string {
  * `PENDING_ADOPTION` allowlist; each zone package deletes its own entries as
  * it adopts a copy table, and the function is deleted when the list empties.
  *
- * @deprecated Outside a Technical details disclosure. Use a table from
- * `lib/status-copy.ts`.
+ * @deprecated Outside a Technical details disclosure. Use a copy table.
  */
 export function formatStatusLabel(value: string): string {
   return value

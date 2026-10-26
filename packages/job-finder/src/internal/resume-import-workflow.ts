@@ -1111,16 +1111,17 @@ async function completeDeferredVisionBranch(input: {
       fieldCandidates: reconciledCandidates,
     });
 
-    const adjudicationResult = await maybeAdjudicateResumeImportCandidates(
-      ctx,
-      {
+    // A stop never waits on the adjudicator: its answer is dropped.
+    const adjudicationResult = await waitForImport(
+      maybeAdjudicateResumeImportCandidates(ctx, {
         profile: latestProfile,
         searchPreferences: latestSearchPreferences,
         bundle,
         runId,
         now,
         candidates: reconciledCandidates,
-      },
+      }),
+      input.signal,
     );
     reconciledCandidates = preserveCurrentCandidateDecisions(
       promoteGroundedSharedMemoryCandidates(

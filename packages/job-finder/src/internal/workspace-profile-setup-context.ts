@@ -102,9 +102,7 @@ async function syncLatestResumeImportCandidatesWithSetupState(
   input: {
     documentBundles: readonly ResumeDocumentBundle[];
     latestResumeImportRun: Awaited<
-      ReturnType<
-        ProfileContext["repository"]["getLatestResumeImportRun"]
-      >
+      ReturnType<ProfileContext["repository"]["getLatestResumeImportRun"]>
     >;
     profileSetupState: ProfileSetupState;
     candidates: readonly Awaited<
@@ -203,9 +201,7 @@ async function syncLatestResumeImportCandidatesWithSetupState(
   };
 }
 
-export function createWorkspaceProfileSetupContextHelpers(
-  ctx: ProfileContext,
-) {
+export function createWorkspaceProfileSetupContextHelpers(ctx: ProfileContext) {
   function freezeDisplayValue(value: unknown): void {
     if (value === null || typeof value !== "object" || Object.isFrozen(value))
       return;
@@ -242,18 +238,21 @@ export function createWorkspaceProfileSetupContextHelpers(
         normalizedPreferences.set(rawSearchPreferences, searchPreferences);
       }
     }
+    // A visual scan is live while its import's foreground runs here, or
+    // while its deferred branch does; only then is it not cut off.
+    const importActive = isResumeImportActiveInProcess(ctx);
+    const visionActive =
+      importActive ||
+      (persistedLatestResumeImportRun !== null &&
+        ctx.activeResumeVisionRunIds.has(persistedLatestResumeImportRun.id));
     const latestResumeImportRun = persistedLatestResumeImportRun
       ? recoverInterruptedTextImportRun({
           run: recoverInterruptedDeferredVisionRun({
             run: persistedLatestResumeImportRun,
-            isActiveInCurrentProcess: ctx.activeResumeVisionRunIds.has(
-              persistedLatestResumeImportRun.id,
-            ),
+            isActiveInCurrentProcess: visionActive,
           }),
-          isImportActiveInCurrentProcess: isResumeImportActiveInProcess(ctx),
-          isVisionActiveInCurrentProcess: ctx.activeResumeVisionRunIds.has(
-            persistedLatestResumeImportRun.id,
-          ),
+          isImportActiveInCurrentProcess: importActive,
+          isVisionActiveInCurrentProcess: visionActive,
         })
       : null;
     const profile = clearSettledVisionDeferredWarnings({

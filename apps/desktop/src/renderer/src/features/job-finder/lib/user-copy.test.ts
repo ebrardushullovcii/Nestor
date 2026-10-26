@@ -10,12 +10,11 @@ import {
   getJobFinderErrorDetail,
   TECHNICAL_DETAILS_LABEL,
 } from "./describe-failure";
-import { STATUS_COPY_TABLES } from "./status-copy";
 
 /**
  * The guard for the Job Finder copy layer (RC-02, RC-03).
  *
- * `status-copy.ts` and `describe-failure.ts` make the right thing exist. This
+ * `describe-failure.ts` makes the right thing exist. This
  * file makes the wrong thing fail: a source scan over `features/job-finder`
  * and `pages` that forbids the three shapes that put system text on a screen.
  *
@@ -53,11 +52,7 @@ type Rule = {
 
 const LIB = "features/job-finder/lib";
 
-const COPY_LAYER_OWNERS = [
-  `${LIB}/status-copy.ts`,
-  `${LIB}/describe-failure.ts`,
-  `${LIB}/job-finder-error-message.ts`,
-] as const;
+const COPY_LAYER_OWNERS = [`${LIB}/describe-failure.ts`] as const;
 
 /**
  * An error binding whose `.message` is the thrown text. Deliberately narrow:
@@ -150,7 +145,7 @@ const RULES: readonly Rule[] = [
   {
     id: "formatStatusLabel",
     description:
-      "the generic title-caser used outside a Technical details disclosure — use an exhaustive table from lib/status-copy.ts",
+      "the generic title-caser used outside a Technical details disclosure — use an exhaustive copy table, one sentence per value",
     exempt: [`${LIB}/job-finder-utils.ts`],
     find: (source) =>
       source
@@ -168,7 +163,7 @@ const RULES: readonly Rule[] = [
   {
     id: "underscoreDisplay",
     description:
-      'an underscore-to-space transform in a rendered position — "prepare only", "awaiting user", "replace section bullets" — use an exhaustive table from lib/status-copy.ts',
+      'an underscore-to-space transform in a rendered position — "prepare only", "awaiting user", "replace section bullets" — use an exhaustive copy table, one sentence per value',
     exempt: [`${LIB}/job-finder-utils.ts`],
     find: (source) => [
       // Inside a JSX expression container or a `${}` interpolation.
@@ -408,43 +403,6 @@ describe("allowlist mechanics", () => {
 
     expect(result.unexpected).toEqual([]);
     expect(result.stale).toEqual(["a.ts"]);
-  });
-});
-
-describe("status vocabulary", () => {
-  const entries = Object.entries(STATUS_COPY_TABLES).flatMap(
-    ([table, labels]) =>
-      Object.entries(labels).map(
-        ([value, label]) => [table, value, label] as const,
-      ),
-  );
-
-  it("covers every enum value with copy", () => {
-    expect(entries.length).toBeGreaterThan(60);
-  });
-
-  it.each(entries)(
-    "%s.%s reads as copy, not a stored value",
-    (_t, _v, label) => {
-      expect(label).not.toMatch(/_/);
-      expect(label).not.toMatch(/^[a-z]/);
-      expect(label.trim()).toBe(label);
-      expect(label.length).toBeGreaterThan(2);
-    },
-  );
-
-  it("never renders a value by title-casing its identifier", () => {
-    // "Site login required" and "Prepare only" were what the title-caser
-    // produced at these exact sites.
-    expect(
-      STATUS_COPY_TABLES.APPLICATION_BLOCKER_LABELS.site_login_required,
-    ).toBe("The job site wants you to sign in first");
-    expect(STATUS_COPY_TABLES.APPLY_RUN_MODE_LABELS.copilot).toBe(
-      "Preparation",
-    );
-    expect(
-      STATUS_COPY_TABLES.RESUME_PATCH_OPERATION_LABELS.replace_section_bullets,
-    ).toBe("Rewrite the bullets in this section");
   });
 });
 

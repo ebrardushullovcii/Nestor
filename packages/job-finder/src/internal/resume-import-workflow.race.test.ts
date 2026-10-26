@@ -2,9 +2,7 @@ import {
   createSeededRepository,
   withProfileView,
 } from "../profile-service.test-support";
-import {
-  type JobFinderRepository,
-} from "@nestor/db";
+import { type JobFinderRepository } from "@nestor/db";
 import type { ResumeVisionProvider } from "@nestor/ai-providers";
 import { describe, expect, test, vi } from "vitest";
 
@@ -139,20 +137,23 @@ function createSlowVisionProvider(): ResumeVisionProvider {
 }
 
 function createService(repository: JobFinderRepository) {
-  return withProfileView(createProfileService({
+  return withProfileView(
+    createProfileService({
+      repository,
+      browserRuntime: createBrowserRuntime(),
+      aiClient: createTextStageAiClient(),
+      visionProvider: createSlowVisionProvider(),
+      documentManager: createDocumentManager(),
+    }),
     repository,
-    browserRuntime: createBrowserRuntime(),
-    aiClient: createTextStageAiClient(),
-    visionProvider: createSlowVisionProvider(),
-    documentManager: createDocumentManager(),
-  }), repository);
+  );
 }
 
 function runImport(
   profileWork: ReturnType<typeof createService>,
   seed: ReturnType<typeof createFreshStartSeed>,
+  text = "Jamie Rivers\njamie@example.com",
 ) {
-  const text = "Jamie Rivers\njamie@example.com";
   return profileWork.runResumeImport({
     baseResume: {
       ...seed.profile.baseResume,
@@ -498,9 +499,7 @@ describe("resume import while the deferred visual scan runs", () => {
     expect(run?.status).not.toBe("failed");
     expect(run?.errorMessage).toBeNull();
     await vi.waitFor(async () =>
-      expect(
-        (await profileWork.read()).resumeImportActive,
-      ).toBe(false),
+      expect((await profileWork.read()).resumeImportActive).toBe(false),
     );
   });
 
@@ -549,5 +548,135 @@ describe("resume import while the deferred visual scan runs", () => {
     expect(after.latestResumeImportRun?.warnings).not.toContain(
       interruptedTextImportMessage,
     );
+  });
+});
+
+describe("stopping an import whose visual scan waits on the adjudicator", () => {
+  test("returns at once when the adjudicator never answers, and writes nothing after", async () => {
+    // A person whose saved headline differs from both readings.
+    const fresh = createFreshStartSeed();
+    const seed = {
+      ...fresh,
+      profile: { ...fresh.profile, headline: "Platform Lead" },
+    };
+    const repository = await createSeededRepository(seed);
+    const textClient = createTextStageAiClient();
+    let adjudicating = false;
+    // The visual scan reads a different headline, just as confidently.
+    const slowVision = createSlowVisionProvider();
+    const confidentVision: ResumeVisionProvider = {
+      ...slowVision,
+      async extractResumeVision(input) {
+        const result = await slowVision.extractResumeVision(input);
+        return {
+          ...result,
+          // Only the reading's confidence changes.
+          candidates: result.candidates.map((candidate) => ({
+            ...candidate,
+            confidence: 0.82,
+            confidenceBreakdown: {
+              ...candidate.confidenceBreakdown,
+              overall: 0.8,
+              recommendation: "auto_apply" as const,
+            },
+          })),
+        } as typeof result;
+      },
+    };
+    const service = createProfileService({
+      repository,
+      browserRuntime: createBrowserRuntime(),
+      visionProvider: confidentVision,
+      documentManager: createDocumentManager(),
+      aiClient: {
+        ...textClient,
+        // The document text and the visual scan disagree on the headline.
+        async extractResumeImportStage(input) {
+          const result = await textClient.extractResumeImportStage(input);
+          if (input.stage !== "identity_summary") return result;
+          return {
+            ...result,
+            candidates: [
+              ...result.candidates,
+              createStageCandidate({
+                target: {
+                  section: "identity",
+                  key: "headline",
+                  recordId: null,
+                },
+                label: "Headline",
+                value: "Data Scientist",
+                sourceBlockIds: ["page_1_block_2"],
+                confidence: 0.86,
+                recommendation: "needs_review",
+                overall: 0.84,
+              }),
+            ],
+          };
+        },
+        adjudicateResumeImportCandidates: () => {
+          adjudicating = true;
+          return new Promise(() => undefined);
+        },
+      },
+    });
+    await runImport(
+      withProfileView(service, repository),
+      seed,
+      "Jamie Rivers\nData Scientist\nStaff Platform Engineer\njamie@example.com",
+    );
+    await vi.waitFor(() => expect(adjudicating).toBe(true), {
+      timeout: 2000,
+      interval: 10,
+    });
+    const before = await repository.getLatestResumeImportRun();
+
+    await expect(
+      Promise.race([
+        service.stop().then(() => "stopped"),
+        new Promise((resolve) =>
+          setTimeout(() => resolve("still waiting"), 1000),
+        ),
+      ]),
+    ).resolves.toBe("stopped");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await repository.getLatestResumeImportRun()).toEqual(before);
+  });
+});
+
+describe("reading while an import's visual scan runs in the foreground", () => {
+  test("never marks the live visual scan as stopped by the app closing", async () => {
+    const seed = createFreshStartSeed();
+    const repository = await createSeededRepository(seed);
+    const textClient = createTextStageAiClient();
+    const service = createProfileService({
+      repository,
+      browserRuntime: createBrowserRuntime(),
+      visionProvider: createSlowVisionProvider(),
+      documentManager: createDocumentManager(),
+      aiClient: {
+        ...textClient,
+        // The text read is still running when the screen reads.
+        async extractResumeImportStage(input) {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return textClient.extractResumeImportStage(input);
+        },
+      },
+    });
+    const profileWork = withProfileView(service, repository);
+    const importing = runImport(profileWork, seed);
+    await vi.waitFor(async () =>
+      expect(
+        (await repository.getLatestResumeImportRun())?.modelRoles?.vision
+          .status,
+      ).toBe("running"),
+    );
+
+    const during = await profileWork.read();
+    expect(during.latestResumeImportRun?.modelRoles?.vision.status).toBe(
+      "running",
+    );
+    expect(during.latestResumeImportRun?.status).not.toBe("failed");
+    await importing;
   });
 });

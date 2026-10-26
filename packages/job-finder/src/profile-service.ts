@@ -366,18 +366,6 @@ export function createProfileService(options: ProfileServiceOptions) {
   }
 
   return {
-    /** Profile work still running, which a reset must wait for. */
-    busyWith(): string[] {
-      return [
-        ...(activeSourceDebugPromiseRef.current ? ["site check"] : []),
-        ...(isResumeImportActiveInProcess(ctx) ||
-        ctx.activeResumeVisionRunIds.size > 0 ||
-        ctx.activeResumeEvidenceRunIds.size > 0
-          ? ["resume import"]
-          : []),
-      ];
-    },
-
     async runResumeImport(input: {
       baseResume: ResumeSourceDocument;
       documentBundle: ResumeDocumentBundle;
