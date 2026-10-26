@@ -122,7 +122,11 @@ it("repeats edit after the person chooses Resume on the kept job, consumes reque
           Request edit
         </button>
         <button
-          onClick={() => void navigate("/job-finder/review-queue?jobId=7")}
+          onClick={() =>
+            void navigate("/job-finder/review-queue?jobId=7", {
+              state: { assistantNavigationRequest: true },
+            })
+          }
         >
           Open normally
         </button>

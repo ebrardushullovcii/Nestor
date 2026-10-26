@@ -43,3 +43,16 @@ export function matchesJobFinderNavigationSearch(
         ResumeViewModeSchema.safeParse(value).success),
   );
 }
+
+/** Explicit Assistant requests must reach a kept screen even when its URL repeats. */
+export const ASSISTANT_NAVIGATION_STATE = {
+  assistantNavigationRequest: true,
+} as const;
+export function isAssistantNavigationRequest(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "assistantNavigationRequest" in state &&
+    state.assistantNavigationRequest === true
+  );
+}

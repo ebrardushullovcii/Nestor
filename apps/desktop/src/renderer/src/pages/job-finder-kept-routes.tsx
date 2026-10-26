@@ -1,3 +1,4 @@
+import { isAssistantNavigationRequest } from "@nestor/contracts";
 import { Suspense, useContext, useLayoutEffect, useRef } from "react";
 import type { ContextType, ReactElement, ReactNode } from "react";
 import {
@@ -36,7 +37,11 @@ function sameLocation(left: LocationContextValue, right: LocationContextValue) {
     left.location.pathname === right.location.pathname &&
     left.location.search === right.location.search &&
     left.location.hash === right.location.hash &&
-    left.location.key === right.location.key
+    (!(
+      new URLSearchParams(right.location.search).has("resumeMode") ||
+      isAssistantNavigationRequest(right.location.state)
+    ) ||
+      left.location.key === right.location.key)
   );
 }
 
@@ -105,8 +110,9 @@ function KeptRouteFrame(props: {
  * visits. A hidden one keeps its state (open job, page, filters, scroll) and
  * the page context and location it was last shown with, so it does no work
  * while another screen changes the URL or the workspace. Coming back to the
- * same history entry with nothing changed re-renders nothing at all. A new
- * navigation key reaches the pane even when the URL repeats. Every other route
+ * same URL with nothing changed re-renders nothing at all. An explicit
+ * resumeMode or marked Assistant request passes its new key even when the URL
+ * repeats. Every other route
  * mounts fresh per path, as before, in its own Suspense boundary so a screen
  * still loading shows its opening surface rather than the previous page.
  */
