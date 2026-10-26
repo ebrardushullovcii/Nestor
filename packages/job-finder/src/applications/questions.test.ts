@@ -75,3 +75,23 @@ test.each([
     ).key,
   );
 });
+
+test("a repeated-step question is application-specific and cannot reuse the first entry's answer", () => {
+  const question = {
+    prompt: "Employment history � Start date (repeated question on step 2)",
+    repeatedAtDifferentStep: true,
+    kind: "other",
+    answerControlType: "text",
+    answerOptions: [],
+  } as const;
+  const one = describeFormQuestion(
+    { ...question, answerOptions: [] },
+    { id: 1, location: "Remote" },
+  );
+  const two = describeFormQuestion(
+    { ...question, answerOptions: [] },
+    { id: 2, location: "Remote" },
+  );
+  expect(one.reusePrompt).toBe(false);
+  expect(one.key).not.toBe(two.key);
+});

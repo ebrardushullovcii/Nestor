@@ -2075,6 +2075,7 @@ export const ApplicationQuestionInputConstraintsSchema = z.object({
 export const ApplicationAttemptQuestionSchema = z.object({
   id: NonEmptyStringSchema,
   prompt: NonEmptyStringSchema,
+  repeatedAtDifferentStep: z.boolean().optional(),
   /**
    * The words around the question on the page — the group it sat in, or the
    * note under it — when they say something the prompt does not.
@@ -2304,6 +2305,12 @@ export type ApplyExecutionModelUse = z.infer<
 >;
 
 export const ApplyExecutionResultSchema = z.object({
+  questionContexts: z
+    .array(
+      z.object({ prompt: z.string().max(2000), step: z.string().max(5000) }),
+    )
+    .max(2000)
+    .optional(),
   answerDependencies: ApplicationAnswerDependenciesSchema.optional(),
   state: ApplicationAttemptStateSchema,
   summary: NonEmptyStringSchema,

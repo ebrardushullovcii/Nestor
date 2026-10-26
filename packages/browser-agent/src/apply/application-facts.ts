@@ -336,14 +336,17 @@ export function savedAnswerForQuestion(
   reusableAnswers: readonly CandidateReusableAnswer[],
 ): CandidateReusableAnswer | null {
   const asked = new Set(
-    [
-      control.label,
-      control.groupLabel,
-      [control.groupLabel, control.label]
-        .filter((part) => part.trim())
-        .join(" — "),
-      control.placeholder,
-    ]
+    (control.repeatedQuestion
+      ? [control.repeatedQuestion.prompt]
+      : [
+          control.label,
+          control.groupLabel,
+          [control.groupLabel, control.label]
+            .filter((part) => part.trim())
+            .join(" — "),
+          control.placeholder,
+        ]
+    )
       .map(normalizeFormQuestionPrompt)
       .filter((text) => text.length > 0),
   );

@@ -10,7 +10,12 @@ import type {
 
 export type FormQuestion = Pick<
   ApplicationAttemptQuestion,
-  "prompt" | "kind" | "answerControlType" | "answerOptions" | "inputConstraints"
+  | "prompt"
+  | "kind"
+  | "answerControlType"
+  | "answerOptions"
+  | "inputConstraints"
+  | "repeatedAtDifferentStep"
 >;
 
 const normalize = normalizeFormQuestionPrompt;
@@ -55,7 +60,9 @@ export function describeFormQuestion(
     input === "choice"
       ? `${input}:${options.map(normalize).sort().join("|")}`
       : input;
-  const jobSpecific = question.kind === "cover_letter";
+  const jobSpecific =
+    question.kind === "cover_letter" ||
+    question.repeatedAtDifferentStep === true;
   const place = jobSpecific
     ? `job ${job.id}`
     : geographic.has(question.kind)

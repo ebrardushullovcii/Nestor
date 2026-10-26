@@ -1,4 +1,5 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
+import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import { describe, expect, test, vi } from "vitest";
 
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
@@ -4010,7 +4011,7 @@ describe("fill_fields visible steps", () => {
         field(0, "Full name"),
         field(1, "Email"),
         field(2, "City"),
-      ];
+      ].map((control) => ({ ...control, groupLabel: `Contact set ${step}` }));
       source.actions = [
         {
           index: 0,
@@ -6269,4 +6270,91 @@ describe("a model that reports in words instead of calling finish", () => {
     expect(seen[1]).toContain("Answer with one of the tools");
     expect(result.outcome).toBe("prepared");
   });
+});
+
+test("repeated-step replay pauses at the second entry, including after resumption, and uses its own answer", async () => {
+  const source = page({
+    stepLabel: "Step 1 of 2",
+    controls: [
+      {
+        ...nameControl(),
+        label: repeatedStep.question,
+        groupLabel: repeatedStep.section,
+        inputType: "month",
+        value: "",
+      },
+    ],
+    actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+  });
+  const input = config(source);
+  input.sources.reusableAnswers = [
+    {
+      id: "first-date",
+      kind: "other",
+      question: `${repeatedStep.section} � ${repeatedStep.question}`,
+      label: "First employment entry",
+      answer: repeatedStep.firstAnswer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  input.hands.clickElement = async () => {
+    source.stepLabel = "Step 2 of 2";
+    source.controls[0].value = "";
+    source.actions = [
+      { index: 0, label: "Submit application", visible: true, disabled: false },
+    ];
+    return { ok: true, observedValue: "Step 2" };
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      { name: "click", args: { ref: "a0" } },
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      {
+        name: "finish",
+        args: { reason: "This entry needs the person.", needsPerson: true },
+      },
+    ]),
+  );
+  expect(result.filled).toHaveLength(1);
+  expect(result.outcome).toBe("paused");
+  expect(source.controls[0].value).toBe("");
+  const question = result.pauses.flatMap(
+    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+  )[0];
+  expect(question?.repeatedAtDifferentStep).toBe(true);
+  input.initialQuestionContexts = result.questionContexts;
+  const resumed = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      {
+        name: "finish",
+        args: { reason: "This entry needs the person.", needsPerson: true },
+      },
+    ]),
+  );
+  expect(resumed.filled).toHaveLength(0);
+  expect(resumed.outcome).toBe("paused");
+  input.sources.reusableAnswers.push({
+    id: "application_second-date",
+    kind: "other",
+    question: question!.prompt,
+    label: "Second employment entry",
+    answer: repeatedStep.secondAnswer,
+    roleFamilies: [],
+    proofEntryIds: [],
+  });
+  const answered = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.secondAnswer } },
+      { name: "finish", args: { reason: "The second entry is filled." } },
+    ]),
+  );
+  expect(answered.filled).toHaveLength(1);
+  expect(source.controls[0].value).toBe(repeatedStep.secondAnswer);
+  expect(answered.outcome).toBe("prepared");
 });

@@ -216,7 +216,10 @@ function questionIdFor(
       ? `_${digest(control.choiceGroupKey)}`
       : "";
   const suffix =
-    choiceSuffix || (same.length > 1 && ordinal > 0 ? `_${ordinal + 1}` : "");
+    (control.repeatedQuestion
+      ? `_repeat_${digest(control.repeatedQuestion.step)}`
+      : "") +
+    (choiceSuffix || (same.length > 1 && ordinal > 0 ? `_${ordinal + 1}` : ""));
   return `question_${jobId}_${slug || "field"}${suffix}`;
 }
 
@@ -257,6 +260,7 @@ export function fileFieldHoldsOtherFile(
 }
 
 export function questionPrompt(control: ApplyFormControl): string {
+  if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
   const label = control.label.trim();
   const group = control.groupLabel.trim();
   // File tasks name the input, without its fieldset legend or required marker.
@@ -317,6 +321,7 @@ export function buildPendingQuestion(input: {
   return {
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
     prompt: questionPrompt(control),
+    ...(control.repeatedQuestion ? { repeatedAtDifferentStep: true } : {}),
     kind: control.questionKind,
     answerControlType: control.answerControlType,
     ...(control.inputConstraints
@@ -525,6 +530,15 @@ async function decideAnswer(input: {
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
+  if (control.repeatedQuestion && !saved) {
+    return {
+      kind: "leave",
+      reason:
+        "This question appeared on another step. Answer it for this entry so Job Finder does not reuse the earlier answer.",
+      suggestion: null,
+      permission: true,
+    };
+  }
   // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
     control,

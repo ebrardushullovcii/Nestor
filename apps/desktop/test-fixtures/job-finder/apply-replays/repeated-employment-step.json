@@ -1,0 +1,8 @@
+{
+  "id": "repeated-employment-start-date",
+  "provenance": "Synthetic repetition of one section on two steps; no applicant data.",
+  "section": "Employment history",
+  "question": "Start date",
+  "firstAnswer": "2021-03",
+  "secondAnswer": "2023-07"
+}

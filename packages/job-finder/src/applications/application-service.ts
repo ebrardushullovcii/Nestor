@@ -415,6 +415,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       {
         ...facts,
         prepareApplicationForm: createApplyFormPreparer({
+          ...(previous?.execution.questionContexts
+            ? { initialQuestionContexts: previous.execution.questionContexts }
+            : {}),
           executionInput: facts,
           applicationRecordId: identity.applicationRecordId,
           searchPreferences,
