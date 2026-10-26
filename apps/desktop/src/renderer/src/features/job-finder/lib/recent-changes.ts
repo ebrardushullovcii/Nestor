@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from "react";
-
 /**
  * The person's own moves of jobs between lists, newest first. Each toast's
  * Undo and Activity's "Recent changes" read the same entries, so a move made
@@ -43,7 +41,6 @@ export const RECENT_CHANGES_LIMIT = 20;
 const STORAGE_KEY = "nestor.job-finder.recent-changes.v1";
 
 let entries: RecentChange[] = readStored();
-const listeners = new Set<() => void>();
 
 function readStored(): RecentChange[] {
   try {
@@ -72,7 +69,6 @@ function commit(next: RecentChange[]): void {
   } catch {
     // Without storage the list lasts for this session only.
   }
-  for (const listener of listeners) listener();
 }
 
 /** Records a move. */
@@ -103,37 +99,9 @@ export function listRecentChanges(): readonly RecentChange[] {
   return entries;
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-export function useRecentChanges(): readonly RecentChange[] {
-  return useSyncExternalStore(subscribe, listRecentChanges);
-}
-
 /** Tests only. */
 export function resetRecentChangesForTest(): void {
   entries = [];
-  for (const listener of listeners) listener();
-}
-
-function jobsWord(count: number): string {
-  return count === 1 ? "1 job" : `${count} jobs`;
-}
-
-/** What the move did, in the words its button used. */
-export function describeRecentChange(change: RecentChange): string {
-  const what =
-    change.jobIds.length > 1 ? jobsWord(change.jobIds.length) : change.label;
-  switch (change.kind) {
-    case "moved_to_shortlisted":
-      return `Moved ${what} back to Shortlisted`;
-    case "taken_out_of_queue":
-      return `Took ${what} out of the apply queue`;
-  }
 }
 
 /**

@@ -1,5 +1,6 @@
 import { createResumesBridge } from "./resumes";
 import { createHomeBridge } from "./home";
+import { createActivityBridge } from "./activity";
 import { createNeedsYouBridge } from "./needs-you";
 import { createTrackerBridge } from "./tracker";
 import {
@@ -364,6 +365,7 @@ const desktopApi = {
   needsYou: createNeedsYouBridge(nativeIpcRenderer),
   tracker: createTrackerBridge(nativeIpcRenderer),
   home: createHomeBridge(nativeIpcRenderer),
+  activity: createActivityBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   firstScreenShown: () => ipcRenderer.send("system:first-screen-shown"),
   launchContext: () =>

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  describeRecentChange,
   getRecentChangeUndo,
   recordRecentChange,
   resetRecentChangesForTest,
@@ -42,8 +41,5 @@ describe("recent changes", () => {
         workspace({ shortlisted: [["a", "approved"]], applied: ["a"] }),
       ),
     ).toEqual({ possible: false, reason: "In Applications again since." });
-    expect(describeRecentChange(change)).toBe(
-      "Moved A at Acme back to Shortlisted",
-    );
   });
 });

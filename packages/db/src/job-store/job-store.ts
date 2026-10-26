@@ -42,6 +42,7 @@ export { createSourceAccessStore } from "./source-access";
 export { createSearchSourcesStore } from "./search-sources";
 export { createTrackerStore, type TrackerStore } from "./tracker";
 export { createHomeStore, type HomeStore } from "./home";
+export { createActivityStore, type ActivityStore } from "./activity";
 export {
   createResumeStore,
   ResumeChangedError,
