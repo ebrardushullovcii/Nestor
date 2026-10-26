@@ -11,7 +11,6 @@ export * from "./internal/performance-budget-evaluation";
 export * from "./internal/performance-evidence";
 export * from "./internal/match-assessment-change-audit";
 export * from "./internal/application-crm";
-export * from "./internal/workspace-crm-methods";
 export {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,

@@ -38,11 +38,7 @@ import { createAssistantBridge } from "./assistant";
 import { createJobsBridge } from "./jobs";
 import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
-  ApplicationDocumentExportResult,
-  ApplicationDocumentListResult,
-  ApplicationDocumentRevision,
   AppearanceTheme,
-  ApproveApplicationDocumentInput,
   CandidateAssetDeleteInput,
   CandidateAssetDeleteResult,
   CandidateAssetImportInput,
@@ -54,8 +50,6 @@ import type {
   CandidateAssetRestoreInput,
   CandidateAssetRestoreResult,
   CandidateProfile,
-  EditApplicationDocumentInput,
-  ExportApplicationDocumentInput,
   DesktopPlatformPing,
   DesktopContextMenuInput,
   DesktopContextMenuResult,
@@ -73,7 +67,6 @@ import type {
   InterviewExportFormat,
   InterviewExportResult,
   JobFinderInterviewFollowUpInput,
-  ListApplicationDocumentsInput,
   ListApplicationAuthorityEnvelopesInput,
   InterviewHotkeyAction,
   InterviewOverlayMoveInput,
@@ -95,7 +88,6 @@ import type {
   JobFinderOpenBrowserSessionInput,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
-  ProposeApplicationDocumentInput,
   JobFinderPerformanceSnapshot,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkCase,

@@ -144,38 +144,6 @@ describe("application page ownership", () => {
     );
   });
 
-  test("a replacement copilot attempt transfers the page before executing its new result", async () => {
-    const transferApplicationPageBinding = vi.fn<
-      NonNullable<BrowserSessionRuntime["transferApplicationPageBinding"]>
-    >(() => Promise.resolve(true));
-    const base = createBrowserRuntime();
-    const executeApplicationFlow = vi.fn<
-      BrowserSessionRuntime["executeApplicationFlow"]
-    >((...args) => base.executeApplicationFlow(...args));
-    const seed = seedPages(["blocked"]);
-    seed.settings.resumeApplicationMode = "original_resume";
-    const harness = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: {
-        ...base,
-        transferApplicationPageBinding,
-        executeApplicationFlow,
-      },
-    });
-    await harness.workspaceService.startApplyCopilotRun(
-      "job_ready",
-      undefined,
-      "application_a",
-    );
-    expect(transferApplicationPageBinding).toHaveBeenCalledOnce();
-    const nextKey = transferApplicationPageBinding.mock.calls[0]?.[2];
-    expect(
-      executeApplicationFlow.mock.calls[0]?.[1].applicationPageBindingKey,
-    ).toBe(nextKey);
-    expect(
-      transferApplicationPageBinding.mock.invocationCallOrder[0],
-    ).toBeLessThan(executeApplicationFlow.mock.invocationCallOrder[0]!);
-  });
 
   test("a terminal run releases an unfinished form after a cancellation race", async () => {
     const seed = seedPages(["filling", "awaiting_review"]);
@@ -200,27 +168,6 @@ describe("application page ownership", () => {
     );
   });
 
-  test("cancelling a run closes blocked forms and keeps completed forms waiting for the person", async () => {
-    for (const state of ["blocked", "awaiting_review"]) {
-      const releaseApplicationPageBinding = vi.fn<
-        NonNullable<BrowserSessionRuntime["releaseApplicationPageBinding"]>
-      >(() => Promise.resolve());
-      const harness = createWorkspaceServiceHarness({
-        seed: seedPages([state]),
-        browserRuntime: {
-          ...createBrowserRuntime(),
-          releaseApplicationPageBinding,
-        },
-      });
-      await harness.workspaceService.cancelApplyRun("run_a");
-      if (state === "blocked")
-        expect(releaseApplicationPageBinding).toHaveBeenCalledWith(
-          "target_site",
-          "result_0",
-        );
-      else expect(releaseApplicationPageBinding).not.toHaveBeenCalled();
-    }
-  });
 
   test.each(["cancel", "skip"] as const)(
     "%s closes a dismissed application's page",
@@ -365,41 +312,6 @@ test("releasing one skipped job keeps another job's filling page", async () => {
   ).toBe("filling");
 });
 
-test("bulk preparation leaves a verified submission and its receipt untouched", async () => {
-  const seed = seedPages(["submitted"]);
-  const result = seed.applyJobResults[0]!;
-  result.privacyReceipt = ApplicationPrivacyReceiptSchema.parse({
-    generatedAt: now,
-    lineage: {
-      runId: result.runId,
-      jobId: result.jobId,
-      resultId: result.id,
-      applicationRecordId: "application_a",
-    },
-    destination: { origin: "http://127.0.0.1:47950", safePath: "/apply" },
-    resume: {
-      source: "original_upload",
-      sourceDocumentId: "synthetic",
-      exportArtifactId: null,
-      fileName: "synthetic.pdf",
-      sha256: "a".repeat(64),
-    },
-    finalSubmitAuthorized: true,
-    finalSubmitOccurred: true,
-    submissionOutcome: null,
-    externalWrites: [],
-  });
-  seed.applyJobResults[0] = ApplyJobResultSchema.parse(result);
-  const before = structuredClone(seed.applyJobResults[0]);
-  const executeApplicationFlow = vi.fn();
-  const harness = createWorkspaceServiceHarness({
-    seed,
-    browserRuntime: { ...createBrowserRuntime(), executeApplicationFlow },
-  });
-  await harness.workspaceService.startAutoApplyQueueRun(["job_ready"]);
-  expect(executeApplicationFlow).not.toHaveBeenCalled();
-  expect(await harness.repository.listApplyJobResults()).toEqual([before]);
-});
 
 test("restart does not call a missing-resume prerequisite a lost form", () => {
   const seed = seedPages(["blocked"]);

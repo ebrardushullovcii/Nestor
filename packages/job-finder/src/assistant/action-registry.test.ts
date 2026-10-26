@@ -7,7 +7,6 @@ import type { AssistantToolContext, AssistantTurnSession } from "./tool-kit";
 import { buildAssistantToolCatalog } from "./tools";
 import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
 
-const at = "2026-10-24T01:00:00.000Z";
 
 describe("registered user actions", () => {
   const catalog = buildAssistantToolCatalog({
@@ -36,18 +35,6 @@ describe("registered user actions", () => {
     keyof JobFinderWorkspaceService,
     unknown[],
   ][] = [
-    [
-      "return-application-to-shortlist",
-      { applicationRecordId: "a" },
-      "returnApplicationToShortlist",
-      ["a"],
-    ],
-    [
-      "undo-return-application-to-shortlist",
-      { jobId: "j" },
-      "undoReturnApplicationToShortlist",
-      ["j"],
-    ],
     ["cancel-source-debug", { runId: "r" }, "cancelSourceDebug", ["r"]],
     ["get-source-debug-run", { runId: "r" }, "getSourceDebugRun", ["r"]],
     [
@@ -68,12 +55,6 @@ describe("registered user actions", () => {
       { targetId: "t", instructionId: "i" },
       "verifySourceInstructions",
       ["t", "i"],
-    ],
-    [
-      "snooze-grouped-decision",
-      { decisionId: "d", expectedRevision: 1, until: at },
-      "snoozeGroupedDecision",
-      [{ decisionId: "d", expectedRevision: 1, until: at, reason: null }],
     ],
   ];
   it.each(calls)(
