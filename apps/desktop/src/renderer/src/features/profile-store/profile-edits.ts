@@ -1,4 +1,5 @@
 import {
+  CandidateProfileSchema,
   ProfileFieldsSchema,
   ProfileListsSchema,
   GoalFieldsSchema,
@@ -188,5 +189,43 @@ export function profileEdits(input: {
     )
       ? input.nextProfile.workEligibility.limitedWorkPermissions
       : undefined,
+  });
+}
+
+function expand(
+  values: Record<string, unknown>,
+  target: Record<string, unknown> = {},
+) {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) continue;
+    const path = key.split(".");
+    let parent = target;
+    for (const part of path.slice(0, -1)) {
+      const child = parent[part];
+      if (!child || typeof child !== "object" || Array.isArray(child))
+        parent[part] = {};
+      parent = parent[part] as Record<string, unknown>;
+    }
+    parent[path.at(-1)!] = value;
+  }
+  return target;
+}
+/** The editor's whole profile, from the overview and the record rows read. */
+export function editorProfile(
+  overview: ProfileOverview,
+  rows: Partial<Record<ProfileRecordCollection, readonly ProfileRecord[]>>,
+) {
+  const fields = expand({ ...overview.fields, ...overview.lists });
+  for (const [kind, values] of Object.entries(rows))
+    fields[kind] = values.map((row) => row.record);
+  return CandidateProfileSchema.parse({
+    ...fields,
+    id: overview.id,
+    baseResume: { ...overview.resume, textContent: null, storagePath: null },
+    resumeIdentityOwnership: overview.resumeIdentityOwnership,
+    workEligibility: {
+      ...(fields.workEligibility as Record<string, unknown>),
+      limitedWorkPermissions: overview.limitedWorkPermissions,
+    },
   });
 }

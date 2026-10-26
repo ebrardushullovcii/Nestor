@@ -9,7 +9,6 @@ import {
   type ResumeImportFieldCandidateSummary,
   type ResumeImportProgressEvent,
   type ResumeImportRun,
-  type SourceDebugRunRecord,
   workModeValues,
 } from "@nestor/contracts";
 import { getResumeImportStageFallbackNotes } from "../profile-resume-panel";
@@ -591,15 +590,10 @@ export function ProfileSetupTargetingStep(props: {
   isProfileSetupPending?: boolean;
   nextStep: ProfileSetupStep | null;
   onSaveAndGoToStep: (step: ProfileSetupStep) => void;
-  onRunSourceDebug?: (
-    targetId: string,
-    options?: { readabilityTimeoutMs?: number },
-  ) => void;
   onResumeApplicationModeChange?: (mode: ResumeApplicationMode) => void;
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
   profileForm: UseFormReturn<ProfileEditorValues>;
   resumeApplicationMode?: ResumeApplicationMode;
-  recentSourceDebugRuns?: readonly SourceDebugRunRecord[];
   /**
    * Lets the screen add a complete address typed into the source form when
    * the person saves or finishes from the footer, instead of dropping it.

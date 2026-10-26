@@ -7,7 +7,6 @@ import {
   type ResumeImportFieldCandidateSummary,
   type ResumeImportRun,
   type ResumeImportProgressEvent,
-  type SourceDebugRunRecord,
 } from "@nestor/contracts";
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form";
 import { Button } from "@renderer/components/ui/button";
@@ -64,17 +63,12 @@ export function ProfileSetupStepEditor(props: {
   onSaveCurrentStep: () => void;
   onSaveAndGoToStep: (step: ProfileSetupStep) => void;
   onResumeApplicationModeChange?: (mode: ResumeApplicationMode) => void;
-  onRunSourceDebug?: (
-    targetId: string,
-    options?: { readabilityTimeoutMs?: number },
-  ) => void;
   profile: CandidateProfile;
   profileForm: UseFormReturn<ProfileEditorValues>;
   profileSetupReviewItems: readonly ProfileSetupReviewItemDisplay[];
   currentStep: ProfileSetupStep;
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
   resumeApplicationMode?: ResumeApplicationMode;
-  recentSourceDebugRuns?: readonly SourceDebugRunRecord[];
   registerPendingSourceFlush?: (flush: (() => Promise<void>) | null) => void;
   searchPreferences: JobSearchPreferences;
   validationMessage: string | null;
@@ -226,9 +220,6 @@ export function ProfileSetupStepEditor(props: {
           isProfileSetupPending={props.isProfileSetupPending}
           nextStep={nextStep}
           onSaveAndGoToStep={props.onSaveAndGoToStep}
-          {...(props.onRunSourceDebug
-            ? { onRunSourceDebug: props.onRunSourceDebug }
-            : {})}
           {...(props.onResumeApplicationModeChange
             ? {
                 onResumeApplicationModeChange:
@@ -241,7 +232,6 @@ export function ProfileSetupStepEditor(props: {
             ? { resumeApplicationMode: props.resumeApplicationMode }
             : {})}
           renderFooter={renderFooter}
-          recentSourceDebugRuns={props.recentSourceDebugRuns ?? []}
           {...(props.registerPendingSourceFlush
             ? { registerPendingSourceFlush: props.registerPendingSourceFlush }
             : {})}

@@ -15,7 +15,6 @@ import {
   type ResumeImportFieldCandidateSummary,
   type ResumeImportRun,
   type ResumeImportProgressEvent,
-  type SourceDebugRunRecord,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
@@ -146,10 +145,6 @@ export function ProfileSetupScreen(props: {
    */
   onProfileSurfaceDraftEdited?: () => void;
   onResumeSetup: (step: ProfileSetupStep) => void;
-  onRunSourceDebug?: (
-    targetId: string,
-    options?: { readabilityTimeoutMs?: number },
-  ) => void;
   onSaveSetupStep: (
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
@@ -159,12 +154,12 @@ export function ProfileSetupScreen(props: {
       message?: string;
       openProfile?: boolean;
       resolvedReviewItems?: readonly ProfileSetupResolvedReviewItem[];
+      resumeApplicationMode?: ResumeApplicationMode;
       stayOnCurrentStep?: boolean;
     },
   ) => void;
   profile: CandidateProfile;
   profileSetupState: ProfileSetupState;
-  recentSourceDebugRuns?: readonly SourceDebugRunRecord[];
   resumeApplicationMode?: ResumeApplicationMode;
   searchPreferences: JobSearchPreferences;
 }) {
@@ -187,11 +182,9 @@ export function ProfileSetupScreen(props: {
     onProfileSurfaceDirtyChange,
     onProfileSurfaceDraftEdited,
     onResumeSetup,
-    onRunSourceDebug,
     onSaveSetupStep,
     profile,
     profileSetupState,
-    recentSourceDebugRuns = [],
     resumeApplicationMode,
     searchPreferences,
   } = props;
@@ -695,14 +688,12 @@ export function ProfileSetupScreen(props: {
                 onSaveAndGoToStep={(step) => handleSaveStep(step)}
                 onResumeApplicationModeChange={setSelectedResumeApplicationMode}
                 registerPendingSourceFlush={registerPendingSourceFlush}
-                {...(onRunSourceDebug ? { onRunSourceDebug } : {})}
                 profile={profile}
                 profileForm={profileForm}
                 profileSetupReviewItems={draftAwareReviewItems}
                 preferencesForm={preferencesForm}
                 resumeApplicationMode={selectedResumeApplicationMode}
                 searchPreferences={searchPreferences}
-                recentSourceDebugRuns={recentSourceDebugRuns}
                 validationMessage={validationMessage}
               />
             </fieldset>

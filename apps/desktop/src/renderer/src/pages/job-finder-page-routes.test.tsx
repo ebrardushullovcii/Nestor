@@ -12,13 +12,9 @@ import {
 
 const launch = vi.hoisted(() => ({
   context: null as LaunchContext | null,
-  requestLegacyWorkspace: vi.fn(),
 }));
 vi.mock("@renderer/features/job-finder/lib/launch-reads", () => ({
   useLaunchReads: () => ({ context: launch.context }),
-}));
-vi.mock("@renderer/features/job-finder/lib/legacy-workspace-demand", () => ({
-  requestLegacyWorkspace: launch.requestLegacyWorkspace,
 }));
 vi.mock("@renderer/features/home/home-screen", () => ({
   HomeScreen: () => <p>Home</p>,
@@ -40,14 +36,13 @@ function renderHome(context: LaunchContext) {
 
 // The redirect is spent once taken, so the case that never redirects runs first.
 describe("JobFinderHomeRoute", () => {
-  it("waits for the old workspace when the launch read could not read it", () => {
+  it("stays on Home when the launch read could not read setup", () => {
     renderHome({
       workspace: "unreadable",
       settings: null,
       profileSetupState: null,
     });
     expect(screen.getByText("Home")).toBeTruthy();
-    expect(launch.requestLegacyWorkspace).toHaveBeenCalledOnce();
   });
 
   it("opens guided setup on a first launch", () => {

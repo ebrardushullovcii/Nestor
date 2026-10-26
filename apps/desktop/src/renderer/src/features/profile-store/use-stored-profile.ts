@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ProfileOverview,
+  ProfileRecord,
   ProfileRecordCollection,
   ProfileRecordPage,
   JobSearchPreferences,
@@ -144,4 +145,65 @@ export function useProfileRecordPage(
         }));
     },
   };
+}
+
+const RECORD_COLLECTIONS = [
+  "experiences",
+  "education",
+  "certifications",
+  "links",
+  "projects",
+  "spokenLanguages",
+  "proofBank",
+] as const satisfies readonly ProfileRecordCollection[];
+
+/**
+ * Every record of every collection, for guided setup, which edits the whole
+ * profile at once. Read again after each profile change.
+ */
+export function useAllProfileRecords(revision: unknown) {
+  const [records, setRecords] = useState<Partial<
+    Record<ProfileRecordCollection, ProfileRecord[]>
+  > | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const readAll = async (collection: ProfileRecordCollection) => {
+      const rows: ProfileRecord[] = [];
+      let after = 0;
+      for (;;) {
+        const page = await window.nestor.jobs.run("list_profile_records", {
+          collection,
+          after,
+          limit: 100,
+        });
+        rows.push(...page.rows);
+        if (page.nextCursor === null) return rows;
+        after = page.nextCursor;
+      }
+    };
+    void Promise.all(
+      RECORD_COLLECTIONS.map(
+        async (collection) => [collection, await readAll(collection)] as const,
+      ),
+    ).then(
+      (entries) => {
+        if (!live) return;
+        setRecords(Object.fromEntries(entries));
+        setError(null);
+      },
+      (reason: unknown) => {
+        if (live)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not load your profile records.",
+          );
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [revision]);
+  return { records, error };
 }

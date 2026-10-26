@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopPlatformPing } from "@nestor/contracts";
@@ -22,6 +22,7 @@ function configureWindowNestor(input: {
         onChange: () => () => undefined,
       },
       home: { summary: () => new Promise(() => undefined) },
+      profileWorkflow: { run: () => new Promise(() => undefined) },
       needsYou: { run: () => new Promise(() => undefined) },
       window: {
         getControlsState: () => new Promise(() => undefined),
@@ -42,8 +43,7 @@ function configureWindowNestor(input: {
   });
 }
 
-// Profile still reads the old workspace, so a failed load shows there.
-function renderJobFinderPage(path = "/job-finder/profile") {
+function renderJobFinderPage(path: string) {
   Element.prototype.scrollTo = () => undefined;
   Element.prototype.scrollIntoView = () => undefined;
   // The page controller mounts a React Router blocker, so the harness must use
@@ -67,75 +67,29 @@ afterEach(() => {
   delete (window as { nestor?: unknown }).nestor;
 });
 
-// First: the other tests open Profile, which asks for the old workspace for
-// the rest of the window's life.
 describe("JobFinderPage launch", () => {
-  it.each(["/job-finder/home", "/job-finder/settings"])(
-    "opens %s without loading the old workspace",
-    async (path) => {
-      configureWindowNestor({
-        getWorkspaceBootstrapError: new Error("not expected"),
-        recoveryFact: { status: "idle" },
-      });
-
-      renderJobFinderPage(path);
-
-      expect(
-        await screen.findByRole("navigation", { name: "Job Finder sections" }),
-      ).toBeTruthy();
-      const bridge = (
-        window as unknown as {
-          nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
-        }
-      ).nestor.jobFinder;
-      expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
-      expect(bridge.getWorkspace).not.toHaveBeenCalled();
-    },
-  );
-});
-
-describe("JobFinderPage startup database recovery blocking", () => {
-  it("blocks on the typed incident without offering a file-mutating retry", async () => {
+  it.each([
+    "/job-finder/home",
+    "/job-finder/profile",
+    "/job-finder/profile/setup",
+    "/job-finder/settings",
+  ])("opens %s without loading the old workspace", async (path) => {
     configureWindowNestor({
-      getWorkspaceBootstrapError: new Error(
-        "Workspace database recovery required (salvage-required). Automatic recovery could not restore the previous workspace safely.",
-      ),
-      recoveryFact: {
-        status: "blocked",
-        incidentId: "incident-block-42",
-        outcome: "salvage-required",
-        candidates: [],
-        quarantineBasenames: ["job-finder-workspace.sqlite.quarantine-a"],
-      },
-    });
-
-    renderJobFinderPage();
-
-    // The old controller loads lazily; on a busy machine that passes 1 s.
-    const alert = await screen.findByRole("alert", {}, { timeout: 5_000 });
-    expect(alert.textContent).toContain("Couldn't open Job Finder");
-    expect(alert.textContent).toContain("Incident ID: incident-block-42");
-    expect(alert.textContent).toContain("retained");
-    expect(alert.textContent).toContain("contact support");
-    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
-  });
-
-  it("keeps the generic retryable error for failures without a typed incident", async () => {
-    configureWindowNestor({
-      getWorkspaceBootstrapError: new Error("Unable to load the workspace."),
+      getWorkspaceBootstrapError: new Error("not expected"),
       recoveryFact: { status: "idle" },
     });
 
-    renderJobFinderPage();
+    renderJobFinderPage(path);
 
-    await waitFor(
-      () => {
-        expect(
-          screen.getByRole("button", { name: "Retry opening Job Finder" }),
-        ).toBeTruthy();
-      },
-      { timeout: 5_000 },
-    );
-    expect(screen.queryByText(/Incident ID:/)).toBeNull();
+    expect(
+      await screen.findByRole("navigation", { name: "Job Finder sections" }),
+    ).toBeTruthy();
+    const bridge = (
+      window as unknown as {
+        nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
+      }
+    ).nestor.jobFinder;
+    expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
+    expect(bridge.getWorkspace).not.toHaveBeenCalled();
   });
 });
