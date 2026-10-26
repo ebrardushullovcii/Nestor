@@ -6,7 +6,10 @@ import {
   type FoundJob,
   type JobSelectionInput,
 } from "@nestor/contracts";
-import { openJobStore } from "@nestor/db/job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+} from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   buildAssistantToolCatalog,
@@ -92,7 +95,7 @@ function add(count: number) {
       }),
     ),
   });
-  jobs.setStage(added, "resume");
+  approveOriginalResumesForTests(jobs, added);
   return added;
 }
 

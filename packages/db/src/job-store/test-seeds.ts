@@ -19,3 +19,23 @@ export function seedTrackerDemo(store: JobStore, ids: number[]) {
     });
   });
 }
+
+/**
+ * Jobs approved with their original resume (no tailored PDF: the imported
+ * file), as Apply requires. Synthetic preconditions for tests and the
+ * isolated desktop test API.
+ */
+export function approveOriginalResumesForTests(store: JobStore, ids: number[]) {
+  store.transaction(() => {
+    const now = Date.now();
+    for (const id of ids)
+      store
+        .sql(
+          `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path)
+           VALUES (?, 'original', 'ready', ?, ?, NULL)
+           ON CONFLICT(job_id) DO UPDATE SET approved_at = excluded.approved_at`,
+        )
+        .run(id, now, now);
+    store.setStage(ids, "resume");
+  });
+}

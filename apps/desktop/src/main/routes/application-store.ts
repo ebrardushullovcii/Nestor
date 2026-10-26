@@ -16,7 +16,10 @@ import {
   AnswerNeedsYouResultSchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
-import { seedTrackerDemo } from "@nestor/db/job-store";
+import {
+  approveOriginalResumesForTests,
+  seedTrackerDemo,
+} from "@nestor/db/job-store";
 import type { IpcMain } from "electron";
 
 import { getApplicationStore } from "../services/job-finder/application-store";
@@ -164,7 +167,7 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
         if (added.length !== 3)
           throw new Error("Load the applications demo in an empty instance.");
         const approvedIds = added.slice(0, 2);
-        store.setStage(approvedIds, "resume");
+        approveOriginalResumesForTests(store, approvedIds);
         if (trackApplications) seedTrackerDemo(store, approvedIds);
         return ApplicationStoreDemoResultSchema.parse({
           approvedIds,

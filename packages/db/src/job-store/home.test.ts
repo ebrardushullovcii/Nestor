@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createApplicationStore } from "./applications";
 import { createHomeStore } from "./home";
-import { openJobStore, type JobStore } from "./job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "./job-store";
 import { createTrackerStore } from "./tracker";
 
 const DAY = 86_400_000;
@@ -44,7 +48,7 @@ function workspace(now: number) {
     jobs: [1, 2, 3, 4, 5, 6].map(job),
   });
   const approved = added.slice(0, 5);
-  store.setStage(approved, "resume");
+  approveOriginalResumesForTests(store, approved);
   createApplicationStore(store).applyJobs({
     selection: { ids: approved.slice(0, 4) },
   });

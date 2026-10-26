@@ -142,14 +142,22 @@ export function createApplicationStore(store: JobStore) {
         ...filter.params,
         ...("ids" in selection ? [] : [JSON.stringify(selection.except)]),
       ];
+      // Only a job with an approved resume is applied to; one in Approved
+      // without an approval is reported as not approved.
+      const approvedWhere = `${where} AND EXISTS (
+        SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
       return store.transaction(() => {
-        const { n: approved } = sql(
-          `SELECT count(*) AS n FROM jobs j WHERE ${where}`,
-        ).get(...params) as { n: number };
+        const count = (condition: string) =>
+          (
+            sql(`SELECT count(*) AS n FROM jobs j WHERE ${condition}`).get(
+              ...params,
+            ) as { n: number }
+          ).n;
+        const approved = count(approvedWhere);
         const now = Date.now();
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
-           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${where}
+           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
            ON CONFLICT(job_id) DO UPDATE SET
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL
@@ -175,7 +183,7 @@ export function createApplicationStore(store: JobStore) {
         return {
           queued,
           unchanged: approved - queued,
-          notApproved: selected ? selected.length - approved : 0,
+          notApproved: (selected ? selected.length : count(where)) - approved,
         };
       });
     },

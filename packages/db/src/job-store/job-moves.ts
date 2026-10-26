@@ -102,13 +102,17 @@ export function writeMove(
 }
 
 /**
- * Whether job `j` is still where move `m` put it: in the move's stage, since
- * the move's own time, and in no later recorded move. A job moved away and
- * back again is in the same stage but has moved on.
+ * Whether job `j` of move item `i` can go back where move `m` found it: it is
+ * still in the move's stage, since the move's own time, and in no later
+ * recorded move (a job moved away and back again has moved on). A job goes
+ * back to Approved only while its resume is still approved: shortlisting it
+ * again clears that approval, and Undo never makes a job approved without one.
  */
 export const STILL_FROM_MOVE = `j.stage = m.to_stage AND j.stage_at = m.at
   AND NOT EXISTS (SELECT 1 FROM job_move_items later
-                  WHERE later.job_id = j.id AND later.move_id > m.id)`;
+                  WHERE later.job_id = j.id AND later.move_id > m.id)
+  AND (i.from_stage <> 'resume' OR EXISTS (
+    SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL))`;
 
 /**
  * Puts each job of a move back where it was, unless it has moved on since
