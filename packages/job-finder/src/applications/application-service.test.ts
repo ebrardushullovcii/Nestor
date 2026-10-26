@@ -1,7 +1,6 @@
 import type { ApplyBlocker } from "@nestor/browser-agent";
 import { createHash } from "node:crypto";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
-import { createHash } from "node:crypto";
 import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/invented-personal-answers.json";
 import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -14,9 +13,7 @@ import {
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationReviewAnswer,
   ApplicationReviewCardSchema,
-  ApplicationAuthorityEnvelopeSchema,
   ApplicationAuthorityStopConditionsSchema,
-  serializeApplicationAuthorityDecisionPolicyForDigest,
   ApplyExecutionResultSchema,
   SourceInstructionArtifactSchema,
   SubmissionOutcomeRecordSchema,
