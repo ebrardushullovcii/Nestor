@@ -7,6 +7,7 @@ import type {
   JobSearchPreferences,
   CommitProfileEditsInput,
 } from "@nestor/contracts";
+import { getJobFinderErrorDetail } from "@renderer/features/job-finder/lib/describe-failure";
 
 /** Personal fields have a small read. History is fetched only in requested pages. */
 export function useStoredProfile() {
@@ -58,10 +59,10 @@ export function useStoredProfile() {
         return true;
       } catch (reason: unknown) {
         if (live.current)
+          // The store explains a refused save (a conflict, a bad range) in
+          // its own words; only the IPC wrapper around them is dropped.
           setError(
-            reason instanceof Error
-              ? reason.message
-              : "Could not save your profile.",
+            getJobFinderErrorDetail(reason) ?? "Could not save your profile.",
           );
         return false;
       } finally {
