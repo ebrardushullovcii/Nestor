@@ -1,0 +1,18 @@
+{
+  "countryOptions": ["Afghanistan", "Albania", "Algeria"],
+  "restrictionOptions": ["Yes", "No"],
+  "restrictionPrompt": "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?",
+  "cases": [
+    {
+      "name": "shared portal redraws after expansion",
+      "delayMs": 80,
+      "settles": true
+    },
+    {
+      "name": "shared portal never redraws",
+      "delayMs": 0,
+      "settles": false
+    }
+  ],
+  "longListSize": 250
+}

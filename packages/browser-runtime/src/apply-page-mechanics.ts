@@ -1230,7 +1230,6 @@ async function readClosedComboboxOptions(
       !control.disabled &&
       control.tagName !== "select" &&
       (control.role === "combobox" || control.inputType === "combobox") &&
-      control.options.length === 0 &&
       // A list that already shows a choice has been answered; opening it
       // tells the person nothing and costs them a second of their run.
       control.selectedOptionLabel.trim().length === 0,
@@ -1239,7 +1238,8 @@ async function readClosedComboboxOptions(
     return [...controls];
   }
 
-  const url = page.url();
+  // A previous choice can change the choices another menu offers.
+  const url = `${page.url()}|${JSON.stringify(controls.filter((control) => control.tagName === "select" || control.role === "combobox" || control.inputType === "combobox").map((control) => [control.scopeKey, control.id, control.name, control.value, control.selectedOptionLabel]))}`;
   let memo = comboboxOptionMemo.get(page);
   if (!memo) {
     memo = new Map<string, string[]>();
@@ -1269,57 +1269,116 @@ async function readClosedComboboxOptions(
       await locator
         .scrollIntoViewIfNeeded({ timeout: 1_500 })
         .catch(() => undefined);
-      // Focus and a down arrow, the way a person opens one of these with the
-      // keyboard. A click depends on the window being the one in front, which
-      // it is not when the browser is doing this beside the app; the keyboard
-      // does not care. The click stays as the fallback.
-      await locator.focus({ timeout: 1_500 }).catch(() => undefined);
-      await locator
-        .press("ArrowDown", { timeout: 1_500 })
-        .catch(() => undefined);
-      if ((await locator.getAttribute("aria-expanded")) !== "true") {
-        await locator.click({ timeout: 1_500 });
-      }
-      // Only the list this control owns. Every open flyout on the page has
-      // options in the DOM, and the nearest ones are not necessarily these.
-      // Give the list the moment it needs to render its choices.
-      await locator
-        .evaluate(
-          (element) =>
-            new Promise<void>((resolve) => {
-              const deadline = Date.now() + 600;
-              const check = (): void => {
-                if (
-                  element.getAttribute("aria-expanded") === "true" ||
-                  Date.now() > deadline
-                ) {
-                  resolve();
-                  return;
-                }
-                setTimeout(check, 50);
-              };
-              check();
-            }),
-        )
-        .catch(() => undefined);
-      const options = await locator.evaluate((element) => {
-        // Only the list this control opened, proved by the control saying it
-        // is expanded and naming the list as its own. Falling back to the
-        // nearest container is how one question ends up showing another
-        // question's answers.
-        if (element.getAttribute("aria-expanded") !== "true") {
-          return [] as string[];
-        }
-        const owned =
-          element.getAttribute("aria-controls") ??
-          element.getAttribute("aria-owns");
-        const listbox = owned ? document.getElementById(owned) : null;
-        if (!listbox) return [] as string[];
-        return Array.from(listbox.querySelectorAll("[role='option']"))
-          .map((option) => (option as HTMLElement).innerText.trim())
-          .filter((text) => text.length > 0)
-          .slice(0, 200);
+      const menuRead = await locator.evaluateHandle((element) => {
+        const ownedMenu = () => {
+          const ids = (
+            element.getAttribute("aria-controls") ??
+            element.getAttribute("aria-owns") ??
+            ""
+          )
+            .split(/\s+/u)
+            .filter(Boolean);
+          return ids.length === 1 ? document.getElementById(ids[0]!) : null;
+        };
+        const initialOwned = ownedMenu();
+        const initialMenus = new Set(
+          document.querySelectorAll("[role='listbox']"),
+        );
+        const changed = new Set<Element>();
+        const observer = new MutationObserver((records) => {
+          for (const record of records) {
+            const target =
+              record.target instanceof Element
+                ? record.target
+                : record.target.parentElement;
+            const menu = target?.closest("[role='listbox']");
+            if (menu) changed.add(menu);
+          }
+        });
+        observer.observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+        // A hard cleanup also covers a page move or a failed click.
+        setTimeout(() => observer.disconnect(), 1500);
+        return { element, initialOwned, initialMenus, changed, observer };
       });
+      let options: string[] = [];
+      try {
+        await locator.focus({ timeout: 1500 }).catch(() => undefined);
+        await locator
+          .press("ArrowDown", { timeout: 1500 })
+          .catch(() => undefined);
+        if ((await locator.getAttribute("aria-expanded")) !== "true")
+          await locator.click({ timeout: 1500 });
+        options = await menuRead.evaluate(async (state) => {
+          const started = Date.now(),
+            deadline = started + 700;
+          let last = "",
+            stableAt = started;
+          while (Date.now() < deadline) {
+            const ids = (
+              state.element.getAttribute("aria-controls") ??
+              state.element.getAttribute("aria-owns") ??
+              ""
+            )
+              .split(/\s+/u)
+              .filter(Boolean);
+            const menu =
+              ids.length === 1 ? document.getElementById(ids[0]!) : null;
+            const owners =
+              ids.length === 1
+                ? Array.from(
+                    document.querySelectorAll("[aria-controls],[aria-owns]"),
+                  ).filter((candidate) =>
+                    (
+                      candidate.getAttribute("aria-controls") ??
+                      candidate.getAttribute("aria-owns") ??
+                      ""
+                    )
+                      .split(/\s+/u)
+                      .includes(ids[0]!),
+                  )
+                : [];
+            const fresh =
+              menu &&
+              (state.changed.has(menu) ||
+                !state.initialMenus.has(menu) ||
+                (menu === state.initialOwned && owners.length === 1));
+            const choices =
+              state.element.getAttribute("aria-expanded") === "true" &&
+              menu &&
+              fresh
+                ? Array.from(menu.querySelectorAll("[role='option']"))
+                    .filter(
+                      (option) =>
+                        option.getAttribute("aria-disabled") !== "true",
+                    )
+                    .map((option) => (option as HTMLElement).innerText.trim())
+                    .filter(Boolean)
+                : [];
+            const signature = JSON.stringify(choices);
+            if (signature !== last) {
+              last = signature;
+              stableAt = Date.now();
+            }
+            if (
+              choices.length &&
+              Date.now() - stableAt >= 120 &&
+              Date.now() - started >= 200
+            )
+              return choices;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          return [];
+        });
+      } finally {
+        await menuRead
+          .evaluate((state) => state.observer.disconnect())
+          .catch(() => undefined);
+        await menuRead.dispose();
+      }
       memo.set(comboboxMemoKey(url, control), options);
       if (options.length > 0) {
         optionsByIndex.set(control.index, options);
@@ -1336,7 +1395,10 @@ async function readClosedComboboxOptions(
 
   return controls.map((control) => {
     const options = optionsByIndex.get(control.index);
-    return options ? { ...control, options } : control;
+    // Raw DOM text from a reused, closed portal is not evidence for this question.
+    return closed.includes(control)
+      ? { ...control, options: options ?? [] }
+      : control;
   });
 }
 

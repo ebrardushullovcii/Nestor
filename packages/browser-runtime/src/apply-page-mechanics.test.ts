@@ -1,4 +1,5 @@
 import { chromium, type Browser } from "playwright";
+import menuReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/handover-options.json";
 import githubReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
@@ -306,6 +307,66 @@ describe("reading the choices of lists the page draws itself", () => {
         "Please provide the link to your LinkedIn profile.",
       );
     await page.close();
+  });
+
+  test.each(menuReplay.cases)(
+    "question-owned choices: $name",
+    async (entry) => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(`<label for="country">Country of residence</label><input id="country" role="combobox" aria-expanded="false" aria-controls="shared" readonly>
+      <label for="restrictions">${menuReplay.restrictionPrompt}</label><input id="restrictions" role="combobox" aria-expanded="false" aria-controls="shared" readonly>
+      <div id="shared" role="listbox" hidden></div><script>
+      const data=${JSON.stringify({ entry, countries: menuReplay.countryOptions, restrictions: menuReplay.restrictionOptions })};
+      const menu=document.getElementById('shared');
+      for(const id of ['country','restrictions']) { const input=document.getElementById(id);
+        input.onclick=()=>{input.setAttribute('aria-expanded','true');menu.hidden=false;
+          if(id==='restrictions' && !data.entry.settles) return;
+          setTimeout(()=>{menu.innerHTML=(id==='country'?data.countries:data.restrictions).map(x=>'<div role="option">'+x+'</div>').join('');},data.entry.delayMs);
+        };
+      }
+      document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('input').forEach(x=>x.setAttribute('aria-expanded','false'));menu.hidden=true;}});
+      </script>`);
+        for (let read = 0; read < 2; read++) {
+          const snapshot = await readRawApplyPage(page);
+          expect(
+            snapshot.controls.find((control) => control.id === "country")
+              ?.options,
+          ).toEqual(menuReplay.countryOptions);
+          expect(
+            snapshot.controls.find((control) => control.id === "restrictions")
+              ?.options,
+          ).toEqual(entry.settles ? menuReplay.restrictionOptions : []);
+          expect(snapshot.controls.every((control) => !control.value)).toBe(
+            true,
+          );
+        }
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  test("a form's long choice list is preserved in order", async () => {
+    const page = await browser.newPage();
+    const options = Array.from(
+      { length: menuReplay.longListSize },
+      (_, index) => `Option ${String(index + 1).padStart(3, "0")}`,
+    );
+    try {
+      await page.setContent(`<label for="choices">Choose a region</label><input id="choices" role="combobox" aria-expanded="false" aria-controls="choice-list" readonly><div id="choice-list" role="listbox" hidden></div><script>
+        const input=document.getElementById('choices'), list=document.getElementById('choice-list');
+        input.onclick=()=>{input.setAttribute('aria-expanded','true');list.hidden=false;list.innerHTML=${JSON.stringify(options)}.map(x=>'<div role="option">'+x+'</div>').join('');};
+        document.addEventListener('keydown',event=>{if(event.key==='Escape'){input.setAttribute('aria-expanded','false');list.hidden=true;}});
+      </script>`);
+      expect(
+        (await readRawApplyPage(page)).controls.find(
+          (control) => control.id === "choices",
+        )?.options,
+      ).toEqual(options);
+    } finally {
+      await page.close();
+    }
   });
 
   test("each control gets its own choices, and keeps them on a second read", async () => {

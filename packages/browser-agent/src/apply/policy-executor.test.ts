@@ -5183,3 +5183,31 @@ describe("typed answer permissions", () => {
     },
   );
 });
+
+test("Needs you keeps every offered choice in the form's order", () => {
+  const options = Array.from(
+    { length: 250 },
+    (_, index) => `Option ${String(index + 1).padStart(3, "0")}`,
+  );
+  const observation = buildApplyFormObservation(
+    rawPage({
+      controls: [
+        rawControl({
+          index: 0,
+          tagName: "select",
+          label: "Choose a region",
+          options,
+          required: true,
+        }),
+      ],
+    }),
+  );
+  expect(
+    buildPendingQuestion({
+      control: observation.controls[0],
+      jobId: "synthetic",
+      detectedAt: "2026-10-26T00:00:00Z",
+      suggestion: null,
+    }).answerOptions,
+  ).toEqual(options);
+});
