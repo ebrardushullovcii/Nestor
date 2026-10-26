@@ -931,10 +931,10 @@ export function LiveAssistantPage() {
 
           <nav
             aria-label="Live Assistant sections"
-            className="col-span-2 col-start-1 row-start-2 flex min-w-0 items-center overflow-x-auto px-2 lg:absolute lg:inset-x-0 lg:top-10 lg:z-10 lg:h-16 lg:justify-center lg:overflow-visible lg:px-52"
+            className="col-span-2 col-start-1 row-start-2 flex min-w-0 items-center overflow-x-auto px-2 lg:absolute lg:inset-x-0 lg:top-10 lg:z-10 lg:h-16 lg:justify-center lg:overflow-visible lg:px-52 lg:pointer-events-none"
             style={noDragRegionStyle}
           >
-            <div className="inline-flex min-w-max items-center gap-1 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-1 lg:max-w-full lg:min-w-0">
+            <div className="inline-flex min-w-max items-center gap-1 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-1 lg:pointer-events-auto lg:max-w-full lg:min-w-0">
               <span className="shrink-0 px-2 text-[0.68rem] font-semibold uppercase tracking-(--tracking-badge) text-foreground lg:hidden">
                 Live Assistant
               </span>
