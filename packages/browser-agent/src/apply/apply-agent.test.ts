@@ -6298,13 +6298,13 @@ test("repeated-step replay pauses at the second entry, including after resumptio
       proofEntryIds: [],
     },
   ];
-  input.hands.clickElement = async () => {
+  input.hands.clickElement = () => {
     source.stepLabel = "Step 2 of 2";
     source.controls[0].value = "";
     source.actions = [
       { index: 0, label: "Submit application", visible: true, disabled: false },
     ];
-    return { ok: true, observedValue: "Step 2" };
+    return Promise.resolve({ ok: true, observedValue: "Step 2" });
   };
   const result = await runApplyAgent(
     input,
@@ -6338,15 +6338,18 @@ test("repeated-step replay pauses at the second entry, including after resumptio
   );
   expect(resumed.filled).toHaveLength(0);
   expect(resumed.outcome).toBe("paused");
-  input.sources.reusableAnswers.push({
-    id: "application_second-date",
-    kind: "other",
-    question: question!.prompt,
-    label: "Second employment entry",
-    answer: repeatedStep.secondAnswer,
-    roleFamilies: [],
-    proofEntryIds: [],
-  });
+  input.sources.reusableAnswers = [
+    ...input.sources.reusableAnswers,
+    {
+      id: "application_second-date",
+      kind: "other",
+      question: question.prompt,
+      label: "Second employment entry",
+      answer: repeatedStep.secondAnswer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
   const answered = await runApplyAgent(
     input,
     scriptedModel([

@@ -69,10 +69,12 @@ test.each([false, true])(
     const second = page(2);
     occurrences.observe(second);
     const fillText = vi.fn(),
-      checkWrittenAnswer = vi.fn(async () => ({
-        supported: true,
-        reason: "Supported",
-      }));
+      checkWrittenAnswer = vi.fn(() =>
+        Promise.resolve({
+          supported: true,
+          reason: "Supported",
+        }),
+      );
     const config = {
       application: { jobId: "1", applicationId: "1", startingUrl: second.url! },
       siteLabel: "Replica",
@@ -114,7 +116,7 @@ test.each([false, true])(
           },
         ],
       },
-      hands: { observe: async () => second, fillText },
+      hands: { observe: () => Promise.resolve(second), fillText },
     } as unknown as ApplyAgentConfig;
     const deps = {
       config,
