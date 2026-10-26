@@ -11,7 +11,7 @@ import {
   buildTailoredResumeTextFromResumeDraft,
   seedResumeDraft,
 } from "./internal/resume-workspace-structure";
-import { createSeed } from "./workspace-service.test-support";
+import { createSeed } from "./profile-service.test-support";
 
 describe("buildResumeRenderDocument", () => {
   test("keeps the candidate's own headline on the generated resume and gives experienced candidates two pages", () => {

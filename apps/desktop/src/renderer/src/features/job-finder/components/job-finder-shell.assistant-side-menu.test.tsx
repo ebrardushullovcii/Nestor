@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
+import type { LaunchContext } from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -40,26 +40,15 @@ const windowControlsState = {
   isMinimizable: true,
 } as const;
 
-function createWorkspace(
+function launchContext(
   collapseSideMenuWithAssistant?: boolean,
-): JobFinderRendererWorkspaceSnapshot {
+): LaunchContext {
   return {
-    applicationRecords: [],
-    discoveryJobs: [],
-    profileSetupState: {
-      completedAt: null,
-      currentStep: "import",
-      lastResumedAt: null,
-      reviewItems: [],
-      status: "not_started",
-    },
-    reviewQueue: [],
-    userActionRequests: [],
     settings:
       collapseSideMenuWithAssistant === undefined
         ? {}
         : { collapseSideMenuWithAssistant },
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
+  } as unknown as LaunchContext;
 }
 
 function setWindowWidth(width: number) {
@@ -70,18 +59,18 @@ function setWindowWidth(width: number) {
   window.dispatchEvent(new Event("resize"));
 }
 
-function renderShell(workspace = createWorkspace()) {
+function renderShell(context = launchContext()) {
   const view = render(
     <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-      <JobFinderShell platform="win32" workspace={workspace}>
+      <JobFinderShell platform="win32" startupContext={context}>
         <div>Current screen</div>
       </JobFinderShell>
     </MemoryRouter>,
   );
-  const rerender = (next = workspace) =>
+  const rerender = (next = context) =>
     view.rerender(
       <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-        <JobFinderShell platform="win32" workspace={next}>
+        <JobFinderShell platform="win32" startupContext={next}>
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,
@@ -198,14 +187,14 @@ describe("side menu while the assistant is open", () => {
   });
 
   it("does nothing when the setting is off, and unfolds when it is turned off while open", () => {
-    const { rerender } = renderShell(createWorkspace(false));
+    const { rerender } = renderShell(launchContext(false));
     assistantState.value = { open: true, width: 400 };
-    rerender(createWorkspace(false));
+    rerender(launchContext(false));
     expect(railCollapsed()).toBe("false");
 
-    rerender(createWorkspace(true));
+    rerender(launchContext(true));
     expect(railCollapsed()).toBe("true");
-    rerender(createWorkspace(false));
+    rerender(launchContext(false));
     expect(railCollapsed()).toBe("false");
     expect(savedPreference()).toBeNull();
   });

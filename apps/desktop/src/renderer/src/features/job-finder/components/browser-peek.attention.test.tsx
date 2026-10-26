@@ -104,12 +104,12 @@ it("saves the exact current tab from the visible Add this job action", async () 
       }),
   );
   const saved = {
-    jobId: "saved",
+    jobId: "17",
     title: "Designer",
     company: "Example Studio",
     planName: "Design",
   };
-  const queueJobForReview = vi.fn().mockResolvedValue(undefined);
+  const runJobs = vi.fn().mockResolvedValue({ moved: 1, moveId: 3 });
   const state: DesktopBrowserState = {
     ...staleAttentionState,
     phase: "ready",
@@ -130,7 +130,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
-      jobFinder: { queueJobForReview },
+      jobs: { run: runJobs },
       browser: {
         addCurrentJob,
         getState: vi.fn().mockResolvedValue(state),
@@ -161,7 +161,10 @@ it("saves the exact current tab from the visible Add this job action", async () 
     expect(screen.getByRole("status").textContent).toContain("Shortlist");
     fireEvent.click(screen.getByRole("button", { name: "Shortlist" }));
     await waitFor(() =>
-      expect(queueJobForReview).toHaveBeenCalledWith("saved"),
+      expect(runJobs).toHaveBeenCalledWith("move_jobs", {
+        selection: { ids: [17] },
+        to: "shortlisted",
+      }),
     );
     await screen.findByText("Designer at Example Studio added to Shortlisted.");
     addCurrentJob.mockImplementationOnce(() =>

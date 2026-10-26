@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { TailoredAsset } from "@nestor/contracts";
 import { buildTailoredAssetBridge } from "./internal/resume-workspace-helpers";
 import { seedResumeDraft } from "./internal/resume-workspace-structure";
-import { createSeed } from "./workspace-service.test-support";
+import { createSeed } from "./profile-service.test-support";
 
 /**
  * Every save, patch, and export rebuilds the tailored asset through the

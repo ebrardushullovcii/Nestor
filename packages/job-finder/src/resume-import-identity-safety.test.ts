@@ -1,15 +1,18 @@
 import {
+  createSeededRepository,
+  withProfileView,
+} from "./profile-service.test-support";
+import {
   CandidateProfileSchema,
   ResumeDocumentBundleSchema,
   ResumeImportFieldCandidateSchema,
 } from "@nestor/contracts";
 import {
-  createInMemoryJobFinderRepository,
   type JobFinderRepository,
 } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
-import { createJobFinderWorkspaceService } from "./index";
+import { createProfileService } from "./profile-service";
 import { buildResumeDraftIdentity } from "./internal/resume-workspace-structure";
 import {
   describeResumeIdentityOwnershipChoice,
@@ -19,27 +22,24 @@ import {
   useResumeSourceNameForProfile,
 } from "./internal/resume-identity";
 import { reconcileCandidates } from "./internal/resume-import-reconciliation";
-import { createSeed } from "./workspace-service.test-fixtures";
+import { createSeed } from "./test-fixtures";
 import {
   createAiClient,
   createBrowserRuntime,
   createDocumentManager,
-  createResearchAdapter,
-} from "./workspace-service.test-runtimes";
+} from "./test-runtimes";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 function createService(repository: JobFinderRepository) {
-  return createJobFinderWorkspaceService({
+  return withProfileView(createProfileService({
     repository,
     browserRuntime: createBrowserRuntime(),
     aiClient: createAiClient(),
     documentManager: createDocumentManager(),
-    exportFileVerifier: { exists: () => Promise.resolve(true) },
-    researchAdapter: createResearchAdapter(),
-  });
+  }), repository);
 }
 
 function createCaseyProfile() {
@@ -96,7 +96,7 @@ describe("resume import identity and revision safety", () => {
   test("keeps a manual profile edit when a delayed import finalizer becomes stale", async () => {
     const seed = createSeed();
     const caseyProfile = createCaseyProfile();
-    const base = createInMemoryJobFinderRepository({
+    const base = await createSeededRepository({
       ...seed,
       profile: caseyProfile,
     });
@@ -116,11 +116,11 @@ describe("resume import identity and revision safety", () => {
         return base.finalizeResumeImportRun(input);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
     const importedText =
       "Taylor Quinn\nTaylor City\ntaylor@example.com\nP01 Imported Skill";
 
-    const pendingImport = workspaceService.runResumeImport({
+    const pendingImport = profileWork.runResumeImport({
       baseResume: {
         ...caseyProfile.baseResume,
         id: "resume_p01_first_job",
@@ -175,7 +175,7 @@ describe("resume import identity and revision safety", () => {
   test("does not re-save stale input profile from a failed import handler", async () => {
     const seed = createSeed();
     const caseyProfile = createCaseyProfile();
-    const base = createInMemoryJobFinderRepository({
+    const base = await createSeededRepository({
       ...seed,
       profile: caseyProfile,
     });
@@ -194,7 +194,7 @@ describe("resume import identity and revision safety", () => {
         return base.commitProfileUpdate(updateProfile, options);
       },
     };
-    const workspaceService = createJobFinderWorkspaceService({
+    const profileWork = withProfileView(createProfileService({
       repository,
       browserRuntime: createBrowserRuntime(),
       aiClient: {
@@ -203,12 +203,10 @@ describe("resume import identity and revision safety", () => {
           Promise.reject(new Error("text extraction failed")),
       },
       documentManager: createDocumentManager(),
-      exportFileVerifier: { exists: () => Promise.resolve(true) },
-      researchAdapter: createResearchAdapter(),
-    });
+    }), repository);
 
     await expect(
-      workspaceService.runResumeImport({
+      profileWork.runResumeImport({
         baseResume: {
           ...caseyProfile.baseResume,
           id: "resume_failed_handler_input",
@@ -232,7 +230,7 @@ describe("resume import identity and revision safety", () => {
   test("keeps a late manual edit when a native no-text import becomes stale", async () => {
     const seed = createSeed();
     const caseyProfile = createCaseyProfile();
-    const base = createInMemoryJobFinderRepository({
+    const base = await createSeededRepository({
       ...seed,
       profile: caseyProfile,
     });
@@ -252,7 +250,7 @@ describe("resume import identity and revision safety", () => {
         return base.commitProfileUpdate(updateProfile, options);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
     const emptyBundle = ResumeDocumentBundleSchema.parse({
       ...createTestBundle({ fullText: "native image-only resume" }),
       fullText: null,
@@ -260,7 +258,7 @@ describe("resume import identity and revision safety", () => {
       blocks: [],
     });
 
-    const pendingImport = workspaceService.runResumeImport({
+    const pendingImport = profileWork.runResumeImport({
       baseResume: {
         ...caseyProfile.baseResume,
         id: "resume_casey_native_no_text",
@@ -300,7 +298,7 @@ describe("resume import identity and revision safety", () => {
         extractionStatus: "needs_text",
       },
     });
-    const base = createInMemoryJobFinderRepository({
+    const base = await createSeededRepository({
       ...seed,
       profile: caseyProfile,
     });
@@ -318,9 +316,9 @@ describe("resume import identity and revision safety", () => {
         return base.commitProfileUpdate(updateProfile, options);
       },
     };
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
 
-    await expect(workspaceService.analyzeProfileFromResume()).rejects.toThrow(
+    await expect(profileWork.analyzeProfileFromResume()).rejects.toThrow(
       /resume text is required/i,
     );
 
@@ -520,14 +518,14 @@ describe("resume import identity and revision safety", () => {
       experiences: [],
       education: [],
     });
-    const repository = createInMemoryJobFinderRepository({
+    const repository = await createSeededRepository({
       ...seed,
       profile: placeholderProfile,
     });
-    const workspaceService = createService(repository);
+    const profileWork = createService(repository);
     const text = "Taylor Quinn\nTaylor City\ntaylor@example.com";
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...placeholderProfile.baseResume,
         id: "resume_taylor_import",
@@ -593,14 +591,14 @@ describe("resume import identity and revision safety", () => {
         textContent: "Jamie Rivers\nBerlin, Germany\njamie@example.com",
       },
     });
-    const base = createInMemoryJobFinderRepository({
+    const base = await createSeededRepository({
       ...seed,
       profile: alignedProfile,
     });
-    const workspaceService = createService(base);
+    const profileWork = createService(base);
     const text = "Jamie Rivers\nBerlin, Germany\njamie@example.com";
 
-    const snapshot = await workspaceService.runResumeImport({
+    const snapshot = await profileWork.runResumeImport({
       baseResume: {
         ...alignedProfile.baseResume,
         textContent: text,

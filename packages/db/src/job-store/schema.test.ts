@@ -77,6 +77,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   profile_revision: "id version",
   profile_settings:
     "id resume_format resume_template_id font_preset appearance_theme collapse_side_menu_with_assistant write_resumes_on_shortlist human_review_required allow_auto_submit_override application_automation_mode salary_disclosure keep_session_alive discovery_only resume_application_mode cover_letter_tone cover_letter_length cover_letter_language cover_letter_sample ai_behavior_profile_assistant_initiative ai_behavior_profile_assistant_reply_style ai_behavior_job_search_selectivity ai_behavior_job_search_remote_counts_as_any_location ai_behavior_applying_cover_letter_policy ai_behavior_applying_written_answer_length application_crm_no_response_automation_enabled application_crm_no_response_automation_after_days",
+  prepared_forms: "id value",
   profile_setup:
     "id status current_step completed_at last_resumed_at reviewed_steps",
   profile_setup_reviews: "id position status critical section value",

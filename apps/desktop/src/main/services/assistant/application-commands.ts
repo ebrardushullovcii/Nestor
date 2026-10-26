@@ -15,10 +15,10 @@ import {
 } from "@nestor/job-finder";
 import { runApplicationCommand } from "../application-commands";
 import { getApplicationStore } from "../job-finder/application-store";
-import { startJobFinderRuntime } from "../job-finder/workspace-service";
+import { startJobFinderRuntime } from "../job-finder/runtime";
 
 async function savedMode() {
-  const { jobFinderRepository: repository } = await startJobFinderRuntime();
+  const { repository } = await startJobFinderRuntime();
   if ((await repository.getActivityControl()).paused)
     throw new AssistantToolError(
       "refused",

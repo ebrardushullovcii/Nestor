@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createSeed,
-  createWorkspaceServiceHarness,
-} from "../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../profile-service.test-support";
 import { createScriptedAssistantModelHandle } from "./model-handle";
 import type { AssistantHostPorts } from "./ports";
 import type { AssistantTurnSession } from "./tool-kit";
@@ -147,11 +147,11 @@ describe("assistant session host", () => {
       modelHandle?: AssistantModelHandle;
     } = {},
   ) {
-    const harness = createWorkspaceServiceHarness(
+    const harness = createProfileServiceHarness(
       options.seed ? { seed: options.seed } : {},
     );
     const repository = createAssistantRepository({ filePath: ":memory:" });
-    const ports = createPorts(harness.workspaceService);
+    const ports = createPorts(harness.service);
     const events: AssistantEvent[] = [];
     const handle =
       options.modelHandle ??
@@ -160,7 +160,7 @@ describe("assistant session host", () => {
       );
     const host = new AssistantSessionHost({
       repository,
-      service: harness.workspaceService,
+      service: harness.service,
       ports,
       resolveModel: () => ({ kind: "ready", handle }),
       publish: (event) => events.push(event),
@@ -313,7 +313,7 @@ describe("assistant session host", () => {
     if (change?.type !== "change") throw new Error("Expected Undo receipt");
     await world.host.undoChange(sent.conversationId, change.receiptId);
     expect(
-      (await world.harness.workspaceService.getWorkspaceSnapshot()).profile
+      (await world.harness.service.read()).profile
         .headline,
     ).not.toBe("Synthetic engineer");
   });
@@ -507,7 +507,7 @@ describe("assistant session host", () => {
       host,
       "Change my headline to Staff platform designer",
     );
-    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
+    const snapshot = await harness.service.read();
     expect(snapshot.profile.headline).toBe("Staff platform designer");
     const view = await host.readConversation({ conversationId });
     const last = reply(view.messages);
@@ -536,7 +536,7 @@ describe("assistant session host", () => {
     );
     expect(undo.receipt.status).toBe("undone");
     expect(
-      (await harness.workspaceService.getWorkspaceSnapshot()).profile.headline,
+      (await harness.service.read()).profile.headline,
     ).toBe("Senior systems designer");
   });
 
@@ -566,7 +566,7 @@ describe("assistant session host", () => {
       .flatMap((part) => (part.type === "change" ? [part.receiptId] : []));
     expect(receipts).toHaveLength(3);
     await host.undoChange(first.conversationId, receipts[1]!);
-    const profile = (await harness.workspaceService.getWorkspaceSnapshot())
+    const profile = (await harness.service.read())
       .profile;
     expect(profile.headline).toBe("First headline");
     expect(profile.skills).toContain("Figma");
@@ -583,9 +583,9 @@ describe("assistant session host", () => {
     const change = reply(view.messages).parts.find(
       (part) => part.type === "change",
     );
-    const current = (await harness.workspaceService.getWorkspaceSnapshot())
+    const current = (await harness.service.read())
       .profile;
-    await harness.workspaceService.saveProfile({
+    await harness.service.saveProfile({
       ...current,
       headline: "My own headline",
     });
@@ -595,7 +595,7 @@ describe("assistant session host", () => {
     );
     expect(undo.message).toMatch(/Headline/u);
     expect(
-      (await harness.workspaceService.getWorkspaceSnapshot()).profile.headline,
+      (await harness.service.read()).profile.headline,
     ).toBe("My own headline");
   });
 
@@ -679,7 +679,7 @@ describe("assistant session host", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(
-      (await harness.workspaceService.getWorkspaceSnapshot()).profile.headline,
+      (await harness.service.read()).profile.headline,
     ).toBe("Senior systems designer");
     // The stopped request is closed in the history the next turn reads, so
     // a later message is not answered with the stopped work.
@@ -1061,7 +1061,7 @@ describe("assistant session host", () => {
     const chat = vi.fn(() =>
       Promise.resolve({ content: "Current application status recorded." }),
     );
-    const { host, ports, harness } = setup({
+    const { host, ports } = setup({
       modelHandle: {
         ...createScriptedAssistantModelHandle(),
         createModel: () => ({ chatWithTools: chat }),
@@ -1076,10 +1076,6 @@ describe("assistant session host", () => {
           : value,
       ),
     ) as unknown as AssistantHostPorts["readCommand"];
-    const snapshots = vi.spyOn(
-      harness.workspaceService,
-      "getWorkspaceSnapshot",
-    );
     const conversation = await host.createConversation();
     await installApplicationWatch(host, conversation.id);
     const check = async () => {
@@ -1106,7 +1102,6 @@ describe("assistant session host", () => {
     expect(chat).toHaveBeenCalledTimes(3);
     await check();
     expect(chat).toHaveBeenCalledTimes(3);
-    expect(snapshots).not.toHaveBeenCalled();
   });
 
   it("recovers a store handoff without repeating it and keeps two conversations separate", async () => {
@@ -1193,7 +1188,7 @@ describe("assistant session host", () => {
 
   it("keeps working after forced compaction, and the summary keeps the person's words", async () => {
     const fixedSnapshot =
-      await createWorkspaceServiceHarness().workspaceService.getWorkspaceSnapshot();
+      await createProfileServiceHarness().service.read();
     const fixedPromptTokens = estimateTokens([
       {
         role: "system",
@@ -1333,7 +1328,7 @@ describe("assistant session host", () => {
     });
     const restarted = new AssistantSessionHost({
       repository,
-      service: harness.workspaceService,
+      service: harness.service,
       ports,
       resolveModel: () => ({
         kind: "ready",
@@ -1357,12 +1352,12 @@ describe("assistant session host", () => {
   });
 
   it("reports an unavailable model as an outage, never as setup", async () => {
-    const harness = createWorkspaceServiceHarness();
+    const harness = createProfileServiceHarness();
     const repository = createAssistantRepository({ filePath: ":memory:" });
     const host = new AssistantSessionHost({
       repository,
-      service: harness.workspaceService,
-      ports: createPorts(harness.workspaceService),
+      service: harness.service,
+      ports: createPorts(harness.service),
       resolveModel: () => ({
         kind: "unavailable",
         detail: "The assistant's AI service is not reachable right now.",

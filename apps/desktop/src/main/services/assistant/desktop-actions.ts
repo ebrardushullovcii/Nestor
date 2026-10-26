@@ -4,8 +4,7 @@ import path from "node:path";
 import { app, clipboard, shell } from "electron";
 
 import { executeCandidateAssetAction } from "../../routes/candidate-assets";
-import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
-import { buildDiagnosticsFileExport } from "../job-finder/workspace-file-exports";
+import { buildDiagnosticsFileExport } from "../job-finder/diagnostics-export";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
 import { writeExportFile } from "./write-export-file";
@@ -13,15 +12,10 @@ import {
   resetJobFinderBrowser,
   resetJobFinderWorkspace,
 } from "../job-finder/reset-workspace";
-import { collectJobFinderPerformanceSnapshot } from "../job-finder/collect-performance-snapshot";
 import { getRegisteredMainWindow } from "../../setup/finished-work-notifier-instance";
 import { applyMainWindowZoomCommand } from "../../setup/window-zoom";
 import { executeAuthorityAction } from "../../routes/job-finder-authority";
-import {
-  getJobFinderStartupResetRecoveryFact,
-  getJobFinderStartupDatabaseRecoveryFact,
-  dismissJobFinderStartupDatabaseRecoveryNotice,
-} from "../job-finder";
+import { getJobFinderStartupResetRecoveryFact } from "../job-finder/reset-workspace";
 
 /** Desktop services behind registered actions. No arbitrary IPC or paths. */
 export async function executeDesktopJobFinderAction(
@@ -36,10 +30,6 @@ export async function executeDesktopJobFinderAction(
     return executeAuthorityAction(actionId, input);
   if (actionId === "get-startup-reset-recovery")
     return getJobFinderStartupResetRecoveryFact();
-  if (actionId === "get-startup-database-recovery")
-    return getJobFinderStartupDatabaseRecoveryFact();
-  if (actionId === "dismiss-startup-database-recovery-notice")
-    return dismissJobFinderStartupDatabaseRecoveryNotice();
   if (actionId === "zoom") {
     const window = getRegisteredMainWindow();
     if (!window || window.isDestroyed())
@@ -82,23 +72,11 @@ export async function executeDesktopJobFinderAction(
       "stop_application",
       input,
     );
-  const service = await getJobFinderWorkspaceService();
-  if (actionId === "get-tailored-asset") {
-    const repository = (
-      await import("../job-finder/create-workspace-service")
-    ).getJobFinderRepositoryForWorkspaceService(service);
-    if (!repository) throw new Error("Resume preview storage is unavailable.");
-    return repository.getTailoredAssetById(
-      C.JobFinderTailoredAssetQuerySchema.parse(input).assetId,
-    );
-  }
-  if (actionId === "get-performance-snapshot")
-    return (await collectJobFinderPerformanceSnapshot({ service })).performance;
   if (actionId === "export-diagnostics") {
     const directory = isDesktopTestApiEnabled()
       ? path.join(getJobFinderUserDataDirectory(), "exports")
       : app.getPath("downloads");
-    const file = await buildDiagnosticsFileExport(service);
+    const file = await buildDiagnosticsFileExport();
     return { filePath: await writeExportFile({ directory, ...file }) };
   }
   throw new Error("Unknown registered desktop action.");

@@ -1,31 +1,31 @@
 import {
-  createInMemoryJobFinderRepository,
+  createSeededRepository,
+  withProfileView,
+} from "../profile-service.test-support";
+import {
   type JobFinderRepository,
 } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
-import { createJobFinderWorkspaceService } from "../index";
+import { createProfileService } from "../profile-service";
 import { ProfileCommitStaleError } from "./profile-commit-stale-conflict";
 import {
   createSeed,
-} from "../workspace-service.test-fixtures";
+} from "../test-fixtures";
 import {
   createAiClient,
   createBrowserRuntime,
   createDocumentManager,
-  createResearchAdapter,
-} from "../workspace-service.test-runtimes";
+} from "../test-runtimes";
 
 function createTestHarness(repository: JobFinderRepository) {
-  const workspaceService = createJobFinderWorkspaceService({
+  const profileWork = withProfileView(createProfileService({
     repository,
     browserRuntime: createBrowserRuntime(),
     aiClient: createAiClient(),
     documentManager: createDocumentManager(),
-    exportFileVerifier: { exists: () => Promise.resolve(true) },
-    researchAdapter: createResearchAdapter(),
-  });
-  return workspaceService;
+  }), repository);
+  return profileWork;
 }
 
 function createCopilotPatchGroupMessage() {
@@ -54,7 +54,7 @@ function createCopilotPatchGroupMessage() {
 
 describe("profile copilot commit concurrency", () => {
   test("a second stale copilot commit raises a typed stale error without overwriting", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     let editCount = 0;
     const repository: JobFinderRepository = {
       ...base,
@@ -84,7 +84,7 @@ describe("profile copilot commit concurrency", () => {
   });
 
   test("undo retries once past a concurrent edit and restores the revision snapshot", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     const seed = createSeed();
     const undoTarget = {
       id: "profile_revision_target_1",
@@ -185,7 +185,7 @@ describe("profile copilot preference and sibling-flag races", () => {
   }
 
   test("a preference save landing during the copilot commit survives beside the patch", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     let racedOnce = false;
     const repository: JobFinderRepository = {
       ...base,
@@ -225,7 +225,7 @@ describe("profile copilot preference and sibling-flag races", () => {
   });
 
   test("undo retries past a concurrent preference save and restores its snapshots", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     const seed = createSeed();
     const undoTarget = {
       id: "profile_revision_target_prefs",
@@ -282,7 +282,7 @@ describe("profile copilot preference and sibling-flag races", () => {
   });
 
   test("a sibling rejection landing during an apply keeps its status", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     let racedOnce = false;
     const repository: JobFinderRepository = {
       ...base,
@@ -318,7 +318,7 @@ describe("profile copilot preference and sibling-flag races", () => {
   });
 
   test("a sibling apply landing during a rejection keeps its status", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     let racedOnce = false;
     const repository: JobFinderRepository = {
       ...base,
@@ -350,7 +350,7 @@ describe("profile copilot preference and sibling-flag races", () => {
   });
 
   test("rejecting an unknown patch group fails without writing", async () => {
-    const base = createInMemoryJobFinderRepository(createSeed());
+    const base = await createSeededRepository(createSeed());
     await base.upsertProfileCopilotMessage(createCopilotPatchGroupMessage());
     const service = createTestHarness(base);
 

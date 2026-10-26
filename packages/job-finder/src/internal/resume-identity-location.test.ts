@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { findResumeDraftIdentityConflicts } from "./resume-identity";
 
 describe("resume header location against the profile identity", () => {

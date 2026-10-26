@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -25,46 +24,6 @@ const windowControlsState = {
   isMaximized: false,
   isMinimizable: true,
 } as const;
-
-function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
-  return {
-    activeCampaignId: "campaign-active",
-    applicationRecords: [],
-    campaigns: [
-      {
-        description: "Active plan",
-        id: "campaign-active",
-        jobIds: ["job_1", "job_2"],
-        mode: "precision",
-        name: "Active plan",
-        status: "active",
-      },
-    ],
-    discoveryJobs: [
-      {
-        id: "job_1",
-        company: "Acme",
-        title: "Platform Engineer",
-        matchAssessment: { score: 70, reasons: [], gaps: [] },
-      },
-      {
-        id: "job_2",
-        company: "Globex",
-        title: "Field Engineer",
-        matchAssessment: { score: 60, reasons: [], gaps: [] },
-      },
-    ],
-    profileSetupState: {
-      completedAt: null,
-      currentStep: "import",
-      lastResumedAt: null,
-      reviewItems: [],
-      status: "not_started",
-    },
-    reviewQueue: [],
-    userActionRequests: [],
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
-}
 
 function taskCenterSummary(): HTMLElement {
   const summary = document.querySelector<HTMLElement>(
@@ -194,7 +153,7 @@ describe("JobFinderShell stacked overlay ownership", () => {
     );
     return render(
       <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-        <JobFinderShell platform="win32" workspace={createWorkspace()}>
+        <JobFinderShell platform="win32">
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,

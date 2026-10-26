@@ -4,13 +4,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopPlatformPing } from "@nestor/contracts";
-import type { JobFinderStartupDatabaseRecoveryFact } from "../../../shared/job-finder-startup-db-recovery";
 import { JobFinderPage } from "./job-finder-page";
 
-function configureWindowNestor(input: {
-  getWorkspaceBootstrapError: Error;
-  recoveryFact: JobFinderStartupDatabaseRecoveryFact;
-}) {
+function configureWindowNestor() {
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
@@ -28,17 +24,7 @@ function configureWindowNestor(input: {
         getControlsState: () => new Promise(() => undefined),
         onControlsStateChange: () => () => undefined,
       },
-      jobFinder: {
-        getWorkspaceBootstrap: vi.fn(() =>
-          Promise.reject(input.getWorkspaceBootstrapError),
-        ),
-        getWorkspace: vi.fn(() =>
-          Promise.reject(input.getWorkspaceBootstrapError),
-        ),
-        getStartupDatabaseRecovery: vi.fn(() =>
-          Promise.resolve(input.recoveryFact),
-        ),
-      },
+      jobFinder: {},
     },
   });
 }
@@ -73,23 +59,13 @@ describe("JobFinderPage launch", () => {
     "/job-finder/profile",
     "/job-finder/profile/setup",
     "/job-finder/settings",
-  ])("opens %s without loading the old workspace", async (path) => {
-    configureWindowNestor({
-      getWorkspaceBootstrapError: new Error("not expected"),
-      recoveryFact: { status: "idle" },
-    });
+  ])("opens %s", async (path) => {
+    configureWindowNestor();
 
     renderJobFinderPage(path);
 
     expect(
       await screen.findByRole("navigation", { name: "Job Finder sections" }),
     ).toBeTruthy();
-    const bridge = (
-      window as unknown as {
-        nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
-      }
-    ).nestor.jobFinder;
-    expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
-    expect(bridge.getWorkspace).not.toHaveBeenCalled();
   });
 });

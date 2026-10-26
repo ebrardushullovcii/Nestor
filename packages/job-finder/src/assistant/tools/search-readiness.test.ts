@@ -1,11 +1,11 @@
 import { expect, it } from "vitest";
 import { getAssistantSearchReadiness } from "../prompt";
-import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { createProfileServiceHarness } from "../../profile-service.test-support";
 import { assistantTestReads } from "../store-reads.test-support";
 
 it("requires an enabled site, independently of a resume or legacy browser state", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const state = await assistantTestReads(workspaceService).readPersonalState();
+  const { service } = createProfileServiceHarness();
+  const state = await assistantTestReads(service).readPersonalState();
   state.enabledSiteCount = 0;
   expect(getAssistantSearchReadiness(state)).toMatchObject({
     canStartSearch: false,

@@ -51,10 +51,6 @@ const jobFinderDiscoveryResultBandsPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/discovery-result-bands.ts",
 );
-const jobFinderPlanSafeguardPausesPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/plan-safeguard-pauses.ts",
-);
 const jobFinderResumeRecordIdentityPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/resume-record-identity.ts",
@@ -62,14 +58,6 @@ const jobFinderResumeRecordIdentityPath = path.resolve(
 const jobFinderResumeIdentityPath = path.resolve(
   currentDir,
   "../../packages/job-finder/src/internal/resume-identity.ts",
-);
-const jobFinderApplyRunRecoveryPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/internal/workspace-apply-run-recovery.ts",
-);
-const jobFinderSourceHealthPath = path.resolve(
-  currentDir,
-  "../../packages/job-finder/src/source-health.ts",
 );
 const jobFinderApplicationSubmissionRuntimeMainPath = path.resolve(
   currentDir,
@@ -135,10 +123,6 @@ const workspaceAliases = {
     currentDir,
     "../../packages/db/src/launch-context.ts",
   ),
-  "@nestor/db/workspace-commits": path.resolve(
-    currentDir,
-    "../../packages/db/src/workspace-commits.ts",
-  ),
   "@nestor/db": dbPath,
   "@nestor/live-assistant": liveAssistantPath,
   "@nestor/job-finder/job-commands": path.resolve(
@@ -163,9 +147,6 @@ const workspaceAliases = {
   "@nestor/job-finder/resume-record-identity":
     jobFinderResumeRecordIdentityPath,
   "@nestor/job-finder/resume-identity": jobFinderResumeIdentityPath,
-  "@nestor/job-finder/apply-run-recovery": jobFinderApplyRunRecoveryPath,
-  "@nestor/job-finder/source-health": jobFinderSourceHealthPath,
-  "@nestor/job-finder/plan-safeguard-pauses": jobFinderPlanSafeguardPausesPath,
   "@nestor/job-finder": jobFinderPath,
   "@nestor/knowledge-base": knowledgeBasePath,
   "@nestor/os-integration": osIntegrationPath,
@@ -193,14 +174,6 @@ const mainConfig = {
     rollupOptions: {
       input: {
         index: path.resolve(currentDir, "src/main/bootstrap.ts"),
-        "workspace-database-startup-worker": path.resolve(
-          currentDir,
-          "src/main/setup/workspace-database-startup-worker.ts",
-        ),
-        "workspace-query-reader": path.resolve(
-          currentDir,
-          "src/main/setup/workspace-query-reader.ts",
-        ),
         "discovery-cpu-worker": path.resolve(
           currentDir,
           "src/main/services/job-finder/discovery-cpu-worker.ts",

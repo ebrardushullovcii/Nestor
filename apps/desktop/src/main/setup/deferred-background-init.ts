@@ -11,9 +11,8 @@ export interface DeferredBackgroundInitOptions {
   scheduleDelayMs?: number;
   advancedInterviewSurfacesEnabled: boolean;
   loadJobFinderServices: () => Promise<{
-    /** The resume writer and Apply, on their own runtime. */
+    /** The resume writer, Apply and profile work, on one runtime. */
     startJobFinderRuntime: () => PromiseLike<unknown>;
-    getJobFinderWorkspaceService: () => PromiseLike<unknown>;
   }>;
   loadCandidateAssetLibraryModule: () => Promise<{
     getCandidateAssetLibrary: () => {
@@ -99,26 +98,19 @@ export function createDeferredBackgroundInitController(
     }
   };
 
-  const initializeJobFinderWorkspace = () => {
+  const startJobFinder = () => {
     void options
       .loadJobFinderServices()
-      .then(async ({ startJobFinderRuntime, getJobFinderWorkspaceService }) => {
+      .then(async ({ startJobFinderRuntime }) => {
         if (quitHasBegun()) {
           return;
         }
         // Queued resumes and an interrupted send carry on from here, whether
-        // or not an old screen ever loads.
+        // or not a screen asks.
         await startJobFinderRuntime();
-        if (quitHasBegun()) {
-          return;
-        }
-        await getJobFinderWorkspaceService();
       })
       .catch((error) => {
-        options.onError(
-          "[Desktop] Failed to initialize Job Finder workspace service.",
-          error,
-        );
+        options.onError("[Desktop] Failed to start Job Finder.", error);
       });
   };
 
@@ -180,7 +172,7 @@ export function createDeferredBackgroundInitController(
 
   const runDeferredInitialization = () => {
     options.onDiagnostic("starting background services");
-    initializeJobFinderWorkspace();
+    startJobFinder();
     enforceCandidateAssetLifecycle();
     initializeLiveAssistant();
     initializeAdvancedInterviewSurfaces();

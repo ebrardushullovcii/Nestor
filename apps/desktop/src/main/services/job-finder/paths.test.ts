@@ -14,7 +14,6 @@ import {
   getJobFinderResetTrashDirectory,
   getJobFinderResetTrashRootDirectory,
   getJobFinderUserDataDirectory,
-  getJobFinderWorkspaceFilePath,
   resolveJobFinderWorkspaceRelativePath,
 } from "./paths";
 
@@ -55,9 +54,6 @@ describe("ensureJobFinderUserDataDirectory", () => {
     try {
       const resolvedUserDataDirectory = path.resolve(userDataDirectory);
 
-      expect(getJobFinderWorkspaceFilePath()).toBe(
-        path.join(resolvedUserDataDirectory, "job-finder-workspace.sqlite"),
-      );
       expect(getJobFinderDocumentsDirectory()).toBe(
         path.join(resolvedUserDataDirectory, "documents", "resumes"),
       );

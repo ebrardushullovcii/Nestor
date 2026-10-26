@@ -6,7 +6,7 @@ import {
 import type { ResumeClaimCheckInput } from "@nestor/ai-providers";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 import {
   withResumeClaimChecks,
   withResumeClaimFixes,

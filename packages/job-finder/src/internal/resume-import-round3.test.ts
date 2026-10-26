@@ -16,12 +16,12 @@ import {
   createAiClient,
   createFreshStartSeedProfile,
   createSeed,
-  createWorkspaceServiceHarness,
-} from "../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../profile-service.test-support";
 import {
   createStageCandidate,
   createTestBundle,
-} from "../workspace-service.resume-analysis.shared";
+} from "../resume-import.test-support";
 import { reconcileCandidates } from "./resume-import-reconciliation";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
 import { promoteGroundedSharedMemoryCandidates } from "./resume-import-shared-memory-candidates";
@@ -92,7 +92,7 @@ function apply(
 describe("round-three resume import regressions", () => {
   test("R3-041 reports an AI outage even if the context-only stage succeeds, and keeps the selected file", async () => {
     const ai = createAiClient();
-    const { workspaceService, repository } = createWorkspaceServiceHarness({
+    const { profileWork, repository } = createProfileServiceHarness({
       aiClient: {
         ...ai,
         getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
@@ -116,7 +116,7 @@ describe("round-three resume import regressions", () => {
       textContent: text,
     };
     await expect(
-      workspaceService.runResumeImport({ baseResume, documentBundle: bundle }),
+      profileWork.runResumeImport({ baseResume, documentBundle: bundle }),
     ).rejects.toThrow(RESUME_IMPORT_AI_UNAVAILABLE_MESSAGE);
     expect((await repository.getProfile()).baseResume).toMatchObject({
       id: "resume_123",
@@ -135,7 +135,7 @@ describe("round-three resume import regressions", () => {
       release = resolve;
     });
     const entered = vi.fn();
-    const { workspaceService, repository } = createWorkspaceServiceHarness({
+    const { profileWork, repository } = createProfileServiceHarness({
       aiClient: {
         ...ai,
         getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
@@ -153,7 +153,7 @@ describe("round-three resume import regressions", () => {
       },
     });
     const controller = new AbortController();
-    const result = workspaceService.runResumeImport({
+    const result = profileWork.runResumeImport({
       signal: controller.signal,
       baseResume: {
         ...seed.profile.baseResume,
@@ -505,7 +505,7 @@ test.each([22000, 33000, 32000])(
       const ai = createAiClient();
       let evidenceCalls = 0;
       const evidenceFinished = vi.fn();
-      const { workspaceService, repository } = createWorkspaceServiceHarness({
+      const { profileWork, repository } = createProfileServiceHarness({
         onResumeEvidenceFinished: evidenceFinished,
         aiClient: {
           ...ai,
@@ -566,7 +566,7 @@ test.each([22000, 33000, 32000])(
         },
       });
       let finished = false;
-      const result = workspaceService
+      const result = profileWork
         .runResumeImport({
           baseResume: {
             ...seed.profile.baseResume,
@@ -618,7 +618,7 @@ test.each([22000, 33000, 32000])(
 test("an empty evidence stage completes without a second read", async () => {
   const ai = createAiClient();
   let evidenceCalls = 0;
-  const { workspaceService } = createWorkspaceServiceHarness({
+  const { profileWork } = createProfileServiceHarness({
     aiClient: {
       ...ai,
       getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
@@ -650,7 +650,7 @@ test("an empty evidence stage completes without a second read", async () => {
       },
     },
   });
-  const result = await workspaceService.runResumeImport({
+  const result = await profileWork.runResumeImport({
     baseResume: {
       ...seed.profile.baseResume,
       textContent: seed.profile.fullName,
@@ -675,7 +675,7 @@ test("evidence appears before a slow visual scan and survives its later save", a
   const visionWait = new Promise<void>((resolve) => {
     releaseVision = resolve;
   });
-  const { workspaceService, repository } = createWorkspaceServiceHarness({
+  const { profileWork, repository } = createProfileServiceHarness({
     aiClient: {
       ...ai,
       getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
@@ -744,7 +744,7 @@ test("evidence appears before a slow visual scan and survives its later save", a
     },
   });
   const sourceResumeId = seed.profile.baseResume.id;
-  const result = await workspaceService.runResumeImport({
+  const result = await profileWork.runResumeImport({
     baseResume: {
       ...seed.profile.baseResume,
       textContent: seed.profile.fullName,
@@ -832,7 +832,7 @@ test.each([true, false])(
     const started: string[] = [];
     let active = 0,
       peak = 0;
-    const { workspaceService, repository } = createWorkspaceServiceHarness({
+    const { profileWork, repository } = createProfileServiceHarness({
       aiClient: {
         ...ai,
         getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
@@ -886,7 +886,7 @@ test.each([true, false])(
         },
       },
     });
-    const importing = workspaceService.runResumeImport({
+    const importing = profileWork.runResumeImport({
       baseResume: {
         ...seed.profile.baseResume,
         textContent: seed.profile.fullName,

@@ -1,7 +1,7 @@
 import { assistantTestReads } from "./store-reads.test-support";
 import { ResumeImportRunSchema } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import { createProfileServiceHarness } from "../profile-service.test-support";
 import type { AssistantHostPorts } from "./ports";
 import { ASSISTANT_SYSTEM_PROMPT } from "./prompt";
 import type { AssistantTurnSession } from "./tool-kit";
@@ -24,8 +24,8 @@ const ports = {
 } as unknown as AssistantHostPorts;
 
 it("reports a UI import even before the new import has a stored run and only offers actions that can work", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
+  const { service } = createProfileServiceHarness();
+  const snapshot = await service.read();
   snapshot.resumeImportActive = true;
   snapshot.latestResumeImportRun = null;
   expect(readAssistantWorkState(ports, snapshot).resumeImport).toMatchObject({
@@ -40,19 +40,16 @@ it("reports a UI import even before the new import has a stored run and only off
     status: "parsing",
     startedAt: snapshot.generatedAt,
   });
-  vi.spyOn(workspaceService, "getWorkspaceSnapshot").mockResolvedValue(
-    snapshot,
-  );
   expect(
     (
       await getWorkspaceSummaryTool.execute(
         {},
         {
-          service: workspaceService,
+          service,
           session,
           ports: {
             ...ports,
-            ...assistantTestReads(workspaceService),
+            ...assistantTestReads(service),
             readPersonalState: () =>
               Promise.resolve({
                 ...snapshot,
@@ -74,11 +71,11 @@ it("reports a UI import even before the new import has a stored run and only off
   const paused = await pauseActivityTool.execute(
     { paused: true, finishCurrent: false },
     {
-      service: workspaceService,
+      service,
       session,
       ports: {
         ...ports,
-        ...assistantTestReads(workspaceService),
+        ...assistantTestReads(service),
         readPersonalState: () =>
           Promise.resolve({
             ...snapshot,
@@ -95,15 +92,15 @@ it("reports a UI import even before the new import has a stored run and only off
 });
 
 it("reports file reading in read_profile before a new import run exists", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
+  const { service } = createProfileServiceHarness();
   const result = await readProfileTool.execute(
     { section: "basics" },
     {
-      service: workspaceService,
+      service,
       session,
       ports: {
         ...ports,
-        ...assistantTestReads(workspaceService),
+        ...assistantTestReads(service),
         isResumeImportActive: () => true,
       },
     },

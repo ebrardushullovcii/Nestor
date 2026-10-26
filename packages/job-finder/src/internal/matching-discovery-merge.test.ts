@@ -8,7 +8,7 @@ import {
   type SavedJob,
 } from "@nestor/contracts";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { mergeDiscoveredJob, mergeDiscoveredPostings } from "./matching";
 
 const RICH_DESCRIPTION =

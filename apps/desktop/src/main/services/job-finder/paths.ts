@@ -7,10 +7,6 @@ function getUserDataDirectory() {
   return resolveDesktopUserDataDirectory(app);
 }
 
-export function getJobFinderWorkspaceFilePath() {
-  return path.join(getUserDataDirectory(), "job-finder-workspace.sqlite");
-}
-
 export function getJobFinderDocumentsDirectory() {
   return path.join(getUserDataDirectory(), "documents", "resumes");
 }

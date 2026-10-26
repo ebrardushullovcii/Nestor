@@ -411,4 +411,6 @@ export { approveOriginalResumesForTests, seedTrackerDemo } from "./test-seeds";
 
 export { createProfileEditDraftStore } from "./profile-edit-draft";
 export { createSendGuards, type SendGuards } from "./send-guards";
+export { createPreparedFormsStore } from "./prepared-forms";
 export { readProfileWithRevision } from "./profile-workspace";
+export { createJobFinderRepository } from "./repository";

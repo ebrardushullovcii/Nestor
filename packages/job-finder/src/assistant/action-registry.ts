@@ -46,7 +46,6 @@ function action<S extends ZodTypeAny>(
 }
 
 const empty = C.JobFinderEmptyActionInputSchema;
-const job = C.JobFinderJobActionInputSchema;
 
 function desktopAction<S extends ZodTypeAny>(
   id: string,
@@ -139,20 +138,6 @@ export const JOB_FINDER_ACTIONS = {
     "read",
     "Read reset recovery status.",
   ),
-  "get-startup-database-recovery": desktopAction(
-    "get-startup-database-recovery",
-    empty,
-    "settings",
-    "read",
-    "Read database recovery status.",
-  ),
-  "dismiss-startup-database-recovery-notice": desktopAction(
-    "dismiss-startup-database-recovery-notice",
-    empty,
-    "settings",
-    "local",
-    "Dismiss the database recovery notice.",
-  ),
   zoom: desktopAction(
     "zoom",
     C.JobFinderZoomInputSchema,
@@ -182,13 +167,6 @@ export const JOB_FINDER_ACTIONS = {
     "files",
     "local",
     "Save diagnostics to a file.",
-  ),
-  "get-performance-snapshot": desktopAction(
-    "get-performance-snapshot",
-    empty,
-    "settings",
-    "read",
-    "Read app performance diagnostics.",
   ),
   "reset-browser": desktopAction(
     "reset-browser",
@@ -421,20 +399,6 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Verify a source's reading instructions.",
     (i, c) => c.service.verifySourceInstructions(i.targetId, i.instructionId),
-  ),
-  "queue-job-for-review": action(
-    job,
-    "jobs",
-    "local",
-    "Shortlist a job.",
-    (i, c) => c.service.queueJobForReview(i.jobId),
-  ),
-  "remove-job-from-review": action(
-    job,
-    "jobs",
-    "local",
-    "Move a shortlisted job back to Find jobs.",
-    (i, c) => c.service.removeJobFromReview(i.jobId),
   ),
 } as const;
 

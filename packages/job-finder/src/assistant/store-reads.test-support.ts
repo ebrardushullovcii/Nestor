@@ -7,7 +7,7 @@ import {
 import { createApplicationStore } from "@nestor/db/applications";
 import { createJobCommandRunner, savePageJobs } from "../job-commands";
 import { createNeedsYouCommandRunner } from "../applications/needs-you-commands";
-import { workspaceHarnessInputs } from "../workspace-service.test-harness";
+import { harnessInputs } from "../profile-service.test-support";
 import type { AssistantHostPorts } from "./ports";
 
 const fixtures = new Map<object, ReturnType<typeof makeReads>>();
@@ -17,9 +17,9 @@ afterEach(() => {
 });
 
 function makeReads(service: object) {
-  const inputs = workspaceHarnessInputs.get(service);
+  const inputs = harnessInputs.get(service);
   if (!inputs)
-    throw new Error("Use a workspace harness or supply explicit read ports.");
+    throw new Error("Use a profile service harness or supply explicit read ports.");
   const { repository, documentManager, jobSites } = inputs;
   const store = openJobStore(":memory:");
   const jobs = createJobCommandRunner({ store });

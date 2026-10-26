@@ -6,7 +6,6 @@ import {
 } from "@nestor/ai-providers";
 import { createCatalogBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
-  JobFinderIntelligenceStateSchema,
   ResumeImportBenchmarkReportSchema,
   ResumeImportBenchmarkRequestSchema,
   type CandidateProfile,
@@ -20,12 +19,11 @@ import {
   type ResumeImportErrorTaxonomy,
   type ResumeImportFieldCandidate,
   type ResumeImportVisionArtifact,
-  type JobFinderRepositoryState,
 } from "@nestor/contracts";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
+import { createJobFinderRepository, openJobStore } from "@nestor/db/job-store";
 
 import { runResumeImportWorkflow } from "./internal/resume-import-workflow";
-import type { WorkspaceServiceContext } from "./internal/workspace-service-context";
+import type { ProfileContext } from "./internal/profile-context";
 import type { JobFinderDocumentManager } from "./internal/workspace-service-contracts";
 
 type ResumeImportBenchmarkHarness = {
@@ -285,78 +283,6 @@ function buildBenchmarkAiClient(useConfiguredAi: boolean): JobFinderAiClient {
       return Promise.resolve([]);
     },
   } satisfies JobFinderAiClient;
-}
-
-export function buildBenchmarkRepositoryState(input: {
-  profile: CandidateProfile;
-  searchPreferences: JobSearchPreferences;
-}): JobFinderRepositoryState {
-  return {
-    profile: input.profile,
-    searchPreferences: input.searchPreferences,
-    profileSetupState: {
-      status: "not_started" as const,
-      currentStep: "import" as const,
-      completedAt: null,
-      reviewItems: [],
-      lastResumedAt: null,
-    },
-    savedJobs: [],
-    tailoredAssets: [],
-    resumeDrafts: [],
-    resumeDraftRevisions: [],
-    resumeExportArtifacts: [],
-    resumeResearchArtifacts: [],
-    resumeValidationResults: [],
-    resumeAssistantMessages: [],
-    profileCopilotMessages: [],
-    profileRevisions: [],
-    applyRuns: [],
-    applyJobResults: [],
-    applySubmitApprovals: [],
-    applicationQuestionRecords: [],
-    applicationAnswerRecords: [],
-    applicationArtifactRefs: [],
-    applicationReplayCheckpoints: [],
-    applicationConsentRequests: [],
-    applicationAuthorityEnvelopes: [],
-    submissionPreflights: [],
-    submissionExecutionGrants: [],
-    submissionIdempotencyRecords: [],
-    submissionArmedMarkers: [],
-    submissionOutcomeRecords: [],
-    applicationRecords: [],
-    applicationAttempts: [],
-    userActionRequests: [],
-    userActionEvents: [],
-    sourceDebugRuns: [],
-    sourceDebugAttempts: [],
-    sourceInstructionArtifacts: [],
-    sourceDebugEvidenceRefs: [],
-    resumeImportRuns: [],
-    resumeImportDocumentBundles: [],
-    resumeImportFieldCandidates: [],
-    settings: {
-      resumeFormat: "pdf" as const,
-      resumeTemplateId: "classic_ats" as const,
-      fontPreset: "inter_requisite" as const,
-      appearanceTheme: "system" as const,
-      humanReviewRequired: true,
-      allowAutoSubmitOverride: false,
-      keepSessionAlive: true,
-      discoveryOnly: false,
-    },
-    discovery: {
-      sessions: [],
-      activeSourceDebugRun: null,
-      recentSourceDebugRuns: [],
-    },
-    campaigns: [],
-    activeCampaignId: null,
-    campaignNotifications: [],
-    activityControl: { paused: false, pausedAt: null, reason: null },
-    intelligence: JobFinderIntelligenceStateSchema.parse({}),
-  };
 }
 
 function createBenchmarkVisionProvider(): ResumeVisionProvider {
@@ -1076,17 +1002,16 @@ export function aggregateBenchmarkMetrics(
   };
 }
 
-function createBenchmarkContext(input: {
+async function createBenchmarkContext(input: {
   aiClient: JobFinderAiClient;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
   visionProvider?: ResumeVisionProvider;
-}): WorkspaceServiceContext {
-  const repository = createInMemoryJobFinderRepository(
-    buildBenchmarkRepositoryState({
-      profile: input.profile,
-      searchPreferences: input.searchPreferences,
-    }),
+}): Promise<ProfileContext> {
+  const repository = createJobFinderRepository(openJobStore(":memory:"));
+  await repository.saveProfileAndSearchPreferences(
+    input.profile,
+    input.searchPreferences,
   );
   const browserRuntime = createCatalogBrowserSessionRuntime({
     sessions: [],
@@ -1120,51 +1045,16 @@ function createBenchmarkContext(input: {
     activeSourceDebugExecutionIdRef: { current: null },
     activeSourceDebugAbortControllerRef: { current: null },
     activeSourceDebugPromiseRef: { current: null },
-    applyRunTransitionTails: new Map<string, Promise<void>>(),
-    markApplicationPreparationStarted: () =>
-      Promise.reject(
-        new Error(
-          "Application preparation is not available in the benchmark harness.",
-        ),
-      ),
-    withApplicationCrmTransition: (operation) => operation(),
-    withIntelligenceTransition: (operation) => operation(),
-    withCampaignTransition: (operation) => operation(),
     activeResumeVisionRunIds: new Set<string>(),
     activeResumeEvidenceRunIds: new Set<string>(),
-    getWorkspaceSnapshot: () =>
-      Promise.reject(
-        new Error(
-          "Workspace snapshots are not available in the benchmark harness.",
-        ),
-      ),
-    readWorkspaceSnapshot: () =>
-      Promise.reject(
-        new Error(
-          "Workspace snapshots are not available in the benchmark harness.",
-        ),
-      ),
-    getActiveCampaignId: () => Promise.resolve(null),
-    runSourceDebugWorkflow: () =>
-      Promise.reject(
-        new Error("Source debug is not available in the benchmark harness."),
-      ),
-    persistDiscoveryState: (updater) =>
-      repository.commitDiscoveryStateUpdate(updater),
-    refreshDiscoverySessions: () => Promise.resolve([]),
+    backgroundWork: new Set<Promise<unknown>>(),
     saveJobSiteMetadata: () =>
       Promise.reject(
         new Error("Source metadata is not used by resume import."),
       ),
     persistSourceDebugRun: () => Promise.resolve(undefined),
-    persistBrowserSessionState: () => Promise.resolve(undefined),
-    staleApprovedResumeDrafts: () => Promise.resolve(undefined),
     openRunBrowserSession: () => Promise.resolve(undefined),
     closeRunBrowserSession: () => Promise.resolve(undefined),
-    closeParkedBrowserTab: () => Promise.resolve(undefined),
-    hasActiveBrowserWorkflow: () => false,
-    resumeActivityForExplicitStart: () => Promise.resolve(),
-    updateJob: () => Promise.resolve(undefined),
   };
 }
 
@@ -1185,7 +1075,7 @@ export async function runResumeImportBenchmark(input: {
     const harness = await input.createHarness(benchmarkCase, request);
     const aiClient =
       harness.aiClient ?? buildBenchmarkAiClient(request.useConfiguredAi);
-    const ctx = createBenchmarkContext({
+    const ctx = await createBenchmarkContext({
       aiClient,
       profile: harness.profile,
       searchPreferences: harness.searchPreferences,

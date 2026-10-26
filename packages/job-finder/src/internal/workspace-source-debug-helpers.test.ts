@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import type { JobDiscoveryTarget } from "@nestor/contracts";
 
-import { createSourceInstructionArtifact } from "../workspace-service.test-fixtures";
+import { createSourceInstructionArtifact } from "../test-fixtures";
 import {
   deriveSourceDebugStartingUrls,
   getSourceDebugMaxSteps,

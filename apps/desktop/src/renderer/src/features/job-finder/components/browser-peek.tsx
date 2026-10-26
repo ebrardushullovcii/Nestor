@@ -142,7 +142,10 @@ export function BrowserPeek(props: {
     if (!savedJob || shortlisting) return;
     setShortlisting(true);
     try {
-      await window.nestor.jobFinder.queueJobForReview(savedJob.jobId);
+      await window.nestor.jobs.run("move_jobs", {
+        selection: { ids: [Number(savedJob.jobId)] },
+        to: "shortlisted",
+      });
       setMessage(
         `${savedJob.title}${savedJob.company ? ` at ${savedJob.company}` : ""} added to Shortlisted.`,
       );

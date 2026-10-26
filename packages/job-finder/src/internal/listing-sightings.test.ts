@@ -6,7 +6,7 @@ import {
   type SavedJobDiscoveryProvenance,
 } from "@nestor/contracts";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import {
   classifySightingRoute,
   selectApplicationSighting,

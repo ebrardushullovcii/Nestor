@@ -28,9 +28,7 @@ import {
 import { browserBridge } from "./browser";
 import { createAssistantBridge } from "./assistant";
 import { createJobsBridge } from "./jobs";
-import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
-  AppearanceTheme,
   CandidateAssetDeleteInput,
   CandidateAssetDeleteResult,
   CandidateAssetImportInput,
@@ -48,7 +46,6 @@ import type {
   DesktopWindowCloseGuardState,
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
-  EditableSourceInstructionArtifact,
   DesktopWindowControlsState,
   InterviewExportFormat,
   InterviewExportResult,
@@ -70,49 +67,17 @@ import type {
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
   JobFinderDiagnosticExportResult,
-  JobFinderOpenBrowserSessionInput,
-  ProfileCopilotContext,
-  ProfileSetupReviewActionOptions,
-  JobFinderPerformanceSnapshot,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkRequest,
-  ResumeImportFieldCandidate,
-  ResumeImportProgressEvent,
   ResumeImportRun,
   RevealSavedFileResult,
-  ResumeTimelineRepairAction,
-  ResumeDocumentBundle,
-  JobFinderRepositoryState,
-  JobFinderTestSaveSurface,
-  JobFinderSettings,
-  ProfileSetupState,
-  SourceDebugProgressEvent,
-  SourceDebugRunRecord,
-  SourceDebugRunDetails,
-  SaveJobFinderWorkspaceInput,
-  JobFinderRendererWorkspaceSnapshot,
-  JobFinderJobDetail,
-  JobFinderWorkspaceEntityMutationInput,
-  JobFinderWorkspaceSyncResult,
-  JobSearchPreferences,
-  SetJobFinderActivityControlInput,
-  UpdateApplicationDefaultsInput,
-  UpdateWorkspaceBehaviorInput,
-  UpdateAiBehaviorInput,
-  WorkspaceRevision,
   WriteClipboardTextResult,
   LaunchContext,
 } from "@nestor/contracts";
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
-import type {
-  JobFinderStartupDatabaseRecoveryFact,
-  JobFinderStartupResetRecoveryFact,
-} from "@nestor/contracts";
-
-let activeResumeImportRequestId: string | null = null;
-let activeSourceDebugRequestId: string | null = null;
+import type { JobFinderStartupResetRecoveryFact } from "@nestor/contracts";
 
 const testApiEnabled =
   process.env.NESTOR_ENABLE_TEST_API === "1" ||
@@ -125,7 +90,6 @@ const configuredSystemThemeOverride =
 let currentSystemThemeOverride: "dark" | "light" | null =
   configuredSystemThemeOverride;
 
-let jobFinderBootstrapRoutesReadyPromise: Promise<void> | null = null;
 let jobFinderRoutesReadyPromise: Promise<void> | null = null;
 let jobFinderAssetRoutesReadyPromise: Promise<void> | null = null;
 let liveAssistantRoutesReadyPromise: Promise<void> | null = null;
@@ -139,16 +103,6 @@ function isDeferredFeatureChannel(channel: unknown): channel is string {
 
 function ensureFeatureRoutesReady(channel: string): Promise<void> {
   if (channel.startsWith("job-finder:")) {
-    if (
-      channel === "job-finder:get-workspace" ||
-      channel === "job-finder:get-workspace-bootstrap" ||
-      channel === "job-finder:get-workspace-home"
-    ) {
-      jobFinderBootstrapRoutesReadyPromise ??= nativeIpcRenderer
-        .invoke("system:job-finder-bootstrap-routes-ready")
-        .then(() => undefined);
-      return jobFinderBootstrapRoutesReadyPromise;
-    }
     if (channel.startsWith("job-finder:candidate-assets:")) {
       jobFinderAssetRoutesReadyPromise ??= nativeIpcRenderer
         .invoke("system:job-finder-asset-routes-ready")
@@ -213,12 +167,6 @@ function applySystemThemeOverride(theme: "dark" | "light" | null) {
   }
 }
 
-function isSaveWorkspaceInputsPayload(
-  profileOrInput: CandidateProfile | SaveJobFinderWorkspaceInput,
-): profileOrInput is SaveJobFinderWorkspaceInput {
-  return "profile" in profileOrInput && "searchPreferences" in profileOrInput;
-}
-
 function isInterviewWorkspaceView(
   value: unknown,
 ): value is InterviewWorkspaceView {
@@ -231,26 +179,6 @@ function isInterviewWorkspaceView(
     typeof candidate.answerOverlay === "object" &&
     typeof candidate.transcriptOverlay === "object"
   );
-}
-
-function toSaveWorkspaceInputsPayload(
-  profileOrInput: CandidateProfile | SaveJobFinderWorkspaceInput,
-  searchPreferences?: JobSearchPreferences,
-): SaveJobFinderWorkspaceInput {
-  if (isSaveWorkspaceInputsPayload(profileOrInput)) {
-    return profileOrInput;
-  }
-
-  if (!searchPreferences) {
-    throw new Error(
-      "Search preferences are required when saving workspace inputs.",
-    );
-  }
-
-  return {
-    profile: profileOrInput,
-    searchPreferences,
-  };
 }
 
 const assistantBridge = createAssistantBridge({
@@ -478,7 +406,7 @@ const desktopApi = {
       ipcRenderer.invoke(
         "live-assistant:record-job-finder-follow-up",
         input,
-      ) as Promise<JobFinderRendererWorkspaceSnapshot>,
+      ) as Promise<unknown>,
   },
   jobFinder: {
     applyJobs: (input: ApplyJobsInput) =>
@@ -527,12 +455,17 @@ const desktopApi = {
       return () =>
         ipcRenderer.removeListener("job-finder:applications-changed", handler);
     },
-    queries: createWorkspaceQueryBridge(),
-    getJobDetail: (jobId: string, planId: string | null) =>
-      ipcRenderer.invoke("job-finder:get-job-detail", {
-        jobId,
-        planId,
-      }) as Promise<JobFinderJobDetail>,
+    // A clicked "Search finished" notice opens the screen it is about.
+    onOpenRoute: (listener: (route: string) => void) => {
+      const handler = (_event: unknown, route: unknown) => {
+        if (typeof route === "string" && route.startsWith("/job-finder/"))
+          listener(route);
+      };
+      ipcRenderer.on("job-finder:open-route", handler);
+      return () => {
+        ipcRenderer.removeListener("job-finder:open-route", handler);
+      };
+    },
     listCandidateAssets: (
       input: CandidateAssetListInput = { includeDeleted: false },
     ) =>
@@ -560,345 +493,16 @@ const desktopApi = {
         "job-finder:candidate-assets:restore",
         input,
       ) as Promise<CandidateAssetRestoreResult>,
-    getWorkspace: () =>
-      ipcRenderer.invoke(
-        "job-finder:get-workspace",
-      ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-    getWorkspaceBootstrap: () =>
-      ipcRenderer.invoke(
-        "job-finder:get-workspace-bootstrap",
-      ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-    getWorkspaceHome: () =>
-      ipcRenderer.invoke(
-        "job-finder:get-workspace-home",
-      ) as Promise<JobFinderRendererWorkspaceSnapshot | null>,
-    syncWorkspace: (baseRevision: WorkspaceRevision | null) =>
-      ipcRenderer.invoke("job-finder:sync-workspace", {
-        baseRevision,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    // Queued in order with this window's later requests, so main sees the
-    // revision before the change it answers.
-    noteWorkspaceRevision: (revision: WorkspaceRevision) => {
-      void ipcRenderer
-        .invoke("job-finder:note-workspace-revision", { revision })
-        .catch(() => undefined);
-    },
-    onWorkspaceUpdate: (listener: () => void) => {
-      const handler = () => listener();
-      ipcRenderer.on("job-finder:workspace-updated", handler);
-      return () => {
-        ipcRenderer.removeListener("job-finder:workspace-updated", handler);
-      };
-    },
-    // A clicked "Search finished" notice opens the screen it is about.
-    onOpenRoute: (listener: (route: string) => void) => {
-      const handler = (_event: unknown, route: unknown) => {
-        if (typeof route === "string" && route.startsWith("/job-finder/"))
-          listener(route);
-      };
-      ipcRenderer.on("job-finder:open-route", handler);
-      return () => {
-        ipcRenderer.removeListener("job-finder:open-route", handler);
-      };
-    },
-    mutateWorkspaceEntities: (input: JobFinderWorkspaceEntityMutationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-workspace-entities",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    openBrowserSession: (input?: JobFinderOpenBrowserSessionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:open-browser-session",
-        input ?? {},
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    checkBrowserSession: () =>
-      ipcRenderer.invoke(
-        "job-finder:check-browser-session",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveProfile: (profile: CandidateProfile) =>
-      ipcRenderer.invoke(
-        "job-finder:save-profile",
-        profile,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveWorkspaceInputs: (
-      profileOrInput: CandidateProfile | SaveJobFinderWorkspaceInput,
-      searchPreferences?: JobSearchPreferences,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:save-workspace-inputs",
-        toSaveWorkspaceInputsPayload(profileOrInput, searchPreferences),
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    analyzeProfileFromResume: () =>
-      ipcRenderer.invoke(
-        "job-finder:analyze-profile-from-resume",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveSearchPreferences: (searchPreferences: JobSearchPreferences) =>
-      ipcRenderer.invoke(
-        "job-finder:save-search-preferences",
-        searchPreferences,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    setActivityControl: (input: SetJobFinderActivityControlInput) =>
-      ipcRenderer.invoke(
-        "job-finder:set-activity-control",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveSettings: (settings: JobFinderSettings) =>
-      ipcRenderer.invoke(
-        "job-finder:save-settings",
-        settings,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    updateApplicationDefaults: (input: UpdateApplicationDefaultsInput) =>
-      ipcRenderer.invoke(
-        "job-finder:update-application-defaults",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    updateWorkspaceBehavior: (input: UpdateWorkspaceBehaviorInput) =>
-      ipcRenderer.invoke(
-        "job-finder:update-workspace-behavior",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    updateAiBehavior: (input: UpdateAiBehaviorInput) =>
-      ipcRenderer.invoke(
-        "job-finder:update-ai-behavior",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    updateAppearanceTheme: (appearanceTheme: AppearanceTheme) =>
-      ipcRenderer.invoke(
-        "job-finder:update-appearance-theme",
-        appearanceTheme,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveProfileSetupState: (profileSetupState: ProfileSetupState) =>
-      ipcRenderer.invoke(
-        "job-finder:save-profile-setup-state",
-        profileSetupState,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    applyProfileSetupReviewAction: (
-      reviewItemId: string,
-      action: "confirm" | "dismiss" | "clear_value",
-      options?: ProfileSetupReviewActionOptions,
-    ) =>
-      ipcRenderer.invoke("job-finder:apply-profile-setup-review-action", {
-        reviewItemId,
-        action,
-        options,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    applyResumeTimelineRepairAction: (
-      runId: string,
-      proposalId: string,
-      action: ResumeTimelineRepairAction,
-    ) =>
-      ipcRenderer.invoke("job-finder:apply-resume-timeline-repair-action", {
-        runId,
-        proposalId,
-        action,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    sendProfileCopilotMessage: (
-      content: string,
-      context?: ProfileCopilotContext,
-    ) =>
-      ipcRenderer.invoke("job-finder:send-profile-copilot-message", {
-        content,
-        context: context ?? { surface: "general" },
-      }) as Promise<JobFinderRendererWorkspaceSnapshot>,
-    applyProfileCopilotPatchGroup: (patchGroupId: string) =>
-      ipcRenderer.invoke("job-finder:apply-profile-copilot-patch-group", {
-        patchGroupId,
-      }) as Promise<JobFinderRendererWorkspaceSnapshot>,
-    rejectProfileCopilotPatchGroup: (patchGroupId: string) =>
-      ipcRenderer.invoke("job-finder:reject-profile-copilot-patch-group", {
-        patchGroupId,
-      }) as Promise<JobFinderRendererWorkspaceSnapshot>,
-    undoProfileRevision: (revisionId: string) =>
-      ipcRenderer.invoke("job-finder:undo-profile-revision", {
-        revisionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    importResume: (
-      onProgress?: (event: ResumeImportProgressEvent) => void,
-      options?: { retryInterrupted?: boolean },
-    ) => {
-      if (activeResumeImportRequestId) {
-        return Promise.reject(new Error("A resume import is already running."));
-      }
-
-      const requestId = `resume_import_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const progressChannel = `job-finder:resume-import-progress:${requestId}`;
-      activeResumeImportRequestId = requestId;
-      const progressHandler = onProgress
-        ? (
-            _event: Electron.IpcRendererEvent,
-            progress: ResumeImportProgressEvent,
-          ) => {
-            onProgress(progress);
-          }
-        : null;
-
-      const cleanup = () => {
-        if (progressHandler) {
-          ipcRenderer.off(progressChannel, progressHandler);
-        }
-        if (activeResumeImportRequestId === requestId) {
-          activeResumeImportRequestId = null;
-        }
-      };
-
-      try {
-        if (progressHandler) {
-          ipcRenderer.on(progressChannel, progressHandler);
-        }
-
-        // Keep cleanup around the invoke itself as well as its promise. A
-        // renderer teardown or a test double can throw synchronously before
-        // Electron returns the IPC promise, which otherwise leaves the
-        // module-level single-flight lock and listener stranded.
-        return Promise.resolve(
-          ipcRenderer.invoke("job-finder:import-resume", {
-            requestId,
-            ...(options?.retryInterrupted === true
-              ? { retryInterrupted: true }
-              : {}),
-          }) as Promise<JobFinderWorkspaceSyncResult>,
-        ).finally(cleanup);
-      } catch (error) {
-        cleanup();
-        return Promise.reject(
-          error instanceof Error
-            ? error
-            : new Error("Resume import could not start."),
-        );
-      }
-    },
-    cancelImportResume: (stopProcessing = false) => {
-      const requestId = activeResumeImportRequestId;
-      if (!requestId) {
-        return;
-      }
-
-      // Keep the request identity in the payload so main can fence a late
-      // native file choice. Release the renderer single-flight lock after the
-      // send; the main handler will discard that old choice if the picker
-      // returns later, and its finally cannot clear a newer request.
-      ipcRenderer.send("job-finder:cancel-import-resume", {
-        requestId,
-        ...(stopProcessing ? { stopProcessing: true } : {}),
-      });
-      if (activeResumeImportRequestId === requestId) {
-        activeResumeImportRequestId = null;
-      }
-    },
-    runSourceDebug: (
-      targetId: string,
-      onProgress?: (event: SourceDebugProgressEvent) => void,
-      options?: { readabilityTimeoutMs?: number },
-    ) => {
-      if (activeSourceDebugRequestId) {
-        return Promise.reject(new Error("Source debug is already running."));
-      }
-
-      const requestId = `source_debug_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const progressChannel = `job-finder:source-debug-progress:${requestId}`;
-      activeSourceDebugRequestId = requestId;
-      const progressHandler = onProgress
-        ? (
-            _event: Electron.IpcRendererEvent,
-            event: SourceDebugProgressEvent,
-          ) => {
-            onProgress(event);
-          }
-        : null;
-
-      if (progressHandler) {
-        ipcRenderer.on(progressChannel, progressHandler);
-      }
-
-      const cleanup = () => {
-        if (progressHandler) {
-          ipcRenderer.off(progressChannel, progressHandler);
-        }
-        if (activeSourceDebugRequestId === requestId) {
-          activeSourceDebugRequestId = null;
-        }
-      };
-
-      return ipcRenderer
-        .invoke("job-finder:run-source-debug", {
-          targetId,
-          requestId,
-          ...(options?.readabilityTimeoutMs
-            ? { readabilityTimeoutMs: options.readabilityTimeoutMs }
-            : {}),
-        })
-        .finally(cleanup) as Promise<JobFinderWorkspaceSyncResult>;
-    },
-    cancelSourceDebug: (runId: string) =>
-      ipcRenderer.invoke("job-finder:cancel-source-debug", {
-        runId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    getSourceDebugRun: (runId: string) =>
-      ipcRenderer.invoke("job-finder:get-source-debug-run", {
-        runId,
-      }) as Promise<SourceDebugRunRecord>,
-    getSourceDebugRunDetails: (runId: string) =>
-      ipcRenderer.invoke("job-finder:get-source-debug-run-details", {
-        runId,
-      }) as Promise<SourceDebugRunDetails>,
     exportDiagnostics: () =>
       ipcRenderer.invoke(
         "job-finder:export-diagnostics",
       ) as Promise<JobFinderDiagnosticExportResult>,
-    getPerformanceSnapshot: () =>
-      ipcRenderer.invoke(
-        "job-finder:get-performance-snapshot",
-      ) as Promise<JobFinderPerformanceSnapshot>,
-    saveSourceInstructionArtifact: (
-      targetId: string,
-      artifact: EditableSourceInstructionArtifact,
-    ) =>
-      ipcRenderer.invoke("job-finder:save-source-instruction-artifact", {
-        targetId,
-        artifact,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    listSourceDebugRuns: (targetId: string) =>
-      ipcRenderer.invoke("job-finder:list-source-debug-runs", {
-        targetId,
-      }) as Promise<readonly SourceDebugRunRecord[]>,
-    acceptSourceInstructionDraft: (targetId: string, instructionId: string) =>
-      ipcRenderer.invoke("job-finder:accept-source-instruction-draft", {
-        targetId,
-        instructionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    verifySourceInstructions: (targetId: string, instructionId: string) =>
-      ipcRenderer.invoke("job-finder:verify-source-instructions", {
-        targetId,
-        instructionId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    resetBrowser: () =>
-      ipcRenderer.invoke(
-        "job-finder:reset-browser",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     resetWorkspace: () =>
-      ipcRenderer.invoke(
-        "job-finder:reset-workspace",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
+      ipcRenderer.invoke("job-finder:reset-workspace") as Promise<void>,
     getStartupResetRecovery: () =>
       ipcRenderer.invoke(
         "job-finder:get-startup-reset-recovery",
       ) as Promise<JobFinderStartupResetRecoveryFact>,
-    getStartupDatabaseRecovery: () =>
-      ipcRenderer.invoke(
-        "job-finder:get-startup-database-recovery",
-      ) as Promise<JobFinderStartupDatabaseRecoveryFact>,
-    dismissStartupDatabaseRecoveryNotice: () =>
-      ipcRenderer.invoke(
-        "job-finder:dismiss-startup-database-recovery-notice",
-      ) as Promise<JobFinderStartupDatabaseRecoveryFact>,
-    queueJobForReview: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:queue-job-for-review", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    removeJobFromReview: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:remove-job-from-review", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
     // Shows a file the app wrote in the OS file manager. It never opens or
     // runs the file, and the renderer keeps no filesystem access of its own.
     revealSavedFile: (path: string) =>
@@ -926,44 +530,6 @@ const desktopApi = {
                 applySystemThemeOverride(theme);
                 return { ok: true as const };
               }),
-            loadApplyQueueDemo: () =>
-              ipcRenderer.invoke(
-                "job-finder:test-load-apply-queue-demo",
-              ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-            loadWorkHistoryReviewDemo: () =>
-              ipcRenderer.invoke(
-                "job-finder:test-load-work-history-review-demo",
-              ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-            loadAgentOwnedBrowserDemo: (input: {
-              sourceUrl: string;
-              applicationUrl: string;
-              secondaryApplicationUrl?: string;
-              jobTitle?: string;
-              jobCompany?: string;
-              foundJobs?: {
-                title: string;
-                company: string;
-                applicationUrl: string;
-              }[];
-            }) =>
-              ipcRenderer.invoke(
-                "job-finder:test-load-agent-owned-browser-demo",
-                input,
-              ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-            failNextSave: (surface: JobFinderTestSaveSurface) =>
-              ipcRenderer.invoke(
-                "job-finder:test-fail-next-save",
-                surface,
-              ) as Promise<{ ok: true }>,
-            resetWorkspaceState: (state: JobFinderRepositoryState) =>
-              ipcRenderer.invoke(
-                "job-finder:test-reset-workspace-state",
-                state,
-              ) as Promise<JobFinderRendererWorkspaceSnapshot>,
-            getPerformanceSnapshot: () =>
-              ipcRenderer.invoke(
-                "job-finder:test-get-performance-snapshot",
-              ) as Promise<JobFinderPerformanceSnapshot>,
             runResumeImportBenchmark: (
               input?: Partial<ResumeImportBenchmarkRequest>,
             ) =>
@@ -975,14 +541,6 @@ const desktopApi = {
               ipcRenderer.invoke(
                 "job-finder:test-get-resume-import-benchmark-cases",
               ) as Promise<readonly ResumeImportBenchmarkCase[]>,
-            getResumeImportState: () =>
-              ipcRenderer.invoke(
-                "job-finder:test-get-resume-import-state",
-              ) as Promise<{
-                resumeImportRuns: readonly ResumeImportRun[];
-                resumeImportDocumentBundles: readonly ResumeDocumentBundle[];
-                resumeImportFieldCandidates: readonly ResumeImportFieldCandidate[];
-              }>,
             importResumeFromPath: (
               sourcePath: string | { sourcePath: string; useVision?: boolean },
             ) =>
@@ -990,7 +548,10 @@ const desktopApi = {
                 ...(typeof sourcePath === "string"
                   ? { sourcePath }
                   : sourcePath),
-              }) as Promise<JobFinderRendererWorkspaceSnapshot>,
+              }) as Promise<{
+                profile: CandidateProfile;
+                latestResumeImportRun: ResumeImportRun | null;
+              }>,
           },
         }
       : {}),

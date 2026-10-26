@@ -43,10 +43,6 @@ function createOptions() {
           calls.push("runtime");
           return Promise.resolve(undefined);
         },
-        getJobFinderWorkspaceService: () => {
-          calls.push("workspace");
-          return Promise.resolve(undefined);
-        },
       });
     },
     loadCandidateAssetLibraryModule: () => {
@@ -117,7 +113,6 @@ describe("deferred background initialization", () => {
 
     expect(counts.jobFinderServices).toBe(1);
     expect(calls).toContain("runtime");
-    expect(calls).toContain("workspace");
     expect(calls).toContain("asset-lifecycle");
     expect(calls).toContain("live-assistant");
     expect(surfaceInitializations).toEqual([true]);
@@ -189,7 +184,6 @@ describe("deferred background initialization", () => {
     const { options, counts } = createOptions();
     const servicesLoad = createManualPromise<{
       startJobFinderRuntime: () => Promise<void>;
-      getJobFinderWorkspaceService: () => Promise<void>;
     }>();
     options.loadJobFinderServices = () => servicesLoad.promise;
     const controller = createDeferredBackgroundInitController(options);
@@ -203,10 +197,6 @@ describe("deferred background initialization", () => {
     servicesLoad.resolve({
       startJobFinderRuntime: () =>
         Promise.reject(new Error("runtime must not start during quit")),
-      getJobFinderWorkspaceService: () =>
-        Promise.reject(
-          new Error("workspace service must not be created during quit"),
-        ),
     });
     await flushMicrotasks();
 
@@ -270,7 +260,7 @@ describe("deferred background initialization", () => {
   test("reports chain failures through the error hook instead of crashing", async () => {
     vi.useFakeTimers();
     const { options, errors } = createOptions();
-    const failure = new Error("workspace unavailable");
+    const failure = new Error("Job Finder unavailable");
     options.loadJobFinderServices = () => Promise.reject(failure);
     const controller = createDeferredBackgroundInitController(options);
 
@@ -280,7 +270,7 @@ describe("deferred background initialization", () => {
 
     expect(errors).toEqual([
       {
-        message: "[Desktop] Failed to initialize Job Finder workspace service.",
+        message: "[Desktop] Failed to start Job Finder.",
         error: failure,
       },
     ]);

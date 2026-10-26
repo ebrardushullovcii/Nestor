@@ -65,7 +65,7 @@ $V/drive shot form --target browser --url /apply/   # an in-app browser page
 $V/drive shot popups --target overlay          # Live Assistant answer and transcript popups
 $V/drive click Submit --page browser --url /apply/  # click/fill/see/wait/press inside an in-app browser page
 $V/drive browser                               # list every webContents (id, type, URL)
-$V/drive eval 'return (await workspace()).profile.fullName'   # Node side; use page.evaluate(() => ...) for the renderer
+$V/drive eval 'return db("jobs", { limit: 1 })'   # Node side; use page.evaluate(() => ...) for the renderer
 $V/drive run .claude/skills/verify-nestor/journeys/job-finder-replica.mjs [stage]
 $V/drive restart                               # close and relaunch on the same data (prepared browser pages are lost)
 $V/drive status
@@ -73,7 +73,7 @@ $V/drive status
 
 Handles: accessible names from `drive see`. They match the app's `aria-label`s and headings. Navigation is by the sidebar buttons ("Home", "Profile", "Find jobs", "Shortlisted", "Applications", "Safeguards", "Settings"); the module switch is the banner button "Job Finder, switch module" and then the menu item "Open Live Assistant". Setting `location.hash` from a script does not navigate like a click does; use the controls.
 
-`eval` and journeys get the same helpers: `page` (the current main window, looked up again on every command because the app can replace it), `app` (Playwright `ElectronApplication`; `app.evaluate` runs in the main process), `click`, `fill`, `press`, `waitFor`, `see`, `shot(name, { target, url })`, `pick(...files)`, `note(...)` (a line in `steps.log`), `db(table, { limit, pattern, name })` (newest rows, also saved as evidence), `tables()`, `workspace()`, `pageFor({ page: "browser", url })`, `browserPages()`, `sites` (`url`, `log`, `submissions()`), `userDataDir`, `evidenceDir`, `desktopDir`, `checkout`, `ai`, `args`, `sleep`.
+`eval` and journeys get the same helpers: `page` (the current main window, looked up again on every command because the app can replace it), `app` (Playwright `ElectronApplication`; `app.evaluate` runs in the main process), `click`, `fill`, `press`, `waitFor`, `see`, `shot(name, { target, url })`, `pick(...files)`, `note(...)` (a line in `steps.log`), `db(table, { limit, pattern, name })` (newest rows, also saved as evidence), `tables()`, `pageFor({ page: "browser", url })`, `browserPages()`, `sites` (`url`, `log`, `submissions()`), `userDataDir`, `evidenceDir`, `desktopDir`, `checkout`, `ai`, `args`, `sleep`.
 
 A journey is a module whose default export takes that context:
 
@@ -85,7 +85,7 @@ export default async ({ click, waitFor, shot, db }) => {
   });
   await waitFor("Shortlisted", 15, { role: "heading" });
   await shot("shortlisted");
-  return db("saved_jobs", { limit: 3 });
+  return db("jobs", { limit: 3 });
 };
 ```
 

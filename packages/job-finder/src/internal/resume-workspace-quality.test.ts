@@ -43,7 +43,7 @@ function withClaimChecks(
 }
 import { createEntry } from "./resume-workspace-primitives";
 import { normalizeText } from "./shared";
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 
 function createBullets(prefix: string, texts: string[]) {
   return texts.map((text, index) => ({

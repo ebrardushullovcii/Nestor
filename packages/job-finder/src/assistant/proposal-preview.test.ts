@@ -1,10 +1,10 @@
 import { expect, it } from "vitest";
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import { createProfileServiceHarness } from "../profile-service.test-support";
 import { profileProposalPreview } from "./proposal-preview";
 
 it("shows the complete current and proposed summary, including text beyond old preview limits", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
+  const { service } = createProfileServiceHarness();
+  const snapshot = await service.read();
   const current = "Current summary with a 23% result. ".repeat(30);
   const proposed = "Senior in-house designer with a 23% result. ".repeat(35);
   snapshot.profile.professionalSummary.fullSummary = current;
@@ -22,8 +22,8 @@ it("shows the complete current and proposed summary, including text beyond old p
 });
 
 it("names the role and changed fields instead of an upsert command", async () => {
-  const { workspaceService } = createWorkspaceServiceHarness();
-  const snapshot = await workspaceService.getWorkspaceSnapshot();
+  const { service } = createProfileServiceHarness();
+  const snapshot = await service.read();
   const role = snapshot.profile.experiences[0]!;
   role.title = "Research Assistant";
   role.achievements = [

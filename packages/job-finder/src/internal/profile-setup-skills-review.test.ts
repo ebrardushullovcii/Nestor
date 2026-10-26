@@ -5,8 +5,8 @@ import {
 } from "@nestor/contracts";
 import {
   createSeed,
-  createWorkspaceServiceHarness,
-} from "../workspace-service.test-support";
+  createProfileServiceHarness,
+} from "../profile-service.test-support";
 import { buildProfileSetupReviewItems } from "./profile-setup-review-items";
 import { shouldIncludeCandidateInSetupReview } from "./profile-setup-review-mapping";
 
@@ -106,7 +106,7 @@ describe("scanned skills import review", () => {
           abstained: 0,
         },
       });
-      const { workspaceService } = createWorkspaceServiceHarness({
+      const { profileWork } = createProfileServiceHarness({
         seed: {
           ...seed,
           profile: { ...seed.profile, skills: [] },
@@ -114,16 +114,16 @@ describe("scanned skills import review", () => {
           resumeImportFieldCandidates: [imported],
         },
       });
-      const before = await workspaceService.getWorkspaceSnapshot();
+      const before = await profileWork.read();
       const review = before.profileSetupState.reviewItems.find(
         (item) => item.sourceCandidateId === imported.id,
       );
       expect(review).toBeDefined();
       if (!review) throw new Error("Skills suggestion was omitted from review");
 
-      await workspaceService.applyProfileSetupReviewAction(review.id, action);
-      const after = await workspaceService.getWorkspaceSnapshot();
-      const state = await workspaceService.getResumeImportState();
+      await profileWork.applyProfileSetupReviewAction(review.id, action);
+      const after = await profileWork.read();
+      const state = await profileWork.getResumeImportState();
 
       expect(after.profile.skills).toEqual(
         action === "confirm" ? extractedSkills : [],

@@ -7,7 +7,7 @@ import {
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
 import { mergeDiscoveredPostings } from "./matching";
 

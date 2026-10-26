@@ -29,7 +29,7 @@ import {
   openJobStore,
 } from "@nestor/db/job-store";
 import { afterEach, expect, it, vi } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import {
   createApplicationService,
   type ApplicationServiceDeps,

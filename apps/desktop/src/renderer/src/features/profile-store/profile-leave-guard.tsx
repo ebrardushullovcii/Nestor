@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker, type Location } from "react-router-dom";
-import type { JobFinderLeaveConfirmation } from "@renderer/pages/use-job-finder-page-controller";
-import { JobFinderUnsavedChangesDialog } from "@renderer/pages/job-finder-unsaved-changes-dialog";
+import {
+  JobFinderUnsavedChangesDialog,
+  type JobFinderLeaveConfirmation,
+} from "@renderer/pages/job-finder-unsaved-changes-dialog";
 import { applyJobFinderWindowCloseGuard } from "@renderer/pages/job-finder-window-close-guard";
 
 const PROFILE_PATH = "/job-finder/profile";

@@ -5,10 +5,10 @@ import {
   SourceInstructionArtifactSchema,
   type EditableSourceInstructionArtifact,
 } from "@nestor/contracts";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 export function createWorkspaceSourceDebugStoreMethods(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
 ) {
   return {
     async getSourceDebugRun(runId: string) {
@@ -107,7 +107,6 @@ export function createWorkspaceSourceDebugStoreMethods(
       });
 
       await ctx.repository.upsertSourceInstructionArtifact(normalizedArtifact);
-      return ctx.getWorkspaceSnapshot();
     },
     async acceptSourceInstructionDraft(
       targetId: string,
@@ -134,7 +133,6 @@ export function createWorkspaceSourceDebugStoreMethods(
         draftInstructionId: acceptedArtifact.id,
         instructionStatus: acceptedArtifact.status,
       }));
-      return ctx.getWorkspaceSnapshot();
     },
   };
 }

@@ -15,9 +15,6 @@
     "./discovery-result-bands": "./src/discovery-result-bands.ts",
     "./resume-record-identity": "./src/resume-record-identity.ts",
     "./resume-identity": "./src/internal/resume-identity.ts",
-    "./apply-run-recovery": "./src/internal/workspace-apply-run-recovery.ts",
-    "./source-health": "./src/source-health.ts",
-    "./plan-safeguard-pauses": "./src/plan-safeguard-pauses.ts",
     "./application-submission-runtime-main": "./src/application-submission-runtime-main.ts",
     "./source-instruction-review": "./src/source-instruction-review.ts"
   },

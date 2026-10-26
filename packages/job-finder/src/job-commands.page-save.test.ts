@@ -3,7 +3,7 @@ import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import { afterEach, expect, it } from "vitest";
 
 import { savePageJobs } from "./job-commands";
-import { createSeed } from "./workspace-service.test-support";
+import { createSeed } from "./profile-service.test-support";
 
 const stores: JobStore[] = [];
 afterEach(() => {

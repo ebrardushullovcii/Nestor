@@ -8,11 +8,11 @@ import { reconcileCandidates } from "./internal/resume-import-reconciliation";
 import {
   createFreshStartSeedProfile,
   createSeed,
-} from "./workspace-service.test-fixtures";
+} from "./test-fixtures";
 import {
   createStageCandidate,
   createTestBundle,
-} from "./workspace-service.resume-analysis.shared";
+} from "./resume-import.test-support";
 
 describe("resume import reconciliation", () => {
   const emptyProfile = () => ({

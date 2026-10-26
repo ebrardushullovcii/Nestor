@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { buildDiscoveryJobs, } from "./matching";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 
 describe("matching helpers", () => {
   test("orders equal-score discovery jobs by detail quality and recency", () => {

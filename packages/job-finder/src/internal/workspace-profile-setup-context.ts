@@ -23,7 +23,7 @@ import {
 } from "./resume-import-recovery";
 import { createUniqueId } from "./shared";
 import { normalizeSearchPreferences } from "./workspace-helpers";
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 
 function buildBundleFromStoredResume(
   profile: CandidateProfile,
@@ -98,18 +98,16 @@ function getCandidateResolutionForReviewStatus(
 }
 
 async function syncLatestResumeImportCandidatesWithSetupState(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: {
     documentBundles: readonly ResumeDocumentBundle[];
     latestResumeImportRun: Awaited<
-      ReturnType<
-        WorkspaceServiceContext["repository"]["getLatestResumeImportRun"]
-      >
+      ReturnType<ProfileContext["repository"]["getLatestResumeImportRun"]>
     >;
     profileSetupState: ProfileSetupState;
     candidates: readonly Awaited<
       ReturnType<
-        WorkspaceServiceContext["repository"]["listResumeImportFieldCandidates"]
+        ProfileContext["repository"]["listResumeImportFieldCandidates"]
       >
     >[number][];
   },
@@ -203,9 +201,7 @@ async function syncLatestResumeImportCandidatesWithSetupState(
   };
 }
 
-export function createWorkspaceProfileSetupContextHelpers(
-  ctx: WorkspaceServiceContext,
-) {
+export function createWorkspaceProfileSetupContextHelpers(ctx: ProfileContext) {
   function freezeDisplayValue(value: unknown): void {
     if (value === null || typeof value !== "object" || Object.isFrozen(value))
       return;
@@ -242,18 +238,21 @@ export function createWorkspaceProfileSetupContextHelpers(
         normalizedPreferences.set(rawSearchPreferences, searchPreferences);
       }
     }
+    // A visual scan is live while its import's foreground runs here, or
+    // while its deferred branch does; only then is it not cut off.
+    const importActive = isResumeImportActiveInProcess(ctx);
+    const visionActive =
+      importActive ||
+      (persistedLatestResumeImportRun !== null &&
+        ctx.activeResumeVisionRunIds.has(persistedLatestResumeImportRun.id));
     const latestResumeImportRun = persistedLatestResumeImportRun
       ? recoverInterruptedTextImportRun({
           run: recoverInterruptedDeferredVisionRun({
             run: persistedLatestResumeImportRun,
-            isActiveInCurrentProcess: ctx.activeResumeVisionRunIds.has(
-              persistedLatestResumeImportRun.id,
-            ),
+            isActiveInCurrentProcess: visionActive,
           }),
-          isImportActiveInCurrentProcess: isResumeImportActiveInProcess(ctx),
-          isVisionActiveInCurrentProcess: ctx.activeResumeVisionRunIds.has(
-            persistedLatestResumeImportRun.id,
-          ),
+          isImportActiveInCurrentProcess: importActive,
+          isVisionActiveInCurrentProcess: visionActive,
         })
       : null;
     const profile = clearSettledVisionDeferredWarnings({

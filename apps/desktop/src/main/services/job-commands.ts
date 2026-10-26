@@ -46,10 +46,10 @@ export function setJobSearchServiceFactory(
 async function getSearchService(): Promise<JobSearchService> {
   if (searchService) return searchService;
   if (!createSearchService) {
-    // The search runs on the workspace's browser and AI; starting the
-    // workspace registers how to build it.
-    const { getJobFinderWorkspaceService } = await import("./job-finder");
-    await getJobFinderWorkspaceService();
+    // The search runs on Job Finder's browser and AI; starting its runtime
+    // registers how to build it.
+    const { startJobFinderRuntime } = await import("./job-finder/runtime");
+    await startJobFinderRuntime();
   }
   if (!createSearchService) {
     throw new Error("Search could not start. Try again in a moment.");
@@ -78,8 +78,8 @@ async function getSearchService(): Promise<JobSearchService> {
   }
 }
 
-/** Scores jobs a closed app left without a fit. */
-function scoreUnscoredJobs(): void {
+/** Scores saved jobs that have no fit yet. */
+export function scoreUnscoredJobs(): void {
   void getSearchService()
     .then((service) => service.scoreUnscored())
     .catch((error: unknown) => {
@@ -98,8 +98,9 @@ export async function runJobCommand<K extends JobCommandName>(
     name === "move_jobs" &&
     JOB_COMMANDS.move_jobs.input.parse(input).to === "shortlisted"
   ) {
-    const { getJobFinderWorkspaceService } = await import("./job-finder");
-    await getJobFinderWorkspaceService();
+    // The resume writer starts with the runtime.
+    const { startJobFinderRuntime } = await import("./job-finder/runtime");
+    await startJobFinderRuntime();
   }
   runner ??= createJobCommandRunner({
     store: getJobStore(),

@@ -31,9 +31,8 @@ vi.mock("electron", () => ({
 import "./index";
 
 type ExposedTestApi = {
-  failNextSave: (surface: string) => Promise<unknown>;
-  loadApplyQueueDemo: () => Promise<unknown>;
-  loadWorkHistoryReviewDemo: () => Promise<unknown>;
+  importResumeFromPath: (sourcePath: string) => Promise<unknown>;
+  loadApplicationsStoreDemo: (input: { sourceUrl: string }) => Promise<unknown>;
 };
 
 const exposedTestApi = (() => {
@@ -47,28 +46,28 @@ const exposedTestApi = (() => {
 })();
 
 describe("preload desktop test API surface when enabled", () => {
-  it("exposes the one-shot save-failure hook over its typed channel", async () => {
-    expect(exposedTestApi?.failNextSave).toBeTypeOf("function");
+  it("imports a resume from a path over its typed channel", async () => {
+    expect(exposedTestApi?.importResumeFromPath).toBeTypeOf("function");
 
     // Preload also invokes a readiness channel of its own, so answer by
     // channel rather than queueing a single value.
+    const imported = { profile: {}, latestResumeImportRun: null };
     mockInvoke.mockImplementation((channel: string) =>
-      channel === "job-finder:test-fail-next-save"
-        ? Promise.resolve({ ok: true })
+      channel === "job-finder:test-import-resume-from-path"
+        ? Promise.resolve(imported)
         : Promise.resolve(undefined),
     );
 
-    await expect(exposedTestApi?.failNextSave("settings")).resolves.toEqual({
-      ok: true,
-    });
+    await expect(
+      exposedTestApi?.importResumeFromPath("synthetic.txt"),
+    ).resolves.toBe(imported);
     expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:test-fail-next-save",
-      "settings",
+      "job-finder:test-import-resume-from-path",
+      { sourcePath: "synthetic.txt" },
     );
   });
 
-  it("keeps the apply-queue demo loader on the same gated surface", () => {
-    expect(exposedTestApi?.loadApplyQueueDemo).toBeTypeOf("function");
-    expect(exposedTestApi?.loadWorkHistoryReviewDemo).toBeTypeOf("function");
+  it("keeps the Applications demo loader on the same gated surface", () => {
+    expect(exposedTestApi?.loadApplicationsStoreDemo).toBeTypeOf("function");
   });
 });

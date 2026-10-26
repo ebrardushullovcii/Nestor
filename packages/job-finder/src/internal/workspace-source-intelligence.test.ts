@@ -17,7 +17,7 @@ import {
 import { setDiscoveryFeedExecutor } from "./discovery-feed-executor";
 import {
   createSourceInstructionArtifact,
-} from "../workspace-service.test-fixtures";
+} from "../test-fixtures";
 
 afterEach(() => {
   vi.useRealTimers();

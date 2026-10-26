@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { access, copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  JobFinderWorkspaceSnapshotSchema,
   canRetrySavedResumeImport,
+  type CandidateProfile,
   type ResumeImportProgressEvent,
   type ResumeImportRun,
   type ResumeSourceDocument,
@@ -14,7 +14,7 @@ import {
   getPdfPageCount,
 } from "../../adapters/resume-document";
 import { generateResumeVisionImages } from "../../adapters/resume-vision-images";
-import { getJobFinderWorkspaceService } from "./workspace-service";
+import { startJobFinderRuntime } from "./runtime";
 import { getJobFinderDocumentsDirectory } from "./paths";
 
 export interface ImportResumeFromSourcePathOptions {
@@ -44,6 +44,32 @@ export function resolveResumeWorkingCopyPath(input: {
     return null;
   }
   return path.join(input.documentsDirectory, `${timestamp}_${fileName}`);
+}
+
+/** The profile an import left, with the run that wrote it. */
+export interface ImportedResume {
+  profile: CandidateProfile;
+  latestResumeImportRun: ResumeImportRun | null;
+}
+
+/**
+ * Waits for one import step, or for the import to be stopped: a stop never
+ * waits on a file read or local image render, and their late result is
+ * dropped.
+ */
+function untilStopped<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Error("Import stopped."));
+    signal.addEventListener("abort", stop, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", stop));
+  });
 }
 
 export class ResumeImportRetryUnavailableError extends Error {}
@@ -78,7 +104,7 @@ export async function assertResumeFileOpens(
 export async function retryInterruptedResumeImport(
   latestRun: ResumeImportRun | null,
   options: Omit<ImportResumeFromSourcePathOptions, "fileName"> = {},
-) {
+): Promise<ImportedResume> {
   if (!latestRun || !canRetrySavedResumeImport(latestRun)) {
     throw new ResumeImportRetryUnavailableError(
       "There is no failed import to try again. Choose your resume file to import it.",
@@ -106,30 +132,47 @@ export async function retryInterruptedResumeImport(
   });
 }
 
-let activeDesktopImports = 0;
+const activeDesktopImports = new Map<Promise<unknown>, AbortController>();
 
 export function isDesktopResumeImportActive(): boolean {
-  return activeDesktopImports > 0;
+  return activeDesktopImports.size > 0;
 }
 
-export async function importResumeFromSourcePath(
+/**
+ * Stops every import this window started and waits for each to end, so a
+ * reset never races a file copy or profile write it is about to clear.
+ */
+export async function stopDesktopResumeImports(): Promise<void> {
+  for (const controller of activeDesktopImports.values()) controller.abort();
+  await Promise.allSettled([...activeDesktopImports.keys()]);
+}
+
+export function importResumeFromSourcePath(
   sourcePath: string,
   options: ImportResumeFromSourcePathOptions = {},
-) {
-  activeDesktopImports += 1;
-  try {
-    return await importResumeFile(sourcePath, options);
-  } finally {
-    activeDesktopImports -= 1;
-  }
+): Promise<ImportedResume> {
+  const controller = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal;
+  const work = importResumeFile(sourcePath, { ...options, signal });
+  activeDesktopImports.set(work, controller);
+  void work
+    .finally(() => activeDesktopImports.delete(work))
+    .catch(() => undefined);
+  return work;
 }
 
 async function importResumeFile(
   sourcePath: string,
   options: ImportResumeFromSourcePathOptions,
-) {
+): Promise<ImportedResume> {
   const targetDirectory = getJobFinderDocumentsDirectory();
-  const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
+  const { profileService, repository } = await startJobFinderRuntime();
+  const readImported = async (): Promise<ImportedResume> => ({
+    profile: await repository.getProfile(),
+    latestResumeImportRun: await repository.getLatestResumeImportRun(),
+  });
   const useVision = options.useVision ?? true;
   // The four stages are the ones the contract names, in the order they run, so
   // the renderer can show "step 2 of 4" instead of one label that sits frozen
@@ -184,10 +227,13 @@ async function importResumeFile(
     sourceFileKind !== "plain_text" &&
     sourceFileKind !== "markdown";
 
-  await assertResumeFileOpens(sourcePath, fileName);
-  await copyFile(sourcePath, targetPath);
+  await untilStopped(
+    assertResumeFileOpens(sourcePath, fileName),
+    options.signal,
+  );
+  await untilStopped(copyFile(sourcePath, targetPath), options.signal);
   const sourceSha256 = createHash("sha256")
-    .update(await readFile(targetPath))
+    .update(await untilStopped(readFile(targetPath), options.signal))
     .digest("hex");
   reportProgress(
     "reading_document",
@@ -215,10 +261,13 @@ async function importResumeFile(
       }))
     : Promise.resolve({ artifact: null, warnings: [] });
 
-  const [extractedResume, generatedVisionArtifact] = await Promise.all([
-    extractResumeDocument(targetPath, extractionInput),
-    generatedVisionArtifactPromise,
-  ]);
+  const [extractedResume, generatedVisionArtifact] = await untilStopped(
+    Promise.all([
+      extractResumeDocument(targetPath, extractionInput),
+      generatedVisionArtifactPromise,
+    ]),
+    options.signal,
+  );
   const visionWarnings = generatedVisionArtifact.warnings;
   const extractionStatus = extractedResume.textContent
     ? "not_started"
@@ -258,16 +307,19 @@ async function importResumeFile(
       ? "Reading your resume and filling in your profile. Anything that would replace details you already saved waits for your review."
       : "Checking what can be recovered from this file.",
   );
-  const snapshot = await jobFinderWorkspaceService
+  const snapshot = await profileService
     .runResumeImport({
       baseResume,
       ...(options.signal ? { signal: options.signal } : {}),
       documentBundle: extractedResume.bundle,
       importWarnings: [...extractedResume.warnings, ...visionWarnings],
-      visionArtifact: generatedVisionArtifact.artifact,
+      ...(generatedVisionArtifact.artifact
+        ? { visionArtifact: generatedVisionArtifact.artifact }
+        : {}),
     })
+    .then(readImported)
     .catch(async (error: unknown) => {
-      const saved = await jobFinderWorkspaceService.getWorkspaceSnapshot();
+      const saved = await readImported();
       if (
         saved.profile.baseResume.id === resumeId &&
         saved.latestResumeImportRun?.sourceResumeId === resumeId &&
@@ -286,5 +338,5 @@ async function importResumeFile(
         ? "Saving the imported resume and review items."
         : "Saving the import issue and recovery guidance.",
   );
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  return snapshot;
 }

@@ -11,7 +11,6 @@ import {
 import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JOB_COMMANDS,
-  JobFinderIntelligenceStateSchema,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
@@ -20,18 +19,18 @@ import {
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
+  type CandidateProfile,
   type JobCommandOutputs,
   type JobCommandName,
-  type JobFinderRepositoryState,
-  type JobFinderWorkspaceSnapshot,
+  type JobSearchPreferences,
   type SavedJob,
 } from "@nestor/contracts";
 import {
   createAssistantRepository,
-  createInMemoryJobFinderRepository,
   type JobFinderRepository,
 } from "@nestor/db";
 import {
+  createJobFinderRepository,
   openJobStore,
   createTrackerStore,
   type JobStore,
@@ -44,8 +43,9 @@ import {
   AssistantSessionHost,
   assistantCommandTools,
   createAssistantModelHandle,
-  createJobFinderWorkspaceService,
+  createProfileService,
   createScriptedAssistantModelHandle,
+  type ProfileServiceOptions,
   type AssistantHostPorts,
   type AssistantModelResolution,
 } from "@nestor/job-finder";
@@ -59,6 +59,12 @@ import {
 
 export type AssistantLaneModel = "scripted" | "live";
 
+/** The person and goals the assistant may have changed. */
+export interface AssistantLaneSnapshot {
+  profile: CandidateProfile;
+  searchPreferences: JobSearchPreferences;
+}
+
 export interface AssistantLaneRecorder {
   searches: string[];
   applications: { jobIds: string[]; mode: string }[];
@@ -69,7 +75,7 @@ export interface AssistantLaneWorld {
   host: AssistantSessionHost;
   recorder: AssistantLaneRecorder;
   events: AssistantEvent[];
-  snapshot(): Promise<JobFinderWorkspaceSnapshot>;
+  snapshot(): Promise<AssistantLaneSnapshot>;
   jobs: readonly SavedJob[];
   /** Where a lane job sits in the job store: found, hidden, shortlisted... */
   stageOf: (laneJobId: string) => string;
@@ -166,10 +172,11 @@ function lanePosting(
   });
 }
 
-function laneSeed(): JobFinderRepositoryState {
+/** Saves the lane's synthetic person, goals and settings. */
+async function seedLaneProfile(repository: JobFinderRepository) {
   const fresh = createFreshStartCandidateProfile();
-  return {
-    profile: {
+  await repository.saveProfileAndSearchPreferences(
+    {
       ...fresh,
       id: "candidate_lane",
       firstName: "Riley",
@@ -194,7 +201,7 @@ function laneSeed(): JobFinderRepositoryState {
         lastAnalyzedAt: NOW,
       },
     },
-    searchPreferences: JobSearchPreferencesSchema.parse({
+    JobSearchPreferencesSchema.parse({
       targetRoles: ["Product Designer"],
       jobFamilies: [],
       locations: ["Remote"],
@@ -212,15 +219,18 @@ function laneSeed(): JobFinderRepositoryState {
       companyBlacklist: [],
       companyWhitelist: [],
     }),
-    profileSetupState: ProfileSetupStateSchema.parse({
+  );
+  await repository.saveProfileSetupState(
+    ProfileSetupStateSchema.parse({
       status: "completed",
       currentStep: "ready_check",
       completedAt: NOW,
       reviewItems: [],
       lastResumedAt: null,
     }),
-    savedJobs: [...LANE_JOBS],
-    settings: JobFinderSettingsSchema.parse({
+  );
+  await repository.saveSettings(
+    JobFinderSettingsSchema.parse({
       resumeTemplateId: "classic_ats",
       resumeFormat: "pdf",
       fontPreset: "inter_requisite",
@@ -230,14 +240,10 @@ function laneSeed(): JobFinderRepositoryState {
       allowAutoSubmitOverride: false,
       discoveryOnly: false,
     }),
-    activityControl: { paused: false, pausedAt: null, reason: null },
-    intelligence: JobFinderIntelligenceStateSchema.parse({}),
-  } as JobFinderRepositoryState;
+  );
 }
 
-type DocumentManager = Parameters<
-  typeof createJobFinderWorkspaceService
->[0]["documentManager"];
+type DocumentManager = ProfileServiceOptions["documentManager"];
 
 function laneDocumentManager(): DocumentManager {
   const unavailable = () =>
@@ -379,11 +385,13 @@ export function resolveLaneModel(
   };
 }
 
-export function createAssistantLaneWorld(
+export async function createAssistantLaneWorld(
   model: AssistantLaneModel,
-): AssistantLaneWorld {
-  const repository = createInMemoryJobFinderRepository(laneSeed());
-  const service = createJobFinderWorkspaceService({
+): Promise<AssistantLaneWorld> {
+  const jobs = laneJobStore();
+  const repository = createJobFinderRepository(jobs.store);
+  await seedLaneProfile(repository);
+  const service = createProfileService({
     repository,
     aiClient: createDeterministicJobFinderAiClient(
       "The assistant lane uses the deterministic Job Finder client.",
@@ -399,7 +407,6 @@ export function createAssistantLaneWorld(
     applications: [],
     sends: [],
   };
-  const jobs = laneJobStore();
   const applications = createApplicationStore(jobs.store);
   const needsYou = createNeedsYouCommandRunner(() => applications, {
     retry: () => Promise.resolve(),
@@ -422,7 +429,10 @@ export function createAssistantLaneWorld(
     recorder,
     events,
     jobs: LANE_JOBS,
-    snapshot: () => service.getWorkspaceSnapshot(),
+    snapshot: async () => ({
+      profile: await repository.getProfile(),
+      searchPreferences: await repository.getSearchPreferences(),
+    }),
     stageOf: (laneJobId) => {
       const id = jobs.ids.get(laneJobId);
       return (id ? jobs.store.getJob(id)?.stage : null) ?? "missing";

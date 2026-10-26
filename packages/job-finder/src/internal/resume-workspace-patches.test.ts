@@ -8,7 +8,7 @@ import {
 } from "./resume-workspace-helpers";
 import { fnv1a32 } from "@nestor/core";
 import { normalizeText } from "./shared";
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 
 const updatedAt = "2026-08-09T12:00:00.000Z";
 

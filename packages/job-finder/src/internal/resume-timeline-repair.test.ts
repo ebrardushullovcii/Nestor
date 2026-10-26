@@ -16,8 +16,9 @@ import {
   deriveResumeTimelineRepairProposals,
   persistResumeTimelineRepairAction,
 } from "./resume-timeline-repair";
-import { createFileJobFinderRepository } from "@nestor/db";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createJobFinderRepository, openJobStore } from "@nestor/db/job-store";
+import { createSeededRepository } from "../profile-service.test-support";
+import { createSeed } from "../test-fixtures";
 
 function experience(
   id: string,
@@ -320,10 +321,13 @@ describe("resume timeline repair", () => {
       resumeImportFieldCandidates: [sourceCandidate],
       resumeImportDocumentBundles: [],
     };
-    let repository = await createFileJobFinderRepository({
-      filePath,
-      seed: repositorySeed,
-    });
+    let store = openJobStore(filePath);
+    let repository = await createSeededRepository(repositorySeed, store);
+    const reopen = () => {
+      store.close();
+      store = openJobStore(filePath);
+      return createJobFinderRepository(store);
+    };
 
     try {
       await persistResumeTimelineRepairAction({
@@ -333,11 +337,7 @@ describe("resume timeline repair", () => {
         action: "accept",
         occurredAt: "2026-07-31T10:02:00.000Z",
       });
-      await repository.close();
-      repository = await createFileJobFinderRepository({
-        filePath,
-        seed: repositorySeed,
-      });
+      repository = reopen();
 
       expect(
         (await repository.getProfile()).experiences.find(
@@ -357,11 +357,7 @@ describe("resume timeline repair", () => {
         action: "undo",
         occurredAt: "2026-07-31T10:03:00.000Z",
       });
-      await repository.close();
-      repository = await createFileJobFinderRepository({
-        filePath,
-        seed: repositorySeed,
-      });
+      repository = reopen();
 
       expect(
         (await repository.getProfile()).experiences.find(
@@ -381,7 +377,7 @@ describe("resume timeline repair", () => {
         ),
       ).toEqual(["accept", "undo"]);
     } finally {
-      await repository.close();
+      store.close();
       await rm(tempDirectory, { recursive: true, force: true });
     }
   });

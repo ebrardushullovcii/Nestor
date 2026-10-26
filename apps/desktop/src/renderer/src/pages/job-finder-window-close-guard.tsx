@@ -5,7 +5,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { JobFinderLeaveConfirmation } from "./use-job-finder-page-controller";
+import type { JobFinderLeaveConfirmation } from "./job-finder-unsaved-changes-dialog";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import {
   hasOpenJobFinderOverlays,

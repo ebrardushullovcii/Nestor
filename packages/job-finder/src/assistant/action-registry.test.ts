@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
+import type { AssistantWorkspaceCommands } from "./workspace-commands";
 import type { JobFinderActionId } from "./action-registry";
 import { executeJobFinderAction, JOB_FINDER_ACTIONS } from "./action-registry";
 import type { AssistantHostPorts } from "./ports";
@@ -32,7 +32,7 @@ describe("registered user actions", () => {
   const calls: [
     JobFinderActionId,
     unknown,
-    keyof JobFinderWorkspaceService,
+    keyof AssistantWorkspaceCommands,
     unknown[],
   ][] = [
     ["cancel-source-debug", { runId: "r" }, "cancelSourceDebug", ["r"]],
@@ -61,7 +61,7 @@ describe("registered user actions", () => {
     "%s calls the UI's service method with the exact contract",
     async (name, input, method, args) => {
       const methodCall = vi.fn().mockResolvedValue(true);
-      const service = new Proxy({} as JobFinderWorkspaceService, {
+      const service = new Proxy({} as AssistantWorkspaceCommands, {
         get: (_target, key) => (key === method ? methodCall : undefined),
       });
       await executeJobFinderAction(name, input, { service });
@@ -81,7 +81,7 @@ describe("registered user actions", () => {
     async (name, input) => {
       const host = vi.fn().mockResolvedValue({ ok: true });
       await executeJobFinderAction(name, input, {
-        service: {} as JobFinderWorkspaceService,
+        service: {} as AssistantWorkspaceCommands,
         host,
       });
       expect(host).toHaveBeenCalledExactlyOnceWith(
@@ -97,7 +97,7 @@ describe("registered user actions", () => {
       .mockResolvedValue({ part: { type: "proposal" } });
     const executeAction = vi.fn().mockResolvedValue({ asset: { id: "f" } });
     const context: AssistantToolContext = {
-      service: {} as JobFinderWorkspaceService,
+      service: {} as AssistantWorkspaceCommands,
       ports: {
         executeAction,
         publishWorkspaceUpdate: vi.fn(),

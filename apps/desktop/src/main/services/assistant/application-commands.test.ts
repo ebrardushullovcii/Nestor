@@ -20,11 +20,10 @@ vi.mock("../job-finder/application-store", () => ({
   getApplicationStore: () => applications,
 }));
 vi.mock("../job-store", () => ({ getJobStore: () => jobs }));
-vi.mock("../job-finder/workspace-service", () => ({
-  getJobFinderWorkspaceService: () => Promise.resolve({}),
+vi.mock("../job-finder/runtime", () => ({
   startJobFinderRuntime: () =>
     Promise.resolve({
-      jobFinderRepository: {
+      repository: {
         getSettings: () => Promise.resolve({ applicationAutomationMode: mode }),
         getActivityControl: () => Promise.resolve({ paused }),
       },

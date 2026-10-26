@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 import { buildApplyLetterDependencies } from "./agent-application-preparation";
 
 // These tests stub semantic judgment to inspect the letter boundary. The source

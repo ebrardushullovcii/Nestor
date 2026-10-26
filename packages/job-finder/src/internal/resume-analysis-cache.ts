@@ -14,7 +14,7 @@ import {
   type ResumeImportVisionArtifact,
 } from "@nestor/contracts";
 
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 import { createUniqueId } from "./shared";
 
 export const RESUME_ANALYSIS_PROMPT_VERSION = "resume-analysis-prompts-v2";
@@ -144,7 +144,7 @@ export interface CompatibleResumeAnalysisCacheEntry {
 }
 
 export async function findCompatibleResumeAnalysisCacheEntry(
-  ctx: Pick<WorkspaceServiceContext, "repository">,
+  ctx: Pick<ProfileContext, "repository">,
   identity: ResumeAnalysisCacheIdentity | null,
 ): Promise<CompatibleResumeAnalysisCacheEntry | null> {
   if (!identity) {

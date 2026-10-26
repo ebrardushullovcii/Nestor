@@ -350,7 +350,6 @@ async function runCapture() {
         );
       }
 
-      await window.nestor.jobFinder.test.loadApplyQueueDemo();
       // An application in Applications, on the job store: the interview
       // write-back lands there as a tracker event on that job.
       const { approvedIds } =

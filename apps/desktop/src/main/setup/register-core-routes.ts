@@ -17,7 +17,6 @@ export interface FeatureRoutesReadyResponse {
  */
 export function registerCoreDesktopRoutes(
   ipcMain: IpcMain,
-  jobFinderBootstrapRoutesReady: () => Promise<void>,
   jobFinderRoutesReady: () => Promise<void>,
   jobFinderAssetRoutesReady: () => Promise<void>,
   liveAssistantRoutesReady: () => Promise<void>,
@@ -25,13 +24,6 @@ export function registerCoreDesktopRoutes(
   registerSystemRouteHandlers(ipcMain);
   registerWindowRouteHandlers(ipcMain);
   registerBrowserRoutes(ipcMain);
-  ipcMain.handle(
-    "system:job-finder-bootstrap-routes-ready",
-    async (): Promise<FeatureRoutesReadyResponse> => {
-      await jobFinderBootstrapRoutesReady();
-      return { ready: true };
-    },
-  );
   ipcMain.handle(
     "system:job-finder-routes-ready",
     async (): Promise<FeatureRoutesReadyResponse> => {

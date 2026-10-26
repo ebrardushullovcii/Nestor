@@ -5,32 +5,21 @@ import {
   ImportResumeRequestSchema,
   ResumeImportProgressEventSchema,
   SourceDebugProgressEventSchema,
-  type JobFinderWorkspaceSnapshot,
   type ResumeImportRun,
+  type SourceDebugRunRecord,
 } from "@nestor/contracts";
 import {
-  getJobFinderWorkspaceService,
   importResumeFromSourcePath,
   retryInterruptedResumeImport,
-} from "../services/job-finder";
-import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
-import { publishJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
+  type ImportedResume,
+} from "../services/job-finder/import-resume";
+import { getProfileService } from "../services/job-finder/runtime";
+import { notifyJobFinderChange } from "../services/job-finder/changes";
 
 /**
  * Resume import and site checks started from a window: the file picker,
- * cancellation and progress events. Both the old workspace routes and the
- * Profile workflow routes run these; each answers in its own shape.
+ * cancellation and progress events, for the Profile workflow routes.
  */
-
-export async function readWorkspaceProjection(
-  service: Awaited<ReturnType<typeof getJobFinderWorkspaceService>>,
-): Promise<JobFinderWorkspaceSnapshot> {
-  if (!service.getWorkspaceProjection) {
-    throw new Error("The interactive workspace view is unavailable.");
-  }
-  // Main keeps full validated jobs; trim listing evidence at the IPC boundary.
-  return service.getWorkspaceProjection();
-}
 
 const activeResumeImportRequests = new WeakMap<
   object,
@@ -51,7 +40,7 @@ export async function importResumeForRequest(
   event: IpcMainInvokeEvent,
   payload: unknown,
   latestRun: () => Promise<ResumeImportRun | null>,
-): Promise<JobFinderWorkspaceSnapshot | null> {
+): Promise<ImportedResume | null> {
   const importRequest = ImportResumeRequestSchema.parse(payload ?? {});
   const requestId = importRequest.requestId ?? null;
   const abortController = new AbortController();
@@ -182,66 +171,42 @@ export async function importResumeForRequest(
 
 /**
  * Checks how to read one job site, reporting progress to the window that
- * asked. An interrupted check is cancelled; a navigation failure the
- * workflow already recorded answers with that recorded state.
+ * asked. Null when the check was stopped, or met a page that would not load
+ * after the workflow already recorded that.
  */
 export async function checkSiteForRequest(
   event: IpcMainInvokeEvent,
-  input: {
-    targetId: string;
-    requestId: string | null;
-    readabilityTimeoutMs: number | null;
-  },
-): Promise<JobFinderWorkspaceSnapshot> {
-  const { targetId, requestId, readabilityTimeoutMs } = input;
-  const service = await getJobFinderWorkspaceService();
-  let snapshot: JobFinderWorkspaceSnapshot;
+  input: { targetId: string; requestId: string | null },
+): Promise<SourceDebugRunRecord | null> {
+  const { targetId, requestId } = input;
+  const service = await getProfileService();
   try {
-    const run = (signal?: AbortSignal) =>
-      service.runSourceDebug(
-        targetId,
-        signal,
-        requestId
-          ? (progressEvent) => {
-              event.sender.send(
-                `job-finder:source-debug-progress:${requestId}`,
-                SourceDebugProgressEventSchema.parse(progressEvent),
-              );
-              publishJobFinderWorkspaceUpdate(event.sender);
-            }
-          : undefined,
-      );
-    snapshot = readabilityTimeoutMs
-      ? await runBoundedNewSourceReadabilityCheck(
-          (signal) => run(signal),
-          readabilityTimeoutMs,
-        )
-      : await run();
+    return await service.runSourceDebug(
+      targetId,
+      undefined,
+      requestId
+        ? (progressEvent) => {
+            event.sender.send(
+              `job-finder:source-debug-progress:${requestId}`,
+              SourceDebugProgressEventSchema.parse(progressEvent),
+            );
+            notifyJobFinderChange();
+          }
+        : undefined,
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (error instanceof Error && error.name === "AbortError") {
-      const interrupted = await readWorkspaceProjection(service);
-      const runningRun = interrupted.recentSourceDebugRuns.find(
-        (run) => run.targetId === targetId && run.state === "running",
-      );
-      snapshot = runningRun
-        ? await service.cancelSourceDebug(runningRun.id)
-        : interrupted;
-    } else {
-      if (
-        !/(?:ApplicationNavigationError|page\.(?:goto|waitFor)|navigation.*(?:failed|timeout)|Timeout \d+ms exceeded|net::ERR_)/iu.test(
-          detail,
-        )
-      ) {
-        throw error;
-      }
-      // The workflow records a screen-safe failed result before this route
-      // fallback is reached. Return that durable snapshot instead of letting
-      // Electron paint its transport wrapper across the window.
-      snapshot = await readWorkspaceProjection(service);
-    }
+    if (
+      !(error instanceof Error && error.name === "AbortError") &&
+      !/(?:ApplicationNavigationError|page\.(?:goto|waitFor)|navigation.*(?:failed|timeout)|Timeout \d+ms exceeded|net::ERR_)/iu.test(
+        detail,
+      )
+    )
+      throw error;
+    // The workflow records a screen-safe result before this is reached;
+    // the Sources tab reads it instead of Electron's transport wrapper.
+    return (await service.listSourceDebugRuns(targetId))[0] ?? null;
+  } finally {
+    notifyJobFinderChange();
   }
-
-  publishJobFinderWorkspaceUpdate(event.sender);
-  return snapshot;
 }

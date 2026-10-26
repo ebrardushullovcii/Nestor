@@ -1,6 +1,5 @@
 import path from "node:path";
 import type * as FsPromises from "node:fs/promises";
-import type * as ContractsModule from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
@@ -22,8 +21,9 @@ const {
   mockGetJobFinderResetTrashRootDirectory,
   mockGetJobFinderUserDataDirectory,
   mockResolveJobFinderWorkspaceRelativePath,
-  mockGetJobFinderWorkspaceService,
-  mockResetWorkspace,
+  mockGetProfileService,
+  mockShutdownRuntime,
+  mockStartRuntime,
   mockCloseBrowser,
   mockClearPersonPause,
   mockClearBrowserStorage,
@@ -33,6 +33,7 @@ const {
   mockSavePause,
   mockDiscardJobSearch,
   mockResetAssistantStore,
+  mockStopImports,
 } = vi.hoisted(() => ({
   mockMkdir: vi.fn(),
   mockOpen: vi.fn(),
@@ -52,8 +53,9 @@ const {
   mockGetJobFinderResetTrashRootDirectory: vi.fn(),
   mockGetJobFinderUserDataDirectory: vi.fn(),
   mockResolveJobFinderWorkspaceRelativePath: vi.fn(),
-  mockGetJobFinderWorkspaceService: vi.fn(),
-  mockResetWorkspace: vi.fn(),
+  mockGetProfileService: vi.fn(),
+  mockShutdownRuntime: vi.fn(),
+  mockStartRuntime: vi.fn(),
   mockCloseBrowser: vi.fn(),
   mockClearPersonPause: vi.fn(),
   mockClearBrowserStorage: vi.fn(),
@@ -63,6 +65,7 @@ const {
   mockSavePause: vi.fn(),
   mockDiscardJobSearch: vi.fn(),
   mockResetAssistantStore: vi.fn(),
+  mockStopImports: vi.fn(),
 }));
 
 vi.mock("@nestor/db/job-store", () => ({
@@ -146,20 +149,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const snapshotParse = vi.hoisted(() => ({ fail: false }));
-vi.mock("@nestor/contracts", async (importOriginal) => ({
-  ...(await importOriginal<typeof ContractsModule>()),
-  JobFinderWorkspaceSnapshotSchema: {
-    parse: (value: unknown) => {
-      if (snapshotParse.fail) {
-        snapshotParse.fail = false;
-        throw new Error("The workspace snapshot could not be read.");
-      }
-      return value;
-    },
-  },
-}));
-
 vi.mock("./paths", () => ({
   getApplicationDocumentsDirectory: mockGetApplicationDocumentsDirectory,
   getBrowserAgentProfileDirectory: mockGetBrowserAgentProfileDirectory,
@@ -175,8 +164,14 @@ vi.mock("./paths", () => ({
     mockResolveJobFinderWorkspaceRelativePath,
 }));
 
-vi.mock("./workspace-service", () => ({
-  getJobFinderWorkspaceService: mockGetJobFinderWorkspaceService,
+vi.mock("./import-resume", () => ({
+  stopDesktopResumeImports: mockStopImports,
+}));
+
+vi.mock("./runtime", () => ({
+  getProfileService: mockGetProfileService,
+  shutdownJobFinderRuntime: mockShutdownRuntime,
+  startJobFinderRuntime: mockStartRuntime,
 }));
 
 import {
@@ -344,19 +339,12 @@ beforeEach(() => {
   mockReadFile.mockRejectedValue(enoentError());
   mockStat.mockRejectedValue(enoentError());
   mockReaddir.mockRejectedValue(enoentError());
-  mockGetJobFinderWorkspaceService.mockResolvedValue({
-    resetWorkspace: mockResetWorkspace,
+  mockGetProfileService.mockResolvedValue({
     setActivityControl: mockSetActivityControl,
   });
-  mockResetWorkspace.mockImplementation(
-    async (
-      _seed: unknown,
-      options?: { beforeStateReset?: () => Promise<void> },
-    ) => {
-      await options?.beforeStateReset?.();
-      return { snapshotMarker: "test-snapshot" };
-    },
-  );
+  mockShutdownRuntime.mockResolvedValue(undefined);
+  mockStopImports.mockResolvedValue(undefined);
+  mockStartRuntime.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -364,14 +352,7 @@ afterEach(() => {
 });
 
 test("browser reset for restore keeps the global pause without latching a person-close pause", async () => {
-  const snapshot = { snapshotMarker: "paused-workspace" };
-  const getWorkspaceSnapshot = vi.fn(() => Promise.resolve(snapshot));
-  mockGetJobFinderWorkspaceService.mockResolvedValueOnce({
-    setActivityControl: mockSetActivityControl,
-    getWorkspaceSnapshot,
-  });
-
-  expect(await resetJobFinderBrowser()).toBe(snapshot);
+  await resetJobFinderBrowser();
   expect(mockSetActivityControl).toHaveBeenCalledExactlyOnceWith({
     paused: true,
     reason: "Browser reset",
@@ -386,7 +367,7 @@ test("browser reset for restore keeps the global pause without latching a person
   expect(mockClearBrowserCache.mock.invocationCallOrder[0]).toBeLessThan(
     mockClearPersonPause.mock.invocationCallOrder[0]!,
   );
-  expect(mockResetWorkspace).not.toHaveBeenCalled();
+  expect(mockShutdownRuntime).not.toHaveBeenCalled();
 });
 
 /** Whether anything lowered the pause; saves of a held pause don't count. */
@@ -398,8 +379,8 @@ const pauseLowered = () =>
 describe("the pause through a reset", () => {
   test.each([
     [
-      "the workspace reset",
-      () => mockResetWorkspace.mockRejectedValueOnce(new Error("locked")),
+      "stopping Job Finder",
+      () => mockShutdownRuntime.mockRejectedValueOnce(new Error("locked")),
     ],
     [
       "the job-store clear",
@@ -411,12 +392,6 @@ describe("the pause through a reset", () => {
     [
       "the Assistant's store",
       () => mockResetAssistantStore.mockRejectedValueOnce(new Error("locked")),
-    ],
-    [
-      "the snapshot",
-      () => {
-        snapshotParse.fail = true;
-      },
     ],
   ])("a failure in %s leaves work paused", async (_stage, inject) => {
     inject();
@@ -441,12 +416,12 @@ describe("the pause through a reset", () => {
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
     mockResetAssistantStore.mockRejectedValueOnce(new Error("locked"));
     await expect(
-      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+      recoverPendingJobFinderWorkspaceReset(),
     ).rejects.toThrow();
     expect(pauseLowered()).toBe(false);
 
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
-    await recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() });
+    await recoverPendingJobFinderWorkspaceReset();
     expect(pauseLowered()).toBe(true);
   });
 });
@@ -470,18 +445,30 @@ describe("resetJobFinderWorkspace", () => {
       order.push("cache");
       return Promise.resolve();
     });
-    mockResetWorkspace.mockImplementationOnce(
-      async (
-        _seed: unknown,
-        options: { beforeStateReset: () => Promise<void> },
-      ) => {
-        order.push("records");
-        await options.beforeStateReset();
-        return { snapshotMarker: "test-snapshot" };
-      },
-    );
+    mockStopImports.mockImplementationOnce(() => {
+      order.push("imports");
+      return Promise.resolve();
+    });
+    mockShutdownRuntime.mockImplementationOnce(() => {
+      order.push("stop");
+      return Promise.resolve();
+    });
+    mockWriteFile.mockImplementationOnce(() => {
+      order.push("files");
+      return Promise.resolve();
+    });
     await resetJobFinderWorkspace();
-    expect(order).toEqual(["pause", "close", "storage", "cache", "records"]);
+    // Resume imports end before Job Finder stops, and both before anything
+    // is set aside or cleared.
+    expect(order).toEqual([
+      "pause",
+      "close",
+      "storage",
+      "cache",
+      "imports",
+      "stop",
+      "files",
+    ]);
     expect(mockCloseBrowser).toHaveBeenCalledWith(true);
   });
 
@@ -544,83 +531,31 @@ describe("resetJobFinderWorkspace", () => {
     await expect(resetJobFinderWorkspace()).rejects.toThrow(
       "Storage could not be cleared",
     );
-    expect(mockResetWorkspace).not.toHaveBeenCalled();
+    expect(mockShutdownRuntime).not.toHaveBeenCalled();
     expect(fileSystemEventLog).toEqual([]);
   });
-  test("creates no marker, trash, or file moves when the workspace reset is blocked", async () => {
-    mockResetWorkspace.mockRejectedValueOnce(
-      new Error(
-        "Job Finder workspace reset is unavailable while discovery is still running.",
-      ),
+  test("creates no marker, trash, or file moves when Job Finder cannot stop", async () => {
+    mockShutdownRuntime.mockRejectedValueOnce(
+      new Error("Job Finder could not stop."),
     );
 
     await expect(resetJobFinderWorkspace()).rejects.toThrow(
-      "workspace reset is unavailable while discovery is still running",
+      "Job Finder could not stop.",
     );
 
-    expect(mockResetWorkspace).toHaveBeenCalledTimes(1);
     expect(fileSystemEventLog).toEqual([]);
   });
 
-  test("keeps files set aside and reports the safe state without undoing anything when the database reset fails after the moves", async () => {
-    mockResetWorkspace.mockImplementationOnce(
-      async (
-        _seed: unknown,
-        options?: { beforeStateReset?: () => Promise<void> },
-      ) => {
-        await options?.beforeStateReset?.();
-        throw new Error("workspace database reset failed");
-      },
+  test("starts Job Finder again once the reset is done", async () => {
+    await resetJobFinderWorkspace();
+    expect(mockStartRuntime).toHaveBeenCalledOnce();
+    expect(Math.max(...mockShutdownRuntime.mock.invocationCallOrder)).toBeLessThan(
+      mockStartRuntime.mock.invocationCallOrder[0]!,
     );
-
-    let caughtError: unknown;
-    try {
-      await resetJobFinderWorkspace();
-    } catch (error) {
-      caughtError = error;
-    }
-
-    expect(caughtError).toBeInstanceOf(Error);
-    const failure = caughtError as Error;
-    expect(failure.message).toContain(
-      "before the workspace database change could be confirmed",
-    );
-    expect(failure.message).toContain(
-      "will finish safely the next time the app starts",
-    );
-    expect((failure.cause as Error).message).toContain(
-      "workspace database reset failed",
-    );
-
-    const rollbackRenames = fileSystemEventLog.filter((event) => {
-      if (!event.startsWith("rename:")) {
-        return false;
-      }
-      const [, destination] = event.split("->");
-      return (
-        !destination!.includes(trashPathSegment) &&
-        allResetSourceRelativePaths.some((sourcePath) =>
-          destination!.endsWith(sourcePath),
-        )
-      );
-    });
-    expect(rollbackRenames).toEqual([]);
-    expect(mockRm).not.toHaveBeenCalledWith(intentMarkerPath, {
-      force: true,
-    });
-
-    mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
-    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
-    const repository = { reset: vi.fn() };
-    await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
-    ).resolves.toEqual({ status: "completed", token: defaultResetToken });
   });
 
   test("writes the durable intent marker before any destructive rename, then completes cleanup after the reset succeeds", async () => {
-    const snapshot = await resetJobFinderWorkspace();
-
-    expect(snapshot).toEqual({ snapshotMarker: "test-snapshot" });
+    await resetJobFinderWorkspace();
 
     const markerWriteEvents = fileSystemEventLog.filter((event) =>
       event.startsWith("write:"),
@@ -731,9 +666,7 @@ describe("resetJobFinderWorkspace", () => {
     });
 
     try {
-      const snapshot = await resetJobFinderWorkspace();
-
-      expect(snapshot).toEqual({ snapshotMarker: "test-snapshot" });
+      await resetJobFinderWorkspace();
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(String(warnSpy.mock.calls[0]?.[0])).toContain(
         "reset trash directory",
@@ -782,14 +715,11 @@ describe("resetJobFinderWorkspace", () => {
     });
     expect(rollbackRenames).toEqual([]);
 
-    mockResetWorkspace.mockRejectedValueOnce(
-      new Error("next launch must not reach the workspace"),
-    );
-    const repository = { reset: vi.fn() };
+
     await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
+      recoverPendingJobFinderWorkspaceReset(),
     ).resolves.toEqual({ status: "idle" });
-    expect(repository.reset).not.toHaveBeenCalled();
+    expect(mockResetJobStore).not.toHaveBeenCalled();
   });
 
   test("rolls back every earlier rename when a later move fails mid-reset across the expanded scope", async () => {
@@ -881,15 +811,14 @@ describe("resetJobFinderWorkspace", () => {
         force: true,
       });
 
-      const repository = { reset: vi.fn() };
       mockStat.mockResolvedValue({ size: 128, mtimeMs: Date.now() });
       mockReadFile.mockResolvedValue(buildValidMarkerRaw());
 
       await expect(
-        recoverPendingJobFinderWorkspaceReset(repository),
+        recoverPendingJobFinderWorkspaceReset(),
       ).resolves.toEqual({ status: "completed", token: defaultResetToken });
 
-      expect(repository.reset).toHaveBeenCalledTimes(1);
+      expect(mockResetJobStore).toHaveBeenCalledTimes(1);
       expect(mockRm).toHaveBeenCalledWith(intentMarkerPath, { force: true });
       expect(mockRm).toHaveBeenCalledWith(
         trashDirectoryPath(defaultResetToken),
@@ -945,23 +874,21 @@ describe("completeJobFinderWorkspaceReset", () => {
 
 describe("recoverPendingJobFinderWorkspaceReset", () => {
   test("reports idle and touches nothing when no intent marker exists", async () => {
-    const repository = { reset: vi.fn() };
 
     await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
+      recoverPendingJobFinderWorkspaceReset(),
     ).resolves.toEqual({ status: "idle" });
 
-    expect(repository.reset).not.toHaveBeenCalled();
+    expect(mockResetJobStore).not.toHaveBeenCalled();
     expect(fileSystemEventLog).toEqual([]);
   });
 
   test("completes the reset forward idempotently: remaining moves, empty seed reset, marker removal, trash cleanup", async () => {
     mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
-    const repository = { reset: vi.fn() };
 
     await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
+      recoverPendingJobFinderWorkspaceReset(),
     ).resolves.toEqual({ status: "completed", token: defaultResetToken });
 
     const renameDestinations = fileSystemEventLog
@@ -973,7 +900,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
           workspacePath("trash", `job-finder-reset-${defaultResetToken}`, sourcePath),
       ),
     );
-    expect(repository.reset).toHaveBeenCalledTimes(1);
+    expect(mockResetJobStore).toHaveBeenCalledTimes(1);
     const markerRemovalIndex = fileSystemEventLog.indexOf(
       `rm:${intentMarkerPath}`,
     );
@@ -1006,7 +933,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
     mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
     await expect(
-      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+      recoverPendingJobFinderWorkspaceReset(),
     ).resolves.toMatchObject({ status: "completed" });
     // A grant naming job 1 must not outlive a store whose next job is 1.
     expect(order).toEqual(["store:false", "assistant:false"]);
@@ -1016,7 +943,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
     mockResetAssistantStore.mockRejectedValueOnce(new Error("locked"));
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
     await expect(
-      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+      recoverPendingJobFinderWorkspaceReset(),
     ).rejects.toThrow("locked");
     expect(markerRemoved()).toBe(false);
   });
@@ -1029,10 +956,9 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       size: maxMarkerBytes + 1,
       mtimeMs: Date.now(),
     });
-    const repository = { reset: vi.fn() };
 
     try {
-      const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+      const outcome = await recoverPendingJobFinderWorkspaceReset();
 
       expect(outcome.status).toBe("quarantined");
       if (outcome.status !== "quarantined") {
@@ -1049,7 +975,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       });
 
       expect(mockReadFile).toHaveBeenCalledTimes(1);
-      expect(repository.reset).not.toHaveBeenCalled();
+      expect(mockResetJobStore).not.toHaveBeenCalled();
 
       const quarantineCall = mockRename.mock.calls.find(
         (call) => String(call[1]) !== intentMarkerPath,
@@ -1073,12 +999,11 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
   test("allows markers at the exact size cap through normal validation", async () => {
     mockStat.mockResolvedValue({ size: maxMarkerBytes, mtimeMs: Date.now() });
     mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
-    const repository = { reset: vi.fn() };
 
     await expect(
-      recoverPendingJobFinderWorkspaceReset(repository),
+      recoverPendingJobFinderWorkspaceReset(),
     ).resolves.toEqual({ status: "completed", token: defaultResetToken });
-    expect(repository.reset).toHaveBeenCalledTimes(1);
+    expect(mockResetJobStore).toHaveBeenCalledTimes(1);
   });
 
   test("quarantines malformed markers, boots startup, and never deletes or moves data paths", async () => {
@@ -1109,7 +1034,6 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
         },
       }),
     ];
-    const repository = { reset: vi.fn() };
 
     try {
       mockStat.mockResolvedValue({ size: 32, mtimeMs: Date.now() });
@@ -1117,7 +1041,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       for (const rawMarker of malformedMarkers) {
         mockReadFile.mockResolvedValueOnce(rawMarker);
 
-        const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+        const outcome = await recoverPendingJobFinderWorkspaceReset();
 
         expect(outcome).toMatchObject({
           status: "quarantined",
@@ -1128,7 +1052,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
         expectQuarantinedInvalidMarkerPath(String(lastRenameCall?.[1]));
       }
 
-      expect(repository.reset).not.toHaveBeenCalled();
+      expect(mockResetJobStore).not.toHaveBeenCalled();
 
       const dataRenames = fileSystemEventLog.filter(
         (event) =>
@@ -1167,18 +1091,17 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       fileSystemEventLog.push(`rename:${String(from)}->${String(to)}`);
       return Promise.resolve();
     });
-    const repository = { reset: vi.fn() };
 
     try {
       await expect(
-        recoverPendingJobFinderWorkspaceReset(repository),
+        recoverPendingJobFinderWorkspaceReset(),
       ).resolves.toEqual({
         status: "quarantined",
         reason: "malformed",
         quarantinedFileName: null,
       });
 
-      expect(repository.reset).not.toHaveBeenCalled();
+      expect(mockResetJobStore).not.toHaveBeenCalled();
       expect(getJobFinderStartupResetRecoveryFact()).toMatchObject({
         status: "degraded",
         reason: "marker_quarantined_malformed",
@@ -1207,10 +1130,9 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
       }
       return Promise.reject(enoentError());
     });
-    const repository = { reset: vi.fn() };
 
     try {
-      const outcome = await recoverPendingJobFinderWorkspaceReset(repository);
+      const outcome = await recoverPendingJobFinderWorkspaceReset();
 
       expect(outcome.status).toBe("quarantined");
       if (outcome.status !== "quarantined") {
@@ -1221,7 +1143,7 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
         /^job-finder-reset-intent\.invalid-.+\.json$/,
       );
 
-      expect(repository.reset).not.toHaveBeenCalled();
+      expect(mockResetJobStore).not.toHaveBeenCalled();
 
       const sidecarWriteCall = mockWriteFile.mock.calls.find((call) =>
         String(call[0]).includes(".pending-trash.json"),
@@ -1268,117 +1190,6 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
   function direntFor(name: string) {
     return { name, isDirectory: () => true, isFile: () => false };
   }
-});
-
-describe("startup recovery database reset failures", () => {
-  test("compensates moved files, removes the marker, and records a degraded fact when the database reset rejects during recovery", async () => {
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
-    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
-    const repository = {
-      reset: vi.fn().mockRejectedValueOnce(new Error("reset boom")),
-    };
-
-    try {
-      let caughtError: unknown;
-      try {
-        await recoverPendingJobFinderWorkspaceReset(repository);
-      } catch (error) {
-        caughtError = error;
-      }
-
-      expect(caughtError).toBeInstanceOf(JobFinderResetFileMoveError);
-      const resetFileMoveError = caughtError as JobFinderResetFileMoveError;
-      expect(resetFileMoveError.message).toContain(
-        "all moved files were restored",
-      );
-      expect(resetFileMoveError.message).toContain(
-        "the next launch will not reset anything",
-      );
-      expect(resetFileMoveError.restoredAllMovedSources).toBe(true);
-      expect(resetFileMoveError.markerRemoved).toBe(true);
-
-      expect(mockRm).toHaveBeenCalledWith(intentMarkerPath, { force: true });
-      const markerRemovalIndex = fileSystemEventLog.indexOf(
-        `rm:${intentMarkerPath}`,
-      );
-      const parentFlushIndex = fileSystemEventLog.indexOf(
-        `fsync:${userDataRoot}`,
-        markerRemovalIndex,
-      );
-      expect(parentFlushIndex).toBeGreaterThan(markerRemovalIndex);
-
-      expect(getJobFinderStartupResetRecoveryFact()).toEqual({
-        status: "degraded",
-        reason: "reset_recovery_failed",
-        quarantinedFileName: null,
-      });
-
-      const laterRepository = { reset: vi.fn() };
-      mockStat.mockRejectedValue(enoentError());
-      await expect(
-        recoverPendingJobFinderWorkspaceReset(laterRepository),
-      ).resolves.toEqual({ status: "idle" });
-      expect(laterRepository.reset).not.toHaveBeenCalled();
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  test("retains the marker and reports explicit guidance when compensation cannot restore every moved file", async () => {
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
-    mockReadFile.mockResolvedValue(buildValidMarkerRaw());
-    mockRename.mockImplementation((from: string, to: string) => {
-      const toPath = String(to);
-      if (toPath === intentMarkerPath) {
-        fileSystemEventLog.push(`rename:${String(from)}->${toPath}`);
-        return Promise.resolve();
-      }
-      if (toPath.includes(trashPathSegment)) {
-        fileSystemEventLog.push(`rename:${String(from)}->${toPath}`);
-        return Promise.resolve();
-      }
-      return Promise.reject(busyError("rollback blocked"));
-    });
-    const repository = {
-      reset: vi.fn().mockRejectedValueOnce(new Error("reset boom")),
-    };
-
-    try {
-      let caughtError: unknown;
-      try {
-        await recoverPendingJobFinderWorkspaceReset(repository);
-      } catch (error) {
-        caughtError = error;
-      }
-
-      expect(caughtError).toBeInstanceOf(JobFinderResetFileMoveError);
-      const resetFileMoveError = caughtError as JobFinderResetFileMoveError;
-      expect(resetFileMoveError.restoredAllMovedSources).toBe(false);
-      expect(resetFileMoveError.markerRemoved).toBe(false);
-      expect(resetFileMoveError.unrestoredSourcePathCount).toBe(
-        allResetSourceRelativePaths.length,
-      );
-      expect(resetFileMoveError.message).toContain(
-        "the next launch completes the reset during startup recovery",
-      );
-
-      expect(mockRm).not.toHaveBeenCalledWith(intentMarkerPath, {
-        force: true,
-      });
-      expect(getJobFinderStartupResetRecoveryFact()).toMatchObject({
-        status: "degraded",
-        reason: "reset_recovery_failed",
-      });
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
 });
 
 describe("sweepStaleJobFinderResetArtifacts", () => {
@@ -1563,7 +1374,7 @@ describe("sweepStaleJobFinderResetArtifacts", () => {
       );
       await vi.advanceTimersByTimeAsync(15_000);
       await rejection;
-      expect(mockResetWorkspace).not.toHaveBeenCalled();
+      expect(mockShutdownRuntime).not.toHaveBeenCalled();
       expect(mockRename).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

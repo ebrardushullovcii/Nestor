@@ -114,6 +114,8 @@ export interface ResumeStore {
    * Cleanup of generated files must keep all of them.
    */
   pdfPathsInUse(): string[];
+  /** Jobs whose resume the person approved. */
+  approvedJobIds(): number[];
   /**
    * Records the hash of an approved PDF that has none yet: one approved
    * before hashes were kept, hashed the first time it is attached.
@@ -184,6 +186,13 @@ export function createResumeStore(store: JobStore): ResumeStore {
          SELECT job_id, pdf_path, approved_at, ? FROM resumes
          WHERE job_id = ? AND pdf_path IS NOT NULL AND approved_at IS NOT NULL`,
       ).run(sha256, jobId);
+    },
+    approvedJobIds() {
+      return (
+        sql(
+          "SELECT job_id FROM resumes WHERE approved_at IS NOT NULL ORDER BY job_id",
+        ).all() as { job_id: number }[]
+      ).map((row) => row.job_id);
     },
     pdfPathsInUse() {
       return (

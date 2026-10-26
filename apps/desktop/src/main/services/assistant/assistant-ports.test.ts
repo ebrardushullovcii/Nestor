@@ -41,15 +41,16 @@ vi.mock("../job-finder/test-api", () => ({
 vi.mock("../job-finder/workspace-updates", () => ({
   publishJobFinderWorkspaceUpdate: vi.fn(),
 }));
-vi.mock("../job-finder/workspace-service", () => ({
-  getJobFinderWorkspaceService: vi.fn(),
+vi.mock("../job-finder/runtime", () => ({
+  getProfileService: vi.fn(),
 }));
 vi.mock("./assistant-browser-port", () => ({
   createAssistantBrowserPort: vi.fn(),
 }));
 
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
-import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
+import { readPersonalWorkspaceState } from "@nestor/db";
+import { openJobStore } from "@nestor/db/job-store";
+import { getProfileService } from "../job-finder/runtime";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
@@ -82,7 +83,7 @@ async function approvedResume() {
   const bytes = Buffer.from("Synthetic approved resume PDF");
   await writeFile(filePath, bytes);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const initial = createEmptyJobFinderRepositoryState();
+  const initial = readPersonalWorkspaceState(openJobStore(":memory:"));
   initial.profile.baseResume = {
     ...initial.profile.baseResume,
     storagePath: filePath,
@@ -145,7 +146,7 @@ describe("Assistant store-backed resume files", () => {
       limit: 200,
     });
     expect(readFile).not.toHaveBeenCalled();
-    expect(getJobFinderWorkspaceService).not.toHaveBeenCalled();
+    expect(getProfileService).not.toHaveBeenCalled();
   });
   it.each(["original_resume", "approved_resume_1000"])(
     "resolves %s without scanning other approved jobs",
@@ -198,7 +199,7 @@ describe("Assistant store-backed resume files", () => {
       "get_application_details",
       { id: 7 },
     );
-    expect(getJobFinderWorkspaceService).not.toHaveBeenCalled();
+    expect(getProfileService).not.toHaveBeenCalled();
   });
 });
 it("minimizes Browser for navigation without closing tabs", async () => {

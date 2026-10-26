@@ -23,7 +23,6 @@ import { runApplicationCommand } from "../application-commands";
 import { runNeedsYouCommand } from "../../routes/needs-you";
 import { runTrackerCommand } from "../../routes/tracker";
 import { readPersonalWorkspaceState } from "@nestor/db";
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { isDesktopResumeImportActive } from "../job-finder/import-resume";
 import { listLocalResumeTemplates } from "../../../shared/job-finder-resume-renderer";
 
@@ -54,10 +53,10 @@ export async function runAssistantReadCommand<K extends AssistantReadCommand>(
 
 export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"] =
   async () => {
-    const personal = readPersonalWorkspaceState(
-      createEmptyJobFinderRepositoryState(),
-      getJobStore(),
-    );
+    // Setup brought up to date first, as the Profile route reads it.
+    const { getProfileService } = await import("../job-finder/runtime");
+    await (await getProfileService()).refreshProfileSetup();
+    const personal = readPersonalWorkspaceState(getJobStore());
     const sites = await runJobCommand("list_sites", {
       filter: "enabled",
       limit: 1,

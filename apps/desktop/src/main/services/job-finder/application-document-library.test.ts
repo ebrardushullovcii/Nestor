@@ -6,7 +6,7 @@ import {
   ApplicationQuestionRecordSchema,
   ApplicationRecordSchema,
 } from "@nestor/contracts";
-import { createResumeWorkspaceDemoState } from "../../adapters/job-finder-demo-state";
+import { createDocumentTestSeed } from "../../adapters/document-test-seed.test-support";
 import { CandidateAssetLibrary } from "./candidate-asset-library";
 import { ApplicationDocumentLibrary } from "./application-document-library";
 
@@ -30,7 +30,7 @@ describe("ApplicationDocumentLibrary", () => {
   });
 
   function createGrounding() {
-    const state = createResumeWorkspaceDemoState();
+    const state = createDocumentTestSeed();
     const job = state.savedJobs.find((entry) => entry.id === "job_ready");
     if (!job) throw new Error("Demo job is missing");
     const applicationRecord = ApplicationRecordSchema.parse({

@@ -16,7 +16,7 @@ import { runJobCommand } from "../services/job-commands";
 async function applicationService() {
   const [{ startJobFinderRuntime }, { getApplicationService }] =
     await Promise.all([
-      import("../services/job-finder/workspace-service"),
+      import("../services/job-finder/runtime"),
       import("../services/applications"),
     ]);
   await startJobFinderRuntime();

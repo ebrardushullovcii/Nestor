@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ResumeHtmlRenderInput } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { createLocalJobFinderDocumentManager } from "./job-finder-document-manager";
-import { createApplyQueueDemoState } from "./job-finder-demo-state";
+import { createDocumentTestSeed } from "./document-test-seed.test-support";
 
 vi.mock("electron", () => ({ BrowserWindow: vi.fn() }));
 
@@ -14,7 +14,7 @@ test("simultaneous resumes for one employer keep separate files and contents", a
   );
   const clock = vi.spyOn(Date, "now").mockReturnValue(1790400000000);
   try {
-    const seed = createApplyQueueDemoState();
+    const seed = createDocumentTestSeed();
     const manager = createLocalJobFinderDocumentManager({ outputDirectory });
     const render = (headline: string) =>
       manager.renderResumeArtifact({
@@ -53,7 +53,7 @@ test("simultaneous resumes for one employer keep separate files and contents", a
 test("artifact HTML workers receive only render data, without PDF callbacks or candidate records", async () => {
   const outputDirectory = await mkdtemp(path.join(tmpdir(), "resume-worker-"));
   try {
-    const seed = createApplyQueueDemoState();
+    const seed = createDocumentTestSeed();
     const renderResumeHtml = vi.fn((input: ResumeHtmlRenderInput) => {
       // Worker.postMessage rejects callbacks; exercise its cloning boundary.
       expect(Object.keys(structuredClone(input)).sort()).toEqual([

@@ -1,11 +1,15 @@
 import type {
   AssistantContextReference,
   AssistantMessage,
-  JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
 import { ACTION_INVENTORY } from "@nestor/job-finder";
 
-import { LANE_JOBS, laneContext, type AssistantLaneRecorder } from "./world";
+import {
+  LANE_JOBS,
+  laneContext,
+  type AssistantLaneRecorder,
+  type AssistantLaneSnapshot,
+} from "./world";
 
 /**
  * Assistant eval cases (plan §15). Each case sends one or more sidebar
@@ -16,7 +20,7 @@ import { LANE_JOBS, laneContext, type AssistantLaneRecorder } from "./world";
  */
 
 export interface AssistantLaneObservation {
-  snapshot: JobFinderWorkspaceSnapshot;
+  snapshot: AssistantLaneSnapshot;
   recorder: AssistantLaneRecorder;
   stageOf(laneJobId: string): string;
   messages: readonly AssistantMessage[];

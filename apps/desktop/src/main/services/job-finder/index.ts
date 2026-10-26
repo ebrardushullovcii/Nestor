@@ -1,15 +1,8 @@
 export {
   getGeneratedResumeDocumentsDirectory,
   getJobFinderDocumentsDirectory,
-  getJobFinderWorkspaceFilePath,
   getBrowserAgentProfileDirectory,
 } from "./paths";
-export {
-  createJobFinderWorkspaceServiceAsync,
-  dismissJobFinderStartupDatabaseRecoveryNotice,
-  getJobFinderStartupDatabaseRecoveryFact,
-  getJobFinderRepositoryForWorkspaceService,
-} from "./create-workspace-service";
 export {
   createJobFinderApplicationAuthorityService,
   getJobFinderApplicationAuthorityService,
@@ -19,12 +12,12 @@ export {
   type JobFinderApplicationAuthorityService,
 } from "./application-authority-service";
 export {
-  getJobFinderWorkspaceService,
+  getProfileService,
   startJobFinderRuntime,
-  beginJobFinderWorkspaceShutdown,
-  setJobFinderWorkspaceServiceTestEnv,
-  shutdownJobFinderWorkspaceService,
-} from "./workspace-service";
+  beginJobFinderShutdown,
+  setJobFinderRuntimeTestEnv,
+  shutdownJobFinderRuntime,
+} from "./runtime";
 export {
   importResumeFromSourcePath,
   retryInterruptedResumeImport,
@@ -33,11 +26,6 @@ export {
   runDesktopResumeImportBenchmark,
   defaultBenchmarkCases,
 } from "./resume-import-benchmark";
-export {
-  loadApplyQueueDemoState,
-  loadAgentOwnedBrowserDriveState,
-  loadWorkHistoryReviewDriveState,
-} from "./load-demo-state";
 export {
   resetJobFinderWorkspace,
   getJobFinderStartupResetRecoveryFact,

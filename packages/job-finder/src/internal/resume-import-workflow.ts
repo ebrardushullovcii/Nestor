@@ -20,7 +20,7 @@ import {
   type ResumeImportVisionArtifact,
 } from "@nestor/contracts";
 
-import type { WorkspaceServiceContext } from "./workspace-service-context";
+import type { ProfileContext } from "./profile-context";
 export { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
 export {
   countResumeImportCandidates,
@@ -65,13 +65,13 @@ import {
  * resume (ADR 0041). Without one (tests, or a build with no AI at all) the
  * rule reader stands in: regex literals beside the built-in stage reader.
  */
-function readsWithoutModel(ctx: Pick<WorkspaceServiceContext, "aiClient">) {
+function readsWithoutModel(ctx: Pick<ProfileContext, "aiClient">) {
   return ctx.aiClient.getStatus().kind === "deterministic";
 }
 
 /** The rule reader's fill-ins for experience records, only without a model. */
 function withRuleReaderMarkers(
-  ctx: Pick<WorkspaceServiceContext, "aiClient">,
+  ctx: Pick<ProfileContext, "aiClient">,
   bundle: Parameters<typeof enrichExperienceCandidatesFromNearbyMarkers>[0],
   candidates: ResumeImportFieldCandidate[],
 ): ResumeImportFieldCandidate[] {
@@ -232,7 +232,7 @@ function isSameStoredResumeDocument(
  * supersedes and must not replace whatever is there now.
  */
 async function readSupersededBaseResume(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   expectedProfileRevision: number,
 ): Promise<CandidateProfile["baseResume"] | null> {
   const current = await ctx.repository.getProfileWithRevision();
@@ -262,7 +262,7 @@ async function readSupersededBaseResume(
  * wait in review, which is the behaviour that predates the attach.
  */
 async function attachImportedBaseResumeAfterStaleFinalization(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   currentProfile: CandidateProfile;
   currentRevision: number;
   supersededBaseResume: CandidateProfile["baseResume"] | null;
@@ -303,7 +303,7 @@ async function attachImportedBaseResumeAfterStaleFinalization(input: {
 }
 
 async function finalizeResumeImportRunAtRevision(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   expectedProfileRevision: number;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
@@ -641,7 +641,7 @@ function resumeImportStageFailureOutcome(
   };
 }
 
-function visionTimeoutMsFor(ctx: WorkspaceServiceContext): number {
+function visionTimeoutMsFor(ctx: ProfileContext): number {
   const timeoutMs = ctx.visionProvider?.getStatus().requestTimeoutMs;
 
   return typeof timeoutMs === "number" &&
@@ -670,7 +670,7 @@ function removeVisionDeferredWarnings(warnings: readonly string[]): string[] {
 }
 
 function createVisionTimeoutResult(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   message: string,
 ): ResumeVisionExtractionResult {
   const status = ctx.visionProvider?.getStatus();
@@ -689,7 +689,7 @@ function createVisionTimeoutResult(
 }
 
 function createTimedOutVisionResult(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   timeoutMs: number,
 ): ResumeVisionExtractionResult {
   return createVisionTimeoutResult(ctx, visionBranchTimeoutMessage(timeoutMs));
@@ -698,7 +698,7 @@ function createTimedOutVisionResult(
 function withVisionBranchDeadline(
   promise: Promise<ResumeVisionBranchResult>,
   timeoutMs: number,
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   options: { unrefTimer?: boolean } = {},
 ): Promise<ResumeVisionBranchResult> {
   let timer: NodeJS.Timeout | null = null;
@@ -813,7 +813,7 @@ function preserveCurrentCandidateDecisions(
 }
 
 async function preserveLatestCandidateDecisions(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   runId: string,
   candidates: readonly ResumeImportFieldCandidate[],
 ): Promise<ResumeImportFieldCandidate[]> {
@@ -881,11 +881,11 @@ const OPTIONAL_EVIDENCE_UNREAD_MESSAGE =
 
 // Background readers share the run's artifacts, but never hold this lock while asking the model.
 const deferredArtifactTransitions = new WeakMap<
-  WorkspaceServiceContext,
+  ProfileContext,
   Promise<void>
 >();
 function withDeferredArtifactTransition<T>(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   operation: () => Promise<T>,
 ): Promise<T> {
   const previous = deferredArtifactTransitions.get(ctx) ?? Promise.resolve();
@@ -900,7 +900,7 @@ function withDeferredArtifactTransition<T>(
   return next;
 }
 async function keepCurrentEvidenceArtifacts(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   run: ResumeImportRun,
   candidates: readonly ResumeImportFieldCandidate[],
 ) {
@@ -952,9 +952,9 @@ async function keepCurrentEvidenceArtifacts(
   return { run: mergedRun, candidates: mergedCandidates };
 }
 async function replaceDeferredVisionArtifacts(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: Parameters<
-    WorkspaceServiceContext["repository"]["replaceResumeImportRunArtifacts"]
+    ProfileContext["repository"]["replaceResumeImportRunArtifacts"]
   >[0],
 ) {
   return withDeferredArtifactTransition(ctx, async () => {
@@ -972,7 +972,7 @@ async function replaceDeferredVisionArtifacts(
 }
 
 async function completeDeferredVisionBranch(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: ProfileContext;
   promise: Promise<ResumeVisionBranchResult>;
   bundle: ResumeDocumentBundle;
   run: ResumeImportRun;
@@ -982,6 +982,8 @@ async function completeDeferredVisionBranch(input: {
   baselineProfile: CandidateProfile;
   baselineSearchPreferences: JobSearchPreferences;
   visionTimeoutMs: number;
+  /** A stopped import writes nothing more, even from this late branch. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const { ctx, promise, bundle, runId, now, textCandidates, visionTimeoutMs } =
     input;
@@ -992,13 +994,11 @@ async function completeDeferredVisionBranch(input: {
   let run = input.run;
 
   try {
-    const visionBranch = await withVisionBranchDeadline(
-      promise,
-      visionTimeoutMs,
-      ctx,
-      {
+    const visionBranch = await waitForImport(
+      withVisionBranchDeadline(promise, visionTimeoutMs, ctx, {
         unrefTimer: true,
-      },
+      }),
+      input.signal,
     );
     const currentCandidates =
       await ctx.repository.listResumeImportFieldCandidates({ runId });
@@ -1111,16 +1111,17 @@ async function completeDeferredVisionBranch(input: {
       fieldCandidates: reconciledCandidates,
     });
 
-    const adjudicationResult = await maybeAdjudicateResumeImportCandidates(
-      ctx,
-      {
+    // A stop never waits on the adjudicator: its answer is dropped.
+    const adjudicationResult = await waitForImport(
+      maybeAdjudicateResumeImportCandidates(ctx, {
         profile: latestProfile,
         searchPreferences: latestSearchPreferences,
         bundle,
         runId,
         now,
         candidates: reconciledCandidates,
-      },
+      }),
+      input.signal,
     );
     reconciledCandidates = preserveCurrentCandidateDecisions(
       promoteGroundedSharedMemoryCandidates(
@@ -1285,6 +1286,7 @@ async function completeDeferredVisionBranch(input: {
       });
     }
   } catch (error) {
+    if (input.signal?.aborted) return;
     const message = messageFromUnknownError(
       error,
       "Deferred resume vision branch failed.",
@@ -1321,13 +1323,16 @@ function scheduleDeferredVisionBranchCompletion(
   input: Parameters<typeof completeDeferredVisionBranch>[0],
 ): Promise<void> {
   input.ctx.activeResumeVisionRunIds.add(input.runId);
-  return completeDeferredVisionBranch(input)
+  const work = completeDeferredVisionBranch(input)
     .catch((error: unknown) => {
       console.error("Deferred resume vision branch completion failed.", error);
     })
     .finally(() => {
       input.ctx.activeResumeVisionRunIds.delete(input.runId);
+      input.ctx.backgroundWork.delete(work);
     });
+  input.ctx.backgroundWork.add(work);
+  return work;
 }
 
 function modelRolesFor(run: ResumeImportRun): ResumeImportModelRoleState {
@@ -1386,7 +1391,7 @@ function hasReviewableTextVisionConflict(
 }
 
 async function maybeAdjudicateResumeImportCandidates(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: {
     profile: CandidateProfile;
     searchPreferences: JobSearchPreferences;
@@ -1502,13 +1507,13 @@ type ResumeImportWorkflowResult = {
 const activeResumeImportCounts = new WeakMap<object, number>();
 
 export function isResumeImportActiveInProcess(
-  ctx: Pick<WorkspaceServiceContext, "repository">,
+  ctx: Pick<ProfileContext, "repository">,
 ): boolean {
   return (activeResumeImportCounts.get(ctx.repository) ?? 0) > 0;
 }
 
 export async function runResumeImportWorkflow(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: ResumeImportWorkflowInput,
 ): Promise<ResumeImportWorkflowResult> {
   const key = ctx.repository;
@@ -1529,7 +1534,7 @@ export async function runResumeImportWorkflow(
 }
 
 async function runResumeImportWorkflowInProcess(
-  ctx: WorkspaceServiceContext,
+  ctx: ProfileContext,
   input: ResumeImportWorkflowInput,
 ): Promise<ResumeImportWorkflowResult> {
   const expectedProfileRevision = input.expectedProfileRevision;
@@ -2526,12 +2531,16 @@ async function runResumeImportWorkflowInProcess(
           (candidate) => candidate.sourceKind !== "vision_omni",
         ),
         visionTimeoutMs,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     }
 
     if (deferredEvidenceState.promise) {
       ctx.activeResumeEvidenceRunIds.add(runId);
-      void deferredEvidenceState.promise
+      const evidenceWork: Promise<void> = waitForImport(
+        deferredEvidenceState.promise,
+        input.signal,
+      )
         .then((evidence) =>
           withDeferredArtifactTransition(ctx, async () => {
             if (input.signal?.aborted) return;
@@ -2621,13 +2630,19 @@ async function runResumeImportWorkflowInProcess(
             });
           }),
         )
-        .catch((error: unknown) =>
-          console.error("Optional resume evidence could not be saved.", error),
-        )
+        .catch((error: unknown) => {
+          if (!input.signal?.aborted)
+            console.error(
+              "Optional resume evidence could not be saved.",
+              error,
+            );
+        })
         .finally(() => {
           ctx.activeResumeEvidenceRunIds.delete(runId);
+          ctx.backgroundWork.delete(evidenceWork);
           ctx.onResumeEvidenceFinished?.();
         });
+      ctx.backgroundWork.add(evidenceWork);
     }
     return {
       profile: finalization.profile,

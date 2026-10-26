@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { readListingDetail } from "./listing-detail-enrichment";
-import { createSeed } from "../workspace-service.test-fixtures";
+import { createSeed } from "../test-fixtures";
 it("asks for the rendered page only when the model found no listing text in HTTP", async () => {
   const readPage = vi
     .fn()

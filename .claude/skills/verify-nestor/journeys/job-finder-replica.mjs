@@ -76,7 +76,7 @@ const STAGES = {
     return { resumeImportRun: imports[0].id };
   },
 
-  async search({ click, shot, waitFor, see, db, ai, page, workspace, sites }) {
+  async search({ click, shot, waitFor, see, db, ai, page, sites }) {
     if (ai !== "live")
       throw new Error(
         "Search needs live AI: run bin/down, then bin/up --ai live.",
@@ -111,33 +111,19 @@ const STAGES = {
       (m) => `${m[1]}%`,
     );
     assert.ok(fits.length > 0, "search results carry model fit verdicts");
-    const runs = db("discovery_runs", { limit: 1 });
-    const jobs = db("saved_jobs", { limit: 20 });
-    const run = (await workspace()).recentDiscoveryRuns[0];
-    assert.equal(run?.state, "completed", "the real search completed");
+    const [search] = db("searches", { limit: 1 });
+    const sources = db("search_sources", { limit: 20 });
+    const jobs = db("jobs", { limit: 20 });
+    assert.equal(search?.state, "done", "the real search finished");
     assert.ok(
-      run.targetExecutions.every((target) => target.state === "completed"),
-      "each replica source completed",
+      sources.length > 0 && sources.every((source) => source.state === "done"),
+      "each replica source finished",
     );
-    assert.ok(
-      run.targetExecutions.some((target) =>
-        target.sourceCounts?.some((source) => (source.pagesCovered ?? 0) > 0),
-      ),
-      "page accounting finished after browser checkpoints",
-    );
-    assert.ok(
-      run.activity.some(
-        (event) =>
-          event.stage === "persistence" &&
-          (event.jobsPersisted ?? 0) > 0 &&
-          !event.terminalState,
-      ),
-      "the browser search committed a live checkpoint",
-    );
+    assert.ok(jobs.length > 0, "the search saved jobs");
     assert.equal(sites.submissions().length, submissionsBefore);
     return {
-      discoveryRun: runs[0]?.id,
-      state: run.state,
+      search: search.id,
+      state: search.state,
       savedJobs: jobs.length,
       fits,
     };
@@ -168,17 +154,17 @@ const STAGES = {
     });
     await waitFor("Shortlisted", 15, { role: "heading" });
     await shot("jf-shortlisted");
-    const [job] = db("saved_jobs", {
+    const [job] = db("jobs", {
       limit: 1,
       pattern: title,
-      name: "saved_jobs-shortlisted",
+      name: "jobs-shortlisted",
     });
-    // Shortlisting can start the resume draft in the background straight away.
-    assert.ok(
-      ["shortlisted", "drafting"].includes(job?.value?.status),
-      `${title} is stored as shortlisted (got ${job?.value?.status})`,
+    assert.equal(
+      job?.stage,
+      "shortlisted",
+      `${title} is stored as shortlisted (got ${job?.stage})`,
     );
-    return { jobId: job.id, title, status: job.value.status };
+    return { jobId: job.id, title, stage: job.stage };
   },
 
   async resume({ page, click, shot, db }) {
@@ -193,9 +179,9 @@ const STAGES = {
       .getByRole("button", { name: "Apply", exact: true })
       .waitFor({ timeout: 30000 });
     await shot("jf-resume-ready");
-    const drafts = db("resume_drafts", { limit: 1 });
-    assert.equal(drafts.length, 1, "a resume_drafts row exists");
-    return { resumeDraft: drafts[0].id };
+    const resumes = db("resumes", { limit: 1 });
+    assert.equal(resumes[0]?.state, "ready", "a written resume is stored");
+    return { resumeJob: resumes[0].job_id };
   },
 
   async apply({ click, shot, waitFor, db }) {

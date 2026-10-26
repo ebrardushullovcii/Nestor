@@ -1043,8 +1043,8 @@ export async function undoReceipt(
       message: "That job move can no longer be undone here.",
     };
   }
-  let undone: string[] = [];
-  let conflicts: string[] = [];
+  const undone: string[] = [];
+  const conflicts: string[] = [];
   if (receipt.target === "app_command") {
     const undo = receipt.undoCommand;
     const command = context.ports.commands?.find(
@@ -1085,14 +1085,6 @@ export async function undoReceipt(
         conflicts.push(...receipt.fieldLabels);
       else throw error;
     }
-  } else if (receipt.target === "resume_draft") {
-    const result = await service.undoAssistantResumeChange({
-      jobId: receipt.targetId ?? "",
-      entries: receipt.entries,
-      reason: `Undid assistant change: ${receipt.summary}`,
-    });
-    undone = result.undoneLabels;
-    conflicts = result.conflictLabels;
   } else {
     const profileEntries = strip("profile");
     const preferenceEntries = strip("search_preferences");

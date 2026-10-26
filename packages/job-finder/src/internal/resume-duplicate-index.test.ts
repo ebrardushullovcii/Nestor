@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ResumeDraftBulletSchema } from "@nestor/contracts";
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 import { seedResumeDraft } from "./resume-workspace-structure";
 import {
   areNearDuplicateResumeLines,

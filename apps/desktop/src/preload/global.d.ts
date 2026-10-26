@@ -18,7 +18,6 @@ import type {
   ApplyJobsResult,
   JobChange,
   ApplicationStoreDemoResult,
-  WorkspaceQueryApi,
 } from "@nestor/contracts";
 import type {
   DesktopAssistantBridge,
@@ -51,7 +50,6 @@ import type {
   DesktopWindowCloseRequest,
   DesktopWindowCloseResolution,
   DesktopWindowControlsState,
-  EditableSourceInstructionArtifact,
   InterviewAudioTranscriptionInput,
   InterviewCaptionFileReadInput,
   InterviewCaptionFileTextResult,
@@ -70,43 +68,15 @@ import type {
   JobChange,
   JobFinderDiagnosticExportResult,
   JobFinderInterviewFollowUpInput,
-  JobFinderJobDetail,
-  JobFinderOpenBrowserSessionInput,
-  JobFinderPerformanceSnapshot,
-  JobFinderRendererWorkspaceSnapshot,
-  JobFinderRepositoryState,
-  JobFinderSettings,
-  JobFinderStartupDatabaseRecoveryFact,
   JobFinderStartupResetRecoveryFact,
-  JobFinderTestSaveSurface,
-  JobFinderWorkspaceEntityMutationInput,
-  JobFinderWorkspaceSyncResult,
-  JobSearchPreferences,
-  ProfileCopilotContext,
-  ProfileSetupReviewActionOptions,
-  ProfileSetupState,
-  ResumeDocumentBundle,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkRequest,
-  ResumeImportFieldCandidate,
-  ResumeImportProgressEvent,
   ResumeImportRun,
-  ResumeTimelineRepairAction,
   RevealSavedFileResult,
   SaveInterviewSetupInput,
-  SaveJobFinderWorkspaceInput,
   SendInterviewChatMessageInput,
-  SetJobFinderActivityControlInput,
-  SourceDebugProgressEvent,
-  SourceDebugRunDetails,
-  SourceDebugRunRecord,
-  UpdateAiBehaviorInput,
-  UpdateApplicationDefaultsInput,
   UpdateInterviewOverlayPreferenceInput,
-  UpdateWorkspaceBehaviorInput,
-  WorkspaceQueryApi,
-  WorkspaceRevision,
   WriteClipboardTextResult,
 } from "@nestor/contracts";
 
@@ -202,7 +172,7 @@ declare global {
         ) => Promise<InterviewExportResult>;
         recordJobFinderFollowUp: (
           input: JobFinderInterviewFollowUpInput,
-        ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+        ) => Promise<unknown>;
       };
       jobFinder: {
         applyJobs: (input: ApplyJobsInput) => Promise<ApplyJobsResult>;
@@ -224,7 +194,7 @@ declare global {
         onApplicationsChange: (
           listener: (change: JobChange) => void,
         ) => () => void;
-        queries: WorkspaceQueryApi;
+        onOpenRoute: (listener: (route: string) => void) => () => void;
         listCandidateAssets: (
           input?: CandidateAssetListInput,
         ) => Promise<CandidateAssetListResult>;
@@ -240,137 +210,9 @@ declare global {
         restoreCandidateAsset: (
           input: CandidateAssetRestoreInput,
         ) => Promise<CandidateAssetRestoreResult>;
-        getWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-        getJobDetail: (
-          jobId: string,
-          planId: string | null,
-        ) => Promise<JobFinderJobDetail>;
-        getWorkspaceBootstrap: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-        /**
-         * Home's first view (ADR 0077): everything but the Find jobs lists,
-         * which stay deferred. Null when the workspace cannot give one.
-         */
-        getWorkspaceHome?: () => Promise<JobFinderRendererWorkspaceSnapshot | null>;
-        syncWorkspace: (
-          baseRevision: WorkspaceRevision | null,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        /** Tells main which revision this window shows (0: none it knows). */
-        noteWorkspaceRevision: (revision: WorkspaceRevision) => void;
-        onWorkspaceUpdate: (listener: () => void) => () => void;
-        onOpenRoute: (listener: (route: string) => void) => () => void;
-        mutateWorkspaceEntities: (
-          input: JobFinderWorkspaceEntityMutationInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        openBrowserSession: (
-          input?: JobFinderOpenBrowserSessionInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        checkBrowserSession: () => Promise<JobFinderWorkspaceSyncResult>;
-        saveProfile: (
-          profile: CandidateProfile,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        saveWorkspaceInputs: {
-          (
-            profile: CandidateProfile,
-            searchPreferences: JobSearchPreferences,
-          ): Promise<JobFinderWorkspaceSyncResult>;
-          (
-            input: SaveJobFinderWorkspaceInput,
-          ): Promise<JobFinderWorkspaceSyncResult>;
-        };
-        analyzeProfileFromResume: () => Promise<JobFinderWorkspaceSyncResult>;
-        saveSearchPreferences: (
-          searchPreferences: JobSearchPreferences,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        setActivityControl: (
-          input: SetJobFinderActivityControlInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        saveSettings: (
-          settings: JobFinderSettings,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        updateApplicationDefaults: (
-          input: UpdateApplicationDefaultsInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        updateWorkspaceBehavior: (
-          input: UpdateWorkspaceBehaviorInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        updateAiBehavior: (
-          input: UpdateAiBehaviorInput,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        updateAppearanceTheme: (
-          appearanceTheme: AppearanceTheme,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        saveProfileSetupState: (
-          profileSetupState: ProfileSetupState,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        applyProfileSetupReviewAction: (
-          reviewItemId: string,
-          action: "confirm" | "dismiss" | "clear_value",
-          options?: ProfileSetupReviewActionOptions,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        applyResumeTimelineRepairAction: (
-          runId: string,
-          proposalId: string,
-          action: ResumeTimelineRepairAction,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        sendProfileCopilotMessage: (
-          content: string,
-          context?: ProfileCopilotContext,
-        ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-        applyProfileCopilotPatchGroup: (
-          patchGroupId: string,
-        ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-        rejectProfileCopilotPatchGroup: (
-          patchGroupId: string,
-        ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-        undoProfileRevision: (
-          revisionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        importResume: (
-          onProgress?: (event: ResumeImportProgressEvent) => void,
-          /** `retryInterrupted` imports again the file a stopped import saved. */
-          options?: { retryInterrupted?: boolean },
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        cancelImportResume: (stopProcessing?: boolean) => void;
-        runSourceDebug: (
-          targetId: string,
-          onProgress?: (event: SourceDebugProgressEvent) => void,
-          options?: { readabilityTimeoutMs?: number },
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        cancelSourceDebug: (
-          runId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        getSourceDebugRun: (runId: string) => Promise<SourceDebugRunRecord>;
-        getSourceDebugRunDetails: (
-          runId: string,
-        ) => Promise<SourceDebugRunDetails>;
         exportDiagnostics: () => Promise<JobFinderDiagnosticExportResult>;
-        getPerformanceSnapshot: () => Promise<JobFinderPerformanceSnapshot>;
-        saveSourceInstructionArtifact: (
-          targetId: string,
-          artifact: EditableSourceInstructionArtifact,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        listSourceDebugRuns: (
-          targetId: string,
-        ) => Promise<readonly SourceDebugRunRecord[]>;
-        acceptSourceInstructionDraft: (
-          targetId: string,
-          instructionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        verifySourceInstructions: (
-          targetId: string,
-          instructionId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        resetBrowser: () => Promise<JobFinderWorkspaceSyncResult>;
-        resetWorkspace: () => Promise<JobFinderWorkspaceSyncResult>;
+        resetWorkspace: () => Promise<void>;
         getStartupResetRecovery: () => Promise<JobFinderStartupResetRecoveryFact>;
-        getStartupDatabaseRecovery: () => Promise<JobFinderStartupDatabaseRecoveryFact>;
-        dismissStartupDatabaseRecoveryNotice: () => Promise<JobFinderStartupDatabaseRecoveryFact>;
-        queueJobForReview: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
-        removeJobFromReview: (
-          jobId: string,
-        ) => Promise<JobFinderWorkspaceSyncResult>;
         revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
         writeClipboardText: (text: string) => Promise<WriteClipboardTextResult>;
         test?: {
@@ -382,45 +224,18 @@ declare global {
           setSystemThemeOverride: (
             theme: "dark" | "light" | null,
           ) => Promise<{ ok: true }>;
-          loadApplyQueueDemo: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-          loadWorkHistoryReviewDemo: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-          loadAgentOwnedBrowserDemo: (input: {
-            sourceUrl: string;
-            applicationUrl: string;
-            secondaryApplicationUrl?: string;
-            jobTitle?: string;
-            jobCompany?: string;
-            foundJobs?: {
-              title: string;
-              company: string;
-              applicationUrl: string;
-            }[];
-          }) => Promise<JobFinderRendererWorkspaceSnapshot>;
-          /**
-           * Arms exactly the next save on one protected surface to fail, then
-           * clears itself. Test API only; absent in a production build.
-           */
-          failNextSave: (
-            surface: JobFinderTestSaveSurface,
-          ) => Promise<{ ok: true }>;
-          resetWorkspaceState: (
-            state: JobFinderRepositoryState,
-          ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-          getPerformanceSnapshot: () => Promise<JobFinderPerformanceSnapshot>;
           runResumeImportBenchmark: (
             input?: Partial<ResumeImportBenchmarkRequest>,
           ) => Promise<ResumeImportBenchmarkReport>;
           getResumeImportBenchmarkCases: () => Promise<
             readonly ResumeImportBenchmarkCase[]
           >;
-          getResumeImportState: () => Promise<{
-            resumeImportRuns: readonly ResumeImportRun[];
-            resumeImportDocumentBundles: readonly ResumeDocumentBundle[];
-            resumeImportFieldCandidates: readonly ResumeImportFieldCandidate[];
-          }>;
           importResumeFromPath: (
             sourcePath: string | { sourcePath: string; useVision?: boolean },
-          ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+          ) => Promise<{
+            profile: CandidateProfile;
+            latestResumeImportRun: ResumeImportRun | null;
+          }>;
         };
       };
     };

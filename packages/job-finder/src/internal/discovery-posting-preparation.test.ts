@@ -11,7 +11,7 @@ import {
   type SavedJob,
   type JobPosting,
 } from "@nestor/contracts";
-import { createSavedJob, createSeed } from "../workspace-service.test-fixtures";
+import { createSavedJob, createSeed } from "../test-fixtures";
 import {
   prepareDiscoveryPosting,
   prepareBodySalaryRange,

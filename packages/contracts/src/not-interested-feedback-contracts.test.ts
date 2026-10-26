@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  DiscoveryFeedbackSchema,
-  EmployerExclusionPreviewSchema,
-  SavedJobSchema,
-} from "./index";
+import { DiscoveryFeedbackSchema, SavedJobSchema } from "./index";
 
 const legacyJob = {
   id: "job_1",
@@ -75,27 +71,5 @@ describe("discovery feedback contracts", () => {
         },
       }).employerExclusion?.campaignId,
     ).toBeNull();
-  });
-
-  it("keeps employer exclusion previews strict and discriminated", () => {
-    const available = EmployerExclusionPreviewSchema.parse({
-      status: "available",
-      jobId: "job_1",
-      displayCompanyName: "Example",
-      normalizedCompanyName: "example",
-      employerDomain: "example.com",
-    });
-    expect(available.status).toBe("available");
-    if (available.status !== "available") throw new Error("Expected preview");
-    expect(available.normalizedCompanyName).toBe("example");
-    expect(
-      EmployerExclusionPreviewSchema.safeParse({
-        status: "unavailable",
-        jobId: "job_1",
-        reason: "provider_domain_only",
-        employerDomain: "jobs.example.com",
-        normalizedCompanyName: "example",
-      }).success,
-    ).toBe(false);
   });
 });

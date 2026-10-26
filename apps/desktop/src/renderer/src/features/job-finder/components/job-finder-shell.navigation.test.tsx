@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 
 import {
-  JobListMatchAssessmentSchema,
-  type JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
 import {
   act,
@@ -33,25 +31,6 @@ const windowControlsState = {
 } as const;
 const scrollToMock = vi.fn();
 const scrollIntoViewMock = vi.fn();
-
-function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
-  return {
-    applicationRecords: [],
-    discoveryJobs: Array.from({ length: 24 }, (_, index) => ({
-      id: `job_${index}`,
-      matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
-    })),
-    profileSetupState: {
-      completedAt: null,
-      currentStep: "import",
-      lastResumedAt: null,
-      reviewItems: [],
-      status: "not_started",
-    },
-    reviewQueue: [],
-    userActionRequests: [],
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
-}
 
 /**
  * The module switch is the wordmark's subtitle inside the header brand
@@ -223,7 +202,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
       expect(width).toBeLessThan(1440);
       render(
         <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-          <JobFinderShell platform="win32" workspace={createWorkspace()}>
+          <JobFinderShell platform="win32">
             <div>Current screen</div>
           </JobFinderShell>
         </MemoryRouter>,
@@ -307,7 +286,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
       expect(width).toBeGreaterThanOrEqual(1440);
       render(
         <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-          <JobFinderShell platform="win32" workspace={createWorkspace()}>
+          <JobFinderShell platform="win32">
             <div>Current screen</div>
           </JobFinderShell>
         </MemoryRouter>,
@@ -360,7 +339,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
   it("does not advertise retired advanced routes through More", () => {
     render(
       <MemoryRouter initialEntries={["/job-finder/analytics"]}>
-        <JobFinderShell platform="win32" workspace={createWorkspace()}>
+        <JobFinderShell platform="win32">
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,
@@ -372,33 +351,6 @@ describe("JobFinderShell compact nav responsive contract", () => {
   });
 
   it("hides zero count badges while distinguishing inventory from attention counts", () => {
-    const workspace = createWorkspace() as unknown as Record<string, unknown> &
-      JobFinderRendererWorkspaceSnapshot;
-    workspace.campaigns = [
-      {
-        id: "campaign_1",
-        jobIds: ["job_1", "job_2"],
-        name: "My plan",
-      },
-    ] as JobFinderRendererWorkspaceSnapshot["campaigns"];
-    workspace.discoveryJobs = [
-      {
-        id: "job_1",
-        company: "Acme",
-        title: "Engineer I",
-        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
-      },
-      {
-        id: "job_2",
-        company: "Globex",
-        title: "Engineer II",
-        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
-      },
-    ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
-    workspace.userActionRequests = [
-      { id: "request_1", state: "pending" },
-    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
-
     render(
       <MemoryRouter initialEntries={["/job-finder/home"]}>
         <JobFinderShell
@@ -411,7 +363,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
             resume: 0,
             applied: 0,
           }}
-          workspace={workspace}
+         
         >
           <div>Current screen</div>
         </JobFinderShell>
@@ -440,7 +392,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
         <JobFinderShell
           needsYouCount={1}
           platform="win32"
-          workspace={workspace}
+         
         >
           <div>Current screen</div>
         </JobFinderShell>
@@ -469,11 +421,10 @@ describe("JobFinderShell compact nav responsive contract", () => {
       ),
     ).toBeTruthy();
 
-    const emptyWorkspace = createWorkspace();
     cleanup();
     render(
       <MemoryRouter initialEntries={["/job-finder/home"]}>
-        <JobFinderShell platform="win32" workspace={emptyWorkspace}>
+        <JobFinderShell platform="win32">
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,
@@ -496,7 +447,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
   it("keeps the shortcut reference out of the More menu and behind one entry", () => {
     render(
       <MemoryRouter initialEntries={["/job-finder/discovery"]}>
-        <JobFinderShell platform="darwin" workspace={createWorkspace()}>
+        <JobFinderShell platform="darwin">
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,
@@ -648,36 +599,6 @@ describe("JobFinderShell keyboard shortcuts", () => {
     );
   }
 
-  function createSearchableWorkspace(): JobFinderRendererWorkspaceSnapshot {
-    const workspace = createWorkspace();
-    workspace.activeCampaignId = "campaign-active";
-    workspace.campaigns = [
-      {
-        description: "Active plan",
-        id: "campaign-active",
-        jobIds: ["job_1", "job_2"],
-        mode: "precision",
-        name: "Active plan",
-        status: "active",
-      },
-    ] as JobFinderRendererWorkspaceSnapshot["campaigns"];
-    workspace.discoveryJobs = [
-      {
-        id: "job_1",
-        company: "Acme",
-        title: "Platform Engineer",
-        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
-      },
-      {
-        id: "job_2",
-        company: "Globex",
-        title: "Field Engineer",
-        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
-      },
-    ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
-    return workspace;
-  }
-
   function renderShellWithShortcuts(
     options: { darwin?: boolean; wide?: boolean } = {},
   ) {
@@ -688,7 +609,7 @@ describe("JobFinderShell keyboard shortcuts", () => {
         <JobFinderShell
           onNavigate={onNavigate}
           platform={options.darwin ? "darwin" : "win32"}
-          workspace={createSearchableWorkspace()}
+         
         >
           <div>Current screen</div>
         </JobFinderShell>
@@ -1082,7 +1003,7 @@ describe("JobFinderShell responsive shell contract", () => {
         <JobFinderShell
           {...(onNavigate ? { onNavigate } : {})}
           platform="win32"
-          workspace={createWorkspace()}
+         
         >
           <div>Current screen</div>
         </JobFinderShell>
@@ -1253,7 +1174,7 @@ describe("JobFinderShell responsive shell contract", () => {
   it("updates the sidebar owner when an Applications empty-state link opens Shortlisted", () => {
     render(
       <MemoryRouter initialEntries={["/job-finder/applications"]}>
-        <JobFinderShell platform="win32" workspace={createWorkspace()}>
+        <JobFinderShell platform="win32">
           <Link to="/job-finder/review-queue">Open Shortlisted</Link>
         </JobFinderShell>
       </MemoryRouter>,
@@ -1785,7 +1706,7 @@ describe("compact navigation shares the header switcher's axis", () => {
   ) {
     render(
       <MemoryRouter initialEntries={[route]}>
-        <JobFinderShell platform={platform} workspace={createWorkspace()}>
+        <JobFinderShell platform={platform}>
           <div>Current screen</div>
         </JobFinderShell>
       </MemoryRouter>,

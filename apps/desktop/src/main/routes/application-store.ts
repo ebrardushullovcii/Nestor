@@ -28,7 +28,7 @@ import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
 import { getApplicationService } from "../services/applications";
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
-import { startJobFinderRuntime } from "../services/job-finder/workspace-service";
+import { startJobFinderRuntime } from "../services/job-finder/runtime";
 
 /** The registered Assistant actions and preload bridge execute the same commands. */
 export async function executeApplicationStoreCommand(
@@ -40,7 +40,7 @@ export async function executeApplicationStoreCommand(
   switch (actionId) {
     case "apply-jobs": {
       const value = ApplyJobsInputSchema.parse(input);
-      const { jobFinderRepository: repository } = await startJobFinderRuntime();
+      const { repository } = await startJobFinderRuntime();
       const settings = await repository.getSettings();
       if ((await repository.getActivityControl()).paused)
         throw new Error(

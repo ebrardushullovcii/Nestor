@@ -1,0 +1,45 @@
+{
+  "id": "apply_result_1",
+  "label": "Synthetic Engineer at Example Co",
+  "savedAt": "2026-10-26T10:00:00.000Z",
+  "snapshot": {
+    "url": "https://jobs.example.test/apply/1",
+    "structure": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fields": [
+      {
+        "type": "text",
+        "value": "Alex Example",
+        "checked": false,
+        "selected": [],
+        "files": [],
+        "disabled": false,
+        "readOnly": false
+      },
+      {
+        "type": "file",
+        "value": "",
+        "checked": false,
+        "selected": [],
+        "files": [
+          {
+            "name": "resume.pdf",
+            "type": "application/pdf",
+            "size": 1024,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "disabled": false,
+        "readOnly": false
+      }
+    ]
+  },
+  "attachments": [
+    {
+      "kind": "candidate_asset",
+      "id": "asset_1",
+      "name": "resume.pdf",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "reason": "form_changed"
+}

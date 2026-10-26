@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { CandidateProfileSchema, ResumeDraftSchema } from "@nestor/contracts";
 import { completeTailoredResumeDraft } from "@nestor/ai-providers";
 import type { ResumeClaimCheckInput } from "@nestor/ai-providers";
-import { createSeed } from "../workspace-service.test-support";
+import { createSeed } from "../profile-service.test-support";
 import {
   withResumeClaimChecks,
   withResumeClaimFixes,
