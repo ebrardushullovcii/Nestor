@@ -293,20 +293,6 @@ export function isApplicationTrackedAsSentByPerson(
   );
 }
 
-/**
- * The person marked the application withdrawn. That can come before or after
- * sending, so it says nothing about a send; it only means they stopped.
- */
-export function isApplicationWithdrawnByPerson(
-  crm: ApplicationCrmData | null | undefined,
-): boolean {
-  return (
-    crm != null &&
-    resolveApplicationCrmStageSource(crm) === "user" &&
-    crm.stage === "withdrawn"
-  );
-}
-
 export function resolveApplicationCrmTrackedStage(
   crm: ApplicationCrmData | null | undefined,
   activityStage: ApplicationCrmStage,
