@@ -2,7 +2,11 @@ import {
   createSavedAnswersStore,
   readSavedApplicationAnswers,
 } from "@nestor/db/applications";
-import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
+import {
+  createJobSitesStore,
+  createResumeStore,
+  createPreferencesStore,
+} from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
@@ -669,12 +673,13 @@ export async function createJobFinderRuntimeAsync(
     desktopTestApiEnabled,
   });
   // The new background search (Find jobs) runs on the same browser and AI.
+  const searchPreferencesStore = createPreferencesStore(getJobStore());
   setJobSearchServiceFactory(() =>
     Promise.resolve(
       createJobSearchRunner({
         store: getJobStore(),
-        readRemoteCountsAsAnyLocation: async () =>
-          (await jobFinderRepository.getSettings()).aiBehavior?.jobSearch
+        readRemoteCountsAsAnyLocation: () =>
+          searchPreferencesStore.settings.read().aiBehavior?.jobSearch
             .remoteCountsAsAnyLocation ?? true,
         engine: createListingSearchEngine({
           browserRuntime,

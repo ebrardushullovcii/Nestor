@@ -24,7 +24,7 @@ export interface JobSearchRunnerDeps {
   engine: JobSearchEngine;
   readContext(): Promise<JobSearchContext>;
   /** Cheap live policy read so a setting changed mid-search cannot publish an old judgment. */
-  readRemoteCountsAsAnyLocation?(): Promise<boolean>;
+  readRemoteCountsAsAnyLocation?(): boolean;
   /** Separate HTTP/browser queues, with per-host limits; fit batches run alongside collection. */
   concurrency?: {
     sources?: number;

@@ -63,7 +63,7 @@ function found(card: ListingCard): FoundJob {
       "Full published listing: build production APIs. Requirements: SQL and distributed systems.",
   };
 }
-function setup(readRemoteCountsAsAnyLocation?: () => Promise<boolean>) {
+function setup(readRemoteCountsAsAnyLocation?: () => boolean) {
   const store = openJobStore(":memory:");
   stores.push(store);
   const context: JobSearchContext = {
@@ -166,9 +166,7 @@ afterEach(() => {
 
 test("a remote-policy change during a model call cannot save an old score; retry judges with the new policy", async () => {
   let remoteCountsAsAnyLocation = true;
-  const { runner, engine, store } = setup(() =>
-    Promise.resolve(remoteCountsAsAnyLocation),
-  );
+  const { runner, engine, store } = setup(() => remoteCountsAsAnyLocation);
   const first = deferred<JobFitUpdate[]>();
   engine.fitJobs.mockImplementationOnce(({ context }) => {
     expect(context.remoteCountsAsAnyLocation).toBe(true);
