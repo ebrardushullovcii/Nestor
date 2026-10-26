@@ -20,6 +20,29 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
+test("the first direct Profile reader revokes approvals based on retired facts, once", () => {
+  const store = openJobStore(":memory:");
+  stores.push(store);
+  store.db
+    .exec(`INSERT INTO jobs(id,stage,stage_at,title,company,location,found_at,seen_at,source_label,url) VALUES(1,'resume',1,'Analyst','Synthetic','Berlin',1,1,'Board','https://example.test/jobs/1');
+    INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path) VALUES(1,'tailored','ready',1,1,'C:/synthetic/approved.pdf');`);
+  const profile = createProfileStore(store);
+  expect(profile.overview().fields.email).toBeNull();
+  expect(
+    store
+      .sql("SELECT state,approved_at,pdf_path FROM resumes WHERE job_id=1")
+      .get(),
+  ).toMatchObject({ state: "queued", approved_at: null, pdf_path: null });
+  store
+    .sql("UPDATE resumes SET state='ready',approved_at=2 WHERE job_id=1")
+    .run();
+  createProfileStore(store);
+  expect(
+    store.sql("SELECT approved_at FROM resumes WHERE job_id=1").get()
+      ?.approved_at,
+  ).toBe(2);
+});
+
 test("editing one Profile field preserves full resume text and history; screen reads omit the private source body", () => {
   const { store, profile } = setup();
   const source = profile.read().baseResume;

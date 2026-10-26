@@ -89,6 +89,9 @@ export const PROFILE_SCHEMA = [
 ].join("\n");
 
 export function createProfileStore(store: JobStore) {
+  return store.transaction(() => initializeProfileStore(store));
+}
+function initializeProfileStore(store: JobStore) {
   const empty = StoredProfileSchema.parse(createFreshStartCandidateProfile()),
     values = createScalarValues(
       store,
@@ -430,6 +433,7 @@ export function createProfileStore(store: JobStore) {
       });
     },
   };
+  if (values.created) invalidateProfileResumes(store);
   return api;
 }
 export type ProfileStore = ReturnType<typeof createProfileStore>;
