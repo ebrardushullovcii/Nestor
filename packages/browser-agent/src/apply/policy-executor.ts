@@ -514,20 +514,19 @@ async function decideAnswer(input: {
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
-  // Application answers are injected only for this request's execution;
-  // reusable library answers do not carry this prefix.
+  // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
     control,
     config.sources.reusableAnswers,
   );
   const isApplicationAnswer =
-    saved?.sourceId.startsWith("answerLibrary.application_") &&
-    (!savedRecord?.applicationScope ||
-      isAnswerFromThisApplication(
-        savedRecord,
-        config.application,
-        config.sources.posting.location,
-      ));
+    isAnswerFromThisApplication(
+      savedRecord,
+      config.application,
+      config.sources.posting.location,
+    ) ||
+    (saved?.sourceId.startsWith("answerLibrary.application_") &&
+      !savedRecord?.applicationScope);
   if (saved && isApplicationAnswer) {
     if (control.answerControlType === "multi_choice" && saved.value !== value)
       return {

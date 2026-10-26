@@ -512,11 +512,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           : question.key;
         const local =
           sql(`SELECT t.id,t.prompt,t.answer FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
-          WHERE n.application_id=? AND t.kind='question' AND t.answer IS NOT NULL AND ${question.reusePrompt ? "t.reuse_prompt=1 AND t.prompt_key=?" : "t.answer_key=?"}
-          ORDER BY t.resolved_at DESC,t.id DESC LIMIT 1`).get(
-            applicationId,
-            key,
-          ) as { id: number; prompt: string; answer: string } | undefined;
+          WHERE n.application_id=? AND t.kind='question' AND ${question.reusePrompt ? "t.reuse_prompt=1 AND t.prompt_key=?" : "t.answer_key=?"}
+          ORDER BY t.id DESC LIMIT 1`).get(applicationId, key) as
+            | { id: number; prompt: string; answer: string | null }
+            | undefined;
+        if (local?.answer === null) return [];
         if (local)
           return [
             {
@@ -574,7 +574,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     findAnswer: (key: string, scope: Partial<FormAnswerScope> = {}) =>
       findAnswerRecord(key, scope)?.answer ?? null,
 
-    request(input: RequestNeedsYouInput): RequestNeedsYouResult {
+    request(
+      input: RequestNeedsYouInput,
+      options: { reuseAnswers?: boolean } = {},
+    ): RequestNeedsYouResult {
       const value = RequestNeedsYouInputSchema.parse(input);
       return store.transaction(() => {
         const application = sql(
@@ -589,7 +592,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         )
           return { status: "stale" };
 
-        if (value.kind === "question") {
+        if (value.kind === "question" && options.reuseAnswers !== false) {
           const previous = sql(
             `SELECT t.* FROM needs_you t JOIN application_needs_you n ON n.task_id = t.id
              WHERE n.application_id = ? AND t.kind = 'question' AND t.answer_key = ?

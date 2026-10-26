@@ -9,6 +9,7 @@ import {
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
   type FoundJob,
+  type ApplyExecutionResult,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
@@ -127,7 +128,7 @@ async function setup(count: number, concurrency?: number) {
     resumes.finishWriting(id, null);
     resumes.approve(id, null);
   }
-  const releases: (() => void)[] = [];
+  const releases: ((result?: ApplyExecutionResult) => void)[] = [];
   const execute = vi.fn<
     NonNullable<BrowserSessionRuntime["executeApplicationFlow"]>
   >(
@@ -138,7 +139,7 @@ async function setup(count: number, concurrency?: number) {
           () => reject(new Error("Stopped")),
           { once: true },
         );
-        releases.push(() => resolve(ready()));
+        releases.push((result = ready()) => resolve(result));
       }),
   );
   const personPage: RawApplyPage = {
@@ -221,6 +222,42 @@ async function setup(count: number, concurrency?: number) {
     deps,
   };
 }
+
+it("returns an answer the form still rejects to Needs you instead of failing with an empty inbox", async () => {
+  const f = await setup(1);
+  const unanswered = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "salary",
+        prompt: "Annual salary expectation",
+        kind: "salary_expectation",
+        answerControlType: "text",
+        inputConstraints: { type: "number" },
+        detectedAt: new Date().toISOString(),
+      },
+    ],
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(unanswered);
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const first = f.applications.needsYou.list().rows[0]!;
+  f.applications.needsYou.answer({
+    id: first.id,
+    answer: "50000",
+    remember: true,
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!(unanswered);
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  expect(f.applications.listApplications().rows[0]?.state).toBe("needs_you");
+  expect(f.applications.needsYou.list().rows[0]?.id).not.toBe(first.id);
+  expect(f.onError).not.toHaveBeenCalled();
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
 
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
   const f = await setup(1);

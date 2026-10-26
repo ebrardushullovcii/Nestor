@@ -129,12 +129,15 @@ export function toKnownFormAnswer(
     proofEntryIds: input.proofEntryIds ?? [],
     ...(input.local ||
     question.kind === "cover_letter" ||
+    question.kind === "salary_expectation" ||
     geographic.has(question.kind)
       ? {
           applicationScope: {
             resultId: null,
             applicationRecordId:
-              input.local || question.kind === "cover_letter"
+              input.local ||
+              question.kind === "cover_letter" ||
+              question.kind === "salary_expectation"
                 ? `application_${applicationId}`
                 : null,
             location: geographic.has(question.kind) ? location : null,
