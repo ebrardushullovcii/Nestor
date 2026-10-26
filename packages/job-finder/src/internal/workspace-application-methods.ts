@@ -4,7 +4,6 @@ import {
   getAiProviderAccessFailure,
   isAiServiceBusy,
 } from "@nestor/ai-providers";
-import { mergeApplicationAnswersIntoExecutionProfile } from "./workspace-application-answer-execution";
 import {
   describeApplicationPreparation,
   hasVerifiedApplicationSubmission,
@@ -198,46 +197,10 @@ type WorkspaceApplicationMethods = Pick<
   ): Promise<void>;
 };
 
-/**
- * True when the only change between two profiles is answers the person saved
- * for next time. Saving an answer while a batch runs (the default now) must
- * not fail the application being filled in meanwhile: the resume it attached
- * does not read the saved answers.
- */
-export function onlySavedAnswersWereAdded(
-  before: CandidateProfile,
-  after: CandidateProfile,
-): boolean {
-  const beforeAnswers = before.answerBank.customAnswers;
-  const afterAnswers = after.answerBank.customAnswers;
-  const kept = new Set(beforeAnswers.map((answer) => JSON.stringify(answer)));
-  if (
-    afterAnswers.length < beforeAnswers.length ||
-    afterAnswers.filter((answer) => kept.has(JSON.stringify(answer))).length !==
-      beforeAnswers.length
-  ) {
-    return false;
-  }
-  const withoutCustomAnswers = (profile: CandidateProfile) =>
-    JSON.stringify({
-      ...profile,
-      answerBank: { ...profile.answerBank, customAnswers: [] },
-    });
-  return withoutCustomAnswers(before) === withoutCustomAnswers(after);
-}
-
-/** Recording a finished preparation, tolerant of answers saved meanwhile. */
 async function assertPreparationProfileCurrent(
   ctx: WorkspaceServiceContext,
   prerequisites: { profile: CandidateProfile; profileRevision: number },
 ): Promise<void> {
-  const current = await ctx.repository.getProfileWithRevision();
-  if (
-    current.revision !== prerequisites.profileRevision &&
-    onlySavedAnswersWereAdded(prerequisites.profile, current.profile)
-  ) {
-    return;
-  }
   await assertCurrentResumeProfile(
     ctx,
     prerequisites.profileRevision,
@@ -539,8 +502,14 @@ export function createWorkspaceApplicationMethods(
     if (ids.length === 0) return;
     const requested = new Set(ids);
     const display = await ctx.repository.readDisplayCollections?.();
-    const [settings, preferences, selectedSaved, intelligence, assets, attempts] =
-      await Promise.all([
+    const [
+      settings,
+      preferences,
+      selectedSaved,
+      intelligence,
+      assets,
+      attempts,
+    ] = await Promise.all([
       ctx.repository.getSettings(),
       ctx.repository.readSearchPreferencesProjection?.() ??
         ctx.repository.getSearchPreferences(),
@@ -1850,19 +1819,7 @@ export function createWorkspaceApplicationMethods(
             applicationPageBindingKey: activeResultIdRun,
             job,
             resumeArtifact,
-            profile: mergeApplicationAnswersIntoExecutionProfile({
-              profile: browserProfile.profile,
-              questionRecords:
-                await ctx.repository.listApplicationQuestionRecords({
-                  applicationRecordId: exactApplicationRecordId,
-                }),
-              answerRecords: await ctx.repository.listApplicationAnswerRecords({
-                applicationRecordId: exactApplicationRecordId,
-              }),
-              idPrefix: `application_${exactApplicationRecordId}`,
-              applicationRecordId: exactApplicationRecordId,
-              jobLocation: job.location,
-            }),
+            profile: browserProfile.profile,
             ...(applicationAttachmentsRun.length > 0
               ? { applicationAttachments: applicationAttachmentsRun }
               : {}),
@@ -1913,8 +1870,12 @@ export function createWorkspaceApplicationMethods(
                 jobId: jobId,
               }),
             prepareApplicationForm: createApplyFormPreparer({
-              readReusableAnswers: async () =>
-                (await ctx.repository.getProfile()).answerBank.customAnswers,
+              readReusableAnswers: () =>
+                readWorkspaceApplicationAnswers(
+                  ctx,
+                  exactApplicationRecordId,
+                  job.location,
+                ),
               executionInput: applyFlowFactsRun,
               applicationRecordId: exactApplicationRecordId,
               searchPreferences,

@@ -139,25 +139,6 @@ export function createSeed(): JobFinderRepositorySeed {
           linkIds: ["link_1"],
         },
       ],
-      answerBank: {
-        workAuthorization:
-          "Authorized to work in the United Kingdom and open to remote roles across Europe.",
-        visaSponsorship:
-          "Do not currently require visa sponsorship for UK-based roles.",
-        relocation:
-          "Open to relocation for the right platform or systems role.",
-        travel:
-          "Open to occasional travel for workshops and planning meetings.",
-        noticePeriod: "Available after a 30-day notice period.",
-        availability: "Available to interview now and start within 30 days.",
-        salaryExpectations:
-          "Targeting senior remote roles in the 180k-220k USD range depending on scope and package.",
-        selfIntroduction:
-          "I am a systems-focused product designer with 10 years of experience building workflow tools, design systems, and operations platforms.",
-        careerTransition:
-          "I am moving deeper into workflow platform roles because that is where my strongest measurable impact has been.",
-        customAnswers: [],
-      },
       applicationIdentity: {
         preferredEmail: "alex@example.com",
         preferredPhone: "+44 7700 900123",

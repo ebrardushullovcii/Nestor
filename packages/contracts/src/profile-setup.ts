@@ -175,7 +175,6 @@ export type ProfileSetupState = z.infer<typeof ProfileSetupStateSchema>;
 
 export interface ProfileSetupReadiness {
   freshStart: boolean;
-  hasAnswerBank: boolean;
   hasContactPath: boolean;
   hasCoreIdentity: boolean;
   hasDiscoverySource: boolean;
@@ -460,24 +459,6 @@ function hasMeaningfulNarrative(profile: CandidateProfile): boolean {
   );
 }
 
-function hasMeaningfulAnswerBank(profile: CandidateProfile): boolean {
-  const answerBank = profile.answerBank ?? {};
-
-  return Boolean(
-    hasMeaningfulText(answerBank.workAuthorization) ||
-    hasMeaningfulText(answerBank.visaSponsorship) ||
-    hasMeaningfulText(answerBank.relocation) ||
-    hasMeaningfulText(answerBank.travel) ||
-    hasMeaningfulText(answerBank.noticePeriod) ||
-    hasMeaningfulText(answerBank.availability) ||
-    hasMeaningfulText(answerBank.salaryExpectations) ||
-    hasMeaningfulText(answerBank.selfIntroduction) ||
-    hasMeaningfulText(answerBank.careerTransition) ||
-    (Array.isArray(answerBank.customAnswers) &&
-      answerBank.customAnswers.length > 0),
-  );
-}
-
 /**
  * True when this profile is still the untouched first-run seed, detected by
  * the reserved fresh-start id or by the exact legacy placeholder identity
@@ -567,12 +548,9 @@ export function evaluateProfileSetupReadiness(
     searchPreferences.workModes,
   );
   const hasWorkEligibilityAnswers =
-    (hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) ||
-      hasMeaningfulText(profile.answerBank?.workAuthorization)) &&
-    (profile.workEligibility.requiresVisaSponsorship !== null ||
-      hasMeaningfulText(profile.answerBank?.visaSponsorship));
+    hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) &&
+    profile.workEligibility.requiresVisaSponsorship !== null;
   const hasNarrative = hasMeaningfulNarrative(profile);
-  const hasAnswerBank = hasMeaningfulAnswerBank(profile);
   // Finishing needs a name, one way to be contacted, and one place to look.
   // Work history, targeting, eligibility and work mode improve results and
   // stay visible as hints, but a person with a resume and a job board should
@@ -586,8 +564,7 @@ export function evaluateProfileSetupReadiness(
     hasMeaningfulBackground ||
     hasTargeting ||
     hasEligibilityPreferences ||
-    hasNarrative ||
-    hasAnswerBank,
+    hasNarrative,
   );
 
   // Job targets owns the finish action, so a materially complete profile
@@ -601,13 +578,12 @@ export function evaluateProfileSetupReadiness(
     recommendedStep = "background";
   } else if (!hasDiscoverySource || !hasWorkEligibilityAnswers) {
     recommendedStep = "targeting";
-  } else if (!hasNarrative || !hasAnswerBank) {
+  } else if (!hasNarrative) {
     recommendedStep = "extras";
   }
 
   return {
     freshStart,
-    hasAnswerBank,
     hasContactPath,
     hasCoreIdentity,
     hasDiscoverySource,

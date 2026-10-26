@@ -378,6 +378,7 @@ export function createJobFinderWorkspaceService(
     documentManager,
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
+    ...(options.savedAnswers ? { savedAnswers: options.savedAnswers } : {}),
     ...(options.readSavedAnswers
       ? { readSavedAnswers: options.readSavedAnswers }
       : {}),
@@ -447,10 +448,11 @@ export function createJobFinderWorkspaceService(
       // resolveAdapterKind), so only whether any source is on matters.
       // Normalizing all 900 sources of a large workspace to learn that took
       // about 4 ms of every workspace read.
-      const adapterKinds: JobSource[] =
-        Boolean(options.jobSites?.list({ filter: "enabled", limit: 1 }).rows.length)
-          ? [getPreferredSessionAdapter(options.jobSites)]
-          : [];
+      const adapterKinds: JobSource[] = Boolean(
+        options.jobSites?.list({ filter: "enabled", limit: 1 }).rows.length,
+      )
+        ? [getPreferredSessionAdapter(options.jobSites)]
+        : [];
       if (adapterKinds.length === 0) {
         return [];
       }

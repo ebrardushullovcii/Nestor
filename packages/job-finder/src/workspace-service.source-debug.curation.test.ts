@@ -12,7 +12,9 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("treats collection result-changing guidance as positive search proof instead of leaving search coverage in draft", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -98,7 +100,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("treats stable jobs search routes with visible filter controls as positive search proof", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],

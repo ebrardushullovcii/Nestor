@@ -33,18 +33,6 @@ export function createProfile(): CandidateProfile {
       motivationThemes: [],
     },
     proofBank: [],
-    answerBank: {
-      workAuthorization: null,
-      visaSponsorship: null,
-      relocation: null,
-      travel: null,
-      noticePeriod: null,
-      availability: null,
-      salaryExpectations: null,
-      selfIntroduction: null,
-      careerTransition: null,
-      customAnswers: [],
-    },
     applicationIdentity: {
       preferredEmail: null,
       preferredPhone: null,

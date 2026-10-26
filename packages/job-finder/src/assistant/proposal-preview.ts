@@ -23,7 +23,6 @@ const recordGroups: Record<string, { field: string; label: string }> = {
   link_record: { field: "links", label: "link" },
   language_record: { field: "spokenLanguages", label: "language" },
   proof_point: { field: "proofBank", label: "achievement" },
-  reusable_answer: { field: "reusableAnswers", label: "saved answer" },
 };
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -78,10 +77,7 @@ export function profileProposalPreview(
   if ("record" in operation || "recordId" in operation) {
     const group =
       recordGroups[operation.operation.replace(/^(upsert|remove)_/u, "")]!;
-    const rows =
-      group.field === "reusableAnswers"
-        ? snapshot.profile.answerBank.customAnswers
-        : profile[group.field];
+    const rows = profile[group.field];
     const id = "record" in operation ? operation.record.id : operation.recordId;
     const before: unknown = Array.isArray(rows)
       ? rows.find((row: unknown) => record(row).id === id)
@@ -161,7 +157,6 @@ export function profileProposalPreview(
         snapshot.profile.summary,
     },
     replace_narrative_fields: profile.narrative,
-    replace_answer_bank_fields: profile.answerBank,
     replace_application_identity_fields: profile.applicationIdentity,
     replace_skill_group_fields: profile.skillGroups,
     replace_profile_list_fields: { ...preferences, ...profile },

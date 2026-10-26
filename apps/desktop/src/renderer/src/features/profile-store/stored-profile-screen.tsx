@@ -1,10 +1,4 @@
-import {
-  useMemo,
-  useState,
-  useRef,
-  useCallback,
-  type ComponentProps,
-} from "react";
+import { useMemo, useState, useCallback, type ComponentProps } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CandidateProfileSchema,
@@ -69,7 +63,7 @@ type ProfilePorts = Omit<
   | "recordSummary"
   | "sourceInfo"
 >;
-/** Reads are local to Profile; Save commits only edited rows and fields. */
+/** Reads are local to Profile; autosave commits only edited rows and fields. */
 export function StoredProfileScreen(props: ProfilePorts) {
   const store = useStoredProfile(),
     settings = useStoredSettings(),
@@ -78,9 +72,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
       upsert: ProfileRecord[];
       remove: { collection: ProfileRecordCollection; id: string }[];
     }>({ upsert: [], remove: [] }),
-    [epoch, setEpoch] = useState(0),
     [message, setMessage] = useState<string | null>(null),
-    draftRevision = useRef(0),
     [params] = useSearchParams(),
     section = params.get("section") ?? "basics";
   const experiences = useProfileRecordPage(
@@ -107,7 +99,6 @@ export function StoredProfileScreen(props: ProfilePorts) {
     [props.onProfileSurfaceDirtyChange],
   );
   const onDraftEdited = useCallback(() => {
-    draftRevision.current++;
     setMessage(null);
     props.onProfileSurfaceDraftEdited?.();
   }, [props.onProfileSurfaceDraftEdited]);
@@ -238,7 +229,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
             >
               Next
             </Button>
-            {dirty ? <span>Save changes before changing pages.</span> : null}
+            {dirty ? <span>Saving your changes…</span> : null}
           </nav>
         ))}
     </>
@@ -250,7 +241,6 @@ export function StoredProfileScreen(props: ProfilePorts) {
       ) : null}
       <ProfileScreen
         {...props}
-        key={epoch}
         onProfileSurfaceDraftEdited={onDraftEdited}
         actionState={{ message }}
         profile={profile}
@@ -288,17 +278,16 @@ export function StoredProfileScreen(props: ProfilePorts) {
           }
           return ok;
         }}
-        onSaveAll={(nextProfile, nextGoals) => {
-          const revision = draftRevision.current,
-            patch = profileEdits({
-              overview: store.overview!,
-              records,
-              goals: store.goals!,
-              nextProfile,
-              nextGoals,
-            });
-          void store.save(patch).then((ok) => {
-            if (!ok) return;
+        onSaveAll={async (nextProfile, nextGoals) => {
+          const patch = profileEdits({
+            overview: store.overview!,
+            records,
+            goals: store.goals!,
+            nextProfile,
+            nextGoals,
+          });
+          const ok = await store.save(patch);
+          if (ok) {
             setSaved((previous) => {
               const key = (row: {
                 collection: ProfileRecordCollection;
@@ -320,9 +309,8 @@ export function StoredProfileScreen(props: ProfilePorts) {
               };
             });
             setMessage("Profile saved.");
-            if (draftRevision.current === revision)
-              setEpoch((value) => value + 1);
-          });
+          }
+          return ok;
         }}
       />
     </>

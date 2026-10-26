@@ -73,7 +73,7 @@ import {
 import { uniqueStrings } from "./shared";
 import { selectApplicationSighting } from "./listing-sightings";
 import { withApplicationRecordTransition } from "./application-crm";
-import { mergeApplicationAnswersIntoExecutionProfile } from "./workspace-application-answer-execution";
+import { applicationAnswersForExecution } from "./workspace-application-answer-execution";
 import { resolveApplicationAttachmentsForExecution } from "./workspace-application-attachments";
 import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { resolveApplyAuthorityForJob } from "./apply-authority-resolution";
@@ -1159,8 +1159,7 @@ export function createApplicationUserActionResumer(
         applicationRecordId: scope.applicationRecordId,
       }),
     ]);
-    const executionProfile = mergeApplicationAnswersIntoExecutionProfile({
-      profile,
+    const applicationAnswers = applicationAnswersForExecution({
       answerRecords,
       questionRecords,
       idPrefix: `application_${request.id}`,
@@ -1203,11 +1202,9 @@ export function createApplicationUserActionResumer(
         (evidence) => evidence.retention !== "temporary",
       ),
     });
-    // The person's answers, spelled out beside the questions they answer.
-    // Merged into the profile they would still have to be found; named here
-    // the agent can go straight to those fields, fill them and carry on
-    // instead of working the whole form a second time.
-    const answeredQuestionLines = executionProfile.answerBank.customAnswers
+    // Keep the person's selected answers beside their questions so resumption
+    // can fill those fields and continue without repeating the whole form.
+    const answeredQuestionLines = applicationAnswers
       .filter((answer) => answer.id.startsWith(`application_${request.id}_`))
       .map(
         (answer) =>
@@ -1317,7 +1314,7 @@ export function createApplicationUserActionResumer(
         applicationPageBindingKey: result.id,
         job: prerequisites.job,
         resumeArtifact: prerequisites.resumeArtifact,
-        profile: executionProfile,
+        profile,
         ...(applicationAttachments.length > 0
           ? { applicationAttachments }
           : {}),
@@ -1384,6 +1381,10 @@ export function createApplicationUserActionResumer(
               jobId: job.id,
             }),
           prepareApplicationForm: createApplyFormPreparer({
+            readReusableAnswers: async () => [
+              ...applicationAnswers,
+              ...(ctx.readSavedAnswers?.() ?? []),
+            ],
             executionInput: applyFlowFacts,
             applicationRecordId: scope.applicationRecordId,
             aiClient: ctx.aiClient,

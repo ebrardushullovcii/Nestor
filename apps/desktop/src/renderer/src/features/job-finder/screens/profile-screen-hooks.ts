@@ -40,7 +40,6 @@ const FIELD_ARRAY_ROOT_NAMES = new Set([
   "links",
   "languages",
   "proofBank",
-  "answerBank.customAnswers",
 ]);
 
 // Structural row mutations ARE genuine user edits even though the root resync
@@ -551,7 +550,6 @@ export function useProfileScreenForms(input: {
     profileSkillValues,
     eligibilityValues,
     applicationIdentityValues,
-    answerBankValues,
     experienceValues,
     educationValues,
     certificationValues,
@@ -569,7 +567,6 @@ export function useProfileScreenForms(input: {
       "profileSkills",
       "eligibility",
       "applicationIdentity",
-      "answerBank",
       "records.experiences",
       "records.education",
       "records.certifications",
@@ -632,7 +629,6 @@ export function useProfileScreenForms(input: {
       }),
     [
       applicationIdentityValues,
-      answerBankValues,
       certificationValues,
       currentProfileBaseline,
       educationValues,
@@ -745,6 +741,7 @@ export function useProfileScreenForms(input: {
             input.profile,
             input.latestResumeImportReviewCandidates,
           ),
+          { keepValues: true },
         ),
       );
       // Incomplete added rows are omitted by the save payload. They are still
@@ -826,11 +823,26 @@ export function useProfileScreenForms(input: {
     loadedProfileContentFingerprintRef.current = incomingProfileFingerprint;
     loadedReviewCandidatesContentFingerprintRef.current =
       incomingCandidatesFingerprint;
-    runWithoutDraftEditSignal(() =>
-      profileForm.reset(mergeOutcome.value as ProfileEditorValues, {
-        keepDirty: true,
-      }),
-    );
+    runWithoutDraftEditSignal(() => {
+      if (
+        buildOrderedContentFingerprint(mergeOutcome.value) ===
+        buildOrderedContentFingerprint(draftValues)
+      ) {
+        profileForm.reset(
+          createProfileEditorValues(
+            input.profile,
+            input.latestResumeImportReviewCandidates,
+          ),
+          {
+            keepValues: true,
+            keepDirty: true,
+          },
+        );
+      } else
+        profileForm.reset(mergeOutcome.value as ProfileEditorValues, {
+          keepDirty: true,
+        });
+    });
     applyBackgroundConflictSurface("profile", false);
     setValidationMessage(null);
     setBackgroundMergeNotice(
@@ -885,6 +897,7 @@ export function useProfileScreenForms(input: {
       runWithoutDraftEditSignal(() =>
         preferencesForm.reset(
           createSearchPreferencesEditorValues(input.searchPreferences),
+          { keepValues: true },
         ),
       );
       applyBackgroundConflictSurface("preferences", false);
@@ -1005,7 +1018,6 @@ export function useProfileScreenForms(input: {
     () =>
       buildProfileScreenViewModel({
         applicationIdentityValues,
-        answerBankValues,
         certificationValues,
         companyBlacklist,
         companyWhitelist,
@@ -1038,7 +1050,6 @@ export function useProfileScreenForms(input: {
       }),
     [
       applicationIdentityValues,
-      answerBankValues,
       certificationValues,
       companyBlacklist,
       companyWhitelist,
@@ -1116,6 +1127,8 @@ export function useProfileScreenForms(input: {
     backgroundArrays,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
+    draftProfileResult,
+    draftDiffers: profileDraftDiffers || preferencesDraftDiffers,
     draftSearchPreferencesResult,
     experienceArray: wrapUserFieldArray(experienceArray),
     hasBackgroundConflict,

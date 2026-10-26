@@ -522,11 +522,6 @@ function createTestProfile(): CandidateProfile {
       noticePeriodDays: 30,
       availableStartDate: "2026-11-01",
     },
-    answerBank: {
-      workAuthorization: "Yes",
-      visaSponsorship: "No",
-      relocation: "Yes",
-    },
   });
 }
 

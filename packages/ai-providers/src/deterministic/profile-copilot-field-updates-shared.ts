@@ -16,7 +16,6 @@ export type PatchOperationName =
   | "replace_work_eligibility_fields"
   | "replace_professional_summary_fields"
   | "replace_narrative_fields"
-  | "replace_answer_bank_fields"
   | "replace_application_identity_fields"
   | "replace_skill_group_fields"
   | "replace_profile_list_fields"
@@ -26,7 +25,6 @@ export type ReviewDomain =
   | "work_eligibility"
   | "professional_summary"
   | "narrative"
-  | "answer_bank"
   | "search_preferences"
   | null;
 

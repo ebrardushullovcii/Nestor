@@ -204,7 +204,7 @@ describe("explicit approval of imported preferences", () => {
   );
 });
 
-test("accepted reusable import text targets saved answers, with unresolved suggestions left for review", () => {
+test("reusable import text goes to Needs you; unresolved text requires confirmation there", () => {
   const accepted = ResumeImportFieldCandidateSchema.parse({
     ...contactCandidate("email", "I build reporting tools."),
     target: { section: "answer_bank", key: "selfIntroduction", recordId: null },
@@ -213,7 +213,12 @@ test("accepted reusable import text targets saved answers, with unresolved sugge
   expect(
     resumeImportSavedAnswers([
       accepted,
-      { ...accepted, id: "unreviewed", resolution: "needs_review" },
+      {
+        ...accepted,
+        id: "unreviewed",
+        target: { ...accepted.target, key: "careerTransition" },
+        resolution: "needs_review",
+      },
     ]),
   ).toEqual([
     {
@@ -224,6 +229,15 @@ test("accepted reusable import text targets saved answers, with unresolved sugge
       answer: "I build reporting tools.",
       input: "text",
       needsConfirmation: false,
+    },
+    {
+      key: "resume_import:career_transition",
+      kind: "career_transition",
+      prompt: "Introduction",
+      label: "Introduction",
+      answer: "I build reporting tools.",
+      input: "text",
+      needsConfirmation: true,
     },
   ]);
 });

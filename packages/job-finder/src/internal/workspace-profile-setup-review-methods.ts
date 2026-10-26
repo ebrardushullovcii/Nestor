@@ -357,19 +357,6 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
               getClearedStructuredFieldValue(currentValue),
           },
         });
-      } else if (targetItem.target.domain === "answer_bank") {
-        const currentValue =
-          nextProfile.answerBank[
-            targetItem.target.key as keyof CandidateProfile["answerBank"]
-          ];
-        nextProfile = CandidateProfileSchema.parse({
-          ...nextProfile,
-          answerBank: {
-            ...nextProfile.answerBank,
-            [targetItem.target.key]:
-              getClearedStructuredFieldValue(currentValue),
-          },
-        });
       } else if (targetItem.target.domain === "application_identity") {
         const currentValue =
           nextProfile.applicationIdentity[

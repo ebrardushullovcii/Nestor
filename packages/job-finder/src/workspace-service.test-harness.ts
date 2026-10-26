@@ -1,4 +1,8 @@
 import {
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "@nestor/db/applications";
+import {
   createTestJobSites,
   createTestJobStore,
 } from "./job-sites.test-support";
@@ -66,6 +70,8 @@ export function createWorkspaceServiceHarness(
   const researchAdapter = options.researchAdapter ?? createResearchAdapter();
   const workspaceService = createJobFinderWorkspaceService({
     repository,
+    savedAnswers: createSavedAnswersStore(store),
+    readSavedAnswers: () => readSavedApplicationAnswers(store),
     jobSites,
     ...(options.onResumeEvidenceFinished
       ? { onResumeEvidenceFinished: options.onResumeEvidenceFinished }
@@ -91,6 +97,17 @@ export function createWorkspaceServiceHarness(
 
   workspaceHarnessInputs.set(workspaceService, { repository, documentManager });
   return {
+    readSavedAnswerRows: () =>
+      createSavedAnswersStore(store)
+        .list()
+        .rows.map(
+          (row) =>
+            createSavedAnswersStore(store).get({
+              key: row.key,
+              scope: row.scope,
+            })!,
+        ),
+    savedAnswers: createSavedAnswersStore(store),
     repository,
     jobSites,
     browserRuntime,

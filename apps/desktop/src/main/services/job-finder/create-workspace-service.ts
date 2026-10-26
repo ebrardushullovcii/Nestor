@@ -1,4 +1,7 @@
-import { readSavedApplicationAnswers } from "@nestor/db/applications";
+import {
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "@nestor/db/applications";
 import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
 import { jobSiteTarget } from "@nestor/contracts";
 import { startResumeService } from "../resumes";
@@ -790,6 +793,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   } = started ?? (await createJobFinderRuntimeAsync(envOverrides));
   const workspaceService = createJobFinderWorkspaceService({
     jobSites: createJobSitesStore(getJobStore()),
+    savedAnswers: createSavedAnswersStore(getJobStore()),
     readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),
     resumeDraftProcessor,
     aiClient,

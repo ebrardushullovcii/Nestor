@@ -41,7 +41,6 @@ const FIELD_ARRAY_ROOT_NAMES = new Set([
   "links",
   "languages",
   "proofBank",
-  "answerBank.customAnswers",
 ]);
 
 // Structural row mutations ARE genuine user edits even though the root resync
@@ -521,7 +520,6 @@ export function useProfileSetupForms(input: {
     profileSkillValues,
     eligibilityValues,
     applicationIdentityValues,
-    answerBankValues,
     experienceValues,
     educationValues,
     certificationValues,
@@ -539,7 +537,6 @@ export function useProfileSetupForms(input: {
       "profileSkills",
       "eligibility",
       "applicationIdentity",
-      "answerBank",
       "records.experiences",
       "records.education",
       "records.certifications",
@@ -596,7 +593,6 @@ export function useProfileSetupForms(input: {
       buildProfileSetupPayload(currentProfileBaseline, profileForm.getValues()),
     [
       applicationIdentityValues,
-      answerBankValues,
       certificationValues,
       currentProfileBaseline,
       educationValues,

@@ -216,25 +216,6 @@ export function createResumeWorkspaceDemoState(): JobFinderRepositoryState {
           linkIds: ["link_1"],
         },
       ],
-      answerBank: {
-        workAuthorization:
-          "Authorized to work in the United Kingdom and open to remote roles across Europe.",
-        visaSponsorship:
-          "Do not currently require visa sponsorship for UK-based roles.",
-        relocation:
-          "Open to relocation for the right platform or systems role.",
-        travel:
-          "Open to occasional travel for planning, workshops, and launch support.",
-        noticePeriod: "Currently able to start after a 30-day notice period.",
-        availability: "Available to interview now and start within 30 days.",
-        salaryExpectations:
-          "Targeting senior remote roles in the 180k-220k USD range depending on scope and package.",
-        selfIntroduction:
-          "I am a systems-focused product designer with 10 years of experience building workflow tools, design systems, and cross-functional operating rhythms.",
-        careerTransition:
-          "I am leaning further into systems and workflow platform roles because that is where my strongest measurable impact has been.",
-        customAnswers: [],
-      },
       applicationIdentity: {
         preferredEmail: "alex@example.com",
         preferredPhone: "+44 7700 900123",
@@ -1249,56 +1230,56 @@ export function createAgentOwnedBrowserDriveState(input: {
     },
     savedJobs: [
       ...base.savedJobs.map((job) =>
-      job.id === "job_ready"
-        ? {
-            ...job,
-            title: input.jobTitle ?? "Platform Engineer",
-            company: input.jobCompany ?? "Northwind Tools",
-            summary:
-              "Own a dependable internal platform spanning TypeScript, React, workflow automation, and design systems.",
-            description:
-              "Own dependable internal platforms used by product, engineering, and operations. Build TypeScript and React workflow tools, improve design-system foundations, automate operational work, and make production services easier to run. The team values measurable adoption, reliable incident recovery, and clear cross-functional leadership.",
-            keySkills: [
-              "TypeScript",
-              "React",
-              "Workflow Automation",
-              "Design Systems",
-              "Platform Reliability",
-            ],
-            responsibilities: [
-              "Own the internal platform roadmap.",
-              "Build workflow automation for product and operations teams.",
-              "Improve the reliability and adoption of shared design-system infrastructure.",
-            ],
-            minimumQualifications: [
-              "Experience building TypeScript and React platforms.",
-              "Evidence of workflow automation and production reliability work.",
-            ],
-            preferredQualifications: [
-              "Experience leading cross-functional platform initiatives.",
-            ],
-            canonicalUrl: `${input.sourceUrl.replace(/\/$/u, "")}/jobs/platform-engineer`,
-            applicationUrl: input.applicationUrl,
-            employerWebsiteUrl: input.applicationUrl,
-            employerDomain: new URL(input.applicationUrl).hostname,
-          }
-        : job.id === "job_consent_queue" && input.secondaryApplicationUrl
+        job.id === "job_ready"
           ? {
               ...job,
-              title: "Staff Product Designer",
-              company: "Contoso Labs",
-              canonicalUrl: `${input.sourceUrl.replace(/\/$/u, "")}/jobs/staff-product-designer`,
-              applicationUrl: input.secondaryApplicationUrl,
-              employerWebsiteUrl: input.secondaryApplicationUrl,
-              employerDomain: new URL(input.secondaryApplicationUrl).hostname,
-              screeningHints: {
-                ...job.screeningHints,
-                requiresConsentInterrupt: false,
-                requiresConsentInterruptKind: null,
-              },
+              title: input.jobTitle ?? "Platform Engineer",
+              company: input.jobCompany ?? "Northwind Tools",
+              summary:
+                "Own a dependable internal platform spanning TypeScript, React, workflow automation, and design systems.",
+              description:
+                "Own dependable internal platforms used by product, engineering, and operations. Build TypeScript and React workflow tools, improve design-system foundations, automate operational work, and make production services easier to run. The team values measurable adoption, reliable incident recovery, and clear cross-functional leadership.",
+              keySkills: [
+                "TypeScript",
+                "React",
+                "Workflow Automation",
+                "Design Systems",
+                "Platform Reliability",
+              ],
+              responsibilities: [
+                "Own the internal platform roadmap.",
+                "Build workflow automation for product and operations teams.",
+                "Improve the reliability and adoption of shared design-system infrastructure.",
+              ],
+              minimumQualifications: [
+                "Experience building TypeScript and React platforms.",
+                "Evidence of workflow automation and production reliability work.",
+              ],
+              preferredQualifications: [
+                "Experience leading cross-functional platform initiatives.",
+              ],
+              canonicalUrl: `${input.sourceUrl.replace(/\/$/u, "")}/jobs/platform-engineer`,
+              applicationUrl: input.applicationUrl,
+              employerWebsiteUrl: input.applicationUrl,
+              employerDomain: new URL(input.applicationUrl).hostname,
             }
-        : localJobAddress(job),
-    ),
+          : job.id === "job_consent_queue" && input.secondaryApplicationUrl
+            ? {
+                ...job,
+                title: "Staff Product Designer",
+                company: "Contoso Labs",
+                canonicalUrl: `${input.sourceUrl.replace(/\/$/u, "")}/jobs/staff-product-designer`,
+                applicationUrl: input.secondaryApplicationUrl,
+                employerWebsiteUrl: input.secondaryApplicationUrl,
+                employerDomain: new URL(input.secondaryApplicationUrl).hostname,
+                screeningHints: {
+                  ...job.screeningHints,
+                  requiresConsentInterrupt: false,
+                  requiresConsentInterruptKind: null,
+                },
+              }
+            : localJobAddress(job),
+      ),
       ...(input.foundJobs ?? []).map((found, index) => ({
         ...base.savedJobs[0]!,
         id: `job_found_${index + 1}`,

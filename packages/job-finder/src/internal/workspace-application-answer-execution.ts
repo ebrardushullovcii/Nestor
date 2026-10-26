@@ -1,8 +1,9 @@
+import type { WorkspaceServiceContext } from "./workspace-service-context";
 import {
   compareApplicationAnswerRecency,
   type ApplicationAnswerRecord,
   type ApplicationQuestionRecord,
-  type CandidateProfile,
+  type CandidateReusableAnswer,
 } from "@nestor/contracts";
 import {
   createReusableAnswerForQuestion,
@@ -21,14 +22,13 @@ function isExecutableUserAnswer(
   );
 }
 
-export function mergeApplicationAnswersIntoExecutionProfile(input: {
-  profile: CandidateProfile;
+export function applicationAnswersForExecution(input: {
   questionRecords: readonly ApplicationQuestionRecord[];
   answerRecords: readonly ApplicationAnswerRecord[];
   idPrefix: string;
   applicationRecordId?: string;
   jobLocation?: string | null;
-}): CandidateProfile {
+}): CandidateReusableAnswer[] {
   const answerById = new Map(
     input.answerRecords.map((answer) => [answer.id, answer] as const),
   );
@@ -83,18 +83,26 @@ export function mergeApplicationAnswersIntoExecutionProfile(input: {
       }),
     ];
   });
-  if (applicationAnswers.length === 0) {
-    return input.profile;
-  }
+  return applicationAnswers;
+}
 
-  return {
-    ...input.profile,
-    answerBank: {
-      ...input.profile.answerBank,
-      customAnswers: [
-        ...applicationAnswers,
-        ...input.profile.answerBank.customAnswers,
-      ],
-    },
-  };
+export async function readWorkspaceApplicationAnswers(
+  ctx: WorkspaceServiceContext,
+  applicationRecordId: string,
+  jobLocation?: string | null,
+): Promise<CandidateReusableAnswer[]> {
+  const [questionRecords, answerRecords] = await Promise.all([
+    ctx.repository.listApplicationQuestionRecords({ applicationRecordId }),
+    ctx.repository.listApplicationAnswerRecords({ applicationRecordId }),
+  ]);
+  return [
+    ...applicationAnswersForExecution({
+      questionRecords,
+      answerRecords,
+      applicationRecordId,
+      idPrefix: `application_${applicationRecordId}`,
+      ...(jobLocation !== undefined ? { jobLocation } : {}),
+    }),
+    ...(ctx.readSavedAnswers?.() ?? []),
+  ];
 }

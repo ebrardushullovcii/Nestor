@@ -285,7 +285,6 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -420,7 +419,6 @@ describe("contracts profile setup schemas", () => {
 
     expect(readiness.materiallyComplete).toBe(true);
     expect(readiness.hasNarrative).toBe(false);
-    expect(readiness.hasAnswerBank).toBe(false);
     expect(getProfileSetupReadinessBlockers(readiness)).toEqual([]);
   });
 
@@ -475,7 +473,6 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -622,7 +619,6 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -772,7 +768,6 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -892,7 +887,6 @@ describe("contracts profile setup schemas", () => {
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
         proofBank: [],
-        answerBank: emptyAnswerBank,
         applicationIdentity: emptyApplicationIdentity,
         skillGroups: emptySkillGroups,
         targetRoles: ["Principal Designer"],
@@ -1167,8 +1161,8 @@ describe("contracts profile setup schemas", () => {
     ]);
   });
 
-  test("needs both work-eligibility answers, as facts or saved sentences", () => {
-    const withAnswers = (workEligibility: object, answerBank: object = {}) =>
+  test("needs both structured work-eligibility facts", () => {
+    const withAnswers = (workEligibility: object) =>
       evaluateProfileSetupReadiness(
         CandidateProfileSchema.parse({
           ...completeProfileFixture,
@@ -1178,7 +1172,6 @@ describe("contracts profile setup schemas", () => {
             requiresVisaSponsorship: null,
             ...workEligibility,
           },
-          answerBank: { ...emptyAnswerBank, ...answerBank },
         }),
         completeSearchPreferencesFixture,
       ).hasWorkEligibilityAnswers;
@@ -1198,9 +1191,6 @@ describe("contracts profile setup schemas", () => {
         authorizedWorkCountries: ["Germany"],
         requiresVisaSponsorship: true,
       }),
-    ).toBe(true);
-    expect(
-      withAnswers({}, { workAuthorization: "Yes", visaSponsorship: "No" }),
     ).toBe(true);
     // Materially complete is unchanged, so a setup finished before the
     // question existed is not reopened.

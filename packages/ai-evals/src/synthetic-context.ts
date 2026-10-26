@@ -39,19 +39,6 @@ export function createSyntheticCandidateProfile() {
       motivationThemes: ["Useful software", "Clear collaboration"],
     },
     proofBank: [],
-    answerBank: {
-      workAuthorization: "Work eligibility must be confirmed per country.",
-      visaSponsorship: null,
-      relocation: "Remote worldwide; onsite only in Example City.",
-      travel: null,
-      noticePeriod: "Two weeks",
-      availability: "Available after a two-week notice period.",
-      salaryExpectations:
-        "Minimum EUR 2,000 monthly; preferred EUR 3,000–4,000 monthly.",
-      selfIntroduction: null,
-      careerTransition: null,
-      customAnswers: [],
-    },
     applicationIdentity: {
       preferredEmail: "alex.vanguard@example.com",
       preferredPhone: null,

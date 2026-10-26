@@ -261,24 +261,6 @@ function toProofBankFormEntries(
   }));
 }
 
-function toReusableAnswerFormEntries(
-  profile: CandidateProfile,
-): ReusableAnswerFormEntry[] {
-  return profile.answerBank.customAnswers.map((entry) => ({
-    id: entry.id,
-    ...(entry.needsConfirmation ? { needsConfirmation: true } : {}),
-    label: entry.label,
-    question: entry.question,
-    answer: entry.answer,
-    kind: entry.kind,
-    ...(entry.applicationScope
-      ? { applicationScope: entry.applicationScope }
-      : {}),
-    roleFamilies: joinListInput(entry.roleFamilies),
-    proofEntryIds: joinListInput(entry.proofEntryIds),
-  }));
-}
-
 // A row the user started but did not finish must block the save with a named
 // message instead of being dropped silently. Fully empty rows stay optional:
 // there is nothing entered in them to lose.
@@ -364,18 +346,6 @@ export function createProfileEditorValues(
         profile.applicationIdentity.preferredLinkIds,
       ),
       preferredPhone: profile.applicationIdentity.preferredPhone ?? "",
-    },
-    answerBank: {
-      availability: profile.answerBank.availability ?? "",
-      careerTransition: profile.answerBank.careerTransition ?? "",
-      customAnswers: toReusableAnswerFormEntries(profile),
-      noticePeriod: profile.answerBank.noticePeriod ?? "",
-      relocation: profile.answerBank.relocation ?? "",
-      salaryExpectations: profile.answerBank.salaryExpectations ?? "",
-      selfIntroduction: profile.answerBank.selfIntroduction ?? "",
-      travel: profile.answerBank.travel ?? "",
-      visaSponsorship: profile.answerBank.visaSponsorship ?? "",
-      workAuthorization: profile.answerBank.workAuthorization ?? "",
     },
     languages: toLanguageFormEntries(profile),
     links: toLinkFormEntries(profile),
@@ -585,21 +555,6 @@ export function buildProfilePayload(
           entry.projectIds,
           entry.linkIds,
         ].some((value) => Boolean(value.trim())),
-    ) ??
-    findIncompleteRowMessage(
-      values.answerBank.customAnswers,
-      "custom answer",
-      "Custom answer",
-      (entry) => entry.label || entry.question || entry.answer,
-      (entry) => Boolean(entry.question.trim()) && Boolean(entry.answer.trim()),
-      (entry) =>
-        [
-          entry.label,
-          entry.question,
-          entry.answer,
-          entry.roleFamilies,
-          entry.proofEntryIds,
-        ].some((value) => Boolean(value.trim())),
     );
 
   if (incompleteRowMessage) {
@@ -806,34 +761,6 @@ export function buildProfilePayload(
       preferredLinkIds: parseListInput(
         values.applicationIdentity.preferredLinkIds,
       ),
-    },
-    answerBank: {
-      workAuthorization: values.answerBank.workAuthorization.trim() || null,
-      visaSponsorship: values.answerBank.visaSponsorship.trim() || null,
-      relocation: values.answerBank.relocation.trim() || null,
-      travel: values.answerBank.travel.trim() || null,
-      noticePeriod: values.answerBank.noticePeriod.trim() || null,
-      availability: values.answerBank.availability.trim() || null,
-      salaryExpectations: values.answerBank.salaryExpectations.trim() || null,
-      selfIntroduction: values.answerBank.selfIntroduction.trim() || null,
-      careerTransition: values.answerBank.careerTransition.trim() || null,
-      customAnswers: values.answerBank.customAnswers
-        .filter((entry) => entry.question.trim() && entry.answer.trim())
-        .map((entry) => ({
-          id: entry.id,
-          ...(entry.needsConfirmation ? { needsConfirmation: true } : {}),
-          kind: candidateAnswerKindValues.includes(entry.kind)
-            ? entry.kind
-            : "other",
-          label: entry.label.trim() || entry.question.trim(),
-          question: entry.question.trim(),
-          answer: entry.answer.trim(),
-          roleFamilies: parseTokenListInput(entry.roleFamilies),
-          proofEntryIds: parseListInput(entry.proofEntryIds),
-          ...(entry.applicationScope
-            ? { applicationScope: entry.applicationScope }
-            : {}),
-        })),
     },
     professionalSummary: {
       shortValueProposition:

@@ -146,7 +146,6 @@ const PROFILE_LABELS: Record<string, string> = {
   tailoringMode: "Resume level",
   compensation: "Pay",
   workEligibility: "Work eligibility",
-  answerBank: "Saved answers",
   proofBank: "Proof points",
 };
 

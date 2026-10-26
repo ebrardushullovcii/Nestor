@@ -1,4 +1,4 @@
-import { expect, test, } from "vitest";
+import { expect, test } from "vitest";
 import {
   SavedJobSchema,
   type CandidateProfile,
@@ -7,9 +7,7 @@ import {
   type SavedJob,
 } from "@nestor/contracts";
 
-import {
-  createSeed,
-} from "../workspace-service.test-support";
+import { createSeed } from "../workspace-service.test-support";
 import { fitPostingFingerprint, jobNeedsFitJudgment } from "./fit-judgment";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
@@ -79,21 +77,6 @@ function unrelatedEdit(profile: CandidateProfile): CandidateProfile {
     ...profile,
     phone: "+44 7700 900999",
     email: "changed@example.test",
-    answerBank: {
-      ...profile.answerBank,
-      customAnswers: [
-        ...profile.answerBank.customAnswers,
-        {
-          id: "answer_new",
-          kind: "other",
-          label: "Why us",
-          question: "Why do you want to work here?",
-          answer: "A synthetic saved answer.",
-          roleFamilies: [],
-          proofEntryIds: [],
-        },
-      ],
-    },
   };
 }
 

@@ -10,7 +10,6 @@ import {
   normalizeCompanyName,
 } from "@nestor/contracts";
 
-import { quarantineAgentAnswers } from "../agent-answer-migration";
 import { migrateDiscoveryStorage } from "./discovery-storage";
 import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
 import { ensureResumeApprovalState } from "./resume-approval-state";
@@ -1698,79 +1697,6 @@ export function runMigrations(
       "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations",
     )
     .get() as { version?: number } | undefined;
-  function confirmLegacyAgentAnswers() {
-    const row = database
-      .prepare("SELECT value FROM singleton_state WHERE key = 'profile'")
-      .get() as { value: string } | undefined;
-    const parsedProfile = row
-      ? CandidateProfileSchema.safeParse(JSON.parse(row.value))
-      : null;
-    if (parsedProfile?.success) {
-      const profile = parsedProfile.data;
-      const questions = (
-        database
-          .prepare("SELECT value FROM application_question_records")
-          .all() as { value: string }[]
-      ).map((entry) =>
-        ApplicationQuestionRecordSchema.parse(JSON.parse(entry.value)),
-      );
-      const answers = (
-        database
-          .prepare("SELECT value FROM application_answer_records")
-          .all() as { value: string }[]
-      ).map((entry) =>
-        ApplicationAnswerRecordSchema.parse(JSON.parse(entry.value)),
-      );
-      const reviews = (
-        database.prepare("SELECT value FROM apply_job_results").all() as {
-          value: string;
-        }[]
-      )
-        .map(
-          (entry) =>
-            ApplyJobResultSchema.parse(JSON.parse(entry.value)).reviewCard,
-        )
-        .filter((card) => card !== null);
-      const repaired = quarantineAgentAnswers(
-        profile,
-        questions,
-        answers,
-        reviews,
-      );
-      if (JSON.stringify(profile) !== JSON.stringify(repaired)) {
-        database
-          .prepare(
-            "UPDATE singleton_state SET value = ?, revision = revision + 1 WHERE key = 'profile'",
-          )
-          .run(JSON.stringify(repaired));
-        // Approval of the old library cannot authorize those values after repair.
-        const envelopes = database
-          .prepare(
-            "SELECT id, value FROM application_authority_envelopes WHERE status = 'active'",
-          )
-          .all() as { id: string; value: string }[];
-        for (const envelope of envelopes) {
-          const value = JSON.parse(envelope.value) as Record<string, unknown>;
-          database
-            .prepare(
-              "UPDATE application_authority_envelopes SET status = 'revoked', value = ? WHERE id = ?",
-            )
-            .run(
-              JSON.stringify({
-                ...value,
-                status: "revoked",
-                revokedAt: new Date().toISOString(),
-              }),
-              envelope.id,
-            );
-        }
-      }
-    }
-    database
-      .prepare("INSERT INTO schema_migrations (version, name) VALUES (?, ?)")
-      .run(19, "confirm_legacy_agent_answers");
-  }
-
   const currentVersion = Number(versionRow?.version ?? 0);
   const appliedVersions = new Set(
     (
@@ -1853,7 +1779,6 @@ export function runMigrations(
       "application_answer_snapshots_profile_revision_idx",
     );
     const needsApplicationAnswerSnapshotMigration = !appliedVersions.has(16);
-    const needsLegacyAgentAnswerMigration = !appliedVersions.has(19);
     const needsOutcomeSourceLineageMigration = !appliedVersions.has(17);
     const needsSavedJobCampaignMembershipMigration = !appliedVersions.has(18);
 
@@ -1886,8 +1811,7 @@ export function runMigrations(
       applicationAnswerSnapshotIndexMissing ||
       needsApplicationAnswerSnapshotMigration ||
       needsOutcomeSourceLineageMigration ||
-      needsSavedJobCampaignMembershipMigration ||
-      needsLegacyAgentAnswerMigration
+      needsSavedJobCampaignMembershipMigration
     ) {
       database.exec("BEGIN IMMEDIATE");
       try {
@@ -2077,8 +2001,6 @@ export function runMigrations(
             )
             .run(18, "saved_job_campaign_membership");
         }
-
-        if (needsLegacyAgentAnswerMigration) confirmLegacyAgentAnswers();
 
         database.exec("COMMIT");
       } catch (error) {
@@ -2353,8 +2275,6 @@ export function runMigrations(
         .prepare("INSERT INTO schema_migrations (version, name) VALUES (?, ?)")
         .run(18, "saved_job_campaign_membership");
     }
-
-    if (currentVersion < 19) confirmLegacyAgentAnswers();
 
     assertApplicationAuthorityTableShape();
     assertApplicationAnswerSnapshotTableShape();

@@ -1347,7 +1347,6 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   function resolveBrowserSessionTarget(input: {
-    targets: readonly JobDiscoveryTarget[];
     targetId: string | null | undefined;
   }): JobDiscoveryTarget | null {
     if (!input.targetId) {

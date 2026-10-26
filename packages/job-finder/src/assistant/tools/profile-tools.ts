@@ -40,7 +40,7 @@ const Id = NonEmptyStringSchema.max(200);
  * profile read in a conversation instead of sitting in every system prompt.
  */
 export const PROFILE_EDITING_RULES = [
-  "Profile edits are typed operations sent with edit_profile. Each operation names its kind: replace_identity_fields, replace_professional_summary_fields, replace_work_eligibility_fields, replace_profile_list_fields, remove_profile_list_entries, replace_search_preferences_fields, replace_compensation_preferences_fields, set_resume_approach, upsert_/remove_ experience, education, certification, project, link, language records, upsert_/remove_ proof_point and reusable_answer, reorder_education_records, resolve_review_items.",
+  "Profile edits are typed operations sent with edit_profile. Each operation names its kind: replace_identity_fields, replace_professional_summary_fields, replace_work_eligibility_fields, replace_profile_list_fields, remove_profile_list_entries, replace_search_preferences_fields, replace_compensation_preferences_fields, set_resume_approach, upsert_/remove_ experience, education, certification, project, link, language records, upsert_/remove_ proof_point, reorder_education_records, resolve_review_items.",
   "An update to an existing card (experience, education, certification, link, project, language) carries that card's id from read_profile; an upsert without an id creates a new card. Include only the fields that change.",
   "Use the exact fields in edit_profile's operation schema. Experience uses companyName, summary and achievements (not company, description or bullets); education uses schoolName; projects use summary and projectUrl. workModes and seniorityLevels belong in replace_search_preferences_fields, not replace_profile_list_fields. Unknown fields reject the whole request without saving anything; correct the named fields and retry.",
   "Work modes use remote, hybrid, onsite or flexible. Built-in employment types use Full-time, Part-time, Contract, Internship or Temporary, with spaces or hyphens as shown, never invented snake_case codes. Employment types and seniority levels also accept the person's own custom wording; preserve it when they ask for a custom value.",
@@ -732,10 +732,6 @@ export function fieldsTouchedByOperation(
       return ["professionalSummary", "summary"];
     case "replace_narrative_fields":
       return ["narrative"];
-    case "replace_answer_bank_fields":
-    case "upsert_reusable_answer":
-    case "remove_reusable_answer":
-      return ["answerBank"];
     case "replace_application_identity_fields":
       return ["applicationIdentity"];
     case "replace_skill_group_fields":
@@ -960,20 +956,6 @@ export const editProfileTool = defineTool({
         );
       }
     }
-
-    if (
-      operations.some((operation) =>
-        [
-          "upsert_reusable_answer",
-          "remove_reusable_answer",
-          "replace_answer_bank_fields",
-        ].includes(operation.operation),
-      )
-    )
-      throw new AssistantToolError(
-        "refused",
-        "Form answers belong in Needs you. Use list_needs_you and answer_need for a pending question, or the Needs you saved-answer commands to edit remembered answers.",
-      );
 
     if (input.mode === "suggest") {
       const { proposal, part } = await session.createProposal({

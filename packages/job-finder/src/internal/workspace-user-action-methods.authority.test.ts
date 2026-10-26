@@ -12,6 +12,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "../index";
 import {
+  createWorkspaceServiceHarness,
   createAiClient,
   createBrowserRuntime,
   createDocumentManager,
@@ -347,23 +348,17 @@ describe("saved-answer application authority", () => {
     "%s adds no salary-recovery collection reads for one unrelated saved answer",
     async (reader) => {
       const seed = answerSeed();
-      seed.profile.answerBank.customAnswers = [
-        {
-          id: "unrelated_answer",
-          label: "Years of experience",
-          question: "Years of experience",
-          answer: "5 years",
-          kind: "other",
-          roleFamilies: [],
-          proofEntryIds: [],
-        },
-      ];
-      const repository = createInMemoryJobFinderRepository(seed);
-      const service = createJobFinderWorkspaceService({
+      const {
         repository,
-        browserRuntime: createBrowserRuntime(),
-        aiClient: createAiClient(),
-        documentManager: createDocumentManager(),
+        workspaceService: service,
+        savedAnswers,
+      } = createWorkspaceServiceHarness({ seed });
+      savedAnswers.upsert({
+        key: "unrelated_answer",
+        label: "Years of experience",
+        prompt: "Years of experience",
+        answer: "5 years",
+        kind: "other",
       });
       const read = service[reader];
       if (!read) throw new Error("Display projection is unavailable.");

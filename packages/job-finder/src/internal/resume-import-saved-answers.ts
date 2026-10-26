@@ -3,13 +3,13 @@ import type {
   UpsertSavedFormAnswerInput,
 } from "@nestor/contracts";
 
-/** Accepted reusable text goes to Needs you; it is never part of Profile. */
+/** Reusable suggestions belong to Needs you, including text awaiting confirmation. */
 export function resumeImportSavedAnswers(
   candidates: readonly ResumeImportFieldCandidate[],
 ): UpsertSavedFormAnswerInput[] {
   return candidates.flatMap((candidate) => {
     if (
-      candidate.resolution !== "auto_applied" ||
+      !["auto_applied", "needs_review"].includes(candidate.resolution) ||
       candidate.target.section !== "answer_bank"
     )
       return [];
@@ -29,7 +29,7 @@ export function resumeImportSavedAnswers(
         prompt: candidate.label,
         answer: answer.trim(),
         input: "text",
-        needsConfirmation: false,
+        needsConfirmation: candidate.resolution !== "auto_applied",
       },
     ];
   });

@@ -351,7 +351,6 @@ describe("contracts profile copilot schemas", () => {
         professionalSummary: {},
         narrative: {},
         proofBank: [],
-        answerBank: {},
         applicationIdentity: {},
         skillGroups: {},
         targetRoles: [],

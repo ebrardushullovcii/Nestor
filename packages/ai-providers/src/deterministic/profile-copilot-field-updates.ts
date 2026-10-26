@@ -4,7 +4,6 @@ import type {
   ProfileCopilotPatchGroup,
   ProfileIdentityPatchFieldsSchema,
   ProfileNarrativePatchFieldsSchema,
-  ProfileAnswerBankPatchFieldsSchema,
   ProfileApplicationIdentityPatchFieldsSchema,
   ProfileCoreListPatchFieldsSchema,
   ProfileProfessionalSummaryPatchFieldsSchema,
@@ -169,7 +168,6 @@ type ContractReplacementKey =
   | ContractFieldKeys<typeof ProfileWorkEligibilityPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileProfessionalSummaryPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileNarrativePatchFieldsSchema>
-  | ContractFieldKeys<typeof ProfileAnswerBankPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileApplicationIdentityPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileSkillGroupsPatchFieldsSchema>
   | ContractFieldKeys<typeof ProfileCoreListPatchFieldsSchema>

@@ -1475,28 +1475,6 @@ describe("profile editor application identity defaults", () => {
     expect(result.validationMessage).toContain("incomplete proof bank row");
   });
 
-  test("blocks the save when a custom answer row is started but missing its answer", () => {
-    const profile = createProfile();
-    const values = createProfileEditorValues(profile);
-
-    values.answerBank.customAnswers = [
-      {
-        id: "answer_incomplete",
-        label: "Why this company?",
-        question: "Why do you want to work here?",
-        answer: "",
-        kind: "other",
-        roleFamilies: "",
-        proofEntryIds: "",
-      },
-    ];
-
-    const result = buildProfilePayload(profile, values);
-
-    expect(result.payload).toBeUndefined();
-    expect(result.validationMessage).toContain("incomplete custom answer row");
-  });
-
   test("still saves fully empty optional rows without inventing data", () => {
     const profile = createProfile();
     const values = createProfileEditorValues(profile);
@@ -1608,48 +1586,6 @@ describe("profile editor application identity defaults", () => {
     expect(result.payload?.skillGroups.coreSkills).toEqual(["Python"]);
   });
 
-  test("parses comma-separated role families as separate tokens on save", () => {
-    const profile = createProfile();
-    const values = createProfileEditorValues(profile);
-
-    values.proofBank = [
-      {
-        id: "proof_roles",
-        title: "Led redesign",
-        claim: "Cut onboarding time by 18%.",
-        heroMetric: "",
-        supportingContext: "",
-        roleFamilies: "frontend, fullstack\ndesign systems",
-        projectIds: "",
-        linkIds: "",
-      },
-    ];
-    values.answerBank.customAnswers = [
-      {
-        id: "answer_roles",
-        label: "",
-        question: "Tell us about a launch.",
-        answer: "Shipped the platform relaunch.",
-        kind: "other",
-        roleFamilies: "backend,platform",
-        proofEntryIds: "",
-      },
-    ];
-
-    const result = buildProfilePayload(profile, values);
-
-    expect(result.validationMessage).toBeUndefined();
-    expect(result.payload?.proofBank[0]?.roleFamilies).toEqual([
-      "frontend",
-      "fullstack",
-      "design systems",
-    ]);
-    expect(result.payload?.answerBank.customAnswers[0]?.roleFamilies).toEqual([
-      "backend",
-      "platform",
-    ]);
-  });
-
   test("round-trips saved role families through the editor values unchanged", () => {
     const profile = CandidateProfileSchema.parse({
       ...createProfile(),
@@ -1678,36 +1614,6 @@ describe("profile editor application identity defaults", () => {
     ]);
     expect(hasProfileDraftChanges(profile, result.payload)).toBe(false);
   });
-});
-
-test("saving Profile preserves a saved eligibility answer's application location scope", () => {
-  const profile = createProfile();
-  const applicationScope = {
-    resultId: "result_1",
-    applicationRecordId: "application_1",
-    location: "Berlin, Germany",
-  };
-  profile.answerBank.customAnswers = [
-    {
-      id: "eligibility",
-      kind: "work_authorization",
-      label: "Are you authorized?",
-      question: "Are you authorized?",
-      answer: "Yes",
-      roleFamilies: [],
-      proofEntryIds: [],
-      applicationScope,
-    },
-  ];
-  const values = createProfileEditorValues(profile);
-  values.identity.headline = "Edited headline";
-  const saved = buildProfilePayload(profile, values).payload;
-  expect(saved?.answerBank.customAnswers[0]?.applicationScope).toEqual(
-    applicationScope,
-  );
-  expect(saved?.answerBank.customAnswers[0]?.question).toBe(
-    "Are you authorized?",
-  );
 });
 
 test("R3-065 saves limited German permission and future sponsorship together", () => {
@@ -1784,30 +1690,4 @@ test("normalizes a bare portfolio domain and removes trailing skill punctuation"
   const result = buildProfilePayload(profile, values);
   expect(result.payload?.portfolioUrl).toBe("https://portfolio.example.test/");
   expect(result.payload?.skills).toEqual(["SAP EWM", "SQL"]);
-});
-
-test("saving unrelated profile edits keeps the old-answer confirmation marker until the person confirms", () => {
-  const profile = createProfile();
-  profile.answerBank.customAnswers = [
-    {
-      id: "agent",
-      label: "Experience",
-      question: "Years?",
-      answer: "0",
-      kind: "other",
-      roleFamilies: [],
-      proofEntryIds: [],
-      needsConfirmation: true,
-    },
-  ];
-  const values = createProfileEditorValues(profile);
-  expect(
-    buildProfilePayload(profile, values).payload?.answerBank.customAnswers[0]
-      ?.needsConfirmation,
-  ).toBe(true);
-  values.answerBank.customAnswers[0]!.needsConfirmation = false;
-  expect(
-    buildProfilePayload(profile, values).payload?.answerBank.customAnswers[0]
-      ?.needsConfirmation,
-  ).toBeUndefined();
 });

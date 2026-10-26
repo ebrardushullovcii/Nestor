@@ -4,7 +4,6 @@ import {
   type CandidateProfile,
   type UserActionRequest,
 } from "@nestor/contracts";
-import { onlySavedAnswersWereAdded } from "./workspace-application-methods";
 import { findManualAnswerStepsCoveredBy } from "./workspace-user-action-methods";
 
 function request(
@@ -142,45 +141,6 @@ describe("a step asked after the answer was saved", () => {
     });
 
     expect(covered.map((entry) => entry.request.id)).toEqual(["late"]);
-  });
-});
-
-describe("an answer saved while a batch runs", () => {
-  const profile = {
-    fullName: "Jamie Rivers",
-    answerBank: {
-      workAuthorization: null,
-      customAnswers: [{ id: "a1", question: "Phone?", answer: "+49" }],
-    },
-  } as unknown as CandidateProfile;
-
-  it("does not count as a profile change for the application being filled in", () => {
-    const after = {
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        customAnswers: [
-          ...profile.answerBank.customAnswers,
-          { id: "a2", question: "Authorized?", answer: "Yes" },
-        ],
-      },
-    } as unknown as CandidateProfile;
-    expect(onlySavedAnswersWereAdded(profile, after)).toBe(true);
-  });
-
-  it("still counts any other edit", () => {
-    expect(
-      onlySavedAnswersWereAdded(profile, {
-        ...profile,
-        fullName: "Someone Else",
-      } as CandidateProfile),
-    ).toBe(false);
-    expect(
-      onlySavedAnswersWereAdded(profile, {
-        ...profile,
-        answerBank: { ...profile.answerBank, customAnswers: [] },
-      } as unknown as CandidateProfile),
-    ).toBe(false);
   });
 });
 

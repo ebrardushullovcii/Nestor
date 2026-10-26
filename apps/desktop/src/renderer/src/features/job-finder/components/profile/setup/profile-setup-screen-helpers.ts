@@ -325,9 +325,7 @@ function getCurrentTargetValue(
     case "narrative":
       return (profile.narrative as Record<string, unknown>)[target.key] ?? null;
     case "answer_bank":
-      return (
-        (profile.answerBank as Record<string, unknown>)[target.key] ?? null
-      );
+      return null;
     case "experience": {
       const record = target.recordId
         ? (profile.experiences.find((entry) => entry.id === target.recordId) ??
@@ -788,7 +786,6 @@ export function buildProfileSetupIdentityBlockerReason(
  */
 export type ProfileSetupPathStepReadiness = Pick<
   ProfileSetupReadiness,
-  | "hasAnswerBank"
   | "hasContactPath"
   | "hasCoreIdentity"
   | "hasDiscoverySource"
@@ -837,7 +834,7 @@ function hasProfileSetupPathStepEvidence(input: {
     // Complete claim, while an empty optional step simply earns no claim
     // instead of becoming a new obligation.
     case "extras":
-      return input.readiness.hasNarrative || input.readiness.hasAnswerBank;
+      return input.readiness.hasNarrative;
     default:
       return input.setupCompleted;
   }

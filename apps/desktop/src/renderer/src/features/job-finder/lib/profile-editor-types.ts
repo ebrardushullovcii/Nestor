@@ -73,18 +73,6 @@ export interface ProfileEditorValues {
     preferredLinkIds: string;
     preferredPhone: string;
   };
-  answerBank: {
-    availability: string;
-    careerTransition: string;
-    customAnswers: ReusableAnswerFormEntry[];
-    noticePeriod: string;
-    relocation: string;
-    salaryExpectations: string;
-    selfIntroduction: string;
-    travel: string;
-    visaSponsorship: string;
-    workAuthorization: string;
-  };
   skillGroups: {
     coreSkills: string;
     highlightedSkills: string;

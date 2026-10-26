@@ -146,7 +146,6 @@ function isPatchGroupSafeForAutoApply(
       operation.operation === "replace_work_eligibility_fields" ||
       operation.operation === "replace_professional_summary_fields" ||
       operation.operation === "replace_narrative_fields" ||
-      operation.operation === "replace_answer_bank_fields" ||
       operation.operation === "replace_application_identity_fields" ||
       operation.operation === "replace_skill_group_fields" ||
       operation.operation === "resolve_review_items"
@@ -431,7 +430,6 @@ function isPreferencesSectionItem(
   return [
     "search_preferences",
     "work_eligibility",
-    "answer_bank",
     "application_identity",
   ].includes(item.target.domain);
 }
@@ -1224,15 +1222,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
             },
           });
           break;
-        case "replace_answer_bank_fields":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
-              ...operation.value,
-            },
-          });
-          break;
         case "replace_application_identity_fields":
           nextProfile = CandidateProfileSchema.parse({
             ...nextProfile,
@@ -1495,34 +1484,6 @@ export function createWorkspaceProfileCopilotMethods(input: {
           nextProfile = CandidateProfileSchema.parse({
             ...nextProfile,
             proofBank: removeRecord(nextProfile.proofBank, operation.recordId),
-          });
-          break;
-        case "upsert_reusable_answer":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
-              customAnswers: replaceOrInsertRecord(
-                nextProfile.answerBank.customAnswers,
-                {
-                  ...operation.record,
-                  id: operation.record.id ?? createUniqueId("answer"),
-                },
-                (record) => CandidateReusableAnswerSchema.parse(record),
-              ),
-            },
-          });
-          break;
-        case "remove_reusable_answer":
-          nextProfile = CandidateProfileSchema.parse({
-            ...nextProfile,
-            answerBank: {
-              ...nextProfile.answerBank,
-              customAnswers: removeRecord(
-                nextProfile.answerBank.customAnswers,
-                operation.recordId,
-              ),
-            },
           });
           break;
         case "set_resume_approach":

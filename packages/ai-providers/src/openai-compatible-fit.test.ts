@@ -255,8 +255,8 @@ describe("batch fit judging", () => {
     expect(prompt).toContain("never overrides a country restriction");
     expect(prompt).toContain("actual office city");
     const profile = createProfile();
-    profile.answerBank.workAuthorization = "Canada only";
-    profile.answerBank.visaSponsorship = "Required outside Canada";
+    profile.workEligibility.authorizedWorkCountries = ["Canada"];
+    profile.workEligibility.requiresVisaSponsorship = true;
     const payload = buildJobFitJudgingPayload({
       assessmentDate: "2026-10-04",
       profile,
@@ -273,9 +273,6 @@ describe("batch fit judging", () => {
             ? "Yes"
             : "No",
     });
-    expect(payload.person.savedEligibilityAnswers.workAuthorization).toBe(
-      "Canada only",
-    );
   });
   test("keeps late requirements and labels sparse evidence provisional (R3-018)", () => {
     const posting = createJobPosting();
@@ -293,15 +290,15 @@ describe("batch fit judging", () => {
   });
   test("includes saved availability and requires comparison of immediate starts (R3-052)", () => {
     const profile = createProfile();
-    profile.answerBank.availability = "September";
+    profile.workEligibility.availableStartDate = "2026-09-01";
     const payload = buildJobFitJudgingPayload({
       assessmentDate: "2026-10-04",
       profile,
       searchPreferences: createPreferences(),
       jobs: [],
     });
-    expect(payload.person.savedEligibilityAnswers.availability).toBe(
-      "September",
+    expect(payload.person.workEligibility["Available start date"]).toBe(
+      "2026-09-01",
     );
     expect(buildFitEvidenceInstructions()).toContain(
       "ambiguous month without a year",

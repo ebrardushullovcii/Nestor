@@ -15,7 +15,9 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("runs source debug, persists artifacts, and validates learned instructions after replay", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -194,7 +196,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("marks lingering running source-debug runs as interrupted in the background without a snapshot", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       discovery: {
         ...createSeed().discovery,

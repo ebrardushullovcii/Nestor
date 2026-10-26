@@ -27,7 +27,9 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         section: "preferences",
       },
     );
-    const assistantMessage = snapshot.profileCopilotMessages.find((message) => message.role === "assistant");
+    const assistantMessage = snapshot.profileCopilotMessages.find(
+      (message) => message.role === "assistant",
+    );
     const patchGroup = assistantMessage?.patchGroups[0];
     const revisions = await repository.listProfileRevisions();
 
@@ -40,7 +42,8 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     expect(snapshot.searchPreferences.discovery.targets).toEqual([]);
     expect(revisions).toHaveLength(0);
 
-    const appliedSnapshot = await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
+    const appliedSnapshot =
+      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
 
     expect(appliedSnapshot.searchPreferences.discovery.targets).toEqual(
       expect.arrayContaining([
@@ -97,8 +100,9 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         section: "preferences",
       },
     );
-    const patchGroup = snapshot.profileCopilotMessages.find((message) => message.role === "assistant")
-      ?.patchGroups[0];
+    const patchGroup = snapshot.profileCopilotMessages.find(
+      (message) => message.role === "assistant",
+    )?.patchGroups[0];
 
     expect(patchGroup).toEqual(
       expect.objectContaining({
@@ -106,9 +110,12 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         summary: "Re-enable LinkedIn Jobs job source",
       }),
     );
-    expect(snapshot.searchPreferences.discovery.targets[0]?.enabled).toBe(false);
+    expect(snapshot.searchPreferences.discovery.targets[0]?.enabled).toBe(
+      false,
+    );
 
-    const appliedSnapshot = await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
+    const appliedSnapshot =
+      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
 
     expect(appliedSnapshot.searchPreferences.discovery.targets[0]).toEqual(
       expect.objectContaining({
@@ -148,7 +155,8 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
                 recordId: null,
               },
               label: "Remote eligibility",
-              reason: "Confirm remote preference before discovery starts from the wrong work-mode assumptions.",
+              reason:
+                "Confirm remote preference before discovery starts from the wrong work-mode assumptions.",
               severity: "recommended",
               status: "pending",
               proposedValue: null,
@@ -205,7 +213,9 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         step: "targeting",
       },
     );
-    const assistantMessage = snapshot.profileCopilotMessages.find((message) => message.role === "assistant");
+    const assistantMessage = snapshot.profileCopilotMessages.find(
+      (message) => message.role === "assistant",
+    );
     const patchGroup = assistantMessage?.patchGroups[0];
     const revisions = await repository.listProfileRevisions();
 
@@ -215,12 +225,15 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     expect(snapshot.profile.workEligibility.remoteEligible).toBe(false);
     expect(revisions).toHaveLength(0);
 
-    const appliedSnapshot = await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
+    const appliedSnapshot =
+      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
 
     expect(appliedSnapshot.searchPreferences.workModes).toEqual(["remote"]);
     expect(appliedSnapshot.profile.workEligibility.remoteEligible).toBe(true);
     expect(
-      appliedSnapshot.profileSetupState.reviewItems.find((item) => item.id === "review_work_mode")?.status,
+      appliedSnapshot.profileSetupState.reviewItems.find(
+        (item) => item.id === "review_work_mode",
+      )?.status,
     ).toBe("edited");
   });
 
@@ -248,18 +261,25 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       },
     );
 
-    expect(githubSnapshot.profile.githubUrl).toBe("https://github.com/elian-morava-example");
-
-    const eligibilitySnapshot = await workspaceService.sendProfileCopilotMessage(
-      "no i dont want a visa im fine working remote",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
+    expect(githubSnapshot.profile.githubUrl).toBe(
+      "https://github.com/elian-morava-example",
     );
 
-    expect(eligibilitySnapshot.profile.workEligibility.requiresVisaSponsorship).toBe(false);
-    expect(eligibilitySnapshot.profile.workEligibility.remoteEligible).toBe(true);
+    const eligibilitySnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "no i dont want a visa im fine working remote",
+        {
+          surface: "profile",
+          section: "preferences",
+        },
+      );
+
+    expect(
+      eligibilitySnapshot.profile.workEligibility.requiresVisaSponsorship,
+    ).toBe(false);
+    expect(eligibilitySnapshot.profile.workEligibility.remoteEligible).toBe(
+      true,
+    );
   });
 
   test("profile copilot can combine multiple preference and identity edits from one request", async () => {
@@ -293,7 +313,9 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         section: "preferences",
       },
     );
-    const assistantMessage = snapshot.profileCopilotMessages.find((message) => message.role === "assistant");
+    const assistantMessage = snapshot.profileCopilotMessages.find(
+      (message) => message.role === "assistant",
+    );
     const patchGroups = assistantMessage?.patchGroups ?? [];
 
     expect(snapshot.profile.yearsExperience).toBe(7);
@@ -305,9 +327,18 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     expect(snapshot.searchPreferences.discovery.targets).toEqual([]);
     expect(patchGroups).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ summary: "Update years of experience", applyMode: "applied" }),
-        expect.objectContaining({ summary: "Update expected salary", applyMode: "needs_review" }),
-        expect.objectContaining({ summary: "Prefer remote work mode", applyMode: "needs_review" }),
+        expect.objectContaining({
+          summary: "Update years of experience",
+          applyMode: "applied",
+        }),
+        expect.objectContaining({
+          summary: "Update expected salary",
+          applyMode: "needs_review",
+        }),
+        expect.objectContaining({
+          summary: "Prefer remote work mode",
+          applyMode: "needs_review",
+        }),
         expect.objectContaining({
           summary: "Add LinkedIn Jobs, Wellfound, and KosovaJob job sources",
           applyMode: "needs_review",
@@ -319,23 +350,42 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       (patchGroup) => patchGroup.summary === "Update expected salary",
     );
     expect(salaryPatchGroup).toBeTruthy();
-    const workModePatchGroup = patchGroups.find((patchGroup) => patchGroup.summary === "Prefer remote work mode");
+    const workModePatchGroup = patchGroups.find(
+      (patchGroup) => patchGroup.summary === "Prefer remote work mode",
+    );
     const jobSourcesPatchGroup = patchGroups.find(
-      (patchGroup) => patchGroup.summary === "Add LinkedIn Jobs, Wellfound, and KosovaJob job sources",
+      (patchGroup) =>
+        patchGroup.summary ===
+        "Add LinkedIn Jobs, Wellfound, and KosovaJob job sources",
     );
     expect(workModePatchGroup).toBeTruthy();
     expect(jobSourcesPatchGroup).toBeTruthy();
 
-    const afterWorkModeApply = await workspaceService.applyProfileCopilotPatchGroup(workModePatchGroup!.id);
+    const afterWorkModeApply =
+      await workspaceService.applyProfileCopilotPatchGroup(
+        workModePatchGroup!.id,
+      );
     expect(afterWorkModeApply.searchPreferences.workModes).toEqual(["remote"]);
-    expect(afterWorkModeApply.profile.workEligibility.remoteEligible).toBe(true);
+    expect(afterWorkModeApply.profile.workEligibility.remoteEligible).toBe(
+      true,
+    );
 
-    const afterSalaryApply = await workspaceService.applyProfileCopilotPatchGroup(salaryPatchGroup!.id);
-    expect(afterSalaryApply.searchPreferences.compensation.maximum).toBe(200000);
+    const afterSalaryApply =
+      await workspaceService.applyProfileCopilotPatchGroup(
+        salaryPatchGroup!.id,
+      );
+    expect(afterSalaryApply.searchPreferences.compensation.maximum).toBe(
+      200000,
+    );
     expect(afterSalaryApply.searchPreferences.compensation.currency).toBeNull();
-    expect(afterSalaryApply.searchPreferences.compensation.currencyStatus).toBe("needs_clarification");
+    expect(afterSalaryApply.searchPreferences.compensation.currencyStatus).toBe(
+      "needs_clarification",
+    );
 
-    const afterJobSourcesApply = await workspaceService.applyProfileCopilotPatchGroup(jobSourcesPatchGroup!.id);
+    const afterJobSourcesApply =
+      await workspaceService.applyProfileCopilotPatchGroup(
+        jobSourcesPatchGroup!.id,
+      );
     expect(afterJobSourcesApply.searchPreferences.discovery.targets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: "LinkedIn Jobs" }),
@@ -362,12 +412,15 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     expect(patchGroup).toEqual(
       expect.objectContaining({ applyMode: "needs_review" }),
     );
-    expect(proposedSnapshot.searchPreferences.locations).not.toEqual(["New York"]);
-    expect(proposedSnapshot.searchPreferences.compensation.currency).not.toBeNull();
+    expect(proposedSnapshot.searchPreferences.locations).not.toEqual([
+      "New York",
+    ]);
+    expect(
+      proposedSnapshot.searchPreferences.compensation.currency,
+    ).not.toBeNull();
 
-    const appliedSnapshot = await workspaceService.applyProfileCopilotPatchGroup(
-      patchGroup!.id,
-    );
+    const appliedSnapshot =
+      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
 
     expect(appliedSnapshot.searchPreferences.locations).toEqual(["New York"]);
     expect(appliedSnapshot.searchPreferences.compensation).toEqual({
@@ -392,10 +445,6 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
             ...createSeed().profile.professionalSummary,
             strengths: [],
           },
-          answerBank: {
-            ...createSeed().profile.answerBank,
-            selfIntroduction: null,
-          },
           applicationIdentity: {
             ...createSeed().profile.applicationIdentity,
             preferredEmail: null,
@@ -409,13 +458,14 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       },
     });
 
-    const displayNameSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my preferred display name to Lex",
-      {
-        surface: "profile",
-        section: "basics",
-      },
-    );
+    const displayNameSnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my preferred display name to Lex",
+        {
+          surface: "profile",
+          section: "basics",
+        },
+      );
     expect(displayNameSnapshot.profile.preferredDisplayName).toBe("Lex");
 
     const strengthsSnapshot = await workspaceService.sendProfileCopilotMessage(
@@ -431,27 +481,17 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       "frontend architecture",
     ]);
 
-    const introSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my short self introduction to Senior engineer focused on reliable AI workflows.",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
-    expect(introSnapshot.profile.answerBank.selfIntroduction).toBe(
-      "Senior engineer focused on reliable AI workflows.",
-    );
-
-    const preferredEmailSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my preferred application email to jobs@example.com",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
-    expect(preferredEmailSnapshot.profile.applicationIdentity.preferredEmail).toBe(
-      "jobs@example.com",
-    );
+    const preferredEmailSnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my preferred application email to jobs@example.com",
+        {
+          surface: "profile",
+          section: "preferences",
+        },
+      );
+    expect(
+      preferredEmailSnapshot.profile.applicationIdentity.preferredEmail,
+    ).toBe("jobs@example.com");
 
     const coreSkillsSnapshot = await workspaceService.sendProfileCopilotMessage(
       "set my core skills to React, TypeScript, Node.js",
@@ -466,13 +506,14 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       "Node.js",
     ]);
 
-    const profileSkillsSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my overall skills to React, TypeScript, Electron",
-      {
-        surface: "profile",
-        section: "basics",
-      },
-    );
+    const profileSkillsSnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my overall skills to React, TypeScript, Electron",
+        {
+          surface: "profile",
+          section: "basics",
+        },
+      );
     expect(profileSkillsSnapshot.profile.skills).toEqual([
       "React",
       "TypeScript",
@@ -494,22 +535,26 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       },
     });
 
-    const availableStartDateSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my available start date to 2026-05-01",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
-    expect(availableStartDateSnapshot.profile.workEligibility.availableStartDate).toBe("2026-05-01");
+    const availableStartDateSnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my available start date to 2026-05-01",
+        {
+          surface: "profile",
+          section: "preferences",
+        },
+      );
+    expect(
+      availableStartDateSnapshot.profile.workEligibility.availableStartDate,
+    ).toBe("2026-05-01");
 
-    const salaryCurrencySnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my salary currency to eur",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
+    const salaryCurrencySnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my salary currency to eur",
+        {
+          surface: "profile",
+          section: "preferences",
+        },
+      );
     expect(salaryCurrencySnapshot.searchPreferences.salaryCurrency).toBe("EUR");
     expect(salaryCurrencySnapshot.searchPreferences.compensation).toEqual(
       expect.objectContaining({
@@ -518,18 +563,21 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       }),
     );
 
-    const tailoringModeSnapshot = await workspaceService.sendProfileCopilotMessage(
-      "set my tailoring mode to aggressive",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
+    const tailoringModeSnapshot =
+      await workspaceService.sendProfileCopilotMessage(
+        "set my tailoring mode to aggressive",
+        {
+          surface: "profile",
+          section: "preferences",
+        },
+      );
     // The strength is half of the resume level (Settings > AI behavior >
     // Resumes, and it can move a person off Original), so it arrives as a
     // resume-level card that waits for Apply & save instead of applying
     // itself.
-    expect(tailoringModeSnapshot.searchPreferences.tailoringMode).toBe("balanced");
+    expect(tailoringModeSnapshot.searchPreferences.tailoringMode).toBe(
+      "balanced",
+    );
     const tailoringPatchGroup = tailoringModeSnapshot.profileCopilotMessages
       .flatMap((message) => message.patchGroups)
       .find((patchGroup) =>
@@ -544,8 +592,12 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
       }),
     );
     const tailoringAppliedSnapshot =
-      await workspaceService.applyProfileCopilotPatchGroup(tailoringPatchGroup!.id);
-    expect(tailoringAppliedSnapshot.searchPreferences.tailoringMode).toBe("aggressive");
+      await workspaceService.applyProfileCopilotPatchGroup(
+        tailoringPatchGroup!.id,
+      );
+    expect(tailoringAppliedSnapshot.searchPreferences.tailoringMode).toBe(
+      "aggressive",
+    );
 
     const reviewModeSnapshot = await workspaceService.sendProfileCopilotMessage(
       "set my preferred locations to Berlin, Prishtina, Remote",
@@ -556,7 +608,9 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     );
     const reviewPatchGroup = reviewModeSnapshot.profileCopilotMessages
       .flatMap((message) => message.patchGroups)
-      .find((patchGroup) => patchGroup.summary === "Update preferred locations");
+      .find(
+        (patchGroup) => patchGroup.summary === "Update preferred locations",
+      );
     const revisions = await repository.listProfileRevisions();
 
     expect(reviewPatchGroup).toEqual(
@@ -565,10 +619,16 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
         applyMode: "needs_review",
       }),
     );
-    expect(reviewModeSnapshot.searchPreferences.locations).toEqual(["Remote", "London"]);
+    expect(reviewModeSnapshot.searchPreferences.locations).toEqual([
+      "Remote",
+      "London",
+    ]);
     expect(revisions.length).toBeGreaterThanOrEqual(3);
 
-    const appliedSnapshot = await workspaceService.applyProfileCopilotPatchGroup(reviewPatchGroup!.id);
+    const appliedSnapshot =
+      await workspaceService.applyProfileCopilotPatchGroup(
+        reviewPatchGroup!.id,
+      );
     expect(appliedSnapshot.searchPreferences.locations).toEqual([
       "Berlin",
       "Prishtina",

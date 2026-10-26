@@ -138,7 +138,7 @@ test("Profile saves an edited field without loading or sending unseen work histo
       .getAttribute("data-profile-section-progress-state"),
   ).toBe("complete");
   fireEvent.change(headline, { target: { value: "Senior Analyst" } });
-  fireEvent.click(screen.getByRole("button", { name: /Save changes/u }));
+  expect(screen.queryByRole("button", { name: /Save changes/u })).toBeNull();
   await screen.findByText("Profile saved.");
   expect(createProfileStore(store).overview().fields.headline).toBe(
     "Senior Analyst",
@@ -163,7 +163,6 @@ test("work-history pages keep unseen records and lock paging until edits save", 
       .getByRole("button", { name: "Next" })
       .hasAttribute("disabled"),
   ).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: /Save changes/u }));
   await screen.findByText("Profile saved.");
   const next = () =>
     within(

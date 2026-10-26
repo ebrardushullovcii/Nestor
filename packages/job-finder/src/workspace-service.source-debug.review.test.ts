@@ -18,7 +18,9 @@ import {
 
 describe("createJobFinderWorkspaceService", () => {
   test("final source-instruction reviewer receives rich phase context and can override final curation", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -144,7 +146,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("skips the AI final reviewer when summary-first handoff still cannot fit the context budget", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -237,7 +241,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("final source-instruction reviewer is told to write future-run instructions, and its lines stand as returned", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -352,7 +358,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("keeps timed-out partial evidence in draft and exposes completion metadata in run details", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -512,7 +520,9 @@ describe("createJobFinderWorkspaceService", () => {
   });
 
   test("final source-debug review switches to summary-first handoff when transcript context is too large", async () => {
-    const sourceSeedForSites = {
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = {
       ...createSeed(),
       savedJobs: [],
       tailoredAssets: [],
@@ -676,7 +686,9 @@ describe("createJobFinderWorkspaceService", () => {
       }),
     ];
 
-    const sourceSeedForSites = seed;
+    const sourceSeedForSites: Parameters<
+      typeof createInMemoryJobFinderRepository
+    >[0] = seed;
     const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
     const browserRuntime = createAgentBrowserRuntime(
       [

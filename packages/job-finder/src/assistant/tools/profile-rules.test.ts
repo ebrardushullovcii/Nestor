@@ -323,11 +323,6 @@ describe("sidebar resume import outcomes", () => {
           availableStartDate: null,
           remoteEligible: null,
         },
-        answerBank: {
-          ...seed.profile.answerBank,
-          workAuthorization: null,
-          visaSponsorship: null,
-        },
       };
       seed.searchPreferences = { ...seed.searchPreferences, workModes: [] };
       const { workspaceService } = createWorkspaceServiceHarness({ seed });
@@ -417,11 +412,6 @@ describe("sidebar resume import outcomes", () => {
             ...seed.profile.workEligibility,
             authorizedWorkCountries: [],
             requiresVisaSponsorship: null,
-          },
-          answerBank: {
-            ...seed.profile.answerBank,
-            workAuthorization: null,
-            visaSponsorship: null,
           },
         };
       if (missing === "headline")

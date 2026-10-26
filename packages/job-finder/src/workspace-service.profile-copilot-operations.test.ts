@@ -11,10 +11,7 @@ import type {
   ProfileSetupState,
 } from "@nestor/contracts";
 import { ProfileCopilotPatchGroupSchema } from "@nestor/contracts";
-import type {
-  JobFinderRepository,
-  JobFinderRepositorySeed,
-} from "@nestor/db";
+import type { JobFinderRepository, JobFinderRepositorySeed } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -148,10 +145,6 @@ function withSeededBackgroundRecords(
       certifications: [seededCertification],
       projects: [seededProject],
       spokenLanguages: [seededLanguage],
-      answerBank: {
-        ...base.profile.answerBank,
-        customAnswers: [seededReusableAnswer],
-      },
     },
   };
 }
@@ -256,26 +249,6 @@ const operationCases = {
     observe: (state) => state.profile.narrative.professionalStory,
     expectedAfterApply:
       "Copilot-refined story about resilient workflow platforms.",
-  },
-  replace_answer_bank_fields: {
-    operation: "replace_answer_bank_fields",
-    request: "Update my availability answers for applications",
-    context: { surface: "profile", section: "preferences" },
-    buildOperation: () => ({
-      operation: "replace_answer_bank_fields",
-      value: {
-        availability: "Available immediately for interviews.",
-        noticePeriod: "No notice period required.",
-      },
-    }),
-    observe: (state) => [
-      state.profile.answerBank.availability,
-      state.profile.answerBank.noticePeriod,
-    ],
-    expectedAfterApply: [
-      "Available immediately for interviews.",
-      "No notice period required.",
-    ],
   },
   replace_application_identity_fields: {
     operation: "replace_application_identity_fields",
@@ -694,41 +667,6 @@ const operationCases = {
       recordId: "proof_1",
     }),
     observe: (state) => state.profile.proofBank.map((entry) => entry.id),
-    expectedAfterApply: [],
-  },
-  upsert_reusable_answer: {
-    operation: "upsert_reusable_answer",
-    request: "Save a reusable answer about my start date",
-    context: { surface: "profile", section: "preferences" },
-    buildOperation: () => ({
-      operation: "upsert_reusable_answer",
-      record: {
-        id: null,
-        kind: "availability",
-        label: "Start date",
-        question: "How soon could you begin?",
-        answer: "Immediately upon offer.",
-        roleFamilies: [],
-        proofEntryIds: [],
-      },
-    }),
-    observe: (state) =>
-      state.profile.answerBank.customAnswers
-        .filter((entry) => entry.label === "Start date")
-        .map((entry) => entry.answer),
-    expectedAfterApply: ["Immediately upon offer."],
-  },
-  remove_reusable_answer: {
-    operation: "remove_reusable_answer",
-    request: "Delete my saved availability answer",
-    context: { surface: "profile", section: "preferences" },
-    buildSeed: withSeededBackgroundRecords,
-    buildOperation: () => ({
-      operation: "remove_reusable_answer",
-      recordId: "answer_1",
-    }),
-    observe: (state) =>
-      state.profile.answerBank.customAnswers.map((entry) => entry.id),
     expectedAfterApply: [],
   },
   resolve_review_items: {

@@ -45,7 +45,7 @@ import {
   focusProfileImportSuggestion,
   getProfileImportSuggestionDestination,
 } from "../components/profile/profile-import-suggestion-navigation";
-import { ProfileSaveFooter } from "../components/profile/profile-save-footer";
+import { useProfileAutosave } from "@renderer/features/profile-store/use-profile-autosave";
 import { ProfileSetupReviewQueueCard } from "../components/profile/setup/profile-setup-screen-sections";
 import { formatProfileSetupReviewValue } from "../components/profile/setup/profile-setup-screen-helpers";
 import {
@@ -155,7 +155,7 @@ export function ProfileScreen(props: {
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
     savedSection?: "sources",
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   latestResumeImportRun: ResumeImportRun | null;
@@ -225,10 +225,11 @@ export function ProfileScreen(props: {
     backgroundArrays,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
+    draftProfileResult,
+    draftDiffers,
     draftSearchPreferencesResult,
     experienceArray,
     hasBackgroundConflict,
-    hasUnsavedChanges,
     hasUserDraftChanges,
     overviewProfile,
     preferencesForm,
@@ -609,12 +610,26 @@ export function ProfileScreen(props: {
     }
 
     setValidationMessage(null);
-    onSaveAll(
+    return onSaveAll(
       profileResult.payload,
       preferencesResult.payload,
       activeSection === "sources" ? "sources" : undefined,
     );
   }
+
+  const autosave = useProfileAutosave({
+    value:
+      draftDiffers &&
+      draftProfileResult.payload &&
+      draftSearchPreferencesResult.payload
+        ? {
+            profile: draftProfileResult.payload,
+            goals: draftSearchPreferencesResult.payload,
+          }
+        : null,
+    blocked: hasBackgroundConflict || resumeAnalysisPending,
+    save: ({ profile: nextProfile, goals }) => onSaveAll(nextProfile, goals),
+  });
 
   function handleResumeIdentityChoice(choice: "profile_name" | "resume_name") {
     const profileResult = buildCanonicalAwareProfilePayload({
@@ -677,17 +692,12 @@ export function ProfileScreen(props: {
       id: "profile-background-merge",
       title: "Profile updated in the background",
       description:
-        "Your unsaved edits were kept. Check the merged fields before saving.",
+        "Your latest edits were kept while the saved profile updated.",
     });
   }, [backgroundMergeNotice, hasBackgroundConflict, showToast]);
 
   return (
     <LockedScreenLayout
-      // F01: Profile's Save lived at the end of a ~5,400px page and was never
-      // painted at any supported height, even with a dirty field. `bottomContent`
-      // is the same always-pinned footer ownership guided setup already uses:
-      // it sits outside the scroll area as a flex sibling, so the primary
-      // action is inside the viewport at 1024x720 and every larger size.
       bottomContent={
         <>
           {backgroundMergeNotice && hasBackgroundConflict ? (
@@ -708,19 +718,6 @@ export function ProfileScreen(props: {
               ) : null}
             </div>
           ) : null}
-          <ProfileSaveFooter
-            // A prior successful save is stale once this save attempt is
-            // rejected locally; keep the inline validation as the only
-            // outcome so invalid input cannot look successfully saved.
-            actionMessage={validationMessage ? null : props.actionState.message}
-            hasUnsavedChanges={hasUnsavedChanges}
-            hasUserEdits={hasUserDraftChanges}
-            isSavePending={
-              pendingActions.profileMutation || resumeAnalysisPending
-            }
-            onSave={handleSaveAll}
-            validationMessage={validationMessage}
-          />
         </>
       }
       contentClassName="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 pb-1 xl:overflow-clip"
@@ -742,6 +739,25 @@ export function ProfileScreen(props: {
               />
             }
           />
+          <div
+            role="status"
+            className="flex items-center gap-2 text-sm text-foreground-muted"
+          >
+            {autosave.error ? (
+              <>
+                {autosave.error}
+                <Button onClick={autosave.retry}>Try again</Button>
+              </>
+            ) : (
+              (validationMessage ??
+              draftProfileResult.validationMessage ??
+              draftSearchPreferencesResult.validationMessage ??
+              (pendingActions.profileMutation || draftDiffers
+                ? "Saving…"
+                : (props.actionState.message ?? "Changes save automatically.")))
+            )}
+            <span className="contents" data-profile-assistant-launcher-slot />
+          </div>
 
           {profileSetupState.status === "completed" ? (
             <ProfileReadyBanner

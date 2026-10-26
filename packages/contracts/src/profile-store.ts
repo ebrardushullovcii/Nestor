@@ -17,9 +17,7 @@ import {
 } from "./profile";
 
 /** Only the persisted Profile data; reusable form answers belong to Needs you. */
-export const StoredProfileSchema = CandidateProfileSchema.omit({
-  answerBank: true,
-});
+export const StoredProfileSchema = CandidateProfileSchema;
 export type StoredProfile = z.infer<typeof StoredProfileSchema>;
 
 type PrefixedShape<P extends string, S extends z.ZodRawShape> = {
@@ -40,7 +38,6 @@ const identity = CandidateProfileSchema.omit({
   workEligibility: true,
   professionalSummary: true,
   narrative: true,
-  answerBank: true,
   applicationIdentity: true,
   skillGroups: true,
   targetRoles: true,

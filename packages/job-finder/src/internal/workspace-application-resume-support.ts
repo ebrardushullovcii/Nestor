@@ -289,7 +289,7 @@ function buildResumeWorkspaceSharedProfile(profile: CandidateProfile) {
       profile.narrative.nextChapterSummary ??
       profile.narrative.careerTransitionSummary ??
       null,
-    selfIntroduction: profile.answerBank.selfIntroduction,
+    selfIntroduction: profile.narrative.professionalStory,
     highlightedProofs: profile.proofBank.slice(0, 4).map((proof) => ({
       id: proof.id,
       title: proof.title,

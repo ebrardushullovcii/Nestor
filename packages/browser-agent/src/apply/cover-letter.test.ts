@@ -286,11 +286,10 @@ test("review evidence has single stops and the letter prompt excludes pay and tr
       { id: "proof", title: "Reporting.", claim: "Cut reporting time." },
     ],
   }).proofBank;
-  applicant.answerBank.salaryExpectations = "PRIVATE_PAY_SENTINEL";
-  applicant.answerBank.customAnswers = [
+  const reusableAnswers = [
     {
       id: "pay",
-      kind: "salary_expectation",
+      kind: "salary_expectation" as const,
       label: "Current pay?",
       question: "Current pay?",
       answer: "PRIVATE_HISTORY_SENTINEL",
@@ -308,7 +307,7 @@ test("review evidence has single stops and the letter prompt excludes pay and tr
         location: "Remote",
         description: "Build tools",
       },
-      reusableAnswers: applicant.answerBank.customAnswers,
+      reusableAnswers,
       documents: [],
     },
     preference: {
