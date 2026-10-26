@@ -89,6 +89,20 @@ describe("activity feed", () => {
     expect(feed.running).toBe(3);
   });
 
+  it("counts a job moved away and back again as moved on since", () => {
+    const first = store.moveJobs({
+      selection: { ids: [ids[0]!] },
+      to: "hidden",
+    });
+    store.moveJobs({ selection: { ids: [ids[0]!] }, to: "found" });
+    store.moveJobs({ selection: { ids: [ids[0]!] }, to: "hidden" });
+
+    const moves = createActivityStore(store).feed().moves;
+
+    expect(moves.find((move) => move.id === first.moveId)?.stillThere).toBe(0);
+    expect(moves[0]?.stillThere).toBe(1);
+  });
+
   it("lists the person's moves of the day, and how many jobs each still holds", () => {
     const shortlist = store.moveJobs({
       selection: { ids: [ids[0]!, ids[1]!] },

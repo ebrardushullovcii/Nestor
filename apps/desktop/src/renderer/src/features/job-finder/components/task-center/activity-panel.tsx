@@ -2,10 +2,13 @@ import { useState } from "react";
 import type { ActivityFeed, ActivityMove } from "@nestor/contracts";
 
 import { Button } from "@renderer/components/ui/button";
+import { useToast } from "@renderer/components/ui/toast";
 import { StatusBadge } from "../status-badge";
 import { refreshActivityFeed } from "../../lib/use-activity-feed";
 import {
   describeMove,
+  describeMovedOn,
+  describeUndo,
   toActivityItems,
   type ActivityItem,
 } from "./activity-items";
@@ -59,12 +62,18 @@ function MoveRow(props: { move: ActivityMove }) {
   const { move } = props;
   const [undoing, setUndoing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
   const { title, detail } = describeMove(move);
+  const movedOn = describeMovedOn(move);
   async function undo() {
     setUndoing(true);
     setError(null);
     try {
-      await window.nestor.jobs.run("undo_move", { moveId: move.id });
+      const result = await window.nestor.jobs.run("undo_move", {
+        moveId: move.id,
+      });
+      const partial = describeUndo(move, result.moved);
+      if (partial) showToast({ ...partial, tone: "warning" });
       // The move is spent; the next read drops it.
       refreshActivityFeed();
     } catch {
@@ -82,6 +91,11 @@ function MoveRow(props: { move: ActivityMove }) {
           <span className="break-words text-(length:--text-small) text-foreground-soft">
             {detail}
           </span>
+          {movedOn ? (
+            <span className="text-(length:--text-small) text-foreground-muted">
+              {movedOn}
+            </span>
+          ) : null}
         </span>
         {move.stillThere > 0 ? (
           <Button

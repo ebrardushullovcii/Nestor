@@ -12,6 +12,7 @@ import type {
 
 import type { JobStore } from "./job-store";
 import { toIso } from "./job-list";
+import { STILL_FROM_MOVE } from "./job-moves";
 
 /** Finished work stays in Activity this long. */
 const FINISHED_FOR_MS = 86_400_000;
@@ -127,7 +128,7 @@ export function createActivityStore(store: JobStore) {
               WHERE i.move_id = m.id) AS from_stages,
              (SELECT COUNT(*) FROM job_move_items i WHERE i.move_id = m.id) AS count,
              (SELECT COUNT(*) FROM job_move_items i JOIN jobs j ON j.id = i.job_id
-              WHERE i.move_id = m.id AND j.stage = m.to_stage) AS still_there,
+              WHERE i.move_id = m.id AND ${STILL_FROM_MOVE}) AS still_there,
              j.title, j.company
            FROM job_moves m
            JOIN jobs j ON j.id = (SELECT MIN(job_id) FROM job_move_items i

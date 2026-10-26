@@ -102,8 +102,17 @@ export function writeMove(
 }
 
 /**
- * Puts each job of a move back where it was, unless something else moved it
- * since. The move is spent either way.
+ * Whether job `j` is still where move `m` put it: in the move's stage, since
+ * the move's own time, and in no later recorded move. A job moved away and
+ * back again is in the same stage but has moved on.
+ */
+export const STILL_FROM_MOVE = `j.stage = m.to_stage AND j.stage_at = m.at
+  AND NOT EXISTS (SELECT 1 FROM job_move_items later
+                  WHERE later.job_id = j.id AND later.move_id > m.id)`;
+
+/**
+ * Puts each job of a move back where it was, unless it has moved on since
+ * (see `STILL_FROM_MOVE`). The move is spent either way.
  */
 export function writeUndo(sql: Statements, moveId: number): MoveOutcome {
   const move = sql("SELECT to_stage FROM job_moves WHERE id = ?").get(
@@ -119,8 +128,12 @@ export function writeUndo(sql: Statements, moveId: number): MoveOutcome {
        stage = (SELECT from_stage FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id),
        stage_at = (SELECT from_stage_at FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id),
        stage_note = (SELECT from_stage_note FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id)
-     WHERE id IN (SELECT job_id FROM job_move_items WHERE move_id = ?1) AND stage = ?2`,
-  ).run(moveId, move.to_stage);
+     WHERE id IN (
+       SELECT j.id FROM job_moves m
+       JOIN job_move_items i ON i.move_id = m.id
+       JOIN jobs j ON j.id = i.job_id
+       WHERE m.id = ?1 AND ${STILL_FROM_MOVE})`,
+  ).run(moveId);
   sql("DELETE FROM job_moves WHERE id = ?").run(moveId);
   const moved = Number(result.changes);
   return {

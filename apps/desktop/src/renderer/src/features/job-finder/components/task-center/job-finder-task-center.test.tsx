@@ -215,4 +215,33 @@ describe("JobFinderTaskCenter", () => {
       expect(readFeed.mock.calls.length).toBeGreaterThan(calls),
     );
   });
+
+  test("says how many jobs came back and how many had moved on since", async () => {
+    readFeed.mockResolvedValue({
+      ...feed,
+      moves: [{ ...feed.moves[1]!, id: 12, stillThere: 2 }],
+    });
+    runJobs.mockResolvedValue({ moveId: 12, moved: 1, counts: {} });
+    const { JobFinderTaskCenter } = await import("./job-finder-task-center");
+    const { ToastProvider } = await import("@renderer/components/ui/toast");
+    render(
+      <ToastProvider>
+        <JobFinderTaskCenter onNavigate={vi.fn()} />
+      </ToastProvider>,
+    );
+    fireEvent.click(summary());
+    const moves = await screen.findByRole("region", {
+      name: "Your recent moves",
+    });
+    expect(moves.textContent).toContain("1 job moved on since");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByText("Put back 1 job")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "2 jobs had moved on since. They stayed where they are.",
+      ),
+    ).toBeTruthy();
+  });
 });
