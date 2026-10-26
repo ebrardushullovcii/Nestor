@@ -6,7 +6,8 @@ import type {
   NeedsYouTask,
   SavedFormAnswerSummary,
 } from "@nestor/contracts";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { useAssistantNeedsView } from "@renderer/features/job-lists/use-assistant-list-view";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
@@ -164,6 +165,30 @@ export function NeedsYouScreen() {
     pinned.current = null;
     setCreating(false);
   }, []);
+  useAssistantNeedsView(searchParams.get("needs"), {
+    requestId: useLocation().key,
+    canApply: !editing,
+    current: { tab, text, kind },
+    setSelection,
+    setFocus: (id) => {
+      activate(id);
+      pinned.current = id;
+    },
+    applyView: (view) => {
+      if (view.tab !== undefined) setTab(view.tab);
+      if (view.text !== undefined) setText(view.text);
+      if (view.kind !== undefined && view.kind !== kind)
+        setSearchParams(
+          (previous) => {
+            const next = new URLSearchParams(previous);
+            if (view.kind) next.set("kind", view.kind);
+            else next.delete("kind");
+            return next;
+          },
+          { replace: true },
+        );
+    },
+  });
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
   const selectedCount = countSelected(selection, list.total);
@@ -227,7 +252,17 @@ export function NeedsYouScreen() {
     <LockedScreenLayout
       lockContentHeight
       topContent={
-        <div className="grid gap-3 pb-4">
+        <div
+          className="grid gap-3 pb-4"
+          data-needs-list-state={JSON.stringify({
+            tab,
+            text,
+            kind,
+            focusId: activeId ?? undefined,
+            selectedIds: [...selection.ids],
+            all: selection.all,
+          })}
+        >
           <PageHeader
             actions={
               tab === "saved" ? (
@@ -398,6 +433,7 @@ export function NeedsYouScreen() {
             <section
               id="list-detail"
               aria-label="Source sign-in"
+              data-needs-detail-id={activeId}
               className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
             >
               <SourceNeedPane key={source.id} source={source} />

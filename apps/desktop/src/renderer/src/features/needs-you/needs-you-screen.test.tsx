@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { FoundJob } from "@nestor/contracts";
 import {
@@ -146,15 +146,116 @@ function ask(
   if (result.status !== "needs_you") throw new Error("Missing question");
   return result.task;
 }
-function show(route = "/job-finder/actions") {
+function show(route = "/job-finder/actions", nextRoute?: string) {
   return render(
     <MemoryRouter initialEntries={[route]}>
       <ToastProvider>
+        {nextRoute ? <Link to={nextRoute}>Test navigation request</Link> : null}
         <NeedsYouScreen />
       </ToastProvider>
     </MemoryRouter>,
   );
 }
+
+it("opens and selects the requested filtered question instead of the first task", async () => {
+  ask(0);
+  const question = ask(
+    1,
+    "availability",
+    "When are you available for interviews?",
+  );
+  const view = {
+    tab: "tasks",
+    kind: "question",
+    text: "interviews",
+    focusId: question.id,
+    selectedIds: [question.id],
+  };
+  show(`/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`);
+  await screen.findByRole("textbox", { name: question.prompt });
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("checkbox", { name: `Select ${question.prompt}` })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
+  expect(
+    screen.queryByRole("button", { name: /^What is your notice/ }),
+  ).toBeNull();
+});
+
+it("loads a focused question outside the first page without treating it as a saved answer", async () => {
+  ask(0);
+  const question = ask(
+    1,
+    "availability",
+    "When are you available for interviews?",
+  );
+  show(
+    `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "tasks", text: "notice", focusId: question.id }))}`,
+  );
+  await screen.findByRole("textbox", { name: question.prompt });
+  expect(
+    screen.getByRole("searchbox", { name: "Filter Needs you" }),
+  ).toHaveProperty("value", "notice");
+  expect(screen.queryByRole("region", { name: "Saved answer" })).toBeNull();
+});
+
+it("opens Saved answers, applies its text filter and focuses the requested saved answer", async () => {
+  const task = ask(0);
+  applications.needsYou.answer({
+    id: task.id,
+    answer: "Four weeks",
+    remember: true,
+  });
+  const answer = applications.needsYou.listAnswers().rows[0]!;
+  show(
+    `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "saved", text: "notice", focusId: answer.id, all: true, selectedIds: [] }))}`,
+  );
+  const pane = await screen.findByRole("region", { name: "Saved answer" });
+  await within(pane).findByRole("textbox", { name: task.prompt });
+  expect(
+    screen
+      .getByRole("button", { name: "Saved answers 1" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("checkbox", { name: `Select ${task.prompt}` })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
+});
+
+it("keeps unsaved typing when a new chat navigation requests another question", async () => {
+  const first = ask(0);
+  const second = ask(
+    1,
+    "availability",
+    "When are you available for interviews?",
+  );
+  show(
+    "/job-finder/actions",
+    `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ text: "interviews", focusId: second.id }))}`,
+  );
+  const editor = await screen.findByRole("textbox", { name: first.prompt });
+  fireEvent.change(editor, { target: { value: "My unsaved answer" } });
+  fireEvent.click(
+    screen.getByRole("link", { name: "Test navigation request" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: first.prompt })).toHaveProperty(
+      "value",
+      "My unsaved answer",
+    ),
+  );
+  expect(screen.queryByRole("textbox", { name: second.prompt })).toBeNull();
+  expect(
+    screen.getByRole("searchbox", { name: "Filter Needs you" }),
+  ).toHaveProperty("value", "");
+});
 
 it("keeps the editor on its task when new work arrives, and one remembered answer releases both applications", async () => {
   const first = ask(0);

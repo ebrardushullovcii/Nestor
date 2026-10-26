@@ -157,6 +157,7 @@ export function TaskPane(props: {
     <section
       id="list-detail"
       aria-label="Task details"
+      data-needs-detail-id={task?.id}
       className="surface-panel-shell min-h-0 overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
     >
       {!loaded ? (

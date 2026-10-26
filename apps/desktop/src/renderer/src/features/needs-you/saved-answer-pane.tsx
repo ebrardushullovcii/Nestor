@@ -40,6 +40,7 @@ export function SavedAnswerPane(props: {
     <section
       id="list-detail"
       aria-label="Saved answer"
+      data-needs-detail-id={value?.id}
       className="surface-panel-shell min-h-0 overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
     >
       {!loaded ? (
