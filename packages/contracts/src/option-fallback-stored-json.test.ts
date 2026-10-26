@@ -11,8 +11,8 @@ test("old saved-answer JSON reads without an optional picker rule", () => {
       label: "Country",
       question: "Country",
       answer: "Primary territory",
-    }).optionFallback,
-  ).toBeNull();
+    }),
+  ).not.toHaveProperty("optionFallback");
   expect(
     SavedFormAnswerSummarySchema.parse({
       id: 1,

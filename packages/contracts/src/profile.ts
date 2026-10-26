@@ -1,4 +1,3 @@
-import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 
 import {
@@ -227,10 +226,8 @@ export const SavedOptionFallbackInputSchema = SavedOptionFallbackSchema.refine(
 );
 
 export const CandidateReusableAnswerSchema = z.object({
-  optionFallback: optionalStoredField(
-    SavedOptionFallbackSchema.nullable(),
-    null,
-  ),
+  // Absent, not null, on answers without a rule: profiles keep their shape.
+  optionFallback: SavedOptionFallbackSchema.nullable().optional(),
   needsConfirmation: z.boolean().optional(),
   id: NonEmptyStringSchema,
   kind: CandidateAnswerKindSchema.default("other"),
