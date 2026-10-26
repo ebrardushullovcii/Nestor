@@ -11,7 +11,6 @@
     "./resumes": "./src/resumes/index.ts",
     "./applications": "./src/applications/index.ts",
     "./needs-you": "./src/applications/needs-you-commands.ts",
-    "./assistant-attention": "./src/assistant/attention.ts",
     "./discovery-ordering": "./src/discovery-ordering.ts",
     "./discovery-result-bands": "./src/discovery-result-bands.ts",
     "./resume-record-identity": "./src/resume-record-identity.ts",

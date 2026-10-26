@@ -64,9 +64,6 @@
       "@nestor/job-finder/needs-you": [
         "packages/job-finder/src/applications/needs-you-commands.ts"
       ],
-      "@nestor/job-finder/assistant-attention": [
-        "packages/job-finder/src/assistant/attention.ts"
-      ],
       "@nestor/job-finder/discovery-ordering": [
         "packages/job-finder/src/discovery-ordering.ts"
       ],

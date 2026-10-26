@@ -157,10 +157,6 @@ const workspaceAliases = {
     currentDir,
     "../../packages/job-finder/src/applications/needs-you-commands.ts",
   ),
-  "@nestor/job-finder/assistant-attention": path.resolve(
-    currentDir,
-    "../../packages/job-finder/src/assistant/attention.ts",
-  ),
   "@nestor/job-finder/discovery-ordering": jobFinderDiscoveryOrderingPath,
   "@nestor/job-finder/discovery-result-bands":
     jobFinderDiscoveryResultBandsPath,
