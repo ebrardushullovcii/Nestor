@@ -26,7 +26,6 @@ import {
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
-  JobFinderActivityControlSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
   JobSearchCampaignCollectionSchema,
@@ -39,7 +38,6 @@ import {
   SavedJobSchema,
   SourceDebugEvidenceRefSchema,
   SourceDebugWorkerAttemptSchema,
-  SourceInstructionArtifactSchema,
   TailoredAssetSchema,
   UserActionEventSchema,
   UserActionRequestSchema,
@@ -804,7 +802,6 @@ export function writeState(
         .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
         .run("campaign_state");
     }
-    initSingletonValue(database, "activity_control", state.activityControl);
     initSingletonValue(database, "intelligence_state", state.intelligence);
     replaceCollection(
       database,
@@ -1121,11 +1118,6 @@ export function writeState(
     );
     replaceCollection(
       database,
-      "source_instruction_artifacts",
-      state.sourceInstructionArtifacts,
-    );
-    replaceCollection(
-      database,
       "source_debug_evidence_refs",
       state.sourceDebugEvidenceRefs,
     );
@@ -1172,12 +1164,6 @@ export function readState(
     "campaign_state",
     JobSearchCampaignCollectionSchema,
   );
-  const activityControl =
-    getSingletonValue(
-      database,
-      "activity_control",
-      JobFinderActivityControlSchema,
-    ) ?? fallbackSeed.activityControl;
   const intelligence =
     getSingletonValue(
       database,
@@ -1385,11 +1371,9 @@ export function readState(
       "source_debug_attempts",
       SourceDebugWorkerAttemptSchema,
     ),
-    sourceInstructionArtifacts: listValues(
-      database,
-      "source_instruction_artifacts",
-      SourceInstructionArtifactSchema,
-    ),
+    // The job store holds site instructions and the pause; the old file's
+    // retired values are not read (see the file repository's exportState).
+    sourceInstructionArtifacts: fallbackSeed.sourceInstructionArtifacts,
     sourceDebugEvidenceRefs: listValues(
       database,
       "source_debug_evidence_refs",
@@ -1402,7 +1386,7 @@ export function readState(
       campaignState?.activeCampaignId ?? fallbackSeed.activeCampaignId,
     campaignNotifications:
       campaignState?.notifications ?? fallbackSeed.campaignNotifications,
-    activityControl,
+    activityControl: fallbackSeed.activityControl,
     intelligence,
   });
 }

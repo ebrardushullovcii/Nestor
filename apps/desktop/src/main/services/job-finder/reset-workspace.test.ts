@@ -30,6 +30,7 @@ const {
   mockClearBrowserCache,
   mockSetActivityControl,
   mockResetJobStore,
+  mockSavePause,
   mockDiscardJobSearch,
   mockResetAssistantStore,
 } = vi.hoisted(() => ({
@@ -59,11 +60,16 @@ const {
   mockClearBrowserCache: vi.fn(),
   mockSetActivityControl: vi.fn(),
   mockResetJobStore: vi.fn(),
+  mockSavePause: vi.fn(),
   mockDiscardJobSearch: vi.fn(),
   mockResetAssistantStore: vi.fn(),
 }));
 
-vi.mock("@nestor/db/job-store", () => ({ resetJobStore: mockResetJobStore }));
+vi.mock("@nestor/db/job-store", () => ({
+  resetJobStore: mockResetJobStore,
+  RESET_IN_PROGRESS_PAUSE: { paused: true, pausedAt: null, reason: "held" },
+  createActivityControlStore: () => ({ save: mockSavePause }),
+}));
 vi.mock("../job-store", () => ({ getJobStore: () => ({ store: true }) }));
 vi.mock("../job-commands", () => ({ discardJobSearch: mockDiscardJobSearch }));
 
@@ -453,6 +459,12 @@ describe("resetJobFinderWorkspace", () => {
     );
     expect(mockRm).not.toHaveBeenCalledWith(intentMarkerPath, {
       force: true,
+    });
+    // The store kept its queue, so work stays paused until a reset finishes.
+    expect(mockSavePause).toHaveBeenCalledWith({
+      paused: true,
+      pausedAt: null,
+      reason: "held",
     });
   });
 

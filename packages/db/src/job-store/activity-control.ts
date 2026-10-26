@@ -52,16 +52,45 @@ export function createActivityControlStore(store: JobStore) {
   };
 }
 
-/** Whether the old workspace file says background work was paused. */
-function readOldPause(oldWorkspaceFile: string): boolean {
-  const database = new DatabaseSync(oldWorkspaceFile, { readOnly: true });
+const UNREADABLE_OLD_PAUSE =
+  "Nestor couldn't read whether background work was paused before this update. Resume it when you're ready.";
+
+/** Kept while a reset runs; only a finished reset lowers it. */
+export const RESET_IN_PROGRESS_PAUSE: JobFinderActivityControl = {
+  paused: true,
+  pausedAt: null,
+  reason:
+    "Reset everything didn't finish. Restart Nestor to finish it, then resume.",
+};
+
+/**
+ * What the old workspace file says about the pause. Only a stored value that
+ * is a JSON object with `paused` exactly `false` means work ran; every other
+ * value (no row, `true`, `"true"`, `1`, `null`, a missing field, text that
+ * isn't JSON, a missing table, a file that won't open) is read as paused.
+ */
+export function readOldPause(
+  oldWorkspaceFile: string,
+): "running" | "paused" | "unreadable" {
+  let database: DatabaseSync;
+  try {
+    database = new DatabaseSync(oldWorkspaceFile, { readOnly: true });
+  } catch {
+    return "unreadable";
+  }
   try {
     const row = database
       .prepare("SELECT value FROM singleton_state WHERE key='activity_control'")
       .get();
-    if (!row) return false;
-    const value = JSON.parse(String(row.value)) as { paused?: unknown };
-    return value.paused === true;
+    if (!row || typeof row.value !== "string") return "unreadable";
+    const value: unknown = JSON.parse(row.value);
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      return "unreadable";
+    const paused = (value as { paused?: unknown }).paused;
+    if (paused === false) return "running";
+    return paused === true ? "paused" : "unreadable";
+  } catch {
+    return "unreadable";
   } finally {
     database.close();
   }
@@ -71,9 +100,9 @@ function readOldPause(oldWorkspaceFile: string): boolean {
  * The pause is a safety control the person set, so an update must not drop
  * it. The first time the store has no pause row, it takes only the pause
  * flag from the old workspace file, once; after that the old file is never
- * read for it again. With no old file (a fresh install) nothing is opened and
- * work runs. An old file that can't be read leaves work paused, with a
- * reason, rather than starting it.
+ * read for it again. With no old file (a fresh install) nothing is opened
+ * and work runs. Anything but a clean "not paused" in the old file leaves
+ * work paused.
  */
 export function carryOverOldPause(
   store: JobStore,
@@ -81,24 +110,17 @@ export function carryOverOldPause(
 ): void {
   const { sql } = store;
   if (sql("SELECT 1 FROM activity_control WHERE id=1").get()) return;
-  let control: JobFinderActivityControl = {
-    paused: false,
-    pausedAt: null,
-    reason: null,
-  };
-  if (existsSync(oldWorkspaceFile)) {
-    let paused: boolean;
-    let reason: string | null = null;
-    try {
-      paused = readOldPause(oldWorkspaceFile);
-    } catch {
-      paused = true;
-      reason =
-        "Nestor couldn't read whether background work was paused before this update. Resume it when you're ready.";
-    }
-    if (paused)
-      control = { paused, pausedAt: new Date().toISOString(), reason };
-  }
+  const old = existsSync(oldWorkspaceFile)
+    ? readOldPause(oldWorkspaceFile)
+    : "running";
+  const control: JobFinderActivityControl =
+    old === "running"
+      ? { paused: false, pausedAt: null, reason: null }
+      : {
+          paused: true,
+          pausedAt: new Date().toISOString(),
+          reason: old === "unreadable" ? UNREADABLE_OLD_PAUSE : null,
+        };
   // Another writer may have saved a pause since the check; that one stands.
   sql(`${INSERT_CONTROL} ON CONFLICT(id) DO NOTHING`).run(
     ...controlRow(control),

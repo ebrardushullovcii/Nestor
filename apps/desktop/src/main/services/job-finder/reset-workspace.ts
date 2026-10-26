@@ -12,7 +12,11 @@ import {
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JobFinderRepository } from "@nestor/db";
-import { resetJobStore } from "@nestor/db/job-store";
+import {
+  RESET_IN_PROGRESS_PAUSE,
+  createActivityControlStore,
+  resetJobStore,
+} from "@nestor/db/job-store";
 import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import {
@@ -773,13 +777,31 @@ async function recoverPendingJobFinderWorkspaceResetOutcome(
 
   // Like the reset itself: the job store and the Assistant's store are
   // cleared before the marker goes. A failure keeps the marker.
-  resetJobStore(getJobStore());
+  clearJobStoreOrHoldPause();
   await resetAssistantStoreWithJobs();
 
   await removeResetIntentMarker();
   await removeResetTrashDirectory(intent.token);
 
   return { status: "completed", token: intent.token };
+}
+
+/**
+ * Clears the job store, which also lowers the pause. A store that could not
+ * be cleared keeps its queue, so work stays paused until a reset finishes.
+ */
+function clearJobStoreOrHoldPause(): void {
+  const store = getJobStore();
+  try {
+    resetJobStore(store);
+  } catch (error) {
+    try {
+      createActivityControlStore(store).save(RESET_IN_PROGRESS_PAUSE);
+    } catch {
+      // The reset's own failure is the one the person is told about.
+    }
+    throw error;
+  }
 }
 
 function recordStartupResetRecoveryOutcome(
@@ -914,7 +936,7 @@ export async function resetJobFinderWorkspace() {
   // Before the reset is marked done, so a failure leaves the marker for the
   // next start to finish both (see `getJobStore` and the recovery below).
   try {
-    resetJobStore(getJobStore());
+    clearJobStoreOrHoldPause();
   } catch (error) {
     throw new Error(
       "Your files were removed, but your saved jobs and applications could not be cleared yet. Restart Nestor to finish the reset.",

@@ -2,7 +2,10 @@ import { notifyWorkspaceCommit } from "./workspace-commits";
 import { openJobStore } from "./job-store/job-store";
 import { createProfileWorkspace } from "./job-store/profile-workspace";
 import { createSiteInstructionsStore } from "./job-store/site-instructions";
-import { createActivityControlStore } from "./job-store/activity-control";
+import {
+  RESET_IN_PROGRESS_PAUSE,
+  createActivityControlStore,
+} from "./job-store/activity-control";
 import {
   parseSavedJobsWithPreparation,
   readSavedJobFingerprintBatch,
@@ -909,13 +912,12 @@ export async function createFileJobFinderRepository(
       const nextState = JobFinderRepositoryStateSchema.parse(
         cloneValue(nextSeed),
       );
+      // Work stays paused while the reset runs; a reset that stops part way
+      // leaves it paused.
+      activityControl.save(RESET_IN_PROGRESS_PAUSE);
       await stopBackups();
       try {
         profileWorkspace.reset(nextState);
-        profileStore.transaction(() => {
-          siteInstructions.replace(nextState.sourceInstructionArtifacts);
-          activityControl.save(nextState.activityControl);
-        });
         if (automaticBackup.beforeReset) {
           const backup = await createWorkspaceResetDatabaseBackup({
             database,
@@ -955,6 +957,10 @@ export async function createFileJobFinderRepository(
         await secureDatabaseFile(options.filePath);
         await removeWorkspaceDatabaseBackups(options.filePath);
         await removeWorkspaceRecoveryArtifacts(options.filePath);
+        profileStore.transaction(() => {
+          siteInstructions.replace(nextState.sourceInstructionArtifacts);
+          activityControl.save(nextState.activityControl);
+        });
       } finally {
         stopBackups = startBackups();
       }
