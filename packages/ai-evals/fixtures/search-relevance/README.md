@@ -10,7 +10,7 @@ pnpm search:eval
 pnpm search:eval --live --tape .tmp/new-search-tape.json --out .tmp/new-search-report.json
 ```
 
-The default command replays the committed model tape with all network access
+The default command replays `fit-quality-tape.json.gz` with all network access
 disabled. It still executes production collection, screening, full-text reading
 and fit under the **recorded model route**. A changed prompt or input cannot
 reuse an old answer: a missing exact request hash fails the run. Replay ignores
@@ -68,6 +68,24 @@ detail HTML/JSON/Markdown saved alongside. They remain scoreable even if current
 collection fails; that failure lowers end-to-end recall. Workable Markdown is
 the provider-published full description, not a summary.
 
-The committed tape and full baseline report use gzip to keep the fixture diff
-small. The CLI reads either JSON or JSON.gz and writes readable JSON reports by
-default. See [today's baseline](baseline-2026-10-26.md) for targets, costs and misses.
+The committed tapes and reports use gzip. The CLI reads JSON or JSON.gz and
+writes readable JSON reports. The [original baseline](baseline-2026-10-26.md)
+preserves the earlier results. `fit-quality-report.json.gz` records the current
+engine: 100% recall for both personas; high-volume top ten 10/10, close-matches
+9/10 (previously 7/10). The 18 fit calls were refreshed, with unchanged screen
+and metadata requests replayed. Labels and public page recordings are unchanged.
+
+On the same ten boards (including the empty board), provider input plus output
+tokens per persona/search are:
+
+| Persona       | Before median/board | After median/board | Before total | After total |
+| ------------- | ------------------: | -----------------: | -----------: | ----------: |
+| High-volume   |             7,848.5 |              7,702 |       85,872 |      84,400 |
+| Close-matches |               5,436 |              5,211 |       63,851 |      64,400 |
+
+Both medians meet the 10k target. The earlier 149,723 total combines two searches,
+not one. The schema change has no independently demonstrated large cost saving.
+At the observed cohort mean, 897 sites project to **7,570,680** high-volume tokens
+or **5,776,680** close-match tokens. These are projections from a small stratified
+sample; the actual 897-site total will be measured later during the owner's full
+search in the real hunt. Live retries and a different listing volume can change it.

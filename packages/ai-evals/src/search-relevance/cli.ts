@@ -37,7 +37,7 @@ export async function runSearchRelevanceCli(args: string[], root: string) {
     ).join("\n"),
   );
   const tapePath = path.resolve(
-    value("--tape", path.join(directory, "baseline-tape.json.gz")),
+    value("--tape", path.join(directory, "fit-quality-tape.json.gz")),
   );
   let pendingWrite = Promise.resolve();
   const saveJson = (file: string, data: unknown) => {

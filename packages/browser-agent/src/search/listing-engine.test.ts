@@ -355,8 +355,9 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
       void args;
       return Promise.resolve({
         content: JSON.stringify({
-          fits: {
-            "1": {
+          fits: [
+            {
+              id: 1,
               s: verdict.score,
               why: verdict.summary,
               r: [verdict.role.assessment, verdict.role.explanation],
@@ -366,7 +367,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
               ],
               c: [verdict.coverage.assessment, verdict.coverage.explanation],
             },
-          },
+          ],
         }),
       });
     }),
@@ -415,7 +416,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
         requests.push(data.listings.map((item) => item.id));
         return Promise.resolve({
           content: JSON.stringify({
-            fits: { [requests.length === 1 ? "1" : "2"]: fit },
+            fits: [{ ...fit, id: requests.length === 1 ? 1 : 2 }],
           }),
         });
       },
@@ -429,6 +430,38 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
   expect(requests).toEqual([[1, 2], [2]]);
   expect(repaired.map((fit) => fit.id)).toEqual([1, 2]);
+  const duplicateRequests: number[][] = [];
+  const duplicates = await fitJobs({
+    profile,
+    goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
+    jobs: [job, { ...job, id: 2 }],
+    client: {
+      chatWithTools: (messages) => {
+        duplicateRequests.push(
+          (
+            JSON.parse(messages[1]!.content) as { listings: { id: number }[] }
+          ).listings.map((row) => row.id),
+        );
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits:
+              duplicateRequests.length === 1
+                ? [fit, fit, { ...fit, id: 2 }]
+                : [fit],
+          }),
+        });
+      },
+    },
+  });
+  expect(duplicateRequests).toEqual([[1, 2], [1]]);
+  expect(duplicates.map((fit) => fit.id)).toEqual([2, 1]);
+  const requestSchema =
+    client.chatWithTools.mock.calls[0]![2]?.jsonSchema?.schema;
+  expect(requestSchema).toMatchObject({
+    properties: {
+      fits: { type: "array", items: { properties: { id: { enum: [1] } } } },
+    },
+  });
 });
 
 test("closed text outside the job body remains hidden without an AI fit", async () => {

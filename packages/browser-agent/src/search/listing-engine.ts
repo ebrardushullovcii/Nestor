@@ -877,6 +877,7 @@ export async function readListings(
 
 const explanation = z.tuple([z.string(), z.string()]);
 const fitSchema = z.object({
+  id: z.number().int().positive(),
   s: z.number().int().min(0).max(100),
   why: z.string(),
   r: explanation,
@@ -895,13 +896,14 @@ function fitResponseSchema(ids: readonly number[]) {
     type: "object",
     additionalProperties: false,
     properties: {
+      id: { type: "integer", enum: ids },
       s: { type: "integer", minimum: 0, maximum: 100 },
       why: { type: "string" },
       r: pair,
       p: pair,
       c: pair,
     },
-    required: ["s", "why", "r", "p", "c"],
+    required: ["id", "s", "why", "r", "p", "c"],
   };
   return {
     name: "job_fits",
@@ -911,12 +913,10 @@ function fitResponseSchema(ids: readonly number[]) {
       required: ["fits"],
       properties: {
         fits: {
-          type: "object",
-          additionalProperties: false,
-          properties: Object.fromEntries(
-            ids.map((id) => [String(id), verdict]),
-          ),
-          required: ids.map(String),
+          type: "array",
+          items: verdict,
+          minItems: ids.length,
+          maxItems: ids.length,
         },
       },
     },
@@ -1000,7 +1000,7 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `Judge each job once from the full listing and candidate evidence. Each listing references the shared passages array by index, in order; together they are its complete unabridged text. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON with one key per job id: {"fits":{"123":{"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}}}. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
+          `Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately. Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"s":score,"why":"short overall reason","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
           {
             person: compactFacts(person),
             goals: input.goals,
@@ -1008,7 +1008,7 @@ export async function fitJobs(
             passages,
             listings,
           },
-          z.object({ fits: z.record(fitSchema) }),
+          z.object({ fits: z.array(fitSchema) }),
           Math.max(8000, batch.length * 350),
           "fit_batch",
           fitResponseSchema(batch.map((job) => job.id)),
@@ -1018,18 +1018,23 @@ export async function fitJobs(
         });
         if (!answer) return batch;
         const ids = new Set(batch.map((job) => String(job.id)));
-        if (Object.keys(answer.fits).some((id) => !ids.has(id))) return batch;
-        const fits = Object.entries(answer.fits).map(([id, fit]) => ({
-          id: Number(id),
-          score: fit.s,
-          summary: fit.why,
-          reasons: [],
-          gaps: [],
-          role: { assessment: fit.r[0], explanation: fit.r[1] },
-          preferences: { assessment: fit.p[0], explanation: fit.p[1] },
-          coverage: { assessment: fit.c[0], explanation: fit.c[1] },
-          scoredAt: new Date().toISOString(),
-        }));
+        if (answer.fits.some((fit) => !ids.has(String(fit.id)))) return batch;
+        const counts = new Map<number, number>();
+        for (const fit of answer.fits)
+          counts.set(fit.id, (counts.get(fit.id) ?? 0) + 1);
+        const fits = answer.fits
+          .filter((fit) => counts.get(fit.id) === 1)
+          .map((fit) => ({
+            id: fit.id,
+            score: fit.s,
+            summary: fit.why,
+            reasons: [],
+            gaps: [],
+            role: { assessment: fit.r[0], explanation: fit.r[1] },
+            preferences: { assessment: fit.p[0], explanation: fit.p[1] },
+            coverage: { assessment: fit.c[0], explanation: fit.c[1] },
+            scoredAt: new Date().toISOString(),
+          }));
         output.push(...fits);
         await input.onBatch?.(fits);
         const judged = new Set(fits.map((fit) => fit.id));

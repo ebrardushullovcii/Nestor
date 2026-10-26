@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { coverageHonest, gradeRanking, recordedReader, turnKey } from "./run";
 import type { LabelledListing, RecordedBoard } from "./corpus";
+import { loadCorpus } from "./corpus";
+import { readFile } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
 describe("manual search relevance eval measurements", () => {
+  it("ships a replay tape bound to the committed corpus", async () => {
+    const directory = fileURLToPath(
+      new URL("../../fixtures/search-relevance/", import.meta.url),
+    );
+    const corpus = await loadCorpus(directory);
+    const tape = JSON.parse(
+      gunzipSync(
+        await readFile(
+          new URL(
+            "../../fixtures/search-relevance/fit-quality-tape.json.gz",
+            import.meta.url,
+          ),
+        ),
+      ).toString("utf8"),
+    ) as { corpusDigest: string };
+    expect(tape.corpusDigest).toBe(corpus.digest);
+  });
   it("counts a screened-out relevant listing as a recall miss and ranks across boards", () => {
     const labels: LabelledListing[] = Array.from({ length: 12 }, (_, i) => ({
       board: i < 6 ? "first" : "second",
