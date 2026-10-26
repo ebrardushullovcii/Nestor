@@ -15,7 +15,7 @@ import {
   isPlainMotivationIntent,
 } from "./concrete-answer-claims";
 import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
-import { employmentMonthEvidence } from "./answer-evidence";
+import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
@@ -59,6 +59,20 @@ export function answerSourceCatalog(
         }
       : {}),
   }));
+  const addWritingFact = (value: unknown, id: string): void => {
+    if (typeof value === "string" && value.trim())
+      rows.push({ id, value, purpose: "profile", country: null });
+    else if (value && typeof value === "object")
+      for (const [key, child] of Object.entries(value))
+        if (key !== "id") addWritingFact(child, `${id}.${key}`);
+  };
+  addWritingFact(sources.profile.summary, "profile.summary");
+  addWritingFact(
+    sources.profile.professionalSummary,
+    "profile.professionalSummary",
+  );
+  addWritingFact(sources.profile.narrative, "profile.narrative");
+  addWritingFact(sources.profile.proofBank, "profile.proofBank");
   rows.push({
     id: "posting.location",
     value: sources.posting.location,
@@ -779,8 +793,15 @@ export function classifyAnswerPermission(input: {
   if (
     tags.kind === "factual_summary" &&
     input.control.kind === "long_text" &&
+    ["other", "experience"].includes(input.control.questionKind) &&
+    !isScalarAnswer(input.answer) &&
+    input.answer.trim().split(/\s+/u).length >= 3 &&
     !fieldNamesAnotherPerson(input.control) &&
-    (source.id === "resume.text" || source.purpose === "profile")
+    (source.id === "resume.text" ||
+      (source.purpose === "profile" &&
+        /^profile\.(?:summary$|professionalSummary\.|narrative\.|experiences\.|education\.|projects\.|proofBank\.|skills\.|skillGroups\.|certifications\.|spokenLanguages\.)/u.test(
+          source.id,
+        )))
   )
     return { kind: "writing", source };
   return deny(

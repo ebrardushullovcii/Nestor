@@ -44,6 +44,12 @@ test.each([
     supported: true,
   },
   {
+    name: "recorded Profile work practices",
+    answer: "I worked remotely with a distributed team.",
+    supported: true,
+    fromProfile: true,
+  },
+  {
     name: "invented work practice",
     answer: "I ran daily video standups with the distributed team.",
     supported: false,
@@ -55,7 +61,7 @@ test.each([
   },
 ])(
   "factual summary still checks every claim: $name",
-  async ({ answer, supported }) => {
+  async ({ answer, supported, fromProfile }) => {
     const resume =
       "I worked remotely with a distributed team. I documented decisions asynchronously.";
     const control: ApplyFormControl = {
@@ -79,66 +85,98 @@ test.each([
       attestationKind: null,
       answered: false,
     };
-    const inputSources = { ...sources, resumeText: resume };
+    const inputSources = {
+      ...sources,
+      resumeText: resume,
+      profile: CandidateProfileSchema.parse({
+        ...sources.profile,
+        professionalSummary: { fullSummary: resume },
+      }),
+    };
     const tags = {
       kind: "factual_summary",
       country: null,
-      sourceId: "resume.text",
+      sourceId: fromProfile
+        ? "profile.professionalSummary.fullSummary"
+        : "resume.text",
     } as const;
     const permission = (
       sourceId: string | null = tags.sourceId,
       groupLabel = "",
       pageInstructions = "",
-    ) =>
-      classifyAnswerPermission({
+    ) => {
+      const field = { ...control, groupLabel };
+      return classifyAnswerPermission({
         sources: inputSources,
-        control: { ...control, groupLabel },
-        controls: [control],
+        control: field,
+        controls: [field],
         tags: { ...tags, sourceId },
         answer,
         pageInstructions,
       });
+    };
     expect(permission().kind).toBe("writing");
     expect(permission(null).kind).toBe("needs_you");
     expect(permission("posting.description").kind).toBe("needs_you");
+    expect(permission("profile.fullName").kind).toBe("needs_you");
     expect(permission(tags.sourceId, "Professional reference").kind).toBe(
       "needs_you",
     );
     expect(permission(tags.sourceId, "", "Write this yourself").kind).toBe(
       "needs_you",
     );
+    for (const [field, proposed, kind] of [
+      [control, "Yes", "factual_summary"],
+      [control, "Ja", "factual_summary"],
+      [
+        { ...control, questionKind: "work_authorization" as const },
+        answer,
+        "factual_summary",
+      ],
+      [control, answer, "preference"],
+    ] as const)
+      expect(
+        classifyAnswerPermission({
+          sources: inputSources,
+          control: field,
+          controls: [field],
+          tags: { ...tags, kind },
+          answer: proposed,
+          pageInstructions: "",
+        }).kind,
+      ).toBe("needs_you");
     const client: LLMClient = {
-      chatWithTools: vi
-        .fn<LLMClient["chatWithTools"]>()
-        .mockResolvedValue({
-          toolCalls: [
-            {
-              id: "lie",
-              type: "function",
-              function: {
-                name: "report_answer_checks",
-                arguments: JSON.stringify({
-                  checks: [
-                    {
-                      index: 0,
-                      supported: true,
-                      reason: "Lying checker",
-                      evidence: [
-                        {
-                          kind: "applicant_fact",
-                          source: "resume",
-                          path: "",
-                          quote: resume,
-                          claim: answer,
-                        },
-                      ],
-                    },
-                  ],
-                }),
-              },
+      chatWithTools: vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+        toolCalls: [
+          {
+            id: "lie",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Lying checker",
+                    evidence: [
+                      {
+                        kind: "applicant_fact",
+                        source: fromProfile ? "applicant" : "resume",
+                        path: fromProfile
+                          ? "/professionalSummary/fullSummary"
+                          : "",
+                        quote: resume,
+                        claim: answer,
+                      },
+                    ],
+                  },
+                ],
+              }),
             },
-          ],
-        }),
+          },
+        ],
+      }),
     };
     const checked = await checkWrittenApplicationAnswers({
       client,

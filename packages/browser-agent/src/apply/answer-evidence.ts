@@ -15,7 +15,7 @@ const normalize = (value: string) =>
     .replace(/\bts\b/gu, "typescript")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
-const scalar = (value: string) =>
+export const isScalarAnswer = (value: string) =>
   /^(?:yes|no|true|false|[-+]?\d+(?:[.,]\d+)?\+?%?)$/iu.test(value.trim());
 const opinion =
   /\b(?:like[sd]?|love[sd]?|hate[sd]?|enjoy\w*|want\w*|wish\w*|proud|passion\w*|excited|interested|strengths?|strongest)\b/iu;
@@ -296,7 +296,7 @@ export function evidenceFitsQuestion(input: {
         ),
     );
   if (
-    scalar(answer) &&
+    isScalarAnswer(answer) &&
     !namedDuration &&
     !affirmativeAuthorization &&
     !evidence.some(
