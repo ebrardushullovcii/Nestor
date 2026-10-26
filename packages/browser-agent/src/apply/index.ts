@@ -49,6 +49,7 @@ export {
   buildPendingQuestion,
   createApplyGuardState,
   executeApplyProposal,
+  questionPrompt,
   type ApplyGuardState,
   type ApplyExecutionOutcome,
   type ApplyExecutorDeps,

@@ -8,6 +8,7 @@ import {
   inferQuestionKind,
   fileUploadProblems,
   hasSubmissionConfirmationText,
+  questionPrompt,
   STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
   type ApplyAgentResult,
@@ -23,6 +24,7 @@ import {
   ApplicationResumeArtifactSchema,
   SubmissionOutcomeRecordSchema,
   UPLOAD_ATTACHED_ANSWER,
+  isUploadRepairPrompt,
   submissionConfirmationSummary,
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
@@ -1178,12 +1180,31 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         .catch(() => null));
     if (!raw || raw.loading || !current(row)) return false;
     const page = buildApplyFormObservation(raw, new Date().toISOString());
+    // The item names the fields whose upload failed; only a confirmed file
+    // in each of those same fields clears it. Another field's upload (a
+    // cover letter) succeeding says nothing about the resume.
+    const item = applications.needsYou
+      .forApplication(row.id)
+      .find((task) => isUploadRepairPrompt(task.prompt));
+    const fields = (item?.prompt ?? "")
+      .replace(/ — upload (?:failed|not confirmed)$/u, "")
+      .split(", ")
+      .filter(Boolean);
+    const problems = new Set(
+      fileUploadProblems(page).map((problem) => problem.control.ref),
+    );
     const accepted =
-      page.controls.some(
-        (control) =>
-          control.kind === "file" && !control.disabled && control.answered,
+      fields.length > 0 &&
+      fields.every((label) =>
+        page.controls.some(
+          (control) =>
+            control.kind === "file" &&
+            !control.disabled &&
+            questionPrompt(control) === label &&
+            (control.answered || control.upload?.network === "accepted") &&
+            !problems.has(control.ref),
+        ),
       ) &&
-      !fileUploadProblems(page).length &&
       applications.needsYou.dropQuestion(
         row.id,
         row.attempt,

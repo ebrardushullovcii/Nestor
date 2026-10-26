@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { choosePageOption } from "./choose-page-option";
 import type {
   ApplyBlockedAttempt,
@@ -1753,8 +1754,16 @@ export function createPlaywrightApplyPageMechanics(
           { timeout: 15_000 },
         );
         rememberAttachedFile(page, ref, {
+          field: await locator
+            .evaluate((element) =>
+              element instanceof HTMLInputElement
+                ? element.name || element.id || null
+                : null,
+            )
+            .catch(() => null),
           name: file.name,
           size: file.bytes.byteLength,
+          sha256: createHash("sha256").update(file.bytes).digest("hex"),
         });
         return { ok: true, observedValue: file.name };
       } catch (error) {

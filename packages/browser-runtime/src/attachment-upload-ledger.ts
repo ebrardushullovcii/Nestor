@@ -2,6 +2,7 @@ import type { Page, Request, Response } from "playwright";
 import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 
 import { inspectPageMutationResponse } from "./mutation-response-body";
+import { getPrepareOnlyRequestPermit } from "./playwright-application-flow";
 
 /**
  * What the site's own server said about each file sent from a page.
@@ -49,6 +50,18 @@ interface UploadRecord {
   status: "pending" | "accepted" | "rejected";
   /** Held back by Nestor's own fence; the site never saw it. */
   blocked: boolean;
+  /**
+   * The exact file the fence's upload permit let this request carry. A
+   * request with one is a carrier whatever its content type.
+   */
+  identity: FileIdentity | null;
+}
+
+interface FileIdentity {
+  field: string | null;
+  name: string;
+  size: number;
+  sha256?: string;
 }
 
 const ledgers = new WeakMap<Page, UploadRecord[]>();
@@ -57,7 +70,7 @@ const ledgers = new WeakMap<Page, UploadRecord[]>();
  * widgets empty the input the moment they take the file (and send it
  * themselves), so a later read of the input cannot say which file it was.
  */
-const given = new WeakMap<Page, Map<string, { name: string; size: number }>>();
+const given = new WeakMap<Page, Map<string, FileIdentity>>();
 const controlHandle = (control: { ref?: string; index: number }) =>
   control.ref ?? `c${control.index}`;
 
@@ -65,14 +78,10 @@ const controlHandle = (control: { ref?: string; index: number }) =>
 export function rememberAttachedFile(
   page: Page,
   ref: string,
-  file: { name: string; size: number },
+  file: FileIdentity,
 ): void {
   let files = given.get(page);
-  if (!files)
-    given.set(
-      page,
-      (files = new Map<string, { name: string; size: number }>()),
-    );
+  if (!files) given.set(page, (files = new Map<string, FileIdentity>()));
   files.set(ref, file);
 }
 /** Answers in the order they arrived; milliseconds tie too often. */
@@ -126,6 +135,7 @@ function track(records: UploadRecord[], request: Request): UploadRecord | null {
     tokens: [],
     status: "pending" as const,
     blocked: false,
+    identity: null,
   };
   const type = (request.headers()["content-type"] ?? "").toLowerCase();
   if (!body || body.length === 0) {
@@ -245,6 +255,13 @@ function tokensIn(
 async function settle(page: Page, record: UploadRecord, response: Response) {
   // Ordered by when the answer arrived, not by when its body was read.
   record.completedAt = ++answered;
+  // The fence's upload permit names the exact file this request carried:
+  // it is a carrier whatever its content type (a raw text/plain PUT too).
+  const permit = getPrepareOnlyRequestPermit(response.request());
+  if (permit?.uploadLeg === "file") {
+    record.carriesFile = true;
+    record.identity = { ...permit.file };
+  }
   // The shared check reads the body in the page too when the embedded browser
   // never hands it over, and fails closed. Only "accepted" (the fence's
   // upload permit for this exact request, and a storage receipt) attaches a
@@ -308,16 +325,24 @@ export function watchAttachmentUploads(page: Page): void {
 /** The server's word on one chosen file; the module comment has the rules. */
 export function attachmentUploadOutcome(
   page: Page,
-  file: { name?: string; size?: number },
+  file: Partial<FileIdentity>,
 ): RawApplyUpload["network"] {
   const records = ledgers.get(page);
   const name = file.name?.trim().toLowerCase();
-  if (!records || (!name && !file.size)) return undefined;
+  if (!records || !name) return undefined;
+  // A carrier is this file only by the permit's exact identity (field,
+  // name, size, digest) when both sides have it, and by name otherwise;
+  // never by size alone, which a cover letter can share.
+  const isThisFile = (record: UploadRecord): boolean =>
+    record.identity
+      ? record.identity.name.toLowerCase() === name &&
+        (file.sha256 === undefined ||
+          (record.identity.sha256 === file.sha256 &&
+            record.identity.size === file.size &&
+            (file.field === undefined || record.identity.field === file.field)))
+      : record.names.includes(name);
   const carriers = records.filter(
-    (record) =>
-      record.carriesFile &&
-      ((name !== undefined && record.names.includes(name)) ||
-        (record.size !== null && record.size === file.size)),
+    (record) => record.carriesFile && isThisFile(record),
   );
   const mentions = records.filter(
     (record) =>
@@ -338,7 +363,9 @@ export function attachmentUploadOutcome(
       ),
   );
   // A carrier the presign pointed at carries this file too.
-  for (const record of linked) if (record.carriesFile) carriers.push(record);
+  for (const record of linked)
+    if (record.carriesFile && (!record.identity || isThisFile(record)))
+      carriers.push(record);
   // A held-back mention never reached the site and says nothing.
   const group = [...new Set([...carriers, ...mentions, ...linked])].filter(
     (record) =>
@@ -371,14 +398,22 @@ export function withAttachmentUploadOutcomes(
     ...raw,
     controls: raw.controls.map((control) => {
       if (!control.upload) return control;
-      // An emptied input is judged by the file Nestor gave it.
-      const file = control.upload.fileName
-        ? { name: control.upload.fileName, size: control.upload.fileSize }
-        : given.get(page)?.get(controlHandle(control));
-      const network = attachmentUploadOutcome(page, {
-        ...(file?.name ? { name: file.name } : {}),
-        ...(file?.size ? { size: file.size } : {}),
-      });
+      // The file Nestor gave this control, with its exact identity; an
+      // emptied input is judged by it too.
+      const mine = given.get(page)?.get(controlHandle(control));
+      const shown = control.upload.fileName;
+      const file =
+        mine && (!shown || shown.toLowerCase() === mine.name.toLowerCase())
+          ? mine
+          : shown
+            ? {
+                name: shown,
+                ...(control.upload.fileSize
+                  ? { size: control.upload.fileSize }
+                  : {}),
+              }
+            : undefined;
+      const network = file ? attachmentUploadOutcome(page, file) : undefined;
       return network
         ? { ...control, upload: { ...control.upload, network } }
         : control;

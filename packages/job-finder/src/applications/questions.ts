@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { UPLOAD_REPAIR_QUESTION_ID } from "@nestor/browser-agent";
+import {
+  STEP_HANDOVER_QUESTION_ID,
+  UPLOAD_REPAIR_QUESTION_ID,
+} from "@nestor/browser-agent";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
@@ -68,6 +71,16 @@ export function describeFormQuestion(
     return {
       key: `question:${digest(`upload repair|job ${job.id}`)}`,
       input: "file",
+      options: [],
+      reusePrompt: false,
+    };
+  // A form button handed to the person is that application's own step: two
+  // forms waiting on "Save and continue" are two items, each continuing only
+  // its own application.
+  if (question.id === STEP_HANDOVER_QUESTION_ID)
+    return {
+      key: `question:${digest(`step handover|job ${job.id}|${normalize(question.prompt)}`)}`,
+      input: "text",
       options: [],
       reusePrompt: false,
     };

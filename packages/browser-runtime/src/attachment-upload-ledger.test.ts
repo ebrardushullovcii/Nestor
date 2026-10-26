@@ -233,3 +233,70 @@ describe("the server's word on a resume Fill attached", () => {
     await expect.poll(outcome).toBe("accepted");
   });
 });
+
+describe("a raw storage PUT", () => {
+  /** Two inputs that each PUT their file, as text/plain, to its own path. */
+  const putWidget = (storage: string) => `<!doctype html><form>
+    <label for="resume">Resume</label><input id="resume" name="resume" type="file">
+    <label for="letter">Cover letter</label><input id="letter" name="letter" type="file">
+  </form><script>
+    for (const id of ["resume", "letter"]) {
+      const input = document.getElementById(id);
+      input.addEventListener("change", () => {
+        fetch(${JSON.stringify(storage)} + "/" + id, {
+          method: "PUT",
+          headers: { "content-type": "text/plain" },
+          body: input.files[0],
+        }).catch(() => {});
+      });
+    }
+  </script>`;
+
+  async function attachBoth(answers: { resume: Answer; letter: Answer }) {
+    const storage = await startServer();
+    storage.answers.set("/storage/resume", answers.resume);
+    storage.answers.set("/storage/letter", answers.letter);
+    const formSite = await startServer(putWidget(`${storage.url}/storage`));
+    const page = await browser.newPage();
+    pages.push(page);
+    const session = createPlaywrightApplyPageSession({ page });
+    await session.installPrepareOnlyGuard({
+      intermediateMutationsAuthorized: false,
+      attachmentUploadsAuthorized: true,
+      allowedOrigins: [],
+    });
+    await page.goto(`${formSite.url}/form`);
+    const read = async (id: string) =>
+      (await session.readPage()).controls.find((entry) => entry.id === id)!;
+    const resume = await read("resume");
+    await session.uploadFile(
+      resume.ref ?? `c${resume.index}`,
+      resumeFile("Taylor-Resume.txt"),
+    );
+    const letter = await read("letter");
+    // Same size as the resume, different file.
+    await session.uploadFile(letter.ref ?? `c${letter.index}`, {
+      name: "Taylor-Letter.txt",
+      mimeType: "text/plain",
+      bytes: new Uint8Array(64).fill(38),
+    });
+    return async (id: string) => (await read(id)).upload?.network;
+  }
+
+  test("a text/plain resume PUT that got 422 is a refused carrier, not a missing outcome", async () => {
+    const outcome = await attachBoth({
+      resume: { status: 422, body: '{"message":"Upload failed"}' },
+      letter: { status: 422, body: '{"message":"Upload failed"}' },
+    });
+    await expect.poll(() => outcome("resume")).toBe("rejected");
+  });
+
+  test("a same-size cover letter that succeeded never clears the failed resume", async () => {
+    const outcome = await attachBoth({
+      resume: { status: 422, body: '{"message":"Upload failed"}' },
+      letter: { status: 201, body: '{"uploadId":"up_7"}' },
+    });
+    await expect.poll(() => outcome("letter")).toBe("accepted");
+    expect(await outcome("resume")).toBe("rejected");
+  });
+});

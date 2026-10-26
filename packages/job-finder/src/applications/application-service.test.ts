@@ -641,6 +641,64 @@ it("drops the upload item once the person's page shows the file arrived, and fin
   expect(f.applications.needsYou.list().total).toBe(0);
 });
 
+it("keeps the upload item while the person's page shows only another field's file confirmed", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const file = (id: string, label: string, value: string) => ({
+    index: id === "resume" ? 0 : 1,
+    tagName: "input",
+    inputType: "file",
+    role: "",
+    id,
+    name: id,
+    label,
+    groupLabel: "",
+    placeholder: "",
+    autocomplete: "",
+    required: true,
+    invalid: false,
+    validationMessage: "",
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value,
+    checked: false,
+    multiple: false,
+    options: [],
+    selectedOptionLabel: "",
+  });
+  // The cover letter arrived; the resume input is still empty.
+  f.browser.readApplicationPageWithPerson.mockResolvedValue({
+    ...f.personPage,
+    title: "Apply",
+    bodyText: "Apply",
+    controls: [
+      {
+        ...file("resume", "Resume", ""),
+        upload: { described: "", nearby: "", shown: false },
+      },
+      {
+        ...file("letter", "Cover letter", "letter.pdf"),
+        upload: {
+          described: "",
+          nearby: "letter.pdf",
+          shown: false,
+          network: "accepted",
+        },
+      },
+    ],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  expect(
+    f.applications.needsYou.list().rows.map((task) => task.prompt),
+  ).toEqual(["Resume — upload failed"]);
+  expect(f.execute).toHaveBeenCalledTimes(1);
+});
+
 it("refills with the person's word when they say the file is attached on the site", async () => {
   const f = await setup(1);
   preparation.uploadsConfirmed.length = 0;
@@ -742,6 +800,18 @@ it("keeps every shared file question's key, and scopes only the upload item to i
   expect(describeFormQuestion(repair, one).key).not.toBe(
     describeFormQuestion(repair, two).key,
   );
+  // Two forms waiting on the same button are two items.
+  const step = {
+    id: "step_handover",
+    prompt: 'Press "Save and continue" on the site, then continue',
+    kind: "other" as const,
+    answerControlType: "text" as const,
+    answerOptions: [],
+  };
+  expect(describeFormQuestion(step, one).key).not.toBe(
+    describeFormQuestion(step, two).key,
+  );
+  expect(describeFormQuestion(step, one).reusePrompt).toBe(false);
 });
 
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
