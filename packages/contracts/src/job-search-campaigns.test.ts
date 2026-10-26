@@ -128,7 +128,7 @@ describe("JobSearchCampaignSchema", () => {
   });
 });
 
-test("effective source selection distinguishes Profile inheritance from explicitly choosing none", () => {
+test("legacy plan selections do not derive sources from retired preference fields", () => {
   const preferences = JobSearchPreferencesSchema.parse({
     ...searchPreferences,
     discovery: {
@@ -152,7 +152,8 @@ test("effective source selection distinguishes Profile inheritance from explicit
     searchPreferences: preferences,
     sourceTargetIds: [] as string[],
   };
-  expect(resolveCampaignSourceTargetIds(plan)).toEqual(["on"]);
+  expect(preferences).not.toHaveProperty("discovery");
+  expect(resolveCampaignSourceTargetIds(plan)).toEqual([]);
   expect(
     resolveCampaignSourceTargetIds({
       ...plan,
@@ -165,5 +166,5 @@ test("effective source selection distinguishes Profile inheritance from explicit
       sourceSelectionMode: "selected",
       sourceTargetIds: ["off", "deleted"],
     }),
-  ).toEqual(["off"]);
+  ).toEqual(["off", "deleted"]);
 });

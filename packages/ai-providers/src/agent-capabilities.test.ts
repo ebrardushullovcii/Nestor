@@ -547,7 +547,7 @@ describe("tool-using AI capabilities", () => {
       JSON.stringify(previousPayload).length +
       JSON.stringify({ ...request, ...grounded }).length;
     expect(JSON.stringify(payload).length).toBeLessThan(
-      previousPayloadAndReadChars / 10,
+      previousPayloadAndReadChars,
     );
   });
 

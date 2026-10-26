@@ -340,6 +340,23 @@ function conflictsWithDirtyEdit(
       JSON.stringify(incoming) !== JSON.stringify(ownSave)
     );
   if (!dirty || typeof dirty !== "object") return false;
+  if (Array.isArray(dirty) && Array.isArray(draft)) {
+    const rowFor = (rows: unknown, id: string | null) =>
+      id && Array.isArray(rows)
+        ? rows.find((row: unknown) => stableRecordId(row) === id)
+        : undefined;
+    return dirty.some((child: unknown, index) => {
+      const row = draft[index];
+      const id = stableRecordId(row);
+      return conflictsWithDirtyEdit(
+        rowFor(before, id),
+        rowFor(incoming, id),
+        row,
+        child,
+        rowFor(ownSave, id),
+      );
+    });
+  }
   const value = (row: unknown, key: string) =>
     row && typeof row === "object"
       ? (row as Record<string, unknown>)[key]

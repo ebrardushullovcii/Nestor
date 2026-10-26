@@ -320,7 +320,6 @@ describe("useProfileScreenForms background-snapshot durability", () => {
       createInput({
         profile: {
           ...profile,
-          headline: "External canonical headline",
           currentLocation: "Berlin",
         },
       }),
@@ -336,6 +335,29 @@ describe("useProfileScreenForms background-snapshot durability", () => {
     expect(result.current.backgroundMergeNotice).toBe(
       backgroundMergedNoticeMessage,
     );
+  });
+
+  it("keeps a same-field background edit as an explicit conflict", () => {
+    const { result, rerender } = renderProfileScreenForms(createInput());
+    act(() => {
+      result.current.profileForm.setValue(
+        "identity.headline",
+        "Local headline",
+        {
+          shouldDirty: true,
+        },
+      );
+    });
+    rerender(
+      createInput({ profile: { ...profile, headline: "Assistant headline" } }),
+    );
+    expect(result.current.profileForm.getValues("identity.headline")).toBe(
+      "Local headline",
+    );
+    expect(result.current.backgroundMergeNotice).toBe(
+      backgroundConflictNoticeMessage,
+    );
+    expect(result.current.hasUserDraftChanges).toBe(true);
   });
 
   it("reorders merged experience rows while keeping each dirty edit on its own record id", () => {
@@ -650,7 +672,6 @@ describe("useProfileScreenForms background-snapshot durability", () => {
 
     const externallyUpdatedProfile = {
       ...profile,
-      headline: "External canonical headline",
       currentLocation: "Berlin",
     };
     rerender(createInput({ profile: externallyUpdatedProfile }));
@@ -840,7 +861,6 @@ describe("useProfileScreenForms draft-edit revision signals", () => {
 
     const externallyUpdatedProfile = {
       ...profile,
-      headline: "External canonical headline",
       currentLocation: "Berlin",
     };
     rerender(createInput({ onDraftEdited, profile: externallyUpdatedProfile }));

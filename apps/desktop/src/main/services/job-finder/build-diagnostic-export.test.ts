@@ -19,6 +19,7 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
   return {
     profileSetupState: { status: "completed" },
     browserSession: { status: "ready", detail: secretCorpus[6] },
+    siteCounts: { all: 1, enabled: 1, disabled: 0, needsAttention: 0 },
     searchPreferences: {
       discovery: { targets: [{ secret: secretCorpus[2] }] },
     },
@@ -115,6 +116,7 @@ describe("buildJobFinderDiagnosticExport", () => {
       latestResumeImportDurationMs: 456,
       latestApplyDurationMs: 123,
     });
+    expect(diagnostic.state.counts.configuredSources).toBe(1);
     expect(diagnostic.performance).toEqual({
       measurements: [
         {

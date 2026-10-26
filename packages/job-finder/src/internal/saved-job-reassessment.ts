@@ -59,17 +59,12 @@ export async function reassessSavedJobs(
     Partial<Pick<WorkspaceServiceContext, "isWorkspaceClosing">>,
 ): Promise<boolean> {
   const closing = () => ctx.isWorkspaceClosing?.() === true;
-  const [profile, searchPreferences, campaignState] = await Promise.all([
+  const [profile, searchPreferences] = await Promise.all([
     ctx.repository.getProfile(),
     ctx.repository.getSearchPreferences(),
-    ctx.repository.getCampaignState(),
   ]);
-  const activeCampaignId = await ctx.getActiveCampaignId();
-  const activeCampaign = campaignState?.campaigns.find(
-    (campaign) => campaign.id === activeCampaignId,
-  );
   const preferences = enrichSearchPreferencesFromProfile(
-    activeCampaign?.searchPreferences ?? searchPreferences,
+    searchPreferences,
     profile,
   );
   const session = createMatchAssessmentSession({

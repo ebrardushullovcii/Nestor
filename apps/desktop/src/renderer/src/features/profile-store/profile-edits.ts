@@ -53,9 +53,7 @@ export function profileEdits(input: {
       (key) =>
         input.beforeProfile
           ? leaf(input.beforeProfile, key)
-          : input.beforeProfile
-            ? leaf(input.beforeProfile, key)
-            : input.overview.fields[key as keyof typeof input.overview.fields],
+          : input.overview.fields[key as keyof typeof input.overview.fields],
       input.nextProfile,
     ),
   );
