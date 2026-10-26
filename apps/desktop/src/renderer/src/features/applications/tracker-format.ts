@@ -48,6 +48,8 @@ const WORK_LABEL: Record<ApplicationWorkState, string> = {
   submitting: "Sending",
   submitted: "Sent",
   stopped: "Stopped",
+  skipped: "Skipped",
+  blocked: "Blocked",
   failed: "Could not apply",
   uncertain: "Sent? Check the site",
 };
@@ -61,6 +63,10 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
   submitting: "Apply is sending it.",
   submitted: "Sent.",
   stopped: "Apply stopped before sending it.",
+  skipped:
+    "Your saved rule skipped this application. You can still open the job and apply by hand.",
+  blocked:
+    "The site blocked this browser. Open the job in your browser to continue by hand.",
   failed: "Apply could not send it.",
   uncertain: "Apply could not tell whether it went through. Check the site.",
 };

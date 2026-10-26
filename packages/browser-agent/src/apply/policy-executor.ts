@@ -14,6 +14,7 @@ import {
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
 import { matchOption } from "./option-match";
+import { resolveOptionFallback } from "./option-fallback";
 import { formatGithubAnswer } from "./github-username";
 import type { ApplyQuestionClassification } from "./question-classification";
 import {
@@ -64,6 +65,7 @@ import type {
  */
 
 export type ApplyExecutionOutcome =
+  | { kind: "skipped"; reason: string }
   | { kind: "observed"; observation: ApplyFormObservation }
   /** A read the model asked for. Carries no page change. */
   | { kind: "read"; text: string; observation: ApplyFormObservation }
@@ -1335,6 +1337,21 @@ export async function executeApplyProposal(
 
   const observation = await config.hands.observe();
   deps.guardState.lastOnSiteUrl = observation.url;
+  for (const control of observation.controls) {
+    if (
+      !control.visible ||
+      control.disabled ||
+      !["select", "combobox"].includes(control.kind)
+    )
+      continue;
+    const rule = savedAnswerForQuestion(
+      control,
+      config.sources.reusableAnswers,
+    )?.optionFallback;
+    const decision = rule ? resolveOptionFallback(control.options, rule) : null;
+    if (decision?.kind === "skip")
+      return { kind: "skipped", reason: decision.reason };
+  }
 
   // A page that moved on since the model looked is retried, not stopped: the
   // model gets what is there now and decides again.
@@ -1788,6 +1805,15 @@ export async function executeApplyProposal(
         };
       }
       const control = await withModelQuestionKinds(deps, observation, found);
+      const savedRule = savedAnswerForQuestion(
+        control,
+        config.sources.reusableAnswers,
+      );
+      const rule = savedRule?.optionFallback
+        ? resolveOptionFallback(control.options, savedRule.optionFallback)
+        : null;
+      if (rule?.kind === "skip")
+        return { kind: "skipped", reason: rule.reason };
       const key = pickerFieldKey(observation, control);
       if ((deps.guardState.pickerFailures.get(key) ?? 0) >= MAX_PICKER_ATTEMPTS)
         return pickerHandover(
@@ -1798,6 +1824,7 @@ export async function executeApplyProposal(
           at,
         );
       if (
+        rule?.kind !== "choice" &&
         control.options.length &&
         !matchOption(control.options, proposal.option)
       )
@@ -1808,12 +1835,27 @@ export async function executeApplyProposal(
           `Offered: ${control.options.join(", ")}.`,
           at,
         );
-      const choice = await decideAnswer({
-        deps,
-        control,
-        value: matchOption(control.options, proposal.option) ?? proposal.option,
-        storedFactId: proposal.storedFactId,
-      });
+      const choice: AnswerDecision =
+        rule?.kind === "choice"
+          ? {
+              kind: "use",
+              answer: {
+                value: rule.value,
+                kind: control.questionKind,
+                sourceKind: "answer_library",
+                sourceId: `answerLibrary.${savedRule!.id}`,
+                provenanceLabel: "your saved picker fallback rule",
+                groundedIn: ["your saved picker fallback rule"],
+              },
+            }
+          : await decideAnswer({
+              deps,
+              control,
+              value:
+                matchOption(control.options, proposal.option) ??
+                proposal.option,
+              storedFactId: proposal.storedFactId,
+            });
       if (choice.kind === "leave") {
         return notEntered({ deps, control, observation, at, decision: choice });
       }

@@ -203,7 +203,17 @@ export const candidateAnswerKindValues = [
 export const CandidateAnswerKindSchema = z.enum(candidateAnswerKindValues);
 export type CandidateAnswerKind = z.infer<typeof CandidateAnswerKindSchema>;
 
+export const SavedOptionFallbackSchema = z
+  .object({
+    primary: z.string().trim().min(1).max(300),
+    fallback: z.string().trim().min(1).max(300),
+    whenNeitherOffered: z.literal("skip_application"),
+  })
+  .strict();
+export type SavedOptionFallback = z.infer<typeof SavedOptionFallbackSchema>;
+
 export const CandidateReusableAnswerSchema = z.object({
+  optionFallback: SavedOptionFallbackSchema.nullable().optional(),
   needsConfirmation: z.boolean().optional(),
   id: NonEmptyStringSchema,
   kind: CandidateAnswerKindSchema.default("other"),

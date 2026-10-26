@@ -4,6 +4,7 @@ import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { describeError } from "./task-pane";
+import { OptionFallbackField } from "./option-fallback-field";
 
 export function CreateAnswerPane(props: {
   onCreated: (value: SavedFormAnswer) => void;
@@ -11,6 +12,7 @@ export function CreateAnswerPane(props: {
 }) {
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState("");
+  const [fallback, setFallback] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -49,13 +51,38 @@ export function CreateAnswerPane(props: {
         Job Finder reuses this fact when a form asks the same question. Keep
         country-specific authorization and sponsorship facts in Profile.
       </p>
+      <OptionFallbackField
+        value={fallback}
+        disabled={busy}
+        onChange={(value) => {
+          setFallback(value);
+          props.onEditing(true);
+        }}
+      />
       <Button
-        disabled={busy || !prompt.trim() || !answer.trim()}
+        disabled={
+          busy ||
+          !prompt.trim() ||
+          !answer.trim() ||
+          (fallback !== null &&
+            (!fallback.trim() || answer.trim().length > 300))
+        }
         onClick={() => {
           setBusy(true);
           setError(null);
           void window.nestor.needsYou
-            .run("create_form_answer", { prompt, answer })
+            .run("create_form_answer", {
+              prompt,
+              answer,
+              optionFallback:
+                fallback === null
+                  ? null
+                  : {
+                      primary: answer.trim(),
+                      fallback: fallback.trim(),
+                      whenNeitherOffered: "skip_application",
+                    },
+            })
             .then(props.onCreated)
             .catch((error) => setError(describeError(error)))
             .finally(() => setBusy(false));

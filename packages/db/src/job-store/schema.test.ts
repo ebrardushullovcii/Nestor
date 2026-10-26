@@ -136,9 +136,13 @@ function seedRows(db: DatabaseSync, tables: ReadonlySet<string>) {
     ).filter(
       (column) => column.notnull && column.dflt_value === null && !column.pk,
     );
-    const values = columns.map((column) =>
-      /INT|REAL|NUM/iu.test(column.type) ? 1 : "seed",
-    );
+    const values = columns.map((column) => {
+      // Adding a CHECK column makes SQLite validate the existing row as well.
+      if (table === "applications" && column.name === "mode")
+        return "confirm_before_submit";
+      if (table === "applications" && column.name === "state") return "queued";
+      return /INT|REAL|NUM/iu.test(column.type) ? 1 : "seed";
+    });
     db.prepare(
       columns.length
         ? `INSERT INTO "${table}" (${columns.map((c) => `"${c.name}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`

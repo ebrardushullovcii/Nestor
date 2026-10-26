@@ -28,6 +28,34 @@ const adult = {
   options: [],
 };
 
+it("vetoes a prepared answer when its saved fallback changes", () => {
+  const rule = {
+    primary: "Primary territory",
+    fallback: "Fallback region",
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const saved = memory.remember({
+    ...adult,
+    key: "country",
+    prompt: "Country of residence",
+    input: "text",
+    answer: rule.primary,
+    optionFallback: rule,
+  });
+  const facts = applicationAnswerDependencies(memory, 1, origin, []);
+  facts.read([
+    { key: "country", prompt: "Country of residence", reusePrompt: true },
+  ]);
+  const proof = facts.snapshot();
+  expect(applicationAnswersUnchanged(memory, 1, origin, proof)).toBe(true);
+  memory.saveAnswer({
+    id: saved.id,
+    answer: rule.primary,
+    optionFallback: { ...rule, fallback: "Another region" },
+  });
+  expect(applicationAnswersUnchanged(memory, 1, origin, proof)).toBe(false);
+});
+
 it("ignores renamed questions and newly saved pay answers, but rejects a changed answer on this form", () => {
   memory.remember(adult);
   const facts = applicationAnswerDependencies(memory, 1, origin, []);

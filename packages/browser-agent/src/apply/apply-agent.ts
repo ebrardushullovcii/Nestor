@@ -67,6 +67,7 @@ import {
   unresolvedRequiredControls,
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
+import { resolveOptionFallback } from "./option-fallback";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
   checkWrittenApplicationAnswer,
@@ -379,6 +380,7 @@ async function runMeasuredApplyAgent(
       : {}),
   };
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
+  let skipReason: string | null = null;
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const resumeText =
@@ -790,6 +792,17 @@ async function runMeasuredApplyAgent(
   ): Promise<AgentLoopToolOutcome> => {
     const withPage = options.withPage === true;
     switch (outcome.kind) {
+      case "skipped":
+        skipReason = outcome.reason;
+        return {
+          kind: "finish",
+          finish: {
+            reason: outcome.reason,
+            stuck: false,
+            needsPerson: false,
+            data: {},
+          },
+        };
       case "observed":
         syncObservation(outcome.observation);
         return {
@@ -2333,8 +2346,33 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
-    beforeModelTurn: () => {
+    beforeModelTurn: async () => {
+      await refreshReusableAnswers();
       const current = pageTools.state.observation;
+      for (const control of current?.controls ?? []) {
+        if (
+          !control.visible ||
+          control.disabled ||
+          !["select", "combobox"].includes(control.kind)
+        )
+          continue;
+        const rule = savedAnswerForQuestion(
+          control,
+          runConfig.sources.reusableAnswers,
+        )?.optionFallback;
+        const decision = rule
+          ? resolveOptionFallback(control.options, rule)
+          : null;
+        if (decision?.kind === "skip") {
+          skipReason = decision.reason;
+          return {
+            reason: skipReason,
+            stuck: false,
+            needsPerson: false,
+            data: {},
+          };
+        }
+      }
       const exhausted = current?.controls.some(
         (control) =>
           (guardState.pickerFailures.get(pickerFieldKey(current, control)) ??
@@ -2437,7 +2475,11 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
-  if (pauses.length > 0) {
+  if (skipReason) {
+    outcome = "paused";
+    reason = skipReason;
+    readyToSend = null;
+  } else if (pauses.length > 0) {
     outcome = "paused";
     reason = pauses[0]?.summary ?? loop.reason;
   } else if (
@@ -2521,7 +2563,8 @@ async function runMeasuredApplyAgent(
   const timing = `[apply] timing read=${agentTiming.pageReadMs}ms (${agentTiming.pageReads} reads) fill=${agentTiming.writeMs}ms upload=${agentTiming.uploadMs}ms tools=${agentTiming.toolMs}ms model=${agentTiming.modelTurns} turns ${agentTiming.modelMs}ms checks=${agentTiming.auxiliaryModelCalls} calls ${agentTiming.auxiliaryModelMs}ms total=${agentTiming.totalMs}ms fields_per_turn(filled/attempted)=[${fieldsPerTurn}] steps_advanced_per_turn=[${stepsPerTurn}] uploads_attached_per_turn=[${uploadsPerTurn}] stored_fact_fills_per_turn=[${storedPerTurn}] answers_waited_per_turn=[${waitedPerTurn}]`;
   return {
     outcome,
-    reason,
+    ...(skipReason ? { skipReason } : {}),
+    reason: skipReason ?? reason,
     steps: loop.steps,
     finalUrl: pageTools.state.observation?.url ?? null,
     filled,

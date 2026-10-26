@@ -517,6 +517,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       await closePage(row.id, row.attempt);
       return;
     }
+    if (result.skipReason) {
+      applications.skip(row.id, row.attempt, result.skipReason);
+      await closePage(row.id, row.attempt);
+      return;
+    }
     let fromMemory = false;
     for (const question of result.questions.filter(
       (q) => q.status === "detected" && !q.submittedAnswer,

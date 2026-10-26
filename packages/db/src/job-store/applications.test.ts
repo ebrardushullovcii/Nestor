@@ -23,6 +23,61 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("persists a saved fallback and visible skipped application across restart without requeueing", () => {
+  const folder = mkdtempSync(path.join(tmpdir(), "nestor-saved-rule-"));
+  folders.push(folder);
+  const file = path.join(folder, "jobs.sqlite");
+  const { jobs, applications } = open(file);
+  const rule = {
+    primary: "Primary territory",
+    fallback: "Fallback region",
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const answer = applications.needsYou.remember({
+    key: "country",
+    prompt: "Country of residence",
+    answer: rule.primary,
+    input: "text",
+    options: [],
+    scope: {},
+    optionFallback: rule,
+  });
+  expect(
+    applications.needsYou.answersForQuestions(
+      1,
+      [{ key: "country", prompt: "Country of residence", reusePrompt: true }],
+      "https://replica.test",
+    )[0]?.optionFallback,
+  ).toEqual(rule);
+  expect(readSavedApplicationAnswers(jobs)[0]?.optionFallback).toEqual(rule);
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const work = applications.claimNext()!;
+  expect(
+    applications.skip(
+      work.id,
+      work.attempt,
+      "Neither saved option is offered.",
+    ),
+  ).toBe(true);
+  expect(applications.needsYou.forApplication(work.id)).toEqual([]);
+  jobs.close();
+  const reopened = open(file).applications;
+  expect(reopened.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    error: "Neither saved option is offered.",
+  });
+  expect(reopened.claimNext()).toBeNull();
+  expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
+    rule,
+  );
+  reopened.needsYou.saveAnswer({
+    id: answer.id,
+    answer: rule.primary,
+    optionFallback: null,
+  });
+  expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toBeNull();
+});
+
 it("persists guarded answer Undo without retracting answers that released applications", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
   folders.push(folder);

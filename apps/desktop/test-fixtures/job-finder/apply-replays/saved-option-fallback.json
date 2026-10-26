@@ -1,0 +1,17 @@
+{
+  "question": "Country of residence",
+  "primary": "Primary territory",
+  "fallback": "Fallback region",
+  "whenNeitherOffered": "skip_application",
+  "cases": [
+    {
+      "options": ["Primary territory", "Fallback region"],
+      "expected": "Primary territory"
+    },
+    {
+      "options": ["Fallback region", "Other region"],
+      "expected": "Fallback region"
+    },
+    { "options": ["Other region"], "expected": null }
+  ]
+}

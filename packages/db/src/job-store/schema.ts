@@ -43,6 +43,12 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   { table: "resume_changes", column: "before_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_move_id", definition: "INTEGER" },
+  {
+    table: "applications",
+    column: "disposition",
+    definition: "TEXT CHECK (disposition IN ('skipped', 'blocked'))",
+  },
+  { table: "form_answers", column: "option_fallback_json", definition: "TEXT" },
 ];
 
 const JOBS = `

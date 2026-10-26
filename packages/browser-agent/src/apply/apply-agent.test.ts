@@ -1,4 +1,5 @@
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
+import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import { describe, expect, test, vi } from "vitest";
@@ -6405,3 +6406,64 @@ test("picker replay: two attempts end in Needs you with offered options, even wh
   );
   expect(questions[0].answerOptions).toEqual(pickerReplay.options);
 });
+
+test.each(fallbackReplay.cases)(
+  "saved picker fallback replay: $options",
+  async ({ options, expected }) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          tagName: "select",
+          role: "combobox",
+          label: fallbackReplay.question,
+          value: "",
+          options,
+        },
+      ],
+    });
+    const input = config(source);
+    input.sources.reusableAnswers = [
+      {
+        id: "saved-rule",
+        kind: "other",
+        label: fallbackReplay.question,
+        question: fallbackReplay.question,
+        answer: fallbackReplay.primary,
+        roleFamilies: [],
+        proofEntryIds: [],
+        optionFallback: {
+          primary: fallbackReplay.primary,
+          fallback: fallbackReplay.fallback,
+          whenNeitherOffered: "skip_application",
+        },
+      },
+    ];
+    const write = vi.fn(async (_ref: string, value: string) => {
+      source.controls[0].value = value;
+      source.controls[0].selectedOptionLabel = value;
+      return { ok: true as const, observedValue: value };
+    });
+    input.hands.chooseOption = write;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "select", args: { ref: "c0", option: fallbackReplay.primary } },
+        { name: "finish", args: { reason: "Filled." } },
+      ]),
+    );
+    if (expected) {
+      expect(write).toHaveBeenCalledWith("c0", expected);
+      expect(result.filled[0]?.answer.sourceKind).toBe("answer_library");
+      expect(result.skipReason).toBeUndefined();
+    } else {
+      expect(write).not.toHaveBeenCalled();
+      expect(result.modelTurns).toBe(0);
+      expect(result.skipReason).toContain(
+        `neither ${fallbackReplay.primary} nor ${fallbackReplay.fallback}`,
+      );
+      expect(result.readyToSend).toBeNull();
+      expect(result.pauses).toHaveLength(0);
+    }
+  },
+);

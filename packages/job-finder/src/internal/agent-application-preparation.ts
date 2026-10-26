@@ -776,6 +776,7 @@ export async function runAgentApplicationPreparation(
     ...prepared,
     agentTiming: result.timing,
     questionContexts: result.questionContexts,
+    ...(result.skipReason ? { skipReason: result.skipReason } : {}),
   };
 }
 

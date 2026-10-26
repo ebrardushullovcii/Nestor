@@ -410,6 +410,7 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  skipReason?: string;
   questionContexts?: Array<{ prompt: string; step: string }>;
   timing?: ApplyAgentTiming;
   outcome: ApplyAgentOutcome;

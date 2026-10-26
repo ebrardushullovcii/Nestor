@@ -2305,6 +2305,7 @@ export type ApplyExecutionModelUse = z.infer<
 >;
 
 export const ApplyExecutionResultSchema = z.object({
+  skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
   questionContexts: optionalStoredField(
     z
       .array(

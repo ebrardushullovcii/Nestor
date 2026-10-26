@@ -1,5 +1,6 @@
 import {
   UpsertSavedFormAnswerInputSchema,
+  SavedOptionFallbackSchema,
   ApplicationListQuerySchema,
   ApplicationApplyModeSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
@@ -60,7 +61,7 @@ type Row = {
   error: string | null;
 };
 
-const COLUMNS = `a.id, a.job_id, a.mode, j.title, j.company, j.location, a.state,
+const COLUMNS = `a.id, a.job_id, a.mode, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state,
   a.attempt, a.queued_at, a.updated_at, a.submitted_at, a.error`;
 
 function toRow(row: Row): ApplicationRow {
@@ -166,7 +167,7 @@ export function createApplicationStore(store: JobStore) {
            SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
            ON CONFLICT(job_id) DO UPDATE SET
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
-             updated_at = excluded.updated_at, error = NULL
+             updated_at = excluded.updated_at, error = NULL, disposition = NULL
            WHERE applications.state IN ('stopped', 'failed')
              AND applications.submitted_at IS NULL RETURNING id`,
         ).all(mode, now, now, ...params) as { id: number }[];
@@ -575,7 +576,7 @@ export function createApplicationStore(store: JobStore) {
       const clauses: string[] = [];
       const params: SQLInputValue[] = [];
       if (query.state !== null) {
-        clauses.push("a.state = ?");
+        clauses.push("COALESCE(a.disposition,a.state) = ?");
         params.push(query.state);
       }
       if (query.cursor !== null) {
@@ -661,6 +662,18 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    skip(id: number, attempt: number, reason: string): boolean {
+      return store.transaction(() => {
+        const row = sql(
+          "UPDATE applications SET state='stopped', disposition='skipped', error=?, updated_at=? WHERE id=? AND attempt=? AND state='running' RETURNING job_id",
+        ).get(reason, Date.now(), id, attempt) as
+          | { job_id: number }
+          | undefined;
+        if (row) changed([row.job_id]);
+        return !!row;
+      });
+    },
+
     stop(id: number): boolean {
       return store.transaction(() => {
         const row = sql(
@@ -708,7 +721,7 @@ export function readSavedApplicationAnswers(
 ): CandidateReusableAnswer[] {
   const rows = store
     .sql(
-      `SELECT id,kind,label,prompt,answer,role_families_json,proof_entry_ids_json
+      `SELECT id,kind,label,prompt,answer,role_families_json,proof_entry_ids_json,option_fallback_json
     FROM form_answers WHERE needs_confirmation=0 ${kinds ? "AND kind IN (SELECT value FROM json_each(?))" : ""} ORDER BY id`,
     )
     .all(...(kinds ? [JSON.stringify(kinds)] : [])) as Array<{
@@ -717,6 +730,7 @@ export function readSavedApplicationAnswers(
     label: string;
     prompt: string;
     answer: string;
+    option_fallback_json: string | null;
     role_families_json: string;
     proof_entry_ids_json: string;
   }>;
@@ -726,6 +740,11 @@ export function readSavedApplicationAnswers(
     label: row.label || row.prompt,
     question: row.prompt,
     answer: row.answer,
+    optionFallback: row.option_fallback_json
+      ? SavedOptionFallbackSchema.parse(
+          JSON.parse(row.option_fallback_json) as unknown,
+        )
+      : null,
     roleFamilies: JSON.parse(row.role_families_json) as string[],
     proofEntryIds: JSON.parse(row.proof_entry_ids_json) as string[],
   }));
