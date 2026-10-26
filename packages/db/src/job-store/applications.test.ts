@@ -71,6 +71,17 @@ it("persists a saved fallback and visible skipped application across restart wit
     ),
   ).toBe(true);
   expect(applications.needsYou.forApplication(work.id)).toEqual([]);
+  expect(
+    applications.applyJobs(
+      { selection: { ids: [work.jobId] } },
+      "autonomous_submit",
+    ),
+  ).toMatchObject({ queued: 0, unchanged: 1 });
+  expect(applications.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    mode: work.mode,
+    attempt: work.attempt,
+  });
   jobs.close();
   const reopened = open(file).applications;
   expect(reopened.getApplication(work.id)).toMatchObject({
@@ -78,6 +89,17 @@ it("persists a saved fallback and visible skipped application across restart wit
     error: "Neither saved option is offered.",
   });
   expect(reopened.claimNext()).toBeNull();
+  expect(
+    reopened.applyJobs(
+      { selection: { ids: [work.jobId] } },
+      "autonomous_submit",
+    ),
+  ).toMatchObject({ queued: 0, unchanged: 1 });
+  expect(reopened.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    mode: work.mode,
+    attempt: work.attempt,
+  });
   expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
     rule,
   );

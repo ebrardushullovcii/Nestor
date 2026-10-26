@@ -169,6 +169,7 @@ export function createApplicationStore(store: JobStore) {
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL, disposition = NULL
            WHERE applications.state IN ('stopped', 'failed')
+             AND applications.disposition IS NULL
              AND applications.submitted_at IS NULL RETURNING id`,
         ).all(mode, now, now, ...params) as { id: number }[];
         for (const { id } of result) {
