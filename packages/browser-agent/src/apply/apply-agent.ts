@@ -695,6 +695,17 @@ async function runMeasuredApplyAgent(
     }
     if (!control.answered) {
       if (!earlier) return;
+      // The widget took the file and emptied its input, and the storage's
+      // receipt for the file Nestor gave it says it arrived.
+      if (control.upload?.network === "accepted") {
+        uploadLedger.set(fieldKey, {
+          ...earlier,
+          control,
+          state: "accepted",
+          since: earlier.state === "accepted" ? earlier.since : at,
+        });
+        return;
+      }
       // The file this field held is gone. Some widgets clear the input once
       // the upload lands and show a chip instead; anything else lost it, and
       // a resume Apply attached is required even on an optional field.
@@ -2685,6 +2696,7 @@ async function runMeasuredApplyAgent(
               if (!fillMayOpen(config, seen?.url ?? null, href)) {
                 const pause = pressOnSitePause(
                   link?.label ? `"${link.label}"` : href || "that link",
+                  now(),
                 );
                 pauses.push(pause);
                 note(pause.summary);

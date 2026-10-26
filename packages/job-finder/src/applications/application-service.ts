@@ -8,6 +8,7 @@ import {
   inferQuestionKind,
   fileUploadProblems,
   hasSubmissionConfirmationText,
+  STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
   type ApplyAgentResult,
   type ApplyBlocker,
@@ -684,9 +685,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           options: known.options,
           reusePrompt: known.reusePrompt,
         },
-        // A refused upload is never settled by an earlier answer.
+        // A refused upload, or a button handed to the person, is never
+        // settled by an earlier answer.
         {
-          reuseAnswers: !repeated && question.id !== UPLOAD_REPAIR_QUESTION_ID,
+          reuseAnswers:
+            !repeated &&
+            question.id !== UPLOAD_REPAIR_QUESTION_ID &&
+            question.id !== STEP_HANDOVER_QUESTION_ID,
         },
       );
       fromMemory ||= requested.status === "answered";

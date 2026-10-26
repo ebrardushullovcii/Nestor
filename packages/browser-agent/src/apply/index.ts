@@ -56,6 +56,7 @@ export {
 export {
   fileUploadProblems,
   runSubmitPreflight,
+  STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
   type ApplySubmitPreflightResult,
   type FileUploadProblem,

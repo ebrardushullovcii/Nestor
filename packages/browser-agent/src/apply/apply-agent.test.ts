@@ -3380,15 +3380,26 @@ test("a resume a widget took and emptied stays on the Ready card once the storag
       loadBytes: () => Promise.resolve(new Uint8Array([1, 2, 3])),
     },
   ];
+  let reads = 0;
+  const observe = runConfig.hands.observe;
+  runConfig.hands.observe = () => {
+    // The storage answers a moment after the upload: pending, then its
+    // receipt.
+    reads += 1;
+    if (source.controls[0].upload && reads > 2)
+      source.controls[0].upload.network = "accepted";
+    return observe();
+  };
   runConfig.hands.uploadFile = (_ref, file) => {
-    // Greenhouse: the input is emptied, and the storage's receipt is all
-    // that says the file arrived.
+    // Greenhouse: the input is emptied, the page shows no chip, and the
+    // storage's receipt is all that says the file arrived.
+    reads = 0;
     source.controls[0].value = "";
     source.controls[0].upload = {
       described: "",
       nearby: "",
       shown: false,
-      network: "accepted",
+      network: "pending",
     };
     return Promise.resolve({ ok: true, observedValue: file.name });
   };
@@ -3402,6 +3413,7 @@ test("a resume a widget took and emptied stays on the Ready card once the storag
   expect(
     result.reviewAttachments?.map((attachment) => attachment.fileName),
   ).toEqual(["approved.pdf"]);
+  expect(result.pauses).toEqual([]);
 });
 
 test("an optional letter the run cannot attach is noted, never a stop", async () => {
@@ -4411,6 +4423,10 @@ describe("fill_fields visible steps", () => {
     expect(result.pauses[0]?.summary).toBe(
       'Job Finder filled what it could on this page. Press "Save and continue" on the site yourself, then continue and Job Finder fills the next page.',
     );
+    // One Needs you item for this application: press it, then continue.
+    expect(
+      result.pauses[0]?.questions?.map((question) => question.prompt),
+    ).toEqual(['Press "Save and continue" on the site, then continue']);
   });
 
   test.each([false, true])(

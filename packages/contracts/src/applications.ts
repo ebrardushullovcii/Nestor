@@ -408,5 +408,13 @@ export type UpsertSavedFormAnswerInput = z.input<
 /** What a person answers an upload item with once the file is attached on the site. */
 export const UPLOAD_ATTACHED_ANSWER = "Attached on the site";
 /** An upload item: the files one form refused, or never confirmed, as Apply words it. */
+/**
+ * Fill in for me hands the form's own button (Next, Continue, Save) to the
+ * person. Their answer says they pressed it; the run then continues on the
+ * page they reached.
+ */
+export const STEP_PRESSED_ANSWER = "Pressed on the site";
+export const isStepHandoverPrompt = (prompt: string): boolean =>
+  /^Press .+ on the site, then continue$/u.test(prompt);
 export const isUploadRepairPrompt = (prompt: string): boolean =>
   /— upload (?:failed|not confirmed)$/u.test(prompt);

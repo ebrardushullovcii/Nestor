@@ -41,7 +41,10 @@ import {
 } from "./cover-letter";
 import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
-import { runSubmitPreflight } from "./submit-preflight";
+import {
+  runSubmitPreflight,
+  STEP_HANDOVER_QUESTION_ID,
+} from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
 import {
   OWN_WORDS_REASON,
@@ -1352,12 +1355,30 @@ async function reviewGuard(
  * run fills what is on the page and hands the press to the person; continuing
  * afterwards picks the run up on the page they reached.
  */
-export function pressOnSitePause(pressed: string): ApplyPause {
+export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
   const summary = `Job Finder filled what it could on this page. Press ${pressed} on the site yourself, then continue and Job Finder fills the next page.`;
+  // One Needs you item for this application: the person presses it on the
+  // site and says so, and the run continues on the page they reached.
+  const question = {
+    id: STEP_HANDOVER_QUESTION_ID,
+    prompt: `Press ${pressed} on the site, then continue`,
+    repeatedAtDifferentStep: false,
+    description: null,
+    kind: "other" as const,
+    answerControlType: "text" as const,
+    isRequired: true,
+    note: "Job Finder filled what it could on this page. In Fill in for me it never presses the form's own buttons, because one of them could send your application.",
+    detectedAt: at.toISOString(),
+    answerOptions: [],
+    suggestedAnswers: [],
+    submittedAnswer: null,
+    status: "detected" as const,
+  };
   return {
     code: "site_tried_to_send",
     summary,
-    question: null,
+    question,
+    questions: [question],
     blocker: {
       code: "site_saves_as_you_go",
       summary,
@@ -1740,7 +1761,10 @@ export async function executeApplyProposal(
       )
         return {
           kind: "paused",
-          pause: pressOnSitePause(describeRef(observation, proposal.ref)),
+          pause: pressOnSitePause(
+            describeRef(observation, proposal.ref),
+            deps.now(),
+          ),
         };
       const livePage = await config.hands.observe();
       const personOwnedBlocker = livePage.blocker?.requiresPerson

@@ -22,6 +22,8 @@ export type UploadEvidenceOptions = {
 
 /** The one question a form's failed uploads become, whatever their number. */
 export const UPLOAD_REPAIR_QUESTION_ID = "upload_repair";
+/** The Needs you item for a form button Fill in for me hands to the person. */
+export const STEP_HANDOVER_QUESTION_ID = "step_handover";
 
 type FileControl = ApplyFormObservation["controls"][number];
 export type FileUploadProblem = {

@@ -5,7 +5,9 @@ import type {
   NeedsYouDraft,
 } from "@nestor/contracts";
 import {
+  STEP_PRESSED_ANSWER,
   UPLOAD_ATTACHED_ANSWER,
+  isStepHandoverPrompt,
   isUploadRepairPrompt,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
@@ -148,7 +150,9 @@ export function TaskPane(props: {
   // A refused upload belongs to one application's page: its answer is
   // never saved for other forms.
   const perApplication =
-    !!details?.task && isUploadRepairPrompt(details.task.prompt);
+    !!details?.task &&
+    (isUploadRepairPrompt(details.task.prompt) ||
+      isStepHandoverPrompt(details.task.prompt));
   async function answer() {
     await saveDraft();
     const result = await window.nestor.needsYou.run("answer_need", {
@@ -188,7 +192,51 @@ export function TaskPane(props: {
               </p>
             ))}
           </div>
-          {task.kind === "question" ? (
+          {task.kind === "question" && isStepHandoverPrompt(task.prompt) ? (
+            <div className="grid gap-3">
+              <h2 className="font-medium">{task.prompt}</h2>
+              <p className="text-sm text-foreground-soft">
+                Job Finder filled what it could on this page. In Fill in for me
+                it never presses the form's own buttons, because one of them
+                could send your application. Open the application, press it
+                yourself, then come back here.
+              </p>
+              {details.applications.map((application) => (
+                <Button
+                  key={application.id}
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    void act(async () => {
+                      if (
+                        !(await window.nestor.jobFinder.openApplication({
+                          id: application.id,
+                        }))
+                      )
+                        throw new Error(
+                          "The form could not be opened. Try opening it again from Applications.",
+                        );
+                    })
+                  }
+                >
+                  {details.applications.length === 1
+                    ? "Open application"
+                    : `Open ${application.title}`}
+                </Button>
+              ))}
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    edit({ answer: STEP_PRESSED_ANSWER, remember: false });
+                    await answer();
+                  })
+                }
+              >
+                I pressed it, continue
+              </Button>
+            </div>
+          ) : task.kind === "question" ? (
             <>
               {task.input === "file" ? (
                 <div className="grid gap-3">
