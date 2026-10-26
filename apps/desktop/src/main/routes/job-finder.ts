@@ -500,8 +500,6 @@ function parseSourceReadabilityTimeout(payload: unknown): number | null {
 const REQUIRED_WORKSPACE_SNAPSHOT_COLLECTIONS = [
   "discoveryJobs",
   "reviewQueue",
-  "applyRuns",
-  "applicationRecords",
 ] as const satisfies readonly (keyof JobFinderWorkspaceSnapshot)[];
 
 async function readWorkspaceProjection(

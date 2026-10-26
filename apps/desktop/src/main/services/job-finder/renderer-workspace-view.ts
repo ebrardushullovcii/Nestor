@@ -2,8 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { transferRowChanges } from "@nestor/core";
 import {
   TailoredAssetSummarySchema,
-  ApplyJobResultListRowSchema,
-  ApplicationAttemptListRowSchema,
 } from "@nestor/contracts";
 import type {
   DiscoveryRunRecord,
@@ -16,10 +14,6 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   TailoredAsset,
   TailoredAssetSummary,
-  ApplyJobResult,
-  ApplyJobResultListRow,
-  ApplicationAttempt,
-  ApplicationAttemptListRow,
 } from "@nestor/contracts";
 
 const listRows = new WeakMap<DiscoveryJobView, JobListRow>();
@@ -254,72 +248,6 @@ function toRendererAssets(assets: TailoredAsset[]): TailoredAssetSummary[] {
   return rows;
 }
 
-const resultRows = new WeakMap<ApplyJobResult, ApplyJobResultListRow>();
-const resultCollections = new WeakMap<
-  ApplyJobResult[],
-  ApplyJobResultListRow[]
->();
-function toRendererResults(results: ApplyJobResult[]): ApplyJobResultListRow[] {
-  const reusable = Object.isFrozen(results);
-  const cached = reusable ? resultCollections.get(results) : undefined;
-  if (cached) return cached;
-  const rows = results.map((result) => {
-    const borrowed = Object.isFrozen(result);
-    const previous = borrowed ? resultRows.get(result) : undefined;
-    if (previous) return previous;
-    const row: Partial<ApplyJobResult> = { ...result };
-    delete row.visualObservationSets;
-    delete row.visualCheckpoints;
-    // Already repository-validated; parse only the DTO on its first projection.
-    const projected = ApplyJobResultListRowSchema.parse(row);
-    if (borrowed) {
-      Object.freeze(projected);
-      resultRows.set(result, projected);
-    }
-    return projected;
-  });
-  if (reusable) {
-    Object.freeze(rows);
-    resultCollections.set(results, rows);
-  }
-  return rows;
-}
-const attemptRows = new WeakMap<
-  ApplicationAttempt,
-  ApplicationAttemptListRow
->();
-const attemptCollections = new WeakMap<
-  ApplicationAttempt[],
-  ApplicationAttemptListRow[]
->();
-function toRendererAttempts(
-  attempts: ApplicationAttempt[],
-): ApplicationAttemptListRow[] {
-  const reusable = Object.isFrozen(attempts);
-  const cached = reusable ? attemptCollections.get(attempts) : undefined;
-  if (cached) return cached;
-  const rows = attempts.map((attempt) => {
-    const borrowed = Object.isFrozen(attempt);
-    const previous = borrowed ? attemptRows.get(attempt) : undefined;
-    if (previous) return previous;
-    const row: Partial<ApplicationAttempt> = { ...attempt };
-    delete row.checkpoints;
-    delete row.visualEvidence;
-    delete row.visualObservationSets;
-    delete row.visualCheckpoints;
-    const projected = ApplicationAttemptListRowSchema.parse(row);
-    if (borrowed) {
-      Object.freeze(projected);
-      attemptRows.set(attempt, projected);
-    }
-    return projected;
-  });
-  if (reusable) {
-    Object.freeze(rows);
-    attemptCollections.set(attempts, rows);
-  }
-  return rows;
-}
 function toRendererJobs(jobs: DiscoveryJobView[]): JobListRow[] {
   const cached = jobCollections.get(jobs);
   if (cached) return cached;
@@ -423,8 +351,6 @@ export function toRendererWorkspaceSnapshot(
   return {
     ...snapshot,
     tailoredAssets: toRendererAssets(snapshot.tailoredAssets ?? []),
-    applyJobResults: toRendererResults(snapshot.applyJobResults),
-    applicationAttempts: toRendererAttempts(snapshot.applicationAttempts),
     discoveryJobs,
     companyJobs,
   };

@@ -151,18 +151,6 @@ export function applyJobFinderWorkspaceDelta(input: {
     input.delta.reviewQueue.removedIds,
     (value) => value.jobId,
   );
-  const applyRuns = applyEntitySlice(
-    input.workspace.applyRuns,
-    input.delta.applyRuns.upserts,
-    input.delta.applyRuns.removedIds,
-    (value) => value.id,
-  );
-  const applicationRecords = applyEntitySlice(
-    input.workspace.applicationRecords,
-    input.delta.applicationRecords.upserts,
-    input.delta.applicationRecords.removedIds,
-    (value) => value.id,
-  );
 
   return {
     status: "applied",
@@ -197,20 +185,6 @@ export function applyJobFinderWorkspaceDelta(input: {
         (value) => value.id,
       ),
       reviewQueue,
-      applyRuns,
-      applyJobResults: applyEntitySlice(
-        input.workspace.applyJobResults,
-        input.delta.applyJobResults.upserts,
-        input.delta.applyJobResults.removedIds,
-        (value) => value.id,
-      ),
-      applicationRecords,
-      applicationAttempts: applyEntitySlice(
-        input.workspace.applicationAttempts,
-        input.delta.applicationAttempts.upserts,
-        input.delta.applicationAttempts.removedIds,
-        (value) => value.id,
-      ),
       userActionRequests: applyEntitySlice(
         input.workspace.userActionRequests,
         input.delta.userActionRequests.upserts,
@@ -234,18 +208,6 @@ export function applyJobFinderWorkspaceDelta(input: {
         previousId: input.workspace.selectedReviewJobId,
         entities: reviewQueue,
         getId: (value) => value.jobId,
-      }),
-      selectedApplyRunId: preserveValidSelection({
-        requestedId: input.delta.selectedApplyRunId,
-        previousId: input.workspace.selectedApplyRunId,
-        entities: applyRuns,
-        getId: (value) => value.id,
-      }),
-      selectedApplicationRecordId: preserveValidSelection({
-        requestedId: input.delta.selectedApplicationRecordId,
-        previousId: input.workspace.selectedApplicationRecordId,
-        entities: applicationRecords,
-        getId: (value) => value.id,
       }),
     },
   };

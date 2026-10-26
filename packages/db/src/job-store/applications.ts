@@ -570,6 +570,17 @@ export function createApplicationStore(store: JobStore) {
       ).map(toRow);
     },
 
+    /** How many applications sit in each state; for diagnostics. */
+    stateCounts(): Partial<Record<ApplicationRow["state"], number>> {
+      return Object.fromEntries(
+        (
+          sql(
+            "SELECT state, COUNT(*) AS n FROM applications GROUP BY state",
+          ).all() as { state: ApplicationRow["state"]; n: number }[]
+        ).map((row) => [row.state, row.n]),
+      );
+    },
+
     listApplications(input: ApplicationListQuery = {}): ApplicationListPage {
       const query = ApplicationListQuerySchema.parse(input);
       const clauses: string[] = [];
