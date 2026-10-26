@@ -5,7 +5,6 @@ export {
   resolveApplicationAuthoritySuccessorId,
   withApplicationAuthorityGate,
 } from "./internal/application-authority-gate";
-export * from "./product-action-tools";
 export * from "./resume-import-benchmark";
 export * from "./user-action-domain";
 export * from "./internal/performance-budget-evaluation";

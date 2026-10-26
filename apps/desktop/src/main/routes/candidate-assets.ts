@@ -14,7 +14,6 @@ import {
   CandidateAssetOpenResultSchema,
   CandidateAssetRestoreInputSchema,
   CandidateAssetRestoreResultSchema,
-  type CandidateAsset,
   type ResumeSourceDocument,
 } from "@nestor/contracts";
 import { CandidateAssetLibraryError } from "../services/job-finder/candidate-asset-library";
@@ -26,45 +25,6 @@ interface CandidateAssetRouteDependencies {
   library: CandidateAssetLibrary;
   selectFile: (event: IpcMainInvokeEvent | null) => Promise<string | null>;
   getResumeSource?: () => Promise<ResumeSourceDocument>;
-  /**
-   * Told when a file the applications may attach becomes available, so an
-   * application waiting on a file question carries on without another press.
-   */
-  onApplicationFileAvailable?: (asset: CandidateAsset) => Promise<unknown>;
-}
-
-async function continueApplicationsWaitingForFile(
-  asset: CandidateAsset,
-): Promise<unknown> {
-  const { getJobFinderWorkspaceService } =
-    await import("../services/job-finder/workspace-service");
-  const workspaceService = await getJobFinderWorkspaceService();
-  return workspaceService.continueApplicationsWaitingForFiles({
-    assetId: asset.id,
-    assetKind: asset.kind,
-  });
-}
-
-function notifyApplicationFileAvailable(
-  dependencies: CandidateAssetRouteDependencies,
-  asset: CandidateAsset,
-): void {
-  if (
-    !dependencies.onApplicationFileAvailable ||
-    asset.deletedAt ||
-    asset.kind === "resume" ||
-    asset.consentScope !== "job_application_attachment"
-  ) {
-    return;
-  }
-  // Not awaited: the continuation drives the browser for minutes, and the
-  // Files tab must settle as soon as the file is stored.
-  void dependencies.onApplicationFileAvailable(asset).catch((error) => {
-    console.warn(
-      "[candidate-assets] Could not continue an application waiting for a file.",
-      error instanceof Error ? error.message : error,
-    );
-  });
 }
 
 const fileDialogOptions: OpenDialogOptions = {
@@ -114,7 +74,6 @@ export function createCandidateAssetOperations(
   dependencies: CandidateAssetRouteDependencies = {
     library: getCandidateAssetLibrary(),
     selectFile: selectCandidateAssetFile,
-    onApplicationFileAvailable: continueApplicationsWaitingForFile,
     getResumeSource: async () => {
       const { getJobFinderWorkspaceService } =
         await import("../services/job-finder/workspace-service");
@@ -176,9 +135,6 @@ export function createCandidateAssetOperations(
           await dependencies.library.importFromSourcePath(sourcePath, input),
         ),
       );
-      if (result.status === "imported") {
-        notifyApplicationFileAvailable(dependencies, result.asset);
-      }
       return result;
     },
   );
@@ -241,7 +197,6 @@ export function createCandidateAssetOperations(
           await dependencies.library.restore(input),
         ),
       );
-      notifyApplicationFileAvailable(dependencies, result.asset);
       return result;
     },
   );

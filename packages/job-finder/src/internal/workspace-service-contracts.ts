@@ -88,29 +88,10 @@ export interface JobFinderWorkspaceResetOptions {
 }
 
 export interface JobFinderWorkspaceService {
-  refreshApprovedApplicationLetter(
-    document: ApplicationDocumentRevision,
-  ): Promise<void>;
   shutdown(): Promise<void>;
   getWorkspaceSnapshot(): Promise<JobFinderWorkspaceSnapshot>;
   /** Read-only display projection; validated job rows may be shared in main. */
   getWorkspaceProjection?(): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * What an application's documents are written against: the profile, the
-   * one job, its application record and its newest result. Read by id, so
-   * opening Applications does not rebuild the whole workspace.
-   */
-  getApplicationDocumentContext?(
-    jobId: string,
-    applicationRecordId: string,
-  ): Promise<{
-    profile: JobFinderWorkspaceSnapshot["profile"];
-    job: SavedJob | null;
-    applicationRecord:
-      | JobFinderWorkspaceSnapshot["applicationRecords"][number]
-      | null;
-    latestResult: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
-  }>;
   /**
    * Returns the small, shell-safe first paint. Deferred collections are empty
    * by design and are marked in the snapshot hydration metadata.
@@ -132,36 +113,9 @@ export interface JobFinderWorkspaceService {
     input?: JobFinderOpenBrowserSessionInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
   checkBrowserSession(): Promise<JobFinderWorkspaceSnapshot>;
-  saveUserActionAnswerDraft(
-    input: SaveUserActionAnswerDraftInput,
-  ): Promise<void>;
   performUserAction(
     command: UserActionCommandInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  projectGroupedManualAnswer(
-    command: ProjectGroupedManualAnswerCommand,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  applyGroupedManualAnswer(
-    command: ApplyGroupedManualAnswerInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  snoozeGroupedDecision(
-    command: SnoozeGroupedDecisionInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  saveApplicationAnswer(
-    command: SaveApplicationAnswerCommandInput,
-  ): Promise<ApplyRunDetails>;
-  clearApplicationAnswer(
-    command: ClearApplicationAnswerCommandInput,
-  ): Promise<ApplyRunDetails>;
-  /**
-   * Carries on applications waiting on a file question once a fitting file is
-   * restored or added in Profile > Files. Returns how many were continued;
-   * the continuations run in the background.
-   */
-  continueApplicationsWaitingForFiles(input: {
-    assetId: string;
-    assetKind: CandidateAssetKind;
-  }): Promise<number>;
   resetWorkspace(
     seed: JobFinderRepositorySeed,
     options?: JobFinderWorkspaceResetOptions,
@@ -243,15 +197,6 @@ export interface JobFinderWorkspaceService {
     input: UpdateAiBehaviorInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
   /**
-   * Replaces the tracker CRM settings in the transaction-current settings and
-   * only then offers the due-based no-response automation run. Automation
-   * failures are reported separately and never roll the committed settings
-   * back.
-   */
-  updateTrackerCrm(
-    applicationCrm: ApplicationCrmSettings,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
    * Replaces the appearance theme in the transaction-current settings without
    * touching any other settings field.
    */
@@ -294,108 +239,9 @@ export interface JobFinderWorkspaceService {
   removeJobFromReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** Moves several jobs back to Find jobs, then reads the workspace once. */
   removeJobsFromReview?(jobIds: readonly string[]): Promise<void>;
-  getApplyRunDetails(
-    runId: string,
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<ApplyRunDetails>;
-  /**
-   * Writes a letter or written answer for one saved job with the model, the
-   * same way the apply agent writes the letter it sends. Null when no model is
-   * available; the caller keeps its plain evidence-built draft.
-   */
-  writeApplicationDocumentText(input: {
-    jobId: string;
-    kind: "cover_letter" | "short_response";
-    questionPrompt: string | null;
-    priorText: string | null;
-  }): Promise<string | null>;
-  buildApplicationPacket(
-    runId: string,
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<ApplicationPacket>;
-  startApplyCopilotRun(
-    jobId: string,
-    options?: Pick<
-      JobFinderApplyCopilotActionInput,
-      "visualCheckpointsEnabled"
-    >,
-    applicationRecordId?: string | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  startAutoApplyRun(
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  startAutoApplyQueueRun(
-    jobIds: readonly string[],
-    applicationAutomationMode?: ApplicationAutomationMode,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  approveApplyRun(runId: string): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * `skippedByPerson` names jobs the person chose to skip, so they read as
-   * skipped rather than as an application that could not be finished.
-   */
-  cancelApplyRun(
-    runId: string,
-    options?: { skippedByPerson?: readonly string[] },
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  resolveApplyConsentRequest(
-    requestId: string,
-    action: "approve" | "decline",
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Moves an unsent application back to Shortlisted: its prepared form
-   * closes, nothing is sent or prepared again, and its history and receipts
-   * stay. Refused for a sent application and while one is being filled in.
-   */
-  returnApplicationToShortlist(
-    applicationRecordId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /** Undo of the move: the application is listed in Applications again. */
-  undoReturnApplicationToShortlist(
-    jobId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  revokeApplyRunApproval(runId: string): Promise<JobFinderWorkspaceSnapshot>;
-  inspectPreparedApplicationPage(
-    input: JobFinderPreparedApplicationPageInput,
-  ): Promise<RawApplyPage>;
-  focusPreparedApplicationPage(
-    input: JobFinderPreparedApplicationPageInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  /**
-   * Records filled-in applications the person sent themselves on the page
-   * they were handed (the site showed its confirmation). Returns how many.
-   */
-  recordApplicationsSentByPerson(): Promise<number>;
-  /**
-   * Sends one application the person already looked over.
-   *
-   * The only way a confirm-first application is ever sent. It runs the same
-   * checks and writes the same single record as a run that was allowed to send
-   * on its own, so an application cannot be sent twice by taking a different
-   * route to it.
-   */
-  submitPreparedApplication(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
-  approveApply(
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<JobFinderWorkspaceSnapshot>;
   recordLiveAssistantApplicationAction(
     input: JobFinderInterviewFollowUpInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  mutateApplicationCrm(
-    command: ApplicationCrmMutationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  mutateApplicationCrmBulkStage(
-    command: ApplicationCrmBulkStageMutationInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  runApplicationNoResponseAutomation(
-    settings?: ApplicationCrmSettings,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  exportApplicationCrm(
-    command: ApplicationCrmExportInput,
-  ): Promise<ApplicationCrmExportResult>;
   /**
    * The shared assistant-edit operation (ADR 0037): typed profile operations
    * committed with attribution, returning the exact values touched so one

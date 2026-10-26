@@ -146,57 +146,6 @@ describe("candidate asset IPC routes", () => {
     ).resolves.toEqual({ status: "cancelled" });
   });
 
-  test("tells waiting applications when an attachable file is added or restored", async () => {
-    temporaryDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "candidate-assets-route-"),
-    );
-    const sourcePath = path.join(temporaryDirectory, "portfolio.pdf");
-    await writeFile(sourcePath, "%PDF-1.7\nportfolio\n%%EOF", "utf8");
-    const handlers = new Map<string, RouteHandler>();
-    const ipcMain = {
-      handle: vi.fn((channel: string, handler: RouteHandler) =>
-        handlers.set(channel, handler),
-      ),
-    } as unknown as IpcMain;
-    const onApplicationFileAvailable = vi.fn(() => Promise.resolve(1));
-    registerCandidateAssetRouteHandlers(ipcMain, {
-      library: new CandidateAssetLibrary(
-        path.join(temporaryDirectory, "library"),
-      ),
-      selectFile: () => Promise.resolve(sourcePath),
-      onApplicationFileAvailable,
-    });
-    const event = { sender: {} } as IpcMainInvokeEvent;
-
-    // A private-only file is not one the applications may attach.
-    await handlers.get("job-finder:candidate-assets:import")!(event, {
-      kind: "portfolio",
-      consentScope: "private_storage_only",
-    });
-    expect(onApplicationFileAvailable).not.toHaveBeenCalled();
-
-    const imported = (await handlers.get("job-finder:candidate-assets:import")!(
-      event,
-      { kind: "portfolio", consentScope: "job_application_attachment" },
-    )) as { asset: { id: string } };
-    expect(onApplicationFileAvailable).toHaveBeenCalledTimes(1);
-    expect(onApplicationFileAvailable).toHaveBeenLastCalledWith(
-      expect.objectContaining({ id: imported.asset.id, kind: "portfolio" }),
-    );
-
-    await handlers.get("job-finder:candidate-assets:delete")!(event, {
-      assetId: imported.asset.id,
-    });
-    expect(onApplicationFileAvailable).toHaveBeenCalledTimes(1);
-    await handlers.get("job-finder:candidate-assets:restore")!(event, {
-      assetId: imported.asset.id,
-      retention: "until_deleted",
-    });
-    expect(onApplicationFileAvailable).toHaveBeenCalledTimes(2);
-    expect(onApplicationFileAvailable).toHaveBeenLastCalledWith(
-      expect.objectContaining({ id: imported.asset.id, deletedAt: null }),
-    );
-  });
   test("reads original attachment metadata and opens a copy using only the stored profile", async () => {
     temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "resume-route-"));
     const sourcePath = path.join(temporaryDirectory, "original.docx");

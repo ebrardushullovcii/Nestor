@@ -168,13 +168,6 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.runSourceDebug(i.targetId),
     { name: "check_source", custom: true },
   ),
-  "clear-application-answer": action(
-    C.ClearApplicationAnswerCommandSchema,
-    "applications",
-    "confirm",
-    "Clear a saved application answer.",
-    (i, c) => c.service.clearApplicationAnswer(i),
-  ),
 
   "reset-workspace": desktopAction(
     "reset-workspace",
@@ -442,27 +435,6 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Move a shortlisted job back to Find jobs.",
     (i, c) => c.service.removeJobFromReview(i.jobId),
-  ),
-  "snooze-grouped-decision": action(
-    C.SnoozeGroupedDecisionInputSchema,
-    "applications",
-    "local",
-    "Snooze a grouped Needs you decision.",
-    (i, c) => c.service.snoozeGroupedDecision(i),
-  ),
-  "return-application-to-shortlist": action(
-    C.JobFinderReturnApplicationToShortlistInputSchema,
-    "applications",
-    "local",
-    "Move an unsent application back to Shortlisted, retaining its history.",
-    (i, c) => c.service.returnApplicationToShortlist(i.applicationRecordId),
-  ),
-  "undo-return-application-to-shortlist": action(
-    job,
-    "applications",
-    "local",
-    "Undo moving an application back to Shortlisted.",
-    (i, c) => c.service.undoReturnApplicationToShortlist(i.jobId),
   ),
 } as const;
 

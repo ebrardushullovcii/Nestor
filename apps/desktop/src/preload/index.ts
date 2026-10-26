@@ -679,31 +679,6 @@ const desktopApi = {
           ResolveSubmissionOutcomeInputSchema.parse(input),
         )
         .then((result) => ResolveSubmissionOutcomeResultSchema.parse(result)),
-    listApplicationDocuments: (input: ListApplicationDocumentsInput) =>
-      ipcRenderer.invoke(
-        "job-finder:list-application-documents",
-        input,
-      ) as Promise<ApplicationDocumentListResult>,
-    proposeApplicationDocument: (input: ProposeApplicationDocumentInput) =>
-      ipcRenderer.invoke(
-        "job-finder:propose-application-document",
-        input,
-      ) as Promise<ApplicationDocumentRevision>,
-    approveApplicationDocument: (input: ApproveApplicationDocumentInput) =>
-      ipcRenderer.invoke(
-        "job-finder:approve-application-document",
-        input,
-      ) as Promise<ApplicationDocumentRevision>,
-    editApplicationDocument: (input: EditApplicationDocumentInput) =>
-      ipcRenderer.invoke(
-        "job-finder:edit-application-document",
-        input,
-      ) as Promise<ApplicationDocumentRevision>,
-    exportApplicationDocument: (input: ExportApplicationDocumentInput) =>
-      ipcRenderer.invoke(
-        "job-finder:export-application-document",
-        input,
-      ) as Promise<ApplicationDocumentExportResult>,
     listCandidateAssets: (
       input: CandidateAssetListInput = { includeDeleted: false },
     ) =>

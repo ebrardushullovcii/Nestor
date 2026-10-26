@@ -17,7 +17,6 @@ import {
   placeNewExperiencesByDate,
 } from "./internal/workspace-profile-copilot-methods";
 import { followPrimaryContacts } from "./internal/profile-merge";
-import { createJobFinderProductActionToolRegistry } from "./product-action-tools";
 import {
   createAiClient,
   createSeed,
@@ -252,24 +251,6 @@ describe("Profile assistant when the AI does not answer", () => {
     expect(
       Date.parse(messages[1]!.createdAt) > Date.parse(messages[0]!.createdAt),
     ).toBe(true);
-  });
-
-  test("the product action passes the outage sentence through unchanged", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness({
-      seed: createSeed(),
-      aiClient: createAssistantClient([outageReply], []),
-    });
-    const registry = createJobFinderProductActionToolRegistry(workspaceService);
-
-    const result = await registry.execute("propose_profile_change", {
-      request: "Change my headline to Principal Engineer.",
-      context: { surface: "profile", section: "basics" },
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.ok === false ? result.error.message : null).toBe(
-      PROFILE_ASSISTANT_UNAVAILABLE_MESSAGE,
-    );
   });
 });
 

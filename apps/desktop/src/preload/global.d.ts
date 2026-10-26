@@ -269,21 +269,6 @@ declare global {
         resolveSubmissionOutcome: (
           input: ResolveSubmissionOutcomeInput,
         ) => Promise<ResolveSubmissionOutcomeResult>;
-        listApplicationDocuments: (
-          input: ListApplicationDocumentsInput,
-        ) => Promise<ApplicationDocumentListResult>;
-        proposeApplicationDocument: (
-          input: ProposeApplicationDocumentInput,
-        ) => Promise<ApplicationDocumentRevision>;
-        approveApplicationDocument: (
-          input: ApproveApplicationDocumentInput,
-        ) => Promise<ApplicationDocumentRevision>;
-        editApplicationDocument: (
-          input: EditApplicationDocumentInput,
-        ) => Promise<ApplicationDocumentRevision>;
-        exportApplicationDocument: (
-          input: ExportApplicationDocumentInput,
-        ) => Promise<ApplicationDocumentExportResult>;
         listCandidateAssets: (
           input?: CandidateAssetListInput,
         ) => Promise<CandidateAssetListResult>;
