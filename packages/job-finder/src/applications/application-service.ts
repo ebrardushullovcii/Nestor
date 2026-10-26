@@ -684,12 +684,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       applications.continuePreparation(row.id, row.attempt);
       return;
     }
-    const refusedBrowser = (agent as ApplyAgentResult | null)?.pauses.find(
+    const blockedAgent = agent as ApplyAgentResult | null;
+    const refusedBrowser = blockedAgent?.pauses.find(
       (pause) => pause.blocker?.code === "browser_blocked",
     );
     if (refusedBrowser) {
-      const origin = new URL((agent as ApplyAgentResult).finalUrl ?? target)
-        .origin;
+      const origin = new URL(blockedAgent?.finalUrl ?? target).origin;
       applications.needsYou.request({
         applicationId: row.id,
         attempt: row.attempt,
