@@ -1,0 +1,8 @@
+{
+  "id": "unavailable-picker-option",
+  "provenance": "Synthetic unavailable option and picker loop; no applicant data.",
+  "question": "Country of residence",
+  "primary": "Unlisted territory",
+  "options": ["Listed region", "Other region"],
+  "savedRule": "If Unlisted territory is missing, use Listed region if offered; otherwise skip this application."
+}

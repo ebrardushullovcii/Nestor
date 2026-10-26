@@ -4,6 +4,11 @@ import {
 } from "@nestor/contracts";
 
 import { normalizeSignal } from "./control-classification";
+import {
+  asksGithubUsername,
+  formatGithubAnswer,
+  githubUsername,
+} from "./github-username";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -256,10 +261,20 @@ export function storedFacts(
     "your professional profile link",
   );
   add(profile.githubUrl, "profile.githubUrl", "your code profile link");
+  add(
+    githubUsername(profile.githubUrl),
+    "profile.githubUrl#username",
+    "the username from your code profile",
+  );
   add(profile.portfolioUrl, "profile.portfolioUrl", "your portfolio");
   add(profile.personalWebsiteUrl, "profile.personalWebsiteUrl", "your website");
   for (const link of profile.links) {
     add(link.url, `profile.links.${link.id}`, "a link on your profile");
+    add(
+      githubUsername(link.url),
+      `profile.links.${link.id}#username`,
+      "the username from your code profile",
+    );
   }
   for (const saved of sources.reusableAnswers.filter(
     (entry) =>
@@ -288,7 +303,15 @@ export function storedFactFor(input: {
   value: string;
   storedFactId?: string | undefined;
 }): ApplyAnswer | null {
-  const wanted = input.value.trim();
+  const wanted = formatGithubAnswer(input.control, input.value).trim();
+  const factId =
+    asksGithubUsername(input.control) &&
+    input.storedFactId &&
+    (input.storedFactId === "profile.githubUrl" ||
+      input.storedFactId.startsWith("profile.links.")) &&
+    !input.storedFactId.endsWith("#username")
+      ? `${input.storedFactId}#username`
+      : input.storedFactId;
   if (!wanted || (!input.storedFactId && !isDistinctive(input.value)))
     return null;
   // Eligibility and current pay need their question and context checked.
@@ -304,8 +327,7 @@ export function storedFactFor(input: {
     payDisclosed: input.payDisclosed,
   }).find(
     (candidate) =>
-      (!input.storedFactId || candidate.sourceId === input.storedFactId) &&
-      candidate.value === wanted,
+      (!factId || candidate.sourceId === factId) && candidate.value === wanted,
   );
   if (!fact) return null;
   // A short value such as Yes, No or a number answers whatever it is put
@@ -318,7 +340,7 @@ export function storedFactFor(input: {
     return null;
   }
   return {
-    value: input.value.trim(),
+    value: wanted,
     kind: input.control.questionKind,
     sourceKind: fact.sourceKind,
     sourceId: fact.sourceId,

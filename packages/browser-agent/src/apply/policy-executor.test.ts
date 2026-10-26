@@ -1,3 +1,4 @@
+import githubReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
 import {
@@ -4408,3 +4409,33 @@ describe("an unconfirmed short value is offered back to the person", () => {
     else expect(suggested ?? []).not.toContain(value);
   });
 });
+
+test.each(githubReplay.fields)(
+  "GitHub replay: $label gets the field's requested format",
+  async (field) => {
+    const source = rawPage({
+      controls: [
+        rawControl({
+          index: 0,
+          label: field.label,
+          placeholder: field.placeholder,
+          required: true,
+        }),
+      ],
+    });
+    const { config } = configFor(source);
+    config.sources.profile.githubUrl = githubReplay.url;
+    const result = await executeApplyProposal(
+      {
+        tool: "type",
+        ref: "c0",
+        text: githubReplay.url,
+        storedFactId: "profile.githubUrl",
+      },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(result.kind).toBe("filled");
+    expect(source.controls[0].value).toBe(field.expected);
+  },
+);
