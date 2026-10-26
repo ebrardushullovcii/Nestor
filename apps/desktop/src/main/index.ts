@@ -22,6 +22,7 @@ import { closeJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerHomeRoutes } from "./routes/home";
+import { registerActivityRoutes } from "./routes/activity";
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { readLaunchContext } from "@nestor/db/launch-context";
 import { getJobFinderWorkspaceFilePath } from "./services/job-finder/paths";
@@ -270,6 +271,7 @@ if (hasSingleInstanceLock) {
   registerNeedsYouRoutes(ipcMain);
   registerTrackerRoutes(ipcMain);
   registerHomeRoutes(ipcMain);
+  registerActivityRoutes(ipcMain);
   // The first frame's settings and setup state, read once migrations allow.
   ipcMain.handle(LAUNCH_CONTEXT_CHANNEL, async () => {
     await prepareWorkspaceStartupContextReads().catch(() => undefined);

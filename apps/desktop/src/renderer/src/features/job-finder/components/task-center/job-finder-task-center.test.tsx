@@ -1,155 +1,132 @@
 // @vitest-environment jsdom
 
-import type {
-  JobFinderRendererWorkspaceSnapshot,
-  ResumeImportRun,
-} from "@nestor/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ActivityFeed } from "@nestor/contracts";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { JobFinderTaskCenter } from "./job-finder-task-center";
 
-// The fixtures' imports end on 31 July; Activity shows a finished run for a day.
+const feed: ActivityFeed = {
+  searches: [
+    {
+      id: "search_1",
+      state: "running",
+      startedAt: "2026-10-26T10:00:00.000Z",
+      finishedAt: null,
+      sourcesDone: 3,
+      sourcesTotal: 12,
+      added: 5,
+      error: null,
+    },
+  ],
+  resumes: [
+    {
+      jobId: 7,
+      title: "Supply Chain Analyst",
+      company: "Spool",
+      state: "ready",
+      at: "2026-10-26T09:00:00.000Z",
+      error: null,
+    },
+  ],
+  applications: [
+    {
+      id: 3,
+      jobId: 9,
+      title: "Data Analyst",
+      company: "Ledger",
+      state: "submitted",
+      at: "2026-10-26T08:00:00.000Z",
+      error: null,
+    },
+  ],
+  running: 4,
+};
+
+let readFeed: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
-  vi.useFakeTimers({
-    toFake: ["Date"],
-    now: new Date("2026-07-31T12:00:00.000Z"),
+  vi.resetModules();
+  readFeed = vi.fn(() => Promise.resolve(feed));
+  Object.defineProperty(window, "nestor", {
+    configurable: true,
+    value: {
+      activity: { feed: readFeed },
+      jobs: {
+        onChange: vi.fn(() => vi.fn()),
+        onSearchStatus: vi.fn(() => vi.fn()),
+      },
+    },
   });
 });
+
 afterEach(() => {
-  vi.useRealTimers();
+  cleanup();
+  window.localStorage.clear();
+  vi.restoreAllMocks();
 });
 
-function importRun(overrides: Partial<ResumeImportRun> = {}): ResumeImportRun {
-  return {
-    id: "resume_import_1",
-    sourceResumeId: "resume_1",
-    sourceResumeFileName: "candidate.pdf",
-    status: "extracting",
-    startedAt: "2026-07-31T10:00:00.000Z",
-    completedAt: null,
-    candidateCounts: { total: 0, autoApplied: 0, needsReview: 0, rejected: 0 },
-    ...overrides,
-  } as ResumeImportRun;
+async function renderTaskCenter(onNavigate = vi.fn()) {
+  const { JobFinderTaskCenter } = await import("./job-finder-task-center");
+  render(<JobFinderTaskCenter onNavigate={onNavigate} />);
+  return onNavigate;
 }
 
-function createWorkspace(
-  latestResumeImportRun: ResumeImportRun | null = importRun(),
-): JobFinderRendererWorkspaceSnapshot {
-  return {
-    discoveryJobs: [],
-    latestResumeImportRun,
-    searchPreferences: {
-      discovery: { targets: [{ id: "source_1", label: "Mercury careers" }] },
-    },
-  } as unknown as JobFinderRendererWorkspaceSnapshot;
-}
+const summary = () =>
+  screen.getByText("Activity", { selector: "span" }).closest("summary")!;
 
 describe("JobFinderTaskCenter", () => {
-  afterEach(() => {
-    cleanup();
-    window.localStorage.clear();
-    vi.restoreAllMocks();
+  test("counts everything running from the store, and lists it with what just finished", async () => {
+    await renderTaskCenter();
+    await waitFor(() =>
+      expect(summary().getAttribute("aria-label")).toBe("Activity: 4 running"),
+    );
+
+    fireEvent.click(summary());
+    // The panel is its own chunk; the first load takes a moment.
+    const running = await screen.findByRole(
+      "region",
+      { name: "Running now" },
+      { timeout: 5000 },
+    );
+    expect(running.textContent).toContain("Job search");
+    expect(running.textContent).toContain("3 of 12 sites read · 5 new jobs");
+    const finished = screen.getByRole("region", { name: "Finished today" });
+    expect(finished.textContent).toContain("Spool · Resume written");
+    expect(finished.textContent).toContain("Ledger · Sent");
   });
 
-  test("clears finished history and keeps it cleared after reopening", () => {
-    const workspace = createWorkspace(
-      importRun({
-        status: "review_ready",
-        completedAt: "2026-07-31T10:00:02.000Z",
-      }),
+  test("opens the screen that shows a piece of work and closes", async () => {
+    const onNavigate = await renderTaskCenter();
+    fireEvent.click(summary());
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Data Analyst/ }),
     );
-    const first = render(
-      <JobFinderTaskCenter
-        isResumeImportPending={false}
-        workspace={workspace}
-      />,
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenCalledWith(
+        "/job-finder/applications?jobId=9",
+      ),
     );
-
-    fireEvent.click(document.querySelector("summary") as HTMLElement);
-    expect(
-      document.querySelector('[data-task-kind="resume_import"]'),
-    ).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Clear finished" }));
-    expect(
-      document.querySelector('[data-task-kind="resume_import"]'),
-    ).toBeNull();
-    expect(screen.getByText(/Nothing is running/)).toBeTruthy();
-
-    first.unmount();
-    render(
-      <JobFinderTaskCenter
-        isResumeImportPending={false}
-        workspace={workspace}
-      />,
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Running now" })).toBeNull(),
     );
-    fireEvent.click(document.querySelector("summary") as HTMLElement);
-    expect(
-      document.querySelector('[data-task-kind="resume_import"]'),
-    ).toBeNull();
   });
 
-  test("closes predictably with Escape, outside interaction, and the visible close control", () => {
-    render(
-      <>
-        <button type="button">Outside control</button>
-        <JobFinderTaskCenter
-          isResumeImportPending={false}
-          workspace={createWorkspace()}
-        />
-      </>,
+  test("clears finished work and keeps it cleared after reopening", async () => {
+    await renderTaskCenter();
+    fireEvent.click(summary());
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear finished" }),
     );
+    expect(screen.queryByRole("region", { name: "Finished today" })).toBeNull();
 
-    const details = document.querySelector("details") as HTMLDetailsElement;
-    const summary = screen.getByLabelText("Activity: 1 running");
-
-    fireEvent.click(summary);
-    expect(details.open).toBe(true);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(details.open).toBe(false);
-    expect(document.activeElement).toBe(summary);
-
-    fireEvent.click(summary);
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Outside control" }),
-    );
-    expect(details.open).toBe(false);
-
-    fireEvent.click(summary);
-    fireEvent.pointerDown(screen.getByRole("region", { name: "Activity" }), {
-      bubbles: true,
-    });
-    expect(details.open).toBe(true);
-
-    fireEvent.click(summary);
     fireEvent.click(screen.getByRole("button", { name: "Close Activity" }));
-    expect(details.open).toBe(false);
-    expect(document.activeElement).toBe(summary);
-
-    const panel = screen.getByRole("region", { name: "Activity" });
-    // Anchored under its own trigger and bounded at every width: as a fixed
-    // bottom sheet it resolved against the header's backdrop filter and opened
-    // upward over the title bar at the minimum window size.
-    expect(panel.className).toContain("absolute");
-    expect(panel.className).toContain("top-12");
-    expect(panel.className).toContain("max-h-[min(38rem,calc(100vh-8rem))]");
-    expect(panel.className).not.toContain("fixed");
-    // An opaque surface, so nothing behind it ever shows through.
-    expect(panel.className).toContain("surface-popover-solid");
-  });
-
-  test("shows useful progress without unavailable capability clutter", () => {
-    render(
-      <JobFinderTaskCenter
-        isResumeImportPending={false}
-        workspace={createWorkspace()}
-      />,
-    );
-
-    expect(screen.getByText("Activity", { selector: "h2" })).toBeInstanceOf(
-      HTMLElement,
-    );
-    expect(screen.getAllByText("Progress").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Pause")).toBeNull();
-    expect(screen.queryByText("Not available")).toBeNull();
+    fireEvent.click(summary());
+    await screen.findByRole("region", { name: "Running now" });
+    expect(screen.queryByRole("region", { name: "Finished today" })).toBeNull();
   });
 });

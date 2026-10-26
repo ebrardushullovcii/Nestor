@@ -34,7 +34,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useRef,
 } from "react";
 import type { ReactNode } from "react";
@@ -42,10 +41,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
 import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery";
 import { WorkspaceStateScreen } from "./job-finder-page-routes";
-import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
-import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import { useLegacyControllerView } from "./legacy-controller-view";
 
@@ -259,16 +256,6 @@ export function JobFinderPage() {
   const context = legacy?.context ?? null;
   const workspace = legacy?.workspace ?? null;
 
-  const latestContext = useRef(context);
-  useLayoutEffect(() => {
-    latestContext.current = context;
-  }, [context]);
-  const onUndoRecentChange = useCallback(
-    (change: RecentChange) =>
-      latestContext.current?.onUndoRecentChange(change) ??
-      Promise.resolve(false),
-    [],
-  );
   // The router wraps a plain navigate in a transition, which rendered the
   // next screen in 5 ms slices over several frames; a click should land in
   // the next frame.
@@ -306,10 +293,6 @@ export function JobFinderPage() {
         >
           <JobFinderPageRouteContext.Provider value={context}>
             <MemoizedJobFinderShell
-              isResumeImportPending={
-                context?.isPending(jobFinderPendingActions.profileImport()) ??
-                false
-              }
               needsYouCount={needsYouCount}
               {...(legacy
                 ? {
@@ -319,9 +302,7 @@ export function JobFinderPage() {
                   }
                 : {})}
               onNavigate={legacy?.navigateFromShell ?? navigateDirectly}
-              onUndoRecentChange={onUndoRecentChange}
               platform={legacy?.platform ?? INITIAL_PLATFORM}
-              resumeImportProgress={context?.resumeImportProgress ?? null}
               stageCounts={stageCounts}
               startupContext={startupContext}
               workspace={workspace}

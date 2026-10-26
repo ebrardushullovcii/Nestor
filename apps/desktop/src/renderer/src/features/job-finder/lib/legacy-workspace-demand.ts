@@ -3,8 +3,8 @@ import { useEffect, useSyncExternalStore } from "react";
 /**
  * Whether this window has asked for the old whole-workspace load. Launch and
  * the store screens never do: it starts when a screen that still reads the
- * old workspace opens (Profile, guided setup, Settings) or when Activity or
- * the command palette asks for it, and stays loaded after that.
+ * old workspace opens (Profile, guided setup, Settings) or when the command
+ * palette asks for it, and stays loaded after that.
  */
 let wanted = false;
 const listeners = new Set<() => void>();

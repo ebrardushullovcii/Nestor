@@ -31,6 +31,7 @@ export * from "./applications";
 export * from "./application-commands";
 export * from "./tracker";
 export * from "./home";
+export * from "./activity";
 export * from "./job-commands";
 export * from "./resumes";
 export * from "./resume-commands";

@@ -1,6 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
-import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebarSlot } from "../assistant/assistant-sidebar-slot";
 import { AssistantToggle } from "../assistant/assistant-toggle";
@@ -37,7 +36,6 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   JobStageCounts,
   LaunchContext,
-  ResumeImportProgressEvent,
   SuiteModule,
 } from "@nestor/contracts";
 import { collapsesSideMenuWithAssistant } from "@nestor/contracts";
@@ -92,13 +90,10 @@ import { requestLegacyWorkspace } from "../lib/legacy-workspace-demand";
 
 interface JobFinderShellProps {
   children: ReactNode;
-  isResumeImportPending?: boolean;
   onDismissSavedStatus?: () => void;
   onNavigate?: (path: string) => void;
-  onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
   platform: "darwin" | "linux" | "win32";
-  resumeImportProgress?: ResumeImportProgressEvent | null;
   saveState?: JobFinderSaveState;
   /** Jobs per stage in the job store, for the list badges. */
   stageCounts?: JobStageCounts | null;
@@ -468,13 +463,10 @@ function getActiveScreen(pathname: string): JobFinderScreen {
 
 export function JobFinderShell({
   children,
-  isResumeImportPending = false,
   onDismissSavedStatus,
   onNavigate,
-  onUndoRecentChange,
   onRetrySave,
   platform,
-  resumeImportProgress = null,
   saveState,
   stageCounts = null,
   needsYouCount = 0,
@@ -1712,7 +1704,6 @@ export function JobFinderShell({
               <Search aria-hidden="true" className="size-4 shrink-0" />
             </button>
             <JobFinderTaskCenter
-              isResumeImportPending={isResumeImportPending}
               onNavigate={(path) => {
                 if (onNavigate) {
                   onNavigate(path);
@@ -1720,9 +1711,6 @@ export function JobFinderShell({
                   void navigate(path);
                 }
               }}
-              onUndoRecentChange={onUndoRecentChange}
-              resumeImportProgress={resumeImportProgress}
-              workspace={workspace}
             />
             <AssistantToggle platform={platform} />
             <BrowserPeek

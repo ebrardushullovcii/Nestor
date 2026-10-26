@@ -1,5 +1,6 @@
 import type { DesktopResumesBridge } from "./resumes";
 import type { DesktopHomeBridge } from "./home";
+import type { DesktopActivityBridge } from "./activity";
 import type { DesktopNeedsYouBridge } from "./needs-you";
 import type { DesktopTrackerBridge } from "./tracker";
 import type {
@@ -170,6 +171,7 @@ declare global {
       needsYou: DesktopNeedsYouBridge;
       tracker: DesktopTrackerBridge;
       home: DesktopHomeBridge;
+      activity: DesktopActivityBridge;
       ping: () => Promise<DesktopPlatformPing>;
       /** The first screen is usable; main starts its background services. */
       firstScreenShown: () => void;
