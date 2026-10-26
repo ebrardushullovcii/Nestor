@@ -1687,11 +1687,14 @@ export class AssistantSessionHost {
             : null;
           const matches =
             actual?.pathname === expected.pathname &&
+            (!expected.hash || actual.hash === expected.hash) &&
             [...expected.searchParams].every(
               ([key, value]) => actual.searchParams.get(key) === value,
             );
           const section =
-            expected.searchParams.get("section") ??
+            (expected.pathname === "/job-finder/settings"
+              ? expected.hash.slice(1) || null
+              : expected.searchParams.get("section")) ??
             (expected.searchParams.get("view") === "tracker"
               ? "tracker"
               : null);
