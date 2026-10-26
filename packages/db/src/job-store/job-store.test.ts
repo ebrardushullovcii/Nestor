@@ -340,12 +340,12 @@ describe("job store", () => {
     }
   });
 
-  it("starts a file from another store version over", () => {
+  it("starts a file from before the store kept its data over", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "job-store-"));
     const file = path.join(dir, "jobs.sqlite");
     try {
       const old = new DatabaseSync(file);
-      old.exec("CREATE TABLE saved_jobs (id TEXT); PRAGMA user_version = 99;");
+      old.exec("CREATE TABLE saved_jobs (id TEXT); PRAGMA user_version = 5;");
       old.close();
       const store = openJobStore(file);
       store.saveFoundJobs({ searchId: null, jobs: [found(1)] });
@@ -354,6 +354,31 @@ describe("job store", () => {
       const reopened = openJobStore(file);
       expect(reopened.stageCounts().found).toBe(1);
       reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the jobs in a file a newer build wrote", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "job-store-"));
+    const file = path.join(dir, "jobs.sqlite");
+    try {
+      const store = openJobStore(file);
+      store.saveFoundJobs({ searchId: null, jobs: [found(1), found(2)] });
+      store.close();
+      const newer = new DatabaseSync(file);
+      newer.exec(
+        "PRAGMA user_version = 99; CREATE TABLE later_notes (id INTEGER)",
+      );
+      newer.close();
+      const reopened = openJobStore(file);
+      expect(reopened.stageCounts().found).toBe(2);
+      reopened.close();
+      const check = new DatabaseSync(file);
+      expect(check.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: 99,
+      });
+      check.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

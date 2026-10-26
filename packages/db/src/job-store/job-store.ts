@@ -27,7 +27,12 @@ import {
   writeUndo,
   type MoveOutcome,
 } from "./job-moves";
-import { JOB_STORE_SCHEMA, JOB_STORE_VERSION } from "./schema";
+import {
+  JOB_STORE_ADDED_COLUMNS,
+  JOB_STORE_KEPT_FROM_VERSION,
+  JOB_STORE_SCHEMA,
+  type AddedColumn,
+} from "./schema";
 import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
@@ -112,15 +117,38 @@ function readVersion(db: DatabaseSync): { version: number; empty: boolean } {
 }
 
 /**
- * Opens the store at `filePath` (or `":memory:"`), creating what is missing.
- * A file written by another store version is deleted and started over.
+ * Adds the listed columns a table doesn't have yet, keeping its rows. Tables
+ * the file doesn't have yet are skipped: their `CREATE TABLE` brings them.
+ */
+export function addMissingColumns(
+  db: DatabaseSync,
+  columns: readonly AddedColumn[],
+): void {
+  for (const { table, column, definition } of columns) {
+    const existing = db
+      .prepare("SELECT name FROM pragma_table_info(?)")
+      .all(table) as { name: string }[];
+    if (existing.length === 0 || existing.some((row) => row.name === column))
+      continue;
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
+  }
+}
+
+/**
+ * Opens the store at `filePath` (or `":memory:"`), adding what is missing and
+ * keeping every row. Only a file from before the store kept its data
+ * (`JOB_STORE_KEPT_FROM_VERSION`) is deleted and started over.
  */
 export function openJobStore(filePath: string): JobStore {
   const inMemory = filePath === ":memory:";
   if (!inMemory) mkdirSync(path.dirname(filePath), { recursive: true });
   let db = openDatabase(filePath);
   const found = readVersion(db);
-  if (!found.empty && found.version !== JOB_STORE_VERSION && !inMemory) {
+  if (
+    !found.empty &&
+    found.version < JOB_STORE_KEPT_FROM_VERSION &&
+    !inMemory
+  ) {
     db.close();
     for (const suffix of ["", "-wal", "-shm"]) {
       rmSync(`${filePath}${suffix}`, { force: true });
@@ -129,8 +157,11 @@ export function openJobStore(filePath: string): JobStore {
   }
   db.exec("BEGIN IMMEDIATE");
   try {
+    // Columns first: a new index in the schema may cover a new column.
+    addMissingColumns(db, JOB_STORE_ADDED_COLUMNS);
     for (const ddl of JOB_STORE_SCHEMA) db.exec(ddl);
-    db.exec(`PRAGMA user_version = ${JOB_STORE_VERSION}`);
+    if (found.version < JOB_STORE_KEPT_FROM_VERSION)
+      db.exec(`PRAGMA user_version = ${JOB_STORE_KEPT_FROM_VERSION}`);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

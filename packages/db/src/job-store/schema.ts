@@ -4,18 +4,42 @@ import { SOURCE_ACCESS_SCHEMA } from "./source-access";
  * The Job Finder store: one SQLite file, one row per job.
  *
  * Everything a screen lists, filters, sorts or counts is a real column with an
- * index behind it; long text and detail-only facts sit in `job_details`. Add
- * your own tables beside these (`job_id INTEGER NOT NULL REFERENCES jobs(id)
- * ON DELETE CASCADE`) as another entry in `JOB_STORE_SCHEMA`: new tables need no
- * version change. Changing an existing table bumps `JOB_STORE_VERSION`, which
- * starts the file over. There are no migrations before release.
+ * index behind it; long text and detail-only facts sit in `job_details`.
+ *
+ * The file holds a person's real job hunt, so a new build never starts it
+ * over and there is no version to bump. Every change is an additive step that
+ * runs on each open and does nothing once applied:
+ * - A new table, index or trigger is another `IF NOT EXISTS` entry in
+ *   `JOB_STORE_SCHEMA` (`job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE
+ *   CASCADE` for a table about jobs).
+ * - A new column goes in its `CREATE TABLE` for new files and in
+ *   `JOB_STORE_ADDED_COLUMNS` for files that already exist. SQLite adds it
+ *   with its default, so a `NOT NULL` column needs one.
+ * - Nothing renames, drops or redefines an existing column or table. A change
+ *   that can't be made by adding needs a new table, filled from the old one.
+ * `schema.test.ts` holds every column released files have and fails when one
+ * goes missing or a new one isn't listed below.
  */
 import { JOB_SITES_SCHEMA } from "./job-sites";
 import { TRACKER_SCHEMA } from "./tracker-schema";
 import { APPLICATION_SCHEMA } from "./application-schema";
 import { SEEN_CARDS_SCHEMA } from "./seen-cards";
 
-export const JOB_STORE_VERSION = 6;
+/**
+ * The layout the store keeps from. A file from before it (an earlier
+ * development layout) is started over once; from this version on, nothing is.
+ */
+export const JOB_STORE_KEPT_FROM_VERSION = 6;
+
+export interface AddedColumn {
+  table: string;
+  column: string;
+  /** What follows the name in `ALTER TABLE … ADD COLUMN`. */
+  definition: string;
+}
+
+/** Columns added to tables after their release, in the order they came. */
+export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [];
 
 const JOBS = `
 CREATE TABLE IF NOT EXISTS jobs (
