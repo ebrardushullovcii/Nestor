@@ -1488,7 +1488,10 @@ export function createPlaywrightApplyPageMechanics(
       } catch (error) {
         return {
           ok: false,
-          error: describeWriteFailure(error, "The picker could not select that option."),
+          error: describeWriteFailure(
+            error,
+            "The picker could not select that option.",
+          ),
         };
       }
     },
