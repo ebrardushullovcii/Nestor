@@ -87,6 +87,7 @@ async function configureAutomaticFailureThreshold(
       campaign.id === activeCampaign.id
         ? {
             ...campaign,
+            sourceTargetIds: ["1"],
             stopRules: {
               ...campaign.stopRules,
               pauseOnFailureRatePercent,

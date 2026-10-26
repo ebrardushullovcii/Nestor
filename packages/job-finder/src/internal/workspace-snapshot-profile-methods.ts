@@ -431,6 +431,7 @@ function projectCampaignApplicationFacts(input: {
   applyJobResults: readonly ApplyJobResult[];
   applyRuns: readonly ApplyRun[];
   userActionRequests: readonly UserActionRequest[];
+  sourceTargetIds: ReadonlySet<string>;
 }) {
   // Resolve lineage through the job's memberships rather than scanning every
   // campaign for each run, record and action request. A group shared by more
@@ -445,7 +446,6 @@ function projectCampaignApplicationFacts(input: {
       campaignIdsByJobId.set(jobId, memberships);
     }
   }
-  const activeSourceTargetIds = new Set(input.activeCampaign.sourceTargetIds);
   const runCampaignById = new Map(
     input.applyRuns.map((run) => [
       run.id,
@@ -492,7 +492,7 @@ function projectCampaignApplicationFacts(input: {
   );
   const userActionRequests = input.userActionRequests.filter((request) => {
     if (request.scope.type === "discovery_source") {
-      return activeSourceTargetIds.has(request.scope.targetId);
+      return input.sourceTargetIds.has(request.scope.targetId);
     }
     if (runCampaignById.get(request.scope.runId) !== activeCampaignId) {
       return false;
@@ -1686,7 +1686,19 @@ export function createWorkspaceSnapshotProfileMethods(
       throw new Error("The active job search campaign is unavailable.");
     }
     const activeCampaignJobIds = new Set(activeCampaign.jobIds);
-    const activeCampaignTargetIds = new Set(activeCampaign.sourceTargetIds);
+    const activeCampaignTargetIds = new Set(
+      [
+        ...discovery.recentSourceDebugRuns.map((run) => run.targetId),
+        ...(discovery.activeSourceDebugRun
+          ? [discovery.activeSourceDebugRun.targetId]
+          : []),
+        ...userActionRequests.flatMap((request) =>
+          request.scope.type === "discovery_source"
+            ? [request.scope.targetId]
+            : [],
+        ),
+      ].filter((id) => ctx.jobSites?.get(Number(id))),
+    );
     const campaignSavedJobs = savedJobs.filter((job) =>
       activeCampaignJobIds.has(job.id),
     );
@@ -1704,6 +1716,7 @@ export function createWorkspaceSnapshotProfileMethods(
       applyJobResults,
       applyRuns,
       userActionRequests,
+      sourceTargetIds: activeCampaignTargetIds,
     });
     const campaignApplyRunIds = new Set(campaignApplyRuns.map((run) => run.id));
     const campaignApplyJobResults = applyJobResults.filter((result) =>
@@ -2060,18 +2073,12 @@ export function createWorkspaceSnapshotProfileMethods(
       notifications: [],
     };
     const bootstrapCampaignState = campaignState;
-    const bootstrapActiveCampaign = campaignState.campaigns.find(
-      (campaign) => campaign.id === campaignState.activeCampaignId,
-    );
-    const bootstrapTargetIds = new Set(
-      bootstrapActiveCampaign?.sourceTargetIds ?? [],
-    );
     // Application lineage is deferred in bootstrap snapshots. Fail closed
     // until the complete snapshot can join requests to runs and records.
     const bootstrapUserActionRequests = userActionRequests.filter(
       (request) =>
         request.scope.type === "discovery_source" &&
-        bootstrapTargetIds.has(request.scope.targetId),
+        Boolean(ctx.jobSites?.get(Number(request.scope.targetId))),
     );
     // A bootstrap snapshot of a workspace that has never run discovery still
     // has to name the real browser lane, or the first paint claims the search

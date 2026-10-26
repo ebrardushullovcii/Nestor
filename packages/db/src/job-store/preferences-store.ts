@@ -183,9 +183,27 @@ export function createPreferencesStore(store: JobStore) {
       read: readGoals,
       replace(input: JobSearchPreferences): void {
         const next = JobSearchPreferencesSchema.parse(input);
-        this.patch({
-          fields: flatten(next, goalFields),
-          lists: flattenLists(next, Object.keys(GoalListsSchema.shape)),
+        store.transaction(() => {
+          let changed = goals.patch(
+            Object.fromEntries(
+              Object.entries(flatten(next, goalFields)).map(([key, value]) => [
+                key,
+                value ?? null,
+              ]),
+            ),
+          );
+          for (const [field, values] of Object.entries(
+            flattenLists(next, Object.keys(GoalListsSchema.shape)),
+          ))
+            changed = items.patch("goals", "1", field, values) || changed;
+          readGoals();
+          if (changed)
+            store.notify({
+              cause: "profile",
+              stages: [],
+              ids: [],
+              searchId: null,
+            });
         });
       },
       patch(input: PatchGoalsInput): GoalValues {
@@ -212,12 +230,33 @@ export function createPreferencesStore(store: JobStore) {
       values: settingValues,
       read: readSettings,
       replace(input: JobFinderSettings): void {
-        const next = JobFinderSettingsSchema.parse(input);
+        const next = JobFinderSettingsSchema.parse({
+          ...defaultSettings(),
+          ...Object.fromEntries(
+            Object.entries(JobFinderSettingsSchema.parse(input)).filter(
+              ([, value]) => value !== undefined,
+            ),
+          ),
+          aiBehavior: AiBehaviorPreferenceSchema.parse(input.aiBehavior ?? {}),
+          coverLetter: CoverLetterPreferenceSchema.parse(
+            input.coverLetter ?? {},
+          ),
+          applicationCrm: ApplicationCrmSettingsSchema.parse(
+            input.applicationCrm ?? {},
+          ),
+        });
         store.transaction(() => {
-          this.patch({
-            fields: flatten(next, settingFields),
-            lists: flattenLists(next, Object.keys(SettingsListsSchema.shape)),
-          });
+          let changed = settings.patch(
+            Object.fromEntries(
+              Object.entries(flatten(next, settingFields)).map(
+                ([key, value]) => [key, value ?? null],
+              ),
+            ),
+          );
+          for (const [field, values] of Object.entries(
+            flattenLists(next, Object.keys(SettingsListsSchema.shape)),
+          ))
+            changed = items.patch("settings", "1", field, values) || changed;
           const ids = new Set(
             (next.applicationCrm?.customStages ?? []).map((stage) => stage.id),
           );
@@ -225,6 +264,14 @@ export function createPreferencesStore(store: JobStore) {
             if (!ids.has(stage.id)) this.removeStage(stage.id);
           for (const stage of next.applicationCrm?.customStages ?? [])
             this.upsertStage(stage);
+          readSettings();
+          if (changed)
+            store.notify({
+              cause: "settings",
+              stages: [],
+              ids: [],
+              searchId: null,
+            });
         });
       },
       patch(input: PatchSettingsInput): SettingsValues {

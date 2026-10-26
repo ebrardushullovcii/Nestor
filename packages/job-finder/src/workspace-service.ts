@@ -542,7 +542,12 @@ export function createJobFinderWorkspaceService(
           ),
         ].slice(0, SOURCE_DEBUG_RECENT_HISTORY_LIMIT),
       }));
-      await persistDiscoveryLoginUserAction({ repository, run });
+      const site = options.jobSites?.get(Number(run.targetId));
+      await persistDiscoveryLoginUserAction({
+        repository,
+        run,
+        target: site ? jobSiteTarget(site) : null,
+      });
     },
     async persistBrowserSessionState(
       session: Awaited<ReturnType<BrowserSessionRuntime["openSession"]>>,

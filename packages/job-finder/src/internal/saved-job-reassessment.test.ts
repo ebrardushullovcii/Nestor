@@ -138,32 +138,17 @@ test("a goal save answers before its rescoring and tells the host when scores ch
   expect(scores(settled)).not.toEqual(scores(stamped));
 });
 
-test("a source-only profile save keeps assessments and does not rescore saved jobs", async () => {
-  const { repository, workspaceService } = foundJobsHarness();
-  const initial = await workspaceService.getWorkspaceSnapshot();
+test("disabling a job site keeps job assessments and does not rescore saved jobs", async () => {
+  const { repository, workspaceService, jobSites } = foundJobsHarness();
+  await workspaceService.getWorkspaceSnapshot();
   const commit = vi.spyOn(repository, "commitSavedJobDelta");
-  expect(initial.searchPreferences.discovery.targets.length).toBeGreaterThan(0);
-  const preferences = {
-    ...initial.searchPreferences,
-    discovery: {
-      ...initial.searchPreferences.discovery,
-      targets: initial.searchPreferences.discovery.targets.map((target, i) =>
-        i === 0 ? { ...target, enabled: !target.enabled } : target,
-      ),
-    },
-  };
+  const site = jobSites.list({ filter: "enabled", limit: 1 }).rows[0]!;
   const before = await repository.listSavedJobs();
-  await workspaceService.saveProfileAndSearchPreferences(
-    initial.profile,
-    preferences,
-  );
+  jobSites.update({ id: site.id, enabled: false });
   const settled = await workspaceService.getWorkspaceSnapshot();
-  expect(await repository.getSearchPreferences()).toEqual(preferences);
   expect(await repository.listSavedJobs()).toEqual(before);
   expect(commit).not.toHaveBeenCalled();
-  expect(settled.searchPreferences.discovery.targets).toEqual(
-    preferences.discovery.targets,
-  );
+  expect(settled.siteCounts.enabled).toBe(0);
 });
 
 test("an unstamped score is stamped even when its content stays the same", async () => {

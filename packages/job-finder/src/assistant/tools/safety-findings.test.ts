@@ -297,12 +297,10 @@ describe("R3 assistant safety findings", () => {
   });
 
 
-  it("R3-008 preserves every source across separate remote and budget changes", async () => {
+  it("R3-008 preserves job sites across separate preference changes", async () => {
     const ctx = world();
     const before = await ctx.service.getWorkspaceSnapshot();
-    expect(before.searchPreferences.discovery.targets.length).toBeGreaterThan(
-      0,
-    );
+    expect(before.siteCounts.enabled).toBeGreaterThan(0);
     const behavior = AiBehaviorPreferenceSchema.parse(
       before.settings.aiBehavior ?? {},
     );
@@ -325,17 +323,15 @@ describe("R3 assistant safety findings", () => {
         operations: [
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { runJobBudget: 120 } },
+            value: { minimumSalaryUsd: 120 },
           },
         ],
       },
       ctx,
     );
     const after = await ctx.service.getWorkspaceSnapshot();
-    expect(after.searchPreferences.discovery.targets).toEqual(
-      before.searchPreferences.discovery.targets,
-    );
-    expect(after.searchPreferences.discovery.runJobBudget).toBe(120);
+    expect(after.siteCounts).toEqual(before.siteCounts);
+    expect(after.searchPreferences.minimumSalaryUsd).toBe(120);
     await editProfileTool.execute(
       {
         summary: "Two narrow budget updates",
@@ -343,21 +339,19 @@ describe("R3 assistant safety findings", () => {
         operations: [
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { runJobBudget: 121 } },
+            value: { minimumSalaryUsd: 121 },
           },
           {
             operation: "replace_search_preferences_fields",
-            value: { discovery: { historyLimit: 4 } },
+            value: { targetSalaryUsd: 400 },
           },
         ],
       },
       ctx,
     );
     const combined = await ctx.service.getWorkspaceSnapshot();
-    expect(combined.searchPreferences.discovery.runJobBudget).toBe(121);
-    expect(combined.searchPreferences.discovery.targets).toEqual(
-      before.searchPreferences.discovery.targets,
-    );
+    expect(combined.searchPreferences.minimumSalaryUsd).toBe(121);
+    expect(combined.siteCounts).toEqual(before.siteCounts);
     expect(JSON.stringify(ctx.changes)).not.toContain('"field":"targets"');
     expect(JSON.stringify(ctx.changes)).not.toContain(
       '"label":"Removed targets"',

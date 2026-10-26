@@ -2755,7 +2755,12 @@ describe("Round 2 application recovery", () => {
             "I will need employer sponsorship after my student permit ends.",
           proofEntryIds: [],
           roleFamilies: [],
-          applicationScope: { hiringCountry: "DE" },
+          applicationScope: {
+            hiringCountry: "DE",
+            resultId: null,
+            applicationRecordId: null,
+            location: null,
+          },
         },
       ];
       config.sources.posting.location = "Berlin, Germany";

@@ -1,4 +1,4 @@
-import { SourceDebugRunRecordSchema } from "@nestor/contracts";
+import { SourceDebugRunRecordSchema, jobSiteTarget } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
@@ -42,10 +42,12 @@ describe("discovery source login UserActionRequest adoption", () => {
 
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
 
@@ -79,6 +81,7 @@ describe("discovery source login UserActionRequest adoption", () => {
 
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run: createPausedRun("Choose a search category manually."),
     });
 
@@ -90,6 +93,7 @@ describe("discovery source login UserActionRequest adoption", () => {
     const run = createPausedRun("Please sign in first.");
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
     const request = (await harness.repository.listUserActionRequests())[0];
@@ -107,6 +111,7 @@ describe("discovery source login UserActionRequest adoption", () => {
     });
     await persistDiscoveryLoginUserAction({
       repository: harness.repository,
+      target: jobSiteTarget(harness.jobSites.get(1)!),
       run,
     });
 

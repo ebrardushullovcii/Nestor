@@ -887,7 +887,7 @@ test.each([false, true])(
     if (saveForFuture)
       expect(answers).toContainEqual(
         expect.objectContaining({
-          question: "Expected salary",
+          prompt: "Expected salary",
           answer: "90000 EUR",
         }),
       );

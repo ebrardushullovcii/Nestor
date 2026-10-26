@@ -62,20 +62,22 @@ export function summarizeReviewCandidates(
   // No cap: the resume panel counts this list for its "N optional imported
   // suggestions" banner, and a cap of 8 made the banner read 8 until fewer
   // than 8 were left. Display surfaces slice for themselves.
-  return candidates.map((candidate) => ({
-    id: candidate.id,
-    target: candidate.target,
-    label: candidate.label,
-    value: candidate.value,
-    valuePreview: candidate.valuePreview,
-    evidenceText: candidate.evidenceText,
-    confidence: candidate.confidence,
-    resolution: candidate.resolution,
-    resolutionReason: candidate.resolutionReason ?? null,
-    notes: candidate.notes,
-    conflictChoices: candidate.conflictChoices ?? [],
-    visualEvidence: candidate.visualEvidence ?? [],
-  }));
+  return candidates
+    .filter((candidate) => candidate.target.section !== "answer_bank")
+    .map((candidate) => ({
+      id: candidate.id,
+      target: candidate.target,
+      label: candidate.label,
+      value: candidate.value,
+      valuePreview: candidate.valuePreview,
+      evidenceText: candidate.evidenceText,
+      confidence: candidate.confidence,
+      resolution: candidate.resolution,
+      resolutionReason: candidate.resolutionReason ?? null,
+      notes: candidate.notes,
+      conflictChoices: candidate.conflictChoices ?? [],
+      visualEvidence: candidate.visualEvidence ?? [],
+    }));
 }
 
 export async function deriveAndPersistProfileSetupState(

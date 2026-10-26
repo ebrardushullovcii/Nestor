@@ -303,7 +303,7 @@ describe("independent workspace queries", () => {
     const preferences = await writer.getSearchPreferences();
     const target = JobDiscoveryTargetSchema.parse({
       id: "query-source",
-      label: "Configured board",
+      label: "Historical label",
       startingUrl: "https://example.test/jobs",
     });
     await writer.saveSearchPreferences({
@@ -336,7 +336,7 @@ describe("independent workspace queries", () => {
       list: "discovery",
       filters: {
         planId: null,
-        sourceLabels: ["Configured board"],
+        sourceLabels: ["Historical label"],
         recommendations: ["apply_with_original"],
         activities: ["active"],
         newSince: "2026-10-23T00:00:00.000Z",
@@ -348,13 +348,13 @@ describe("independent workspace queries", () => {
     expect(result.rows[0]).toMatchObject({
       id: "labeled",
       providerUpdatedAt: job.providerUpdatedAt,
-      sourceLabels: ["Configured board"],
+      sourceLabels: ["Historical label"],
       applyPath: "easy_apply",
       listingActivity: { status: "active", observedAt: job.lastSeenAt },
       tieBreakReason: "Job title matches one of your target roles.",
     });
     expect(result.facets.sources).toEqual([
-      { value: "Configured board", count: 1 },
+      { value: "Historical label", count: 1 },
       { value: "Source unavailable", count: 1 },
     ]);
     expect(result.facets.workModes).toEqual([
@@ -370,21 +370,6 @@ describe("independent workspace queries", () => {
         })
         .rows.map((row) => row.id),
     ).toEqual(["unspecified"]);
-    await writer.saveSearchPreferences({
-      ...preferences,
-      discovery: {
-        ...preferences.discovery,
-        targets: [{ ...target, label: "Renamed board" }],
-      },
-    });
-    expect(
-      reader
-        .queryJobList({
-          list: "discovery",
-          filters: { planId: null, sourceLabels: ["Renamed board"] },
-        })
-        .rows.map((row) => row.id),
-    ).toEqual(["labeled"]);
   });
   test("Find jobs bands keep unjudged work visible and exclude decided and weaker jobs by default", async () => {
     const { writer, reader } = await fixture();

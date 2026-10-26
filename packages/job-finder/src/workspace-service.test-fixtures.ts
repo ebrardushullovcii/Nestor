@@ -567,6 +567,11 @@ export function createFreshStartSeedProfile(): JobFinderRepositorySeed["profile"
       preferredEmail: null,
       preferredPhone: null,
     },
+    workEligibility: {
+      ...profile.workEligibility,
+      authorizedWorkCountries: [],
+      requiresVisaSponsorship: null,
+    },
     baseResume: {
       ...profile.baseResume,
       extractionStatus: "not_started",

@@ -274,7 +274,18 @@ test("reset advances the Profile token even when resetting to the same values", 
     const seed = createSeed(),
       workspace = createProfileWorkspace(store, seed),
       before = await workspace.methods.getProfileWithRevision();
+    const settings = createPreferencesStore(store).settings;
+    settings.patch({
+      fields: {
+        appearanceTheme: "dark",
+        "coverLetter.sample": "Synthetic personal sample",
+      },
+    });
     workspace.reset(seed);
+    expect(settings.read()).toMatchObject({
+      appearanceTheme: seed.settings.appearanceTheme,
+      coverLetter: { sample: null },
+    });
     const result = await workspace.methods.commitProfileUpdate(
       (current) => ({ ...current, headline: "Late edit" }),
       { expectedRevision: before.revision },

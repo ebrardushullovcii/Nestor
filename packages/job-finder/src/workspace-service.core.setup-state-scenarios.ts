@@ -24,6 +24,11 @@ describe("createJobFinderWorkspaceService", () => {
         profile: {
           ...createSeed().profile,
           id: "candidate_fresh_start",
+          workEligibility: {
+            ...createSeed().profile.workEligibility,
+            authorizedWorkCountries: [],
+            requiresVisaSponsorship: null,
+          },
           firstName: null,
           lastName: null,
           fullName: null,

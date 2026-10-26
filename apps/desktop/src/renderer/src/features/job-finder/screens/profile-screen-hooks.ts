@@ -594,6 +594,10 @@ export function useProfileScreenForms(input: {
     salaryCurrency,
     compensationInterval,
     discoveryTargets,
+    shiftPreference,
+    minimumWeeklyHours,
+    maximumWeeklyHours,
+    compensationBasis,
   ] = useWatch({
     control: preferencesForm.control,
     name: [
@@ -614,6 +618,10 @@ export function useProfileScreenForms(input: {
       "salaryCurrency",
       "compensationInterval",
       "discoveryTargets",
+      "shiftPreference",
+      "minimumWeeklyHours",
+      "maximumWeeklyHours",
+      "compensationBasis",
     ],
   });
   const draftProfileResult = useMemo(
@@ -665,6 +673,10 @@ export function useProfileScreenForms(input: {
       companyBlacklist,
       companyWhitelist,
       compensationInterval,
+      compensationBasis,
+      shiftPreference,
+      minimumWeeklyHours,
+      maximumWeeklyHours,
       currentSearchPreferencesBaseline,
       discoveryTargets,
       employmentTypes,

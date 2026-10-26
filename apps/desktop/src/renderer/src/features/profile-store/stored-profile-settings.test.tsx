@@ -217,6 +217,30 @@ test("typing during an autosave keeps the latest work-history edit and input foc
   expect(createProfileStore(store).overview().counts.experiences).toBe(30);
 });
 
+test("Profile autosaves later edits to shifts and weekly hours", async () => {
+  profileScreen("preferences");
+  const shifts = await screen.findByLabelText("Shifts"),
+    minimum = screen.getByLabelText("Minimum weekly hours"),
+    maximum = screen.getByLabelText("Maximum weekly hours");
+  fireEvent.change(shifts, { target: { value: "day" } });
+  fireEvent.change(minimum, { target: { value: "10" } });
+  fireEvent.change(maximum, { target: { value: "20" } });
+  await waitFor(() =>
+    expect(createPreferencesStore(store).goals.read()).toMatchObject({
+      shiftPreference: "day",
+      weeklyHours: { minimum: 10, maximum: 20 },
+    }),
+  );
+  fireEvent.change(minimum, { target: { value: "12" } });
+  fireEvent.change(maximum, { target: { value: "18" } });
+  await waitFor(() =>
+    expect(createPreferencesStore(store).goals.read().weeklyHours).toEqual({
+      minimum: 12,
+      maximum: 18,
+    }),
+  );
+});
+
 test("Settings saves Apply mode and appearance independently and follows other writers live", async () => {
   const preferences = createPreferencesStore(store);
   render(

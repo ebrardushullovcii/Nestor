@@ -221,7 +221,7 @@ it.each([
 );
 
 it.each(["pause_for_user", "answer_from_profile"] as const)(
-  "pay fan-out follows the person's pay setting, carried over from an older permission (%s)",
+  "pay fan-out follows the person's saved pay setting (%s)",
   async (salaryDisclosure) => {
     const answered = request("a", "run_1", "r_a");
     const other = request("b", "run_1", "r_b");
@@ -299,14 +299,14 @@ it.each(["pause_for_user", "answer_from_profile"] as const)(
           { id: "r_b", privacyReceipt: { resume: { sha256 } } },
         ]),
       listApplicationAuthorityEnvelopes: () => Promise.resolve([envelope]),
-      // No pay choice saved yet: the older permission's choice is carried over.
+      // The row-store setting supplies the choice; the envelope never changes it.
       getSettings: () => Promise.resolve(settings),
       commitSettingsUpdate: (update: (current: object) => object) => {
         settings = update(settings);
         return Promise.resolve(settings);
       },
     };
-    let settings: object = {};
+    let settings: object = { salaryDisclosure };
     const covered = await findManualAnswerStepsCoveredBy({
       ctx: { repository } as never,
       answered: [

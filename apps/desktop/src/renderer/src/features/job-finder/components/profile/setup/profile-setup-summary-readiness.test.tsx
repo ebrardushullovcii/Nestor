@@ -179,22 +179,6 @@ describe("guided setup readiness, stated once", () => {
     expect(withoutEligibility.text).toBe(
       "Still needed to finish: Say where you can work and whether you need visa sponsorship.",
     );
-    // A saved answer-bank sentence answers the question too.
-    const answeredInWords = buildReadinessLine({
-      draftProfile: CandidateProfileSchema.parse({
-        ...profile,
-        workEligibility: {
-          ...profile.workEligibility,
-          authorizedWorkCountries: [],
-          requiresVisaSponsorship: null,
-        },
-      }),
-      draftSearchPreferences: searchPreferencesWithoutWorkMode,
-    });
-    expect(answeredInWords.text).toBe(
-      "Everything required is in. You can finish setup.",
-    );
-
     const ready = buildReadinessLine({
       draftProfile: profile,
       draftSearchPreferences: {

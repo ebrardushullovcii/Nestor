@@ -28,7 +28,7 @@ describe("workspace service demo retention", () => {
     );
     expect(snapshot.reviewQueue.length).toBeGreaterThan(0);
     expect(snapshot.dashboard.jobsAwaitingReview).toBeGreaterThan(0);
-    expect(snapshot.dashboard.sourceHealth.total).toBe(
+    expect(snapshot.siteCounts.enabled).toBe(
       seed.searchPreferences.discovery.targets.filter(
         (target) => target.enabled,
       ).length,
