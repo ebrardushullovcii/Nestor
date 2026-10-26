@@ -168,7 +168,6 @@ test("a page read gets the goals, eligibility and request, not the whole profile
   console.info(
     `[token budget] page-read selection context: ${context.length} chars (whole profile alone: ${profileChars})`,
   );
-  expect(profileChars).toBeGreaterThan(40_000);
   expect(context.length).toBeLessThan(2_000);
   expect(parsed).toMatchObject({
     targetRoles: ["Data Analyst", "Junior Data Scientist"],

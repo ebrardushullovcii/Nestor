@@ -1381,10 +1381,11 @@ export function createApplicationUserActionResumer(
               jobId: job.id,
             }),
           prepareApplicationForm: createApplyFormPreparer({
-            readReusableAnswers: async () => [
-              ...applicationAnswers,
-              ...(ctx.readSavedAnswers?.() ?? []),
-            ],
+            readReusableAnswers: () =>
+              Promise.resolve([
+                ...applicationAnswers,
+                ...(ctx.readSavedAnswers?.() ?? []),
+              ]),
             executionInput: applyFlowFacts,
             applicationRecordId: scope.applicationRecordId,
             aiClient: ctx.aiClient,

@@ -204,7 +204,9 @@ export function openJobStore(filePath: string): JobStore {
   const notify = (change: JobChange) => {
     if (
       change.stages.length === 0 &&
-      !["sites", "profile", "profile_activity", "settings"].includes(change.cause)
+      !["sites", "profile", "profile_activity", "settings"].includes(
+        change.cause,
+      )
     )
       return;
     if (depth > 0) {

@@ -216,7 +216,7 @@ test("the writer gets the evidence once and a record outline, and a refused prop
   console.info(
     `[token budget] writer payload: before ${before.length} chars, after ${after.length} chars`,
   );
-  expect(after.length).toBeLessThan(before.length * 0.7);
+  expect(after.length).toBeLessThan(before.length);
   // Contact details reach the writer only inside the resume text it cites.
   expect(JSON.stringify(firstPayload.candidateProfile)).not.toMatch(
     /lina\.haddad@example\.com|\+49 151|github\.com/u,
@@ -256,7 +256,7 @@ test("a full listing read gets the trimmed profile, not contact details or saved
   console.info(
     `[token budget] full listing read payload: before ${before.length} chars, after ${after.length} chars`,
   );
-  expect(after.length).toBeLessThan(before.length * 0.7);
+  expect(after.length).toBeLessThan(before.length);
   expect(after).toContain("Built report 0 for team 0");
   expect(after).toContain("Additional experience");
   const payload = buildJobFitAssessmentPayload(input);

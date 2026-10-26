@@ -1,11 +1,6 @@
-
-import {
-  SourceDebugRunRecordSchema,
-} from "@nestor/contracts";
-import { describe, expect, test, } from "vitest";
-import {
-  persistDiscoveryLoginUserAction,
-} from "./internal/workspace-source-user-action";
+import { SourceDebugRunRecordSchema } from "@nestor/contracts";
+import { describe, expect, test } from "vitest";
+import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
   createSeed,
   createWorkspaceServiceHarness,
@@ -41,7 +36,6 @@ function createPausedRun(summary: string) {
 }
 
 describe("discovery source login UserActionRequest adoption", () => {
-
   test("persists one strict browser-owned request for a login-required source prompt", async () => {
     const harness = createWorkspaceServiceHarness({ seed: createSeed() });
     const run = createPausedRun("Please sign in first.");

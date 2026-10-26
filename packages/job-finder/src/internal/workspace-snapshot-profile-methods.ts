@@ -1858,6 +1858,7 @@ export function createWorkspaceSnapshotProfileMethods(
       profile: setupContext.profile,
       searchPreferences: setupContext.searchPreferences,
       profileSetupState: setupContext.profileSetupState,
+      siteCounts: ctx.jobSites?.counts(),
       browserSession,
       sourceAccessPrompts,
       discoverySessions,
@@ -2110,6 +2111,7 @@ export function createWorkspaceSnapshotProfileMethods(
       profile: setupContext.profile,
       searchPreferences: bootstrapSearchPreferences,
       profileSetupState: setupContext.profileSetupState,
+      siteCounts: ctx.jobSites?.counts(),
       browserSession: createBrowserSessionSnapshot(
         discovery.sessions,
         getPreferredSessionAdapter(ctx.jobSites),

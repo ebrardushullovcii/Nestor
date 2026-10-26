@@ -81,13 +81,11 @@ export function useProfileRecordPage(
   const after = cursors[index] ?? 0;
   const queryKey = `${collection}:${text}:${after}`;
   const [result, setResult] = useState({ page: EMPTY, key: "" });
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    setBusy(true);
     void window.nestor.jobs
       .run("list_profile_records", { collection, text, after, limit: 25 })
       .then((page) => {
@@ -100,7 +98,6 @@ export function useProfileRecordPage(
           }));
         } else setResult({ page, key: queryKey });
         setError(null);
-        setBusy(false);
       })
       .catch((reason: unknown) => {
         if (live) {
@@ -109,7 +106,6 @@ export function useProfileRecordPage(
               ? reason.message
               : "Could not load these records.",
           );
-          setBusy(false);
         }
       });
     return () => {
@@ -129,7 +125,7 @@ export function useProfileRecordPage(
     text,
     index,
     error,
-    loading: enabled && !error && (busy || result.key !== queryKey),
+    loading: enabled && !error && result.key !== queryKey,
     refresh: () => setRevision((value) => value + 1),
     setText: (value: string) =>
       setQuery({ text: value, cursors: [0], index: 0 }),

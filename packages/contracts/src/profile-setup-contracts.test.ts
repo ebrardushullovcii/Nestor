@@ -34,19 +34,6 @@ const emptyNarrative = {
   motivationThemes: [],
 };
 
-const emptyAnswerBank = {
-  workAuthorization: null,
-  visaSponsorship: null,
-  relocation: null,
-  travel: null,
-  noticePeriod: null,
-  availability: null,
-  salaryExpectations: null,
-  selfIntroduction: null,
-  careerTransition: null,
-  customAnswers: [],
-};
-
 const emptyApplicationIdentity = {
   preferredEmail: null,
   preferredPhone: null,

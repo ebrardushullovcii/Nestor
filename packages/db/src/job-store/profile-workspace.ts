@@ -87,32 +87,7 @@ export function createProfileWorkspace(
       .sql("SELECT value FROM profile_history ORDER BY created_at DESC,id")
       .all()
       .map((row) => ProfileRevisionSchema.parse(JSON.parse(String(row.value))));
-  const setup = () => {
-    const row = store.sql("SELECT * FROM profile_setup WHERE id=1").get();
-    return ProfileSetupStateSchema.parse(
-      row
-        ? {
-            status: row.status,
-            currentStep: row.current_step,
-            completedAt: row.completed_at,
-            lastResumedAt: row.last_resumed_at,
-            ...(row.reviewed_steps
-              ? {
-                  reviewedSteps: JSON.parse(
-                    String(row.reviewed_steps),
-                  ) as unknown,
-                }
-              : {}),
-            reviewItems: store
-              .sql(
-                "SELECT value FROM profile_setup_reviews ORDER BY position,id",
-              )
-              .all()
-              .map((item) => JSON.parse(String(item.value)) as unknown),
-          }
-        : {},
-    );
-  };
+  const setup = () => readProfileSetupState(store);
   const writeSetup = (input: unknown) => {
     const next = ProfileSetupStateSchema.parse(input);
     const count = store
@@ -344,4 +319,29 @@ export function createProfileWorkspace(
       profileRevisions: history(),
     }),
   };
+}
+
+export function readProfileSetupState(store: JobStore) {
+  const row = store.sql("SELECT * FROM profile_setup WHERE id=1").get();
+  return ProfileSetupStateSchema.parse(
+    row
+      ? {
+          status: row.status,
+          currentStep: row.current_step,
+          completedAt: row.completed_at,
+          lastResumedAt: row.last_resumed_at,
+          ...(row.reviewed_steps
+            ? {
+                reviewedSteps: JSON.parse(
+                  String(row.reviewed_steps),
+                ) as unknown,
+              }
+            : {}),
+          reviewItems: store
+            .sql("SELECT value FROM profile_setup_reviews ORDER BY position,id")
+            .all()
+            .map((item) => JSON.parse(String(item.value)) as unknown),
+        }
+      : {},
+  );
 }

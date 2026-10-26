@@ -9,13 +9,8 @@ import {
   type JobFinderRepository,
 } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
-
-import { createJobFinderWorkspaceService } from "../index";
 import {
   createWorkspaceServiceHarness,
-  createAiClient,
-  createBrowserRuntime,
-  createDocumentManager,
   createSeed,
 } from "../workspace-service.test-support";
 import * as authorityResolution from "./apply-authority-resolution";

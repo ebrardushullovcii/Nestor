@@ -37,18 +37,17 @@ it("creates and reads the real Needs you answer library through MCP", async () =
   });
   const ctx = context();
   ctx.session.assertPersonAnswerAuthority = () => Promise.resolve();
-  const recordChange = vi.fn<
-    AssistantToolContext["session"]["recordChange"]
-  >((input) =>
-    Promise.resolve({
-      receipt: AssistantChangeReceiptSchema.parse({
-        id: "receipt",
-        conversationId: "chat",
-        ...input,
-        createdAt: new Date().toISOString(),
+  const recordChange = vi.fn<AssistantToolContext["session"]["recordChange"]>(
+    (input) =>
+      Promise.resolve({
+        receipt: AssistantChangeReceiptSchema.parse({
+          id: "receipt",
+          conversationId: "chat",
+          ...input,
+          createdAt: new Date().toISOString(),
+        }),
+        part: { type: "text", text: "Saved answer changed" },
       }),
-      part: { type: "text", text: "Saved answer changed" },
-    }),
   );
   ctx.session.recordChange = recordChange;
   const mcp = await connectAssistantMcp(needsYouCommandTools(run), ctx);

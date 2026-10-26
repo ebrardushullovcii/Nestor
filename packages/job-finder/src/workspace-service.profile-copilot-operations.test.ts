@@ -125,16 +125,6 @@ const seededLanguage = {
   notes: null,
 };
 
-const seededReusableAnswer = {
-  id: "answer_1",
-  kind: "availability" as const,
-  label: "Availability",
-  question: "When can you start?",
-  answer: "Within two weeks of an offer.",
-  roleFamilies: [],
-  proofEntryIds: [],
-};
-
 function withSeededBackgroundRecords(
   base: JobFinderRepositorySeed,
 ): JobFinderRepositorySeed {

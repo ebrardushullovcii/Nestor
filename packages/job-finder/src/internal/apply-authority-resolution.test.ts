@@ -423,7 +423,7 @@ test.each([
   expect(result.authority.submitAuthorized).toBe(false);
 });
 
-test("migrates the old envelope pay choice once and reads the durable value through authority resolution", async () => {
+test("reads the saved pay choice independently of an old authority envelope", async () => {
   const seed = createSeed();
   const repository = createInMemoryJobFinderRepository({
     ...seed,
@@ -432,10 +432,7 @@ test("migrates the old envelope pay choice once and reads the durable value thro
     ],
   });
   expect(await readSalaryDisclosurePreference(repository)).toBe(
-    "answer_from_profile",
-  );
-  expect((await repository.getSettings()).salaryDisclosure).toBe(
-    "answer_from_profile",
+    "pause_for_user",
   );
   await repository.commitSettingsUpdate((current) => ({
     ...current,

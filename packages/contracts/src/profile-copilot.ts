@@ -202,7 +202,6 @@ export const ProfileSearchPreferencesPatchFieldsSchema = requireAtLeastOneField(
     approvalMode: true,
     companyBlacklist: true,
     companyWhitelist: true,
-    discovery: true,
     employmentTypes: true,
     shiftPreference: true,
     weeklyHours: true,

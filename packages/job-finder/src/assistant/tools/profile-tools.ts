@@ -285,6 +285,7 @@ function setupReadiness(snapshot: AssistantPersonalState) {
   const readiness = evaluateProfileSetupReadiness(
     snapshot.profile,
     snapshot.searchPreferences,
+    snapshot.siteCounts.enabled,
   );
   readiness.hasDiscoverySource = snapshot.enabledSiteCount > 0;
   const blockers = getProfileSetupReadinessBlockers(readiness);
@@ -776,53 +777,16 @@ export function fieldsTouchedByOperation(
 function parseOperations(
   raw: readonly unknown[],
   profile: CandidateProfile,
-  searchPreferences: JobSearchPreferences,
 ): ProfileCopilotPatchOperation[] {
   const operations: ProfileCopilotPatchOperation[] = [];
   const problems: string[] = [];
-  let discovery = searchPreferences.discovery;
   raw.forEach((entry, index) => {
     const unknownFields = unknownProfileFields(
       ProfileCopilotPatchOperationSchema,
       entry,
       `operations[${index}]`,
     );
-    // Merge before schema defaults can turn an omitted source list into [].
-    let candidate = entry;
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "operation" in entry &&
-      entry.operation === "replace_search_preferences_fields" &&
-      "value" in entry &&
-      entry.value &&
-      typeof entry.value === "object" &&
-      "discovery" in entry.value &&
-      entry.value.discovery &&
-      typeof entry.value.discovery === "object" &&
-      !Array.isArray(entry.value.discovery)
-    ) {
-      if (
-        unknownFields.length === 0 &&
-        Object.hasOwn(entry.value.discovery, "targets")
-      ) {
-        problems.push(
-          "Source lists cannot be replaced through edit_profile. Use add_sites, update_site or set_sites_enabled to change only the requested sites; omit discovery.targets here.",
-        );
-        return;
-      }
-      candidate = {
-        ...entry,
-        value: {
-          ...entry.value,
-          discovery: {
-            ...discovery,
-            ...entry.value.discovery,
-          },
-        },
-      };
-    }
-    const parsed = ProfileCopilotPatchOperationSchema.safeParse(candidate);
+    const parsed = ProfileCopilotPatchOperationSchema.safeParse(entry);
     if (
       parsed.success &&
       parsed.data.operation === "replace_identity_fields" &&
@@ -839,12 +803,6 @@ function parseOperations(
     if (unknownFields.length > 0) problems.push(...unknownFields);
     else if (parsed.success) {
       operations.push(parsed.data);
-      if (
-        parsed.data.operation === "replace_search_preferences_fields" &&
-        parsed.data.value.discovery
-      ) {
-        discovery = parsed.data.value.discovery;
-      }
     } else
       problems.push(`operations[${index}]: ${describeZodIssues(parsed.error)}`);
   });

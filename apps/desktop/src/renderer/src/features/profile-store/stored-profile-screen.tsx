@@ -1,4 +1,10 @@
-import { useMemo, useState, useCallback, type ComponentProps } from "react";
+import {
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+  type ComponentProps,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CandidateProfileSchema,
@@ -75,6 +81,9 @@ export function StoredProfileScreen(props: ProfilePorts) {
     [message, setMessage] = useState<string | null>(null),
     [params] = useSearchParams(),
     section = params.get("section") ?? "basics";
+  const ownWrites = useRef(
+    new Map<string, { before: unknown; after: unknown }>(),
+  );
   const experiences = useProfileRecordPage(
       "experiences",
       section === "experience",
@@ -92,9 +101,9 @@ export function StoredProfileScreen(props: ProfilePorts) {
     ),
     proof = useProfileRecordPage("proofBank", section === "background");
   const onDirtyChange = useCallback(
-    (value: boolean) => {
+    (value: boolean, blockNavigation = false) => {
       setDirty(value);
-      props.onProfileSurfaceDirtyChange(value);
+      props.onProfileSurfaceDirtyChange(value && blockNavigation);
     },
     [props.onProfileSurfaceDirtyChange],
   );
@@ -249,7 +258,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
         recordPaging={paging}
         recordSummary={store.overview}
         recordStatus={
-          pages.some(({ page }) => page.loading || page.error) ? (
+          pages.some(({ page }) => page.loading) ? (
             <div role="status">
               {pages
                 .filter(({ page }) => page.loading || page.error)
@@ -286,8 +295,30 @@ export function StoredProfileScreen(props: ProfilePorts) {
             nextProfile,
             nextGoals,
           });
+          // Rebase only this editor's preceding write when leaving during an autosave.
+          // A conflicting external write still fails the expected-value check.
+          for (const [key, previous] of ownWrites.current) {
+            const expected = patch.profile?.expected;
+            if (
+              expected &&
+              Object.hasOwn(expected, key) &&
+              JSON.stringify(expected[key as keyof typeof expected]) ===
+                JSON.stringify(previous.before)
+            ) {
+              Object.assign(expected, { [key]: previous.after });
+            }
+          }
           const ok = await store.save(patch);
           if (ok) {
+            for (const [key, value] of Object.entries(
+              patch.profile?.fields ?? {},
+            )) {
+              const expected = patch.profile?.expected;
+              ownWrites.current.set(key, {
+                before: expected?.[key as keyof typeof expected],
+                after: value,
+              });
+            }
             setSaved((previous) => {
               const key = (row: {
                 collection: ProfileRecordCollection;

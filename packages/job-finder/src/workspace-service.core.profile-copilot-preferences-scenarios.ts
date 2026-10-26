@@ -6,125 +6,6 @@ import {
 } from "./workspace-service.test-support";
 
 describe("createJobFinderWorkspaceService – profile copilot preferences and extended fields", () => {
-  test("profile copilot leaves discovery-target rewrites in review mode until the user applies them", async () => {
-    const { repository, workspaceService } = createWorkspaceServiceHarness({
-      seed: {
-        ...createSeed(),
-        searchPreferences: {
-          ...createSeed().searchPreferences,
-          discovery: {
-            historyLimit: 5,
-            targets: [],
-          },
-        },
-      },
-    });
-
-    const snapshot = await workspaceService.sendProfileCopilotMessage(
-      "add a few job sources for me like linkedin and wellfound",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
-    const assistantMessage = snapshot.profileCopilotMessages.find(
-      (message) => message.role === "assistant",
-    );
-    const patchGroup = assistantMessage?.patchGroups[0];
-    const revisions = await repository.listProfileRevisions();
-
-    expect(patchGroup).toEqual(
-      expect.objectContaining({
-        applyMode: "needs_review",
-      }),
-    );
-    expect(assistantMessage?.content).toContain("review");
-    expect(snapshot.searchPreferences.discovery.targets).toEqual([]);
-    expect(revisions).toHaveLength(0);
-
-    const appliedSnapshot =
-      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
-
-    expect(appliedSnapshot.searchPreferences.discovery.targets).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          label: "LinkedIn Jobs",
-          startingUrl: "https://www.linkedin.com/jobs/search/",
-        }),
-        expect.objectContaining({
-          label: "Wellfound",
-          startingUrl: "https://wellfound.com/jobs",
-        }),
-      ]),
-    );
-    expect(appliedSnapshot.profileRevisions[0]).toEqual(
-      expect.objectContaining({
-        trigger: "assistant_patch",
-      }),
-    );
-  });
-
-  test("profile copilot can re-enable an existing disabled job source after review", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness({
-      seed: {
-        ...createSeed(),
-        searchPreferences: {
-          ...createSeed().searchPreferences,
-          discovery: {
-            historyLimit: 5,
-            targets: [
-              {
-                id: "target_linkedin_jobs",
-                label: "LinkedIn Jobs",
-                startingUrl: "https://www.linkedin.com/jobs/search/",
-                enabled: false,
-                adapterKind: "auto",
-                customInstructions: null,
-                instructionStatus: "missing",
-                validatedInstructionId: null,
-                draftInstructionId: null,
-                lastDebugRunId: null,
-                lastVerifiedAt: null,
-                staleReason: null,
-              },
-            ],
-          },
-        },
-      },
-    });
-
-    const snapshot = await workspaceService.sendProfileCopilotMessage(
-      "please add linkedin jobs again",
-      {
-        surface: "profile",
-        section: "preferences",
-      },
-    );
-    const patchGroup = snapshot.profileCopilotMessages.find(
-      (message) => message.role === "assistant",
-    )?.patchGroups[0];
-
-    expect(patchGroup).toEqual(
-      expect.objectContaining({
-        applyMode: "needs_review",
-        summary: "Re-enable LinkedIn Jobs job source",
-      }),
-    );
-    expect(snapshot.searchPreferences.discovery.targets[0]?.enabled).toBe(
-      false,
-    );
-
-    const appliedSnapshot =
-      await workspaceService.applyProfileCopilotPatchGroup(patchGroup!.id);
-
-    expect(appliedSnapshot.searchPreferences.discovery.targets[0]).toEqual(
-      expect.objectContaining({
-        label: "LinkedIn Jobs",
-        enabled: true,
-      }),
-    );
-  });
-
   test("profile copilot downgrades list-heavy search-preference edits to review mode", async () => {
     const { repository, workspaceService } = createWorkspaceServiceHarness({
       seed: {
@@ -307,7 +188,7 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     });
 
     const snapshot = await workspaceService.sendProfileCopilotMessage(
-      "make my experience 7 years and my prefered work mode to be remote and make my expected salary to be 200000 and add linkedin, wellfound and kosovajob",
+      "make my experience 7 years and my prefered work mode to be remote and make my expected salary to be 200000",
       {
         surface: "profile",
         section: "preferences",
@@ -324,7 +205,6 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     // of silently assuming USD.
     expect(snapshot.searchPreferences.targetSalaryUsd).toBeNull();
     expect(snapshot.searchPreferences.workModes).toEqual(["hybrid"]);
-    expect(snapshot.searchPreferences.discovery.targets).toEqual([]);
     expect(patchGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -339,10 +219,6 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
           summary: "Prefer remote work mode",
           applyMode: "needs_review",
         }),
-        expect.objectContaining({
-          summary: "Add LinkedIn Jobs, Wellfound, and KosovaJob job sources",
-          applyMode: "needs_review",
-        }),
       ]),
     );
 
@@ -353,13 +229,7 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     const workModePatchGroup = patchGroups.find(
       (patchGroup) => patchGroup.summary === "Prefer remote work mode",
     );
-    const jobSourcesPatchGroup = patchGroups.find(
-      (patchGroup) =>
-        patchGroup.summary ===
-        "Add LinkedIn Jobs, Wellfound, and KosovaJob job sources",
-    );
     expect(workModePatchGroup).toBeTruthy();
-    expect(jobSourcesPatchGroup).toBeTruthy();
 
     const afterWorkModeApply =
       await workspaceService.applyProfileCopilotPatchGroup(
@@ -380,18 +250,6 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
     expect(afterSalaryApply.searchPreferences.compensation.currency).toBeNull();
     expect(afterSalaryApply.searchPreferences.compensation.currencyStatus).toBe(
       "needs_clarification",
-    );
-
-    const afterJobSourcesApply =
-      await workspaceService.applyProfileCopilotPatchGroup(
-        jobSourcesPatchGroup!.id,
-      );
-    expect(afterJobSourcesApply.searchPreferences.discovery.targets).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "LinkedIn Jobs" }),
-        expect.objectContaining({ label: "Wellfound" }),
-        expect.objectContaining({ label: "KosovaJob" }),
-      ]),
     );
   });
 

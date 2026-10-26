@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ApplicationAuthorityEnvelopeSchema,
-  type CandidateProfile,
   type UserActionRequest,
 } from "@nestor/contracts";
 import { findManualAnswerStepsCoveredBy } from "./workspace-user-action-methods";

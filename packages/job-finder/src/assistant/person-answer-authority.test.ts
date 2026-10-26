@@ -181,7 +181,7 @@ describe("the person's answer authority", () => {
           } as unknown as AssistantHostPorts,
         },
       ),
-    ).rejects.toThrow("Needs you");
+    ).rejects.toThrow("Invalid discriminator value");
     expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
       before,
     );

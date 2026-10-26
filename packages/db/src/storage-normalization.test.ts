@@ -417,9 +417,6 @@ test("forward migrations retain resume text, source evidence, independent plans 
     JSON.stringify(before),
   );
   db.prepare(
-    "UPDATE singleton_state SET value = ? WHERE key = 'search_preferences'",
-  ).run(JSON.stringify(prefs));
-  db.prepare(
     "UPDATE singleton_state SET value = ? WHERE key = 'campaign_state'",
   ).run(JSON.stringify(state));
   db.exec("DELETE FROM schema_migrations WHERE version IN (26,27)");
@@ -443,23 +440,10 @@ test("forward migrations retain resume text, source evidence, independent plans 
   expect(
     Number(db.prepare("SELECT count(*) AS n FROM resume_drafts").get()!.n),
   ).toBe(1);
-  expect(
-    String(
-      db
-        .prepare(
-          "SELECT value FROM singleton_state WHERE key = 'search_preferences'",
-        )
-        .get()!.value,
-    ).length,
-  ).toBeLessThan(100);
   const restored = await temp.createRepository();
   cleanups.push(() => restored.close());
-  expect(await restored.getSearchPreferences()).toEqual(prefs);
   expect(await restored.getCampaignState()).toEqual(state);
   // Same key order too: plan reconciliation compares these as JSON.
-  expect(JSON.stringify(await restored.getSearchPreferences())).toBe(
-    JSON.stringify(prefs),
-  );
   expect(JSON.stringify(await restored.getCampaignState())).toBe(
     JSON.stringify(state),
   );

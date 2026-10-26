@@ -242,48 +242,6 @@ describe("file repository startup recovery integration", () => {
     }
   });
 
-  test("surfaces the original error untouched when migrations fail on a clean-integrity database", async () => {
-    const fixture = await createStartupFixture();
-    temporaryDirectories.push(fixture.tempDirectory);
-    const first = await openRepository(fixture);
-    await first.replaceSavedJobs([createSavedJob({ id: "job_inert" })]);
-    await first.close();
-
-    // Re-arm the default-campaign migration while corrupting its
-    // search-preferences input, so migration fails on a database whose
-    // SQLite integrity is still clean.
-    const raw = new DatabaseSync(fixture.filePath);
-    try {
-      raw.prepare("DELETE FROM schema_migrations WHERE version = ?").run(10);
-      raw
-        .prepare("DELETE FROM singleton_state WHERE key = ?")
-        .run("campaign_state");
-      raw
-        .prepare("UPDATE singleton_state SET value = ? WHERE key = ?")
-        .run("not-json{", "search_preferences");
-    } finally {
-      raw.close();
-    }
-
-    const bytesBefore = await readFile(fixture.filePath);
-
-    let failure: unknown = null;
-    try {
-      await openRepository(fixture);
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(failure).toBeInstanceOf(Error);
-    expect(failure).not.toBeInstanceOf(WorkspaceDatabaseRecoveryRequiredError);
-    expect(quarantineBasenames(fixture)).toEqual([]);
-
-    expect(await readFile(fixture.filePath)).toEqual(bytesBefore);
-    expect(await readFile(fixture.backupPath)).not.toEqual(
-      NOT_DATABASE_CONTENT,
-    );
-  });
-
   test("reports a typed recovery-required incident when no valid candidate remains", async () => {
     const fixture = await createStartupFixture();
     temporaryDirectories.push(fixture.tempDirectory);
@@ -424,7 +382,7 @@ describe("file repository startup recovery integration", () => {
     }
   });
 
-  test("profile revision compare-and-swap survives corruption recovery on migration 11", async () => {
+  test("Profile edit tokens survive unrelated workspace recovery", async () => {
     const fixture = await createStartupFixture();
     temporaryDirectories.push(fixture.tempDirectory);
     const first = await openRepository(fixture);
@@ -440,9 +398,12 @@ describe("file repository startup recovery integration", () => {
       const persisted = await second.getProfileWithRevision();
       expect(persisted.revision).toBeGreaterThanOrEqual(baseline.revision);
 
-      const applied = await second.commitProfileUpdate((current) => current, {
-        expectedRevision: persisted.revision,
-      });
+      const applied = await second.commitProfileUpdate(
+        (current) => ({ ...current, headline: "Edited after recovery" }),
+        {
+          expectedRevision: persisted.revision,
+        },
+      );
       expect(applied.status).toBe("applied");
       expect(applied.revision).toBe(persisted.revision + 1);
 
@@ -510,57 +471,6 @@ describe("file repository startup recovery integration", () => {
     expect(observations).toEqual([
       { integrityOk: true, restoredJobPresent: true },
     ]);
-  });
-
-  test("withholds restore telemetry when the reopened database fails startup validation", async () => {
-    const fixture = await createStartupFixture();
-    temporaryDirectories.push(fixture.tempDirectory);
-    const first = await openRepository(fixture);
-    await first.replaceSavedJobs([createSavedJob({ id: "job_reopen_fail" })]);
-    await first.close();
-
-    // Re-arm the default-campaign migration inside the close snapshot with a
-    // malformed search-preferences input: the lenient validation override
-    // accepts the snapshot through candidate evaluation and final
-    // revalidation, while the real reopen migration must reject it.
-    const raw = new DatabaseSync(fixture.backupPath);
-    try {
-      raw.prepare("DELETE FROM schema_migrations WHERE version = ?").run(10);
-      raw
-        .prepare("DELETE FROM singleton_state WHERE key = ?")
-        .run("campaign_state");
-      raw
-        .prepare("UPDATE singleton_state SET value = ? WHERE key = ?")
-        .run("not-json{", "search_preferences");
-    } finally {
-      raw.close();
-    }
-
-    await writeFile(fixture.filePath, NOT_DATABASE_CONTENT);
-
-    const telemetry = createTelemetryRecorder();
-    let failure: unknown = null;
-    try {
-      await openRepository(fixture, {
-        telemetry,
-        validationRunMigrations: () => undefined,
-      });
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(failure).toBeInstanceOf(WorkspaceDatabaseRecoveryRequiredError);
-    const details = (failure as WorkspaceDatabaseRecoveryRequiredError).details;
-    expect(details.outcome).toBe("restore-promotion-failed");
-    expect(details.incidentId).toBeTruthy();
-    expect(details.quarantineBasenames).toHaveLength(1);
-    expect(telemetry.restoredEvents).toEqual([]);
-    expect(telemetry.rotationEvents).toEqual([]);
-
-    // Promotion itself succeeded, so the restored bytes stay live and every
-    // artifact remains preserved for support.
-    expect(existsSync(fixture.filePath)).toBe(true);
-    expect(quarantineBasenames(fixture)).toHaveLength(1);
   });
 
   test("a failing restore telemetry observer cannot invalidate the reopened database", async () => {

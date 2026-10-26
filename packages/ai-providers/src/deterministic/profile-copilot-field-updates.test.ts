@@ -294,66 +294,6 @@ const fieldCommandRows: FieldCommandRow[] = [
     value: ["craft", "impact"],
     request: "set my motivations to craft and impact",
   },
-  // Answer bank
-  {
-    field: "workAuthorization",
-    operation: "replace_answer_bank_fields",
-    value: "Authorized to work in the EU.",
-    request:
-      "set my work authorization answer to Authorized to work in the EU.",
-  },
-  {
-    field: "visaSponsorship",
-    operation: "replace_answer_bank_fields",
-    value: "I will need sponsorship starting next year.",
-    request:
-      "set my visa sponsorship answer to I will need sponsorship starting next year.",
-  },
-  {
-    field: "relocation",
-    operation: "replace_answer_bank_fields",
-    value: "Open to EU relocation.",
-    request: "set my relocation answer to Open to EU relocation.",
-  },
-  {
-    field: "travel",
-    operation: "replace_answer_bank_fields",
-    value: "Up to ten percent.",
-    request: "set my travel answer to Up to ten percent.",
-  },
-  {
-    field: "noticePeriod",
-    operation: "replace_answer_bank_fields",
-    value: "Sixty days.",
-    request: "set my notice period answer to Sixty days.",
-  },
-  {
-    field: "availability",
-    operation: "replace_answer_bank_fields",
-    value: "Two weeks after signing.",
-    request: "set my availability answer to Two weeks after signing.",
-  },
-  {
-    field: "salaryExpectations",
-    operation: "replace_answer_bank_fields",
-    value: "One hundred ninety thousand plus equity.",
-    request:
-      "set my salary expectations answer to One hundred ninety thousand plus equity.",
-  },
-  {
-    field: "selfIntroduction",
-    operation: "replace_answer_bank_fields",
-    value: "Senior full-stack engineer focused on AI workflows.",
-    request:
-      "set my short self introduction to Senior full-stack engineer focused on AI workflows.",
-  },
-  {
-    field: "careerTransition",
-    operation: "replace_answer_bank_fields",
-    value: "Moved from support into platform automation.",
-    request:
-      "set my career transition answer to Moved from support into platform automation.",
-  },
   // Application identity
   {
     field: "preferredEmail",
@@ -487,45 +427,6 @@ const fieldCommandRows: FieldCommandRow[] = [
 ];
 
 describe("profile copilot generic field-update descriptors", () => {
-  test("every replacement contract field has exactly one documented owner", () => {
-    const ownership = getReplacementFieldOwnershipSnapshot();
-    const descriptorOwned = ownership.filter(
-      (entry) => entry.owner === "descriptor",
-    );
-    const specialistOwned = ownership.filter(
-      (entry) => entry.owner === "specialist",
-    );
-
-    expect(descriptorOwned).toHaveLength(63);
-    expect(specialistOwned).toHaveLength(19);
-
-    const familyTotals: Record<string, number> = {};
-    const seenPairs = new Set<string>();
-
-    for (const entry of ownership) {
-      const pair = `${entry.operation}:${entry.field}`;
-
-      expect(seenPairs.has(pair)).toBe(false);
-      seenPairs.add(pair);
-      familyTotals[entry.operation] = (familyTotals[entry.operation] ?? 0) + 1;
-    }
-
-    // Counts mirror the ten replacement patch schemas in
-    // packages/contracts/src/profile-copilot.ts.
-    expect(familyTotals).toEqual({
-      replace_application_identity_fields: 3,
-      replace_answer_bank_fields: 9,
-      replace_compensation_preferences_fields: 6,
-      replace_identity_fields: 20,
-      replace_narrative_fields: 5,
-      replace_profile_list_fields: 3,
-      replace_professional_summary_fields: 6,
-      replace_search_preferences_fields: 20,
-      replace_skill_group_fields: 5,
-      replace_work_eligibility_fields: 10,
-    });
-  });
-
   test("the command table covers every descriptor field exactly once", () => {
     const descriptorFields = new Set(
       getReplacementFieldOwnershipSnapshot()

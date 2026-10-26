@@ -161,8 +161,8 @@ export function createSeed(): JobFinderRepositorySeed {
         analysisWarnings: [],
       },
       workEligibility: {
-        authorizedWorkCountries: [],
-        requiresVisaSponsorship: null,
+        authorizedWorkCountries: ["United Kingdom"],
+        requiresVisaSponsorship: false,
         willingToRelocate: null,
         preferredRelocationRegions: [],
         willingToTravel: null,

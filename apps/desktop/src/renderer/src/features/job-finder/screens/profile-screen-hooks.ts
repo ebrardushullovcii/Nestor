@@ -741,7 +741,7 @@ export function useProfileScreenForms(input: {
             input.profile,
             input.latestResumeImportReviewCandidates,
           ),
-          { keepValues: true },
+          { keepValues: profileChangedSinceSeen },
         ),
       );
       // Incomplete added rows are omitted by the save payload. They are still

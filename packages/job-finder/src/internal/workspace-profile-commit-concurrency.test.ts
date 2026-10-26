@@ -6,9 +6,7 @@ import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "../index";
 import { ProfileCommitStaleError } from "./profile-commit-stale-conflict";
-import { RESUME_IMPORT_SUPERSEDED_MESSAGE } from "./resume-import-workflow";
 import {
-  createFreshStartSeedProfile,
   createSeed,
 } from "../workspace-service.test-fixtures";
 import {
@@ -17,24 +15,6 @@ import {
   createDocumentManager,
   createResearchAdapter,
 } from "../workspace-service.test-runtimes";
-
-const REUSABLE_ANSWER = {
-  id: "answer_concurrent_1",
-  kind: "other" as const,
-  label: "Notice period",
-  question: "What is your notice period?",
-  answer: "Two weeks",
-  roleFamilies: [],
-  proofEntryIds: [],
-};
-
-function addReusableAnswer(
-  current: Awaited<ReturnType<JobFinderRepository["getProfile"]>>,
-) {
-  return {
-    ...current,
-  };
-}
 
 function createTestHarness(repository: JobFinderRepository) {
   const workspaceService = createJobFinderWorkspaceService({
@@ -156,31 +136,6 @@ describe("profile copilot commit concurrency", () => {
       true,
     );
   });
-});
-
-describe("resume import finalize concurrency", () => {
-  function createImportSeed() {
-    const seed = createSeed();
-    return {
-      ...seed,
-      profile: {
-        ...createFreshStartSeedProfile(),
-        baseResume: {
-          ...seed.profile.baseResume,
-          extractionStatus: "not_started" as const,
-          lastAnalyzedAt: null,
-          textContent: [
-            "Jamie Rivers",
-            "Staff Frontend Engineer",
-            "Berlin, Germany",
-            "jamie@example.com",
-            "",
-            "12 years of experience building React, TypeScript, and design systems.",
-          ].join("\n"),
-        },
-      },
-    };
-  }
 });
 
 describe("profile copilot preference and sibling-flag races", () => {

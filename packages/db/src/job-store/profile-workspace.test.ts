@@ -12,6 +12,82 @@ import { createProfileStore } from "./profile-store";
 import { createPreferencesStore } from "./preferences-store";
 import { createSavedAnswersStore } from "./applications";
 import { createProfileWorkspace } from "./profile-workspace";
+import { JOB_STORE_SCHEMA } from "./schema";
+import { PROFILE_SCHEMA } from "./profile-store";
+import { PREFERENCES_SCHEMA } from "./preferences-store";
+import { PROFILE_WORKFLOW_SCHEMA } from "./profile-workspace";
+import { PROFILE_IMPORT_SCHEMA } from "./profile-import-store";
+
+test("Profile tables add to an existing job store without copying old Profile or Settings", async () => {
+  const directory = await mkdtemp(
+      path.join(os.tmpdir(), "nestor-profile-additive-"),
+    ),
+    filePath = path.join(directory, "jobs.sqlite"),
+    legacyPath = path.join(directory, "workspace.sqlite");
+  const before = new DatabaseSync(filePath);
+  const newTables = new Set([
+    PROFILE_SCHEMA,
+    PREFERENCES_SCHEMA,
+    PROFILE_WORKFLOW_SCHEMA,
+    PROFILE_IMPORT_SCHEMA,
+  ]);
+  for (const ddl of JOB_STORE_SCHEMA) if (!newTables.has(ddl)) before.exec(ddl);
+  before.exec("PRAGMA user_version = 6");
+  before.exec(`INSERT INTO jobs(id,stage,stage_at,title,company,location,found_at,seen_at,source_label,url)
+    VALUES(7,'shortlisted',1,'Saved Engineer','Synthetic Employer','Berlin',1,1,'My board','https://synthetic.test/jobs/7');
+    INSERT INTO job_details(job_id,description) VALUES(7,'Full saved listing');
+    CREATE TABLE retained_sentinel(value TEXT); INSERT INTO retained_sentinel VALUES('existing store');`);
+  before.close();
+  const old = new DatabaseSync(legacyPath);
+  old.exec("CREATE TABLE singleton_state(key TEXT PRIMARY KEY,value TEXT)");
+  old
+    .prepare("INSERT INTO singleton_state VALUES(?,?)")
+    .run("profile", "old unread profile");
+  old
+    .prepare("INSERT INTO singleton_state VALUES(?,?)")
+    .run("settings", "old unread settings");
+  old.close();
+  const store = openJobStore(filePath);
+  const seed = createSeed();
+  const repository = await createFileJobFinderRepository({
+    filePath: legacyPath,
+    store,
+    seed,
+  });
+  try {
+    expect(store.getJob(7)).toMatchObject({
+      title: "Saved Engineer",
+      description: "Full saved listing",
+      stage: "shortlisted",
+    });
+    expect(store.sql("SELECT value FROM retained_sentinel").get()?.value).toBe(
+      "existing store",
+    );
+    expect((await repository.getProfile()).headline).toBe(
+      seed.profile.headline,
+    );
+    expect(await repository.getSettings()).toMatchObject(seed.settings);
+    createProfileStore(store).patch({
+      fields: { headline: "New imported facts" },
+    });
+    await repository.close();
+    const reopened = await createFileJobFinderRepository({
+      filePath: legacyPath,
+      store,
+      seed,
+    });
+    try {
+      expect((await reopened.getProfile()).headline).toBe("New imported facts");
+      expect(store.getJob(7)?.stage).toBe("shortlisted");
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await repository.close();
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("Profile and Settings commands and shared readers use one durable store", async () => {
   const directory = await mkdtemp(

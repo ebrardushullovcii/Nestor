@@ -627,6 +627,7 @@ describe("workspace database corruption recovery core", () => {
       // From the fixture's clean close; the leftover log makes the next open
       // ignore and remove it.
       `${DATABASE_FILE_NAME}.clean-close`,
+      `${DATABASE_FILE_NAME}.jobs.sqlite`,
     ]);
   });
 

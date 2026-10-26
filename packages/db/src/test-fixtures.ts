@@ -5,6 +5,7 @@ export function createSeed(): JobFinderRepositorySeed {
   return {
     profile: {
       id: "candidate_1",
+      resumeIdentityOwnership: null,
       firstName: "Alex",
       lastName: "Vanguard",
       middleName: null,
@@ -40,6 +41,7 @@ export function createSeed(): JobFinderRepositorySeed {
       },
       baseResume: {
         id: "resume_1",
+        sha256: null,
         fileName: "alex-vanguard.pdf",
         uploadedAt: "2026-03-20T10:00:00.000Z",
         storagePath: "/tmp/alex-vanguard.pdf",

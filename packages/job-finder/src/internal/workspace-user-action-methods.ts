@@ -24,9 +24,7 @@ import {
   reduceUserActionCommand,
 } from "../user-action-domain";
 import {
-  createReusableAnswerForQuestion,
   rememberWorkspaceAnswer,
-  eligibilityAnswerScope,
   normalizeAnswerQuestion,
 } from "./workspace-answer-memory";
 import {

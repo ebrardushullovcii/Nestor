@@ -9,7 +9,6 @@ import type {
   LinkFormEntry,
   ProjectFormEntry,
   ProofBankEntryFormEntry,
-  ReusableAnswerFormEntry,
 } from "./job-finder-types";
 
 export interface ProfileEditorValues {

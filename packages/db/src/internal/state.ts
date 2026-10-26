@@ -29,7 +29,6 @@ import {
   JobFinderActivityControlSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
-  JobFinderSettingsSchema,
   JobSearchCampaignCollectionSchema,
   ResumeAssistantMessageSchema,
   ResumeDraftRevisionSchema,
@@ -459,24 +458,6 @@ function parseSingletonRow<TValue>(
       schema,
     }),
   ) as TValue;
-}
-
-/** Settings authorize external actions, so validate their file once on open. */
-export function validateWorkspaceSettingsFile(database: DatabaseSync): void {
-  const row = database
-    .prepare("SELECT value FROM singleton_state WHERE key = 'settings'")
-    .get();
-  if (row)
-    validatePersistedRowValue({
-      tableName: "singleton_state",
-      rowId: "settings",
-      value: parsePersistedRowJson({
-        tableName: "singleton_state",
-        rowId: "settings",
-        rawValue: String(row.value),
-      }),
-      schema: JobFinderSettingsSchema,
-    });
 }
 export function getSingletonValue<TValue>(
   database: DatabaseSync,

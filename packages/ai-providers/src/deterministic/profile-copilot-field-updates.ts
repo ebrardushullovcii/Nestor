@@ -70,14 +70,8 @@ export const specialistOwnedReplacementFields = {
     fields: ["targetRoles", "locations"],
   },
   replace_search_preferences_fields: {
-    sourceModule: "job-source, salary, target-role, and work-mode specialists",
-    fields: [
-      "discovery",
-      "minimumSalaryUsd",
-      "targetRoles",
-      "targetSalaryUsd",
-      "workModes",
-    ],
+    sourceModule: "salary, target-role, and work-mode specialists",
+    fields: ["minimumSalaryUsd", "targetRoles", "targetSalaryUsd", "workModes"],
   },
   replace_compensation_preferences_fields: {
     sourceModule: "unified typed salary command parser",

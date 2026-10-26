@@ -9,7 +9,6 @@ import {
   CandidateProfileSchema,
   CandidateProjectSchema,
   CandidateProofBankEntrySchema,
-  CandidateReusableAnswerSchema,
   JobSearchPreferencesSchema,
   ProfileCopilotPatchGroupSchema,
   ProfileSetupStateSchema,

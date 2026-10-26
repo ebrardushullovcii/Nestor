@@ -78,7 +78,6 @@ import {
 } from "./grouped-manual-answer-support";
 import {
   openDatabaseFile,
-  repairLegacyCommaSplitAchievements,
   secureDatabaseFile,
   runMigrations,
 } from "./internal/migrations";
@@ -99,10 +98,7 @@ import {
   type RestoredSnapshotRevalidator,
   type WorkspaceDatabaseRecoveryResult,
 } from "./file-repository-recovery";
-import {
-  normalizeLegacySourceDebugRunRecord,
-  readLegacySeed,
-} from "./internal/legacy";
+import { normalizeLegacySourceDebugRunRecord } from "./internal/legacy";
 import {
   bootstrapState,
   cloneValue,
@@ -117,7 +113,6 @@ import {
   stateTableNames,
   upsertIndexedCollectionValue,
   writeState,
-  validateWorkspaceSettingsFile,
 } from "./internal/state";
 
 import type {
@@ -391,40 +386,10 @@ export async function createFileJobFinderRepository(
   >;
   try {
     if (!hasPersistedState(database)) {
-      const legacySeed = await readLegacySeed(options.filePath, normalizedSeed);
-      const bootstrapSeed = legacySeed
-        ? JobFinderRepositoryStateSchema.parse({
-            ...legacySeed,
-            profile: {
-              ...legacySeed.profile,
-              experiences: legacySeed.profile.experiences.map((experience) => ({
-                ...experience,
-                achievements: repairLegacyCommaSplitAchievements(
-                  experience.achievements,
-                ),
-              })),
-            },
-            profileRevisions: legacySeed.profileRevisions.map((revision) => ({
-              ...revision,
-              snapshotProfile: {
-                ...revision.snapshotProfile,
-                experiences: revision.snapshotProfile.experiences.map(
-                  (experience) => ({
-                    ...experience,
-                    achievements: repairLegacyCommaSplitAchievements(
-                      experience.achievements,
-                    ),
-                  }),
-                ),
-              },
-            })),
-          })
-        : normalizedSeed;
-      bootstrapState(database, bootstrapSeed);
+      bootstrapState(database, normalizedSeed);
       await secureDatabaseFile(options.filePath);
     }
 
-    validateWorkspaceSettingsFile(database);
     context = createFileRepositoryContext({
       database,
       filePath: options.filePath,
@@ -924,6 +889,7 @@ export async function createFileJobFinderRepository(
         }),
       ),
     async close() {
+      if (!database.isOpen) return;
       stopProfileUpdates();
       await approvalFolder.flush();
       await stopBackups();

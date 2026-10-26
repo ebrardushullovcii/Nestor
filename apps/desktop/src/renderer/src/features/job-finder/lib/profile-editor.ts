@@ -1,6 +1,5 @@
 import { normalizePublicLinkUrl } from "@nestor/contracts";
 import {
-  candidateAnswerKindValues,
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
   type ResumeImportFieldCandidateSummary,
@@ -12,7 +11,6 @@ import {
 import type {
   DiscoveryTargetEditorValue,
   ProofBankEntryFormEntry,
-  ReusableAnswerFormEntry,
 } from "./job-finder-types";
 import {
   deriveJobSourceLabel,

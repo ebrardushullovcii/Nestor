@@ -1,10 +1,6 @@
 import { chmod } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import {
-  CandidateProfileSchema,
-  ApplicationQuestionRecordSchema,
-  ApplicationAnswerRecordSchema,
-  ApplyJobResultSchema,
   JobSearchPreferencesSchema,
   getDefaultCampaignConfiguration,
   normalizeCompanyName,

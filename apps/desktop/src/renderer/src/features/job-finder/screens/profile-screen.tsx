@@ -78,9 +78,9 @@ import {
 } from "../assistant/assistant-context-capture";
 
 const unsavedProfileSourceActionMessage =
-  "Save your current profile and source setup before running source checks or searches so those actions use the latest saved configuration.";
+  "Your goal changes are saving. Try this source check again once they finish.";
 const unsavedProfileSourceSignInMessage =
-  "Save this source before opening a sign-in session so the browser uses the latest saved source entry.";
+  "This site is still saving. Try opening its sign-in session again in a moment.";
 
 function parseProfileSection(value: string | null): ProfileSection | null {
   switch (value) {
@@ -135,7 +135,10 @@ export function ProfileScreen(props: {
     action: ResumeTimelineRepairAction,
   ) => Promise<void>;
   onOpenBrowserSessionForTarget: (targetId: string) => void;
-  onProfileSurfaceDirtyChange: (dirty: boolean) => void;
+  onProfileSurfaceDirtyChange: (
+    dirty: boolean,
+    blockNavigation?: boolean,
+  ) => void;
   /**
    * Reports each user-authored draft edit so the shell can retire an
    * exact-request save retry captured before the edit.
@@ -289,11 +292,6 @@ export function ProfileScreen(props: {
       return { ...section, progress: { filled: 1, total: 1, percent: 100 } };
     return section;
   });
-
-  useEffect(() => {
-    onProfileSurfaceDirtyChange(hasUserDraftChanges);
-    return () => onProfileSurfaceDirtyChange(false);
-  }, [hasUserDraftChanges, onProfileSurfaceDirtyChange]);
 
   // A freshly mounted section already starts at the top; resetting it on
   // mount only forced a layout of the whole new screen.
@@ -630,6 +628,17 @@ export function ProfileScreen(props: {
     blocked: hasBackgroundConflict || resumeAnalysisPending,
     save: ({ profile: nextProfile, goals }) => onSaveAll(nextProfile, goals),
   });
+  const blockNavigation =
+    hasBackgroundConflict ||
+    Boolean(
+      autosave.error ||
+      draftProfileResult.validationMessage ||
+      draftSearchPreferencesResult.validationMessage,
+    );
+  useEffect(() => {
+    onProfileSurfaceDirtyChange(hasUserDraftChanges, blockNavigation);
+    return () => onProfileSurfaceDirtyChange(false);
+  }, [hasUserDraftChanges, blockNavigation, onProfileSurfaceDirtyChange]);
 
   function handleResumeIdentityChoice(choice: "profile_name" | "resume_name") {
     const profileResult = buildCanonicalAwareProfilePayload({
@@ -661,7 +670,7 @@ export function ProfileScreen(props: {
           }
         : useResumeSourceNameForProfile(profileResult.payload);
     setValidationMessage(null);
-    onSaveAll(nextProfile, preferencesResult.payload);
+    void onSaveAll(nextProfile, preferencesResult.payload);
   }
 
   function handleReviewImportSuggestion(
@@ -699,26 +708,24 @@ export function ProfileScreen(props: {
   return (
     <LockedScreenLayout
       bottomContent={
-        <>
-          {backgroundMergeNotice && hasBackgroundConflict ? (
-            <div
-              className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-(--warning-border) bg-(--warning-surface) px-4 py-2 text-sm leading-6 text-(--warning-text) sm:px-5"
-              role="status"
-            >
-              <span>{backgroundMergeNotice}</span>
-              {hasBackgroundConflict ? (
-                <Button
-                  onClick={discardEditsAndReloadCanonical}
-                  size="compact"
-                  type="button"
-                  variant="outline"
-                >
-                  Discard my edits and reload
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </>
+        backgroundMergeNotice && hasBackgroundConflict ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-(--warning-border) bg-(--warning-surface) px-4 py-2 text-sm leading-6 text-(--warning-text) sm:px-5"
+            role="status"
+          >
+            <span>{backgroundMergeNotice}</span>
+            {hasBackgroundConflict ? (
+              <Button
+                onClick={discardEditsAndReloadCanonical}
+                size="compact"
+                type="button"
+                variant="outline"
+              >
+                Discard my edits and reload
+              </Button>
+            ) : null}
+          </div>
+        ) : undefined
       }
       contentClassName="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 pb-1 xl:overflow-clip"
       topClassName="grid gap-2 pb-1"
@@ -959,7 +966,9 @@ export function ProfileScreen(props: {
                       requestedFileKind={searchParams.get("kind")}
                       requestedSourceFilter={searchParams.get("show")}
                       activeDiscoveryRun={activeDiscoveryRun}
-                      onSaveNow={handleSaveAll}
+                      onSaveNow={() => {
+                        void handleSaveAll();
+                      }}
                       backgroundArrays={backgroundArrays}
                       discoveryRuns={discoveryRuns}
                       experienceArray={experienceArray}

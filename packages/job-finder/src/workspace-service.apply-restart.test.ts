@@ -247,6 +247,7 @@ describe("apply restart recovery", () => {
         (run) => run.id === "apply_run_parked",
       )?.state,
     ).toBe("running");
+    const persisted = await repository.exportState();
     await beforeClose.shutdown();
 
     const baseRuntime = createBrowserRuntime();
@@ -255,14 +256,18 @@ describe("apply restart recovery", () => {
     const flowGate = new Promise<void>((resolve) => {
       releaseFlow = resolve;
     });
-    const reopened = createService(repository, {
-      ...baseRuntime,
-      async executeApplicationFlow(...args) {
-        flowCount += 1;
-        await flowGate;
-        return baseRuntime.executeApplicationFlow(...args);
+    const reopenedRepository = createInMemoryJobFinderRepository(persisted);
+    const reopened = createService(
+      reopenedRepository,
+      {
+        ...baseRuntime,
+        async executeApplicationFlow(...args) {
+          flowCount += 1;
+          await flowGate;
+          return baseRuntime.executeApplicationFlow(...args);
+        },
       },
-    });
+    );
     const reopenedSnapshot = await reopened.getWorkspaceSnapshot();
     expect(reopenedSnapshot.activityControl.paused).toBe(true);
     expect(
@@ -285,19 +290,19 @@ describe("apply restart recovery", () => {
       reopened.setActivityControl({ paused: false }),
     ]);
     await vi.waitFor(() => expect(flowCount).toBe(1));
-    expect((await repository.listApplyRuns())[0]?.id).toBe("apply_run_parked");
+    expect((await reopenedRepository.listApplyRuns())[0]?.id).toBe("apply_run_parked");
     releaseFlow?.();
     await vi.waitFor(async () =>
-      expect((await repository.listApplyRuns())[0]?.state).not.toBe("running"),
+      expect((await reopenedRepository.listApplyRuns())[0]?.state).not.toBe("running"),
     );
     expect(flowCount).toBe(1);
     expect(
-      (await repository.listApplyJobResults()).find(
+      (await reopenedRepository.listApplyJobResults()).find(
         (result) => result.id === "result_planned",
       )?.state,
     ).not.toBe("planned");
     expect(
-      (await repository.listApplyJobResults()).find(
+      (await reopenedRepository.listApplyJobResults()).find(
         (result) => result.id === "result_settled",
       )?.state,
     ).toBe("failed");

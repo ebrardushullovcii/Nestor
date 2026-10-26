@@ -6,6 +6,8 @@ import {
   GroupedManualAnswerDecisionSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
+  JobFinderSettingsSchema,
+  JobSearchPreferencesSchema,
   JobSearchCampaignSchema,
   ProfileCopilotMessageSchema,
   SourceDebugRunRecordSchema,
@@ -826,7 +828,11 @@ async function expectPostResetState(
     {
       label: "search preferences",
       read: () => repository.getSearchPreferences(),
-      expected: resetSeed.searchPreferences,
+      expected: JobSearchPreferencesSchema.parse({
+        ...resetSeed.searchPreferences,
+        weeklyHours: { minimum: null, maximum: null },
+        discovery: { ...resetSeed.searchPreferences.discovery, targets: [] },
+      }),
     },
     {
       label: "profile setup state",
@@ -836,7 +842,7 @@ async function expectPostResetState(
     {
       label: "settings",
       read: () => repository.getSettings(),
-      expected: resetSeed.settings,
+      expected: JobFinderSettingsSchema.parse(resetSeed.settings),
     },
     {
       label: "discovery state",

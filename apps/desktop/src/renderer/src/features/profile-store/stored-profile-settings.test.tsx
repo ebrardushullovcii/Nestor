@@ -26,14 +26,18 @@ import { StoredSettingsScreen } from "./stored-settings-screen";
 
 let store: JobStore;
 let calls: { name: string; input: unknown }[];
+let pauseCommit: Promise<void> | null;
 beforeEach(() => {
   store = openJobStore(":memory:");
   calls = [];
+  pauseCommit = null;
   const run = createJobCommandRunner({ store });
   const jobs: DesktopJobsBridge = {
     run: (name, input) => {
       calls.push({ name, input });
-      return run(name, input);
+      return pauseCommit && name === "commit_profile_edits"
+        ? pauseCommit.then(() => run(name, input))
+        : run(name, input);
     },
     onChange: (listener) => store.onChange(listener),
     onSearchStatus: () => () => {},
@@ -184,6 +188,35 @@ test("work-history pages keep unseen records and lock paging until edits save", 
     remove: [],
   });
 });
+test("typing during an autosave keeps the latest work-history edit and input focus", async () => {
+  let release: (() => void) | undefined;
+  pauseCommit = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  profileScreen("experience");
+  await screen.findByText("1–25 of 30");
+  const title = (await screen.findAllByLabelText(/^Title$/u))[0]!;
+  title.focus();
+  fireEvent.change(title, { target: { value: "Senior Analyst" } });
+  await waitFor(() =>
+    expect(
+      calls.filter((call) => call.name === "commit_profile_edits"),
+    ).toHaveLength(1),
+  );
+  fireEvent.change(title, {
+    target: { value: "Senior Analyst, Data Products" },
+  });
+  await act(() => Promise.resolve().then(() => release!()));
+  await waitFor(() =>
+    expect(
+      createProfileStore(store).records.get("experiences", "work-0"),
+    ).toMatchObject({ record: { title: "Senior Analyst, Data Products" } }),
+  );
+  expect(document.activeElement).toBe(title);
+  expect(title.isConnected).toBe(true);
+  expect(createProfileStore(store).overview().counts.experiences).toBe(30);
+});
+
 test("Settings saves Apply mode and appearance independently and follows other writers live", async () => {
   const preferences = createPreferencesStore(store);
   render(

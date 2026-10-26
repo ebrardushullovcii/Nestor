@@ -3,7 +3,6 @@ import {
   ApplicationQuestionRecordSchema,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
-import { createSeed } from "../workspace-service.test-fixtures";
 import { applicationAnswersForExecution } from "./workspace-application-answer-execution";
 
 const now = "2026-08-10T10:00:00.000Z";
@@ -48,7 +47,6 @@ function answer(input: {
 
 describe("application answers in prepare-only execution", () => {
   it("injects every selected user-reviewed answer ahead of reusable profile answers", () => {
-    const profile = createSeed().profile;
     const merged = applicationAnswersForExecution({
       questionRecords: [
         question("question-1", "answer-1"),
@@ -84,7 +82,6 @@ describe("application answers in prepare-only execution", () => {
   });
 
   it("does not resurrect an answer whose latest revision was cleared", () => {
-    const profile = createSeed().profile;
     const merged = applicationAnswersForExecution({
       questionRecords: [question("question-1", null)],
       answerRecords: [
@@ -131,8 +128,6 @@ describe("application answers in prepare-only execution", () => {
 });
 
 it("keeps the person's pay answers scoped to this application's execution profile", () => {
-  const profile = createSeed().profile;
-  const before = structuredClone(profile);
   const salary = {
     ...question("salary", "salary_answer"),
     prompt: "Expected salary",
@@ -173,11 +168,9 @@ it("keeps the person's pay answers scoped to this application's execution profil
   for (const entry of merged.slice(0, 2)) {
     expect(entry.id).toMatch(/^application_request_pay_/);
   }
-  expect(profile).toEqual(before);
 });
 
 it("an application's own currency survives a newer library-seeded suggestion", () => {
-  const profile = createSeed().profile;
   const own = answer({
     id: "own_currency",
     questionId: "currency",
@@ -207,8 +200,6 @@ it("an application's own currency survives a newer library-seeded suggestion", (
 });
 
 it("Prepare again keeps one-use eligibility on the same application even after a newer agent suggestion", () => {
-  const profile = createSeed().profile;
-  const before = structuredClone(profile);
   const own = {
     ...answer({
       id: "own",
@@ -251,7 +242,6 @@ it("Prepare again keeps one-use eligibility on the same application even after a
       hiringCountry: "Germany",
     },
   });
-  expect(profile).toEqual(before);
   expect(
     applicationAnswersForExecution({
       questionRecords: [currentQuestion],
@@ -260,5 +250,5 @@ it("Prepare again keeps one-use eligibility on the same application even after a
       applicationRecordId: "application_b",
       jobLocation: "Hamburg, Germany",
     }),
-  ).toBe(profile);
+  ).toEqual([]);
 });

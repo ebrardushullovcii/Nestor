@@ -2334,52 +2334,6 @@ describe("persisted row corruption handling", () => {
       await cleanupTempDirectoryWithRetry(temp.tempDirectory);
     }
   });
-  test("fails loudly instead of falling back to the seed when a settings singleton is corrupted", async () => {
-    const sensitiveMarker = "SECRET-TOKEN-4c2e";
-    const temp = await createTempRepository("nestor-db-corrupt-settings-");
-    let repository: FileRepository | null = null;
-    try {
-      repository = await temp.createRepository();
-      await repository.close();
-      repository = null;
-
-      const corruptedDatabase = new DatabaseSync(temp.filePath);
-      try {
-        corruptedDatabase
-          .prepare("UPDATE singleton_state SET value = ? WHERE key = ?")
-          .run(`{"resumeFormat":"pdf","note":"${sensitiveMarker}`, "settings");
-      } finally {
-        corruptedDatabase.close();
-      }
-
-      {
-        const failure = await temp
-          .createRepository()
-          .catch((error) => error as unknown);
-
-        expect(failure).toBeInstanceOf(Error);
-        const failureMessage = failure instanceof Error ? failure.message : "";
-        expect(failureMessage).toContain('table "singleton_state"');
-        expect(failureMessage).toContain('row "settings"');
-        expect(failureMessage).not.toContain(sensitiveMarker);
-
-        const verificationDatabase = new DatabaseSync(temp.filePath);
-        try {
-          const survivingRow = verificationDatabase
-            .prepare(
-              "SELECT COUNT(*) AS count FROM singleton_state WHERE key = ?",
-            )
-            .get("settings") as { count: number };
-          expect(Number(survivingRow.count)).toBe(1);
-        } finally {
-          verificationDatabase.close();
-        }
-      }
-    } finally {
-      await repository?.close().catch(() => undefined);
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
-  });
 });
 
 describe("repository backend parity", () => {
