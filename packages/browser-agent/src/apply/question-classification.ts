@@ -21,6 +21,8 @@ import type { ApplyFormControl } from "./types";
  */
 export interface ApplyQuestionClassification {
   asksAboutPay: boolean;
+  /** Two page reads failed; the application must hand these questions over. */
+  readFailed?: boolean;
   answerTags?: ApplyAnswerTags | null;
   eligibilityKind?: "work_authorization" | "visa_sponsorship" | null;
   /** Expected pay is distinct from private current pay and pay history. */
@@ -34,7 +36,7 @@ export interface ApplyQuestionClassification {
 
 const DECLARATION_KINDS = ApplicationAttestationKindSchema.options;
 
-export async function classifyApplicationQuestions(input: {
+interface QuestionReadInput {
   client: LLMClient;
   questions: ReadonlyArray<{
     prompt: string;
@@ -52,7 +54,43 @@ export async function classifyApplicationQuestions(input: {
     question?: string;
   }[];
   signal?: AbortSignal | undefined;
-}): Promise<Map<string, ApplyQuestionClassification>> {
+}
+
+export async function classifyApplicationQuestions(
+  input: QuestionReadInput,
+): Promise<Map<string, ApplyQuestionClassification>> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    input.signal?.throwIfAborted();
+    try {
+      const readings = await readApplicationQuestions(input, attempt);
+      if (
+        input.questions.every((question) => {
+          const reading = readings.get(question.identity ?? question.prompt);
+          return reading && (input.sources === undefined || reading.answerTags);
+        })
+      )
+        return readings;
+    } catch {
+      input.signal?.throwIfAborted();
+    }
+  }
+  return new Map(
+    input.questions.map((question) => [
+      question.identity ?? question.prompt,
+      {
+        asksAboutPay: false,
+        declarationKind: null,
+        answerTags: null,
+        readFailed: true,
+      },
+    ]),
+  );
+}
+
+async function readApplicationQuestions(
+  input: QuestionReadInput,
+  attempt: number,
+): Promise<Map<string, ApplyQuestionClassification>> {
   const result = new Map<string, ApplyQuestionClassification>();
   if (input.questions.length === 0) {
     return result;
@@ -184,9 +222,9 @@ export async function classifyApplicationQuestions(input: {
     reasoningTask: "apply",
     // A full page can have dozens of questions; truncation used to leave
     // later questions unclassified and trigger another call on each write.
-    maxOutputTokens: Math.max(
-      2000,
-      Math.min(16_000, input.questions.length * 150 + 300),
+    maxOutputTokens: Math.min(
+      16_000,
+      Math.max(4000, input.questions.length * 200 + 1000) * (attempt + 1),
     ),
   });
   const call = response.toolCalls?.find(
@@ -420,14 +458,18 @@ export function createQuestionClassifier(input: {
               client: input.client,
               questions: missing,
               pageInstructions,
-              sources,
+              ...(input.sources ? { sources } : {}),
               signal: input.signal,
             })
       ).then((readings) => {
         input.signal?.throwIfAborted();
         if (missing.some((question) => !readings.has(question.identity)))
           throw new Error("The question check did not cover every question.");
-        if (shared && readKey.length <= 64_000) {
+        if (
+          shared &&
+          readKey.length <= 64_000 &&
+          ![...readings.values()].some((reading) => reading.readFailed)
+        ) {
           shared.delete(readKey);
           shared.set(readKey, copyReadings(readings));
           if (shared.size > 64) shared.delete(shared.keys().next().value!);

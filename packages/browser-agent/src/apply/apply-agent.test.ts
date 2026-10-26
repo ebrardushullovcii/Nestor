@@ -3288,6 +3288,14 @@ describe("apply readiness regressions", () => {
                     function: {
                       name: "report_question_kinds",
                       arguments: JSON.stringify({
+                        tags: [
+                          {
+                            index: 0,
+                            kind: "other",
+                            country: null,
+                            sourceId: null,
+                          },
+                        ],
                         questions: [
                           {
                             index: 0,
@@ -5703,17 +5711,14 @@ test.each([
     };
     const checkTasks: Array<string | undefined> = [];
     let turns = 0;
-    let releaseReading = () => {};
-    const reading = new Promise<void>((resolve) => {
-      releaseReading = resolve;
-    });
     await runApplyAgent(input, {
       chatWithTools: async (messages, definitions, options) => {
         const name = definitions[0]?.function.name;
         if (name === "report_question_kinds") {
-          // An unread page: the quick check starts before the reading comes
-          // back, and a reading that flags the question redoes it in full.
-          if (unread) await reading;
+          // The writer waits for this reading instead of launching a
+          // speculative answer check while the page remains unread.
+          if (unread)
+            await new Promise<void>((resolve) => setTimeout(resolve, 5));
           return {
             toolCalls: [
               {
@@ -5747,11 +5752,9 @@ test.each([
         }
         if (name === "report_answer_checks") {
           checkTasks.push(options?.reasoningTask);
-          releaseReading();
           return (await supportedChecks(messages, definitions))!;
         }
-        releaseReading();
-        // The page's questions are read while the model decides.
+        // Every writer turn already has the page's reading.
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
         return {
           toolCalls: [

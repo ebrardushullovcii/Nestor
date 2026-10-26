@@ -58,7 +58,7 @@ describe("classifyApplicationQuestions", () => {
     expect(result.get("Portfolio link")?.declarationKind).toBeNull();
   });
 
-  test("returns nothing for a reply without the report", async () => {
+  test("hands the question over after two replies without the report", async () => {
     const client = {
       chatWithTools: () => Promise.resolve({ content: "ok", toolCalls: [] }),
     } as unknown as LLMClient;
@@ -66,7 +66,7 @@ describe("classifyApplicationQuestions", () => {
       client,
       questions: [{ prompt: "Expected salary", kind: "text", options: [] }],
     });
-    expect(result.size).toBe(0);
+    expect(result.get("Expected salary")?.readFailed).toBe(true);
   });
 });
 
@@ -142,22 +142,54 @@ test("reuses across steps and requirement changes but reads new wording and opti
   expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 
-test("retries a failed classification rather than caching the failure", async () => {
+test("retries a failed classification once before returning the reading", async () => {
   const client = clientReplying([
     { index: 0, asksAboutPay: true, declarationKind: null },
   ]);
   vi.mocked(client.chatWithTools).mockRejectedValueOnce(new Error("offline"));
   const classify = createQuestionClassifier({ client });
-  await expect(classify(controls())).rejects.toThrow("offline");
   expect((await classify(controls())).get("Pay")?.asksAboutPay).toBe(true);
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
-test("does not cache an incomplete reply as a checked page", async () => {
+test("caches an incomplete page as a handover after exactly one retry", async () => {
   const client = clientReplying([]);
   const classify = createQuestionClassifier({ client });
-  await expect(classify(controls())).rejects.toThrow("every question");
-  await expect(classify(controls())).rejects.toThrow("every question");
+  expect((await classify(controls())).get("Pay")?.readFailed).toBe(true);
+  expect((await classify(controls())).get("Pay")?.answerTags).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("a truncated report can recover on its single larger retry", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "other", country: null, sourceId: "profile.fullName" },
+    ],
+  });
+  vi.mocked(client.chatWithTools).mockResolvedValueOnce({
+    toolCalls: [
+      {
+        id: "cut-off",
+        type: "function",
+        function: { name: "report_question_kinds", arguments: '{"tags":[' },
+      },
+    ],
+  });
+  const classify = createQuestionClassifier({ client, sources: () => [] });
+  const result = await classify(controls("Full name", []));
+  expect(result.get("Full name")?.answerTags?.sourceId).toBe(
+    "profile.fullName",
+  );
+  expect(result.get("Full name")?.readFailed).toBeUndefined();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(
+    vi
+      .mocked(client.chatWithTools)
+      .mock.calls.map((call) => call[2]?.maxOutputTokens),
+  ).toEqual([4000, 8000]);
+  await classify(controls("Full name", []));
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
@@ -173,7 +205,7 @@ test("gives a large page enough output budget to classify every question", async
   });
   expect(
     vi.mocked(client.chatWithTools).mock.calls[0]?.[2]?.maxOutputTokens,
-  ).toBe(4800);
+  ).toBe(7000);
 });
 
 test("returning to any step reuses each earlier question classification", async () => {
@@ -312,13 +344,17 @@ test("shared reads require the full same request and AI-client scope", async () 
 test("incomplete, failed and cancelled reads never become reusable model decisions", async () => {
   const cacheScope = {};
   const client = clientReplying([]);
-  await expect(
-    createQuestionClassifier({ client, cacheScope })(controls()),
-  ).rejects.toThrow("every question");
+  expect(
+    (await createQuestionClassifier({ client, cacheScope })(controls())).get(
+      "Pay",
+    )?.readFailed,
+  ).toBe(true);
   vi.mocked(client.chatWithTools).mockRejectedValueOnce(new Error("offline"));
-  await expect(
-    createQuestionClassifier({ client, cacheScope })(controls()),
-  ).rejects.toThrow("offline");
+  expect(
+    (await createQuestionClassifier({ client, cacheScope })(controls())).get(
+      "Pay",
+    )?.readFailed,
+  ).toBe(true);
   vi.mocked(client.chatWithTools).mockResolvedValue({
     toolCalls: [
       {
@@ -358,7 +394,7 @@ test("incomplete, failed and cancelled reads never become reusable model decisio
       controls(),
     ),
   ).rejects.toThrow("Stopped");
-  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(6);
 });
 
 test("bounds shared question reads and reads an evicted page with the model again", async () => {
@@ -447,7 +483,7 @@ test("a question left out of both lists is not taken as plain", async () => {
   const classify = createQuestionClassifier({
     client: clientReplyingSparse({ plainIndexes: [], flagged: [] }),
   });
-  await expect(classify(controls())).rejects.toThrow("every question");
+  expect((await classify(controls())).get("Pay")?.readFailed).toBe(true);
 });
 
 test("settled readings are offered only once every question has come back", async () => {

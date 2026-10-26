@@ -12,6 +12,7 @@ import {
   runAgentLoop,
   type AgentLoopFinish,
   type AgentLoopModel,
+  type AgentLoopResult,
   type AgentLoopTool,
   type AgentLoopToolOutcome,
 } from "@nestor/agent-runtime";
@@ -100,6 +101,8 @@ import type {
   ApplyPause,
   ApplyProposal,
 } from "./types";
+
+class QuestionReadUnavailableError extends Error {}
 
 const DEFAULT_MAX_STEPS = 200;
 // Long forms on a slow model took 16 minutes to reach the review step;
@@ -2418,6 +2421,41 @@ async function runMeasuredApplyAgent(
   const loopClient: LLMClient = {
     chatWithTools: async (messages, tools, options) => {
       await refreshReusableAnswers();
+      const observation = pageTools.state.observation;
+      if (classifyQuestions && observation) {
+        const readings = await classifyQuestions(
+          observation.controls,
+          JSON.stringify({
+            instructions: observation.ownWordsRequired
+              ? "In your own words"
+              : observation.bodyTextExcerpt,
+          }),
+        );
+        if ([...readings.values()].some((reading) => reading.readFailed)) {
+          const reason =
+            "Job Finder could not read the form's questions after two attempts. Complete them here or on the form.";
+          for (const control of observation.controls) {
+            if (
+              !control.visible ||
+              control.disabled ||
+              control.readOnly ||
+              control.kind === "file" ||
+              !questionPrompt(control)
+            )
+              continue;
+            const question = buildPendingQuestion({
+              control,
+              jobId: config.application.jobId,
+              detectedAt: now().toISOString(),
+              suggestion: null,
+              siblings: observation.controls,
+            });
+            question.note = reason;
+            pendingQuestions.set(pendingQuestionKey(control), question);
+          }
+          throw new QuestionReadUnavailableError(reason);
+        }
+      }
       return llmClient.chatWithTools(
         currentReusableAnswers === initialReusableAnswers
           ? messages
@@ -2596,12 +2634,28 @@ async function runMeasuredApplyAgent(
       : {}),
     ...(config.signal ? { signal: config.signal } : {}),
     now,
-  }).finally(async () => {
-    // Stop aborts the provider through the run's signal; cleanup still drains
-    // the local drafts if a page change left their writes unattempted.
-    runAbort.abort();
-    await Promise.allSettled(letterRequests.values());
-  });
+  })
+    .catch((error: unknown): AgentLoopResult => {
+      if (!(error instanceof QuestionReadUnavailableError)) throw error;
+      note(error.message);
+      return {
+        ending: "stopped",
+        reason: error.message,
+        finish: null,
+        stop: { reason: error.message },
+        steps: 0,
+        progressSteps: 0,
+        turnNotes: [],
+        messages: [],
+        timing: { totalMs: 0, modelMs: 0, toolMs: 0, modelTurns: 0 },
+      };
+    })
+    .finally(async () => {
+      // Stop aborts the provider through the run's signal; cleanup still drains
+      // the local drafts if a page change left their writes unattempted.
+      runAbort.abort();
+      await Promise.allSettled(letterRequests.values());
+    });
 
   for (const pause of pauses) {
     if (pause.code !== "document_needs_you") continue;

@@ -897,3 +897,39 @@ test("a motivation misreading cannot waive a language-of-choice preference", asy
   expect(s.fillText).not.toHaveBeenCalled();
   expect(check).not.toHaveBeenCalled();
 });
+
+test.each(["truncated", "unparseable"])(
+  "a %s question reading retries once then creates a visible handover",
+  async (failure) => {
+    const { runApplyAgent } = await import("./apply-agent");
+    const s = setup(field("Full name"));
+    s.config.modelQuestionClassification = true;
+    const client: LLMClient = {
+      chatWithTools: vi.fn<LLMClient["chatWithTools"]>((_messages, tools) => {
+        expect(tools[0]?.function.name).toBe("report_question_kinds");
+        return failure === "truncated"
+          ? Promise.reject(new Error("incomplete response: max_output_tokens"))
+          : Promise.resolve({
+              toolCalls: [
+                {
+                  id: "broken",
+                  type: "function",
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: '{"tags":[',
+                  },
+                },
+              ],
+            });
+      }),
+    };
+    const result = await runApplyAgent(s.config, client);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(s.fillText).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("paused");
+    const question = result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((question) => question.prompt === "Full name");
+    expect(question?.note).toContain("two attempts");
+  },
+);

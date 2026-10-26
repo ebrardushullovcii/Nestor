@@ -83,7 +83,7 @@ export async function checkClassifiedApplicationAnswers(input: {
         },
         controls,
         tags: reading?.answerTags,
-        approvedAttestations: input.approvedAttestations,
+        approvedAttestations: input.approvedAttestations ?? [],
         sources: input.sources,
         answer: answer.answer,
         pageInstructions: input.formContext.pageText,
