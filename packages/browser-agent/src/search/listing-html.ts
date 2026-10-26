@@ -43,8 +43,10 @@ function descendants(node: Node): Element[] {
     pending: Node[] = [];
   const pushChildren = (parent: Node) => {
     if (!("childNodes" in parent)) return;
-    for (let i = parent.childNodes.length - 1; i >= 0; i--)
-      if (element(parent.childNodes[i])) pending.push(parent.childNodes[i]);
+    for (let i = parent.childNodes.length - 1; i >= 0; i--) {
+      const child = parent.childNodes[i];
+      if (child && element(child)) pending.push(child);
+    }
   };
   pushChildren(node);
   while (pending.length) {
