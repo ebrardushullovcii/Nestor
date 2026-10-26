@@ -8,6 +8,7 @@ import {
 } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
+import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
 
 export interface WrittenAnswerCheck {
   supported: boolean;
@@ -42,12 +43,8 @@ function quoteMatches(value: unknown, quote: string, path: string): boolean {
     );
   if (typeof value === "number" || typeof value === "boolean")
     return path !== "" && quote === String(value);
-  if (!value || typeof value !== "object") return false;
-  try {
-    return JSON.stringify(JSON.parse(quote)) === JSON.stringify(value);
-  } catch {
-    return false;
-  }
+  // Containers never establish a claim. Cite the scalar field itself.
+  return false;
 }
 
 const EVIDENCE_INSTRUCTIONS =
@@ -283,7 +280,7 @@ export async function checkWrittenApplicationAnswers(input: {
         const proposedAnswer = input.answers[raw.index];
         if (!proposedAnswer) continue;
         const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
-        const verified =
+        const quotesVerified =
           evidence.length > 0 &&
           evidence.every((entry: unknown) => {
             if (!entry || typeof entry !== "object") return false;
@@ -319,6 +316,14 @@ export async function checkWrittenApplicationAnswers(input: {
               quote,
               item.path,
             );
+          });
+        const verified =
+          quotesVerified &&
+          evidenceFitsQuestion({
+            question: proposedAnswer.question,
+            answer: proposedAnswer.answer,
+            evidence: evidence as AnswerEvidence[],
+            applicant: evidenceSources.applicant,
           });
         const unsupportedEvidence = raw.supported && !verified;
         verdicts.set(raw.index, {

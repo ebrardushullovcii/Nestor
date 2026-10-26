@@ -1,0 +1,155 @@
+/** Deterministic relevance checks. A positive model verdict cannot override these. */
+export interface AnswerEvidence {
+  source: string;
+  path: string;
+  quote: string;
+}
+
+const normalize = (value: string) =>
+  value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\bjs\b/gu, "javascript")
+    .replace(/\bts\b/gu, "typescript")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+const scalar = (value: string) =>
+  /^(?:yes|no|true|false|[-+]?\d+(?:[.,]\d+)?\+?%?)$/iu.test(value.trim());
+const opinion = /\b(?:favou?rites?|prefer(?:ence|red|s)?|like[sd]?)\b/iu;
+
+function savedEvidence(
+  entry: AnswerEvidence,
+  applicant: unknown,
+): { question: string; answer: string } | null {
+  const match = /^\/savedAnswers\/(\d+)\/answer$/u.exec(entry.path);
+  if (
+    entry.source !== "applicant" ||
+    !match ||
+    !applicant ||
+    typeof applicant !== "object"
+  )
+    return null;
+  const saved = (applicant as Record<string, unknown>).savedAnswers;
+  const item: unknown = Array.isArray(saved) ? saved[Number(match[1])] : null;
+  if (!item || typeof item !== "object") return null;
+  const record = item as Record<string, unknown>;
+  return typeof record.question === "string" &&
+    typeof record.answer === "string"
+    ? { question: record.question, answer: record.answer }
+    : null;
+}
+
+function labelMatches(
+  question: string,
+  entry: AnswerEvidence,
+  applicant: unknown,
+): boolean {
+  const saved = savedEvidence(entry, applicant);
+  if (saved) return normalize(saved.question) === normalize(question);
+  if (entry.source !== "applicant" || !entry.path) return false;
+  const label =
+    entry.path.split("/").at(-1)?.replace(/~1/gu, "/").replace(/~0/gu, "~") ??
+    "";
+  const asked = normalize(question);
+  // Structured Profile fields have a fixed meaning. A repeated value such as
+  // No in an unrelated field is never evidence about prior employer history.
+  if (entry.path.startsWith("/workEligibility/")) {
+    if (/\b(?:previous|prior|before|worked|consulted)\b/iu.test(question))
+      return false;
+    const keys: Record<string, RegExp> = {
+      "Need visa sponsorship": /\bsponsor(?:ship)?\b/iu,
+      "Willing to relocate": /\brelocat\w*/iu,
+      "Willing to travel": /\btravel\w*/iu,
+      "Can work remotely": /\bremote\w*/iu,
+      "Notice period in days": /\bnotice\b/iu,
+      "Available start date": /\b(?:start date|available)\b/iu,
+      "Security clearance": /\bsecurity clearance\b/iu,
+    };
+    return keys[label]?.test(question) ?? false;
+  }
+  if (entry.path === "/yearsExperience")
+    return (
+      /\b(?:overall|total)\b/iu.test(question) && /\byears?\b/iu.test(question)
+    );
+  const words = normalize(label.replace(/([a-z])([A-Z])/gu, "$1 $2"));
+  return words.length > 2 && asked === words;
+}
+
+function skillYearClaim(
+  question: string,
+  answer: string,
+): { years: string; topics: string[] } | null {
+  const count =
+    /\b(\d+(?:\.\d+)?)\+?\s*(?:years?|yrs?)\b/iu.exec(answer)?.[1] ??
+    (/\byears?\b/iu.test(question) && /^\d+(?:\.\d+)?\+?$/u.test(answer.trim())
+      ? answer.replace(/\+$/u, "").trim()
+      : null);
+  if (!count) return null;
+  const text = normalize(/\byears?\b/iu.test(question) ? question : answer);
+  // Keep the subject words, rather than allowing a listed skill plus total
+  // career years to stand in for the duration of using that skill.
+  const ignored = new Set(
+    "a an the of in with using and or how many years year yrs experience experienced professional professionally overall total career work working have has do you your i me my specifically hands on for describe tell us about application questions relevant development software engineering engineer".split(
+      " ",
+    ),
+  );
+  const topics = text
+    .split(" ")
+    .filter((word) => !ignored.has(word) && !/^\d+$/u.test(word));
+  return topics.length ? { years: count, topics: [...new Set(topics)] } : null;
+}
+
+function quoteStatesSkillYears(
+  quote: string,
+  claim: { years: string; topics: string[] },
+): boolean {
+  return quote.split(/[;\n]|[.!?](?:\s|$)/u).some((clause) => {
+    if (/\b(?:overall|total|career)\b/iu.test(clause)) return false;
+    const text = normalize(clause);
+    return (
+      new RegExp(
+        `(?:^| )${claim.years.replace(".", "\\.")} (?:years?|yrs?)(?: |$)`,
+        "u",
+      ).test(text) &&
+      claim.topics.every((topic) => text.split(" ").includes(topic))
+    );
+  });
+}
+
+export function evidenceFitsQuestion(input: {
+  question: string;
+  answer: string;
+  evidence: readonly AnswerEvidence[];
+  applicant: unknown;
+}): boolean {
+  const { question, answer, evidence, applicant } = input;
+  const exactSaved = evidence.some((entry) => {
+    const saved = savedEvidence(entry, applicant);
+    return (
+      saved &&
+      normalize(saved.question) === normalize(question) &&
+      normalize(saved.answer) === normalize(answer)
+    );
+  });
+  if (opinion.test(question) || opinion.test(answer)) return exactSaved;
+  if (
+    scalar(answer) &&
+    !evidence.some(
+      (entry) =>
+        labelMatches(question, entry, applicant) &&
+        normalize(entry.quote) === normalize(answer),
+    )
+  )
+    return false;
+  const years = skillYearClaim(question, answer);
+  if (
+    years &&
+    !exactSaved &&
+    !evidence.some(
+      (entry) =>
+        entry.source !== "posting" && quoteStatesSkillYears(entry.quote, years),
+    )
+  )
+    return false;
+  return true;
+}
