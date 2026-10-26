@@ -6,6 +6,15 @@ import { validateApplication, escape } from "./forms.mjs";
 import { page, listing, detail, applyPage, editorial } from "./pages.mjs";
 
 export { moreSites };
+const uploadReplay = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../job-finder/apply-replays/attachment-upload.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
 const catalog = createCatalog(moreSites);
 const assets = new Map(
   ["client.js", "styles.css"].map((name) => [
@@ -37,10 +46,10 @@ export async function handleMoreSites(
           fileUploadHandle: {
             url: target.href,
             fields: {
-              acl: "private",
-              bucket: "replica-files",
-              Policy: "synthetic-policy",
-              "X-Amz-Signature": "synthetic-signature",
+              ...uploadReplay.fields,
+              Policy: Buffer.from(JSON.stringify(uploadReplay.policy)).toString(
+                "base64",
+              ),
             },
           },
         },

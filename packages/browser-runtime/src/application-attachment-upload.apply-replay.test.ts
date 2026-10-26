@@ -1,3 +1,4 @@
+import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
 import {
@@ -5,6 +6,10 @@ import {
   type AttachmentUploadWindow,
 } from "./application-attachment-upload-policy";
 
+const fields = {
+  ...replay.fields,
+  Policy: Buffer.from(JSON.stringify(replay.policy)).toString("base64"),
+};
 const bytes = new TextEncoder().encode("%PDF-1.4 synthetic selected resume");
 const grant: AttachmentUploadWindow = {
   sourceOrigin: "https://apply.example.test",
@@ -41,16 +46,13 @@ test("the selected file reaches a separate signed storage target, with no other 
     (
       await classifyAttachmentUpload(
         await multipart({
-          acl: "private",
-          bucket: "synthetic-files",
-          Policy: "synthetic-policy",
-          "X-Amz-Signature": "synthetic-signature",
+          ...fields,
         }),
       )
     ).allowed,
   ).toBe(true);
   const request = await multipart({
-    "X-Amz-Signature": "synthetic",
+    "X-Amz-Signature": fields["X-Amz-Signature"],
     email: "candidate@example.test",
   });
   expect((await classifyAttachmentUpload(request)).allowed).toBe(false);
@@ -60,7 +62,7 @@ test("the selected file reaches a separate signed storage target, with no other 
   expect(
     (
       await classifyAttachmentUpload({
-        ...(await multipart({ "X-Amz-Signature": "synthetic" })),
+        ...(await multipart({ "X-Amz-Signature": fields["X-Amz-Signature"] })),
         nowMs: 2001,
       })
     ).allowed,
@@ -69,7 +71,7 @@ test("the selected file reaches a separate signed storage target, with no other 
     (
       await classifyAttachmentUpload(
         await multipart(
-          { "X-Amz-Signature": "synthetic" },
+          { "X-Amz-Signature": fields["X-Amz-Signature"] },
           new Uint8Array(bytes.length),
           grant.fileName,
         ),
@@ -79,7 +81,11 @@ test("the selected file reaches a separate signed storage target, with no other 
   expect(
     (
       await classifyAttachmentUpload(
-        await multipart({ "X-Amz-Signature": "synthetic" }, bytes, "other.pdf"),
+        await multipart(
+          { "X-Amz-Signature": fields["X-Amz-Signature"] },
+          bytes,
+          "other.pdf",
+        ),
       )
     ).allowed,
   ).toBe(false);
@@ -128,6 +134,57 @@ test("a same-origin file-handle presign contains only upload metadata", async ()
     ).allowed,
   ).toBe(false);
 });
+
+test("Apply replay: the named second GraphQL operation cannot escape the inspected upload operation", async () => {
+  const body = new TextEncoder().encode(JSON.stringify(replay.refusedPresign));
+  expect(
+    (
+      await classifyAttachmentUpload({
+        window: grant,
+        nowMs: 1000,
+        method: "POST",
+        url: grant.sourceOrigin + "/api/non-user-graphql",
+        contentType: "application/json",
+        body,
+      })
+    ).allowed,
+  ).toBe(false);
+});
+
+test.each(replay.refusedMetadata)(
+  "Apply replay: prepared answers never ride in storage metadata: %j",
+  async (metadata) => {
+    const extra = Object.fromEntries(
+      Object.entries(metadata).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+    const request = await multipart({ ...fields, ...extra });
+    expect(
+      (
+        await classifyAttachmentUpload({
+          ...request,
+          preparedValues: replay.preparedAnswers,
+        })
+      ).allowed,
+    ).toBe(false);
+  },
+);
+
+test.each(replay.refusedPaths)(
+  "Apply replay: a file cannot disguise a final operation at %s",
+  async (path) => {
+    const request = await multipart(fields);
+    expect(
+      (
+        await classifyAttachmentUpload({
+          ...request,
+          url: grant.sourceOrigin + path,
+        })
+      ).allowed,
+    ).toBe(false);
+  },
+);
 test("a direct object upload must contain exactly the selected file, inside its window", async () => {
   const request = {
     window: grant,

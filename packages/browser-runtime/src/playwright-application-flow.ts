@@ -32,6 +32,7 @@ import {
 } from "./application-read-request-policy";
 import {
   classifyIntermediateMutationRequest,
+  FINAL_ACTION_SIGNAL,
   INTERMEDIATE_MUTATION_WINDOW_DURATION_MS,
   INTERMEDIATE_MUTATION_WINDOW_MAX_REQUESTS,
   type IntermediateMutationResourceKind,
@@ -285,9 +286,11 @@ export async function closePrepareOnlyFinalActionWindow(
  * Runs inside the application page. Keep this function self-contained because
  * Playwright serializes it before evaluation in the browser context.
  */
-export function installPrepareOnlyMutationGuardInPage(
-  intermediateMutationsAuthorized = false,
-): void {
+export function installPrepareOnlyMutationGuardInPage(guardInput: {
+  intermediateMutationsAuthorized: boolean;
+  finalActionSignal: string;
+}): void {
+  const { intermediateMutationsAuthorized } = guardInput;
   interface InternalGuardState extends PrepareOnlyGuardSnapshot {
     preparedValues: string[];
     intermediateMutationsAuthorized: boolean;
@@ -619,8 +622,7 @@ export function installPrepareOnlyMutationGuardInPage(
     const signal = `${parsedUrl.pathname} ${parsedUrl.search} ${
       input.bodyText ?? ""
     }`.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-    const finalActionSignal =
-      /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)/iu;
+    const finalActionSignal = new RegExp(guardInput.finalActionSignal, "iu");
     const intermediateActionSignal =
       /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
     if (
@@ -1352,10 +1354,10 @@ async function ensureFramePrepareOnlyMutationGuard(
   intermediateMutationsAuthorized: boolean,
   finalActionWindowOpen: boolean,
 ): Promise<PrepareOnlyGuardSnapshot> {
-  await frame.evaluate(
-    installPrepareOnlyMutationGuardInPage,
+  await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
-  );
+    finalActionSignal: FINAL_ACTION_SIGNAL.source,
+  });
   // A page handed to the person had its guard opened for them; a run that
   // takes the page back shuts it again unless its own send window is open.
   await frame.evaluate((open) => {
@@ -1491,6 +1493,7 @@ export async function ensurePrepareOnlyMutationGuard(
         url: request.url(),
         contentType: request.headers()["content-type"] ?? "",
         body: request.postDataBuffer(),
+        preparedValues: [...networkGuardState!.preparedValues],
       });
       if (attachment.allowed) {
         networkGuardState!.attachmentUploadWindow!.remainingRequests -= 1;
@@ -1542,7 +1545,10 @@ export async function ensurePrepareOnlyMutationGuard(
   ];
 
   if (!networkGuardState.initScriptInstalled) {
-    await page.addInitScript(installPrepareOnlyMutationGuardInPage, false);
+    await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
+      intermediateMutationsAuthorized: false,
+      finalActionSignal: FINAL_ACTION_SIGNAL.source,
+    });
     networkGuardState.initScriptInstalled = true;
   }
   if (!networkGuardState.serviceWorkerInitScriptInstalled) {

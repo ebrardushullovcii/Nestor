@@ -53,7 +53,7 @@ const ALLOWED_RESOURCE_KINDS = new Set<IntermediateMutationResourceKind>([
   "xhr",
 ]);
 
-const FINAL_ACTION_SIGNAL =
+export const FINAL_ACTION_SIGNAL =
   /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)/iu;
 const INTERMEDIATE_ACTION_SIGNAL =
   /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;

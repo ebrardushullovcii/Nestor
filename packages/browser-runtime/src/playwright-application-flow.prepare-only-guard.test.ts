@@ -1,3 +1,4 @@
+import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -19,6 +20,7 @@ import {
   openPrepareOnlyIntermediateMutationWindow,
   readServiceWorkerRegisterGuardInPage,
   registerPrepareOnlyPreparedValueInPage,
+  registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
 import {
   armPlaywrightApplicationFormAction,
@@ -560,10 +562,10 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
             fileUploadHandle: {
               url: storage.baseUrl + "/",
               fields: {
-                acl: "private",
-                bucket: "synthetic-files",
-                Policy: "synthetic-policy",
-                "X-Amz-Signature": "synthetic-signature",
+                ...replay.fields,
+                Policy: Buffer.from(JSON.stringify(replay.policy)).toString(
+                  "base64",
+                ),
               },
             },
           },
@@ -613,6 +615,64 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       );
       expect(uploads).toHaveLength(1);
       expect(uploads[0]!.body).toContain(new TextDecoder().decode(bytes));
+      await registerPrepareOnlyPreparedValue(page, "90000");
+      for (const attack of [
+        "multiple_operations",
+        "metadata_answer",
+        ...replay.refusedPaths,
+      ]) {
+        await openPrepareOnlyAttachmentUploadWindow(page, {
+          name: "synthetic-resume.pdf",
+          mimeType: "application/pdf",
+          bytes,
+        });
+        const forwarded = await page.evaluate(
+          async ({ attack, origin, fields, presign }) => {
+            try {
+              if (attack === "multiple_operations")
+                await fetch("/api/non-user-graphql", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify(presign),
+                });
+              else {
+                const body = new FormData();
+                const input = document.getElementById(
+                  "resume",
+                ) as HTMLInputElement;
+                body.set("file", input.files![0]!);
+                for (const [key, value] of Object.entries(fields))
+                  body.set(key, value);
+                if (attack === "metadata_answer")
+                  body.set("key", "uploads/salary_expectation_90000");
+                await fetch(
+                  origin + (attack === "metadata_answer" ? "/" : attack),
+                  { method: "POST", body },
+                );
+              }
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          {
+            attack,
+            origin: storage.baseUrl,
+            fields: {
+              ...replay.fields,
+              Policy: Buffer.from(JSON.stringify(replay.policy)).toString(
+                "base64",
+              ),
+            },
+            presign: replay.refusedPresign,
+          },
+        );
+        expect(forwarded).toBe(false);
+      }
+      expect(requestHitsFor(site.hits, "/api/non-user-graphql")).toHaveLength(
+        1,
+      );
+      expect(requestHitsFor(storage.hits, "/")).toHaveLength(1);
       for (const request of [
         {
           path: "/api/application/submit",

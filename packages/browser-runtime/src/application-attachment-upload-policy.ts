@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import { FINAL_ACTION_SIGNAL as finalSignal } from "./application-intermediate-mutation-policy";
+import {
+  carriesPreparedValue,
+  requestUrlCarriesPreparedValue,
+} from "./application-read-request-policy";
 
 export interface AttachmentUploadWindow {
   sourceOrigin: string;
@@ -12,10 +17,27 @@ export interface AttachmentUploadWindow {
 
 const uploadSignal =
   /(?:^|[^a-z0-9])(?:uploads?|attachments?|files?|objects?|blobs?|storage|documents?)(?:[^a-z0-9]|$)/iu;
-const finalSignal =
-  /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|register|create\s*(?:application|account|user)|apply\s*(?:to\s*job|now)|send\s*application)(?:[^a-z0-9]|$)/iu;
 const splitCase = (value: string) =>
   value.replace(/([a-z0-9])([A-Z])/gu, "$1 $2");
+
+function containsPreparedAnswer(
+  text: string,
+  answers: readonly string[],
+): boolean {
+  if (carriesPreparedValue(text, answers)) return true;
+  const compact = (value: string) =>
+    value
+      .normalize("NFKC")
+      .toLocaleLowerCase("en")
+      .replace(/[^\p{L}\p{N}]/gu, "");
+  const haystack = compact(text);
+  return answers.some((answer) => {
+    const needle = compact(answer);
+    return needle.length >= 3
+      ? haystack.includes(needle)
+      : text === answer.trim();
+  });
+}
 
 function uploadMetadata(
   value: unknown,
@@ -59,7 +81,8 @@ function presignRequest(body: string, grant: AttachmentUploadWindow): boolean {
     ) ?? [];
   let depth = 0,
     args = 0,
-    roots = 0;
+    roots = 0,
+    complete = false;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (token.startsWith("#")) continue;
@@ -77,7 +100,12 @@ function presignRequest(body: string, grant: AttachmentUploadWindow): boolean {
     }
     if (token === "}") {
       depth--;
-      if (depth === 0) break;
+      if (depth === 0) {
+        if (tokens.slice(i + 1).some((token) => !token.startsWith("#")))
+          return false;
+        complete = true;
+        break;
+      }
       continue;
     }
     if (depth === 0) continue;
@@ -99,7 +127,122 @@ function presignRequest(body: string, grant: AttachmentUploadWindow): boolean {
       return false;
     roots++;
   }
-  return roots === 1;
+  return complete && roots === 1;
+}
+
+function storageMetadata(
+  key: string,
+  value: string,
+  grant: AttachmentUploadWindow,
+  sameOrigin: boolean,
+): boolean {
+  switch (key.toLowerCase()) {
+    case "key":
+      return /^(?:[\w./!()'*-]|%[\da-f]{2}|\$\{filename\}){1,1024}$/iu.test(
+        value,
+      );
+    case "acl":
+      return [
+        "private",
+        "public-read",
+        "authenticated-read",
+        "bucket-owner-read",
+        "bucket-owner-full-control",
+      ].includes(value);
+    case "bucket":
+      return /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(value);
+    case "content-type":
+      return value === grant.mimeType;
+    case "filename":
+    case "file_name":
+      return value === grant.fileName;
+    case "size":
+    case "file_size":
+      return value === String(grant.byteLength);
+    case "success_action_status":
+      return ["200", "201", "204"].includes(value);
+    case "x-amz-algorithm":
+      return value === "AWS4-HMAC-SHA256";
+    case "x-goog-algorithm":
+      return /^(?:GOOG4-RSA-SHA256|GOOG4-HMAC-SHA256)$/u.test(value);
+    case "x-amz-date":
+    case "x-goog-date":
+      return /^\d{8}T\d{6}Z$/u.test(value);
+    case "x-amz-signature":
+      return /^[\da-f]{64}$/iu.test(value);
+    case "x-goog-signature":
+      return /^[\da-f]{64,1024}$/iu.test(value);
+    case "x-amz-credential":
+      return /^[A-Z\d]{8,64}\/\d{8}\/[a-z\d-]+\/s3\/aws4_request$/u.test(value);
+    case "x-goog-credential":
+      return /^[\w.+-]+@[\w.-]+\/\d{8}\/[\w-]+\/storage\/goog4_request$/u.test(
+        value,
+      );
+    case "x-amz-security-token":
+      return /^[\w+/=-]{16,8192}$/u.test(value);
+    case "policy": {
+      if (!/^[A-Za-z\d+/]+={0,2}$/u.test(value) || value.length < 16)
+        return false;
+      let policy: unknown;
+      try {
+        policy = JSON.parse(Buffer.from(value, "base64").toString("utf8"));
+      } catch {
+        return false;
+      }
+      if (!policy || typeof policy !== "object" || Array.isArray(policy))
+        return false;
+      const record = policy as Record<string, unknown>;
+      if (
+        typeof record.expiration !== "string" ||
+        !Number.isFinite(Date.parse(record.expiration)) ||
+        !Array.isArray(record.conditions)
+      )
+        return false;
+      return (
+        Object.keys(record).every((key) =>
+          ["expiration", "conditions"].includes(key),
+        ) &&
+        record.conditions.every((condition: unknown) => {
+          if (Array.isArray(condition)) {
+            if (condition[0] === "content-length-range")
+              return (
+                condition.length === 3 &&
+                typeof condition[1] === "number" &&
+                typeof condition[2] === "number"
+              );
+            return (
+              condition.length === 3 &&
+              ["eq", "starts-with"].includes(String(condition[0])) &&
+              typeof condition[1] === "string" &&
+              /^\$(?:key|bucket|acl|Content-Type|x-amz-[\w-]+|x-goog-[\w-]+)$/iu.test(
+                condition[1],
+              ) &&
+              typeof condition[2] === "string" &&
+              !/\s/u.test(condition[2])
+            );
+          }
+          return (
+            !!condition &&
+            typeof condition === "object" &&
+            Object.entries(condition).every(
+              ([name, item]) =>
+                name.toLowerCase() !== "policy" &&
+                typeof item === "string" &&
+                storageMetadata(name, item, grant, false),
+            )
+          );
+        })
+      );
+    }
+    case "csrf_token":
+    case "csrftoken":
+    case "csrfmiddlewaretoken":
+    case "_csrftoken":
+    case "authenticity_token":
+      return sameOrigin && /^[\w+/=-]{16,4096}$/u.test(value);
+    default:
+      return false;
+  }
 }
 
 /** No form answers: one exact selected file and bounded upload metadata only. */
@@ -110,6 +253,7 @@ export async function classifyAttachmentUpload(input: {
   url: string;
   contentType: string;
   body: Uint8Array | null;
+  preparedValues?: readonly string[];
 }): Promise<{ allowed: boolean; containsFile: boolean }> {
   const multipart = /\bmultipart\/form-data\b/iu.test(input.contentType);
   const binary =
@@ -134,6 +278,10 @@ export async function classifyAttachmentUpload(input: {
     return denied;
   }
   if (!["https:", "http:"].includes(url.protocol)) return denied;
+  const preparedAnswers = (input.preparedValues ?? []).filter(
+    (value) => value !== grant.fileName,
+  );
+  if (requestUrlCarriesPreparedValue(url.href, preparedAnswers)) return denied;
   let signal: string;
   try {
     signal = splitCase(decodeURIComponent(url.pathname + url.search));
@@ -180,12 +328,21 @@ export async function classifyAttachmentUpload(input: {
       return { allowed: false, containsFile: files.length > 0 };
     for (const [key, value] of form) {
       if (typeof value !== "string") continue;
-      // Tokens/keys are upload transport metadata, never candidate answers.
+      // Storage signing fields have constrained values. They are never an
+      // escape hatch for a form answer, including inside a decoded policy.
+      const decoded =
+        key.toLowerCase() === "policy"
+          ? Buffer.from(value, "base64").toString("utf8")
+          : value;
       if (
-        !/^(?:_?csrf(?:middleware)?token|authenticity_token|token|policy|key|acl|bucket|content-type|filename|file_name|file_size|size|success_action_status|x-amz-[\w-]+|x-goog-[\w-]+)$/iu.test(
+        !storageMetadata(
           key,
+          value,
+          grant,
+          url.origin === grant.sourceOrigin,
         ) ||
         value.length > 8192 ||
+        containsPreparedAnswer(decoded, preparedAnswers) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
         return { allowed: false, containsFile: true };
