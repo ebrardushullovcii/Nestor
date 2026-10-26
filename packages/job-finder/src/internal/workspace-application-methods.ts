@@ -1,3 +1,4 @@
+import { readWorkspaceApplicationAnswers } from "./workspace-application-answer-execution";
 import { jobSiteTarget } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -1770,6 +1771,7 @@ export function createWorkspaceApplicationMethods(
               )
             : null;
           const applyInstructions = uniqueStrings([
+            provenanceSite?.customInstructions ?? "",
             ...buildInstructionGuidance(activeInstruction),
             ...recoverySeed.recoveryInstructions,
           ]);

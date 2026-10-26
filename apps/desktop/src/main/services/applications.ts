@@ -179,12 +179,19 @@ export async function startApplicationService(
     authorityRepository: repository,
     candidateAssets: getCandidateAssetLibrary(),
     readInputs: async () => {
-      const [profile, settings, searchPreferences] = await Promise.all([
-        repository.getProfile(),
-        repository.getSettings(),
-        repository.getSearchPreferences(),
-      ]);
-      return { profile, settings, searchPreferences };
+      const [profile, settings, searchPreferences, sourceInstructionArtifacts] =
+        await Promise.all([
+          repository.getProfile(),
+          repository.getSettings(),
+          repository.getSearchPreferences(),
+          repository.listSourceInstructionArtifacts(),
+        ]);
+      return {
+        profile,
+        settings,
+        searchPreferences,
+        sourceInstructionArtifacts,
+      };
     },
     isPaused: async () => (await repository.getActivityControl()).paused,
     authorizeSending,
