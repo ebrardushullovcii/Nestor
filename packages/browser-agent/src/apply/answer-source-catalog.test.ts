@@ -250,6 +250,110 @@ test.each([
   ).toBe("literal");
 });
 
+test("a saved negative authorization answer asserts no compatibility with the permit", () => {
+  const sources = source();
+  sources.profile.workEligibility.limitedWorkPermissions = [
+    {
+      country: "United Kingdom",
+      conditions: "Maximum 20 hours per week",
+      requiresFutureSponsorship: false,
+    },
+  ];
+  sources.posting.description = "This role requires 40 hours per week.";
+  const field = control("Are you authorized to work in the UK?");
+  sources.reusableAnswers = [
+    {
+      id: "legal",
+      question: field.label,
+      label: field.label,
+      kind: "other",
+      answer: "No",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  const tags = {
+    kind: "work_auth",
+    country: "GB",
+    sourceId: "answerLibrary.legal",
+  } as const;
+  expect(decide(sources, field, tags, "No").kind).toBe("literal");
+  sources.reusableAnswers[0].answer = "Yes";
+  expect(decide(sources, field, tags).kind).toBe("needs_you");
+});
+
+test.each([
+  ["Start date (MM/YYYY)", "January 2024", "01/2024", "literal"],
+  ["Start date (DD/MM/YYYY)", "2024-01-15", "15/01/2024", "literal"],
+  ["Start date (DD/MM/YYYY)", "January 2024", "01/01/2024", "needs_you"],
+  ["Start date (MM/YYYY)", "2024-01-15", "2024-01-15", "needs_you"],
+  ["Start date (DD/MM/YYYY)", "2024-01-15", "01/15/2024", "needs_you"],
+])(
+  "recorded dates keep precision and the requested format: %s",
+  (label, recorded, answer, expected) => {
+    const sources = source();
+    sources.profile = CandidateProfileSchema.parse({
+      ...sources.profile,
+      experiences: [
+        {
+          id: "job",
+          companyName: "Example",
+          title: "Engineer",
+          startDate: recorded,
+        },
+      ],
+    });
+    const field = { ...control(label), groupLabel: "Employment history" };
+    expect(
+      decide(
+        sources,
+        field,
+        {
+          kind: "other",
+          country: null,
+          sourceId: "profile.experiences.job.startDate",
+        },
+        answer,
+      ).kind,
+    ).toBe(expected);
+  },
+);
+
+test("only a classified, fact-free motivation can proceed without a source", () => {
+  const sources = source(),
+    field = control("Why do you want to join us?");
+  const tags = { kind: "motivation", country: null, sourceId: null } as const;
+  expect(
+    decide(sources, field, tags, "I am excited about this opportunity.").kind,
+  ).toBe("writing");
+  expect(
+    decide(
+      sources,
+      field,
+      tags,
+      "I am excited about already holding a valid driving licence.",
+    ).kind,
+  ).toBe("needs_you");
+  expect(
+    decide(
+      sources,
+      field,
+      { ...tags, kind: "preference" },
+      "I am excited about this opportunity.",
+    ).kind,
+  ).toBe("needs_you");
+  expect(
+    classifyAnswerPermission({
+      control: field,
+      controls: [field],
+      tags,
+      sources,
+      answer: "I am excited about this opportunity.",
+      pageInstructions: "Write this yourself",
+    }).kind,
+  ).toBe("needs_you");
+});
+
 test.each([
   ["City", "profile.currentCity", "London"],
   ["Country of residence", "profile.currentCountry", "Germany"],

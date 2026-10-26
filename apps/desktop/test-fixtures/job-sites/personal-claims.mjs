@@ -15,7 +15,22 @@ export function handlePersonalClaims(req, res, url, { send }) {
     send(405, "This fixture is fill-only.");
     return true;
   }
-  if (url.pathname === "/personal-claims/apply/github-format") {
+  if (url.pathname === "/personal-claims/apply/answer-formats") {
+    send(
+      200,
+      `<!doctype html><title>Apply — Synthetic Workshop</title>
+      <h1>Engineer — Synthetic Workshop</h1><form>
+      <label>Full name<input name="name" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Are you authorized to work in the UK?<select name="authorization" required><option value="">Choose</option><option>Yes</option><option>No</option></select></label>
+      <fieldset><legend>Employment history</legend>
+      <label>Company<input name="employer" required></label>
+      <label>Start date (MM/YYYY)<input name="start" placeholder="MM/YYYY" required></label>
+      <label>End date (DD/MM/YYYY)<input name="end" placeholder="DD/MM/YYYY" required></label>
+      </fieldset><label>Why do you want to join us?<textarea name="motivation" placeholder="One short sentence, for example: I am excited about this opportunity." required></textarea></label>
+      <button>Send application</button></form>`,
+    );
+  } else if (url.pathname === "/personal-claims/apply/github-format") {
     send(
       200,
       `<!doctype html><title>Apply — Synthetic Workshop</title>

@@ -9,6 +9,7 @@ import {
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
+import { isPlainMotivationIntent } from "./concrete-answer-claims";
 import { OWN_WORDS_REASON, ownWordsAppliesToQuestion } from "./own-words";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { normalizeSignal } from "./control-classification";
@@ -347,7 +348,8 @@ export async function checkWrittenApplicationAnswers(input: {
         if (!proposedAnswer) continue;
         const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
         const quotesVerified =
-          evidence.length > 0 &&
+          (evidence.length > 0 ||
+            isPlainMotivationIntent(proposedAnswer.answer)) &&
           evidence.every((entry: unknown) => {
             if (!entry || typeof entry !== "object") return false;
             const item = entry as Record<string, unknown>;

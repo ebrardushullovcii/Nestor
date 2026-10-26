@@ -126,13 +126,20 @@ const writingGlue = new Set(
     "role position team company work working join joining build building help helping " +
     "apply applying bring bringing use using used develop developing support supporting " +
     "reliable dependable meaningful thoughtful strong stronger good great well " +
-    "because about through into together also especially aligns aligns alignment"
+    "because about through into together also especially aligns aligns alignment involves involving"
   ).split(/\s+/u),
 );
 function contentWords(text: string): string[] {
   return normalize(text)
     .split(" ")
     .filter((word) => word && !writingGlue.has(word));
+}
+
+/** Complete statements of intent only: no qualifications, history or named facts. */
+export function isPlainMotivationIntent(text: string): boolean {
+  return /^I (?:am (?:excited|interested|motivated) (?:about|in|by) (?:this|the) (?:opportunity|role|position)|am excited to (?:help|contribute)|(?:would like|hope|want) to (?:help|contribute|join your team)|would welcome the opportunity to (?:help|contribute))[.!]?$/iu.test(
+    text.trim(),
+  );
 }
 
 /** Concrete claims must be in the cited text, even when the checker lies about support. */
@@ -143,6 +150,7 @@ export function concreteClaimsSupported(
   for (const clause of answer.split(
     /(?<=[.!?])\s+|\n|\b(?:and|but)\s+(?=I\b|I['’]|would\b|hope\b|want\b)/gu,
   )) {
+    if (isPlainMotivationIntent(clause)) continue;
     const personalHistory =
       /\b(?:led|worked|managed|built|delivered|earned|achieved|spent|graduated|founded|employed)\b|\bmy\s+(?:experience|work|career|time|tenure)\b/iu.test(
         clause,

@@ -758,7 +758,9 @@ async function decideAnswer(input: {
         provenanceLabel: "written for this application",
         groundedIn: input.groundedIn?.length
           ? [...input.groundedIn]
-          : [permission.source.id],
+          : permission.source
+            ? [permission.source.id]
+            : [],
       },
     };
     // Only requested writing reaches the independent claim checker below.

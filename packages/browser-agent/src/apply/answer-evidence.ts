@@ -99,14 +99,41 @@ export function employmentMonthEvidence(
   answer: string,
   evidence: readonly AnswerEvidence[],
 ): boolean | null {
-  if (!/^\d{4}-\d{2}(?:-\d{2})?$/u.test(answer)) return null;
+  const iso = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/u.exec(answer);
+  const dayFirst = /^(\d{2})\/(\d{2})\/(\d{4})$/u.exec(answer);
+  const monthFirst = /^(\d{2})\/(\d{4})$/u.exec(answer);
+  if (!iso && !dayFirst && !monthFirst) return null;
   const asked = normalize(question).replace(/ optional$/u, "");
-  const field = /\b(?:from|start (?:date|month))(?: mm yyyy)?$/u.test(asked)
+  const label = asked.replace(
+    /\s+(?:dd mm yyyy|mm yyyy|yyyy mm dd|yyyy mm)$/u,
+    "",
+  );
+  const field = /\b(?:from|start (?:date|month))$/u.test(label)
     ? "startDate"
-    : /\b(?:to|end (?:date|month))(?: mm yyyy)?$/u.test(asked)
+    : /\b(?:to|end (?:date|month))$/u.test(label)
       ? "endDate"
       : null;
   if (!field) return null;
+  const format = /\b(dd mm yyyy|mm yyyy|yyyy mm dd|yyyy mm)$/u.exec(asked)?.[1];
+  const actualFormat = dayFirst
+    ? "dd mm yyyy"
+    : monthFirst
+      ? "mm yyyy"
+      : iso?.[3]
+        ? "yyyy mm dd"
+        : "yyyy mm";
+  if ((dayFirst || monthFirst || format) && format !== actualFormat)
+    return false;
+  const year = iso?.[1] ?? dayFirst?.[3] ?? monthFirst?.[2];
+  const month = iso?.[2] ?? dayFirst?.[2] ?? monthFirst?.[1];
+  const day = iso?.[3] ?? dayFirst?.[1];
+  const canonical = `${year}-${month}${day ? `-${day}` : ""}`;
+  const date = new Date(`${year}-${month}-${day ?? "01"}T00:00:00Z`);
+  if (
+    !Number.isFinite(date.valueOf()) ||
+    date.toISOString().slice(0, 10) !== `${year}-${month}-${day ?? "01"}`
+  )
+    return false;
   const months =
     "january february march april may june july august september october november december".split(
       " ",
@@ -121,15 +148,12 @@ export function employmentMonthEvidence(
       return false;
     const quote = entry.quote.trim();
     if (/^\d{4}-\d{2}(?:-\d{2})?$/u.test(quote))
-      return (
-        quote === answer ||
-        (answer.length === 7 && quote.startsWith(answer + "-"))
-      );
+      return quote === canonical || (!day && quote.startsWith(canonical + "-"));
     const match = /^([a-z]+)\s+(\d{4})$/iu.exec(quote);
     if (!match) return false;
     const month = months.indexOf((match[1] ?? "").toLowerCase()) + 1;
     return (
-      month > 0 && answer === `${match[2]}-${String(month).padStart(2, "0")}`
+      month > 0 && canonical === `${match[2]}-${String(month).padStart(2, "0")}`
     );
   });
 }
@@ -227,6 +251,7 @@ export function evidenceFitsQuestion(input: {
   if (requiresSavedNationalityAnswer(question)) return exactSaved;
   if (requiresSavedOpinionAnswer(question, answer)) return exactSaved;
   if (exactSaved) return true;
+  if (isPlainMotivationIntent(answer)) return motivation.test(question);
   // A numeric day count may be displayed with its source field's explicit unit.
   const noticeDays = /^(\d+) days?$/iu.exec(answer.trim());
   if (
@@ -286,4 +311,5 @@ export function evidenceFitsQuestion(input: {
 import {
   authorizationCountryMatches,
   concreteClaimsSupported,
+  isPlainMotivationIntent,
 } from "./concrete-answer-claims";
