@@ -592,7 +592,9 @@ test.each([22000, 33000, 32000])(
         ),
       ).toBe(false);
       const savedProfile = await repository.getProfile();
-      await vi.advanceTimersByTimeAsync(93001 - coreMs);
+      // Optional evidence starts when a core slot becomes free; its own read
+      // still gets all 93 seconds and must be retained after completion.
+      await vi.advanceTimersByTimeAsync(93001);
       await vi.advanceTimersByTimeAsync(0);
       expect(evidenceCalls).toBe(1);
       expect(
@@ -809,3 +811,126 @@ test("evidence appears before a slow visual scan and survives its later save", a
     ),
   ).toBe(true);
 });
+
+test.each([true, false])(
+  "admits core reads first and retains optional evidence (late: %s)",
+  async (late) => {
+    const ai = createAiClient();
+    const stages = [
+      "identity_summary",
+      "experience",
+      "background",
+      "shared_memory",
+    ] as const;
+    const releases = new Map<string, () => void>();
+    const gates = new Map(
+      stages.map((stage) => [
+        stage,
+        new Promise<void>((resolve) => releases.set(stage, resolve)),
+      ]),
+    );
+    const started: string[] = [];
+    let active = 0,
+      peak = 0;
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      aiClient: {
+        ...ai,
+        getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
+        extractResumeImportStage: async (input) => {
+          started.push(input.stage);
+          active++;
+          peak = Math.max(peak, active);
+          await gates.get(input.stage);
+          active--;
+          return {
+            stage: input.stage,
+            analysisProviderKind: "openai_compatible",
+            analysisProviderLabel: "Controlled model",
+            notes: [],
+            candidates:
+              input.stage === "identity_summary"
+                ? [
+                    createStageCandidate({
+                      target: {
+                        section: "identity",
+                        key: "fullName",
+                        recordId: null,
+                      },
+                      label: "Name",
+                      value: seed.profile.fullName,
+                      confidence: 0.95,
+                      overall: 0.95,
+                      sourceBlockIds: [bundle.blocks[0]!.id],
+                    }),
+                  ]
+                : input.stage === "shared_memory"
+                  ? [
+                      createStageCandidate({
+                        target: {
+                          section: "proof_point",
+                          key: "record",
+                          recordId: "queued_evidence",
+                        },
+                        label: "Delivered work",
+                        value: {
+                          title: "Delivered work",
+                          claim: "Delivered work on time",
+                        },
+                        confidence: 0.95,
+                        overall: 0.95,
+                        sourceBlockIds: [bundle.blocks[0]!.id],
+                      }),
+                    ]
+                  : [],
+          };
+        },
+      },
+    });
+    const importing = workspaceService.runResumeImport({
+      baseResume: {
+        ...seed.profile.baseResume,
+        textContent: seed.profile.fullName,
+      },
+      documentBundle: { ...bundle, fullText: seed.profile.fullName },
+    });
+    await vi.waitFor(() =>
+      expect(started).toEqual(["identity_summary", "experience", "background"]),
+    );
+    expect(peak).toBe(3);
+    releases.get("background")!();
+    await vi.waitFor(() => expect(started).toEqual([...stages]));
+    if (!late) {
+      releases.get("shared_memory")!();
+      await vi.waitFor(() => expect(active).toBe(2));
+    }
+    releases.get("identity_summary")!();
+    releases.get("experience")!();
+    const result = await importing;
+    expect(result.profile.fullName).toBe(seed.profile.fullName);
+    expect(
+      result.latestResumeImportRun?.timing?.textStages.map(
+        (stage) => stage.stage,
+      ),
+    ).toEqual(
+      late ? ["identity_summary", "experience", "background"] : [...stages],
+    );
+    if (late) releases.get("shared_memory")!();
+    await vi.waitFor(async () =>
+      expect(
+        (
+          await repository.listResumeImportFieldCandidates({
+            runId: result.latestResumeImportRun!.id,
+          })
+        ).some((candidate) => candidate.target.recordId === "queued_evidence"),
+      ).toBe(true),
+    );
+    expect(
+      (await repository.getLatestResumeImportRun())?.timing?.textStages.some(
+        (stage) =>
+          stage.stage === "shared_memory" && stage.status === "completed",
+      ),
+    ).toBe(true);
+    expect(peak).toBe(3);
+    expect(started).toHaveLength(4);
+  },
+);

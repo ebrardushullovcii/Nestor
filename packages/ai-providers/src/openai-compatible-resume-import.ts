@@ -27,6 +27,26 @@ const ADJUDICATION_CANDIDATE_LIMIT = 24;
 const POST_ADJ_NORMALIZATION_RISK = 0.1;
 const POST_ADJ_CONFLICT_RISK = 0.34;
 
+/** Omitted saved fields mean empty/unknown; explicit false and zero remain facts. */
+function compactSavedContext(value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    const entries = value
+      .map(compactSavedContext)
+      .filter((entry) => entry !== undefined);
+    return entries.length ? entries : undefined;
+  }
+  if (typeof value === "object") {
+    const entries: [string, unknown][] = [];
+    for (const [key, item] of Object.entries(value)) {
+      const compact = compactSavedContext(item);
+      if (compact !== undefined) entries.push([key, compact]);
+    }
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+  return value;
+}
+
 function toStringArray(value: unknown): string[] {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -135,9 +155,66 @@ function normalizeTarget(
   };
 }
 
-function normalizeCandidate(
+/** Private model-wire form. The stored candidate schema stays unchanged. */
+function expandCompactCandidate(
   value: unknown,
+  blocks: readonly { id: string; text: string }[],
+): unknown {
+  if (!Array.isArray(value)) return value;
+  if (value.length < 4 || value.length > 5) return undefined;
+  const [targetValue, canonical, rawIds, confidence, extra] =
+    value as unknown[];
+  const target = normalizeTarget(targetValue);
+  if (
+    !target ||
+    !Array.isArray(rawIds) ||
+    !rawIds.every(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    ) ||
+    typeof confidence !== "number" ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1 ||
+    (extra !== undefined &&
+      (!extra || typeof extra !== "object" || Array.isArray(extra)))
+  )
+    return undefined;
+  const metadata = (extra ?? {}) as Record<string, unknown>;
+  const sourceBlockIds = [...new Set(rawIds)];
+  const byId = new Map(blocks.map((block) => [block.id, block.text]));
+  if (sourceBlockIds.some((id) => !byId.has(id))) return undefined;
+  const explicitQuote =
+    typeof metadata.evidenceText === "string" && metadata.evidenceText.trim()
+      ? metadata.evidenceText
+      : null;
+  if (!sourceBlockIds.length && !explicitQuote) return undefined;
+  const labelKey = target.key === "record" ? target.section : target.key;
+  const label = labelKey
+    .replace(/([a-z])([A-Z])/gu, "$1 $2")
+    .replace(/_/gu, " ")
+    .toLowerCase();
+  return {
+    ...metadata,
+    target,
+    value: canonical,
+    label:
+      typeof metadata.label === "string"
+        ? metadata.label
+        : label[0]!.toUpperCase() + label.slice(1),
+    confidence,
+    sourceBlockIds,
+    // Source text is bookkeeping: copy the model-cited blocks verbatim,
+    // without parsing their meaning or inventing any candidate value.
+    evidenceText:
+      explicitQuote ?? sourceBlockIds.map((id) => byId.get(id)!).join("\n"),
+  };
+}
+
+function normalizeCandidate(
+  raw: unknown,
+  blocks: readonly { id: string; text: string }[],
 ): ResumeImportFieldCandidateDraft | undefined {
+  const value = expandCompactCandidate(raw, blocks);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -201,7 +278,7 @@ export function buildResumeImportStageInstructions(
         "Prefer literal values from the document over inferred rewrites.",
         "Identify the person from the contact header beside their email, phone or address, before considering later sections. A job title, volunteer role, degree or section heading is never a person name. Use the contact-header name as evidence for fullName, firstName and lastName; abstain if it is unclear.",
         "Only return currentLocation when the blocks show an address or a short location label, not a narrative sentence. Also return location.currentCity, location.currentRegion and location.currentCountry separately, using null for an absent region. A country is not a state or region. Normalize country names to English, for example Deutschland to Germany; Copenhagen, Denmark has city Copenhagen, region null and country Denmark.",
-        'Each candidate target must be an object like {"section":"identity","key":"fullName","recordId":null}, not a string.',
+        'Write targets as "section.key" or "section.key.recordId", for example "identity.fullName". Keep any record id exactly as supplied for an existing record.',
       ].join(" ");
     case "experience":
       return [
@@ -276,8 +353,10 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       "You extract structured resume import candidates from parsed document blocks.",
       'Return JSON only, as one object: {"candidates":[...],"notes":[...]}. Never return a bare candidate or a bare array.',
       "Use only the provided document as evidence.",
-      "Each candidate must include target, label, value, normalizedValue when helpful, evidenceText, sourceBlockIds, confidence, notes, and alternatives.",
-      'Example response: {"candidates":[{"target":{"section":"identity","key":"fullName","recordId":null},"label":"Full name","value":"Jane Doe","normalizedValue":"Jane Doe","evidenceText":"Jane Doe","sourceBlockIds":["block_1"],"confidence":0.98,"notes":[],"alternatives":[]}],"notes":[]}',
+      "Return each candidate as [target, value, sourceBlockIds, confidence], with an optional fifth metadata object. Target is section.key or section.key.recordId; confidence is between 0 and 1. Existing candidate objects remain accepted.",
+      "Return the grounded canonical value once. Cite the exact sourceBlockIds; their complete text is retained verbatim as evidence, so do not repeat it. Metadata can supply evidenceText for a more precise quote or when the document has no blocks, a helpful label, meaningful normalizedValue, notes, alternatives, conflictChoices or visualEvidence. Retain every real ambiguity and alternative. Omit empty metadata and duplicate normalizedValue. Record values need only their id and evidenced fields; absent fields receive the existing schema defaults.",
+      'Example response: {"candidates":[["identity.fullName","Jane Doe",["block_1"],0.98]]}. With no blocks, use an object candidate with an exact evidenceText quote, or metadata.evidenceText; never guess source ids.',
+      "Omitted saved profile/preference fields are empty or unknown, never new evidence. Explicit false and zero are preserved. Compare all provided saved facts before proposing replacements.",
       "Only use sourceBlockIds that exist in the input block list.",
       "Confidence must be a number between 0 and 1.",
       buildResumeImportStageInstructions(input.stageInput.stage),
@@ -285,14 +364,16 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
     ].join(" "),
     {
       stage: input.stageInput.stage,
-      existingProfile: {
+      existingProfile: compactSavedContext({
         ...input.stageInput.existingProfile,
         baseResume: {
           ...input.stageInput.existingProfile.baseResume,
           textContent: null,
         },
-      },
-      existingSearchPreferences: input.stageInput.existingSearchPreferences,
+      }),
+      existingSearchPreferences: compactSavedContext(
+        input.stageInput.existingSearchPreferences,
+      ),
       documentBundle: {
         id: input.stageInput.documentBundle.id,
         sourceResumeId: input.stageInput.documentBundle.sourceResumeId,
@@ -318,12 +399,14 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
   // the production route, where a complete experience record was dropped
   // for its wrapping alone. Accept all three shapes.
   const normalizedPayload: Record<string, unknown> = Array.isArray(payload)
-    ? { candidates: payload }
+    ? { candidates: normalizeTarget(payload[0]) ? [payload] : payload }
     : payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
       : {};
   const rawCandidates: unknown[] = Array.isArray(normalizedPayload.candidates)
-    ? normalizedPayload.candidates
+    ? normalizeTarget(normalizedPayload.candidates[0])
+      ? [normalizedPayload.candidates]
+      : normalizedPayload.candidates
     : normalizedPayload.candidates &&
         typeof normalizedPayload.candidates === "object"
       ? [normalizedPayload.candidates]
@@ -338,7 +421,9 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       analysisProviderKind: "openai_compatible",
       analysisProviderLabel: input.status.label,
       candidates: rawCandidates
-        .map((candidate) => normalizeCandidate(candidate))
+        .map((candidate) =>
+          normalizeCandidate(candidate, input.stageInput.documentBundle.blocks),
+        )
         .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
           Boolean(candidate),
         )
@@ -430,7 +515,12 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
       : {};
   const candidates = Array.isArray(normalizedPayload.candidates)
     ? normalizedPayload.candidates
-        .map((candidate) => normalizeCandidate(candidate))
+        .map((candidate) =>
+          normalizeCandidate(
+            candidate,
+            input.adjudicationInput.documentBundle.blocks,
+          ),
+        )
         .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
           Boolean(candidate),
         )
