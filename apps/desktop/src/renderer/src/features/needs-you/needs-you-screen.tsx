@@ -254,6 +254,7 @@ export function NeedsYouScreen() {
       topContent={
         <div
           className="grid gap-3 pb-4"
+          data-needs-editing={editing ? "true" : "false"}
           data-needs-list-state={JSON.stringify({
             tab,
             text,

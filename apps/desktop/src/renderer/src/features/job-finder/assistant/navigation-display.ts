@@ -140,7 +140,12 @@ export async function waitForDisplayedDestination(
       reason:
         overlay !== "none"
           ? "An overlay still covers the destination."
-          : "The requested page or section has not been displayed.",
+          : needsView &&
+              view &&
+              !viewDisplayed &&
+              shownElements('main [data-needs-editing="true"]').length > 0
+            ? "Needs you has unsaved answer text. Save it before changing its view."
+            : "The requested page or section has not been displayed.",
     };
     if (
       matches &&

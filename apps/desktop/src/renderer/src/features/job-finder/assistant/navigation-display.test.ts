@@ -6,6 +6,19 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+it("explains when unsaved answer text blocks a Needs you view change", async () => {
+  const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "tasks" }))}`;
+  document.body.innerHTML =
+    '<main><h1>Needs you</h1><div data-needs-editing="true" data-needs-list-state=\'{"tab":"saved"}\'></div></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({
+    status: "blocked",
+    reason:
+      "Needs you has unsaved answer text. Save it before changing its view.",
+  });
+});
+
 it("confirms the Needs you tab, filter, selection and loaded focused answer together", async () => {
   const view = {
     tab: "saved",
