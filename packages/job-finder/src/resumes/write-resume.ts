@@ -318,7 +318,7 @@ function names(text: string, skill: string): boolean {
  * listing asks for, that the person's evidence does not have as
  * unsupported, so settling restores or drops it.
  */
-function withEvidenceChecks(
+export function withEvidenceChecks(
   draft: ResumeDraft,
   profile: CandidateProfile,
   job: SavedJob,
