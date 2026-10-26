@@ -525,13 +525,22 @@ export async function runAgentApplicationPreparation(
 ): Promise<ApplyExecutionResult> {
   const { executionInput, startedAt } = input;
   const now = input.now ?? (() => new Date());
+  const fieldSaveOrigins = [
+    ...(executionInput.intermediateMutationAllowedOrigins ??
+      executionInput.applyAllowedOrigins ??
+      []),
+  ];
 
-  // Nothing may leave the page during a prepare-only run. The guard goes in
-  // before the agent is allowed to touch anything.
+  // Install the fence before any field is touched. Attachment uploads have a
+  // separate file-bound grant. Non-final field saves stay on the form frame's
+  // own origin; a saved envelope may narrow that permission.
   await input.session.installPrepareOnlyGuard({
+    ...(executionInput.attachmentUploadsAuthorized === true
+      ? { attachmentUploadsAuthorized: true }
+      : {}),
     intermediateMutationsAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
-    allowedOrigins: executionInput.applyAllowedOrigins ?? [],
+    allowedOrigins: fieldSaveOrigins,
   });
 
   const { targetUrl, isContinuation } =
@@ -543,6 +552,36 @@ export async function runAgentApplicationPreparation(
     allowedOrigins,
   };
   let activeEnvelope = input.envelope ?? null;
+  const recheckWriteAuthority = async (purpose: "answers" | "attachment") => {
+    if (executionInput.recheckIntermediateMutationAuthority) {
+      const page = await input.session.readPage();
+      const origin = page.url ? originOf(page.url) : null;
+      if (
+        !origin ||
+        !(await executionInput.recheckIntermediateMutationAuthority(
+          origin,
+          purpose,
+        ))
+      )
+        throw new Error(
+          "The application's permission to persist this value changed.",
+        );
+      await input.session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized:
+          executionInput.intermediateMutationsAuthorized === true,
+        ...(executionInput.attachmentUploadsAuthorized === true
+          ? { attachmentUploadsAuthorized: true }
+          : {}),
+        allowedOrigins: fieldSaveOrigins,
+      });
+    }
+  };
+  const hands = createApplyPageHands(input.session, now);
+  const uploadFile = hands.uploadFile;
+  hands.uploadFile = async (ref, file) => {
+    await recheckWriteAuthority("attachment");
+    return uploadFile(ref, file);
+  };
   const moveReviewer = createMoveReviewer({
     llmClient: input.llmClient,
     goal: isContinuation
@@ -558,26 +597,11 @@ export async function runAgentApplicationPreparation(
     input.applicationRecordId,
   );
   const outcome = await runApplyAgentSafely(input, {
-    hands: createApplyPageHands(input.session, now),
+    hands,
     safety: {
       ...input.session,
       openIntermediateWriteWindow: async () => {
-        if (executionInput.recheckIntermediateMutationAuthority) {
-          const page = await input.session.readPage();
-          const origin = page.url ? originOf(page.url) : null;
-          if (
-            !origin ||
-            !(await executionInput.recheckIntermediateMutationAuthority(origin))
-          )
-            throw new Error(
-              "The application's permission to save fields changed.",
-            );
-          await input.session.installPrepareOnlyGuard({
-            intermediateMutationsAuthorized:
-              executionInput.intermediateMutationsAuthorized === true,
-            allowedOrigins,
-          });
-        }
+        await recheckWriteAuthority("answers");
         await input.session.openIntermediateWriteWindow();
       },
     },
@@ -661,6 +685,7 @@ export async function runAgentApplicationPreparation(
         if (widened) {
           if (widened !== true) activeEnvelope = widened;
           allowedOrigins.push(origin);
+          if (!fieldSaveOrigins.includes(origin)) fieldSaveOrigins.push(origin);
         }
       }
       return review;
@@ -738,6 +763,7 @@ export async function runAgentApplicationPreparation(
       result,
       siteLabel: input.siteLabel,
       preparedAt: now().toISOString(),
+      intermediateSaved: input.session.readIntermediateWriteCount() > 0,
     }),
   });
 
@@ -1164,6 +1190,7 @@ export function buildApplyReviewCard(input: {
   result: ApplyAgentResult;
   siteLabel: string;
   preparedAt: string;
+  intermediateSaved?: boolean;
 }): ApplicationReviewCard {
   const filled = input.result.reviewFilled ?? input.result.filled;
   const attached = input.result.reviewAttachments ?? input.result.attachments;
@@ -1196,6 +1223,7 @@ export function buildApplyReviewCard(input: {
   return ApplicationReviewCardSchema.parse({
     siteLabel: clamp(input.siteLabel, 240),
     pageUrl: input.result.finalUrl,
+    ...(input.intermediateSaved ? { intermediateSaved: true } : {}),
     ...(input.result.reviewObservedFieldKeys
       ? { observedFieldKeys: input.result.reviewObservedFieldKeys }
       : {}),
@@ -1420,6 +1448,9 @@ export function mergeApplyReviewCards(
   );
   return ApplicationReviewCardSchema.parse({
     ...current,
+    ...(previous.intermediateSaved || current.intermediateSaved
+      ? { intermediateSaved: true }
+      : {}),
     ...(retainEarlier && current.observedFieldKeys
       ? {
           observedFieldKeys: [...observedFieldKeys].slice(0, 500),

@@ -6,6 +6,15 @@ import { validateApplication, escape } from "./forms.mjs";
 import { page, listing, detail, applyPage, editorial } from "./pages.mjs";
 
 export { moreSites };
+const uploadReplay = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../job-finder/apply-replays/attachment-upload.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
 const catalog = createCatalog(moreSites);
 const assets = new Map(
   ["client.js", "styles.css"].map((name) => [
@@ -24,6 +33,45 @@ export async function handleMoreSites(
   url,
   { send, readPost, logPost },
 ) {
+  if (url.pathname === "/api/non-user-graphql" && req.method === "POST") {
+    const payload = await readPost(req);
+    logPost(url.pathname, payload);
+    const target = new URL(`http://${req.headers.host}`);
+    target.hostname = "localhost";
+    target.pathname = "/";
+    send(
+      200,
+      JSON.stringify({
+        data: {
+          fileUploadHandle: {
+            url: target.href,
+            fields: {
+              ...uploadReplay.fields,
+              Policy: Buffer.from(JSON.stringify(uploadReplay.policy)).toString(
+                "base64",
+              ),
+            },
+          },
+        },
+      }),
+      "application/json",
+    );
+    return true;
+  }
+  if (
+    url.pathname === "/" &&
+    req.method === "POST" &&
+    /^localhost:/iu.test(req.headers.host ?? "")
+  ) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (req.method !== "POST") send(405, "Method not allowed");
+    else {
+      const files = await readPost(req);
+      logPost(url.pathname, files);
+      send(200, JSON.stringify({ uploaded: true }), "application/json");
+    }
+    return true;
+  }
   if (url.pathname.startsWith("/replica-assets/")) {
     const name = url.pathname.slice("/replica-assets/".length);
     if (req.method !== "GET") send(405, "Method not allowed");

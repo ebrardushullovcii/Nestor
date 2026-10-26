@@ -160,6 +160,13 @@ function SentReview(props: { details: ApplicationDetails }) {
         {sent ? "What was sent" : "What Apply filled in"}
       </summary>
       <div className="mt-2 grid gap-3">
+        {props.details.application.state === "ready" &&
+        card?.intermediateSaved ? (
+          <p className="text-foreground-soft">
+            Earlier answers or attachments were saved on the employer’s site.
+            This application has not been sent. Review it before you send.
+          </p>
+        ) : null}
         {receipt ? (
           <div className="grid gap-0.5">
             <p>

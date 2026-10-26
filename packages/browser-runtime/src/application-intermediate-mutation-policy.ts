@@ -53,8 +53,8 @@ const ALLOWED_RESOURCE_KINDS = new Set<IntermediateMutationResourceKind>([
   "xhr",
 ]);
 
-const FINAL_ACTION_SIGNAL =
-  /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:now|job)|create[-_\s]*account|register)(?:[^a-z0-9]|$)/iu;
+export const FINAL_ACTION_SIGNAL =
+  /(?:^|[^a-z0-9])(?:submit(?:ted|ting)?|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)|\/(?:apply|submit|complete|send)(?=\/|\s|[?#.;]|$)|\/applications\/?(?=\s|[?#]|$)|(?:^|[^a-z0-9])(?:is[-_\s]*)?(?:final|complete)["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:true|1|on|yes)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])(?:is[-_\s]*)?draft["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:false|0|off|no)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])step["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?final(?=["'\s,}&\]]|$)/iu;
 const INTERMEDIATE_ACTION_SIGNAL =
   /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
 
@@ -66,7 +66,7 @@ function buildInspectableSignal(input: {
   bodyText?: string | null;
   url: URL;
 }): string {
-  const body = input.bodyText?.slice(0, 8_192) ?? "";
+  const body = input.bodyText ?? "";
   const safeDecode = (value: string): string => {
     try {
       return decodeURIComponent(value);
@@ -74,10 +74,9 @@ function buildInspectableSignal(input: {
       return value;
     }
   };
-  return `${safeDecode(input.url.pathname)} ${safeDecode(input.url.search)} ${body}`.replace(
-    /([a-z0-9])([A-Z])/g,
-    "$1 $2",
-  );
+  return `${safeDecode(input.url.pathname)} ${safeDecode(input.url.search)} ${safeDecode(body)}`
+    .replace(/\\(["'])/gu, "$1")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
 /**
@@ -116,14 +115,12 @@ export function classifyIntermediateMutationRequest(
   } catch {
     return { allowed: false, reason: "invalid_url" };
   }
-  // "*" is the default window: the form's own origin (an embedded ATS
-  // answers from its own host) is fine, and any write that is not a final
-  // send goes through. A pinned origin keeps the narrower rule.
-  const anyOrigin = input.window.expectedOrigin === "*";
-  if (!anyOrigin && parsedUrl.origin !== input.window.expectedOrigin) {
+  if (parsedUrl.origin !== input.window.expectedOrigin) {
     return { allowed: false, reason: "cross_origin" };
   }
 
+  if ((input.bodyText?.length ?? 0) > 65_536)
+    return { allowed: false, reason: "ambiguous_mutation" };
   const signal = buildInspectableSignal({
     bodyText: input.bodyText ?? null,
     url: parsedUrl,
@@ -131,7 +128,7 @@ export function classifyIntermediateMutationRequest(
   if (FINAL_ACTION_SIGNAL.test(signal)) {
     return { allowed: false, reason: "final_action_signal" };
   }
-  if (!anyOrigin && !INTERMEDIATE_ACTION_SIGNAL.test(signal)) {
+  if (!INTERMEDIATE_ACTION_SIGNAL.test(signal)) {
     return { allowed: false, reason: "ambiguous_mutation" };
   }
 

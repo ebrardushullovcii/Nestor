@@ -1,0 +1,102 @@
+{
+  "refused": [
+    {
+      "error": "Save refused"
+    },
+    {
+      "errors": [
+        {
+          "message": "Save refused"
+        }
+      ]
+    },
+    {
+      "success": false
+    },
+    {
+      "ok": false
+    },
+    {
+      "uploaded": false
+    },
+    {
+      "status": "failed"
+    },
+    {
+      "statusCode": 422
+    },
+    {
+      "statusCode": "400"
+    },
+    {
+      "errorCode": "INVALID_ATTACHMENT"
+    },
+    {
+      "data": {
+        "result": {
+          "error": "Save refused"
+        }
+      }
+    },
+    {
+      "message": "Upload failed"
+    },
+    {
+      "msg": "File too large"
+    },
+    {
+      "detail": "Invalid file type"
+    },
+    {
+      "description": "File not accepted"
+    },
+    {
+      "reason": "Unable to upload"
+    }
+  ],
+  "accepted": [
+    {
+      "success": true,
+      "errors": [],
+      "error": null
+    },
+    {
+      "ok": true
+    },
+    {
+      "uploaded": true
+    },
+    {
+      "message": "Upload complete"
+    },
+    {
+      "detail": "File accepted"
+    }
+  ],
+  "plainText": [
+    {
+      "text": "Upload failed",
+      "accepted": false
+    },
+    {
+      "text": "File too large",
+      "accepted": false
+    },
+    {
+      "text": "Invalid file type",
+      "accepted": false
+    },
+    {
+      "text": "Unable to upload",
+      "accepted": false
+    },
+    {
+      "text": "Upload complete",
+      "accepted": true
+    },
+    {
+      "text": "File accepted",
+      "accepted": true
+    }
+  ]
+}

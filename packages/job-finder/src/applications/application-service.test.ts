@@ -275,7 +275,13 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   const recheck =
     f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
+  expect(f.execute.mock.calls[0]![1]).toMatchObject({
+    intermediateMutationsAuthorized: true,
+    attachmentUploadsAuthorized: true,
+    intermediateMutationAllowedOrigins: [],
+  });
   expect(await recheck("https://replica.test")).toBe(true);
+  expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.applications.needsYou.remember({
     key: "salary",
     prompt: "Expected salary",
@@ -284,9 +290,54 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
     scope: {},
     options: [],
   });
-  expect(await recheck("https://replica.test")).toBe(true);
+  expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.seed.profile.phone = "+447700900999";
-  expect(await recheck("https://replica.test")).toBe(false);
+  expect(await recheck("https://replica.test", "attachment")).toBe(false);
+});
+
+it("keeps non-final saves frame-pinned without a final envelope in either mode", async () => {
+  const f = await setup(1);
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const input = f.execute.mock.calls[0]![1];
+  expect(input).toMatchObject({
+    intermediateMutationsAuthorized: true,
+    submitAuthorized: false,
+    intermediateMutationAllowedOrigins: [],
+  });
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(true);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://unrelated.test",
+      "answers",
+    ),
+  ).toBe(false);
+  f.seed.settings.applicationAutomationMode = "confirm_before_submit";
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(true);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "attachment",
+    ),
+  ).toBe(true);
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  expect(f.authorizeSending).toHaveBeenCalledOnce();
 });
 
 it("refuses sendPrepared after a used answer changes post-Ready and refills without a final browser action", async () => {
@@ -529,6 +580,12 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
     f.applications.listApplications({ state: "queued" }).rows,
   ).toHaveLength(2);
   expect(f.execute.mock.calls[0]![1].resumeArtifact.filePath).toBe(f.imported);
+  expect(
+    f.execute.mock.calls[0]![1].intermediateMutationAllowedOrigins,
+  ).toEqual([]);
+  expect(f.execute.mock.calls[0]![1].applyAllowedOrigins).toEqual([
+    "https://replica.test",
+  ]);
   f.releases.shift()!();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
   const row = f.applications.forJobs([

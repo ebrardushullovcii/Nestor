@@ -1,0 +1,30 @@
+{
+  "name": "Taylor Morgan",
+  "firstName": "Taylor",
+  "lastName": "Morgan",
+  "fileName": "Taylor-Morgan-Resume.pdf",
+  "keyPrefix": "uploads/7f3a9c21/prefix_",
+  "rails": {
+    "utf8": "✓",
+    "authenticity_token": "1234",
+    "Content-Type": "application/octet-stream"
+  },
+  "refusedRails": [
+    {
+      "utf8": "yes"
+    },
+    {
+      "authenticity_token": "Taylor"
+    },
+    {
+      "Content-Type": "application/json"
+    }
+  ],
+  "refusedPaths": [
+    "/uploads/apply",
+    "/uploads/submit",
+    "/uploads/complete",
+    "/uploads/send"
+  ],
+  "presignQuery": "mutation ApiCreateFileUploadHandle($organizationHostedJobsPageName: String!, $fileUploadContext: FileUploadContext!, $filename: String!, $contentType: String!, $contentLength: Int!) {\n  fileUploadHandle: createFileUploadHandle(organizationHostedJobsPageName: $organizationHostedJobsPageName, fileUploadContext: $fileUploadContext, filename: $filename, contentType: $contentType, contentLength: $contentLength) {\n    handle\n    url\n    fields\n    __typename\n  }\n}"
+}

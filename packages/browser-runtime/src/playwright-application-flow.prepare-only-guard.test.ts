@@ -1,3 +1,9 @@
+import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
+import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
+import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
+import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
+import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
+import { inspectPageMutationResponse } from "./mutation-response-body";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -15,9 +21,12 @@ import {
   ensurePrepareOnlyMutationGuard,
   getLatestBlockedPrepareOnlyAttempt,
   openPrepareOnlyFinalActionWindow,
+  openPrepareOnlyAttachmentUploadWindow,
   openPrepareOnlyIntermediateMutationWindow,
   readServiceWorkerRegisterGuardInPage,
+  readPrepareOnlyIntermediateWriteCount,
   registerPrepareOnlyPreparedValueInPage,
+  registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
 import {
   armPlaywrightApplicationFormAction,
@@ -39,6 +48,7 @@ interface FixtureServer {
   registerHtml: (path: string, html: string) => void;
   registerScript: (path: string, js: string) => void;
   registerAttachment: (path: string, content: string) => void;
+  registerJson: (path: string, value: unknown) => void;
   close: () => Promise<void>;
 }
 
@@ -47,10 +57,12 @@ function startFixtureServer(): Promise<FixtureServer> {
   const htmlRoutes = new Map<string, string>();
   const scriptRoutes = new Map<string, string>();
   const attachmentRoutes = new Map<string, string>();
+  const jsonRoutes = new Map<string, unknown>();
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
+      response.setHeader("Access-Control-Allow-Origin", "*");
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       hits.push({
         kind: "request",
@@ -60,8 +72,13 @@ function startFixtureServer(): Promise<FixtureServer> {
         body: Buffer.concat(chunks).toString("utf8"),
       });
       const html = htmlRoutes.get(url.pathname);
+      if (jsonRoutes.has(url.pathname)) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(jsonRoutes.get(url.pathname)));
+        return;
+      }
       if (html !== undefined) {
-        response.writeHead(200, { "content-type": "text/html" });
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(html);
         return;
       }
@@ -106,6 +123,9 @@ function startFixtureServer(): Promise<FixtureServer> {
         hits,
         registerHtml: (path, html) => {
           htmlRoutes.set(path, html);
+        },
+        registerJson: (path, value) => {
+          jsonRoutes.set(path, value);
         },
         registerScript: (path, js) => {
           scriptRoutes.set(path, js);
@@ -177,6 +197,207 @@ const requestHitsFor = (
   hits.filter((hit) => hit.kind === "request" && hit.path === path);
 
 describe("Prepare-only guard real-Chromium fixtures", () => {
+  test.each(["ashby", "greenhouse"] as const)(
+    "scrubbed real %s request shape uploads after Name is filled",
+    async (shape) => {
+      const site = await startTrackedServer(),
+        storage = await startTrackedServer();
+      const key = realShapes.keyPrefix + realShapes.fileName;
+      const policy = Buffer.from(
+        JSON.stringify({
+          ...replay.policy,
+          conditions: [...replay.policy.conditions, { key }],
+        }),
+      ).toString("base64");
+      const fields = { ...replay.fields, key, Policy: policy };
+      site.registerJson("/api/non-user-graphql", {
+        data: {
+          fileUploadHandle: { url: storage.baseUrl + "/storage", fields },
+        },
+      });
+      site.registerJson("/uncacheable_attributes/presigned_fields", {
+        url: storage.baseUrl + "/storage",
+        resume: { key: "uploads/{timestamp}/{unique_id}/${filename}", fields },
+      });
+      storage.registerJson("/storage", { uploaded: true });
+      site.registerHtml(
+        "/real-shape",
+        `<label>Name<input id="name"></label><label>Resume<input id="resume" type="file"></label><output id="result"></output><script>
+      document.getElementById('resume').addEventListener('change',async function(){
+        const file=this.files[0];
+        try{
+          const shape=${JSON.stringify(shape)};
+          const signed=shape==='ashby'? (await(await fetch('/api/non-user-graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'ApiCreateFileUploadHandle',variables:{organizationHostedJobsPageName:'synthetic',fileUploadContext:'NonUserFormEngine',filename:file.name,contentType:file.type,contentLength:file.size},query:${JSON.stringify(realShapes.presignQuery)}})})).json()).data.fileUploadHandle : await(await fetch('/uncacheable_attributes/presigned_fields?fields[]=resume')).json();
+          const body=new FormData();
+          if(shape==='greenhouse'){body.append('utf8','✓');body.append('authenticity_token','1234');body.append('Content-Type','application/octet-stream');}
+          for(const [key,value]of Object.entries(shape==='ashby'?signed.fields:signed.resume.fields)) if(shape==='ashby'||key!=='Content-Type')body.append(key,value);
+          if(shape==='greenhouse') body.set('key',signed.resume.key.replace('{timestamp}',String(Date.now())).replace('{unique_id}','abc123'));
+          body.append('file',file);
+          if(shape==='greenhouse')this.value='';
+          const status=shape==='ashby'?(await fetch(signed.url,{method:'POST',body})).status:await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',signed.url);xhr.onload=()=>resolve(xhr.status);xhr.onerror=reject;xhr.send(body);});
+          document.getElementById('result').textContent=status===200?'uploaded':'refused';
+        }catch(error){document.getElementById('result').textContent='failed '+String(error);}
+      });</script>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${site.baseUrl}/real-shape`);
+      const session = createPlaywrightApplyPageSession({ page });
+      await session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized: true,
+        attachmentUploadsAuthorized: true,
+        allowedOrigins: [],
+      });
+      await page.fill("#name", realShapes.name);
+      await registerPrepareOnlyPreparedValue(page, realShapes.name);
+      await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+      await registerPrepareOnlyPreparedValue(page, realShapes.lastName);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      const file = {
+        name: realShapes.fileName,
+        mimeType: "application/pdf",
+        bytes: new TextEncoder().encode("%PDF-1.4 synthetic upload bytes"),
+      };
+      const resume = (await session.readPage()).controls.find(
+        (field) => field.inputType === "file",
+      )!;
+      const response = page
+        .waitForResponse(`${storage.baseUrl}/storage`)
+        .catch(() => null);
+      await session.uploadFile(resume.ref ?? `c${resume.index}`, file);
+      await page.waitForFunction(
+        () => !!document.getElementById("result")?.textContent,
+      );
+      expect(
+        await page.locator("#result").textContent(),
+        JSON.stringify({
+          blocked: await getLatestBlockedPrepareOnlyAttempt(page),
+          site: site.hits.map((hit) => hit.path),
+          storage: storage.hits.map((hit) => hit.path),
+        }),
+      ).toBe("uploaded");
+      expect(requestHitsFor(storage.hits, "/storage")).toHaveLength(1);
+      const observed = await response;
+      if (!observed) throw Error("No upload response");
+      Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+      expect(await inspectPageMutationResponse(page, observed)).toMatchObject({
+        accepted: true,
+        body: { uploaded: true },
+      });
+      for (const path of realShapes.refusedPaths) {
+        await openPrepareOnlyAttachmentUploadWindow(page, file);
+        const forwarded = await page.evaluate(
+          async ({ url, name, bytes, fields }) => {
+            try {
+              const body = new FormData();
+              for (const [key, value] of Object.entries(fields))
+                body.append(key, value);
+              body.append(
+                "file",
+                new File([new Uint8Array(bytes)], name, {
+                  type: "application/pdf",
+                }),
+              );
+              await fetch(url, { method: "POST", body });
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          {
+            url: storage.baseUrl + path,
+            name: file.name,
+            bytes: [...file.bytes],
+            fields,
+          },
+        );
+        expect(forwarded).toBe(false);
+        expect(requestHitsFor(storage.hits, path)).toHaveLength(0);
+      }
+    },
+  );
+
+  test.each(
+    ["fetch", "xhr"].flatMap((transport) =>
+      ["form", "blob", "file"].map((body) => ({ transport, body })),
+    ),
+  )(
+    "embedded upload response replay: $transport $body",
+    async ({ transport, body }) => {
+      const site = await startTrackedServer(),
+        storage = await startTrackedServer();
+      site.registerHtml("/body-upload", "<p>Upload</p>");
+      const { page } = await newGuardedPage();
+      await page.goto(`${site.baseUrl}/body-upload`);
+      await ensurePrepareOnlyMutationGuard(page, false, [site.baseUrl], true);
+      const file = {
+        name: realShapes.fileName,
+        mimeType: "application/pdf",
+        bytes: new TextEncoder().encode("%PDF-1.4 synthetic body replay"),
+      };
+      const cases = [
+        ...responseReplay.refused.map((body) => ({
+          body,
+          accepted: false,
+          plain: false,
+        })),
+        ...responseReplay.accepted.map((body) => ({
+          body,
+          accepted: true,
+          plain: false,
+        })),
+        ...responseReplay.plainText.map((entry) => ({
+          body: entry.text,
+          accepted: entry.accepted,
+          plain: true,
+        })),
+      ];
+      for (const [index, entry] of cases.entries()) {
+        const pathname = `/upload-body-${index}`,
+          url = storage.baseUrl + pathname;
+        if (entry.plain && typeof entry.body === "string")
+          storage.registerAttachment(pathname, entry.body);
+        else storage.registerJson(pathname, entry.body);
+        await openPrepareOnlyAttachmentUploadWindow(page, file);
+        const response = page.waitForResponse(url);
+        await page.evaluate(
+          async ({ url, transport, body, name, bytes }) => {
+            const blob = new Blob([new Uint8Array(bytes)], {
+              type: "application/pdf",
+            });
+            let payload: Blob | FormData =
+              body === "file"
+                ? new File([blob], name, { type: "application/pdf" })
+                : blob;
+            if (body === "form") {
+              const form = new FormData();
+              form.append("key", "uploads/" + name);
+              form.append("file", blob, name);
+              payload = form;
+            }
+            if (transport === "fetch")
+              await (
+                await fetch(url, { method: "POST", body: payload })
+              ).text();
+            else
+              await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", url);
+                xhr.onload = () => resolve();
+                xhr.onerror = () => reject(new Error("XHR failed"));
+                xhr.send(payload);
+              });
+          },
+          { url, transport, body, name: file.name, bytes: [...file.bytes] },
+        );
+        const observed = await response;
+        Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+        expect(await inspectPageMutationResponse(page, observed)).toEqual({
+          body: entry.body,
+          accepted: entry.accepted,
+        });
+      }
+    },
+  );
   test(
     "a retained human sign-in accepts native click, Enter, and requestSubmit once each while unrelated forms stay blocked",
     { timeout: 60_000 },
@@ -403,6 +624,290 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
   );
 
   test(
+    "Workday replay: Fill saves non-final steps, reaches review, and refuses a submit disguised as a step",
+    { timeout: 60_000 },
+    async () => {
+      const app = await startTrackedServer();
+      app.registerHtml(
+        "/wizard",
+        `<form><label>Email<input name="email" value="${stepReplay.email}"></label><input name="resume" type="file"><button type="button" id="next">${stepReplay.nextLabel}</button><button type="button" id="final" hidden>${stepReplay.finalLabel}</button><button type="button" id="bad-label">${stepReplay.refusedStepLabel}</button><button type="button" id="bad-request">Continue</button></form><script>
+        let step=0;
+        const save=path=>fetch(path,{method:'POST',body:new FormData(document.querySelector('form'))}).catch(()=>null);
+        next.onclick=async()=>{const result=await save('${stepReplay.savePath}'); if(result?.ok && ++step===${stepReplay.steps}){next.hidden=true;document.getElementById('final').hidden=false;}};
+        document.getElementById('final').onclick=()=>save('${stepReplay.finalPath}');
+        document.getElementById('bad-label').onclick=()=>save('${stepReplay.savePath}');
+        document.getElementById('bad-request').onclick=()=>save('${stepReplay.refusedStepPath}');
+      </script>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/wizard`);
+      await ensurePrepareOnlyMutationGuard(page, true, []);
+      await registerPrepareOnlyPreparedValue(page, stepReplay.email);
+      for (let step = 0; step < stepReplay.steps; step++) {
+        await openPrepareOnlyIntermediateMutationWindow(page);
+        await page.locator("#next").click();
+        await expect
+          .poll(() => requestHitsFor(app.hits, stepReplay.savePath).length)
+          .toBe(step + 1);
+        await closePrepareOnlyIntermediateMutationWindow(page);
+      }
+      await expect.poll(() => page.locator("#final").isVisible()).toBe(true);
+      expect(requestHitsFor(app.hits, stepReplay.finalPath)).toHaveLength(0);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      await page.locator("#bad-label").click();
+      await page.locator("#bad-request").click();
+      await page.waitForTimeout(100);
+      expect(requestHitsFor(app.hits, stepReplay.savePath)).toHaveLength(
+        stepReplay.steps,
+      );
+      expect(requestHitsFor(app.hits, stepReplay.refusedStepPath)).toHaveLength(
+        0,
+      );
+      expect((await getLatestBlockedPrepareOnlyAttempt(page))?.kind).toBe(
+        "dom_submit",
+      );
+      await closePrepareOnlyIntermediateMutationWindow(page);
+    },
+  );
+
+  test(
+    "a form frame saves only to its own pinned origin, with an envelope still narrowing those frames",
+    { timeout: 60_000 },
+    async () => {
+      const parent = await startTrackedServer();
+      const child = await startTrackedServer();
+      child.registerHtml(
+        "/form",
+        '<input name="email" value="synthetic@example.test">',
+      );
+      parent.registerHtml(
+        "/frames",
+        `<iframe src="${child.baseUrl}/form"></iframe>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${parent.baseUrl}/frames`);
+      await ensurePrepareOnlyMutationGuard(page, true, []);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      const frame = page
+        .frames()
+        .find((frame) => frame.url() === `${child.baseUrl}/form`)!;
+      const save = (url: string) =>
+        frame.evaluate(async (url) => {
+          try {
+            return (
+              await fetch(url, { method: "POST", body: "answer=synthetic" })
+            ).ok;
+          } catch {
+            return false;
+          }
+        }, url);
+      expect(await save(`${child.baseUrl}/api/save`)).toBe(true);
+      expect(await save(`${parent.baseUrl}/api/save`)).toBe(false);
+      await closePrepareOnlyIntermediateMutationWindow(page);
+      await ensurePrepareOnlyMutationGuard(page, true, [parent.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      expect(await save(`${child.baseUrl}/api/save`)).toBe(false);
+      expect(requestHitsFor(child.hits, "/api/save")).toHaveLength(1);
+      expect(requestHitsFor(parent.hits, "/api/save")).toHaveLength(0);
+    },
+  );
+
+  test("a live Fill save window denies bare apply endpoints and final flags while allowing non-final step saves", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml(
+      "/form",
+      '<input name="name" value="Synthetic Applicant">',
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/form`);
+    await ensurePrepareOnlyMutationGuard(page, true, []);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    const outcomes = await page.evaluate(async ({ denied, allowed }) => {
+      const results: boolean[] = [];
+      for (const request of [...denied, ...allowed]) {
+        try {
+          results.push(
+            (
+              await fetch(request.path, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: request.body,
+              })
+            ).ok,
+          );
+        } catch {
+          results.push(false);
+        }
+      }
+      return results;
+    }, finalMutationReplay);
+    expect(outcomes).toEqual([
+      ...finalMutationReplay.denied.map(() => false),
+      ...finalMutationReplay.allowed.map(() => true),
+    ]);
+    const writes = app.hits.filter((hit) => hit.method === "POST");
+    expect(writes).toHaveLength(finalMutationReplay.allowed.length);
+    expect(writes.map(({ path, body }) => ({ path, body }))).toEqual(
+      finalMutationReplay.allowed,
+    );
+  });
+
+  test.each(["fetch", "xhr"] as const)(
+    "embedded-response replay reads %s bodies without a request-finished event",
+    async (transport) => {
+      const app = await startTrackedServer();
+      app.registerHtml("/response-body-replay", "<p>Application form</p>");
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/response-body-replay`);
+      await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      const cases = [
+        ...responseReplay.refused.map((body) => ({ body, accepted: false })),
+        ...responseReplay.accepted.map((body) => ({ body, accepted: true })),
+      ];
+      for (const [index, entry] of cases.entries()) {
+        const url = `${app.baseUrl}/api/save-body-${index}`;
+        app.registerJson(`/api/save-body-${index}`, entry.body);
+        const response = page.waitForResponse(url);
+        await page.evaluate(
+          async ({ url, transport }) => {
+            const body = '{"fieldAnswers":{"name":"Synthetic Applicant"}}';
+            if (transport === "fetch")
+              await (await fetch(url, { method: "POST", body })).text();
+            else
+              await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", url);
+                xhr.onload = () => resolve();
+                xhr.onerror = () => reject(new Error("XHR failed"));
+                xhr.send(body);
+              });
+          },
+          { url, transport },
+        );
+        const observed = await response;
+        // Electron receives response but never resolves Playwright's body reader.
+        Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+        expect(await inspectPageMutationResponse(page, observed)).toEqual(
+          entry,
+        );
+      }
+    },
+  );
+
+  test("a 2xx refusal never counts as a saved intermediate step", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml("/response-replay", "<p>Application form</p>");
+    for (const [index, body] of responseReplay.refused.entries())
+      app.registerJson(`/api/save-refusal-${index}`, body);
+    app.registerJson("/api/save-ok", { ok: true });
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/response-replay`);
+    await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    await page.evaluate(async (count) => {
+      for (let index = 0; index < count; index++) {
+        const response = await fetch(`/api/save-refusal-${index}`, {
+          method: "POST",
+          body: '{"fieldAnswers":{}}',
+        });
+        await response.text();
+      }
+      await (
+        await fetch("/api/save-ok", {
+          method: "POST",
+          body: '{"fieldAnswers":{}}',
+        })
+      ).text();
+    }, responseReplay.refused.length);
+    await expect
+      .poll(() => readPrepareOnlyIntermediateWriteCount(page))
+      .toBe(1);
+    expect(app.hits.filter((hit) => hit.method === "POST")).toHaveLength(
+      responseReplay.refused.length + 1,
+    );
+  });
+
+  test("an ambiguous response-body fallback cannot borrow an identical request's success", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml("/ambiguous-body", "<p>Application form</p>");
+    app.registerJson("/api/save-identical", { saved: true });
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/ambiguous-body`);
+    await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    const response = page.waitForResponse(`${app.baseUrl}/api/save-identical`);
+    await page.evaluate(async () => {
+      await Promise.all(
+        [1, 2].map(async () =>
+          (
+            await fetch("/api/save-identical", {
+              method: "POST",
+              body: '{"fieldAnswers":{}}',
+            })
+          ).text(),
+        ),
+      );
+    });
+    const observed = await response;
+    Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+    expect(await inspectPageMutationResponse(page, observed)).toMatchObject({
+      accepted: false,
+    });
+  });
+
+  test(
+    "multipart draft saves require Send authority and stay pinned to the form origin",
+    { timeout: 60_000 },
+    async () => {
+      const app = await startTrackedServer();
+      const other = await startTrackedServer();
+      app.registerHtml(
+        "/multipart-draft",
+        `<form><input name="email" value="synthetic@example.test"><input name="resume" type="file"></form>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/multipart-draft`);
+      await page.locator('[name="resume"]').setInputFiles({
+        name: "resume.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.concat([
+          Buffer.from("%PDF synthetic"),
+          Buffer.alloc(128_000),
+        ]),
+      });
+      const post = (url: string) =>
+        page.evaluate(async (url) => {
+          try {
+            return (
+              await fetch(url, {
+                method: "POST",
+                body: new FormData(document.querySelector("form")!),
+              })
+            ).ok;
+          } catch {
+            return false;
+          }
+        }, url);
+      await ensurePrepareOnlyMutationGuard(page, false, [app.baseUrl]);
+      await expect(
+        openPrepareOnlyIntermediateMutationWindow(page),
+      ).rejects.toThrow(/authority/u);
+      expect(await post(`${app.baseUrl}/api/save`)).toBe(false);
+      await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      await post(`${app.baseUrl}/api/save`);
+      expect(requestHitsFor(app.hits, "/api/save")).toHaveLength(1);
+      await post(`${other.baseUrl}/api/save`);
+      await post(`${app.baseUrl}/api/create-application/upload`);
+      expect(requestHitsFor(other.hits, "/api/save")).toHaveLength(0);
+      expect(
+        requestHitsFor(app.hits, "/api/create-application/upload"),
+      ).toHaveLength(0);
+    },
+  );
+
+  test(
     "allows one bounded same-origin autosave but still blocks final-submit traffic",
     { timeout: 60_000 },
     async () => {
@@ -510,13 +1015,11 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
   );
 
   test(
-    "a field save fired from a later document, to the form's own origin, gets through the default window",
+    "a later document keeps its field-save window pinned to its own origin",
     { timeout: 60_000 },
     async () => {
-      // The apply form lives in a document opened after the guard was
-      // installed, and it saves each answer to an ATS origin that is not the
-      // page's. Both were blocked before: the init script started the new
-      // document unauthorized, and the window was pinned to the page origin.
+      // New documents retain a bounded, pinned window. A separate host does
+      // not become an authorized destination for ordinary form answers.
       const site = await startTrackedServer();
       const ats = await startTrackedServer();
       site.registerHtml("/listing", `<a id="apply" href="/apply">Apply</a>`);
@@ -543,8 +1046,221 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       await page.selectOption("#school", "u");
       await page.waitForTimeout(600);
 
-      expect(requestHitsFor(ats.hits, "/v1/candidate/8112037")).toHaveLength(1);
+      expect(requestHitsFor(ats.hits, "/v1/candidate/8112037")).toHaveLength(0);
       expect(await getLatestBlockedPrepareOnlyAttempt(page)).toBeNull();
+    },
+  );
+
+  test.each(["fetch", "xhr"])(
+    "a same-origin presign and separate storage %s upload pass while form answers and final actions stay blocked",
+    async (transport) => {
+      const site = await startTrackedServer();
+      const storage = await startTrackedServer();
+      site.registerScript(
+        "/api/non-user-graphql",
+        JSON.stringify({
+          data: {
+            fileUploadHandle: {
+              url: storage.baseUrl + "/",
+              fields: {
+                ...replay.fields,
+                Policy: Buffer.from(JSON.stringify(replay.policy)).toString(
+                  "base64",
+                ),
+              },
+            },
+          },
+        }),
+      );
+      site.registerHtml(
+        "/apply-with-upload",
+        `<label>Resume <input id="resume" type="file"></label><output id="result"></output>
+       <script>
+       document.getElementById('resume').addEventListener('change', async function () {
+         try {
+           const signed = await fetch('/api/non-user-graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'UploadHandle',query:'query UploadHandle { fileUploadHandle { url fields } }',variables:{}})});
+           const target=(await signed.json()).data.fileUploadHandle;
+           const body = new FormData(); body.append('file', this.files[0]);
+           for(const [key,value] of Object.entries(target.fields))body.append(key,value);
+           const result = ${transport === "xhr" ? "await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',target.url);xhr.onload=()=>resolve(xhr.responseText);xhr.onerror=reject;xhr.send(body);})" : "await (await fetch(target.url, {method:'POST',body})).text()"};
+           document.getElementById('result').textContent = result;
+         } catch { document.getElementById('result').textContent = 'Upload failed'; }
+       });
+       </script>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${site.baseUrl}/apply-with-upload`);
+      const session = createPlaywrightApplyPageSession({ page });
+      await session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized: false,
+        attachmentUploadsAuthorized: true,
+        allowedOrigins: [site.baseUrl],
+      });
+      const resume = (await session.readPage()).controls.find(
+        (field) => field.inputType === "file",
+      )!;
+      const bytes = new TextEncoder().encode("%PDF-1.4 synthetic resume bytes");
+      expect(
+        await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+          name: "synthetic-resume.pdf",
+          mimeType: "application/pdf",
+          bytes,
+        }),
+      ).toMatchObject({ ok: true });
+      await page.waitForFunction(
+        () => document.getElementById("result")?.textContent === "fixture-ok",
+      );
+      const uploads = requestHitsFor(storage.hits, "/");
+      expect(requestHitsFor(site.hits, "/api/non-user-graphql")).toHaveLength(
+        1,
+      );
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0]!.body).toContain(new TextDecoder().decode(bytes));
+      await registerPrepareOnlyPreparedValue(page, "90000");
+      for (const attack of [
+        "multiple_operations",
+        "metadata_answer",
+        ...replay.refusedPaths,
+      ]) {
+        await openPrepareOnlyAttachmentUploadWindow(page, {
+          name: "synthetic-resume.pdf",
+          mimeType: "application/pdf",
+          bytes,
+        });
+        const forwarded = await page.evaluate(
+          async ({ attack, origin, fields, presign }) => {
+            try {
+              if (attack === "multiple_operations")
+                await fetch("/api/non-user-graphql", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify(presign),
+                });
+              else {
+                const body = new FormData();
+                const input = document.getElementById(
+                  "resume",
+                ) as HTMLInputElement;
+                body.set("file", input.files![0]!);
+                for (const [key, value] of Object.entries(fields))
+                  body.set(key, value);
+                if (attack === "metadata_answer")
+                  body.set("key", "uploads/salary_expectation_90000");
+                await fetch(
+                  origin + (attack === "metadata_answer" ? "/" : attack),
+                  { method: "POST", body },
+                );
+              }
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          {
+            attack,
+            origin: storage.baseUrl,
+            fields: {
+              ...replay.fields,
+              Policy: Buffer.from(JSON.stringify(replay.policy)).toString(
+                "base64",
+              ),
+            },
+            presign: replay.refusedPresign,
+          },
+        );
+        expect(forwarded).toBe(false);
+      }
+      expect(requestHitsFor(site.hits, "/api/non-user-graphql")).toHaveLength(
+        1,
+      );
+      expect(requestHitsFor(storage.hits, "/")).toHaveLength(1);
+      for (const request of [
+        {
+          path: "/api/application/submit",
+          body: "resume=synthetic-resume.pdf",
+        },
+        {
+          path: "/api/uploads",
+          body: JSON.stringify({ operationName: "SubmitApplication" }),
+        },
+      ])
+        expect(
+          await page.evaluate(
+            async ({ url, body }) => {
+              try {
+                await fetch(url, { method: "POST", body });
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            { url: storage.baseUrl + request.path, body: request.body },
+          ),
+        ).toBe(false);
+      expect(
+        requestHitsFor(storage.hits, "/api/application/submit"),
+      ).toHaveLength(0);
+      expect(requestHitsFor(storage.hits, "/")).toHaveLength(1);
+      for (const origin of [site.baseUrl, storage.baseUrl]) {
+        for (const [path, body] of [
+          ["/api/answers", JSON.stringify({ answer: "private answer" })],
+          [
+            "/api/applications",
+            JSON.stringify({ name: "Synthetic Candidate" }),
+          ],
+          ["/api/users", JSON.stringify({ email: "candidate@example.test" })],
+          [
+            "/graphql",
+            JSON.stringify({
+              operationName: "CreateApplication",
+              query: "mutation { createApplication { id } }",
+            }),
+          ],
+          [
+            "/graphql",
+            JSON.stringify({
+              operationName: "ApplyToJob",
+              query: "mutation { applyToJob { id } }",
+            }),
+          ],
+          [
+            "/api/autosave",
+            " ".repeat(9000) +
+              JSON.stringify({ operationName: "SubmitApplication" }),
+          ],
+        ] as const) {
+          // Keep the attachment grant live: this must not pass merely because
+          // the successful presign and upload exhausted its request budget.
+          await openPrepareOnlyAttachmentUploadWindow(page, {
+            name: "synthetic-resume.pdf",
+            mimeType: "application/pdf",
+            bytes,
+          });
+          expect(
+            await page.evaluate(
+              async ({ url, body }) => {
+                try {
+                  await fetch(url, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body,
+                  });
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
+              { url: origin + path, body },
+            ),
+          ).toBe(false);
+          expect(
+            requestHitsFor(
+              origin === site.baseUrl ? site.hits : storage.hits,
+              path,
+            ),
+          ).toHaveLength(0);
+        }
+      }
     },
   );
 

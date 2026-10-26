@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
 import {
   classifyIntermediateMutationRequest,
   type IntermediateMutationRequestInput,
@@ -22,6 +23,73 @@ function classify(overrides: Partial<IntermediateMutationRequestInput> = {}) {
 }
 
 describe("intermediate application mutation policy", () => {
+  test.each(finalMutationReplay.denied)(
+    "save-window send attack is refused: $path $body",
+    ({ path, body }) => {
+      expect(
+        classify({
+          method: "POST",
+          url: `https://apply.example.com${path}`,
+          bodyText: body,
+        }),
+      ).toEqual({ allowed: false, reason: "final_action_signal" });
+    },
+  );
+  test.each(finalMutationReplay.allowed)(
+    "non-final step save remains allowed: $path $body",
+    ({ path, body }) => {
+      expect(
+        classify({
+          method: "POST",
+          url: `https://apply.example.com${path}`,
+          bodyText: body,
+        }),
+      ).toEqual({ allowed: true, reason: "allowed_intermediate_mutation" });
+    },
+  );
+  test.each([
+    {
+      url: "https://apply.example.com/api/applications",
+      bodyText: '{"name":"Synthetic Candidate"}',
+    },
+    {
+      url: "https://apply.example.com/api/users",
+      bodyText: '{"email":"candidate@example.test"}',
+    },
+    {
+      url: "https://apply.example.com/graphql",
+      bodyText: '{"operationName":"CreateApplication"}',
+    },
+    {
+      url: "https://apply.example.com/graphql",
+      bodyText: '{"operationName":"ApplyToJob"}',
+    },
+    {
+      url: "https://unrelated.example.net/api/autosave",
+      bodyText: '{"answer":"private"}',
+    },
+    {
+      url: "https://apply.example.com/api/application/draft",
+      bodyText: " ".repeat(9000) + '{"operationName":"SubmitApplication"}',
+    },
+  ])(
+    "denies ambiguous, outside-origin and final operations: $url",
+    (request) => {
+      expect(classify(request).allowed).toBe(false);
+      expect(classify({ ...request, authorized: false }).allowed).toBe(false);
+    },
+  );
+  test("a wildcard never opens an origin or ambiguity exemption", () => {
+    expect(
+      classify({
+        window: {
+          expectedOrigin: "*",
+          expiresAtMs: 2000,
+          remainingRequests: 2,
+        },
+      }).allowed,
+    ).toBe(false);
+  });
   test("allows an exact same-origin autosave only inside an active bounded window", () => {
     expect(classify()).toEqual({
       allowed: true,

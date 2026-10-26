@@ -1,0 +1,12 @@
+{
+  "id": "workday-non-final-step-saves",
+  "provenance": "Scrubbed Workday-style replica reproduction; synthetic data only.",
+  "email": "synthetic@example.test",
+  "steps": 3,
+  "savePath": "/api/save",
+  "nextLabel": "Save and continue",
+  "finalLabel": "Submit application",
+  "finalPath": "/api/submit",
+  "refusedStepLabel": "Save and submit application",
+  "refusedStepPath": "/api/create-application/upload"
+}

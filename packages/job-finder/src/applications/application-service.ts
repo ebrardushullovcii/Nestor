@@ -331,9 +331,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
-      intermediateMutationsAuthorized: mode !== "prepare_only",
-      intermediateMutationAllowedOrigins: [...allowedOrigins],
-      recheckIntermediateMutationAuthority: async (observedOrigin) => {
+      intermediateMutationsAuthorized:
+        !envelope || envelope.intermediateMutationsAuthorized,
+      attachmentUploadsAuthorized: true,
+      // No envelope: the browser pins each live form frame's own origin.
+      // An envelope, when present, continues to narrow those destinations.
+      intermediateMutationAllowedOrigins: envelope ? [...allowedOrigins] : [],
+      recheckIntermediateMutationAuthority: async (
+        observedOrigin,
+        purpose = "answers",
+      ) => {
+        if (
+          purpose === "answers" &&
+          envelope &&
+          !envelope.intermediateMutationsAuthorized
+        )
+          return false;
         if (
           !current(row) ||
           signal.aborted ||
@@ -355,7 +368,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               new Date().toISOString(),
             ) ||
             !permission.scope.jobIds.includes(String(row.jobId)) ||
-            !permission.allowedResumeSha256.includes(sha256)
+            !permission.allowedResumeSha256.includes(sha256) ||
+            !permission.allowedOrigins.includes(observedOrigin) ||
+            (purpose === "answers" &&
+              !permission.intermediateMutationsAuthorized)
           )
             return false;
         }
@@ -364,7 +380,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          latestMode !== "prepare_only" &&
           jobs.getJob(row.jobId)?.stage === "resume" &&
           resume?.approvedAt === approved.approvedAt &&
           resume.pdfPath === approved.pdfPath &&

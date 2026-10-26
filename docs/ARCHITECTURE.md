@@ -101,10 +101,10 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 - `submitAuthorized` is true only under an `autonomous_submit` envelope or the
   person's Send press under `confirm_before_submit`, after preflight;
   `prepare_only` never sends, and legacy flags do not acquire that meaning
-- intermediate field saves are allowed by default to the origin the form's
-  frame saves to, in a 10-second, 40-request window after each field change;
-  a saved envelope may narrow the origins, and no final send, DOM submit, or
-  navigation mutation passes (ADR 0024). None of this grants a final action
+- intermediate answer saves are allowed in either mode, pinned to the initiating
+  form frame’s own origin, with recognizable non-final semantics and any saved
+  envelope still narrowing permissions. Uploading the selected attachment uses
+  a separate file-bound window; neither permission grants a final action
 - Browser Runtime keeps Playwright `Page` private and exposes optional typed
   application observation/exact-one-action hands only to main-process
   composition. Job Finder owns the authority/preflight/idempotency policy around
@@ -122,6 +122,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   projection atomically. This recovery channel records external operator
   evidence but grants no browser action or submission authority
 - prepare-only browser execution installs page and network mutation guards before filling fields. A separate `intermediateMutationsAuthorized` capability may allow autosave/draft/non-final ATS traffic, but it never permits DOM form submission, `requestSubmit`, a final-control click, navigation mutation, beacon, WebSocket, EventSource, or WebTransport; omitted authorization remains false. The capability is field-scoped: one exact grounded field action opens a same-origin 10-second/40-request window, only fetch/XHR `POST`/`PUT`/`PATCH` traffic with explicit draft/autosave/save/update/field/answer/upload/progress semantics can pass, and final-action, cross-origin, ambiguous, late, or exhausted traffic is blocked and journaled. Both the page wrapper and Playwright route enforce the boundary. Observed external writes and receipt attestations describe Job Finder's own authority and actions — they cannot confirm an external site outcome, which only the user can verify on the site
+- attachment selection opens a separate 15-second, two-request window. A same-origin presign may request only a file-upload handle with upload metadata. An upload may cross origins only when its multipart or raw body matches the selected file's name, size and digest (raw object PUTs match the bytes); mixed form answers and application/account operations are refused. The application origin and any saved envelope are rechecked before selection. This does not open an ordinary field-save or submit window
 - prepare-only execution continuously rechecks application-origin service-worker registration through the run sentinel plus an in-page scan, with explicit rechecks before safe-advance clicks and at the preparation step limit, and pauses untouched before any further field or click action when a worker can influence the origin; a failed employer-page goto is classified once as the technical `application_page_unreachable` blocker carrying only causal-free user copy, while its raw transport detail stays in session diagnostics
 - exact provider job URLs are prioritized before per-source collection caps so a configured vacancy cannot silently degrade into an unrelated board result
 - authentication remains owned by the browser session. The default desktop browser uses sandboxed Electron tabs and a persistent session; main may bring sign-ins over from a browser profile the user picks from a discovered list, but cookie values, profile paths and credentials must never enter renderer state, prompts or logs. Opening a source does not prove authentication; the user explicitly confirms sign-in before a source-scoped retry. See [ADR 0017](adr/0017-embedded-job-finder-browser.md) for browser ownership, handover and import boundaries
