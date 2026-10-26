@@ -8,7 +8,8 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "assistant-lane": "node scripts/run-assistant-lane.mjs"
+    "assistant-lane": "node scripts/run-assistant-lane.mjs",
+    "search-relevance": "node scripts/run-search-relevance.mjs"
   },
   "dependencies": {
     "@nestor/ai-providers": "workspace:*",
