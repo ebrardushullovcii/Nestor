@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -10,6 +10,7 @@ const groups = {
     "packages/browser-agent/src/apply/answer-source-catalog.test.ts",
     "packages/browser-agent/src/apply/classified-answer-check.test.ts",
     "packages/browser-agent/src/apply/written-answer-grounding.apply-replay.test.ts",
+    "packages/browser-agent/src/apply/submit-preflight.test.ts",
   ],
   formats: [
     "packages/browser-agent/src/apply/application-facts.test.ts",
@@ -20,8 +21,12 @@ const groups = {
   uploads: [
     "packages/browser-runtime/src/application-attachment-upload.apply-replay.test.ts",
     "packages/browser-runtime/src/application-intermediate-mutation-policy.test.ts",
+    "packages/browser-runtime/src/application-fill-request-policy.test.ts",
     "packages/browser-runtime/src/mutation-response.test.ts",
+    "packages/browser-runtime/src/mutation-response-body.test.ts",
+    "packages/browser-runtime/src/attachment-upload-ledger.test.ts",
     "packages/browser-runtime/src/playwright-application-flow.prepare-only-guard.test.ts",
+    "packages/browser-runtime/src/playwright-application-flow.strict-fill.test.ts",
   ],
   "needs-you": [
     "packages/browser-agent/src/apply/question-occurrences.apply-replay.test.ts",
@@ -75,6 +80,13 @@ function main() {
   if (!selected.length || selected.some((name) => !Object.hasOwn(groups, name)))
     throw new Error(`Choose groups from: ${Object.keys(groups).join(", ")}.`);
   const root = realpathSync(process.cwd());
+  const replayDirectory = "packages/browser-agent/src/apply";
+  const knownFiles = new Set(Object.values(groups).flat());
+  for (const name of readdirSync(path.join(root, replayDirectory)).sort()) {
+    if (!name.endsWith(".apply-replay.test.ts")) continue;
+    const file = `${replayDirectory}/${name}`;
+    if (!knownFiles.has(file)) groups[/github|format|picker/iu.test(name) ? "formats" : "facts"].push(file);
+  }
   const files = [...new Set(selected.flatMap((name) => groups[name]))];
   const missing = files.filter((file) => !existsSync(path.join(root, file)));
   if (missing.length) throw new Error(`Required replay files are missing:\n${missing.join("\n")}`);
@@ -108,6 +120,9 @@ function main() {
   const byFile = new Map(suites.map((suite) => [suite.name.replaceAll("\\", "/"), suite]));
   const findSuite = (file) => [...byFile].find(([name]) => name.endsWith("/" + file))?.[1];
   const missingResults = files.filter((file) => !findSuite(file));
+  const failedSuites = suites.filter((suite) => suite.status === "failed").map((suite) => ({
+    file: path.relative(root, suite.name).replaceAll("\\", "/"), message: suite.message,
+  }));
   const summaries = Object.fromEntries(selected.map((name) => {
     const assertions = groups[name].flatMap((file) => findSuite(file)?.assertionResults ?? []);
     return [name, {
@@ -120,7 +135,7 @@ function main() {
   const success = run.status === 0 && result.success === true && !missingResults.length &&
     Object.values(summaries).every((group) => group.total > 0 && group.failed === 0 && group.skipped === 0);
   const summary = {
-    offline: true, success, durationMs: Date.now() - started, groups: summaries, missingResults,
+    offline: true, success, durationMs: Date.now() - started, groups: summaries, missingResults, failedSuites,
     cost: { inputTokenTarget: 100_000, callTarget: 8, measurement: "Scripted accounting and call bounds only; live baselines are external." },
     rawReport,
   };
