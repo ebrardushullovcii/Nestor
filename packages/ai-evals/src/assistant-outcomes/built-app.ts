@@ -87,6 +87,7 @@ export async function chatInBuiltApp(
   page: Page,
   request: string,
   timeoutMs = 120_000,
+  submitted?: () => void,
 ): Promise<AssistantConversationView> {
   const conversation = () =>
     page.evaluate(async () => {
@@ -107,12 +108,26 @@ export async function chatInBuiltApp(
   const end = Date.now() + timeoutMs;
   do {
     const view = await conversation();
+    const userIndex =
+      view?.messages.findIndex(
+        (message) =>
+          message.role === "user" &&
+          message.origin === "sidebar" &&
+          !prior.has(message.id) &&
+          message.parts.some(
+            (part) => part.type === "text" && part.text === request.trim(),
+          ),
+      ) ?? -1;
+    if (userIndex >= 0) submitted?.();
     if (
       view &&
+      userIndex >= 0 &&
       !view.activeTurn &&
-      view.messages.some(
-        (message) => message.role === "assistant" && !prior.has(message.id),
-      )
+      view.messages
+        .slice(userIndex + 1)
+        .some(
+          (message) => message.role === "assistant" && !prior.has(message.id),
+        )
     )
       return view;
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -169,6 +184,7 @@ export async function runBuiltAppOutcomes(options: {
     let reply: AssistantConversationView | undefined;
     let evidence: BuiltAppEvidence = { operations: [], receipts: [] };
     let turnError: string | undefined;
+    let throughChat = false;
     let phase: "prepare" | "composer" | "chat" | "evidence" = "prepare";
     let cannotReachChat = false;
     try {
@@ -185,7 +201,9 @@ export async function runBuiltAppOutcomes(options: {
           .click();
       await options.shot(`before-${batch.id}`);
       phase = "chat";
-      reply = await chatInBuiltApp(options.page, batch.request);
+      reply = await chatInBuiltApp(options.page, batch.request, 120_000, () => {
+        throughChat = true;
+      });
       await writeFile(
         path.join(options.evidenceDir, `${batch.id}-conversation.json`),
         `${JSON.stringify(reply, null, 2)}\n`,
@@ -213,6 +231,7 @@ export async function runBuiltAppOutcomes(options: {
         actionId: action.actionId,
         request: batch.request,
         expected: action.expected ?? "completed",
+        throughChat,
         assertions,
         ...(action.blockedReason
           ? { blockedReason: action.blockedReason }

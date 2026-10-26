@@ -30,6 +30,7 @@ import {
   profileOperationOutcomeCases,
   declarationOutcomeCases,
 } from "./profile-operation-cases";
+import { answerOutcomeCases } from "./answer-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -63,6 +64,7 @@ export function allBatches(
     ...siteOutcomeCases(replicaOrigin),
     ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
+    ...answerOutcomeCases(),
   ];
 }
 
@@ -362,6 +364,7 @@ export async function run(
   const lines = [
     `Assistant outcomes: ${state.build.head}`,
     `${report.inventoryTotal} controls, ${report.excluded.length} explicit exclusions.`,
+    `${report.exercisedActions} mapped actions actually requested through the built-app chat.`,
     `Completed ${report.counts.completed}; correctly blocked ${report.counts.correctly_blocked}; unsupported ${report.counts.unsupported}; failed ${report.counts.failed}.`,
     "",
     ...report.actions.map(

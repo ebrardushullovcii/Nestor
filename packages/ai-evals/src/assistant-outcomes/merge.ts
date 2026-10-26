@@ -20,6 +20,7 @@ const artifactSchema = z.object({
       actionId: z.string().min(1),
       request: z.string().min(1),
       expected: z.enum(["completed", "correctly_blocked"]),
+      throughChat: z.boolean().default(false),
       assertions: z.array(
         z.object({
           label: z.string(),
@@ -59,6 +60,7 @@ export function combineOutcomeArtifacts(inputs: readonly unknown[]) {
         actionId: observation.actionId,
         request: observation.request,
         expected: observation.expected,
+        throughChat: observation.throughChat,
         ...(observation.blockedReason === undefined
           ? {}
           : { blockedReason: observation.blockedReason }),

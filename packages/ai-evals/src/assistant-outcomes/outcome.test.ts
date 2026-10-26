@@ -10,6 +10,7 @@ const base: ObservedAction = {
   actionId: "profile.headline",
   request: "Change my headline",
   expected: "completed",
+  throughChat: true,
   assertions: [],
 };
 test("a mapped call, question or refusal without an outcome cannot pass", () => {
@@ -17,6 +18,17 @@ test("a mapped call, question or refusal without an outcome cannot pass", () => 
   expect(
     judgeAction({ ...base, unsupportedReason: "No tool can do this." }),
   ).toMatchObject({ outcome: "unsupported", passed: false });
+});
+test("matching seeded state cannot pass without an actual built-app chat request", () => {
+  expect(
+    judgeAction({
+      ...base,
+      throughChat: false,
+      assertions: [
+        equalOutcome("data", "Headline", "Profile store", "New", "New"),
+      ],
+    }),
+  ).toMatchObject({ outcome: "failed", passed: false });
 });
 test("completion asserts the saved value, and ignores a forged assertion pass flag", () => {
   const assertion = equalOutcome(

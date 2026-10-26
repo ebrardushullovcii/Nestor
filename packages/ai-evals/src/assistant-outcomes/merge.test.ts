@@ -17,6 +17,7 @@ const artifact = (actual: string) => ({
       actionId: "navigation.home",
       request: "Show Home",
       expected: "completed",
+      throughChat: true,
       assertions: [
         {
           kind: "visible_state",

@@ -42,6 +42,8 @@ export interface ObservedAction {
   actionId: string;
   request: string;
   expected: "completed" | "correctly_blocked";
+  /** A new person message was observed in the built app after composer submission. */
+  throughChat?: boolean;
   assertions: readonly OutcomeAssertion[];
   blockedReason?: string;
   unsupportedReason?: string;
@@ -73,6 +75,8 @@ export function judgeAction(observation: ObservedAction): ActionOutcome {
       failures: [observation.unsupportedReason],
     };
   if (observation.error) failures.push(observation.error);
+  if (observation.throughChat !== true)
+    failures.push("No request was observed through the built-app chat.");
   if (!observation.assertions.length)
     failures.push("No resulting data, file or visible state was asserted.");
   for (const assertion of observation.assertions) {
@@ -117,6 +121,7 @@ export function judgeAction(observation: ObservedAction): ActionOutcome {
 
 export interface OutcomeReport {
   inventoryTotal: number;
+  exercisedActions: number;
   actions: {
     id: string;
     screen: string;
@@ -209,6 +214,11 @@ export function buildOutcomeReport(
   }
   return {
     inventoryTotal: inventory.length,
+    exercisedActions: new Set(
+      observations
+        .filter((observation) => observation.throughChat === true)
+        .map((observation) => observation.actionId),
+    ).size,
     actions,
     excluded,
     counts,
