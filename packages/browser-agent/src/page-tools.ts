@@ -505,7 +505,9 @@ export function createPageTools(
         if (moved) return moved;
         const chosen = await hands.chooseOption(ref, option);
         if (!chosen.ok) {
-          return ok(`The list did not take "${option}": ${chosen.error}`);
+          return ok(
+            `The list did not take "${option}": ${chosen.error}${chosen.offeredOptions?.length ? ` It offers: ${chosen.offeredOptions.slice(0, 40).join(", ")}.` : ""}`,
+          );
         }
         return ok(
           `Chose "${option}" in ${ref}. The page now:\n\n${describe(await observe())}`,
