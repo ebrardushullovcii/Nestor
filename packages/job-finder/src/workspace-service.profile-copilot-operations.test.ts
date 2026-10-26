@@ -31,8 +31,14 @@ import {
  * restores the pre-apply state.
  */
 
-type ProfileCopilotOperationDiscriminant =
-  ProfileCopilotPatchOperation["operation"];
+// These operations remain readable in old stored proposals, but the retired
+// Profile answer bank cannot be edited through the current apply path.
+type ProfileCopilotOperationDiscriminant = Exclude<
+  ProfileCopilotPatchOperation["operation"],
+  | "replace_answer_bank_fields"
+  | "upsert_reusable_answer"
+  | "remove_reusable_answer"
+>;
 
 type ProfileCopilotOperationPayload<
   TOperation extends ProfileCopilotOperationDiscriminant,
