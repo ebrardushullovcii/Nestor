@@ -34,7 +34,7 @@ const sampleEntries = [
   {
     href: "/job-finder/settings?asset=resume",
     id: "resume",
-    kind: "document" as const,
+    kind: "application" as const,
     metadata: ["resume"],
     subtitle: "PDF",
     title: "Elian CV",
@@ -470,6 +470,78 @@ describe("JobFinderGlobalSearch", () => {
     typeQuery("zzzz");
     expect(screen.getByText("0 results")).toBeTruthy();
     expect(screen.getByText(/Nothing in your saved jobs/i));
+  });
+
+  it("adds the saved jobs the store finds, and says it is searching until they arrive", async () => {
+    let answer: (found: {
+      entries: typeof sampleEntries;
+      incomplete: boolean;
+    }) => void = () => undefined;
+    const searchMore = vi.fn(
+      () =>
+        new Promise<{ entries: typeof sampleEntries; incomplete: boolean }>(
+          (resolve) => {
+            answer = resolve;
+          },
+        ),
+    );
+    render(
+      <JobFinderGlobalSearch
+        entries={[]}
+        onNavigate={vi.fn()}
+        searchMore={searchMore}
+      />,
+    );
+    typeQuery("platform");
+    await waitFor(() => expect(searchMore).toHaveBeenCalledWith("platform"));
+    expect(screen.getByText("Searching your saved jobs…")).toBeTruthy();
+    expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
+    answer({ entries: [sampleEntries[0]!], incomplete: false });
+    expect(
+      await screen.findByRole("option", { name: /Platform Engineer/ }),
+    ).toBeTruthy();
+    expect(screen.getByText("1 result")).toBeTruthy();
+  });
+
+  it("says the saved jobs could not be searched when the store fails", async () => {
+    const searchMore = vi.fn(() =>
+      Promise.reject(new Error("database is locked")),
+    );
+    render(
+      <JobFinderGlobalSearch
+        entries={[]}
+        onNavigate={vi.fn()}
+        searchMore={searchMore}
+      />,
+    );
+    typeQuery("platform");
+    expect(
+      await screen.findByText(
+        "Your saved jobs could not be searched. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Searching your saved jobs…")).toBeNull();
+    expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
+  });
+
+  it("shows what came back when part of the search fails", async () => {
+    const searchMore = vi.fn(() =>
+      Promise.resolve({ entries: [sampleEntries[0]!], incomplete: true }),
+    );
+    render(
+      <JobFinderGlobalSearch
+        entries={[]}
+        onNavigate={vi.fn()}
+        searchMore={searchMore}
+      />,
+    );
+    typeQuery("platform");
+    expect(
+      await screen.findByRole("option", { name: /Platform Engineer/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Some of your saved jobs could not be searched/),
+    ).toBeTruthy();
   });
 
   it("does not search on one noisy character", () => {

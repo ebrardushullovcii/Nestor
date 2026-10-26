@@ -588,6 +588,25 @@ describe("JobFinderShell keyboard shortcuts", () => {
           onControlsStateChange: vi.fn(() => vi.fn()),
           toggleMaximize: vi.fn().mockResolvedValue(windowControlsState),
         },
+        // The palette reads saved jobs from the store: one found job.
+        jobs: {
+          run: vi.fn((_name: string, input: { stage: string }) =>
+            Promise.resolve({
+              rows:
+                input.stage === "found"
+                  ? [
+                      {
+                        id: 1,
+                        stage: "found",
+                        title: "Platform Engineer",
+                        company: "Acme",
+                        location: "Remote",
+                      },
+                    ]
+                  : [],
+            }),
+          ),
+        },
       },
     });
 
@@ -808,9 +827,7 @@ describe("JobFinderShell keyboard shortcuts", () => {
     expect(await screen.findByText("1 result")).toBeTruthy();
 
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onNavigate).toHaveBeenCalledWith(
-      "/job-finder/discovery?jobId=job_1",
-    );
+    expect(onNavigate).toHaveBeenCalledWith("/job-finder/discovery?job=1");
     expect(
       screen.queryByRole("dialog", {
         name: "Search your workspace",

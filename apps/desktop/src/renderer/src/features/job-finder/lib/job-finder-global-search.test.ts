@@ -6,18 +6,16 @@ import {
 
 const entries: readonly JobFinderGlobalSearchEntry[] = [
   {
-    campaignId: "campaign-a",
-    href: "/job-finder/discovery?job=one",
-    id: "one",
+    href: "/job-finder/discovery?job=1",
+    id: "job:1",
     kind: "job",
     metadata: ["TypeScript", "remote"],
     subtitle: "Acme · Remote",
     title: "Platform Engineer",
   },
   {
-    campaignId: "campaign-b",
-    href: "/job-finder/applications?application=two",
-    id: "two",
+    href: "/job-finder/applications?jobId=2",
+    id: "job:2",
     kind: "application",
     metadata: ["applied"],
     subtitle: "Example · Applied",
@@ -32,9 +30,17 @@ describe("searchJobFinderEntries", () => {
     ]);
   });
 
-  it("can stay inside the active campaign", () => {
+  it("keeps what another search found without matching it again", () => {
+    const screen: JobFinderGlobalSearchEntry = {
+      href: "/job-finder/settings",
+      id: "screen:settings",
+      kind: "screen",
+      metadata: [],
+      subtitle: "Applying, AI, appearance",
+      title: "Settings",
+    };
     expect(
-      searchJobFinderEntries(entries, "engineer", { campaignId: "campaign-b" }),
+      searchJobFinderEntries([screen], "frontend", { found: [entries[1]!] }),
     ).toEqual([{ entries: [entries[1]], kind: "application" }]);
   });
 
@@ -44,32 +50,32 @@ describe("searchJobFinderEntries", () => {
     ]);
   });
 
-  it("keeps application and resume results reachable when many jobs match", () => {
+  it("keeps screen and application results reachable when many jobs match", () => {
     const manyJobs = Array.from({ length: 50 }, (_, index) => ({
       ...entries[0]!,
       id: `job-${index}`,
     }));
     const application = { ...entries[1]!, title: "Platform application" };
-    const resume: JobFinderGlobalSearchEntry = {
-      href: "/job-finder/review-queue",
-      id: "resume",
-      kind: "document",
-      metadata: [],
-      subtitle: "Platform resume",
-      title: "Platform resume",
+    const screen: JobFinderGlobalSearchEntry = {
+      href: "/job-finder/discovery",
+      id: "screen:discovery",
+      kind: "screen",
+      metadata: ["platform"],
+      subtitle: "Search and triage",
+      title: "Find jobs",
     };
 
     const groups = searchJobFinderEntries(
-      [...manyJobs, application, resume],
+      [...manyJobs, application, screen],
       "platform",
       { limit: 5 },
     );
 
     expect(groups.flatMap((group) => group.entries)).toHaveLength(5);
     expect(groups.map((group) => group.kind)).toEqual([
+      "screen",
       "job",
       "application",
-      "document",
     ]);
   });
 });

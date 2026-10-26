@@ -16,11 +16,6 @@ export function decodeResumeWorkspaceJobId(encodedJobId: string): string {
   }
 }
 
-/** Shortlisted, opened on one job and its resume. */
-export function buildShortlistedJobRoute(jobId: string | number): string {
-  return `/job-finder/review-queue?jobId=${encodeURIComponent(String(jobId))}`;
-}
-
 export function getResumeWorkspaceJobIdFromPathname(
   pathname: string,
 ): string | null {

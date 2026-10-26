@@ -1,14 +1,7 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
+import type { JobRow, JobStage } from "@nestor/contracts";
+import { STAGE_LABEL } from "@renderer/features/job-lists/job-format";
 import type { JobFinderGlobalSearchEntry } from "./job-finder-global-search";
-import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
-import { buildShortlistedJobRoute } from "./resume-workspace-route";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
-import {
-  isEmployerAbsenceLabel,
-  isLocationAbsenceLabel,
-  resolveJobEmployerDisplay,
-  resolveJobLocationDisplay,
-} from "./job-employer-location-display";
 
 /**
  * Every screen, so "set" then Enter opens Settings. The extra words are what
@@ -31,7 +24,7 @@ function screen(
   };
 }
 
-const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
+export const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
   screen("home", "Home", "Your next step", "/job-finder/home", ["start"]),
   screen(
     "profile",
@@ -84,158 +77,67 @@ const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
   ),
 ];
 
-export function buildJobFinderGlobalSearchEntries(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): readonly JobFinderGlobalSearchEntry[] {
-  const campaigns = workspace.campaigns ?? [];
-  const discoveryJobs = workspace.discoveryJobs ?? [];
-  const applicationRecords = workspace.applicationRecords ?? [];
-  const tailoredAssets = workspace.tailoredAssets ?? [];
-  const resumeExportArtifacts = workspace.resumeExportArtifacts ?? [];
+/** Where a saved job opens: the screen that lists its stage. */
+function jobHref(row: JobRow): string {
+  if (row.stage === "applied")
+    return `${JOB_FINDER_ROUTE_PATHS.applications}?jobId=${row.id}`;
+  if (row.stage === "shortlisted" || row.stage === "resume")
+    return `${JOB_FINDER_ROUTE_PATHS.reviewQueue}?jobId=${row.id}`;
+  return `${JOB_FINDER_ROUTE_PATHS.discovery}?job=${row.id}`;
+}
 
-  const campaignIdsByJobId = new Map<string, Set<string>>();
-  for (const campaign of campaigns) {
-    for (const jobId of campaign.jobIds ?? []) {
-      const campaignIds = campaignIdsByJobId.get(jobId) ?? new Set<string>();
-      campaignIds.add(campaign.id);
-      campaignIdsByJobId.set(jobId, campaignIds);
-    }
-  }
-  const campaignNameById = new Map(
-    campaigns.map((campaign) => [campaign.id, campaign.name]),
-  );
-  // A null or stale activeCampaignId means no searchable plan scope. Valid
-  // planless workspaces must still surface every job, application, and
-  // document record instead of returning none — including records that carry
-  // another plan's campaign id, which keep their own campaign metadata and
-  // label. When an active plan resolves, scope those records to its jobs so
-  // unrelated plans drop out; campaign and company entries always remain
-  // searchable as shared context.
-  const resolvesActivePlan = campaigns.some(
-    (campaign) => campaign.id === workspace.activeCampaignId,
-  );
-  const campaignLabelFor = (campaignId: string | null) =>
-    campaignId ? (campaignNameById.get(campaignId) ?? "Search plan") : null;
-  const isInActivePlan = (jobId: string) =>
-    campaignIdsByJobId.get(jobId)?.has(workspace.activeCampaignId) ?? false;
-  // Nothing the app says it saved may be unfindable: Home advertises every
-  // job saved on the device, so the search covers them all and labels the
-  // ones outside the active plan instead of denying they exist.
-  const outOfPlanLabel = (jobId: string) =>
-    resolvesActivePlan && !isInActivePlan(jobId)
-      ? "Saved on this device, not in this search plan"
-      : null;
-  const campaignIdForJob = resolvesActivePlan
-    ? (jobId: string) =>
-        isInActivePlan(jobId) ? workspace.activeCampaignId : null
-    : (jobId: string) =>
-        campaigns.find((campaign) =>
-          campaignIdsByJobId.get(jobId)?.has(campaign.id),
-        )?.id ?? null;
+/** Every stage, in the order a person most likely means. */
+const SEARCHED_STAGES: readonly JobStage[] = [
+  "found",
+  "shortlisted",
+  "resume",
+  "applied",
+  "hidden",
+];
 
-  const jobEntries: JobFinderGlobalSearchEntry[] = discoveryJobs.map((job) => {
-    const employer = resolveJobEmployerDisplay({
-      company: job.company,
-      canonicalUrl: job.canonicalUrl,
-    });
-    const location = resolveJobLocationDisplay(job.location);
-    const campaignId = campaignIdForJob(job.id);
-    return {
-      campaignId,
-      // Built when a result is opened: building a link for each of thousands
-      // of jobs every time the palette opened cost about 45 ms.
-      get href() {
-        return buildJobFinderContextRoute("/job-finder/discovery", {
-          jobId: job.id,
-        });
-      },
-      id: job.id,
-      kind: "job" as const,
-      metadata: [
-        employer,
-        location,
-        ...(job.workMode ?? []),
-        job.status,
-        ...(job.matchAssessment?.reasons ?? []),
-      ].filter(
-        (value): value is string =>
-          typeof value === "string" &&
-          value.length > 0 &&
-          !isEmployerAbsenceLabel(value) &&
-          !isLocationAbsenceLabel(value),
-      ),
-      // The employer and location line, from the two values resolved above.
-      subtitle: [
-        employer,
-        location,
-        campaignLabelFor(campaignId) ?? outOfPlanLabel(job.id),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      title: job.title,
-    };
-  });
-  const applicationEntries: JobFinderGlobalSearchEntry[] =
-    applicationRecords.map((record) => ({
-      campaignId: campaignIdForJob(record.jobId),
-      href: buildJobFinderContextRoute("/job-finder/applications", {
-        applicationRecordId: record.id,
+/**
+ * The saved jobs whose title, company or place match `query`, read from the
+ * job store a few per stage, best fit first. Applied jobs are applications.
+ * A stage that can't be read leaves the rest and marks the search incomplete.
+ */
+export async function searchSavedJobs(
+  query: string,
+  perStage = 8,
+): Promise<{
+  entries: readonly JobFinderGlobalSearchEntry[];
+  incomplete: boolean;
+}> {
+  // The store's text filter needs a word; without one it would list any job.
+  if (!/[\p{L}\p{N}]/u.test(query)) return { entries: [], incomplete: false };
+  const pages = await Promise.allSettled(
+    SEARCHED_STAGES.map((stage) =>
+      window.nestor.jobs.run("list_jobs", {
+        stage,
+        text: query,
+        sort: "best_fit",
+        limit: perStage,
       }),
-      id: record.id,
-      kind: "application",
-      metadata: [
-        record.company,
-        record.status,
-        record.lastActionLabel,
-        record.nextActionLabel,
-        ...(record.crm?.tags ?? []),
-      ].filter((value): value is string => typeof value === "string"),
-      subtitle: [
-        record.company,
-        (record.status ?? "").replaceAll("_", " "),
-        campaignLabelFor(campaignIdForJob(record.jobId)),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      title: record.title,
-    }));
-  const documentEntries: JobFinderGlobalSearchEntry[] = [
-    ...tailoredAssets.map((asset) => ({
-      campaignId: campaignIdForJob(asset.jobId),
-      href: buildShortlistedJobRoute(asset.jobId),
-      id: asset.id,
-      kind: "document" as const,
-      metadata: [asset.templateName, asset.status, asset.version],
-      subtitle: [
-        asset.templateName,
-        asset.status,
-        campaignLabelFor(campaignIdForJob(asset.jobId)),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      title: asset.label,
-    })),
-    ...resumeExportArtifacts.map((artifact) => ({
-      campaignId: campaignIdForJob(artifact.jobId),
-      href: buildShortlistedJobRoute(artifact.jobId),
-      id: artifact.id,
-      kind: "document" as const,
-      metadata: [artifact.templateId, artifact.format, artifact.filePath],
-      subtitle: [
-        (artifact.templateId ?? "").replaceAll("_", " "),
-        `${(artifact.format ?? "").toUpperCase()} export`,
-        campaignLabelFor(campaignIdForJob(artifact.jobId)),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      title: artifact.filePath.split(/[\\/]/).at(-1) ?? "Resume export",
-    })),
-  ];
-
-  return [
-    ...SCREEN_ENTRIES,
-    ...jobEntries,
-    ...applicationEntries,
-    ...documentEntries,
-  ];
+    ),
+  );
+  const entries = pages.flatMap((page) =>
+    page.status === "fulfilled"
+      ? page.value.rows.map((row) => ({
+          href: jobHref(row),
+          id: `job:${row.id}`,
+          kind:
+            row.stage === "applied"
+              ? ("application" as const)
+              : ("job" as const),
+          metadata: [],
+          subtitle: [row.company, row.location, STAGE_LABEL[row.stage]]
+            .filter(Boolean)
+            .join(" · "),
+          title: row.title,
+        }))
+      : [],
+  );
+  return {
+    entries,
+    incomplete: pages.some((page) => page.status === "rejected"),
+  };
 }

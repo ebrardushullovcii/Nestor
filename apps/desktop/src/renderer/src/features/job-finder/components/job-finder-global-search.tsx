@@ -20,33 +20,23 @@ import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 
 const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
   application: "Applications",
-  company: "Companies",
-  document: "Resumes",
-  job: "Jobs and companies",
+  job: "Jobs",
   screen: "Go to",
 };
 
 export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
 
-/**
- * The entries, or a function that builds them. Indexing every saved job took
- * ~50 ms at 12k jobs, so the palette opens first and builds its index once
- * the window is idle or a query needs it, whichever comes first.
- */
-export type JobFinderGlobalSearchEntries =
-  | readonly JobFinderGlobalSearchEntry[]
-  | (() => readonly JobFinderGlobalSearchEntry[]);
-
-function resolveEntries(
-  entries: JobFinderGlobalSearchEntries,
-): readonly JobFinderGlobalSearchEntry[] {
-  return typeof entries === "function" ? entries() : entries;
-}
+/** Finds more entries for a query, such as saved jobs from the job store. */
+export type JobFinderGlobalSearchMore = (query: string) => Promise<{
+  entries: readonly JobFinderGlobalSearchEntry[];
+  /** Part of the search could not be read; `entries` is what came back. */
+  incomplete: boolean;
+}>;
 
 export function JobFinderGlobalSearch(props: {
-  campaignId?: string | null;
-  entries: JobFinderGlobalSearchEntries;
+  entries: readonly JobFinderGlobalSearchEntry[];
   onNavigate: (entry: JobFinderGlobalSearchEntry) => void;
+  searchMore?: JobFinderGlobalSearchMore;
   resultsLayout?: "overlay" | "in-flow";
 }) {
   const inputId = useId();
@@ -57,17 +47,41 @@ export function JobFinderGlobalSearch(props: {
   const [activeIndex, setActiveIndex] = useState(-1);
   const deferredQuery = useDeferredValue(query);
   const isQueryLongEnough = deferredQuery.trim().length >= 2;
+  const [more, setMore] = useState<{
+    query: string;
+    entries: readonly JobFinderGlobalSearchEntry[];
+    incomplete: boolean;
+  }>({ query: "", entries: [], incomplete: false });
+  const { searchMore } = props;
+  useEffect(() => {
+    if (!isQueryLongEnough || !searchMore) return undefined;
+    let current = true;
+    void searchMore(deferredQuery.trim()).then(
+      (found) => {
+        if (current) setMore({ query: deferredQuery, ...found });
+      },
+      () => {
+        if (current)
+          setMore({ query: deferredQuery, entries: [], incomplete: true });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [deferredQuery, isQueryLongEnough, searchMore]);
   const groups = useMemo(
     () =>
       isQueryLongEnough
-        ? searchJobFinderEntries(resolveEntries(props.entries), deferredQuery, {
-            ...(props.campaignId !== undefined
-              ? { campaignId: props.campaignId }
-              : {}),
+        ? searchJobFinderEntries(props.entries, deferredQuery, {
+            found: more.query === deferredQuery ? more.entries : [],
           })
         : [],
-    [deferredQuery, isQueryLongEnough, props.campaignId, props.entries],
+    [deferredQuery, isQueryLongEnough, more, props.entries],
   );
+  // Saved jobs are still being read for what was typed.
+  const searching = Boolean(searchMore) && more.query !== deferredQuery;
+  const incomplete =
+    !searching && more.query === deferredQuery && more.incomplete;
   const visibleEntries = useMemo(
     () => groups.flatMap((group) => [...group.entries]),
     [groups],
@@ -198,7 +212,7 @@ export function JobFinderGlobalSearch(props: {
         id={inputId}
         onChange={(event) => handleQueryChange(event.target.value)}
         onKeyDown={handleInputKeyDown}
-        placeholder="Search jobs, applications, resumes, or a screen"
+        placeholder="Search jobs, applications, or a screen"
         role="combobox"
         type="search"
         value={query}
@@ -217,14 +231,26 @@ export function JobFinderGlobalSearch(props: {
             className="px-2 pb-2 text-xs text-foreground-muted"
             role="status"
           >
-            {resultCount} {resultCount === 1 ? "result" : "results"}
+            {searching
+              ? "Searching your saved jobs…"
+              : `${resultCount} ${resultCount === 1 ? "result" : "results"}`}
           </p>
-          {groups.length === 0 ? (
-            <p className="rounded-(--radius-field) px-3 py-5 text-center text-sm text-foreground-soft">
-              Nothing in your saved jobs, companies, applications, or resumes
-              matches &ldquo;{query}&rdquo;.
+          {incomplete ? (
+            <p
+              className="rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-sm text-foreground-soft"
+              role="alert"
+            >
+              {groups.length === 0
+                ? "Your saved jobs could not be searched. Try again."
+                : "Some of your saved jobs could not be searched; these are the ones that could."}
             </p>
-          ) : (
+          ) : null}
+          {groups.length === 0 && !searching && !incomplete ? (
+            <p className="rounded-(--radius-field) px-3 py-5 text-center text-sm text-foreground-soft">
+              Nothing in your saved jobs, applications or screens matches
+              &ldquo;{query}&rdquo;.
+            </p>
+          ) : groups.length === 0 ? null : (
             <div
               aria-label="Search results"
               className="grid"
@@ -302,11 +328,11 @@ function getDialogFocusableElements(root: HTMLElement): HTMLElement[] {
 }
 
 export function JobFinderGlobalSearchDialog(props: {
-  campaignId?: string | null;
-  entries: JobFinderGlobalSearchEntries;
+  entries: readonly JobFinderGlobalSearchEntry[];
   focusRequest: number;
   onClose: () => void;
   onNavigate: (entry: JobFinderGlobalSearchEntry) => void;
+  searchMore?: JobFinderGlobalSearchMore;
 }) {
   const panelRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef<Element | null>(null);
@@ -343,19 +369,6 @@ export function JobFinderGlobalSearchDialog(props: {
       }
     };
   }, [focusSearchInput]);
-
-  useEffect(() => {
-    const { entries } = props;
-    if (typeof entries !== "function") return undefined;
-    if (typeof window.requestIdleCallback !== "function") {
-      const timer = window.setTimeout(entries, 50);
-      return () => window.clearTimeout(timer);
-    }
-    const handle = window.requestIdleCallback(() => entries(), {
-      timeout: 500,
-    });
-    return () => window.cancelIdleCallback(handle);
-  }, [props.entries]);
 
   useEffect(() => {
     if (props.focusRequest === 0) {
@@ -435,11 +448,9 @@ export function JobFinderGlobalSearchDialog(props: {
           </button>
         </div>
         <JobFinderGlobalSearch
-          {...(props.campaignId !== undefined
-            ? { campaignId: props.campaignId }
-            : {})}
           entries={props.entries}
           onNavigate={handleNavigate}
+          {...(props.searchMore ? { searchMore: props.searchMore } : {})}
           resultsLayout="in-flow"
         />
       </section>
