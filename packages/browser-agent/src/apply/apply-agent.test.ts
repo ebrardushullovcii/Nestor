@@ -2213,7 +2213,7 @@ describe("apply agent run endings", () => {
     };
     const uploadFile = vi.fn((_ref: string, upload: { name: string }) => {
       source.controls[fields.length] = {
-        ...source.controls[fields.length]!,
+        ...source.controls[fields.length],
         value: file.afterUpload.value,
         upload: {
           described: file.described,
