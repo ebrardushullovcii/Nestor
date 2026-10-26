@@ -22,6 +22,7 @@ import { siteOutcomeCases } from "./site-cases";
 import { trackerOutcomeCases } from "./tracker-cases";
 import { applicationViewOutcomeCases } from "./application-view-cases";
 import { readOutcomeCases } from "./read-cases";
+import { profileViewOutcomeCases } from "./profile-view-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -49,6 +50,7 @@ export function allBatches(
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
     ...preferenceOutcomeCases(),
+    ...profileViewOutcomeCases(),
     ...siteOutcomeCases(replicaOrigin),
     ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
