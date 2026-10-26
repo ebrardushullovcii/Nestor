@@ -2,6 +2,8 @@ import { jobStageValues } from "@nestor/contracts";
 
 import type { JobStore } from "./job-store";
 import { JOB_STORE_SCHEMA } from "./schema";
+import { createProfileStore } from "./profile-store";
+import { createPreferencesStore } from "./preferences-store";
 
 /**
  * Reset everything: drops every table and makes it again, as in a new file,
@@ -30,6 +32,10 @@ export function resetJobStore(store: JobStore): void {
           db.exec(`DROP TABLE "${name}"`);
       for (const { name } of tables()) db.exec(`DROP TABLE "${name}"`);
       for (const ddl of JOB_STORE_SCHEMA) db.exec(ddl);
+      // Existing repository/command handles still read these singleton rows.
+      // Recreate only fresh defaults; reset never restores retired values.
+      createProfileStore(store);
+      createPreferencesStore(store);
     });
   } finally {
     db.exec("PRAGMA foreign_keys = ON");
@@ -45,4 +51,6 @@ export function resetJobStore(store: JobStore): void {
     searchId: null,
   });
   store.notify({ cause: "sites", stages: [], ids: null, searchId: null });
+  store.notify({ cause: "profile", stages: [], ids: null, searchId: null });
+  store.notify({ cause: "settings", stages: [], ids: null, searchId: null });
 }

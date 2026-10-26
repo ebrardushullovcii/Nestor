@@ -1,0 +1,374 @@
+{
+  "id": "synthetic",
+  "edits": {
+    "profile": {
+      "fields": {
+        "firstName": "synthetic",
+        "lastName": "synthetic",
+        "middleName": "synthetic",
+        "fullName": "synthetic",
+        "preferredDisplayName": "synthetic",
+        "headline": "synthetic",
+        "summary": "synthetic",
+        "currentLocation": "synthetic",
+        "currentCity": "synthetic",
+        "currentRegion": "synthetic",
+        "currentCountry": "synthetic",
+        "timeZone": "synthetic",
+        "yearsExperience": 1,
+        "email": "synthetic",
+        "secondaryEmail": "synthetic",
+        "phone": "synthetic",
+        "portfolioUrl": "synthetic",
+        "linkedinUrl": "synthetic",
+        "githubUrl": "synthetic",
+        "personalWebsiteUrl": "synthetic",
+        "workEligibility.requiresVisaSponsorship": true,
+        "workEligibility.willingToRelocate": true,
+        "workEligibility.willingToTravel": true,
+        "workEligibility.remoteEligible": true,
+        "workEligibility.noticePeriodDays": 1,
+        "workEligibility.availableStartDate": "synthetic",
+        "workEligibility.securityClearance": "synthetic",
+        "professionalSummary.shortValueProposition": "synthetic",
+        "professionalSummary.fullSummary": "synthetic",
+        "professionalSummary.leadershipSummary": "synthetic",
+        "professionalSummary.domainFocusSummary": "synthetic",
+        "narrative.professionalStory": "synthetic",
+        "narrative.nextChapterSummary": "synthetic",
+        "narrative.careerTransitionSummary": "synthetic",
+        "applicationIdentity.preferredEmail": "synthetic",
+        "applicationIdentity.preferredPhone": "synthetic"
+      },
+      "lists": {
+        "targetRoles": [
+          "synthetic"
+        ],
+        "locations": [
+          "synthetic"
+        ],
+        "skills": [
+          "synthetic"
+        ],
+        "workEligibility.authorizedWorkCountries": [
+          "synthetic"
+        ],
+        "workEligibility.preferredRelocationRegions": [
+          "synthetic"
+        ],
+        "professionalSummary.careerThemes": [
+          "synthetic"
+        ],
+        "professionalSummary.strengths": [
+          "synthetic"
+        ],
+        "narrative.differentiators": [
+          "synthetic"
+        ],
+        "narrative.motivationThemes": [
+          "synthetic"
+        ],
+        "applicationIdentity.preferredLinkIds": [
+          "synthetic"
+        ],
+        "skillGroups.coreSkills": [
+          "synthetic"
+        ],
+        "skillGroups.tools": [
+          "synthetic"
+        ],
+        "skillGroups.languagesAndFrameworks": [
+          "synthetic"
+        ],
+        "skillGroups.softSkills": [
+          "synthetic"
+        ],
+        "skillGroups.highlightedSkills": [
+          "synthetic"
+        ]
+      },
+      "expected": {
+        "firstName": "synthetic",
+        "lastName": "synthetic",
+        "middleName": "synthetic",
+        "fullName": "synthetic",
+        "preferredDisplayName": "synthetic",
+        "headline": "synthetic",
+        "summary": "synthetic",
+        "currentLocation": "synthetic",
+        "currentCity": "synthetic",
+        "currentRegion": "synthetic",
+        "currentCountry": "synthetic",
+        "timeZone": "synthetic",
+        "yearsExperience": 1,
+        "email": "synthetic",
+        "secondaryEmail": "synthetic",
+        "phone": "synthetic",
+        "portfolioUrl": "synthetic",
+        "linkedinUrl": "synthetic",
+        "githubUrl": "synthetic",
+        "personalWebsiteUrl": "synthetic",
+        "workEligibility.requiresVisaSponsorship": true,
+        "workEligibility.willingToRelocate": true,
+        "workEligibility.willingToTravel": true,
+        "workEligibility.remoteEligible": true,
+        "workEligibility.noticePeriodDays": 1,
+        "workEligibility.availableStartDate": "synthetic",
+        "workEligibility.securityClearance": "synthetic",
+        "professionalSummary.shortValueProposition": "synthetic",
+        "professionalSummary.fullSummary": "synthetic",
+        "professionalSummary.leadershipSummary": "synthetic",
+        "professionalSummary.domainFocusSummary": "synthetic",
+        "narrative.professionalStory": "synthetic",
+        "narrative.nextChapterSummary": "synthetic",
+        "narrative.careerTransitionSummary": "synthetic",
+        "applicationIdentity.preferredEmail": "synthetic",
+        "applicationIdentity.preferredPhone": "synthetic"
+      },
+      "expectedLists": {
+        "targetRoles": [
+          "synthetic"
+        ],
+        "locations": [
+          "synthetic"
+        ],
+        "skills": [
+          "synthetic"
+        ],
+        "workEligibility.authorizedWorkCountries": [
+          "synthetic"
+        ],
+        "workEligibility.preferredRelocationRegions": [
+          "synthetic"
+        ],
+        "professionalSummary.careerThemes": [
+          "synthetic"
+        ],
+        "professionalSummary.strengths": [
+          "synthetic"
+        ],
+        "narrative.differentiators": [
+          "synthetic"
+        ],
+        "narrative.motivationThemes": [
+          "synthetic"
+        ],
+        "applicationIdentity.preferredLinkIds": [
+          "synthetic"
+        ],
+        "skillGroups.coreSkills": [
+          "synthetic"
+        ],
+        "skillGroups.tools": [
+          "synthetic"
+        ],
+        "skillGroups.languagesAndFrameworks": [
+          "synthetic"
+        ],
+        "skillGroups.softSkills": [
+          "synthetic"
+        ],
+        "skillGroups.highlightedSkills": [
+          "synthetic"
+        ]
+      }
+    },
+    "goals": {
+      "fields": {
+        "searchSelectivity": "best_matches",
+        "shiftPreference": "day",
+        "minimumSalaryUsd": 1,
+        "targetSalaryUsd": 1,
+        "salaryCurrency": "USD",
+        "approvalMode": "draft_only",
+        "tailoringMode": "conservative",
+        "compensation.basis": "base",
+        "compensation.minimum": 1,
+        "compensation.maximum": 1,
+        "compensation.interval": "hour",
+        "compensation.currency": "USD",
+        "compensation.currencyStatus": "explicit",
+        "weeklyHours.minimum": 1,
+        "weeklyHours.maximum": 1
+      },
+      "lists": {
+        "targetRoles": [
+          "synthetic"
+        ],
+        "jobFamilies": [
+          "synthetic"
+        ],
+        "locations": [
+          "synthetic"
+        ],
+        "excludedLocations": [
+          "synthetic"
+        ],
+        "workModes": [
+          "remote"
+        ],
+        "seniorityLevels": [
+          "synthetic"
+        ],
+        "targetIndustries": [
+          "synthetic"
+        ],
+        "targetCompanyStages": [
+          "synthetic"
+        ],
+        "employmentTypes": [
+          "synthetic"
+        ],
+        "companyBlacklist": [
+          "synthetic"
+        ],
+        "companyWhitelist": [
+          "synthetic"
+        ]
+      },
+      "expected": {
+        "searchSelectivity": "best_matches",
+        "shiftPreference": "day",
+        "minimumSalaryUsd": 1,
+        "targetSalaryUsd": 1,
+        "salaryCurrency": "USD",
+        "approvalMode": "draft_only",
+        "tailoringMode": "conservative",
+        "compensation.basis": "base",
+        "compensation.minimum": 1,
+        "compensation.maximum": 1,
+        "compensation.interval": "hour",
+        "compensation.currency": "USD",
+        "compensation.currencyStatus": "explicit",
+        "weeklyHours.minimum": 1,
+        "weeklyHours.maximum": 1
+      },
+      "expectedLists": {
+        "targetRoles": [
+          "synthetic"
+        ],
+        "jobFamilies": [
+          "synthetic"
+        ],
+        "locations": [
+          "synthetic"
+        ],
+        "excludedLocations": [
+          "synthetic"
+        ],
+        "workModes": [
+          "remote"
+        ],
+        "seniorityLevels": [
+          "synthetic"
+        ],
+        "targetIndustries": [
+          "synthetic"
+        ],
+        "targetCompanyStages": [
+          "synthetic"
+        ],
+        "employmentTypes": [
+          "synthetic"
+        ],
+        "companyBlacklist": [
+          "synthetic"
+        ],
+        "companyWhitelist": [
+          "synthetic"
+        ]
+      }
+    },
+    "upsert": [
+      {
+        "collection": "experiences",
+        "record": {
+          "id": "synthetic",
+          "companyName": "synthetic",
+          "companyUrl": "synthetic",
+          "title": "synthetic",
+          "employmentType": "synthetic",
+          "location": "synthetic",
+          "workMode": [
+            "remote"
+          ],
+          "startDate": "synthetic",
+          "endDate": "synthetic",
+          "isCurrent": true,
+          "isDraft": true,
+          "summary": "synthetic",
+          "achievements": [
+            "synthetic"
+          ],
+          "skills": [
+            "synthetic"
+          ],
+          "domainTags": [
+            "synthetic"
+          ],
+          "peopleManagementScope": "synthetic",
+          "ownershipScope": "synthetic"
+        }
+      }
+    ],
+    "remove": [
+      {
+        "collection": "experiences",
+        "id": "synthetic"
+      }
+    ],
+    "expectedRecords": [
+      {
+        "collection": "experiences",
+        "id": "synthetic",
+        "value": {
+          "collection": "experiences",
+          "record": {
+            "id": "synthetic",
+            "companyName": "synthetic",
+            "companyUrl": "synthetic",
+            "title": "synthetic",
+            "employmentType": "synthetic",
+            "location": "synthetic",
+            "workMode": [
+              "remote"
+            ],
+            "startDate": "synthetic",
+            "endDate": "synthetic",
+            "isCurrent": true,
+            "isDraft": true,
+            "summary": "synthetic",
+            "achievements": [
+              "synthetic"
+            ],
+            "skills": [
+              "synthetic"
+            ],
+            "domainTags": [
+              "synthetic"
+            ],
+            "peopleManagementScope": "synthetic",
+            "ownershipScope": "synthetic"
+          }
+        }
+      }
+    ],
+    "expectedWorkPermissions": [
+      {
+        "country": "synthetic",
+        "conditions": "synthetic",
+        "requiresFutureSponsorship": true
+      }
+    ],
+    "draftId": "synthetic",
+    "requireCurrentDraft": true,
+    "resumeIdentityChoice": "profile_name",
+    "workPermissions": [
+      {
+        "country": "synthetic",
+        "conditions": "synthetic",
+        "requiresFutureSponsorship": true
+      }
+    ]
+  }
+}
