@@ -1,0 +1,43 @@
+{
+  "siteLabel": "siteLabel-sample",
+  "pageUrl": "https://jobs.example.test/listing",
+  "answers": [
+    {
+      "fieldKey": "fieldKey-sample",
+      "sourceId": "sourceId-sample",
+      "question": "question-sample",
+      "answer": "answer-sample",
+      "source": "source-sample",
+      "written": true,
+      "groundedIn": [
+        "groundedIn0-sample"
+      ]
+    }
+  ],
+  "observedFieldKeys": [
+    "observedFieldKeys0-sample"
+  ],
+  "attachments": [
+    {
+      "fieldKey": "fieldKey-sample",
+      "label": "label-sample",
+      "fileName": "fileName-sample",
+      "field": "field-sample"
+    }
+  ],
+  "letter": {
+    "text": "text-sample",
+    "reviewReason": "reviewReason-sample",
+    "needsRefresh": true,
+    "fields": [
+      "fields0-sample"
+    ],
+    "groundedIn": [
+      "groundedIn0-sample"
+    ]
+  },
+  "waitingOnYou": [
+    "waitingOnYou0-sample"
+  ],
+  "preparedAt": "2026-10-26T09:00:00.000Z"
+}

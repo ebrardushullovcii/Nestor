@@ -1,0 +1,9 @@
+{
+  "statuses": [
+    "applying"
+  ],
+  "tag": "tag-sample",
+  "text": "text-sample",
+  "due": true,
+  "quietForDays": 1
+}

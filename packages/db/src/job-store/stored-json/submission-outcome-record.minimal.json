@@ -1,0 +1,19 @@
+{
+  "id": "id-sample",
+  "preflightId": "preflightId-sample",
+  "idempotencyKey": "idempotencyKey-sample",
+  "authorityEnvelopeId": "authorityEnvelopeId-sample",
+  "authorityRevision": 1,
+  "runId": "runId-sample",
+  "jobId": "jobId-sample",
+  "resultId": "resultId-sample",
+  "applicationRecordId": "applicationRecordId-sample",
+  "outcome": "not_submitted",
+  "attemptedAt": "2026-10-26T09:00:00.000Z",
+  "verifiedAt": null,
+  "evidence": [],
+  "retry": {
+    "eligible": true,
+    "blockReason": null
+  }
+}

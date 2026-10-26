@@ -1,0 +1,11 @@
+{
+  "id": "id-sample",
+  "jobId": "jobId-sample",
+  "source": "tailored_export",
+  "sourceDocumentId": "sourceDocumentId-sample",
+  "exportArtifactId": "exportArtifactId-sample",
+  "fileName": "fileName-sample",
+  "filePath": "filePath-sample",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "approvedAt": "2026-10-26T09:00:00.000Z"
+}

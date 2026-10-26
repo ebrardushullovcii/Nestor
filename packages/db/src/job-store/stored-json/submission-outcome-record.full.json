@@ -1,0 +1,39 @@
+{
+  "id": "id-sample",
+  "preflightId": "preflightId-sample",
+  "idempotencyKey": "idempotencyKey-sample",
+  "authorityEnvelopeId": "authorityEnvelopeId-sample",
+  "authorityRevision": 1,
+  "runId": "runId-sample",
+  "jobId": "jobId-sample",
+  "resultId": "resultId-sample",
+  "applicationRecordId": "applicationRecordId-sample",
+  "outcome": "submitted",
+  "attemptedAt": "2026-10-26T09:00:00.000Z",
+  "verifiedAt": "2026-10-26T09:00:00.000Z",
+  "evidence": [
+    {
+      "id": "id-sample",
+      "kind": "employer_site_state",
+      "observedAt": "2026-10-26T09:00:00.000Z",
+      "destination": {
+        "origin": "https://jobs.example.test",
+        "safePath": "/redacted/path"
+      },
+      "artifactRefId": "artifactRefId-sample",
+      "summary": "summary-sample"
+    }
+  ],
+  "retry": {
+    "eligible": false,
+    "blockReason": "submission_confirmed"
+  },
+  "browserAction": {
+    "reason": "reason-sample",
+    "detail": "detail-sample",
+    "actionAttempted": true,
+    "actionIssued": true,
+    "actionCompleted": true,
+    "requestsObservedDuringAction": 0
+  }
+}
