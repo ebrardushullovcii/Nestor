@@ -6,6 +6,11 @@
   "fields": [
     {
       "label": "GitHub username",
+      "placeholder": "Username only, no URL",
+      "expected": "synthetic-developer"
+    },
+    {
+      "label": "GitHub username",
       "placeholder": "",
       "expected": "synthetic-developer"
     },

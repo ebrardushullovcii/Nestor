@@ -2333,7 +2333,7 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
-    beforeModelTurn: async () => {
+    beforeModelTurn: () => {
       const current = pageTools.state.observation;
       const exhausted = current?.controls.some(
         (control) =>

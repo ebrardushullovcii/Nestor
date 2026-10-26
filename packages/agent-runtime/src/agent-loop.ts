@@ -188,7 +188,7 @@ export interface AgentLoopOptions {
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
   /** Finish from the host's verified state before spending another model call. */
-  beforeModelTurn?: () => Promise<AgentLoopFinish | null>;
+  beforeModelTurn?: () => AgentLoopFinish | null | Promise<AgentLoopFinish | null>;
   /**
    * A reply with words and no tool call. The host may take it as a step of
    * its own (most often the model reporting that it is done) instead of the
