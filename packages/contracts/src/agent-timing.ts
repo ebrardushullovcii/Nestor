@@ -1,4 +1,3 @@
-import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 
 export const ModelTokenUsageSchema = z.object({
