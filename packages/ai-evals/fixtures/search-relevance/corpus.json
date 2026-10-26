@@ -1,0 +1,944 @@
+{
+  "version": 1,
+  "capturedAt": "2026-10-26",
+  "selection": "59 frozen public vacancies across 9 hiring boards plus one explicitly empty plain careers page. Deliberate role, seniority, geography and transferable-stack contrasts; not a random sample or whole-board recall estimate. Labels were fixed before the single model baseline.",
+  "boards": [
+    {
+      "id": "grafana",
+      "file": "grafana.json.gz",
+      "sha256": "5af2eeb7d7bf53bbbfbd9dd17d66b8246cc8833b8038fe5746993fd38689748b"
+    },
+    {
+      "id": "metabase",
+      "file": "metabase.json.gz",
+      "sha256": "09958af5d10e2281755b6c219cf68d87589f45e47c2f0837e450a0f3705553dd"
+    },
+    {
+      "id": "linear",
+      "file": "linear.json.gz",
+      "sha256": "310bbd7e37f3ba3b3855625d1ba7ee8c9b3b8bcab76d911b38ebf5293caa8ec9"
+    },
+    {
+      "id": "resend",
+      "file": "resend.json.gz",
+      "sha256": "cdd2ef6112798f41aa998dd8f9a4bf5a60bcfa7af368234b3bcaac737b0b3a17"
+    },
+    {
+      "id": "posthog",
+      "file": "posthog.json.gz",
+      "sha256": "355e6badb7114df66e0a03f6041283a2d1118b6d4557c6e2dc72f1d84d754dcc"
+    },
+    {
+      "id": "ashby",
+      "file": "ashby.json.gz",
+      "sha256": "9bdd4e10486c9b55ebb4498fd2f49b0fcd442eab17d6ee964d0b7fbfa27dd1a7"
+    },
+    {
+      "id": "genesys",
+      "file": "genesys.json.gz",
+      "sha256": "95cc8a7570b437595aa66891eee257c04f1956f239aa05628505afbdaccdd758"
+    },
+    {
+      "id": "runware",
+      "file": "runware.json.gz",
+      "sha256": "97083ecfde32aaf137d0b7746cf007b8f14637e4a0091489c927d45a273a07e8"
+    },
+    {
+      "id": "automattic",
+      "file": "automattic.json.gz",
+      "sha256": "6b30dcda3357ef213cf0a0c71d9cf5151491327b7ecc4faba46f06f1fd7d9489"
+    },
+    {
+      "id": "37signals",
+      "file": "37signals.json.gz",
+      "sha256": "ff7d2e7eb6fbddad6e5860dc99e3708a729c44a4f9bf9ed6e84803f97f7ba57d"
+    }
+  ],
+  "listings": [
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6116452004",
+      "title": "Commercial Account Executive, Acquisition | Remote | Netherlands",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Account executive, not software delivery."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Account executive, not software delivery."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6111473004",
+      "title": "Senior Backend Engineer - Analytics | Canada | Remote",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Canada hiring region; candidate is US only."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Canada hiring region; candidate is US only."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6114603004",
+      "title": "Senior Backend Engineer - Analytics | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior backend analytics; transferable distributed-systems skills. Backend-only for the close persona."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote senior backend analytics; transferable distributed-systems skills. Backend-only for the close persona."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6223411004",
+      "title": "Senior Backend Engineer - Databases Tempo | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior distributed backend/Tempo; Go is a transferable stack, not a frontend close match."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote senior distributed backend/Tempo; Go is a transferable stack, not a frontend close match."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6200721004",
+      "title": "Senior Engineering Manager, Grafana Frontend | USA | Remote",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "People management scope, not the requested hands-on IC track."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "People management scope, not the requested hands-on IC track."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6130872004",
+      "title": "Senior FullStack Engineer - Grafana Cloud Observability| Canada | Remote",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Canada posting; remote is country restricted."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Canada posting; remote is country restricted."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6130907004",
+      "title": "Senior FullStack Engineer - Grafana Cloud Observability| US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote React/TypeScript full-stack product work; comparable backend languages explicitly accepted."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote React/TypeScript full-stack product work; comparable backend languages explicitly accepted."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6223924004",
+      "title": "Senior Fullstack Engineer - Grafana Data Source Plugins | NASA | (Remote, USA)",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote integrations and TypeScript/Go plugins; broad match, substantial Go/operations gap for frontend specialist."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote integrations and TypeScript/Go plugins; broad match, substantial Go/operations gap for frontend specialist."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6230155004",
+      "title": "Senior Software Engineer - Grafana Search & Storage | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior search/storage software; backend and infrastructure focus."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote senior search/storage software; backend and infrastructure focus."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6208004004",
+      "title": "Senior Software Engineer - Session Replay | USA | Remote ",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote full-stack session replay; data architecture/backend leadership dominates a frontend specialist close match."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote full-stack session replay; data architecture/backend leadership dominates a frontend specialist close match."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6227872004",
+      "title": "Staff FrontEnd Engineer - Application Core Services | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote, explicitly 75% frontend, React/TypeScript and Node; technical IC leadership fits nine years."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote, explicitly 75% frontend, React/TypeScript and Node; technical IC leadership fits nine years."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6194871004",
+      "title": "Staff Frontend Engineer - Grafana DataViz | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote React/TypeScript data visualisation, frontend technical leadership."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote React/TypeScript data visualisation, frontend technical leadership."
+        }
+      }
+    },
+    {
+      "board": "grafana",
+      "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6227875004",
+      "title": "Staff Fullstack Engineer - Application Core Services | US | Remote",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote full-stack billing but explicitly 75% backend/Go/infrastructure; broad fit, not a frontend close match."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "US remote full-stack billing but explicitly 75% backend/Go/infrastructure; broad fit, not a frontend close match."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/5eca795c-48dd-496a-be23-2181068a5450",
+      "title": "Analytics Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Analytics/data modelling role rather than product software engineering."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Analytics/data modelling role rather than product software engineering."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/5bf3233d-a162-47b2-8d85-d3650b176c6e",
+      "title": "Engineering Manager",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Engineering manager, not hands-on individual contributor."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Engineering manager, not hands-on individual contributor."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/1b702919-4d0b-4085-baec-8947f9b7e4ee",
+      "title": "Senior SRE/DevOps Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Pure SRE/operations rather than the requested product engineering work."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Pure SRE/operations rather than the requested product engineering work."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/85f454d8-e795-4978-8a2b-4b8bfa7d7c37",
+      "title": "Software Engineer (Backend)",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Global remote backend product engineering; explicitly accepts a strong desire to learn Clojure."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Global remote backend product engineering; explicitly accepts a strong desire to learn Clojure."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/8f02d3fa-edf4-4433-a6d1-4f9e517ac8f9",
+      "title": "Software Engineer (Frontend)",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Global remote React/JavaScript customer-facing web product and design systems."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "Global remote React/JavaScript customer-facing web product and design systems."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/85c418b6-1647-4f3a-b21f-5ade5399b6fd",
+      "title": "Success Engineer (EU)",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "EU customer success/support role, not US product IC engineering."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "EU customer success/support role, not US product IC engineering."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/20d0af01-5532-4c22-bf64-474f15b1df05",
+      "title": "Success Engineer (Global)",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Customer success/support rather than product engineering."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Customer success/support rather than product engineering."
+        }
+      }
+    },
+    {
+      "board": "metabase",
+      "url": "https://jobs.lever.co/metabase/428505ba-d14f-4675-832f-385af863093e",
+      "title": "Technical Product Lead",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Technical product leadership/product management, not IC software delivery."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Technical product leadership/product management, not IC software delivery."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/cd5ae036-0223-427a-b038-ba16ef9dcb32",
+      "title": "Senior / Staff Fullstack Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior full-stack product work; React, TypeScript, Node, GraphQL and PostgreSQL."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote senior full-stack product work; React, TypeScript, Node, GraphQL and PostgreSQL."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/12f8f208-0b9c-4569-bb3d-41c8a197029e",
+      "title": "Senior / Staff Product Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior customer-facing React/TypeScript product engineering."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote senior customer-facing React/TypeScript product engineering."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/0c7c2e26-0a98-42cf-a47c-9a3999fb513b",
+      "title": "Product Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Remote North America product engineering, but advertised 2–5 years rather than the close persona senior scope."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Remote North America product engineering, but advertised 2–5 years rather than the close persona senior scope."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/b4a7764e-c680-4bdf-9956-dc78f2ca94d5",
+      "title": "Senior / Staff Product Engineer, Applied AI",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Requires shipped production applied-AI systems; neither synthetic persona has this core evidence."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Requires shipped production applied-AI systems; neither synthetic persona has this core evidence."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/a264869e-f058-487c-ab7f-9b77dffa427c",
+      "title": "Senior / Staff Product Designer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Product designer rather than software engineering."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Product designer rather than software engineering."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/26c77e48-b4ef-455d-a02c-3ef68fc6f9f9",
+      "title": "Customer Success Manager, Growth",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Customer success management rather than software delivery."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Customer success management rather than software delivery."
+        }
+      }
+    },
+    {
+      "board": "linear",
+      "url": "https://jobs.ashbyhq.com/linear/41b3ed5c-f7a0-40b7-8a77-4952868c3d47",
+      "title": "Product Support Specialist, APAC",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "APAC product support, wrong role and hiring region."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "APAC product support, wrong role and hiring region."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/cde17f7c-4c70-435f-be38-ef5abe94ff22",
+      "title": "Security Engineer, Platform",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Dedicated security engineering, absent specialist security experience."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Dedicated security engineering, absent specialist security experience."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/053bde8f-294e-4cce-9d62-2301282120a2",
+      "title": "Backend Engineer, MTA",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Americas remote TypeScript backend email delivery; queues/retries transfer, email specialism is learnable. Not frontend."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Americas remote TypeScript backend email delivery; queues/retries transfer, email specialism is learnable. Not frontend."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/50cc0eb8-4a93-455d-bcdb-fe8eb080b55d",
+      "title": "Technical Account Executive",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Technical account executive is sales."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Technical account executive is sales."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/df2fe05d-87ca-4e87-a66d-50bb2c9c4859",
+      "title": "Backend Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Americas remote Node/TypeScript/Postgres backend, eight years, APIs and distributed systems. Not frontend."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Americas remote Node/TypeScript/Postgres backend, eight years, APIs and distributed systems. Not frontend."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/6589bee8-3ec9-4620-90b6-890b23464c4d",
+      "title": "Backend Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Europe hiring region for this posting; US-only candidate."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Europe hiring region for this posting; US-only candidate."
+        }
+      }
+    },
+    {
+      "board": "resend",
+      "url": "https://jobs.ashbyhq.com/resend/53d3710a-2d55-42ac-ba90-cdfd306bf560",
+      "title": "Software Engineer, Developer Tools",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Americas remote TypeScript/Node APIs, SDKs and developer tooling; broad match, not frontend product focus."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Americas remote TypeScript/Node APIs, SDKs and developer tooling; broad match, not frontend product focus."
+        }
+      }
+    },
+    {
+      "board": "posthog",
+      "url": "https://jobs.ashbyhq.com/posthog/20ab9628-20ff-4ae3-bd6a-46ae7e9dc6b8",
+      "title": "Product Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; US is in the stated Americas/Europe hiring area."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; US is in the stated Americas/Europe hiring area."
+        }
+      }
+    },
+    {
+      "board": "posthog",
+      "url": "https://jobs.ashbyhq.com/posthog/8dc3f33a-b930-4c54-b4c4-3e6bd2ff28d3",
+      "title": "AI Research Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Research-oriented AI role; no ML research evidence in either persona."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Research-oriented AI role; no ML research evidence in either persona."
+        }
+      }
+    },
+    {
+      "board": "posthog",
+      "url": "https://jobs.ashbyhq.com/posthog/1464036f-94d5-4dbd-aef8-fe99246a26d4",
+      "title": "Site Reliability Engineer (US - Pacific time)",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "SRE/operations and US Pacific time, not requested product IC work."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "SRE/operations and US Pacific time, not requested product IC work."
+        }
+      }
+    },
+    {
+      "board": "posthog",
+      "url": "https://jobs.ashbyhq.com/posthog/3c592b84-8b34-4ae4-ae23-cadce8f2212d",
+      "title": "Product Manager, Observability (ex-founder or ex-product engineer)",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Product management role despite engineer words in title."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Product management role despite engineer words in title."
+        }
+      }
+    },
+    {
+      "board": "posthog",
+      "url": "https://jobs.ashbyhq.com/posthog/8854fb74-8457-40cd-bc10-60125a0c0cd4",
+      "title": "Technical Customer Success Manager - Americas",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Technical customer success, not product software delivery."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Technical customer success, not product software delivery."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/695b1ce6-c375-4fad-94ef-61b50a3fbd28",
+      "title": "Engineering Manager - Americas",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "People manager, not the IC role sought."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "People manager, not the IC role sought."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/cc846e56-27dd-41b5-bf5b-64d5eeb5ff1a",
+      "title": "Staff Design Engineer - Americas",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Requires excellent visual design as well as coding; neither persona has professional visual design evidence."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Requires excellent visual design as well as coding; neither persona has professional visual design evidence."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/6a15668c-3f98-4404-8f1f-927cddfc5af7",
+      "title": "Staff Product Engineer - Americas",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote staff product IC, React/TypeScript/Node; nine years and technical ownership support the scope."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote staff product IC, React/TypeScript/Node; nine years and technical ownership support the scope."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/751768c6-8d97-4e91-a57d-6b85ce4b5a37",
+      "title": "Senior Product Engineer - Americas",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "US remote senior full-stack product engineer, React/TypeScript and autonomous feature ownership."
+        },
+        "close": {
+          "relevant": true,
+          "reason": "US remote senior full-stack product engineer, React/TypeScript and autonomous feature ownership."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/3b9b0141-86e7-46b2-b6b4-ed039b84cdc4",
+      "title": "Senior Software Engineer, Product Engineering - EU",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "EU hiring region, not US remote."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "EU hiring region, not US remote."
+        }
+      }
+    },
+    {
+      "board": "ashby",
+      "url": "https://jobs.ashbyhq.com/ashby/fd86edd7-3af0-4977-a61a-215212c296fa",
+      "title": "Design Engineer - Americas",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Design engineer explicitly requires professional visual design excellence, not just frontend development."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Design engineer explicitly requires professional visual design excellence, not just frontend development."
+        }
+      }
+    },
+    {
+      "board": "genesys",
+      "url": "https://genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Indiana-USA/Lead-Software-Engineer--CRM-and-Integrations_JR112133-1",
+      "title": "Lead Software Engineer, CRM and Integrations",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Explicit remote anywhere within US; lead full-stack UI/API/integrations, eight years. CRM specialism is a broad-match gap, not a close frontend match."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Explicit remote anywhere within US; lead full-stack UI/API/integrations, eight years. CRM specialism is a broad-match gap, not a close frontend match."
+        }
+      }
+    },
+    {
+      "board": "genesys",
+      "url": "https://genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Galway-Flexible/Software-Engineer_JR112638-1",
+      "title": "Software Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Ireland hiring location and voice/backend role; not remote from US."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Ireland hiring location and voice/backend role; not remote from US."
+        }
+      }
+    },
+    {
+      "board": "genesys",
+      "url": "https://genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Galway-Ireland/Senior-Software-Engineer---Python_JR112175-1",
+      "title": "Senior Software Engineer - Python",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Explicit Galway onsite two to three days weekly; production ML/agent experience also missing."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Explicit Galway onsite two to three days weekly; production ML/agent experience also missing."
+        }
+      }
+    },
+    {
+      "board": "genesys",
+      "url": "https://genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Galway-Flexible/Staff-Software-Engineer_JR112637",
+      "title": "Staff Software Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Hiring locations do not include US; full description governs remote eligibility."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Hiring locations do not include US; full description governs remote eligibility."
+        }
+      }
+    },
+    {
+      "board": "genesys",
+      "url": "https://genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Galway-Ireland/Software-Development-Engineer---UI_JR112297-1",
+      "title": "Software Development Engineer – UI",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Galway, Ireland UI vacancy, not US remote."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Galway, Ireland UI vacancy, not US remote."
+        }
+      }
+    },
+    {
+      "board": "runware",
+      "url": "https://apply.workable.com/runware/j/771442E40D",
+      "title": "Engineering Manager",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "People management rather than senior individual contributor."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "People management rather than senior individual contributor."
+        }
+      }
+    },
+    {
+      "board": "runware",
+      "url": "https://apply.workable.com/runware/j/FF7C5B881F",
+      "title": "Senior / Lead Cooling Systems Design Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Physical cooling/refrigeration engineering, not software."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Physical cooling/refrigeration engineering, not software."
+        }
+      }
+    },
+    {
+      "board": "runware",
+      "url": "https://apply.workable.com/runware/j/3AE376AFCA",
+      "title": "Senior Software Engineer - Serverless",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Requires European time zone despite multiple location variants; Chicago is outside it. Go/PHP backend, not close frontend."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Requires European time zone despite multiple location variants; Chicago is outside it. Go/PHP backend, not close frontend."
+        }
+      }
+    },
+    {
+      "board": "runware",
+      "url": "https://apply.workable.com/runware/j/EA63D51FBF",
+      "title": "Senior Software Engineer - Web App & DevEx",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Listed hiring countries exclude US; backend/API role despite Web App title."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Listed hiring countries exclude US; backend/API role despite Web App title."
+        }
+      }
+    },
+    {
+      "board": "runware",
+      "url": "https://apply.workable.com/runware/j/3A932CE62B",
+      "title": "Staff Software Engineer - Serverless",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Provider locations include US; senior/staff backend/control-plane systems with transferable language skills. Not frontend."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Provider locations include US; senior/staff backend/control-plane systems with transferable language skills. Not frontend."
+        }
+      }
+    },
+    {
+      "board": "automattic",
+      "url": "https://automattic.com/work-with-us/job/experienced-software-engineer/",
+      "title": "Experienced Software Engineer",
+      "labels": {
+        "volume": {
+          "relevant": true,
+          "reason": "Public worldwide remote experienced software engineer; PHP/JS transferable for broad persona, React-specific close match not demonstrated."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Public worldwide remote experienced software engineer; PHP/JS transferable for broad persona, React-specific close match not demonstrated."
+        }
+      }
+    },
+    {
+      "board": "automattic",
+      "url": "https://automattic.com/work-with-us/job/senior-product-manager-payments/",
+      "title": "Senior Product Manager, Payments",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Product manager, not software IC."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Product manager, not software IC."
+        }
+      }
+    },
+    {
+      "board": "automattic",
+      "url": "https://automattic.com/work-with-us/job/senior-revenue-engineer/",
+      "title": "Senior Revenue Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Revenue/GTM engineering rather than core product software delivery."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Revenue/GTM engineering rather than core product software delivery."
+        }
+      }
+    },
+    {
+      "board": "automattic",
+      "url": "https://automattic.com/work-with-us/job/senior-systems-engineer/",
+      "title": "Senior Systems Engineer",
+      "labels": {
+        "volume": {
+          "relevant": false,
+          "reason": "Systems/operations role, not the requested product engineering focus."
+        },
+        "close": {
+          "relevant": false,
+          "reason": "Systems/operations role, not the requested product engineering focus."
+        }
+      }
+    }
+  ]
+}

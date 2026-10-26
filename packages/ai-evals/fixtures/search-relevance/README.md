@@ -29,7 +29,11 @@ are fixed before the model run. Include related roles, transferable stacks,
 country restrictions, management, sales and seniority near misses when extending
 the corpus; do not relabel a miss to match a model answer.
 
-Recall counts labelled relevant jobs that survive screening and reading and
+The primary end-to-end recall also requires the production collector to find the
+listing URL in its recorded inventory. Screening/fit recall is shown separately
+to isolate ranking from collection failures. Targets must pass both.
+
+Screening/fit recall counts labelled relevant jobs that survive screening and reading and
 receive a fit. Ranking uses all scored, non-hidden sample jobs across boards,
 descending score, URL as a deterministic tie-break. Targets: at least 90% recall
 and at least eight relevant jobs in the first ten. An unscored job is a miss.
@@ -48,3 +52,13 @@ When refreshing, save only public response bodies and selected observed cards
 in the existing recording format, update checksums, then review every sampled
 full description and both labels before running AI. Keep past baseline reports
 so changes can be compared; record the engine commit and model route each time.
+
+The 2026-10-26 corpus has 59 labelled vacancies (23 broad positives, nine close
+positives): Grafana/Greenhouse, Metabase/Lever, Linear, Resend, PostHog and
+Ashby on Ashby, Genesys/Workday, Runware/Workable, and plain careers pages at
+Automattic and 37signals. 37signals explicitly had no vacancies. Provider feeds
+are full inventories; only the labelled cohort is screened and fitted. Workday
+and Workable card snapshots come from public inventories, with their public
+detail HTML/JSON/Markdown saved alongside. They remain scoreable even if current
+collection fails; that failure lowers end-to-end recall. Workable Markdown is
+the provider-published full description, not a summary.

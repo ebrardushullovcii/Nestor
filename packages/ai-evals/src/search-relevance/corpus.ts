@@ -42,19 +42,29 @@ export const digest = (value: string | Uint8Array) =>
 export async function loadCorpus(directory: string) {
   const raw = await readFile(path.join(directory, "corpus.json"), "utf8");
   const manifest = JSON.parse(raw) as CorpusManifest;
-  const boards = await Promise.all(manifest.boards.map(async (entry) => {
-    const bytes = await readFile(path.join(directory, entry.file));
-    if (digest(bytes) !== entry.sha256) throw new Error(`Recording checksum mismatch: ${entry.id}`);
-    const board = JSON.parse(gunzipSync(bytes).toString("utf8")) as RecordedBoard;
-    if (board.source.id !== entry.id) throw new Error(`Recording id mismatch: ${entry.id}`);
-    return board;
-  }));
+  const boards = await Promise.all(
+    manifest.boards.map(async (entry) => {
+      const bytes = await readFile(path.join(directory, entry.file));
+      if (digest(bytes) !== entry.sha256)
+        throw new Error(`Recording checksum mismatch: ${entry.id}`);
+      const board = JSON.parse(
+        gunzipSync(bytes).toString("utf8"),
+      ) as RecordedBoard;
+      if (board.source.id !== entry.id)
+        throw new Error(`Recording id mismatch: ${entry.id}`);
+      return board;
+    }),
+  );
   const urls = new Set<string>();
   for (const listing of manifest.listings) {
-    if (urls.has(listing.url)) throw new Error(`Duplicate label: ${listing.url}`);
+    if (urls.has(listing.url))
+      throw new Error(`Duplicate label: ${listing.url}`);
     urls.add(listing.url);
-    const card = boards.find((b) => b.source.id === listing.board)?.cards.find((c) => c.url === listing.url);
-    if (!card || card.title !== listing.title) throw new Error(`Missing or changed card: ${listing.url}`);
+    const card = boards
+      .find((b) => b.source.id === listing.board)
+      ?.cards.find((c) => c.url === listing.url);
+    if (!card || card.title !== listing.title)
+      throw new Error(`Missing or changed card: ${listing.url}`);
   }
   return { manifest, boards, digest: digest(raw) };
 }
