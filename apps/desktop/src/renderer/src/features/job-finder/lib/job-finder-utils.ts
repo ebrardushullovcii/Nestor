@@ -4,7 +4,6 @@ import type {
   ApplicationRecord,
   ApplicationStatus,
   AssetStatus,
-  BrowserSessionState,
   CandidateProfile,
   ProfileSetupState,
   SourceDebugRunRecord,
@@ -370,19 +369,6 @@ export function getEventTone(event: ApplicationEvent): BadgeTone {
     case "warning":
       return "active";
     case "critical":
-      return "critical";
-    default:
-      return "muted";
-  }
-}
-
-export function getSessionTone(session: BrowserSessionState): BadgeTone {
-  switch (session.status) {
-    case "ready":
-      return "positive";
-    case "login_required":
-      return "active";
-    case "blocked":
       return "critical";
     default:
       return "muted";

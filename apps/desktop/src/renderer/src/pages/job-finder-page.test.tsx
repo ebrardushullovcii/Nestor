@@ -42,8 +42,8 @@ function configureWindowNestor(input: {
   });
 }
 
-// Settings still reads the old workspace, so a failed load shows there.
-function renderJobFinderPage(path = "/job-finder/settings") {
+// Profile still reads the old workspace, so a failed load shows there.
+function renderJobFinderPage(path = "/job-finder/profile") {
   Element.prototype.scrollTo = () => undefined;
   Element.prototype.scrollIntoView = () => undefined;
   // The page controller mounts a React Router blocker, so the harness must use
@@ -67,28 +67,31 @@ afterEach(() => {
   delete (window as { nestor?: unknown }).nestor;
 });
 
-// First: the other tests open Settings, which asks for the old workspace for
+// First: the other tests open Profile, which asks for the old workspace for
 // the rest of the window's life.
 describe("JobFinderPage launch", () => {
-  it("opens Home and its navigation without loading the old workspace", async () => {
-    configureWindowNestor({
-      getWorkspaceBootstrapError: new Error("not expected"),
-      recoveryFact: { status: "idle" },
-    });
+  it.each(["/job-finder/home", "/job-finder/settings"])(
+    "opens %s without loading the old workspace",
+    async (path) => {
+      configureWindowNestor({
+        getWorkspaceBootstrapError: new Error("not expected"),
+        recoveryFact: { status: "idle" },
+      });
 
-    renderJobFinderPage("/job-finder/home");
+      renderJobFinderPage(path);
 
-    expect(
-      await screen.findByRole("navigation", { name: "Job Finder sections" }),
-    ).toBeTruthy();
-    const bridge = (
-      window as unknown as {
-        nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
-      }
-    ).nestor.jobFinder;
-    expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
-    expect(bridge.getWorkspace).not.toHaveBeenCalled();
-  });
+      expect(
+        await screen.findByRole("navigation", { name: "Job Finder sections" }),
+      ).toBeTruthy();
+      const bridge = (
+        window as unknown as {
+          nestor: { jobFinder: Record<string, ReturnType<typeof vi.fn>> };
+        }
+      ).nestor.jobFinder;
+      expect(bridge.getWorkspaceBootstrap).not.toHaveBeenCalled();
+      expect(bridge.getWorkspace).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("JobFinderPage startup database recovery blocking", () => {
@@ -108,7 +111,8 @@ describe("JobFinderPage startup database recovery blocking", () => {
 
     renderJobFinderPage();
 
-    const alert = await screen.findByRole("alert");
+    // The old controller loads lazily; on a busy machine that passes 1 s.
+    const alert = await screen.findByRole("alert", {}, { timeout: 5_000 });
     expect(alert.textContent).toContain("Couldn't open Job Finder");
     expect(alert.textContent).toContain("Incident ID: incident-block-42");
     expect(alert.textContent).toContain("retained");
@@ -124,11 +128,14 @@ describe("JobFinderPage startup database recovery blocking", () => {
 
     renderJobFinderPage();
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Retry opening Job Finder" }),
-      ).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole("button", { name: "Retry opening Job Finder" }),
+        ).toBeTruthy();
+      },
+      { timeout: 5_000 },
+    );
     expect(screen.queryByText(/Incident ID:/)).toBeNull();
   });
 });

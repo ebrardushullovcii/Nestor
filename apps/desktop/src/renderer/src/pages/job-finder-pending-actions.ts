@@ -43,7 +43,6 @@ export const jobFinderPendingActions = {
     instructionId: string,
   ): `source-instruction-verify:${string}` =>
     `source-instruction-verify:${instructionId}`,
-  workspaceReset: (): "workspace:reset" => "workspace:reset",
 } as const;
 
 type PendingActionFactory =

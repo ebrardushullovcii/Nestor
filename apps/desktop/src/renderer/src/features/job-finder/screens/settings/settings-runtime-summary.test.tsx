@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
-  BrowserSessionState,
+  DesktopBrowserState,
   JobFinderSettings,
 } from "@nestor/contracts";
 import {
@@ -12,14 +12,6 @@ import {
 
 afterEach(cleanup);
 
-const browserSession = {
-  source: "target_site",
-  status: "ready",
-  driver: "chrome_profile_agent",
-  label: "Browser ready",
-  detail: null,
-  lastCheckedAt: "2026-07-30T10:00:00.000Z",
-} as BrowserSessionState;
 
 const settings = {
   keepSessionAlive: false,
@@ -45,15 +37,32 @@ describe("getApplySafeguardCopy", () => {
 describe("SettingsRuntimeSummary", () => {
   it("renders the apply safeguard disclosure", () => {
     render(
-      <SettingsRuntimeSummary
-        browserSession={browserSession}
-        settings={settings}
-      />,
+      <SettingsRuntimeSummary browser={null} settings={settings} />,
     );
 
     expect(screen.getByText("Original resume required")).not.toBeNull();
     expect(
       screen.getByText(/Sending follows the mode you choose under Applying/),
     ).not.toBeNull();
+  });
+
+  it("describes the built-in browser from its live state", () => {
+    const { rerender } = render(
+      <SettingsRuntimeSummary browser={null} settings={settings} />,
+    );
+    expect(screen.getByText("Not open")).not.toBeNull();
+    rerender(
+      <SettingsRuntimeSummary
+        browser={
+          {
+            phase: "working",
+            activity: "Reading a listing",
+          } as DesktopBrowserState
+        }
+        settings={settings}
+      />,
+    );
+    expect(screen.getByText("Working")).not.toBeNull();
+    expect(screen.getByText("Reading a listing")).not.toBeNull();
   });
 });

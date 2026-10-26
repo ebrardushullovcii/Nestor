@@ -137,7 +137,7 @@ export function getJobFinderFailedSaveKey(
  * asking on its own.
  *
  * `settings` is deliberately absent. Settings sections stage their drafts
- * locally with no global dirty flag (see `noteSettingsDraftEdited`), so the
+ * locally with no global dirty flag, so the
  * failed state is the only thing standing between those staged drafts and a
  * navigation that discards them.
  */
@@ -521,12 +521,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
     saveCoordinator.markSurfaceRevised("profile");
     saveCoordinator.markSurfaceRevised("answers");
   }, [saveCoordinator]);
-  // Settings sections stage drafts locally with no global dirty flag, so each
-  // staged edit reports here to keep the shell's exact-request retry honest
-  // for the settings surface.
-  const noteSettingsDraftEdited = useCallback(() => {
-    saveCoordinator.markSurfaceRevised("settings");
-  }, [saveCoordinator]);
   const isPendingAction = useCallback(
     (scope: PendingActionScope) => hasPendingAction(pendingActionState, scope),
     [pendingActionState],
@@ -831,7 +825,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
       setProfileSurfaceDirty: applyProfileSurfaceDirty,
       onProfileSurfaceDraftEdited: noteProfileSurfaceDraftEdited,
       onCancelImportResume: () => cancelImportResumeIfWaiting(true),
-      onSettingsDraftEdited: noteSettingsDraftEdited,
       setSelectedDiscoveryJobId,
       setSelectedReviewJobId,
       sourceDebugRunIdRef,
@@ -860,7 +853,6 @@ export function useJobFinderPageController(loadWorkspace = true) {
     selectedReviewJob,
     selectedTailoredAsset,
     noteProfileSurfaceDraftEdited,
-    noteSettingsDraftEdited,
     workspace,
     workspaceWithOptimisticProfileCopilot,
   ]);

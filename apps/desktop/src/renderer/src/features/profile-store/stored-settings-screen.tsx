@@ -1,21 +1,40 @@
-import type { ComponentProps } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import type { DesktopBrowserState } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
+import { clearJobDetailCache } from "@renderer/features/job-finder/hooks/use-job-detail";
 import { SettingsScreen } from "@renderer/features/job-finder/screens/settings/settings-screen";
+import { listLocalResumeTemplates } from "../../../../shared/job-finder-resume-catalog";
 import { useStoredSettings } from "./use-stored-settings";
 
-type SettingsPorts = Omit<
-  ComponentProps<typeof SettingsScreen>,
-  | "settings"
-  | "onUpdateAppearanceTheme"
-  | "onUpdateAiBehavior"
-  | "onUpdateApplicationDefaults"
-  | "onUpdateWorkspaceBehavior"
->;
+const RESUME_TEMPLATES = listLocalResumeTemplates();
+
+function useBrowserState(): DesktopBrowserState | null {
+  const [state, setState] = useState<DesktopBrowserState | null>(null);
+  useEffect(() => {
+    const browser = window.nestor?.browser;
+    if (!browser) return undefined;
+    let live = true;
+    void browser.getState().then(
+      (next) => live && setState(next),
+      () => undefined,
+    );
+    const stop = browser.onStateChanged(setState);
+    return () => {
+      live = false;
+      stop();
+    };
+  }, []);
+  return state;
+}
+
 /** Settings owns its small read, independently of Profile and every job list. */
-export function StoredSettingsScreen(props: SettingsPorts) {
+export function StoredSettingsScreen() {
   const store = useStoredSettings();
+  const browser = useBrowserState();
+  const navigate = useNavigate();
   const { showToast } = useToast();
   if (!store.settings)
     return (
@@ -38,7 +57,18 @@ export function StoredSettingsScreen(props: SettingsPorts) {
     <>
       {store.error ? <p role="alert">{store.error}</p> : null}
       <SettingsScreen
-        {...props}
+        availableResumeTemplates={RESUME_TEMPLATES}
+        browser={browser}
+        onResetWorkspace={async () => {
+          clearJobDetailCache();
+          try {
+            await window.nestor.jobFinder.resetWorkspace();
+          } finally {
+            clearJobDetailCache();
+          }
+          // Reset leaves nothing set up, so guided setup opens next.
+          void navigate("/job-finder/profile/setup");
+        }}
         settings={store.settings}
         onUpdateAppearanceTheme={store.updateAppearanceTheme}
         onUpdateAiBehavior={async (input, options) => {

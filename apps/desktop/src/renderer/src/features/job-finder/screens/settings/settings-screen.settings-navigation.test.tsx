@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { BrowserSessionState, JobFinderSettings } from "@nestor/contracts";
+import type { JobFinderSettings } from "@nestor/contracts";
 import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import {
   act,
@@ -85,17 +85,10 @@ vi.mock("./settings-support-controls", () => ({
   ),
 }));
 vi.mock("./settings-workspace-controls", () => ({
-  SettingsWorkspaceControls: (props: {
-    isWorkspaceResetPending: boolean;
-    onResetWorkspace: () => void;
-  }) => (
+  SettingsWorkspaceControls: (props: { onResetWorkspace: () => void }) => (
     <section data-testid="panel-danger-zone">
       Delete everything panel
-      <button
-        disabled={props.isWorkspaceResetPending}
-        onClick={props.onResetWorkspace}
-        type="button"
-      >
+      <button onClick={props.onResetWorkspace} type="button">
         Reset everything
       </button>
     </section>
@@ -120,17 +113,8 @@ const baseSettings = {
 
 const baseProps = {
   availableResumeTemplates: [],
-  browserSession: {
-    source: "target_site",
-    status: "idle",
-    driver: "catalog_seed",
-    label: "Idle",
-    detail: null,
-    lastCheckedAt: "2026-08-01T00:00:00.000Z",
-  } as unknown as BrowserSessionState,
-  isWorkspaceResetPending: false,
+  browser: null,
   onResetWorkspace: vi.fn(),
-  onSettingsDraftEdited: vi.fn(),
   onUpdateAiBehavior: vi.fn(),
   onUpdateAppearanceTheme: vi.fn(),
   onUpdateApplicationDefaults: vi.fn(),
@@ -477,11 +461,7 @@ describe("SettingsScreen information architecture", () => {
     const onResetWorkspace = vi.fn();
     render(
       <MemoryRouter>
-        <SettingsScreen
-          {...baseProps}
-          isWorkspaceResetPending
-          onResetWorkspace={onResetWorkspace}
-        />
+        <SettingsScreen {...baseProps} onResetWorkspace={onResetWorkspace} />
       </MemoryRouter>,
     );
 
@@ -495,9 +475,8 @@ describe("SettingsScreen information architecture", () => {
       },
     );
 
-    expect(resetButton.disabled).toBe(true);
     fireEvent.click(resetButton);
-    expect(onResetWorkspace).not.toHaveBeenCalled();
+    expect(onResetWorkspace).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,6 +1,6 @@
 import type {
   AppearanceTheme,
-  BrowserSessionState,
+  DesktopBrowserState,
   JobFinderSettings,
   ResumeTemplateDefinition,
   UpdateAiBehaviorInput,
@@ -177,12 +177,8 @@ const SETTINGS_LATER_SECTION_CLASS =
 
 export function SettingsScreen(props: {
   availableResumeTemplates: readonly ResumeTemplateDefinition[];
-  browserSession: BrowserSessionState;
-  isWorkspaceResetPending: boolean;
+  browser: DesktopBrowserState | null;
   onResetWorkspace: () => void | Promise<boolean | void>;
-  // Reports staged settings edits upward so a shell save retry captured
-  // before the edit can never resubmit stale values.
-  onSettingsDraftEdited: () => void;
   // Scoped saves resolve false when the save did not commit; sections treat
   // that as a failure instead of showing a local saved message.
   onUpdateAppearanceTheme: (
@@ -202,10 +198,8 @@ export function SettingsScreen(props: {
 }) {
   const {
     availableResumeTemplates,
-    browserSession,
-    isWorkspaceResetPending,
+    browser,
     onResetWorkspace,
-    onSettingsDraftEdited,
     onUpdateAiBehavior,
     onUpdateAppearanceTheme,
     onUpdateApplicationDefaults,
@@ -502,7 +496,6 @@ export function SettingsScreen(props: {
             App & device
           </h2>
           <SettingsAppDeviceSection
-            onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateAppearanceTheme={onUpdateAppearanceTheme}
             onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
@@ -519,7 +512,6 @@ export function SettingsScreen(props: {
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h2>
           <SettingsAiBehaviorSection
-            onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateAiBehavior={onUpdateAiBehavior}
             onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
@@ -537,7 +529,6 @@ export function SettingsScreen(props: {
           </h2>
           <SettingsApplicationDefaultsSection
             availableResumeTemplates={availableResumeTemplates}
-            onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateApplicationDefaults={onUpdateApplicationDefaults}
             settings={settings}
           />
@@ -564,7 +555,6 @@ export function SettingsScreen(props: {
             headingId="settings-application-authority-heading"
             mode={settings.applicationAutomationMode ?? "confirm_before_submit"}
             onSave={async (input) => {
-              onSettingsDraftEdited();
               const saved = await onUpdateApplicationDefaults({
                 applicationAutomationMode: input.mode,
               });
@@ -574,7 +564,6 @@ export function SettingsScreen(props: {
             }}
           >
             <SettingsApplyingWritingSection
-              onSettingsDraftEdited={onSettingsDraftEdited}
               onUpdateAiBehavior={onUpdateAiBehavior}
               settings={settings}
             />
@@ -591,7 +580,6 @@ export function SettingsScreen(props: {
             {SETTINGS_WORKSPACE_BEHAVIOR_LABEL}
           </h2>
           <SettingsWorkspaceBehaviorSection
-            onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
           />
@@ -607,10 +595,7 @@ export function SettingsScreen(props: {
             Diagnostics
           </h2>
           <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.32fr)_minmax(0,0.92fr)] xl:items-start">
-            <SettingsRuntimeSummary
-              browserSession={browserSession}
-              settings={settings}
-            />
+            <SettingsRuntimeSummary browser={browser} settings={settings} />
             <div className="grid min-w-0 gap-3">
               <SettingsSupportControls />
             </div>
@@ -629,10 +614,7 @@ export function SettingsScreen(props: {
           <h2 className="sr-only" id="settings-danger-zone-heading">
             Delete everything
           </h2>
-          <SettingsWorkspaceControls
-            isWorkspaceResetPending={isWorkspaceResetPending}
-            onResetWorkspace={onResetWorkspace}
-          />
+          <SettingsWorkspaceControls onResetWorkspace={onResetWorkspace} />
         </section>
       </SettingsDirtySectionsProvider>
 

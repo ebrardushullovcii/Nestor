@@ -49,8 +49,6 @@ const fontPresetOptions: ReadonlyArray<{
 
 interface SettingsApplicationDefaultsSectionProps {
   availableResumeTemplates: readonly ResumeTemplateDefinition[];
-  /** Reports staged default edits so a stale shell save retry is retired. */
-  onSettingsDraftEdited?: () => void;
   onUpdateApplicationDefaults: (
     input: UpdateApplicationDefaultsInput,
   ) => Promise<boolean | void> | void;
@@ -59,7 +57,6 @@ interface SettingsApplicationDefaultsSectionProps {
 
 export function SettingsApplicationDefaultsSection({
   availableResumeTemplates,
-  onSettingsDraftEdited,
   onUpdateApplicationDefaults,
   settings,
 }: SettingsApplicationDefaultsSectionProps) {
@@ -119,14 +116,12 @@ export function SettingsApplicationDefaultsSection({
     if (isSavePending || !isFontPresetOption(value)) return;
     setDraftFontPreset(value);
     resetSectionSave();
-    onSettingsDraftEdited?.();
     saveResumeLook(value, draftResumeTemplateId);
   };
   const pickResumeTemplate = (value: string) => {
     if (isSavePending || !isResumeTemplateOption(value)) return;
     setDraftResumeTemplateId(value);
     resetSectionSave();
-    onSettingsDraftEdited?.();
     saveResumeLook(draftFontPreset, value);
   };
 

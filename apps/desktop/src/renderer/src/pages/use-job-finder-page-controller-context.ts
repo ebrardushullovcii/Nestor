@@ -73,8 +73,6 @@ type BuildJobFinderPageContextArgs = {
   setProfileCopilotBusy: Dispatch<SetStateAction<boolean>>;
   setProfileCopilotPendingContextKey: Dispatch<SetStateAction<string | null>>;
   setProfileSurfaceDirty: Dispatch<SetStateAction<boolean>>;
-  /** Notifies the save coordinator that a staged settings draft changed. */
-  onSettingsDraftEdited: () => void;
   /** Notifies the save coordinator that a profile/setup draft was edited. */
   onProfileSurfaceDraftEdited: () => void;
   onCancelImportResume: () => void;
@@ -117,7 +115,6 @@ export function buildJobFinderPageContext(
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
     setProfileSurfaceDirty,
-    onSettingsDraftEdited,
     onProfileSurfaceDraftEdited,
     onCancelImportResume,
     setSelectedDiscoveryJobId,
@@ -170,7 +167,6 @@ export function buildJobFinderPageContext(
     onProfileSurfaceDirtyChange: setProfileSurfaceDirty,
     onProfileSurfaceDraftEdited,
     onCancelImportResume,
-    onSettingsDraftEdited,
     onNavigateSafely: navigateSafely,
     profileCopilotPendingContextKey,
     onApplyResumeTimelineRepairAction: async (runId, proposalId, action) => {
@@ -195,23 +191,6 @@ export function buildJobFinderPageContext(
       ),
     onResetBrowser: () =>
       runAction(actions.resetBrowser, () => undefined, null),
-    onResetWorkspace: () =>
-      runAction(
-        actions.resetWorkspace,
-        (snapshot) => {
-          saveCoordinator.clearReceipt();
-          navigate(
-            snapshot.profileSetupState.status === "not_started"
-              ? "/job-finder/profile/setup"
-              : "/job-finder/profile",
-          );
-        },
-        "Workspace reset. Your profile, resume, jobs, and browser session were cleared on this device.",
-        {
-          scope: jobFinderPendingActions.workspaceReset(),
-          rethrowError: true,
-        },
-      ),
     onSelectDiscoveryJob: setSelectedDiscoveryJobId,
     onSelectReviewItem: setSelectedReviewJobId,
     onSetActivityControl: (input: SetJobFinderActivityControlInput) =>

@@ -120,8 +120,6 @@ function toInput(slice: AiBehaviorSlice): UpdateAiBehaviorInput {
 }
 
 interface SettingsAiBehaviorSectionProps {
-  /** Reports staged edits so a stale shell save retry is retired. */
-  onSettingsDraftEdited?: () => void;
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
     options?: { undo?: () => void },
@@ -134,7 +132,6 @@ interface SettingsAiBehaviorSectionProps {
 }
 
 export function SettingsAiBehaviorSection({
-  onSettingsDraftEdited,
   onUpdateAiBehavior,
   onUpdateWorkspaceBehavior,
   settings,
@@ -172,7 +169,6 @@ export function SettingsAiBehaviorSection({
       seed: seedSlice,
       toInput,
       onUpdateAiBehavior,
-      onSettingsDraftEdited,
       anchorId: "settings-ai-behavior",
       label: SETTINGS_AI_BEHAVIOR_LABEL,
       order: 1,

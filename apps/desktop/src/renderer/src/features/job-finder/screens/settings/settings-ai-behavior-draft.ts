@@ -34,7 +34,6 @@ export function useAiBehaviorSliceSave<Slice>(args: {
     input: UpdateAiBehaviorInput,
     options?: { undo?: () => void },
   ) => Promise<boolean | void> | void;
-  onSettingsDraftEdited?: (() => void) | undefined;
   anchorId: string;
   label: string;
   order: number;
@@ -43,8 +42,7 @@ export function useAiBehaviorSliceSave<Slice>(args: {
   savedMessage: string;
   undoneMessage: string;
 }) {
-  const { onSettingsDraftEdited, onUpdateAiBehavior, seed, settings, toInput } =
-    args;
+  const { onUpdateAiBehavior, seed, settings, toInput } = args;
   const saved = seed(settings);
   const savedKey = JSON.stringify(toInput(saved));
   const [draft, setDraft] = useState<Slice>(saved);
@@ -138,7 +136,6 @@ export function useAiBehaviorSliceSave<Slice>(args: {
     latestDraftRef.current = next;
     setDraft(next);
     resetSectionSave();
-    onSettingsDraftEdited?.();
     if (when === "now") {
       sendLatest({ offerUndo: true });
       return;

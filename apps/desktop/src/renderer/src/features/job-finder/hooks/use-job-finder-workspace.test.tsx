@@ -299,7 +299,6 @@ describe("useJobFinderWorkspace revision window", () => {
           mutateWorkspaceEntities,
           getWorkspace,
           checkBrowserSession: bareSnapshotAction,
-          resetWorkspace: bareSnapshotAction,
           onWorkspaceUpdate: (listener: () => void) => {
             notifyUpdate = listener;
             return () => undefined;

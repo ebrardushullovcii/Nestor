@@ -40,7 +40,6 @@ import {
   patchFindJobsLists,
   registerFullWorkspaceRead,
 } from "../lib/workspace-view-refresh";
-import { clearJobDetailCache } from "./use-job-detail";
 
 /** How long update-driven syncs rest, as a multiple of the last sync. */
 const UPDATE_SYNC_REST_FACTOR = 2;
@@ -770,14 +769,6 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
       requestWorkspaceRefresh,
       resetBrowser: () =>
         runWorkspaceAction(() => window.nestor.jobFinder.resetBrowser()),
-      resetWorkspace: () => {
-        clearJobDetailCache();
-        return runWorkspaceAction(() =>
-          window.nestor.jobFinder.resetWorkspace(),
-        ).finally(() => {
-          clearJobDetailCache();
-        });
-      },
       runSourceDebug: (
         targetId: string,
         onProgress?: (event: SourceDebugProgressEvent) => void,

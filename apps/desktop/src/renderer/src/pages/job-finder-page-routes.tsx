@@ -503,17 +503,5 @@ export function JobFinderProfileSetupRoute() {
 }
 
 export function JobFinderSettingsRoute() {
-  const context = useJobFinderPageContext();
-
-  return (
-    <SettingsScreen
-      availableResumeTemplates={context.workspace.availableResumeTemplates}
-      browserSession={context.workspace.browserSession}
-      isWorkspaceResetPending={context.isPending(
-        jobFinderPendingActions.workspaceReset(),
-      )}
-      onResetWorkspace={context.onResetWorkspace}
-      onSettingsDraftEdited={context.onSettingsDraftEdited}
-    />
-  );
+  return <SettingsScreen />;
 }

@@ -35,8 +35,6 @@ function zoomKeysSentence(): string {
 }
 
 interface SettingsAppDeviceSectionProps {
-  /** Reports staged theme edits so a stale shell save retry is retired. */
-  onSettingsDraftEdited?: () => void;
   onUpdateAppearanceTheme: (
     theme: AppearanceTheme,
   ) => Promise<boolean | void> | void;
@@ -48,7 +46,6 @@ interface SettingsAppDeviceSectionProps {
 }
 
 export function SettingsAppDeviceSection({
-  onSettingsDraftEdited,
   onUpdateAppearanceTheme,
   onUpdateWorkspaceBehavior,
   settings,
@@ -135,7 +132,6 @@ export function SettingsAppDeviceSection({
     setSelectedTheme(theme);
     applyAppearancePreference(theme, getSystemPrefersDark());
     resetSectionSave();
-    onSettingsDraftEdited?.();
     if (theme !== settings.appearanceTheme) saveTheme(theme);
   };
   // A switch acts when flipped: this layout choice saves at once instead of

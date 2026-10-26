@@ -4,7 +4,6 @@ import { act } from "react";
 import type {
   AppearanceTheme,
   ApplicationCrmSettings,
-  BrowserSessionState,
   JobFinderSettings,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
@@ -37,15 +36,6 @@ beforeAll(() => {
   globalActScope.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-const browserSession = {
-  source: "target_site",
-  status: "idle",
-  driver: "catalog_seed",
-  label: "Idle",
-  detail: null,
-  lastCheckedAt: "2026-08-01T00:00:00.000Z",
-} as unknown as BrowserSessionState;
-
 function parseSettings(
   overrides: Partial<JobFinderSettings> = {},
 ): JobFinderSettings {
@@ -63,7 +53,6 @@ function parseSettings(
 function createCallbacks() {
   return {
     onResetWorkspace: vi.fn(),
-    onSettingsDraftEdited: vi.fn(),
     // Production scoped saves resolve false when a save did not commit.
     onUpdateAiBehavior: vi.fn<
       (
@@ -93,10 +82,8 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
     <MemoryRouter>
       <SettingsScreen
         availableResumeTemplates={[]}
-        browserSession={browserSession}
-        isWorkspaceResetPending={false}
+        browser={null}
         onResetWorkspace={callbacks.onResetWorkspace}
-        onSettingsDraftEdited={callbacks.onSettingsDraftEdited}
         onUpdateAiBehavior={(input, options) =>
           callbacks.onUpdateAiBehavior(input, options)
         }
