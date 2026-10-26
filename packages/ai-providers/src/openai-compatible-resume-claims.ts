@@ -41,10 +41,8 @@ export function buildResumeClaimCheckPayload(input: ResumeClaimCheckInput) {
     job: {
       title: input.job.title,
       company: input.job.company,
-      description: input.job.description.slice(0, 2_000),
-      requirements: (input.job.requirements ?? [])
-        .slice(0, 30)
-        .map((line) => line.slice(0, 240)),
+      description: input.job.description,
+      requirements: input.job.requirements ?? [],
     },
     resumeLines:
       input.resumeLines ??

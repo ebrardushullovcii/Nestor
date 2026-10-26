@@ -22,6 +22,23 @@ const input = {
 };
 
 describe("resume claim checks", () => {
+  test("keeps late listing technologies and complete requirements for Aggressive stretch checks", () => {
+    const description =
+      "Published job context. ".repeat(200) + "Preferred: Kubernetes and Go.";
+    const requirements = Array.from(
+      { length: 35 },
+      (_, index) =>
+        `${index}: ${"Complete published requirement. ".repeat(12)} Kubernetes`,
+    );
+    const payload = buildResumeClaimCheckPayload({
+      ...input,
+      tailoringStrength: "aggressive",
+      job: { ...input.job, description, requirements },
+    });
+    expect(payload.job.description).toBe(description);
+    expect(payload.job.requirements).toEqual(requirements);
+  });
+
   test("the evidence keeps checks on one routing session across jobs and client restarts", async () => {
     const sessions: Array<string | null> = [];
     const fetchMock = vi
