@@ -76,6 +76,48 @@
       "placeholder": "",
       "hint": "Enter your GitHub handle.",
       "expected": "synthetic-developer"
+    },
+    {
+      "label": "Your GitHub username will be shown publicly",
+      "placeholder": "",
+      "hint": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "",
+      "hint": "Your GitHub username will be shown publicly",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "What is your GitHub username?",
+      "placeholder": "",
+      "hint": "",
+      "expected": "synthetic-developer"
+    },
+    {
+      "label": "Your GitHub handle will be shown publicly",
+      "placeholder": "",
+      "hint": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "",
+      "hint": "Your GitHub handle will be shown publicly",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "What is your GitHub handle?",
+      "placeholder": "",
+      "hint": "",
+      "expected": "synthetic-developer"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "URL",
+      "hint": "",
+      "expected": "https://github.com/synthetic-developer/"
     }
   ],
   "linearPage": "<div class=\"field\"><label for=\"gh\">Github <span>*</span></label><p>Please provide your GitHub username. We'll need this info to host final interview rounds.</p><input id=\"gh\" type=\"text\" placeholder=\"Type here...\" required></div><div class=\"field\"><label for=\"li\">LinkedIn</label><p>Please provide the link to your LinkedIn profile.</p><input id=\"li\" type=\"text\" placeholder=\"Type here...\"></div>"

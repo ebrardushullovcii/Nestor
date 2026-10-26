@@ -57,12 +57,12 @@ export function githubUsername(
 }
 
 const GITHUB = /\bgit\s?hub\b/iu;
-const HANDLE = /\b(?:user\s*name|handle)\b/iu;
+const HANDLE_LABEL = /^(?:your\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)$/iu;
 // Help text must ask for the handle ("Please provide your GitHub username",
 // "Enter your handle", "Username only"); "Your username will be shown
 // publicly" mentions one without asking for it.
 const ASKS_HANDLE =
-  /\b(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:your\s+)?git\s?hub\s+(?:user\s*name|handle)|(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:user\s*name|handle))\b/iu;
+  /\b(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|what(?:\s+is|['’]s)\s+(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:user\s*name|handle))\b/iu;
 const URL_WORDS =
   /\b(?:url|link|address|website|https?)\b|\b[a-z\d-]+\.com\b/iu;
 // In a label, "GitHub profile" asks for the address too.
@@ -94,12 +94,17 @@ export function asksGithubUsername(
   if (!GITHUB.test(label) && !GITHUB.test(hint)) return false;
   if (ADDRESS.test(label)) return false;
   if (/github\.com|https?:\/\//iu.test(placeholder)) return false;
-  if (HANDLE.test(label)) return true;
+  if (
+    HANDLE_LABEL.test(clean(control.label).replace(/[\s*:?]+$/gu, "")) ||
+    ASKS_HANDLE.test(label)
+  )
+    return true;
   // Help text such as "Please provide your GitHub username" decides it.
   if (hint && URL_WORDS.test(hint)) return false;
   if (hint && ASKS_HANDLE.test(hint)) return true;
   const example = clean(placeholder);
-  if (HANDLE.test(example)) return !URL_WORDS.test(example);
+  if (URL_WORDS.test(example)) return false;
+  if (HANDLE_LABEL.test(example) || ASKS_HANDLE.test(example)) return true;
   return HANDLE_EXAMPLE.test(example) && !GITHUB.test(example);
 }
 
