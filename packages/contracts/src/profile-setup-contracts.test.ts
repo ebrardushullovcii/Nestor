@@ -8,6 +8,7 @@ import {
   CandidateProfileSchema,
   CandidateAnswerBankSchema,
   JobSearchPreferencesSchema,
+  JobDiscoveryPreferencesSchema,
   createFreshStartCandidateProfile,
   evaluateProfileSetupReadiness,
   deriveProfileSetupState,
@@ -319,6 +320,7 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       { enabledSiteCount: 1, now: "2026-04-11T10:15:00.000Z" },
     );
@@ -490,6 +492,7 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
         enabledSiteCount: 1,
@@ -637,6 +640,7 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
         enabledSiteCount: 1,
@@ -788,6 +792,7 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       0,
     );
@@ -908,6 +913,7 @@ describe("contracts profile setup schemas", () => {
         tailoringMode: "balanced",
         companyBlacklist: [],
         companyWhitelist: [],
+        discovery: JobDiscoveryPreferencesSchema.parse({}),
       },
       {
         enabledSiteCount: 0,
