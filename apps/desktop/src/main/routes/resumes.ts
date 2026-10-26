@@ -1,3 +1,5 @@
+import { getJobStore } from "../services/job-store";
+import { listLocalResumeTemplates } from "../../shared/job-finder-resume-renderer";
 import {
   RESUMES_EXPORT_PDF_CHANNEL,
   RESUMES_PREVIEW_CHANNEL,
@@ -37,10 +39,13 @@ export async function runResumeCommand<K extends ResumeCommandName>(
   input: unknown,
 ) {
   if (!runner) {
-    const { createResumeCommandRunner } = await import(
-      "@nestor/job-finder/resumes"
+    const { createResumeCommandRunner, createResumeCommandReads } =
+      await import("@nestor/job-finder/resumes");
+    runner ??= createResumeCommandRunner(resumeService, () =>
+      Promise.resolve(
+        createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
+      ),
     );
-    runner ??= createResumeCommandRunner(resumeService);
   }
   return runner(name, input);
 }

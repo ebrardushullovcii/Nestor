@@ -1,3 +1,4 @@
+import { assistantTestReads } from "../store-reads.test-support";
 import { randomUUID } from "node:crypto";
 import {
   AiBehaviorPreferenceSchema,
@@ -76,6 +77,7 @@ function world() {
       ),
   } as unknown as AssistantTurnSession;
   const ports = {
+    ...assistantTestReads(service),
     publishWorkspaceUpdate,
   } as unknown as AssistantHostPorts;
   return {
@@ -265,53 +267,26 @@ describe("R3 assistant safety findings", () => {
     },
   );
 
-  it("R3-016 inspects the saved binding without person handoff or a visible-tab lease", async () => {
+  it("inspects the current store application's exact binding without using the visible unrelated tab", async () => {
     const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    snapshot.applyJobResults = [
-      ApplyJobResultSchema.parse({
-        id: "result",
-        jobId: "job_ready",
-        runId: "run",
-        applicationRecordId: "record",
-        state: "awaiting_review",
-        summary: "Ready",
-        detail: "Filled synthetic form",
-        startedAt: "2026-10-04T12:00:00.000Z",
-        updatedAt: "2026-10-04T12:00:00.000Z",
-      }),
-    ];
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const inspect = vi
-      .spyOn(ctx.service, "inspectPreparedApplicationPage")
-      .mockResolvedValue(page("http://127.0.0.1:47950/spruce/apply/1"));
-    const focus = vi.spyOn(ctx.service, "focusPreparedApplicationPage");
-    const visibleTab = vi.fn(() => ({
-      tabId: "unrelated",
-      url: page().url!,
-      title: "Unrelated",
-    }));
+    ctx.ports.readCommand = vi.fn(() =>
+      Promise.resolve([{ id: 7, attempt: 2, state: "ready" }]),
+    ) as unknown as AssistantHostPorts["readCommand"];
+    const visibleTab = vi.fn();
     ctx.ports.browser = { visibleTab, lease: vi.fn() };
-    const browserLease = vi.fn();
+    const browserLease = vi.fn(() =>
+      Promise.resolve(lease(page("http://127.0.0.1:47950/spruce/apply/1"))),
+    );
     ctx.session.browserLease = browserLease;
     const observed = await browserUseApplicationTool.execute(
-      { jobId: "job_ready" },
+      { jobId: "3" },
       ctx,
     );
-    expect(inspect).toHaveBeenCalledWith({
-      jobId: "job_ready",
-      runId: "run",
-      resultId: "result",
-      applicationRecordId: "record",
+    expect(browserLease).toHaveBeenCalledWith({
+      applicationResultId: "application_7_attempt_2",
     });
-    expect(focus).not.toHaveBeenCalled();
     expect(visibleTab).not.toHaveBeenCalled();
-    expect(browserLease).not.toHaveBeenCalled();
-    expect(observed.summary).toContain("read-only");
-    snapshot.applyJobResults = [];
-    await expect(
-      browserUseApplicationTool.execute({ jobId: "job_ready" }, ctx),
-    ).rejects.toThrow("Nothing was opened or restored");
+    expect(observed.summary).toContain("Nothing was sent");
   });
 
   it("inspection closes all form/submit windows before reading the exact saved application", async () => {
@@ -563,11 +538,19 @@ describe("R3 assistant safety findings", () => {
     const fresh = createWorkspaceServiceHarness({ seed }).workspaceService;
     await setDefaultResumeLevelTool.execute(
       { level: "light" },
-      { ...ctx, service: fresh },
+      {
+        ...ctx,
+        service: fresh,
+        ports: { ...ctx.ports, ...assistantTestReads(fresh) },
+      },
     );
     await setDefaultResumeLevelTool.execute(
       { level: "tailored" },
-      { ...ctx, service: fresh },
+      {
+        ...ctx,
+        service: fresh,
+        ports: { ...ctx.ports, ...assistantTestReads(fresh) },
+      },
     );
     const shortlisted = await fresh.queueJobForReview(seed.savedJobs[0]!.id);
     expect(
@@ -660,9 +643,6 @@ describe("R3 assistant safety findings", () => {
       "does not expose that pay control",
     );
   });
-
-
-
 });
 
 it("partial AI settings never restore withdrawn declaration approvals", async () => {
@@ -706,8 +686,6 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
       .preApprovedDeclarations,
   ).toEqual([]);
 });
-
-
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {
   const ctx = world();

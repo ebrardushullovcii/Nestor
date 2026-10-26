@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { createPlaywrightApplyPageMechanics } from "@nestor/browser-runtime";
-import type {
-  ApplyRawPageHands,
-  JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import type { ApplyRawPageHands, ApplicationDetails } from "@nestor/contracts";
 import type {
   AssistantBrowserLease,
   AssistantBrowserPort,
@@ -52,7 +49,7 @@ async function popupsOf(page: Page): Promise<Page[]> {
 
 export function createAssistantBrowserPort(
   browser: EmbeddedBrowser,
-  readWorkspace: () => Promise<JobFinderWorkspaceSnapshot>,
+  readApplication: (id: number) => Promise<ApplicationDetails | null>,
 ): AssistantBrowserPort {
   return {
     async show() {
@@ -69,20 +66,21 @@ export function createAssistantBrowserPort(
       input.signal?.throwIfAborted();
       let preparedRecordId: string | null = null;
       if (input.applicationResultId) {
-        const snapshot = await readWorkspace();
-        const result = snapshot.applyJobResults.find(
-          (result) => result.id === input.applicationResultId,
+        const identity = /^application_(\d+)_attempt_(\d+)$/u.exec(
+          input.applicationResultId,
         );
+        const details = identity
+          ? await readApplication(Number(identity[1]))
+          : null;
         if (
-          !result?.applicationRecordId ||
-          !["awaiting_review", "blocked"].includes(result.state) ||
-          result.privacyReceipt?.submissionOutcome?.outcome ===
-            "outcome_uncertain"
+          !details ||
+          details.application.attempt !== Number(identity![2]) ||
+          !["ready", "needs_you"].includes(details.application.state)
         )
           throw new Error(
             "This application is not waiting for editing. Check its send outcome first.",
           );
-        preparedRecordId = result.applicationRecordId;
+        preparedRecordId = String(details.application.id);
         const matches: string[] = [];
         for (const tabId of browser.getApplicationTabIds(
           input.applicationResultId,
@@ -178,34 +176,9 @@ export function createAssistantBrowserPort(
                 .catch(() => null);
               guard();
               if (binding) return true;
-              const snapshot = await readWorkspace();
+              const tabId = await browser.identifyAutomationPage(current);
               guard();
-              // With no exact mark, protect a page still referenced by a saved
-              // preparation. URL matches are only a conservative refusal, never
-              // evidence that this is the application's retained tab.
-              const records = new Set(
-                snapshot.applicationRecords.map((record) => record.id),
-              );
-              return (
-                snapshot.applicationRecords.some(
-                  (record) =>
-                    record.lastAttemptState !== "submitted" &&
-                    record.replaySummary.lastUrl === current.url(),
-                ) ||
-                snapshot.applyJobResults.some(
-                  (result) =>
-                    result.applicationRecordId !== null &&
-                    records.has(result.applicationRecordId) &&
-                    result.reviewCard?.pageUrl === current.url(),
-                ) ||
-                snapshot.userActionRequests.some(
-                  (request) =>
-                    request.scope.type === "application" &&
-                    request.scope.applicationRecordId !== null &&
-                    records.has(request.scope.applicationRecordId) &&
-                    request.actionUrl === current.url(),
-                )
-              );
+              return !tabId || browser.isApplicationTab(tabId);
             };
             const requireEditableTab = async (fieldsOnly = false) => {
               guard();

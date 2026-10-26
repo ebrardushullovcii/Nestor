@@ -30,10 +30,7 @@ vi.mock("@nestor/browser-runtime", () => ({
   createPlaywrightApplyPageMechanics: () => mechanics,
 }));
 
-import {
-  ApplicationRecordSchema,
-  type JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import { ApplicationDetailsSchema } from "@nestor/contracts";
 
 import type { EmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
@@ -43,7 +40,9 @@ function world(bound = false) {
   const original = {
     url: () => "http://127.0.0.1:47950/spruce/apply/1",
     goto: vi.fn(),
-    evaluate: vi.fn(() => Promise.resolve(bound ? "prepared_result" : null)),
+    evaluate: vi.fn(() =>
+      Promise.resolve(bound ? "application_7_attempt_2" : null),
+    ),
     screenshot: vi.fn(() => Promise.resolve(Buffer.from("synthetic"))),
   };
   const owned = {
@@ -85,16 +84,35 @@ function world(bound = false) {
       ) => work(loan.signal, () => undefined, vi.fn()),
     ),
   } as unknown as EmbeddedBrowser;
-  const snapshot = {
-    applicationRecords: [],
-    applyJobResults: [],
-    userActionRequests: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
-  const readWorkspace = vi.fn(() => Promise.resolve(snapshot));
+  const state = { protected: false };
+  const details = ApplicationDetailsSchema.parse({
+    application: {
+      id: 7,
+      jobId: 3,
+      title: "Designer",
+      company: "Synthetic",
+      location: "Remote",
+      state: "ready",
+      attempt: 2,
+      mode: "confirm_before_submit",
+      queuedAt: "2026-10-01T10:00:00.000Z",
+      updatedAt: "2026-10-01T10:00:00.000Z",
+      submittedAt: null,
+      error: null,
+    },
+    summary: null,
+    detail: null,
+    reviewCard: null,
+    receipt: null,
+    resumeFileName: null,
+  });
+  browser.isApplicationTab = () => state.protected;
+  const readApplication = vi.fn(() => Promise.resolve(details));
   return {
-    port: createAssistantBrowserPort(browser, readWorkspace),
-    snapshot,
-    readWorkspace,
+    port: createAssistantBrowserPort(browser, readApplication),
+    state,
+    details,
+    readApplication,
     browser,
     getApplicationTabIds,
     endLoan,
@@ -200,7 +218,7 @@ describe("assistant browser tab safety", () => {
     const ctx = world();
     const lease = await lend(ctx, "original");
     await lease.hands.fillText("name", "Synthetic");
-    ctx.original.evaluate.mockResolvedValue("prepared_result");
+    ctx.original.evaluate.mockResolvedValue("application_7_attempt_2");
     await expect(lease.hands.fillText("name", "late")).rejects.toThrow(
       "This tab holds a prepared application",
     );
@@ -209,28 +227,11 @@ describe("assistant browser tab safety", () => {
   });
 
   it.each([false, true])(
-    "an unreadable binding only allows tabs with no saved application pointing there (record: %s)",
+    "an unreadable binding keeps Apply-owned tabs protected (owned: %s)",
     async (referenced) => {
       const ctx = world();
       ctx.original.evaluate.mockRejectedValue(new Error("cannot read mark"));
-      ctx.snapshot.applicationRecords = [
-        ApplicationRecordSchema.parse({
-          id: "record",
-          jobId: "job",
-          title: "Synthetic",
-          company: "Synthetic",
-          status: "ready_for_review",
-          lastAttemptState: "ready",
-          lastActionLabel: "Prepared",
-          nextActionLabel: "Review",
-          lastUpdatedAt: "2026-10-04T12:00:00.000Z",
-          replaySummary: {
-            lastUrl: referenced
-              ? ctx.original.url()
-              : "https://elsewhere.test/apply",
-          },
-        }),
-      ];
+      ctx.state.protected = referenced;
 
       const lease = await lend(ctx, "original");
       if (referenced)
@@ -271,33 +272,30 @@ it("shows a focused retained tab through the browser open command", async () => 
 
 it("lends the exact waiting application for fields only, records edits, and fences late writes", async () => {
   const ctx = world(true);
-  ctx.snapshot.applyJobResults = [
-    {
-      id: "prepared_result",
-      applicationRecordId: "record",
-      state: "awaiting_review",
-      privacyReceipt: null,
-    },
-  ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
   ctx.browser.readTab = vi.fn(() =>
-    Promise.resolve({ url: ctx.original.url(), value: "prepared_result" }),
+    Promise.resolve({
+      url: ctx.original.url(),
+      value: "application_7_attempt_2",
+    }),
   ) as EmbeddedBrowser["readTab"];
   const onApplicationChange = vi.fn(() => Promise.resolve());
   const turn = new AbortController();
   const lease = await ctx.port.lease({
     tabId: null,
-    applicationResultId: "prepared_result",
+    applicationResultId: "application_7_attempt_2",
     conversationId: "conversation",
     turnId: "turn",
     signal: turn.signal,
     onApplicationChange,
   });
-  expect(ctx.getApplicationTabIds).toHaveBeenCalledWith("prepared_result");
+  expect(ctx.getApplicationTabIds).toHaveBeenCalledWith(
+    "application_7_attempt_2",
+  );
   expect(ctx.context.newPage).not.toHaveBeenCalled();
   expect(ctx.lendTab).toHaveBeenCalledWith("original");
-  expect(lease.applicationResultId).toBe("prepared_result");
+  expect(lease.applicationResultId).toBe("application_7_attempt_2");
   await lease.hands.fillText("cover_letter", "Synthetic letter");
-  expect(onApplicationChange).toHaveBeenCalledWith("record", "Phone");
+  expect(onApplicationChange).toHaveBeenCalledWith("7", "Phone");
   await expect(lease.hands.clickAction("send")).rejects.toThrow("fields only");
   await expect(lease.hands.navigate("https://example.test")).rejects.toThrow(
     "fields only",
@@ -306,7 +304,7 @@ it("lends the exact waiting application for fields only, records edits, and fenc
   await expect(
     lease.hands.fillText("cover_letter", "Wrong tab"),
   ).rejects.toThrow("changed or closed");
-  ctx.original.evaluate.mockResolvedValue("prepared_result");
+  ctx.original.evaluate.mockResolvedValue("application_7_attempt_2");
   turn.abort();
   await expect(
     lease.hands.uploadFile("resume", {
@@ -322,36 +320,34 @@ it("lends the exact waiting application for fields only, records edits, and fenc
 
 it("refuses missing or ambiguous retained application tabs without opening a copy", async () => {
   const ctx = world(true);
-  ctx.snapshot.applyJobResults = [
-    {
-      id: "prepared_result",
-      applicationRecordId: "record",
-      state: "awaiting_review",
-    },
-  ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
   ctx.browser.readTab = vi.fn(() =>
     Promise.resolve(null),
   ) as EmbeddedBrowser["readTab"];
   await expect(
     ctx.port.lease({
       tabId: null,
-      applicationResultId: "prepared_result",
+      applicationResultId: "application_7_attempt_2",
       conversationId: "conversation",
       turnId: "turn",
     }),
   ).rejects.toThrow("exact prepared application tab");
-  expect(ctx.getApplicationTabIds).toHaveBeenCalledWith("prepared_result");
+  expect(ctx.getApplicationTabIds).toHaveBeenCalledWith(
+    "application_7_attempt_2",
+  );
   expect(ctx.context.newPage).not.toHaveBeenCalled();
   expect(ctx.lendTab).not.toHaveBeenCalled();
   const readTab = vi.fn(() =>
-    Promise.resolve({ url: ctx.original.url(), value: "prepared_result" }),
+    Promise.resolve({
+      url: ctx.original.url(),
+      value: "application_7_attempt_2",
+    }),
   );
   ctx.browser.readTab = readTab as EmbeddedBrowser["readTab"];
   ctx.getApplicationTabIds.mockReturnValue([]);
   await expect(
     ctx.port.lease({
       tabId: null,
-      applicationResultId: "prepared_result",
+      applicationResultId: "application_7_attempt_2",
       conversationId: "conversation",
       turnId: "turn",
     }),
@@ -361,7 +357,7 @@ it("refuses missing or ambiguous retained application tabs without opening a cop
   await expect(
     ctx.port.lease({
       tabId: null,
-      applicationResultId: "prepared_result",
+      applicationResultId: "application_7_attempt_2",
       conversationId: "conversation",
       turnId: "turn",
     }),

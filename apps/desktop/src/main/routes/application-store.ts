@@ -33,7 +33,6 @@ export async function executeApplicationStoreCommand(
   input: unknown,
   instruction?: { conversationId: string; mode: ApplicationAutomationMode },
 ): Promise<unknown> {
-  await getJobFinderWorkspaceService();
   const store = getApplicationStore();
   switch (actionId) {
     case "apply-jobs": {
@@ -83,14 +82,17 @@ export async function executeApplicationStoreCommand(
       });
     }
     case "stop-application":
+      await getJobFinderWorkspaceService();
       return (await getApplicationService()).stopApplication(
         ApplicationTargetSchema.parse(input).id,
       );
     case "send-application":
+      await getJobFinderWorkspaceService();
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
     case "open-application": {
+      await getJobFinderWorkspaceService();
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);

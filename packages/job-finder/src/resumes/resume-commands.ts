@@ -1,11 +1,21 @@
+import { createResumeStore, type JobStore } from "@nestor/db/job-store";
 import {
   RESUME_COMMANDS,
+  JobListQuerySchema,
+  isResumeTemplateApplyEligible,
+  type ResumeTemplateDefinition,
+  type JobListQueryInput,
+  type ShortlistedPage,
   type ResumeCommandName,
   type ResumeCommandOutputs,
 } from "@nestor/contracts";
 import type { z } from "zod";
 
 import type { ResumeService } from "./resume-service";
+interface ResumeCommandReads {
+  list(query: JobListQueryInput): ShortlistedPage;
+  get(jobId: number): ResumeCommandOutputs["get_resume"];
+}
 
 type Handlers = {
   [K in ResumeCommandName]: (
@@ -24,26 +34,59 @@ export type RunResumeCommand = <K extends ResumeCommandName>(
  */
 export function createResumeCommandRunner(
   service: () => Promise<ResumeService>,
+  read: () => Promise<ResumeCommandReads> = service,
 ): RunResumeCommand {
-  const handlers = (resumes: ResumeService): Handlers => ({
-    list_shortlisted: (input) => resumes.list(input),
-    get_resume: ({ jobId }) => resumes.get(jobId),
-    save_resume: ({ jobId, draft, expectedUpdatedAt }) =>
-      resumes.saveDraft(jobId, draft, expectedUpdatedAt),
-    set_resume_level: ({ jobId, level }) => resumes.setLevel(jobId, level),
-    undo_resume_level: ({ jobId, changeId }) => resumes.undoLevel(jobId, changeId),
-    rewrite_resume: ({ jobId }) => resumes.rewrite(jobId),
-    approve_resume: ({ jobId }) => resumes.approve(jobId),
-  });
+  const handlers: Handlers = {
+    list_shortlisted: async (input) => (await read()).list(input),
+    get_resume: async ({ jobId }) => (await read()).get(jobId),
+    save_resume: async ({ jobId, draft, expectedUpdatedAt }) =>
+      (await service()).saveDraft(jobId, draft, expectedUpdatedAt),
+    set_resume_level: async ({ jobId, level }) =>
+      (await service()).setLevel(jobId, level),
+    undo_resume_level: async ({ jobId, changeId }) =>
+      (await service()).undoLevel(jobId, changeId),
+    rewrite_resume: async ({ jobId }) => (await service()).rewrite(jobId),
+    approve_resume: async ({ jobId }) => (await service()).approve(jobId),
+  };
 
   return async (name, input) => {
     if (!Object.hasOwn(RESUME_COMMANDS, name)) {
       throw new Error(`There is no resume command named ${String(name)}.`);
     }
     const parsed: unknown = RESUME_COMMANDS[name].input.parse(input ?? {});
-    const handler = handlers(await service())[name] as (
-      value: unknown,
-    ) => unknown;
+    const handler = handlers[name] as (value: unknown) => unknown;
     return (await handler(parsed)) as ResumeCommandOutputs[typeof name];
+  };
+}
+
+/** Store-only reads shared by the screen, chat and the running resume service. */
+export function createResumeCommandReads(
+  store: JobStore,
+  templates: () => readonly ResumeTemplateDefinition[],
+): ResumeCommandReads {
+  const resumes = createResumeStore(store);
+  return {
+    list(query) {
+      const page = store.listJobs(JobListQuerySchema.parse(query));
+      const statuses = resumes.statuses(page.rows.map((row) => row.id));
+      return {
+        ...page,
+        rows: page.rows.map((row) => ({
+          ...row,
+          resume: statuses.get(row.id) ?? null,
+        })),
+      };
+    },
+    get(jobId) {
+      const job = store.getJob(jobId);
+      if (!job) throw new Error("That job no longer exists.");
+      return {
+        job,
+        resume: resumes.get(jobId),
+        templates: templates()
+          .filter(isResumeTemplateApplyEligible)
+          .map(({ id, label }) => ({ id, label })),
+      };
+    },
   };
 }

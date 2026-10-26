@@ -1,14 +1,16 @@
+import { runJobCommand } from "../job-commands";
+import {
+  readAssistantPersonalState,
+  runAssistantReadCommand,
+} from "./store-reads";
 import {
   CandidateAssetSchema,
   type CandidateAsset,
   type CandidateProfile,
-  type ResumeExportArtifactSummary,
 } from "@nestor/contracts";
 import {
-  resolveApprovedResumeExportForApply,
   savedResumeDigestMatches,
   type AssistantHostPorts,
-  type JobFinderWorkspaceService,
 } from "@nestor/job-finder";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -17,7 +19,6 @@ import { extractResumeDocument } from "../../adapters/resume-document";
 import { getApplicationStore } from "../job-finder/application-store";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { getCandidateAssetLibrary } from "../job-finder/candidate-asset-library-instance";
-import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import {
   importResumeFromSourcePath,
   isDesktopResumeImportActive,
@@ -29,7 +30,6 @@ import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { assistantAppCommands } from "./app-commands";
-import { runNeedsYouCommand } from "../../routes/needs-you";
 
 /**
  * The assistant's host ports, implemented with the exact functions the IPC
@@ -38,20 +38,8 @@ import { runNeedsYouCommand } from "../../routes/needs-you";
  * batch start, the same serialized send.
  */
 
-async function readWorkspaceProjection(service: JobFinderWorkspaceService) {
-  if (!service.getWorkspaceProjection) {
-    throw new Error("The assistant workspace view is unavailable.");
-  }
-  return service.getWorkspaceProjection();
-}
-
-async function readProfile(
-  service: JobFinderWorkspaceService,
-): Promise<CandidateProfile> {
-  const repository = getJobFinderRepositoryForWorkspaceService(service);
-  return repository
-    ? repository.getProfile()
-    : (await readWorkspaceProjection(service)).profile;
+async function readProfile(): Promise<CandidateProfile> {
+  return (await readAssistantPersonalState()).profile;
 }
 
 async function withTempCopy<T>(
@@ -105,14 +93,8 @@ interface ResumeDocument {
 async function listResumeDocuments(
   documentId?: string,
 ): Promise<ResumeDocument[]> {
-  const service = await getJobFinderWorkspaceService();
-  const snapshot =
-    documentId === ORIGINAL_RESUME_DOCUMENT_ID
-      ? null
-      : await readWorkspaceProjection(service);
   const documents: ResumeDocument[] = [];
-  const base =
-    snapshot?.profile.baseResume ?? (await readProfile(service)).baseResume;
+  const base = (await readProfile()).baseResume;
   if (
     (!documentId || documentId === ORIGINAL_RESUME_DOCUMENT_ID) &&
     base.storagePath &&
@@ -137,50 +119,50 @@ async function listResumeDocuments(
       });
     }
   }
-  if (!snapshot) return documents;
-  const draftsByJob = new Map(
-    snapshot.resumeDrafts.map((draft) => [draft.jobId, draft]),
-  );
-  const exportsByJob = new Map<string, ResumeExportArtifactSummary[]>();
-  for (const artifact of snapshot.resumeExportArtifacts) {
-    const exports = exportsByJob.get(artifact.jobId) ?? [];
-    exports.push(artifact);
-    exportsByJob.set(artifact.jobId, exports);
-  }
-  for (const item of snapshot.reviewQueue) {
+  const jobId = documentId?.startsWith(APPROVED_RESUME_DOCUMENT_PREFIX)
+    ? Number(documentId.slice(APPROVED_RESUME_DOCUMENT_PREFIX.length))
+    : null;
+  const ids = jobId
+    ? [jobId]
+    : documentId
+      ? []
+      : (
+          await runAssistantReadCommand("list_shortlisted", {
+            stage: "resume",
+            limit: 50,
+          })
+        ).rows.map((row) => row.id);
+  for (const id of ids) {
+    const { job, resume } = await runAssistantReadCommand("get_resume", {
+      jobId: id,
+    });
     if (
-      documentId &&
-      documentId !== `${APPROVED_RESUME_DOCUMENT_PREFIX}${item.jobId}`
+      !resume?.approvedAt ||
+      !resume.pdfPath ||
+      !resume.pdfSha256 ||
+      resume.state !== "ready"
     )
       continue;
-    if (item.resumeReview.status !== "approved") continue;
-    const draft = draftsByJob.get(item.jobId);
-    if (!draft?.approvedAt) continue;
-    const approvedExport = resolveApprovedResumeExportForApply({
-      draft,
-      exports: exportsByJob.get(item.jobId) ?? [],
-    });
-    if (!approvedExport?.sha256) continue;
-    const filePath = approvedExport.filePath;
+    const filePath = resume.pdfPath;
     const metadata = await stat(filePath).catch(() => null);
-    if (!metadata?.isFile() || metadata.size === 0) continue;
+    if (!metadata?.isFile() || !metadata.size) continue;
     documents.push({
       filePath,
       asset: CandidateAssetSchema.parse({
-        id: `${APPROVED_RESUME_DOCUMENT_PREFIX}${item.jobId}`,
+        id: `${APPROVED_RESUME_DOCUMENT_PREFIX}${id}`,
         kind: "resume",
         originalName: path.basename(filePath).slice(0, 255),
-        mime: resumeMime(filePath),
+        mime: "application/pdf",
         byteSize: metadata.size,
-        sha256: approvedExport.sha256,
-        createdAt: draft.approvedAt,
+        sha256: resume.pdfSha256,
+        createdAt: resume.approvedAt,
         sensitivity: "sensitive",
         consentScope: "job_application_attachment",
         retention: "until_deleted",
         forJob: {
-          jobId: item.jobId,
-          title: item.title.slice(0, 300),
-          company: item.company.slice(0, 300),
+          jobId: String(id),
+          title: job.title.slice(0, 300),
+          company: job.company.slice(0, 300),
         },
       }),
     });
@@ -210,18 +192,9 @@ export function createAssistantHostPorts(input: {
   const library = getCandidateAssetLibrary();
   const ports: AssistantHostPorts = {
     commands: assistantAppCommands(),
-    readNeed: (id) => runNeedsYouCommand("get_need", { id }),
-    async readJobDetail(jobId, planId) {
-      const { readJobFinderJobDetail } =
-        await import("../job-finder/read-job-detail");
-      const service = await getJobFinderWorkspaceService();
-      const repository = getJobFinderRepositoryForWorkspaceService(service);
-      const activePlan =
-        planId ??
-        (await repository?.getCampaignState())?.activeCampaignId ??
-        null;
-      return readJobFinderJobDetail(repository, { jobId, planId: activePlan });
-    },
+    readPersonalState: readAssistantPersonalState,
+    readCommand: runAssistantReadCommand,
+    savePageJobs: (input) => runJobCommand("import_page_jobs", input),
     async executeAction(actionId, input) {
       const { executeDesktopJobFinderAction } =
         await import("./desktop-actions");
@@ -243,7 +216,7 @@ export function createAssistantHostPorts(input: {
       publishJobFinderWorkspaceUpdate();
     },
     async listDocuments() {
-      const resumes = await listResumeDocuments().catch(() => []);
+      const resumes = await listResumeDocuments();
       return [
         ...resumes.map((document) => document.asset),
         ...(await library.list({ includeDeleted: false })).assets,
@@ -251,8 +224,7 @@ export function createAssistantHostPorts(input: {
     },
     async readDocumentText(documentId) {
       if (documentId === ORIGINAL_RESUME_DOCUMENT_ID) {
-        const service = await getJobFinderWorkspaceService();
-        return (await readProfile(service)).baseResume.textContent ?? null;
+        return (await readProfile()).baseResume.textContent ?? null;
       }
       const resumeDocument = await findResumeDocument(documentId);
       if (resumeDocument) {
@@ -313,7 +285,10 @@ export function createAssistantHostPorts(input: {
         }),
       );
       try {
-        await waitForAssistantResumeImport(service, imported, options);
+        await waitForAssistantResumeImport(service, imported, {
+          ...options,
+          readProfile,
+        });
       } finally {
         publishJobFinderWorkspaceUpdate();
       }
@@ -323,10 +298,7 @@ export function createAssistantHostPorts(input: {
   if (input.browserHost === "embedded") {
     ports.browser = createAssistantBrowserPort(
       getEmbeddedBrowser(),
-      async () => {
-        const service = await getJobFinderWorkspaceService();
-        return readWorkspaceProjection(service);
-      },
+      async (id) => runAssistantReadCommand("get_application_details", { id }),
     );
   }
   return ports;

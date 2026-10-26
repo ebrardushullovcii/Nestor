@@ -65,6 +65,30 @@ export function createJobCommandRunner(deps: {
       sourceRevision: 0,
     };
   const handlers: Handlers = {
+    import_page_jobs: ({ postings, pageUrl }) =>
+      store.saveFoundJobs({
+        searchId: null,
+        jobs: postings.map((posting) => ({
+          title: posting.title,
+          company: posting.company,
+          location: posting.location,
+          workModes: posting.workMode,
+          url: posting.canonicalUrl,
+          applyUrl: posting.applicationUrl,
+          sourceId: "browser_page",
+          sourceLabel: new URL(pageUrl).hostname,
+          sourceJobId: null,
+          postedAt: posting.postedAt,
+          salaryText: posting.salaryText,
+          salaryMin: posting.normalizedCompensation.minAmount ?? null,
+          salaryMax: posting.normalizedCompensation.maxAmount ?? null,
+          salaryCurrency: posting.normalizedCompensation.currency ?? null,
+          seniority: posting.seniority,
+          employmentType: posting.employmentType,
+          summary: posting.summary,
+          description: posting.description,
+        })),
+      }),
     list_jobs: (input) => store.listJobs(input),
     get_job: ({ id }) => store.getJob(id),
     stage_counts: () => store.stageCounts(),

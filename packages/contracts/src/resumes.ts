@@ -58,4 +58,5 @@ export interface StoredResume extends ResumeStatus {
   levelChangeId: string | null;
   /** The approved PDF Apply attaches. */
   pdfPath: string | null;
+  pdfSha256: string | null;
 }

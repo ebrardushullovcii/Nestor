@@ -195,6 +195,13 @@ CREATE TABLE IF NOT EXISTS resumes (
   pdf_path TEXT
 );
 CREATE INDEX IF NOT EXISTS resumes_by_state ON resumes (state, updated_at);
+CREATE TABLE IF NOT EXISTS resume_pdf_assets (
+  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  approved_at INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  PRIMARY KEY (job_id, path, approved_at)
+) WITHOUT ROWID;
 `;
 
 export const JOB_STORE_SCHEMA: readonly string[] = [

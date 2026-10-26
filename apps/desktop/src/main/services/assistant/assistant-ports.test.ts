@@ -5,7 +5,6 @@ import {
   mkdtemp,
   readFile,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -55,24 +54,31 @@ vi.mock("./assistant-browser-port", () => ({
   createAssistantBrowserPort: vi.fn(),
 }));
 
-import {
-  ResumeExportArtifactSummarySchema,
-} from "@nestor/contracts";
-import type { JobFinderWorkspaceService } from "@nestor/job-finder";
-import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
+import {
+  readAssistantPersonalState,
+  runAssistantReadCommand,
+} from "./store-reads";
+
+vi.mock("./store-reads", () => ({
+  readAssistantPersonalState: vi.fn(),
+  runAssistantReadCommand: vi.fn(),
+}));
+vi.mock("./app-commands", () => ({ assistantAppCommands: () => [] }));
+vi.mock("../job-commands", () => ({ runJobCommand: vi.fn() }));
 
 let directory: string | null = null;
 afterEach(async () => {
-  if (directory) await rm(directory, { recursive: true, force: true });
+  if (directory) {
+    expect(directory.startsWith(path.resolve(".tmp") + path.sep)).toBe(true);
+    await rm(directory, { recursive: true, force: true });
+  }
   directory = null;
-  vi.useRealTimers();
   vi.clearAllMocks();
-  vi.mocked(getJobFinderRepositoryForWorkspaceService).mockReturnValue(null);
 });
 
 async function approvedResume() {
@@ -82,247 +88,130 @@ async function approvedResume() {
   const bytes = Buffer.from("Synthetic approved resume PDF");
   await writeFile(filePath, bytes);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const approvedAt = "2026-10-01T10:00:00.000Z";
-  const exported = ResumeExportArtifactSummarySchema.parse({
-    id: "export_approved",
-    draftId: "draft_1",
-    jobId: "job_1",
-    isApproved: true,
-    filePath,
+  const initial = createEmptyJobFinderRepositoryState();
+  initial.profile.baseResume = {
+    ...initial.profile.baseResume,
+    storagePath: filePath,
     sha256,
-    format: "pdf",
-    templateId: "classic_ats",
-    exportedAt: approvedAt,
-  });
-  const draft = {
-    id: "draft_1",
-    jobId: "job_1",
-    status: "approved",
-    approvedAt,
-    approvedExportId: exported.id,
+    fileName: "original.pdf",
+    uploadedAt: "2026-10-01T10:00:00.000Z",
   };
-  const exports = [
-    exported,
-    {
-      ...exported,
-      id: "newer_unapproved",
-      isApproved: false,
-      sha256: "b".repeat(64),
-      exportedAt: "2026-10-01T11:00:00.000Z",
-    },
-  ];
-  const getResumeWorkspace = vi.fn(() => Promise.resolve({ draft, exports }));
-  const getWorkspaceSnapshot = vi.fn(() => {
-    throw new Error("Canonical reads are forbidden for assistant documents");
+  vi.mocked(readAssistantPersonalState).mockResolvedValue({
+    profile: initial.profile,
+    searchPreferences: initial.searchPreferences,
+    settings: initial.settings,
+    profileSetupState: initial.profileSetupState,
+    activityControl: initial.activityControl,
+    latestResumeImportRun: null,
+    resumeImportActive: false,
+    enabledSiteCount: 0,
+    availableResumeTemplates: [],
+    generatedAt: "2026-10-01T10:00:00.000Z",
   });
-  const getWorkspaceProjection = vi.fn(() =>
-    Promise.resolve({
-      profile: { baseResume: {} },
-      resumeDrafts: [draft],
-      resumeExportArtifacts: exports,
-      reviewQueue: [
-        {
-          jobId: "job_1",
-          title: "Engineer",
-          company: "Cedar",
-          resumeReview: {
-            status: "approved",
-            approvedAt,
-            approvedFilePath: filePath,
+  const resume = {
+    approvedAt: "2026-10-01T10:00:00.000Z",
+    state: "ready",
+    pdfPath: filePath,
+    pdfSha256: sha256,
+  };
+  vi.mocked(runAssistantReadCommand).mockImplementation(((
+    name: string,
+    input: { jobId?: number },
+  ) =>
+    Promise.resolve(
+      name === "list_shortlisted"
+        ? {
+            rows: Array.from({ length: 50 }, (_, i) => ({ id: i + 1 })),
+            total: 1000,
+          }
+        : {
+            job: { id: input.jobId, title: "Engineer", company: "Cedar" },
+            resume,
           },
-        },
-      ],
-    }),
-  );
-  const service = {
-    getWorkspaceSnapshot,
-    getWorkspaceProjection,
-    getResumeWorkspace,
-  } as unknown as JobFinderWorkspaceService;
-  vi.mocked(getJobFinderWorkspaceService).mockResolvedValue(service);
+    )) as typeof runAssistantReadCommand);
   return {
     ports: createAssistantHostPorts({ browserHost: "external" }),
     filePath,
     bytes,
     sha256,
-    exported,
-    getResumeWorkspace,
-    getWorkspaceSnapshot,
-    getWorkspaceProjection,
+    resume,
+    profile: initial.profile,
   };
 }
 
-describe("assistant approved resume files", () => {
-  async function thousandApprovedResumes() {
-    const fixture = await approvedResume();
-    const approvedAt = "2026-10-01T10:00:00.000Z";
-    const exports = Array.from({ length: 1_000 }, (_, index) => ({
-      ...fixture.exported,
-      id: `export_${index}`,
-      draftId: `draft_${index}`,
-      jobId: `job_${index}`,
-    }));
-    // Shared synthetic bytes keep this a metadata/lookup test, without
-    // creating a thousand files or hiding unselected reads behind failures.
-    const service = {
-      getWorkspaceSnapshot: fixture.getWorkspaceSnapshot,
-      getWorkspaceProjection: () =>
-        Promise.resolve({
-          profile: {
-            baseResume: {
-              id: "original",
-              storagePath: fixture.filePath,
-              sha256: fixture.sha256,
-              fileName: "original.pdf",
-              uploadedAt: approvedAt,
-            },
-          },
-          resumeDrafts: exports.map((artifact) => ({
-            id: artifact.draftId,
-            jobId: artifact.jobId,
-            status: "approved",
-            approvedAt,
-            approvedExportId: artifact.id,
-          })),
-          resumeExportArtifacts: exports,
-          reviewQueue: exports.map((artifact) => ({
-            jobId: artifact.jobId,
-            title: "Engineer",
-            company: "Cedar",
-            resumeReview: {
-              status: "approved",
-              approvedAt,
-              approvedFilePath: fixture.filePath,
-            },
-          })),
-        }),
-    } as unknown as JobFinderWorkspaceService;
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue(service);
-    return fixture;
-  }
-
-  it("lists 1,000 approved resumes using metadata without reading file contents", async () => {
-    const { ports, sha256, bytes, getWorkspaceSnapshot } =
-      await thousandApprovedResumes();
+describe("Assistant store-backed resume files", () => {
+  it("lists one bounded page of approved PDF metadata without reading file contents", async () => {
+    const { ports } = await approvedResume();
     const documents = await ports.listDocuments();
-    expect(documents).toHaveLength(1_001);
-    expect(documents[0]).toMatchObject({
-      id: "original_resume",
-      byteSize: bytes.length,
-      sha256,
-    });
-    expect(documents.at(-1)).toMatchObject({
-      id: "approved_resume_job_999",
-      byteSize: bytes.length,
-      sha256,
+    expect(documents).toHaveLength(51);
+    expect(runAssistantReadCommand).toHaveBeenCalledWith("list_shortlisted", {
+      stage: "resume",
+      limit: 50,
     });
     expect(readFile).not.toHaveBeenCalled();
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(getJobFinderWorkspaceService).not.toHaveBeenCalled();
   });
-
-  it.each(["original_resume", "approved_resume_job_999"])(
-    "reads only the requested file when resolving %s among 1,000 approved jobs",
+  it.each(["original_resume", "approved_resume_1000"])(
+    "resolves %s without scanning other approved jobs",
     async (documentId) => {
-      const { ports, filePath, bytes } = await thousandApprovedResumes();
-      const file = await ports.loadDocumentFile(documentId);
-      expect(file.bytes).toEqual(Uint8Array.from(bytes));
+      const { ports, filePath, bytes } = await approvedResume();
+      expect((await ports.loadDocumentFile(documentId)).bytes).toEqual(
+        Uint8Array.from(bytes),
+      );
       expect(readFile).toHaveBeenCalledExactlyOnceWith(filePath);
-      expect(stat).toHaveBeenCalledTimes(1);
+      expect(runAssistantReadCommand).not.toHaveBeenCalledWith(
+        "list_shortlisted",
+        expect.anything(),
+      );
+      if (documentId !== "original_resume")
+        expect(runAssistantReadCommand).toHaveBeenCalledExactlyOnceWith(
+          "get_resume",
+          { jobId: 1000 },
+        );
     },
   );
-
-  it("uses the approved export's persisted digest and refuses changed disk bytes", async () => {
-    const { ports, filePath, bytes, sha256, getResumeWorkspace } =
-      await approvedResume();
+  it("uses the persisted approval digest and rejects changed bytes", async () => {
+    const { ports, filePath, sha256 } = await approvedResume();
+    await writeFile(filePath, "Changed and unapproved synthetic bytes");
     expect(
       (await ports.listDocuments()).find(
-        (asset) => asset.id === "approved_resume_job_1",
+        (asset) => asset.id === "approved_resume_1",
       )?.sha256,
     ).toBe(sha256);
-    expect(getResumeWorkspace).not.toHaveBeenCalled();
-    expect(
-      (await ports.loadDocumentFile("approved_resume_job_1")).bytes,
-    ).toEqual(Uint8Array.from(bytes));
-    await writeFile(filePath, "Changed, unapproved synthetic resume");
-    expect(
-      (await ports.listDocuments()).find(
-        (asset) => asset.id === "approved_resume_job_1",
-      )?.sha256,
-    ).toBe(sha256);
-    await expect(
-      ports.loadDocumentFile("approved_resume_job_1"),
-    ).rejects.toThrow(/changed/);
-    expect(getResumeWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("refuses an approved export without a saved digest", async () => {
-    const { ports, exported } = await approvedResume();
-    exported.sha256 = null;
-    await expect(
-      ports.loadDocumentFile("approved_resume_job_1"),
-    ).rejects.toThrow();
-  });
-});
-
-describe("assistant interactive workspace reads", () => {
-
-
-  it("reads the original resume text from the stored profile without projecting the workspace", async () => {
-    const profile = createEmptyJobFinderRepositoryState().profile;
-    profile.baseResume.textContent = "Synthetic original resume text.";
-    const getProfile = vi.fn().mockResolvedValue(profile);
-    vi.mocked(getJobFinderRepositoryForWorkspaceService).mockReturnValue({
-      getProfile,
-    } as unknown as NonNullable<
-      ReturnType<typeof getJobFinderRepositoryForWorkspaceService>
-    >);
-    const getWorkspaceSnapshot = vi.fn();
-    const getWorkspaceProjection = vi.fn();
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
-      getWorkspaceSnapshot,
-      getWorkspaceProjection,
-    } as unknown as JobFinderWorkspaceService);
-    const ports = createAssistantHostPorts({ browserHost: "external" });
-    await expect(ports.readDocumentText("original_resume")).resolves.toBe(
-      profile.baseResume.textContent,
+    await expect(ports.loadDocumentFile("approved_resume_1")).rejects.toThrow(
+      /changed/,
     );
-    expect(getProfile).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
-    expect(getWorkspaceProjection).not.toHaveBeenCalled();
   });
-
-  it("gives the browser lease the full main projection rather than a renderer row or canonical snapshot", async () => {
-    const view = {
-      applyJobResults: [
-        {
-          id: "prepared-result",
-          applicationRecordId: "application",
-          state: "awaiting_review",
-        },
-      ],
-    };
-    const getWorkspaceProjection = vi.fn().mockResolvedValue(view);
-    const getWorkspaceSnapshot = vi.fn();
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
-      getWorkspaceSnapshot,
-      getWorkspaceProjection,
-    } as unknown as JobFinderWorkspaceService);
+  it("refuses an approved PDF without an approval digest", async () => {
+    const { ports, resume } = await approvedResume();
+    resume.pdfSha256 = "";
+    await expect(ports.loadDocumentFile("approved_resume_1")).rejects.toThrow();
+  });
+  it("reads original text and exact browser work without a workspace runtime", async () => {
+    const { ports, profile } = await approvedResume();
+    profile.baseResume.textContent = "Synthetic text";
+    expect(await ports.readDocumentText("original_resume")).toBe(
+      "Synthetic text",
+    );
+    const expected = { application: { id: 7 } };
+    vi.mocked(runAssistantReadCommand).mockResolvedValue(expected as never);
     createAssistantHostPorts({ browserHost: "embedded" });
-    const readWorkspace = vi
-      .mocked(createAssistantBrowserPort)
-      .mock.calls.at(-1)![1];
-    await expect(readWorkspace()).resolves.toBe(view);
-    expect(getWorkspaceProjection).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    const read = vi.mocked(createAssistantBrowserPort).mock.calls.at(-1)![1];
+    expect(await read(7)).toEqual(expected);
+    expect(runAssistantReadCommand).toHaveBeenCalledWith(
+      "get_application_details",
+      { id: 7 },
+    );
+    expect(getJobFinderWorkspaceService).not.toHaveBeenCalled();
   });
 });
-
-it("R3-169 minimizes Browser before app navigation without closing or reloading tabs", async () => {
+it("minimizes Browser for navigation without closing tabs", async () => {
   const command = vi.fn(() => Promise.resolve());
   vi.mocked(getEmbeddedBrowser).mockReturnValue({
     command,
   } as unknown as ReturnType<typeof getEmbeddedBrowser>);
-  const ports = createAssistantHostPorts({ browserHost: "embedded" });
-  await ports.prepareAppNavigation?.();
+  await createAssistantHostPorts({
+    browserHost: "embedded",
+  }).prepareAppNavigation?.();
   expect(command).toHaveBeenCalledExactlyOnceWith({ type: "minimize" });
 });

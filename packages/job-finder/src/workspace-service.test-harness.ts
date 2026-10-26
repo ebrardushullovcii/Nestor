@@ -20,6 +20,14 @@ import {
   createResearchAdapter,
 } from "./workspace-service.test-runtimes";
 
+export const workspaceHarnessInputs = new WeakMap<
+  object,
+  {
+    repository: ReturnType<typeof createInMemoryJobFinderRepository>;
+    documentManager: ReturnType<typeof createDocumentManager>;
+  }
+>();
+
 export function createWorkspaceServiceHarness(
   options: {
     seed?: JobFinderRepositorySeed;
@@ -74,6 +82,7 @@ export function createWorkspaceServiceHarness(
       : {}),
   });
 
+  workspaceHarnessInputs.set(workspaceService, { repository, documentManager });
   return {
     repository,
     browserRuntime,

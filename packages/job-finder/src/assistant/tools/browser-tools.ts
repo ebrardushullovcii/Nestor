@@ -19,7 +19,8 @@ import {
   type AssistantToolContext,
   type AssistantToolDefinition,
 } from "../tool-kit";
-import { findJob, jobRowsPart, plural } from "./format";
+import { plural } from "./format";
+import { applicationIdentity } from "../../applications/application-service";
 
 const Id = NonEmptyStringSchema.max(200);
 
@@ -266,36 +267,24 @@ export const browserUseApplicationTool = defineTool({
   label: () => "Checking the prepared application",
   effect: "read",
   async execute(input, context) {
-    const snapshot = await context.service.getWorkspaceSnapshot();
-    const latest = snapshot.applyJobResults
-      .filter((result) => result.jobId === input.jobId)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-    if (
-      !latest?.applicationRecordId ||
-      !["awaiting_review", "paused", "blocked"].includes(latest.state)
-    ) {
+    const rows = await context.ports.readCommand("applications_for_jobs", {
+      jobIds: [Number(input.jobId)],
+    });
+    const application = rows[0];
+    if (!application || !["ready", "needs_you"].includes(application.state))
       throw new AssistantToolError(
         "refused",
-        "I cannot identify this application's retained tab. Nothing was opened or restored.",
+        "This application is not waiting in a prepared form.",
       );
-    }
-    context.session.assertCurrent();
-    const raw = await context.service.inspectPreparedApplicationPage({
-      jobId: input.jobId,
-      runId: latest.runId,
-      resultId: latest.id,
-      applicationRecordId: latest.applicationRecordId,
+    const lease = await context.session.browserLease({
+      applicationResultId: applicationIdentity(
+        application.id,
+        application.attempt,
+      ).resultId,
     });
-    context.session.assertCurrent();
-    const observation = await createPageTools(
-      createApplyPageHands({
-        ...TEMPLATE_HANDS,
-        readPage: () => Promise.resolve(raw),
-      }),
-      {},
-    ).observe();
+    const observation = await pageToolsFor(lease).observe();
     return {
-      summary: `Inspected the retained application tab at ${observation.url} with submit windows closed. This inspection is read-only and did not show the page to the person or select it for later browser tools. Use retry_application with openPage:true to show and safely edit this exact form. Report recovery only if its fields and attachment are present.`,
+      summary: `Inspected the retained form at ${observation.url}. Nothing was sent.`,
       data: observation,
     };
   },
@@ -546,48 +535,24 @@ export const savePageJobsTool = defineTool({
       );
     }
     context.session.assertCurrent();
-    const saved = await context.service.saveJobsFromPage({
+    const saved = await context.ports.savePageJobs({
       postings: picked,
       pageUrl: resultSet.pageUrl ?? "about:blank",
     });
     context.ports.publishWorkspaceUpdate();
-    const snapshot = await context.service.getWorkspaceSnapshot();
-    const jobs = snapshot.discoveryJobs.filter((job) =>
-      saved.savedJobIds.includes(job.id),
+    const ids = [...saved.added, ...saved.merged];
+    const jobs = await Promise.all(
+      ids.map((id) => context.ports.readCommand("get_job", { id })),
     );
     const savedSet = await context.session.createResultSet({
       kind: "jobs",
       label: "Saved from the page",
-      itemIds: saved.savedJobIds,
+      itemIds: ids.map(String),
       source: "page_collection",
     });
-    const matched = saved.mergedJobIds
-      .map((id) => findJob(snapshot, id))
-      .filter((job): job is NonNullable<typeof job> => job !== null);
     return {
-      summary: [
-        `Saved ${plural(saved.newJobIds.length, "new job")} (result set ${savedSet.id}).`,
-        matched.length > 0
-          ? `Already saved and left as they were: ${matched
-              .map(
-                (job) =>
-                  `${job.title} at ${job.company} (${job.status.replaceAll("_", " ")})`,
-              )
-              .join("; ")}.`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      data: { jobIds: saved.savedJobIds, resultSetId: savedSet.id },
-      parts: jobs.length
-        ? [
-            jobRowsPart({
-              jobs,
-              title: "Saved from the page",
-              resultSetId: savedSet.id,
-            }),
-          ]
-        : [],
+      summary: `Saved ${plural(saved.added.length, "new job")}; ${saved.merged.length} already saved.`,
+      data: { jobs, jobIds: ids, resultSetId: savedSet.id },
     };
   },
 });
@@ -619,12 +584,11 @@ export const applyHereTool = defineTool({
       );
     }
     context.session.assertCurrent();
-    const saved = await context.service.saveJobsFromPage({
+    const saved = await context.ports.savePageJobs({
       postings: [posting],
       pageUrl,
-      applyOnThisPage: true,
     });
-    const jobId = saved.savedJobIds[0];
+    const jobId = [...saved.added, ...saved.merged][0]?.toString();
     if (!jobId)
       throw new AssistantToolError("transient", "The job could not be saved.");
     await context.session.createResultSet({
@@ -636,10 +600,11 @@ export const applyHereTool = defineTool({
     context.ports.publishWorkspaceUpdate();
     // Say where the application will really run: a page merged into a job
     // saved from another site applies on that job's own address.
-    const snapshot = await context.service.getWorkspaceSnapshot();
-    const job = findJob(snapshot, jobId);
-    const applicationUrl = job?.applicationUrl ?? job?.canonicalUrl ?? null;
-    const merged = saved.mergedJobIds.includes(jobId);
+    const job = await context.ports.readCommand("get_job", {
+      id: Number(jobId),
+    });
+    const applicationUrl = job?.applyUrl ?? job?.url ?? null;
+    const merged = saved.merged.includes(Number(jobId));
     const samePage =
       applicationUrl !== null && sameOrigin(applicationUrl, pageUrl);
     return {

@@ -22,6 +22,7 @@ type ResumeRow = {
   previous_json: string | null;
   approved_at: number | null;
   pdf_path: string | null;
+  pdf_sha256: string | null;
 };
 
 type PreviousResume = {
@@ -52,6 +53,7 @@ function toStoredResume(row: ResumeRow): StoredResume {
     previousLevel: previous?.level ?? null,
     levelChangeId: previous?.changeId ?? null,
     pdfPath: row.pdf_path,
+    pdfSha256: row.pdf_sha256,
   };
 }
 
@@ -94,7 +96,11 @@ export interface ResumeStore {
   /** The posting text a listing read found for a job that had only its card. */
   saveListing(jobId: number, description: string, facts: JobListingFacts): void;
   /** Approves it and hands the job to Apply in one write. */
-  approve(jobId: number, pdfPath: string | null): StoredResume;
+  approve(
+    jobId: number,
+    pdfPath: string | null,
+    sha256?: string | null,
+  ): StoredResume;
   /**
    * Every resume PDF the store still points at: approved ones, the one a
    * level Undo would put back, and the copy each application was given.
@@ -106,9 +112,9 @@ export interface ResumeStore {
 export function createResumeStore(store: JobStore): ResumeStore {
   const { sql } = store;
   const read = (jobId: number) =>
-    sql("SELECT * FROM resumes WHERE job_id = ?").get(jobId) as
-      | ResumeRow
-      | undefined;
+    sql(
+      `SELECT r.*, f.sha256 AS pdf_sha256 FROM resumes r LEFT JOIN resume_pdf_assets f ON f.job_id = r.job_id AND f.path = r.pdf_path AND f.approved_at = r.approved_at WHERE r.job_id = ?`,
+    ).get(jobId) as ResumeRow | undefined;
   const stageOf = (jobId: number) =>
     (
       sql("SELECT stage FROM jobs WHERE id = ?").get(jobId) as
@@ -322,7 +328,7 @@ export function createResumeStore(store: JobStore): ResumeStore {
       ).run(description, JSON.stringify(facts), jobId);
     },
 
-    approve(jobId, pdfPath) {
+    approve(jobId, pdfPath, sha256) {
       return store.transaction(() => {
         const row = require(jobId);
         if (row.state !== "ready") {
@@ -333,6 +339,10 @@ export function createResumeStore(store: JobStore): ResumeStore {
           `UPDATE resumes SET approved_at = ?, pdf_path = ?, previous_json = NULL
            WHERE job_id = ?`,
         ).run(now, pdfPath, jobId);
+        if (pdfPath && sha256)
+          sql(
+            "INSERT OR REPLACE INTO resume_pdf_assets(job_id,path,approved_at,sha256) VALUES(?,?,?,?)",
+          ).run(jobId, pdfPath, now, sha256);
         const stages: JobStage[] = ["shortlisted"];
         if (stageOf(jobId) === "shortlisted") {
           sql(

@@ -22,6 +22,7 @@ export function createNeedsYouCommandRunner(
       input: NeedsYouCommandInput<K>,
     ) => NeedsYouCommandOutput<K> | Promise<NeedsYouCommandOutput<K>>;
   } = {
+    application_needs: ({ id }) => getStore().needsYou.forApplication(id),
     list_needs_you: (input) => getStore().needsYou.list(input),
     needs_you_counts: () => getStore().needsYou.counts(),
     get_need: ({ id }) => getStore().needsYou.details(id),

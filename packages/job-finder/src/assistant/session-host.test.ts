@@ -1,25 +1,21 @@
+import { assistantTestReads } from "./store-reads.test-support";
 import {
+  ApplicationDetailsSchema,
   AssistantConversationSchema,
   AssistantMessageSchema,
   AssistantProposalSchema,
-  ApplicationPrivacyReceiptSchema,
-  ApplicationRecordSchema,
-  ApplyJobResultSchema,
-  ApplyRunSchema,
-  UserActionEventSchema,
-  UserActionRequestSchema,
   NeedsYouDetailsSchema,
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
   type NeedsYouDetails,
-  type UserActionRequest,
 } from "@nestor/contracts";
 import { createAssistantRepository } from "@nestor/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  createSeed} from "../workspace-service.test-support";
 import {
-  createSeed,
   createWorkspaceServiceHarness,
 } from "../workspace-service.test-support";
 import { createScriptedAssistantModelHandle } from "./model-handle";
@@ -59,13 +55,14 @@ function context(
   };
 }
 
-function createPorts(): AssistantHostPorts & {
+function createPorts(service: object): AssistantHostPorts & {
   started: { jobIds: readonly string[]; mode: string }[];
   sent: string[][];
 } {
   const started: { jobIds: readonly string[]; mode: string }[] = [];
   const sent: string[][] = [];
   return {
+    ...assistantTestReads(service),
     started,
     sent,
     checkSource: () => Promise.resolve(),
@@ -96,167 +93,39 @@ async function waitFor<T>(
   }
 }
 
-function applicationHandoff() {
-  const seed = createSeed();
-  const at = "2026-09-28T03:00:00.000Z";
-  const run = ApplyRunSchema.parse({
-    id: "run_person_handoff",
-    state: "completed",
-    jobIds: ["job_ready"],
-    createdAt: at,
-    updatedAt: at,
-    completedAt: at,
-    summary: "Sign in to continue.",
-    detail: "The application is parked for sign-in.",
-    totalJobs: 1,
-    blockedJobs: 1,
-  });
-  const result = ApplyJobResultSchema.parse({
-    id: "result_person_handoff",
-    runId: run.id,
-    jobId: "job_ready",
-    state: "awaiting_review",
-    summary: run.summary,
-    detail: run.detail,
-    startedAt: at,
-    updatedAt: at,
-    blockerReason: "auth_required",
-    blockerSummary:
-      "Sign in to the existing application; nothing has been sent.",
-  });
-  const request = UserActionRequestSchema.parse({
-    id: "request_login",
-    dedupeKey: "application-login",
-    revision: 1,
-    kind: "login",
-    state: "awaiting_user",
-    scope: {
-      type: "application",
-      runId: run.id,
-      jobId: result.jobId,
-      resultId: result.id,
-      source: "target_site",
+function storedApplication(state = "needs_you") {
+  return ApplicationDetailsSchema.parse({
+    application: {
+      id: 7,
+      jobId: 3,
+      title: "Designer",
+      company: "Synthetic",
+      location: "Remote",
+      state,
+      attempt: 2,
+      mode: "confirm_before_submit",
+      queuedAt: "2026-10-01T10:00:00.000Z",
+      updatedAt: "2026-10-01T10:00:00.000Z",
+      submittedAt: null,
+      error: null,
     },
-    verification: {
-      type: "page_blocker_absent",
-      blockerFingerprint: "login-form",
-    },
-    title: "Sign in to continue",
-    summary: result.blockerSummary,
-    createdAt: at,
-    updatedAt: at,
-  });
-  seed.applyRuns = [run];
-  seed.applyJobResults = [result];
-  seed.userActionRequests = [request];
-  return { seed, run, result, request };
-}
-
-function userActionTransition(
-  request: UserActionRequest,
-  state: "verifying" | "resolved",
-) {
-  const at = new Date().toISOString();
-  const next = UserActionRequestSchema.parse({
-    ...request,
-    revision: request.revision + 1,
-    state,
-    updatedAt: at,
-    resolvedAt: state === "resolved" ? at : null,
-  });
-  return {
-    request: next,
-    event: UserActionEventSchema.parse({
-      id: `${request.id}_${next.revision}`,
-      requestId: request.id,
-      operation:
-        state === "resolved" ? "verification_succeeded" : "confirm_done",
-      previousRevision: request.revision,
-      resultingRevision: next.revision,
-      previousState: request.state,
-      resultingState: state,
-      occurredAt: at,
-    }),
-  };
-}
-
-function submittedResult(
-  result: ReturnType<typeof applicationHandoff>["result"],
-) {
-  const at = new Date().toISOString();
-  const destination = {
-    origin: "https://replica.example.test",
-    safePath: "/receipt",
-  };
-  const applicationRecordId = "application_confirmed";
-  return ApplyJobResultSchema.parse({
-    ...result,
-    state: "submitted",
-    applicationRecordId,
-    updatedAt: at,
-    completedAt: at,
-    blockerReason: null,
-    blockerSummary: null,
-    privacyReceipt: ApplicationPrivacyReceiptSchema.parse({
-      generatedAt: at,
-      lineage: {
-        runId: result.runId,
-        jobId: result.jobId,
-        resultId: result.id,
-        applicationRecordId,
-      },
-      destination,
-      resume: { source: "original_upload", fileName: "synthetic-resume.pdf" },
-      finalSubmitOccurred: true,
-      submissionOutcome: {
-        id: "outcome_confirmed",
-        preflightId: "preflight_confirmed",
-        idempotencyKey: "send_once",
-        authorityEnvelopeId: "authority_confirmed",
-        authorityRevision: 1,
-        runId: result.runId,
-        jobId: result.jobId,
-        resultId: result.id,
-        applicationRecordId,
-        outcome: "submitted",
-        attemptedAt: at,
-        verifiedAt: at,
-        evidence: [
-          {
-            id: "receipt_visible",
-            kind: "employer_site_state",
-            observedAt: at,
-            destination,
-            artifactRefId: null,
-            summary: "The employer page confirmed receipt.",
-          },
-        ],
-        retry: { eligible: false, blockReason: "submission_confirmed" },
-      },
-    }),
+    summary: null,
+    detail: null,
+    reviewCard: null,
+    receipt: null,
+    resumeFileName: null,
   });
 }
-
 async function installApplicationWatch(
   host: AssistantSessionHost,
   conversationId: string,
-  options: {
-    kind?: "apply_run" | "apply_batch";
-    resumed?: boolean;
-    sourceMessageId?: string;
-  } = {},
 ) {
   const input = {
     conversationId,
-    run: {
-      kind: options.kind ?? "apply_run",
-      id: "run_person_handoff",
-      jobIds: ["job_ready"],
-    },
-    note: "Applying to the existing job",
-    sourceMessageId: options.sourceMessageId ?? null,
-    turnId: "turn_initial_apply",
-    resumed: options.resumed,
+    run: { kind: "apply_run" as const, id: "7", jobIds: ["3"] },
+    note: "Applying to Designer",
+    sourceMessageId: null,
+    turnId: "turn_original",
   };
   await (
     host as unknown as { watch: (value: typeof input) => Promise<void> }
@@ -282,7 +151,7 @@ describe("assistant session host", () => {
       options.seed ? { seed: options.seed } : {},
     );
     const repository = createAssistantRepository({ filePath: ":memory:" });
-    const ports = createPorts();
+    const ports = createPorts(harness.workspaceService);
     const events: AssistantEvent[] = [];
     const handle =
       options.modelHandle ??
@@ -1022,7 +891,8 @@ describe("assistant session host", () => {
         }),
       ),
     );
-    ports.readNeed = readNeed;
+    const priorRead = ports.readCommand;
+    ports.readCommand = ((name, input) => name === "get_need" ? readNeed() : priorRead(name, input)) as AssistantHostPorts["readCommand"];
     await repository.upsertMessage(
       AssistantMessageSchema.parse({
         id: "message_question",
@@ -1140,311 +1010,108 @@ describe("assistant session host", () => {
     );
   });
 
-  it("reports login once, follows human verification and filling, then reports its receipt once", async () => {
-    // This test drives every watch check; background intervals must not race it.
+  it("reports each store handoff once, follows resumed filling, and reports the final outcome", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const fixture = applicationHandoff();
     const chat = vi.fn(() =>
       Promise.resolve({ content: "Current application status recorded." }),
     );
-    const { host, harness, ports, repository } = setup({
-      seed: fixture.seed,
+    const { host, ports, harness } = setup({
       modelHandle: {
         ...createScriptedAssistantModelHandle(),
         createModel: () => ({ chatWithTools: chat }),
       },
     });
-    const conversation = await host.createConversation();
-    await installApplicationWatch(host, conversation.id, {
-      kind: "apply_batch",
-      sourceMessageId: "message_original_apply",
-    });
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
+    const value = storedApplication();
+    let needId = 11;
+    ports.readCommand = vi.fn((name: string) =>
+      Promise.resolve(
+        name === "application_needs"
+          ? [{ id: needId, prompt: "Sign in to continue" }]
+          : value,
+      ),
+    ) as unknown as AssistantHostPorts["readCommand"];
+    const snapshots = vi.spyOn(
+      harness.workspaceService,
+      "getWorkspaceSnapshot",
     );
-    expect(chat).toHaveBeenCalledTimes(1);
-    const hostNotes = async () =>
-      (await repository.listMessages(conversation.id, { limit: 100 })).messages
-        .filter(
-          (message) => message.role === "user" && message.origin === "host",
-        )
-        .flatMap((message) =>
-          message.parts
-            .filter((part) => part.type === "text")
-            .map((part) => part.text),
-        );
-    expect((await hostNotes())[0]).toContain("waiting on the person");
-    expect((await hostNotes())[0]).toContain("Sign in to continue");
-    expect((await hostNotes())[0]).toContain("nothing has been sent");
-    const snapshotReads = vi.fn(() =>
-      harness.workspaceService.getWorkspaceSnapshot(),
-    );
-    harness.workspaceService.getWorkspaceProjection = snapshotReads;
-    await Promise.all(Array.from({ length: 10 }, () => host.checkWatches()));
-    expect(snapshotReads).toHaveBeenCalledTimes(1);
-    expect(chat).toHaveBeenCalledTimes(1);
-    expect(
-      (await repository.listOperations(conversation.id, { runOnly: true }))[0]
-        ?.status,
-    ).toBe("started");
-
-    const verifying = userActionTransition(fixture.request, "verifying");
-    await harness.repository.commitUserActionTransition(verifying);
-    await installApplicationWatch(host, conversation.id, {
-      kind: "apply_run",
-      resumed: true,
-      sourceMessageId: "message_answer",
-    });
-    await installApplicationWatch(host, conversation.id, {
-      kind: "apply_run",
-      resumed: true,
-      sourceMessageId: "message_later_answer",
-    });
-    const watches = await repository.listOperations(conversation.id, {
-      runOnly: true,
-    });
-    expect(watches).toHaveLength(1);
-    expect(watches[0]?.receiptId).toBe("message_original_apply");
-    await host.checkWatches();
-    expect(chat).toHaveBeenCalledTimes(1);
-    await harness.repository.upsertApplyJobResult({
-      ...fixture.result,
-      state: "filling",
-    });
-    await host.checkWatches();
-    expect(chat).toHaveBeenCalledTimes(1);
-    await harness.repository.commitUserActionTransition(
-      userActionTransition(verifying.request, "resolved"),
-    );
-    await harness.repository.upsertApplyJobResult(
-      submittedResult(fixture.result),
-    );
-    await Promise.all(Array.from({ length: 10 }, () => host.checkWatches()));
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
-    expect(chat).toHaveBeenCalledTimes(2);
-    expect(await hostNotes()).toHaveLength(2);
-    expect((await hostNotes())[1]).toContain('"state":"submitted"');
-    expect((await hostNotes())[1]).toContain('"outcome":"submitted"');
-    await host.checkWatches();
-    expect(chat).toHaveBeenCalledTimes(2);
-    expect(ports.started).toEqual([]);
-    expect(ports.sent).toEqual([]);
-    expect(
-      (await repository.listOperations(conversation.id, { runOnly: true }))[0]
-        ?.status,
-    ).toBe("committed");
-  });
-
-  it("reports a new question handoff once after the login leg resumes", async () => {
-    const fixture = applicationHandoff();
-    const chat = vi.fn(() =>
-      Promise.resolve({ content: "Current application status recorded." }),
-    );
-    const { host, harness, ports } = setup({
-      seed: fixture.seed,
-      modelHandle: {
-        ...createScriptedAssistantModelHandle(),
-        createModel: () => ({ chatWithTools: chat }),
-      },
-    });
     const conversation = await host.createConversation();
     await installApplicationWatch(host, conversation.id);
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
-    const verifying = userActionTransition(fixture.request, "verifying");
-    await harness.repository.commitUserActionTransition(verifying);
-    await host.checkWatches();
-    await harness.repository.upsertApplyJobResult({
-      ...fixture.result,
-      state: "filling",
-    });
-    await host.checkWatches();
-    await harness.repository.commitUserActionTransition(
-      userActionTransition(verifying.request, "resolved"),
-    );
-    await harness.repository.upsertApplyJobResult({
-      ...fixture.result,
-      blockerReason: "required_human_input",
-      blockerSummary: "Answer the required availability question.",
-    });
-    await harness.repository.createUserActionRequest({
-      ...fixture.request,
-      id: "request_question",
-      dedupeKey: "application-question",
-      kind: "manual_answer",
-      title: "Answer the required availability question",
-      state: "pending",
-    });
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
+    const check = async () => {
+      await host.checkWatches();
+      await waitFor(
+        () => host.readConversation({ conversationId: conversation.id }),
+        (view) => view.activeTurn === null,
+      );
+    };
+    await check();
+    expect(chat).toHaveBeenCalledTimes(1);
+    await check();
+    expect(chat).toHaveBeenCalledTimes(1);
+    value.application.state = "running";
+    await check();
+    needId = 12;
+    value.application.state = "needs_you";
+    await check();
     expect(chat).toHaveBeenCalledTimes(2);
-    await Promise.all(Array.from({ length: 10 }, () => host.checkWatches()));
-    expect(chat).toHaveBeenCalledTimes(2);
-    const view = await host.readConversation({
-      conversationId: conversation.id,
-    });
-    expect(JSON.stringify(view.messages)).toContain(
-      "Answer the required availability question",
-    );
-    expect(ports.started).toEqual([]);
+    value.application.state = "running";
+    await check();
+    value.application.state = "submitted";
+    await check();
+    expect(chat).toHaveBeenCalledTimes(3);
+    await check();
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(snapshots).not.toHaveBeenCalled();
   });
 
-  it("keeps application watches and their sources separate between conversations", async () => {
-    const fixture = applicationHandoff();
-    const { host, repository } = setup({ seed: fixture.seed });
+  it("recovers a store handoff without repeating it and keeps two conversations separate", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const chat = vi.fn(() =>
+      Promise.resolve({ content: "Checked the application." }),
+    );
+    const { host, ports, repository } = setup({
+      modelHandle: {
+        ...createScriptedAssistantModelHandle(),
+        createModel: () => ({ chatWithTools: chat }),
+      },
+    });
+    const value = storedApplication();
+    ports.readCommand = vi.fn((name: string) =>
+      Promise.resolve(
+        name === "application_needs" ? [{ id: 11, prompt: "Sign in" }] : value,
+      ),
+    ) as unknown as AssistantHostPorts["readCommand"];
     const first = await host.createConversation();
     const second = await host.createConversation();
-    await installApplicationWatch(host, first.id, {
-      kind: "apply_batch",
-      sourceMessageId: "message_first",
-    });
-    await installApplicationWatch(host, second.id, {
-      kind: "apply_run",
-      sourceMessageId: "message_second",
-    });
-    const firstOperations = await repository.listOperations(first.id, {
-      runOnly: true,
-    });
-    const secondOperations = await repository.listOperations(second.id, {
-      runOnly: true,
-    });
-    expect(firstOperations).toHaveLength(1);
-    expect(secondOperations).toHaveLength(1);
-    expect(firstOperations[0]?.receiptId).toBe("message_first");
-    expect(secondOperations[0]?.receiptId).toBe("message_second");
-    const active = (
-      host as unknown as {
-        watches: Map<
-          string,
-          { conversationId: string; sourceMessageId: string }
-        >;
-      }
-    ).watches;
-    expect(
-      [...active.values()].map((watch) => [
-        watch.conversationId,
-        watch.sourceMessageId,
-      ]),
-    ).toEqual([
-      [first.id, "message_first"],
-      [second.id, "message_second"],
-    ]);
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: first.id }),
-      (view) => view.activeTurn === null,
-    );
-    await waitFor(
-      () => host.readConversation({ conversationId: second.id }),
-      (view) => view.activeTurn === null,
-    );
-    expect(
-      (await host.readConversation({ conversationId: first.id })).messages.some(
-        (message) => message.role === "user" && message.origin === "host",
-      ),
-    ).toBe(true);
-    expect(
-      (
-        await host.readConversation({ conversationId: second.id })
-      ).messages.some(
-        (message) => message.role === "user" && message.origin === "host",
-      ),
-    ).toBe(true);
-  });
-
-  it("recovers a dormant application handoff quietly, then follows the same application to submission", async () => {
-    const fixture = applicationHandoff();
-    const chat = vi.fn(() =>
-      Promise.resolve({ content: "Current application status recorded." }),
-    );
-    const handle = {
-      ...createScriptedAssistantModelHandle(),
-      createModel: () => ({ chatWithTools: chat }),
-    };
-    const { host, harness, ports, repository } = setup({
-      seed: fixture.seed,
-      modelHandle: handle,
-    });
-    const conversation = await host.createConversation();
-    await installApplicationWatch(host, conversation.id);
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
-    expect(chat).toHaveBeenCalledTimes(1);
+    await installApplicationWatch(host, first.id);
+    await installApplicationWatch(host, second.id);
     await host.shutdown();
-    const originalWatch = (
-      await repository.listOperations(conversation.id, { runOnly: true })
-    )[0]!;
-    // A prior app version could persist both names for this same run.
-    await repository.upsertOperation({
-      ...originalWatch,
-      id: "legacy_answer_watch",
-      run: { kind: "apply_batch", id: fixture.run.id },
-      startedAt: new Date(
-        Date.parse(originalWatch.startedAt) + 1_000,
-      ).toISOString(),
-    });
-    const reopened = new AssistantSessionHost({
-      repository,
-      service: harness.workspaceService,
-      ports,
-      resolveModel: () => ({ kind: "ready", handle }),
-      publish: () => undefined,
-      watchIntervalMs: 50,
-      log: () => undefined,
-    });
-    hosts.push(reopened);
-    await reopened.recover();
-    expect((await repository.getOperation(originalWatch.id))?.status).toBe(
-      "started",
-    );
-    expect((await repository.getOperation("legacy_answer_watch"))?.status).toBe(
-      "committed",
-    );
-    await Promise.all(
-      Array.from({ length: 10 }, () => reopened.checkWatches()),
-    );
-    expect(chat).toHaveBeenCalledTimes(1);
-    const verifying = userActionTransition(fixture.request, "verifying");
-    await harness.repository.commitUserActionTransition(verifying);
-    await reopened.checkWatches();
-    await harness.repository.upsertApplyJobResult({
-      ...fixture.result,
-      state: "filling",
-    });
-    await reopened.checkWatches();
-    await harness.repository.commitUserActionTransition(
-      userActionTransition(verifying.request, "resolved"),
-    );
-    await harness.repository.upsertApplyJobResult(
-      submittedResult(fixture.result),
-    );
-    await reopened.checkWatches();
-    await waitFor(
-      () => reopened.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
+    const options = (
+      host as unknown as {
+        options: ConstructorParameters<typeof AssistantSessionHost>[0];
+      }
+    ).options;
+    const recovered = new AssistantSessionHost(options);
+    hosts.push(recovered);
+    await recovered.recover();
+    await recovered.checkWatches();
+    expect(chat).not.toHaveBeenCalled();
+    value.application.state = "running";
+    await recovered.checkWatches();
+    value.application.state = "uncertain";
+    await recovered.checkWatches();
+    for (const conversation of [first, second])
+      await waitFor(
+        () => recovered.readConversation({ conversationId: conversation.id }),
+        (view) => view.activeTurn === null,
+      );
     expect(chat).toHaveBeenCalledTimes(2);
-    await reopened.checkWatches();
-    expect(chat).toHaveBeenCalledTimes(2);
-    expect(ports.started).toEqual([]);
-    expect(
-      (await repository.listOperations(conversation.id, { runOnly: true }))[0]
-        ?.status,
-    ).toBe("committed");
+    for (const conversation of [first, second]) {
+      const notes = JSON.stringify(
+        (await repository.listMessages(conversation.id, { limit: 100 }))
+          .messages,
+      );
+      expect(notes).toContain("do not send again");
+    }
   });
 
   it("never lets a note from Job Finder authorize applications", async () => {
@@ -1649,7 +1316,7 @@ describe("assistant session host", () => {
     const host = new AssistantSessionHost({
       repository,
       service: harness.workspaceService,
-      ports: createPorts(),
+      ports: createPorts(harness.workspaceService),
       resolveModel: () => ({
         kind: "unavailable",
         detail: "The assistant's AI service is not reachable right now.",
@@ -1774,72 +1441,14 @@ describe("assistant session host", () => {
     expect(release).toHaveBeenCalledWith("Reviewing your send instruction");
   });
 
-  it("continues a confirmation timeout with an unconfirmed send and no permission to retry", async () => {
-    const fixture = applicationHandoff();
-    const sent = submittedResult(fixture.result);
-    const uncertain = ApplyJobResultSchema.parse({
-      ...sent,
-      state: "awaiting_review",
-      summary: "Send attempted; confirmation timed out",
-      detail: "Check the site before trying again.",
-      privacyReceipt: {
-        ...sent.privacyReceipt,
-        finalSubmitOccurred: false,
-        submissionOutcome: {
-          ...sent.privacyReceipt!.submissionOutcome,
-          outcome: "outcome_uncertain",
-          verifiedAt: null,
-          retry: { eligible: false, blockReason: "outcome_uncertain" },
-        },
-      },
-    });
-    fixture.seed.applyJobResults = [uncertain];
-    fixture.seed.applyRuns = [
-      ApplyRunSchema.parse({ ...fixture.run, state: "completed" }),
-    ];
-    fixture.seed.userActionRequests = [];
-    const chat = vi.fn(() =>
-      Promise.resolve({ content: "The send is unconfirmed. Check the site." }),
-    );
-    const { host, ports, repository } = setup({
-      seed: fixture.seed,
-      modelHandle: {
-        ...createScriptedAssistantModelHandle(),
-        createModel: () => ({ chatWithTools: chat }),
-      },
-    });
-    const conversation = await host.createConversation();
-    await installApplicationWatch(host, conversation.id);
-    await host.checkWatches();
-    await waitFor(
-      () => host.readConversation({ conversationId: conversation.id }),
-      (view) => view.activeTurn === null,
-    );
-    const notes = (
-      await repository.listMessages(conversation.id, { limit: 100 })
-    ).messages.filter((message) => message.origin === "host");
-    const text = JSON.stringify(notes);
-    expect(text).toContain("send unconfirmed");
-    expect(text).toContain("blocked_until_person_checks_outcome");
-    expect(text).toContain("Do not send again or change sending settings");
-    expect(ports.sent).toEqual([]);
-  });
-
   it("records a successful prepared-form field edit on the application", async () => {
-    const seed = createSeed();
-    seed.applicationRecords = [
-      ApplicationRecordSchema.parse({
-        id: "record_edit",
-        jobId: "job_ready",
-        title: "Designer",
-        company: "Synthetic",
-        status: "ready_for_review",
-        lastUpdatedAt: "2026-10-05T10:00:00.000Z",
-        lastActionLabel: "Prepared",
-        nextActionLabel: "Review",
-      }),
-    ];
-    const { host, ports, harness } = setup({ seed });
+    const { host, ports } = setup();
+    const read = vi.fn(() => Promise.resolve(storedApplication("ready")));
+    ports.readCommand = read as unknown as AssistantHostPorts["readCommand"];
+    const addEvent = vi.fn(() => Promise.resolve({ summary: "Noted" }));
+    ports.commands = [
+      { name: "add_event", execute: addEvent },
+    ] as unknown as NonNullable<AssistantHostPorts["commands"]>;
     let noteChange:
       | ((recordId: string, field: string) => Promise<void>)
       | undefined;
@@ -1870,13 +1479,16 @@ describe("assistant session host", () => {
       }
     ).detachedSession(conversation.id, null);
     await session.browserLease({ applicationResultId: "prepared" });
-    await noteChange!("record_edit", "Cover letter");
-    const application = (
-      await harness.workspaceService.getWorkspaceSnapshot()
-    ).applicationRecords.find((record) => record.id === "record_edit")!;
-    expect(application.crm?.notes[0]?.body).toBe(
-      "Assistant changed Cover letter in the prepared form. Nothing was sent.",
+    await noteChange!("7", "Cover letter");
+    expect(read).toHaveBeenCalledWith("get_application_details", { id: 7 });
+    expect(addEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: 3,
+        kind: "note",
+        title: "Prepared form edited",
+        body: "Assistant changed Cover letter in the prepared form. Nothing was sent.",
+      }),
+      expect.anything(),
     );
-    expect(application.status).toBe("ready_for_review");
   });
 });

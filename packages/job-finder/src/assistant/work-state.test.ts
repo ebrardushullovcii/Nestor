@@ -1,17 +1,14 @@
-import {
-  ResumeImportRunSchema,
-} from "@nestor/contracts";
+import { assistantTestReads } from "./store-reads.test-support";
+import { ResumeImportRunSchema } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import type { AssistantHostPorts } from "./ports";
 import { ASSISTANT_SYSTEM_PROMPT } from "./prompt";
 import type { AssistantTurnSession } from "./tool-kit";
-import {
-  getWorkspaceSummaryTool,
-} from "./tools/workspace-tools";
+import { getWorkspaceSummaryTool } from "./tools/workspace-tools";
 import { readProfileTool } from "./tools/profile-tools";
 import { pauseActivityTool } from "./tools/settings-tools";
-import { readAssistantWorkState, } from "./work-state";
+import { readAssistantWorkState } from "./work-state";
 
 const openInApp = vi.fn();
 const session = {
@@ -50,7 +47,16 @@ it("reports a UI import even before the new import has a stored run and only off
     (
       await getWorkspaceSummaryTool.execute(
         {},
-        { service: workspaceService, session, ports },
+        {
+          service: workspaceService,
+          session,
+          ports: {
+            ...ports,
+            ...assistantTestReads(workspaceService),
+            readPersonalState: () =>
+              Promise.resolve({ ...snapshot, enabledSiteCount: 1 }),
+          },
+        },
       )
     ).data,
   ).toMatchObject({
@@ -62,7 +68,16 @@ it("reports a UI import even before the new import has a stored run and only off
   });
   const paused = await pauseActivityTool.execute(
     { paused: true, finishCurrent: false },
-    { service: workspaceService, session, ports },
+    {
+      service: workspaceService,
+      session,
+      ports: {
+        ...ports,
+        ...assistantTestReads(workspaceService),
+        readPersonalState: () =>
+          Promise.resolve({ ...snapshot, enabledSiteCount: 1 }),
+      },
+    },
   );
   expect(paused.summary).toContain(
     "Resume import is still running; it was not stopped.",
@@ -76,7 +91,11 @@ it("reports file reading in read_profile before a new import run exists", async 
     {
       service: workspaceService,
       session,
-      ports: { ...ports, isResumeImportActive: () => true },
+      ports: {
+        ...ports,
+        ...assistantTestReads(workspaceService),
+        isResumeImportActive: () => true,
+      },
     },
   );
   expect(result.data).toMatchObject({

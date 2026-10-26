@@ -1,4 +1,5 @@
 import {
+  JOB_COMMANDS,
   JOBS_CHANGED_CHANNEL,
   JOBS_RUN_CHANNEL,
   JOBS_SEARCH_STATUS_CHANNEL,
@@ -78,10 +79,14 @@ function scoreUnscoredJobs(): void {
 let runner: RunJobCommand | null = null;
 
 /** The same commands the screens use; the Assistant calls this directly. */
-export function runJobCommand<K extends JobCommandName>(
+export async function runJobCommand<K extends JobCommandName>(
   name: K,
   input: unknown,
 ) {
+  if (name === "move_jobs" && JOB_COMMANDS.move_jobs.input.parse(input).to === "shortlisted") {
+    const { getJobFinderWorkspaceService } = await import("./job-finder");
+    await getJobFinderWorkspaceService();
+  }
   runner ??= createJobCommandRunner({
     store: getJobStore(),
     search: getSearchService,

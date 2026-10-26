@@ -1,25 +1,17 @@
-import type {
-  AssistantTaskPlan,
-  JobFinderWorkspaceSnapshot,
-} from "@nestor/contracts";
+import { getAssistantSearchReadiness } from "../prompt";
+import type { AssistantTaskPlan } from "@nestor/contracts";
 import {
   AssistantTaskPlanStepSchema,
   AssistantJobViewSchema,
   AssistantTrackerViewSchema,
   JobIdSchema,
   JobDetailSchema,
-  JobStageCountsSchema,
-  JobSearchStatusSchema,
   NonEmptyStringSchema,
 } from "@nestor/contracts";
 import { z } from "zod";
-import { projectWorkspaceAttention } from "../attention";
-import {
-  getAssistantSearchReadiness,
-} from "../prompt";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import { readAssistantWorkState } from "../work-state";
-import { allJobs, compactApplication, compactJob, plural } from "./format";
+import { plural } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
 
@@ -33,112 +25,31 @@ export const getWorkspaceSummaryTool = defineTool({
   label: () => "Reading your workspace",
   effect: "read",
   async execute(_input, context) {
-    const { service, ports } = context;
-    const snapshot = await service.getWorkspaceSnapshot();
-    const countsCommand = ports.commands?.find(
-      (command) => command.name === "stage_counts",
-    );
-    const searchCommand = ports.commands?.find(
-      (command) => command.name === "search_status",
-    );
-    const trackerCommand = ports.commands?.find(
-      (command) => command.name === "list_applications",
-    );
-    if (countsCommand && searchCommand) {
-      const [countsResult, searchResult, trackerResult] = await Promise.all([
-        countsCommand.execute({}, context),
-        searchCommand.execute({}, context),
-        trackerCommand?.execute({ limit: 1 }, context),
-      ]);
-      const counts = JobStageCountsSchema.parse(countsResult.data);
-      const search = JobSearchStatusSchema.parse(searchResult.data);
-      return {
-        summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
-        data: {
-          jobs: counts,
-          search,
-          applications: trackerResult
-            ? z
-                .object({ counts: z.record(z.number()) })
-                .parse(trackerResult.data).counts
-            : null,
-          profile: {
-            setup: snapshot.profileSetupState.status,
-            name: snapshot.profile.fullName,
-          },
-          applyMode: snapshot.settings.applicationAutomationMode,
-          needsYou: projectWorkspaceAttention(snapshot).count,
-        },
-      };
-    }
-    const work = readAssistantWorkState(ports, snapshot);
-    const applications = snapshot.applicationRecords;
-    const byStatus = new Map<string, number>();
-    for (const record of applications) {
-      byStatus.set(record.status, (byStatus.get(record.status) ?? 0) + 1);
-    }
-    const running = snapshot.applyRuns.filter((run) =>
-      ["running", "awaiting_submit_approval", "paused_for_consent"].includes(
-        run.state,
-      ),
-    );
-    const attention = projectWorkspaceAttention(snapshot);
-    const searchReadiness = getAssistantSearchReadiness(snapshot);
+    const { ports } = context;
+    const [counts, search, tracker, needs, personal] = await Promise.all([
+      ports.readCommand("stage_counts", {}),
+      ports.readCommand("search_status", {}),
+      ports.readCommand("list_applications", { limit: 1 }),
+      ports.readCommand("needs_you_counts", {}),
+      ports.readPersonalState(),
+    ]);
     return {
-      summary: `${plural(snapshot.discoveryJobs.length, "job")} found, ${snapshot.reviewQueue.length} shortlisted, ${plural(applications.length, "application")}, ${attention.count} Needs you items, ${attention.readyToSend.length} ready to send, ${attention.resumeReviews.length} resume reviews. ${
-        searchReadiness.canStartSearch
-            ? `Ready to search ${plural(searchReadiness.enabledSourceCount, "enabled source")}.`
-            : searchReadiness.missingRequirements.join(" ")
-      }`,
+      summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
       data: {
-        ...work,
+        jobs: counts,
+        search: { ...search, ...getAssistantSearchReadiness(personal) },
+        applications: tracker.counts,
         profile: {
-          setup: snapshot.profileSetupState.status,
-          name: snapshot.profile.fullName,
-          headline: snapshot.profile.headline,
-          targetRoles: snapshot.searchPreferences.targetRoles,
+          setup: personal.profileSetupState.status,
+          name: personal.profile.fullName,
         },
-        jobs: {
-          found: snapshot.discoveryJobs.length,
-          shortlisted: snapshot.reviewQueue.length,
-        },
-        applications: Object.fromEntries(byStatus),
-        runningApplyRuns: running.map((run) => ({
-          id: run.id,
-          state: run.state,
-          jobIds: run.jobIds,
-        })),
-        search: {
-          ...searchReadiness,
-          enabledSources: searchReadiness.enabledSources.slice(0, 40),
-        },
-        needsYou: attention.count,
-        readyToSend: attention.readyToSend.length,
-        resumeReviews: attention.resumeReviews.length,
-        applyMode:
-          snapshot.settings.applicationAutomationMode ??
-          "confirm_before_submit",
-        activityPaused: snapshot.activityControl.paused ?? false,
+        applyMode: personal.settings.applicationAutomationMode,
+        needsYou: needs.question + needs.sign_in + needs.captcha + needs.mfa,
+        ...readAssistantWorkState(ports, personal),
       },
     };
   },
 });
-
-/** A plain account of one job's application, read from its runs. */
-export function describeApplicationProgress(
-  snapshot: JobFinderWorkspaceSnapshot,
-  jobId: string,
-): string | null {
-  const runsById = new Map(snapshot.applyRuns.map((run) => [run.id, run]));
-  const latest = snapshot.applyJobResults
-    .filter((result) => result.jobId === jobId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  if (!latest) return null;
-  const run = runsById.get(latest.runId);
-  const waitingSameSite =
-    latest.state === "planned" && run?.state === "running";
-  return `${latest.state.replaceAll("_", " ")} in run ${latest.runId} (${(run?.state ?? "unknown").replaceAll("_", " ")})${waitingSameSite ? ", not started yet" : ""}`;
-}
 
 export const readResultTool = defineTool({
   name: "read_result",
@@ -159,7 +70,7 @@ export const readResultTool = defineTool({
   }),
   label: () => "Reading more results",
   effect: "read",
-  async execute(input, { service, session }) {
+  async execute(input, { ports, session }) {
     if (input.handle) {
       const page = session.handles.read(
         input.handle,
@@ -191,23 +102,17 @@ export const readResultTool = defineTool({
       input.cursor,
       input.cursor + input.limit,
     );
-    const snapshot = await service.getWorkspaceSnapshot();
-    const jobs = allJobs(snapshot);
-    const items = ids.map((id, offset) => {
-      const position = input.cursor + offset + 1;
-      if (resultSet.kind === "applications") {
-        const record = snapshot.applicationRecords.find(
-          (entry) => entry.id === id,
-        );
-        return record
-          ? { position, ...compactApplication(record) }
-          : { position, id, missing: true };
-      }
-      const job = jobs.find((entry) => entry.id === id);
-      return job
-        ? { position, ...compactJob(job) }
-        : { position, id, missing: true };
-    });
+    const items = await Promise.all(
+      ids.map(async (id, offset) => {
+        const position = input.cursor + offset + 1;
+        if (!/^\d+$/u.test(id)) return { position, id, missing: true };
+        const value =
+          resultSet.kind === "applications"
+            ? await ports.readCommand("get_application", { jobId: Number(id) })
+            : await ports.readCommand("get_job", { id: Number(id) });
+        return value ? { position, ...value } : { position, id, missing: true };
+      }),
+    );
     const next = input.cursor + ids.length;
     return {
       summary: `${resultSet.label}: items ${input.cursor + 1}–${next} of ${resultSet.itemIds.length}.`,

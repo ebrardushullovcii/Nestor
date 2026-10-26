@@ -45,6 +45,7 @@ function setup(overrides: Partial<ResumeServiceDeps> = {}) {
       format: "pdf" as const,
       fileName: "resume.pdf",
       storagePath: "/exports/resume.pdf",
+      sha256: "a".repeat(64),
       pageCount: 1,
       warnings: [],
     }),
@@ -85,10 +86,14 @@ describe("resumes on the store", () => {
     const original = service.get(id).resume!.level;
     const first = service.setLevel(id, "aggressive");
     await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
-    expect(service.undoLevel(id, first.levelChangeId!)).toMatchObject({ level: original });
+    expect(service.undoLevel(id, first.levelChangeId!)).toMatchObject({
+      level: original,
+    });
     const second = service.setLevel(id, "light");
     service.setLevel(id, "aggressive");
-    expect(() => service.undoLevel(id, second.levelChangeId!)).toThrow("changed since");
+    expect(() => service.undoLevel(id, second.levelChangeId!)).toThrow(
+      "changed since",
+    );
     expect(service.get(id).resume?.level).toBe("aggressive");
   });
 
@@ -100,7 +105,9 @@ describe("resumes on the store", () => {
     await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const current = service.get(id).resume!;
     const saved = service.saveDraft(id, current.draft!, current.updatedAt);
-    expect(() => service.undoLevel(id, changed.levelChangeId!)).toThrow("changed since");
+    expect(() => service.undoLevel(id, changed.levelChangeId!)).toThrow(
+      "changed since",
+    );
     expect(service.get(id).resume).toEqual(saved);
   });
 
@@ -115,6 +122,7 @@ describe("resumes on the store", () => {
     const approved = await service.approve(id);
     expect(approved.approvedAt).not.toBeNull();
     expect(approved.pdfPath).toBe("/exports/resume.pdf");
+    expect(approved.pdfSha256).toBe("a".repeat(64));
     expect(stageOf(store, id)).toBe("resume");
   });
 
@@ -133,6 +141,7 @@ describe("resumes on the store", () => {
     const undone = service.undoLevel(id);
     expect(undone.level).toBe(level);
     expect(undone.approvedAt).not.toBeNull();
+    expect(undone.pdfSha256).toBe("a".repeat(64));
     expect(stageOf(store, id)).toBe("resume");
   });
 
