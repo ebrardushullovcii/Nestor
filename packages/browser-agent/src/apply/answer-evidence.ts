@@ -109,9 +109,10 @@ function employmentMonthEvidence(
         (answer.length === 7 && quote.startsWith(answer + "-"))
       );
     const match = /^([a-z]+)\s+(\d{4})$/iu.exec(quote);
-    const month = match ? months.indexOf(match[1]!.toLowerCase()) + 1 : 0;
+    if (!match) return false;
+    const month = months.indexOf(match[1].toLowerCase()) + 1;
     return (
-      month > 0 && answer === `${match![2]}-${String(month).padStart(2, "0")}`
+      month > 0 && answer === `${match[2]}-${String(month).padStart(2, "0")}`
     );
   });
 }
