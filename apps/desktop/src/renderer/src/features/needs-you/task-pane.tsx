@@ -4,6 +4,10 @@ import type {
   NeedsYouDetails,
   NeedsYouDraft,
 } from "@nestor/contracts";
+import {
+  UPLOAD_ATTACHED_ANSWER,
+  isUploadRepairPrompt,
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import { AnswerField } from "./answer-field";
@@ -141,12 +145,16 @@ export function TaskPane(props: {
       if (live.current) setBusy(false);
     }
   }
+  // A refused upload belongs to one application's page: its answer is
+  // never saved for other forms.
+  const perApplication =
+    !!details?.task && isUploadRepairPrompt(details.task.prompt);
   async function answer() {
     await saveDraft();
     const result = await window.nestor.needsYou.run("answer_need", {
       id,
       answer: latest.current.answer,
-      remember: latest.current.remember,
+      remember: latest.current.remember && !perApplication,
     });
     onEditing(false);
     onResolved(
@@ -185,6 +193,51 @@ export function TaskPane(props: {
               {task.input === "file" ? (
                 <div className="grid gap-3">
                   <h2 className="font-medium">{task.prompt}</h2>
+                  <p className="text-sm text-foreground-soft">
+                    Your other answers are kept. Open the application to finish
+                    attaching the file on the site.
+                  </p>
+                  {details.applications.map((application) => (
+                    <Button
+                      key={application.id}
+                      disabled={busy}
+                      onClick={() =>
+                        void act(async () => {
+                          if (
+                            !(await window.nestor.jobFinder.openApplication({
+                              id: application.id,
+                            }))
+                          )
+                            throw new Error(
+                              "The form could not be opened. Try opening it again from Applications.",
+                            );
+                        })
+                      }
+                    >
+                      {details.applications.length === 1
+                        ? "Open application"
+                        : `Open ${application.title}`}
+                    </Button>
+                  ))}
+                  {isUploadRepairPrompt(task.prompt) ? (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(async () => {
+                          // The site's word was wrong or stale: the person
+                          // sees the file on the page and says so.
+                          edit({
+                            answer: UPLOAD_ATTACHED_ANSWER,
+                            remember: false,
+                          });
+                          await answer();
+                        })
+                      }
+                    >
+                      It's attached on the site
+                    </Button>
+                  ) : null}
                   <label className="grid gap-2">
                     File type
                     <select
@@ -221,7 +274,7 @@ export function TaskPane(props: {
                             kind: fileKind,
                             consentScope: "job_application_attachment",
                             forJob:
-                              !draft.remember && application
+                              (!draft.remember || perApplication) && application
                                 ? {
                                     jobId: String(application.jobId),
                                     title: application.title,
@@ -252,20 +305,29 @@ export function TaskPane(props: {
                   disabled={busy}
                 />
               )}
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={draft.remember}
-                  onCheckedChange={(value) =>
-                    edit({ remember: value === true })
-                  }
-                  disabled={busy}
-                />
-                Save this answer for next time
-              </label>
-              <p className="text-xs text-foreground-muted">
-                One answer covers every application waiting on this same
-                question. Saved answers stay in Needs you.
-              </p>
+              {perApplication ? (
+                <p className="text-xs text-foreground-muted">
+                  This is for this application only. Nothing is saved for other
+                  forms.
+                </p>
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={draft.remember}
+                      onCheckedChange={(value) =>
+                        edit({ remember: value === true })
+                      }
+                      disabled={busy}
+                    />
+                    Save this answer for next time
+                  </label>
+                  <p className="text-xs text-foreground-muted">
+                    One answer covers every application waiting on this same
+                    question. Saved answers stay in Needs you.
+                  </p>
+                </>
+              )}
               <Button
                 disabled={busy || !draft.answer.trim()}
                 onClick={() => void act(answer)}

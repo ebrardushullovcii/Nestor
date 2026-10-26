@@ -17,6 +17,7 @@ import {
   ApplyExecutionResultSchema,
   SourceInstructionArtifactSchema,
   SubmissionOutcomeRecordSchema,
+  UPLOAD_ATTACHED_ANSWER,
   type FoundJob,
   type ApplyExecutionResult,
   type RawApplyPage,
@@ -33,10 +34,14 @@ import {
   createApplicationService,
   type ApplicationServiceDeps,
 } from "./application-service";
+import { describeFormQuestion } from "./questions";
 
 const preparation = vi.hoisted(() => ({
   answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
+  uploadsConfirmed: [] as boolean[],
+  /** The file field the run saw accepted on the form, if any. */
+  attachedField: "Resume" as string | null,
   readAnswers:
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
 }));
@@ -49,6 +54,9 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
+      preparation.uploadsConfirmed.push(
+        (input.uploadsConfirmedByPerson ?? []).length > 0,
+      );
       input.onPrepared?.({
         result: {
           outcome: "ready_to_send",
@@ -77,6 +85,15 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           answers: preparation.answers,
           pageUrl: input.executionInput.job.canonicalUrl,
           preparedAt: new Date().toISOString(),
+          attachments: preparation.attachedField
+            ? [
+                {
+                  label: "Resume",
+                  fileName: "resume.pdf",
+                  field: preparation.attachedField,
+                },
+              ]
+            : [],
         }),
         handoff: {
           status: "awaiting_your_review",
@@ -102,6 +119,7 @@ const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   preparation.blocker = null;
   preparation.answers = [];
+  preparation.attachedField = "Resume";
   vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
@@ -492,6 +510,240 @@ it("refuses sendPrepared after a used answer changes post-Ready and refills with
   expect(finalAction).not.toHaveBeenCalled();
 });
 
+const rejectedUpload = () =>
+  ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "upload_repair",
+        prompt: "Resume — upload failed",
+        kind: "resume",
+        answerControlType: "file",
+        detectedAt: new Date().toISOString(),
+      },
+    ],
+  });
+
+it("keeps one upload item per refused form, reopening or refilling it without sending", async () => {
+  const f = await setup(2);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!(rejectedUpload());
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(2));
+  const row = f.applications.forJobs([f.ids[0]!])[0]!;
+  expect(row.state).toBe("needs_you");
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.browser.handApplicationPageToPerson).toHaveBeenCalled();
+  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(f.applications.needsYou.list().total).toBe(1);
+  expect(f.applications.getApplication(row.id)?.mode).toBe(row.mode);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("keeps Send for me through an upload repair and drops the upload item when the form stops on another question", async () => {
+  const f = await setup(1);
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
+    conversationId: "send-with-upload",
+    mode: "autonomous_submit",
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(row.id)?.mode).toBe("autonomous_submit");
+  expect(f.authorizeSending).toHaveBeenCalledTimes(2);
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "salary",
+          prompt: "Annual salary expectation",
+          kind: "salary_expectation",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(
+      f.applications.needsYou.list().rows.map((task) => task.prompt),
+    ).toEqual(["Annual salary expectation"]),
+  );
+  expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
+});
+
+it("drops the upload item once the person's page shows the file arrived, and finishes the form", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const file = {
+    index: 0,
+    tagName: "input",
+    inputType: "file",
+    role: "",
+    id: "resume",
+    name: "resume",
+    label: "Resume",
+    groupLabel: "",
+    placeholder: "",
+    autocomplete: "",
+    required: true,
+    invalid: false,
+    validationMessage: "",
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value: "resume.pdf",
+    checked: false,
+    multiple: false,
+    options: [],
+    selectedOptionLabel: "",
+  };
+  const form = (nearby: string): RawApplyPage => ({
+    ...f.personPage,
+    title: "Apply",
+    bodyText: "Apply",
+    controls: [{ ...file, upload: { described: "", nearby, shown: false } }],
+  });
+  f.browser.readApplicationPageWithPerson.mockResolvedValue(
+    form("Resume Upload rejected by server"),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  expect(f.applications.needsYou.list().total).toBe(1);
+  f.browser.readApplicationPageWithPerson.mockResolvedValue(
+    form("Resume resume.pdf"),
+  );
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2), {
+    timeout: 5_000,
+  });
+  expect(f.applications.needsYou.list().total).toBe(0);
+});
+
+it("refills with the person's word when they say the file is attached on the site", async () => {
+  const f = await setup(1);
+  preparation.uploadsConfirmed.length = 0;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  // An earlier attempt cannot settle the item.
+  expect(
+    f.applications.needsYou.dropQuestion(
+      row.id,
+      row.attempt + 1,
+      "upload_repair",
+    ),
+  ).toBe(false);
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.applications.needsYou.answer({
+    id: task.id,
+    answer: UPLOAD_ATTACHED_ANSWER,
+    remember: false,
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(preparation.uploadsConfirmed).toEqual([false, true]),
+  );
+  // The word lasts that one refill: the next refusal asks again, and the
+  // attempt after it does not inherit the earlier confirmation.
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  expect(preparation.uploadsConfirmed).toEqual([false, true, false]);
+});
+
+it("never makes Ready or sends a form whose refused upload is still open, whatever a later run saw", async () => {
+  const f = await setup(1);
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
+    conversationId: "send-with-open-upload",
+    mode: "autonomous_submit",
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  // The rerun resumes past the file's step and reports the form ready.
+  preparation.attachedField = null;
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.needsYou.list().total).toBe(1);
+  expect(f.applications.beginSubmission(row.id, row.attempt + 1)).toBe(false);
+  expect(f.browser.handApplicationPageToPerson).not.toHaveBeenCalled();
+});
+
+it("keeps the upload item when a later run attaches a different field's file", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(rejectedUpload());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  // The rerun settles the cover letter, not the refused resume.
+  preparation.attachedField = "Cover letter";
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(
+    f.applications.needsYou.list().rows.map((task) => task.prompt),
+  ).toEqual(["Resume — upload failed"]);
+});
+
+it("keeps every shared file question's key, and scopes only the upload item to its job", () => {
+  const resume = {
+    prompt: "Resume",
+    kind: "resume" as const,
+    answerControlType: "file" as const,
+    answerOptions: [],
+  };
+  const one = { id: 1, location: "Remote" };
+  const two = { id: 2, location: "Remote" };
+  expect(describeFormQuestion(resume, one).key).toBe(
+    describeFormQuestion(resume, two).key,
+  );
+  const repair = { ...resume, id: "upload_repair" };
+  expect(describeFormQuestion(repair, one).key).not.toBe(
+    describeFormQuestion(repair, two).key,
+  );
+});
+
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
   const f = await setup(1);
   await f.service.start();
@@ -871,19 +1123,22 @@ it("automatically carries every waiting page on after one site sign-in and MFA, 
   });
   expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
     "target_site",
-    key(second.id, 2),
-    "https://replica.test/jobs/1",
+    key(third.id, 2),
+    f.jobs.getJob(third.jobId)!.applyUrl ?? f.jobs.getJob(third.jobId)!.url,
   );
   expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalledWith(
     "target_site",
     key(first.id, 2),
     expect.anything(),
   );
+  // This attempt lost its old tab, so execute opens a fresh application with
+  // the shared session rather than reloading a retained binding.
+  pages.set(key(second.id, 2), accessible);
   f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(third.id)?.state).toBe("needs_you"),
-  );
-  expect(f.applications.getApplication(second.id)?.state).toBe("ready");
+  await vi.waitFor(() => {
+    expect(f.applications.getApplication(third.id)?.state).toBe("needs_you");
+    expect(f.applications.getApplication(second.id)?.state).toBe("ready");
+  });
   expect(
     f.applications.needsYou.details(task.id)?.applications.map((row) => row.id),
   ).toEqual([third.id]);

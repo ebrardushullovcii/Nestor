@@ -97,26 +97,41 @@ describe("reading the choices of lists the page draws itself", () => {
   test("full text and link reads retain the tail of a long listing page", async () => {
     const page = await browser.newPage();
     try {
-      await page.setContent(`<body>${"<p>Visible listing text</p>".repeat(3000)}${Array.from({ length: 405 }, (_, index) => `<a href="https://example.test/${index}">Link ${index}</a>`).join("")}<p>Last vacancy</p></body>`);
+      await page.setContent(
+        `<body>${"<p>Visible listing text</p>".repeat(3000)}${Array.from({ length: 405 }, (_, index) => `<a href="https://example.test/${index}">Link ${index}</a>`).join("")}<p>Last vacancy</p></body>`,
+      );
       const mechanics = createPlaywrightApplyPageMechanics(page);
       expect(await mechanics.readText()).toContain("Last vacancy");
       const raw = await mechanics.readPage();
       expect(raw.links).toHaveLength(405);
       expect(raw.links.at(-1)?.href).toBe("https://example.test/404");
-      expect(await mechanics.readLinkedText?.()).toContain("Link 404 → https://example.test/404");
-    } finally { await page.close(); }
+      expect(await mechanics.readLinkedText?.()).toContain(
+        "Link 404 → https://example.test/404",
+      );
+    } finally {
+      await page.close();
+    }
   });
 
   test("keeps repeated labels, their URLs and adjacent status text inside separate page items", async () => {
     const page = await browser.newPage();
     try {
-      await page.setContent(`<article><p>First employer</p><h2><a href="https://example.test/one">Engineer</a></h2><p>Closed</p></article><article><p>Second employer</p><h2><a href="https://example.test/two">Engineer</a></h2><p>Open</p></article><p hidden>Hidden employer</p><script>const secretText='Not page evidence';</script>`);
-      const text = await createPlaywrightApplyPageMechanics(page).readLinkedText?.();
-      expect(text).toContain("First employer\nEngineer → https://example.test/one\nClosed\n[End page item 1]");
-      expect(text).toContain("[Page item 2]\nSecond employer\nEngineer → https://example.test/two\nOpen");
+      await page.setContent(
+        `<article><p>First employer</p><h2><a href="https://example.test/one">Engineer</a></h2><p>Closed</p></article><article><p>Second employer</p><h2><a href="https://example.test/two">Engineer</a></h2><p>Open</p></article><p hidden>Hidden employer</p><script>const secretText='Not page evidence';</script>`,
+      );
+      const text =
+        await createPlaywrightApplyPageMechanics(page).readLinkedText?.();
+      expect(text).toContain(
+        "First employer\nEngineer → https://example.test/one\nClosed\n[End page item 1]",
+      );
+      expect(text).toContain(
+        "[Page item 2]\nSecond employer\nEngineer → https://example.test/two\nOpen",
+      );
       expect(text).not.toContain("Hidden employer");
       expect(text).not.toContain("Not page evidence");
-    } finally { await page.close(); }
+    } finally {
+      await page.close();
+    }
   });
 
   test("keeps the outer step legend on a nested skills group", async () => {
@@ -168,6 +183,45 @@ describe("reading the choices of lists the page draws itself", () => {
         min: "2000-01",
         max: "2026-10",
       });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("reads what each file field itself shows, not the help text or another field beside it", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form>
+        <label>Name <input name="name"></label>
+        <div class="upload"><p>Resume</p><button type="button">Attach</button>
+          <input id="resume" type="file" aria-describedby="resume-error" style="position:absolute;width:1px;height:1px;opacity:0">
+          <span>Taylor-Resume.pdf</span></div>
+        <p id="resume-error">Upload rejected by server</p>
+        <p><label>Cover letter <input id="letter" type="file"></label></p>
+        <p id="stale" hidden>Upload failed</p>
+        <p>Trouble uploading? Upload error help</p>
+      </form>`);
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      const automated = await readRawApplyPage(page);
+      for (const controls of [native.controls, automated.controls]) {
+        expect(
+          controls.find((control) => control.id === "resume")?.upload,
+        ).toEqual({
+          described: "Upload rejected by server",
+          nearby: "Resume\nAttach\nTaylor-Resume.pdf",
+          shown: false,
+        });
+        expect(
+          controls.find((control) => control.id === "letter")?.upload,
+        ).toEqual({ described: "", nearby: "Cover letter", shown: true });
+        expect(
+          controls.find((control) => control.id === "")?.upload,
+        ).toBeUndefined();
+      }
     } finally {
       await page.close();
     }
@@ -586,7 +640,9 @@ describe("reading the choices of lists the page draws itself", () => {
   }, 15_000);
 
   test("keeps nearby actions reachable when scrolling an off-screen native toggle", async () => {
-    const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+    const page = await browser.newPage({
+      viewport: { width: 900, height: 640 },
+    });
     try {
       await page.setContent(`
         <div style="height:1600px"></div>
@@ -595,11 +651,18 @@ describe("reading the choices of lists the page draws itself", () => {
         <div style="height:900px"></div>
         <aside style="position:fixed;bottom:0;left:0;right:0;height:180px;background:white">Page overlay</aside>
       `);
-      await expect(createPlaywrightApplyPageMechanics(page).setToggle("c0", true)).resolves.toMatchObject({ ok: true });
-      expect(await page.evaluate(() => {
-        const rect = document.getElementById("send")!.getBoundingClientRect();
-        return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.id;
-      })).toBe("send");
+      await expect(
+        createPlaywrightApplyPageMechanics(page).setToggle("c0", true),
+      ).resolves.toMatchObject({ ok: true });
+      expect(
+        await page.evaluate(() => {
+          const rect = document.getElementById("send")!.getBoundingClientRect();
+          return document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          )?.id;
+        }),
+      ).toBe("send");
     } finally {
       await page.close();
     }
@@ -690,11 +753,14 @@ describe("reading the choices of lists the page draws itself", () => {
       const mechanics = createPlaywrightApplyPageMechanics(page);
       const blocked = await mechanics.checkAction!("a0");
       expect(blocked.ok).toBe(false);
-      if (blocked.ok) throw new Error("An obstructed button was reported reachable");
+      if (blocked.ok)
+        throw new Error("An obstructed button was reported reachable");
       expect(blocked.error).toContain("Cookie choices");
       expect(await page.evaluate("window.sends")).toBe(0);
       await page.locator("#close").click();
-      await expect(mechanics.checkAction!("a0")).resolves.toMatchObject({ ok: true });
+      await expect(mechanics.checkAction!("a0")).resolves.toMatchObject({
+        ok: true,
+      });
       expect(await page.evaluate("window.sends")).toBe(0);
     } finally {
       await page.close();

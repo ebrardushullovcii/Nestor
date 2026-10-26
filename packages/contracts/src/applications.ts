@@ -404,3 +404,9 @@ export const UpsertSavedFormAnswerInputSchema =
 export type UpsertSavedFormAnswerInput = z.input<
   typeof UpsertSavedFormAnswerInputSchema
 >;
+
+/** What a person answers an upload item with once the file is attached on the site. */
+export const UPLOAD_ATTACHED_ANSWER = "Attached on the site";
+/** An upload item: the files one form refused, or never confirmed, as Apply words it. */
+export const isUploadRepairPrompt = (prompt: string): boolean =>
+  /— upload (?:failed|not confirmed)$/u.test(prompt);

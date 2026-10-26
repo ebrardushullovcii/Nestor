@@ -264,11 +264,43 @@ export function withEmbeddedBrowserActivity(
     },
     closeSession: (source) => runtime.closeSession(source),
     async readApplicationPageWithPerson(source, key) {
-      return (
-        (await browser.readApplicationPageWithPerson(key)) ??
-        (await runtime.readApplicationPageWithPerson?.(source, key)) ??
-        null
-      );
+      const page = await browser.readApplicationPageWithPerson(key);
+      if (!page)
+        return (
+          (await runtime.readApplicationPageWithPerson?.(source, key)) ?? null
+        );
+      // The person's read sees the page; the automation's read of the same
+      // page also heard its upload requests. Carry the server's word on each
+      // file across, so a repair is judged by it and not by the page alone.
+      // Both reads use the same collector, so one control is the same
+      // position, frame handle, id, name and label in each. A file that
+      // cannot be tied to exactly one heard control, or a heard read that
+      // failed, is unconfirmed: the page alone does not settle it.
+      if (!page.controls.some((control) => control.upload)) return page;
+      const heard = await runtime
+        .readApplicationPageBinding?.(source, key)
+        .catch(() => null);
+      return {
+        ...page,
+        controls: page.controls.map((control) => {
+          if (!control.upload) return control;
+          const same =
+            heard?.controls.filter(
+              (other) =>
+                other.inputType === "file" &&
+                other.index === control.index &&
+                other.ref === control.ref &&
+                other.id === control.id &&
+                other.name === control.name &&
+                other.label === control.label,
+            ) ?? [];
+          const network =
+            same.length === 1 ? same[0]!.upload?.network : "unconfirmed";
+          return network
+            ? { ...control, upload: { ...control.upload, network } }
+            : control;
+        }),
+      };
     },
     async releaseApplicationPageBinding(source, key) {
       try {

@@ -858,6 +858,99 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
 
+    /** Whether this application's current attempt still waits on this field. */
+    waitsOn(applicationId: number, fieldKey: string): boolean {
+      return !!sql(`SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+        JOIN applications a ON a.id=n.application_id
+        WHERE n.application_id=? AND n.field_key=? AND n.attempt=a.attempt AND t.resolved_at IS NULL`).get(
+        applicationId,
+        fieldKey,
+      );
+    },
+
+    /**
+     * The person's answer to this application's field, with the attempt it
+     * was asked in and the words it asked with, once they gave one.
+     */
+    fieldAnswer(
+      applicationId: number,
+      fieldKey: string,
+    ): { answer: string; attempt: number; prompt: string } | null {
+      const row =
+        sql(`SELECT t.answer, t.prompt, n.attempt FROM application_needs_you n
+        JOIN needs_you t ON t.id=n.task_id
+        WHERE n.application_id=? AND n.field_key=? AND t.resolved_at IS NOT NULL`).get(
+          applicationId,
+          fieldKey,
+        ) as
+          | { answer: string | null; prompt: string; attempt: number }
+          | undefined;
+      return row?.answer
+        ? { answer: row.answer, attempt: row.attempt, prompt: row.prompt }
+        : null;
+    },
+
+    /** The words of the open item this application waits on for a field. */
+    openPrompt(applicationId: number, fieldKey: string): string | null {
+      const row = sql(`SELECT t.prompt FROM application_needs_you n
+        JOIN needs_you t ON t.id=n.task_id
+        WHERE n.application_id=? AND n.field_key=? AND t.resolved_at IS NULL`).get(
+        applicationId,
+        fieldKey,
+      ) as { prompt: string } | undefined;
+      return row?.prompt ?? null;
+    },
+
+    /**
+     * The site settled this field itself, such as an upload it now accepts:
+     * the application stops waiting on it, and the task closes once nothing
+     * else waits on it. A waiting application with nothing left is refilled.
+     * Only the application's current attempt may settle it, an item asked
+     * in that attempt or before, and only while the task is still open; an
+     * answered task keeps the person's answer.
+     */
+    dropQuestion(
+      applicationId: number,
+      attempt: number,
+      fieldKey: string,
+    ): boolean {
+      return store.transaction(() => {
+        const link = sql(`SELECT n.task_id FROM application_needs_you n
+          JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id
+          WHERE n.application_id=? AND n.field_key=? AND a.attempt=? AND n.attempt<=?
+            AND t.resolved_at IS NULL`).get(
+          applicationId,
+          fieldKey,
+          attempt,
+          attempt,
+        ) as { task_id: number } | undefined;
+        if (!link) return false;
+        sql(
+          "DELETE FROM application_needs_you WHERE application_id=? AND field_key=?",
+        ).run(applicationId, fieldKey);
+        const closed =
+          sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM application_needs_you WHERE task_id=?)`).run(
+            Date.now(),
+            link.task_id,
+            link.task_id,
+          );
+        if (closed.changes)
+          sql("DELETE FROM needs_you_drafts WHERE task_id = ?").run(
+            link.task_id,
+          );
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+          AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+          WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
+          Date.now(),
+          Date.now(),
+          applicationId,
+        );
+        changed();
+        return true;
+      });
+    },
+
     forgetAnswer(
       key: string,
       inputScope: Partial<FormAnswerScope> = {},

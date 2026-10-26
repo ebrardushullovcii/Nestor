@@ -195,6 +195,7 @@ export function buildApplyFormObservation(
       selectedOptionLabel: rawControl.selectedOptionLabel,
       invalid: rawControl.invalid,
       validationMessage: rawControl.validationMessage,
+      ...(rawControl.upload ? { upload: rawControl.upload } : {}),
     };
     const control: ApplyFormControl = {
       ...base,

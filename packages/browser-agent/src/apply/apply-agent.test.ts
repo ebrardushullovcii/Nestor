@@ -1962,6 +1962,300 @@ describe("apply agent run endings", () => {
     expect(result.attachments).toHaveLength(1);
   });
 
+  test.each([false, true])(
+    "a rejected upload is a file handover even when the file input retained its value (native invalid: %s)",
+    async (invalid) => {
+      const source = page({
+        bodyText: "Application form. Resume failed to upload.",
+        controls: [
+          {
+            ...nameControl(),
+            inputType: "file",
+            label: "Resume",
+            value: "resume.txt",
+            invalid,
+            validationMessage: invalid ? "Resume failed to upload" : "",
+          },
+        ],
+      });
+      const model = repeatingModel("finish", {
+        reason: "The upload failed; repair it on the site.",
+        stuck: true,
+      });
+      const chat = vi.spyOn(model, "chatWithTools");
+      const result = await runApplyAgent(config(source), model);
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
+      expect(result.reviewAttachments).toEqual([]);
+      expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            answerControlType: "file",
+            prompt: "Resume — upload failed",
+          }),
+        ]),
+      );
+      expect(chat).toHaveBeenCalledOnce();
+    },
+  );
+
+  test("several refused uploads on one form are one item for the person", async () => {
+    const source = page({
+      bodyText: "Application form.",
+      controls: ["Resume", "Cover letter"].map((label, index) => ({
+        ...nameControl(),
+        index,
+        id: `file${index}`,
+        name: `file${index}`,
+        inputType: "file",
+        label,
+        value: `${label}.txt`,
+        upload: {
+          described: "",
+          nearby: `${label} Upload rejected by server`,
+          shown: false,
+        },
+      })),
+    });
+    const model = repeatingModel("finish", {
+      reason: "The uploads failed; repair them on the site.",
+      stuck: true,
+    });
+    const result = await runApplyAgent(config(source), model);
+    expect(result.outcome).toBe("paused");
+    const files = result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .filter((question) => question.answerControlType === "file");
+    expect(files).toEqual([
+      expect.objectContaining({
+        id: "upload_repair",
+        prompt: "Resume, Cover letter — upload failed",
+      }),
+    ]);
+  });
+
+  const resumeFile = (
+    nearby: string,
+    overrides: Partial<RawApplyControl> = {},
+  ): RawApplyControl => ({
+    ...nameControl(),
+    index: 1,
+    id: "resume",
+    name: "resume",
+    inputType: "file",
+    label: "Resume",
+    value: "resume.txt",
+    upload: { described: "", nearby, shown: false },
+    ...overrides,
+  });
+  const fileQuestions = (result: Awaited<ReturnType<typeof runApplyAgent>>) =>
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .filter((question) => question.answerControlType === "file");
+
+  test("a refusal on an earlier step still stops the form on its last step", async () => {
+    const source = page({
+      stepLabel: "Step 1 of 2",
+      controls: [nameControl(), resumeFile("Resume Upload rejected by server")],
+      actions: [
+        { index: 0, label: "Continue", visible: true, disabled: false },
+      ],
+    });
+    const input = config(source);
+    const toLastStep = () => {
+      source.stepLabel = "Step 2 of 2";
+      source.controls = [nameControl()];
+      source.actions = [
+        {
+          index: 0,
+          label: "Submit application",
+          visible: true,
+          disabled: false,
+        },
+      ];
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    };
+    input.hands.clickAction = vi.fn(toLastStep);
+    input.hands.clickElement = vi.fn(toLastStep);
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "click", args: { ref: "a0" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(source.stepLabel).toBe("Step 2 of 2");
+    expect(result.readyToSend).toBeNull();
+    expect(result.outcome).not.toBe("prepared");
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({
+        id: "upload_repair",
+        prompt: "Resume — upload failed",
+      }),
+    ]);
+  });
+
+  test("a field that stays on the page across steps clears its item once the server takes the file", async () => {
+    const source = page({
+      stepLabel: "Step 1 of 2",
+      controls: [nameControl(), resumeFile("Resume Upload rejected by server")],
+      actions: [
+        { index: 0, label: "Continue", visible: true, disabled: false },
+      ],
+    });
+    const input = config(source);
+    const toLastStep = () => {
+      source.stepLabel = "Step 2 of 2";
+      source.controls = [
+        nameControl(),
+        resumeFile("Resume resume.txt", {
+          upload: {
+            described: "",
+            nearby: "Resume resume.txt",
+            shown: false,
+            network: "accepted",
+          },
+        }),
+      ];
+      source.actions = [
+        {
+          index: 0,
+          label: "Submit application",
+          visible: true,
+          disabled: false,
+        },
+      ];
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    };
+    input.hands.clickAction = vi.fn(toLastStep);
+    input.hands.clickElement = vi.fn(toLastStep);
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "click", args: { ref: "a0" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(fileQuestions(result)).toEqual([]);
+    expect(result.outcome).toBe("prepared");
+  });
+
+  test("a file the site cleared is missing even on a field marked optional", async () => {
+    const source = page({
+      controls: [
+        { ...nameControl(), value: "" },
+        resumeFile("Resume resume.txt", { required: false }),
+      ],
+    });
+    const input = config(source);
+    input.hands.fillText = vi.fn((_ref: string, value: string) => {
+      source.controls[0].value = value;
+      source.controls[1] = resumeFile("Resume", { required: false, value: "" });
+      return Promise.resolve({ ok: true as const, observedValue: value });
+    });
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(result.readyToSend).toBeNull();
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({ id: "upload_repair" }),
+    ]);
+  });
+
+  test("a widget that empties its input still hands over a file the server or fence refused", async () => {
+    // Greenhouse reads the file, empties the input, then sends the file
+    // itself; Nestor's fence held that request back.
+    const source = page({
+      controls: [
+        nameControl(),
+        resumeFile("Resume Attach", {
+          required: false,
+          value: "",
+          upload: {
+            described: "",
+            nearby: "Resume Attach",
+            shown: false,
+            network: "rejected",
+          },
+        }),
+      ],
+    });
+    const result = await runApplyAgent(
+      config(source),
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(result.readyToSend).toBeNull();
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({
+        id: "upload_repair",
+        prompt: "Resume — upload failed",
+      }),
+    ]);
+  });
+
+  test("an upload that never finishes is handed over instead of waited on forever", async () => {
+    const source = page({
+      controls: [nameControl(), resumeFile("Resume Uploading…")],
+    });
+    const result = await runApplyAgent(
+      config(source, { uploadWaitMs: 0 }),
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(result.readyToSend).toBeNull();
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({
+        id: "upload_repair",
+        prompt: "Resume — upload not confirmed",
+      }),
+    ]);
+  });
+
+  test("the person's word settles stale upload text, but not a server refusal", async () => {
+    const stale = page({
+      controls: [nameControl(), resumeFile("Resume Upload failed")],
+    });
+    const settled = await runApplyAgent(
+      config(stale, { uploadsConfirmedByPerson: ["Resume"] }),
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(fileQuestions(settled)).toEqual([]);
+    expect(settled.outcome).toBe("prepared");
+    // The word covers only the field the person named.
+    const otherField = await runApplyAgent(
+      config(stale, { uploadsConfirmedByPerson: ["Cover letter"] }),
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(fileQuestions(otherField)).toEqual([
+      expect.objectContaining({ id: "upload_repair" }),
+    ]);
+    const refused = page({
+      controls: [
+        nameControl(),
+        resumeFile("Resume resume.txt", {
+          upload: {
+            described: "",
+            nearby: "Resume resume.txt",
+            shown: false,
+            network: "rejected",
+          },
+        }),
+      ],
+    });
+    const result = await runApplyAgent(
+      config(refused, { uploadsConfirmedByPerson: ["Resume"] }),
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({ id: "upload_repair" }),
+    ]);
+  });
+
   test("hands an unmatched required upload to the person even when a resume is available", async () => {
     const source = page({
       controls: [
@@ -3064,6 +3358,50 @@ test("a retry replaces the retained original before handing back missing files",
       .flatMap((pause) => pause.questions ?? [])
       .map((question) => question.prompt),
   ).toContain("Transcript");
+});
+
+test("a resume a widget took and emptied stays on the Ready card once the storage confirmed it", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), inputType: "file", label: "Resume", value: "" },
+    ],
+    actions: [
+      { index: 0, label: "Submit application", visible: true, disabled: false },
+    ],
+  });
+  const runConfig = config(source);
+  runConfig.sources.documents = [
+    {
+      id: "approved-resume",
+      kind: "resume",
+      label: "Your CV",
+      fileName: "approved.pdf",
+      mimeType: "application/pdf",
+      loadBytes: () => Promise.resolve(new Uint8Array([1, 2, 3])),
+    },
+  ];
+  runConfig.hands.uploadFile = (_ref, file) => {
+    // Greenhouse: the input is emptied, and the storage's receipt is all
+    // that says the file arrived.
+    source.controls[0].value = "";
+    source.controls[0].upload = {
+      described: "",
+      nearby: "",
+      shown: false,
+      network: "accepted",
+    };
+    return Promise.resolve({ ok: true, observedValue: file.name });
+  };
+  const result = await runApplyAgent(
+    runConfig,
+    scriptedModel([
+      { name: "upload", args: { ref: "c0", documentId: "approved-resume" } },
+      { name: "finish", args: { reason: "Filled in." } },
+    ]),
+  );
+  expect(
+    result.reviewAttachments?.map((attachment) => attachment.fileName),
+  ).toEqual(["approved.pdf"]);
 });
 
 test("an optional letter the run cannot attach is noted, never a stop", async () => {

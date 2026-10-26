@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { UPLOAD_REPAIR_QUESTION_ID } from "@nestor/browser-agent";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
@@ -16,7 +17,8 @@ export type FormQuestion = Pick<
   | "answerOptions"
   | "inputConstraints"
   | "repeatedAtDifferentStep"
->;
+> &
+  Partial<Pick<ApplicationAttemptQuestion, "id">>;
 
 const normalize = normalizeFormQuestionPrompt;
 const digest = (value: string) =>
@@ -60,6 +62,15 @@ export function describeFormQuestion(
     input === "choice"
       ? `${input}:${options.map(normalize).sort().join("|")}`
       : input;
+  // A refused upload belongs to this application's page, whichever files
+  // it names; every other file question keeps its shared key.
+  if (question.id === UPLOAD_REPAIR_QUESTION_ID)
+    return {
+      key: `question:${digest(`upload repair|job ${job.id}`)}`,
+      input: "file",
+      options: [],
+      reusePrompt: false,
+    };
   const jobSpecific =
     question.kind === "cover_letter" ||
     question.repeatedAtDifferentStep === true;

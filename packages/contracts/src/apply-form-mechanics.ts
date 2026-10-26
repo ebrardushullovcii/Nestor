@@ -45,6 +45,27 @@ export interface RawApplyControl {
   multiple: boolean;
   options: string[];
   selectedOptionLabel: string;
+  /** What a file input's own field shows about its upload. */
+  upload?: RawApplyUpload;
+}
+
+export interface RawApplyUpload {
+  /** Text the input points at with aria-describedby or aria-errormessage. */
+  described: string;
+  /** Text of the input's own field: the widest box holding no other field. */
+  nearby: string;
+  /** The browser's own file widget is on screen, showing the chosen name. */
+  shown: boolean;
+  /** The file the input holds now, as the page reports it. */
+  fileName?: string;
+  fileSize?: number;
+  /**
+   * The site's server on the request that carried this file: a 2xx, a
+   * refusal, or still waiting. Absent when no such request was seen, as on
+   * forms that send the file with the final submission. "unconfirmed" when
+   * the read that hears the requests could not be tied to this control.
+   */
+  network?: "accepted" | "rejected" | "pending" | "unconfirmed";
 }
 
 export interface RawApplyAction {

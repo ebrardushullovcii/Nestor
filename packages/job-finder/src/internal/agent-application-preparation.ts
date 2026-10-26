@@ -100,6 +100,7 @@ export interface AgentApplicationPreparationInput {
   readReusableAnswers?: Parameters<
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
+  uploadsConfirmedByPerson?: readonly string[];
   /**
    * Writes and renders the letter this application sends. Omitted when the
    * caller has no way to produce one, in which case a form that asks for a
@@ -621,6 +622,9 @@ export async function runAgentApplicationPreparation(
     ...(input.initialPickerAttempts
       ? { initialPickerAttempts: input.initialPickerAttempts }
       : {}),
+    ...(input.uploadsConfirmedByPerson?.length
+      ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
+      : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     accountCreationAuthorized:
@@ -907,6 +911,7 @@ export function createApplyFormPreparer(input: {
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
+  uploadsConfirmedByPerson?: readonly string[];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
   return async ({ session, currentUrl, startedAt, signal, onProgress }) => {
@@ -967,6 +972,9 @@ export function createApplyFormPreparer(input: {
         : {}),
       ...(input.initialPickerAttempts
         ? { initialPickerAttempts: input.initialPickerAttempts }
+        : {}),
+      ...(input.uploadsConfirmedByPerson?.length
+        ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
         : {}),
       startedAt,
       siteLabel: input.siteLabel,

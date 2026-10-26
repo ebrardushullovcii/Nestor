@@ -54,8 +54,11 @@ export {
   type ApplyExecutorDeps,
 } from "./policy-executor";
 export {
+  fileUploadProblems,
   runSubmitPreflight,
+  UPLOAD_REPAIR_QUESTION_ID,
   type ApplySubmitPreflightResult,
+  type FileUploadProblem,
 } from "./submit-preflight";
 export {
   completeTaskLocalSignIn,

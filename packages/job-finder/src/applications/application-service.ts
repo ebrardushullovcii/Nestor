@@ -6,7 +6,9 @@ import {
   canContinueApplicationAfterAccess,
   checkClassifiedApplicationAnswers,
   inferQuestionKind,
+  fileUploadProblems,
   hasSubmissionConfirmationText,
+  UPLOAD_REPAIR_QUESTION_ID,
   type ApplyAgentResult,
   type ApplyBlocker,
 } from "@nestor/browser-agent";
@@ -19,12 +21,14 @@ import {
   AiBehaviorPreferenceSchema,
   ApplicationResumeArtifactSchema,
   SubmissionOutcomeRecordSchema,
+  UPLOAD_ATTACHED_ANSWER,
   submissionConfirmationSummary,
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
   type ApplicationRow,
   type ApplicationResumeArtifact,
   type ApplicationReviewCard,
+  type ApplyExecutionResult,
   type CandidateProfile,
   type CandidateAnswerKind,
   type JobFinderSettings,
@@ -77,6 +81,14 @@ import {
   resolveActiveSourceInstructionArtifact,
 } from "../internal/workspace-helpers";
 import { uniqueStrings } from "../internal/shared";
+
+/** The file fields an upload item names, from its words. */
+function uploadRepairFields(prompt: string): string[] {
+  return prompt
+    .replace(/ — upload (?:failed|not confirmed)$/u, "")
+    .split(", ")
+    .filter(Boolean);
+}
 
 export interface ApplicationServiceDeps {
   jobs: JobStore;
@@ -176,12 +188,63 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         row.attempt,
         reason ?? "The form is ready for your click.",
       );
-    if (applications.getApplication(row.id)?.state !== "ready") return;
+    const state = applications.getApplication(row.id)?.state;
+    // An open file item kept it in Needs you; the person's page stays watched.
+    if (state === "needs_you") waiting.set(row.id, row.attempt);
+    if (state !== "ready") return;
     await browser.handApplicationPageToPerson?.(
       "target_site",
       applicationIdentity(row.id, row.attempt).resultId,
     );
     waiting.set(row.id, row.attempt);
+  }
+
+  /**
+   * The file fields the person said are attached on the site, from the
+   * upload item of the attempt just before this one. The word lasts one
+   * attempt and covers only the fields that item named.
+   */
+  function confirmedUploadFields(row: ApplicationRow): string[] {
+    const said = applications.needsYou.fieldAnswer(
+      row.id,
+      UPLOAD_REPAIR_QUESTION_ID,
+    );
+    if (
+      said?.answer !== UPLOAD_ATTACHED_ANSWER ||
+      said.attempt !== row.attempt - 1
+    )
+      return [];
+    return uploadRepairFields(said.prompt);
+  }
+
+  /**
+   * The upload item is done when this run attached a file to every field it
+   * names. A run that settled a different field's file, or resumed past the
+   * file's step, leaves it alone.
+   */
+  function uploadRepaired(
+    row: ApplicationRow,
+    result: ApplyExecutionResult,
+    review: ApplicationReviewCard | null,
+  ): boolean {
+    if (
+      result.questions.some(
+        (question) =>
+          question.id === UPLOAD_REPAIR_QUESTION_ID &&
+          question.status === "detected",
+      )
+    )
+      return false;
+    const prompt = applications.needsYou.openPrompt(
+      row.id,
+      UPLOAD_REPAIR_QUESTION_ID,
+    );
+    if (!prompt) return false;
+    const attached = new Set(
+      (review?.attachments ?? []).map((attachment) => attachment.field),
+    );
+    const fields = uploadRepairFields(prompt);
+    return fields.length > 0 && fields.every((field) => attached.has(field));
   }
 
   async function modeFor(
@@ -495,6 +558,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             searchPreferences,
             reusableAnswers: letterAnswers,
           }),
+          uploadsConfirmedByPerson: confirmedUploadFields(row),
           readReusableAnswers: (questions) => {
             const byKey = new Map(
               questions.map((question) => [
@@ -562,6 +626,18 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       })
     )
       return;
+    // The site took the file this time: its upload item is done, even when
+    // the form now stops on another question.
+    if (
+      (result.state === "ready" ||
+        result.questions.some((question) => question.status === "detected")) &&
+      uploadRepaired(row, result, review as ApplicationReviewCard | null)
+    )
+      applications.needsYou.dropQuestion(
+        row.id,
+        row.attempt,
+        UPLOAD_REPAIR_QUESTION_ID,
+      );
     if (await deps.isHoldingCurrent()) {
       applications.continuePreparation(row.id, row.attempt);
       return;
@@ -608,7 +684,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           options: known.options,
           reusePrompt: known.reusePrompt,
         },
-        { reuseAnswers: !repeated },
+        // A refused upload is never settled by an earlier answer.
+        {
+          reuseAnswers: !repeated && question.id !== UPLOAD_REPAIR_QUESTION_ID,
+        },
       );
       fromMemory ||= requested.status === "answered";
     }
@@ -865,7 +944,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               row,
               "The permission to send this application changed. Review the filled form before trying again.",
             );
-          if (!applications.beginSubmission(row.id, row.attempt)) return;
+          if (!applications.beginSubmission(row.id, row.attempt))
+            // A file still open in Needs you holds the send back.
+            return applications.waitsOnFile(row.id)
+              ? leaveForPerson(row)
+              : undefined;
           const runtime = {
             observeApplicationForm:
               browser.observeApplicationForm!.bind(browser),
@@ -892,6 +975,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     !!app &&
                     app.attempt === row.attempt &&
                     app.state === "submitting" &&
+                    !applications.waitsOnFile(row.id) &&
                     jobs.getJob(row.jobId)?.stage === "resume" &&
                     approved?.approvedAt === artifact.approvedAt &&
                     (approved.pdfPath ??
@@ -1072,6 +1156,38 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
   }
 
+  /** The person fixed the upload on the page: drop its item, finish the rest. */
+  async function checkUploadRepair(row: ApplicationRow): Promise<boolean> {
+    if (
+      row.state !== "needs_you" ||
+      !applications.needsYou.waitsOn(row.id, UPLOAD_REPAIR_QUESTION_ID)
+    )
+      return false;
+    const key = applicationIdentity(row.id, row.attempt).resultId;
+    const raw =
+      (await browser
+        .readApplicationPageWithPerson?.("target_site", key)
+        .catch(() => null)) ??
+      (await browser
+        .readApplicationPageBinding?.("target_site", key)
+        .catch(() => null));
+    if (!raw || raw.loading || !current(row)) return false;
+    const page = buildApplyFormObservation(raw, new Date().toISOString());
+    const accepted =
+      page.controls.some(
+        (control) =>
+          control.kind === "file" && !control.disabled && control.answered,
+      ) &&
+      !fileUploadProblems(page).length &&
+      applications.needsYou.dropQuestion(
+        row.id,
+        row.attempt,
+        UPLOAD_REPAIR_QUESTION_ID,
+      );
+    if (accepted) wake();
+    return accepted;
+  }
+
   async function watch(): Promise<void> {
     if (stopped || watching) return;
     watching = true;
@@ -1093,6 +1209,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           continue;
         }
         if (await recordPersonSubmission(row, attempt)) continue;
+        if (await checkUploadRepair(row)) continue;
         await checkApplicationAccess(row);
       }
     } finally {
@@ -1281,6 +1398,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (!row || !work || !["ready", "needs_you"].includes(row.state))
       return false;
     const key = applicationIdentity(id, work.attempt).resultId;
+    const fileHandover =
+      row.state === "needs_you" &&
+      work.execution.questions.some(
+        (question) =>
+          question.status === "detected" &&
+          question.answerControlType === "file",
+      );
     let focused = await browser.focusApplicationPageBinding?.(
       "target_site",
       key,
@@ -1309,7 +1433,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       waiting.set(id, work.attempt);
       return true;
     }
-    if (row.state !== "ready") return false;
+    if (row.state !== "ready" && !fileHandover) return false;
     await closePage(id, work.attempt).catch(onError);
     const queued = applications.reprepareForReview(id, row.attempt);
     if (queued) wake();

@@ -473,23 +473,31 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
-    /** Open lost its page: refill for review, never revive permission to send. */
+    /**
+     * Open lost its page: refill it. A Ready form comes back for review and
+     * never revives permission to send; a form waiting on a file keeps the
+     * mode the person chose.
+     */
     reprepareForReview(
       id: number,
       attempt: number,
       reason = "Restoring the form for your review.",
     ): boolean {
       return store.transaction(() => {
-        const row =
-          sql(`UPDATE applications SET state='queued', mode='confirm_before_submit',
+        const row = sql(`UPDATE applications SET state='queued',
+          mode=CASE WHEN state='ready' THEN 'confirm_before_submit' ELSE mode END,
           queued_at=?, updated_at=?, error=?
-          WHERE id=? AND attempt=? AND state='ready' AND submitted_at IS NULL RETURNING job_id`).get(
-            Date.now(),
-            Date.now(),
-            reason.slice(0, 2000),
-            id,
-            attempt,
-          ) as { job_id: number } | undefined;
+          WHERE id=? AND attempt=? AND (state='ready' OR (state='needs_you' AND EXISTS (
+            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+            WHERE n.application_id=applications.id AND n.attempt=applications.attempt
+              AND t.kind='question' AND t.input='file' AND t.resolved_at IS NULL
+          ))) AND submitted_at IS NULL RETURNING job_id`).get(
+          Date.now(),
+          Date.now(),
+          reason.slice(0, 2000),
+          id,
+          attempt,
+        ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
@@ -500,7 +508,11 @@ export function createApplicationStore(store: JobStore) {
       return store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state = 'submitting', updated_at = ?
-          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready') RETURNING job_id`).get(
+          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready')
+            AND NOT EXISTS (
+            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+            WHERE n.application_id = applications.id AND t.kind = 'question'
+              AND t.input = 'file' AND t.resolved_at IS NULL) RETURNING job_id`).get(
             Date.now(),
             id,
             attempt,
@@ -746,14 +758,32 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /**
+     * True while a file this application needs is still open in Needs you,
+     * from this attempt or an earlier one: a refused upload stays the
+     * person's until they settle it, whatever a later run observed.
+     */
+    waitsOnFile(id: number): boolean {
+      return !!sql(`SELECT 1 FROM applications WHERE id = ? AND EXISTS (
+            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+            WHERE n.application_id = applications.id AND t.kind = 'question'
+              AND t.input = 'file' AND t.resolved_at IS NULL)`).get(id);
+    },
+
     /** Preparation only. This API cannot mark an application sent or arm a send. */
     finishPreparation(input: ApplicationPreparationUpdate): boolean {
       input = ApplicationPreparationUpdateSchema.parse(input);
       return store.transaction(() => {
+        // An open file item keeps the form in Needs you, never Ready.
         const row = sql(
-          `UPDATE applications SET state = ?, error = ?, updated_at = ?
+          `UPDATE applications SET state = CASE WHEN ? = 'ready' AND EXISTS (
+            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
+            WHERE n.application_id = applications.id AND t.kind = 'question'
+              AND t.input = 'file' AND t.resolved_at IS NULL) THEN 'needs_you' ELSE ? END,
+           error = ?, updated_at = ?
            WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id`,
         ).get(
+          input.state,
           input.state,
           input.error ?? null,
           Date.now(),
