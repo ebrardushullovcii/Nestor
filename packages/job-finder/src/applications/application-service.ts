@@ -332,7 +332,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
       intermediateMutationsAuthorized:
-        sends && envelope?.intermediateMutationsAuthorized === true,
+        sends && (!envelope || envelope.intermediateMutationsAuthorized),
       attachmentUploadsAuthorized: true,
       intermediateMutationAllowedOrigins: [...allowedOrigins],
       recheckIntermediateMutationAuthority: async (
@@ -341,7 +341,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ) => {
         if (
           purpose === "answers" &&
-          (!sends || !envelope?.intermediateMutationsAuthorized)
+          (!sends || (envelope && !envelope.intermediateMutationsAuthorized))
         )
           return false;
         if (
@@ -377,7 +377,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          (purpose === "attachment" || latestMode !== "prepare_only") &&
+          (purpose === "attachment" || latestMode === "autonomous_submit") &&
           jobs.getJob(row.jobId)?.stage === "resume" &&
           resume?.approvedAt === approved.approvedAt &&
           resume.pdfPath === approved.pdfPath &&

@@ -286,6 +286,51 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   expect(await recheck("https://replica.test", "attachment")).toBe(false);
 });
 
+it("keeps Send for me's non-final saves pinned without a final envelope, and closes that permission when changed to Fill", async () => {
+  const f = await setup(1);
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const input = f.execute.mock.calls[0]![1];
+  expect(input).toMatchObject({
+    intermediateMutationsAuthorized: true,
+    submitAuthorized: false,
+    intermediateMutationAllowedOrigins: ["https://replica.test"],
+  });
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(true);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://unrelated.test",
+      "answers",
+    ),
+  ).toBe(false);
+  f.seed.settings.applicationAutomationMode = "confirm_before_submit";
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(false);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "attachment",
+    ),
+  ).toBe(true);
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  expect(f.authorizeSending).toHaveBeenCalledOnce();
+});
+
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
   const f = await setup(1);
   await f.service.start();
