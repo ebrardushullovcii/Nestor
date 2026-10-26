@@ -347,6 +347,32 @@ describe("reading the choices of lists the page draws itself", () => {
     },
   );
 
+  test("two lists with the same question keep separate choices on another read", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<label for="one">Country</label><input id="one" role="combobox" aria-controls="one-list" aria-expanded="false" readonly>
+        <label for="two">Country</label><input id="two" role="combobox" aria-controls="two-list" aria-expanded="false" readonly>
+        <div id="one-list" role="listbox" hidden></div><div id="two-list" role="listbox" hidden></div>
+        <script>
+          const choices={one:['Germany','France'],two:['United Kingdom','Ireland']};
+          for (const id of Object.keys(choices)) document.getElementById(id).onclick=()=>{
+            document.getElementById(id).setAttribute('aria-expanded','true');
+            const menu=document.getElementById(id+'-list');menu.hidden=false;
+            menu.innerHTML=choices[id].map(label=>'<div role="option">'+label+'</div>').join('');
+          };
+          document.addEventListener('keydown',event=>{if(event.key==='Escape'){
+            document.querySelectorAll('input').forEach(input=>input.setAttribute('aria-expanded','false'));
+            document.querySelectorAll('[role="listbox"]').forEach(menu=>menu.hidden=true);
+          }});
+        </script>`);
+      for (let read = 0; read < 2; read++) {
+        const controls = (await readRawApplyPage(page)).controls;
+        expect(controls.find(control => control.id === "one")?.options).toEqual(["Germany", "France"]);
+        expect(controls.find(control => control.id === "two")?.options).toEqual(["United Kingdom", "Ireland"]);
+      }
+    } finally { await page.close(); }
+  });
+
   test("a form's long choice list is preserved in order", async () => {
     const page = await browser.newPage();
     const options = Array.from(

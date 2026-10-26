@@ -1241,6 +1241,8 @@ async function readClosedComboboxOptions(
 
   // A previous choice can change the choices another menu offers.
   const url = `${page.url()}|${JSON.stringify(controls.filter((control) => control.tagName === "select" || control.role === "combobox" || control.inputType === "combobox").map((control) => [control.scopeKey, control.id, control.name, control.value, control.selectedOptionLabel]))}`;
+  const keyFor = (control: RawApplyControl) =>
+    `${comboboxMemoKey(url, control)}|${JSON.stringify([control.scopeKey, control.index, control.id, control.name])}`;
   let memo = comboboxOptionMemo.get(page);
   if (!memo) {
     memo = new Map<string, string[]>();
@@ -1255,7 +1257,7 @@ async function readClosedComboboxOptions(
   const optionsByIndex = new Map<number, string[]>();
   const toOpen: RawApplyControl[] = [];
   for (const control of closed) {
-    const remembered = memo.get(comboboxMemoKey(url, control));
+    const remembered = memo.get(keyFor(control));
     if (remembered) {
       if (remembered.length > 0) {
         optionsByIndex.set(control.index, remembered);
@@ -1318,7 +1320,7 @@ async function readClosedComboboxOptions(
           .catch(() => undefined);
         if ((await locator.getAttribute("aria-expanded")) !== "true")
           await locator.click({ timeout: 1500 });
-        const owner = comboboxMemoKey(url, control);
+        const owner = keyFor(control);
         const observed = await menuRead.evaluate(
           async (state, context) => {
             const started = Date.now(),
@@ -1401,14 +1403,14 @@ async function readClosedComboboxOptions(
           .catch(() => undefined);
         await menuRead.dispose();
       }
-      memo.set(comboboxMemoKey(url, control), options);
+      memo.set(keyFor(control), options);
       if (options.length > 0) {
         optionsByIndex.set(control.index, options);
       }
     } catch {
       // Remembered as "nothing to offer" so the next read does not pay for
       // the same list again.
-      memo.set(comboboxMemoKey(url, control), []);
+      memo.set(keyFor(control), []);
       // A list that will not open tells us nothing; the question still goes
       // to the person, just without its choices.
     }
