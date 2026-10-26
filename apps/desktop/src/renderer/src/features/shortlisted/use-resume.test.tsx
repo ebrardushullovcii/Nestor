@@ -62,11 +62,14 @@ beforeEach(() => {
         },
       },
       resumes: {
-        run: (name: string, input: Parameters<typeof write>[0]) =>
+        run: (
+          name: string,
+          input: Parameters<typeof write>[0] & { jobId?: number },
+        ) =>
           name === "get_resume"
             ? Promise.resolve({
-                job: { id: 1, title: "Designer" } as JobDetail,
-                resume: saved,
+                job: { id: input.jobId ?? 1, title: "Designer" } as JobDetail,
+                resume: { ...saved, jobId: input.jobId ?? 1 },
                 templates: [],
               })
             : write(input),
@@ -77,6 +80,33 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it("opens another job while the previous job is still saving", async () => {
+  const { result, rerender } = renderHook(({ id }) => useResume(id), {
+    initialProps: { id: 1 },
+  });
+  await waitFor(() => expect(result.current.resume).not.toBeNull());
+  let finish!: (value: StoredResume) => void;
+  write.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => result.current.edit({ ...saved.draft!, targetPageCount: 1 }));
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.flush().catch(() => undefined);
+  });
+  rerender({ id: 2 });
+  await waitFor(() => expect(result.current.job?.id).toBe(2));
+  await act(async () => {
+    finish(saved);
+    await pending;
+  });
+  expect(result.current.job?.id).toBe(2);
+  expect(result.current.resume?.jobId).toBe(2);
+});
 
 it("keeps unsaved typing across an external change, and replaces saved content only after the person chooses Save my edits", async () => {
   const { result } = renderHook(() => useResume(1));

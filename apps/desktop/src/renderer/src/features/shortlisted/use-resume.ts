@@ -42,7 +42,7 @@ export function useResume(jobId: number | null) {
   } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const latest = useRef({ jobId, resume, draft, dirty });
-  const saving = useRef<Promise<boolean> | null>(null);
+  const saving = useRef(new Map<number, Promise<boolean>>());
   const conflicted = useRef(false);
   const unsaved = useRef(
     new Map<number, { resume: StoredResume; draft: ResumeDraft }>(),
@@ -52,7 +52,7 @@ export function useResume(jobId: number | null) {
   const load = useCallback(async (id: number) => {
     const view = await window.nestor.resumes.run("get_resume", { jobId: id });
     if (latest.current.jobId !== id) return;
-    if (saving.current) return;
+    if (saving.current.has(id)) return;
     if (
       latest.current.resume &&
       view.resume &&
@@ -113,10 +113,11 @@ export function useResume(jobId: number | null) {
   );
 
   const save = useCallback(async () => {
-    if (saving.current) return saving.current;
     if (conflicted.current) return false;
     const { jobId: id, resume: saved, draft: current } = latest.current;
     if (id === null || !saved || !current) return false;
+    const pending = saving.current.get(id);
+    if (pending) return pending;
     setSaveStatus("saving");
     const work = async () => {
       try {
@@ -140,17 +141,19 @@ export function useResume(jobId: number | null) {
         setSaveError(null);
         return finished;
       } catch (error) {
+        if (latest.current.jobId !== id) return false;
         setSaveStatus("failed");
         setSaveError(describeError(error));
         conflicted.current = true;
         return false;
       }
     };
-    saving.current = work();
+    const pendingSave = work();
+    saving.current.set(id, pendingSave);
     try {
-      return await saving.current;
+      return await pendingSave;
     } finally {
-      saving.current = null;
+      saving.current.delete(id);
     }
   }, []);
 
