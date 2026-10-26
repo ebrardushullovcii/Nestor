@@ -455,6 +455,13 @@ export type JobFinderSourceDebugActionInput = z.infer<
   typeof JobFinderSourceDebugActionInputSchema
 >;
 
+/** A source check started from the app, which reports progress under `requestId`. */
+export const JobFinderRunSourceDebugInputSchema =
+  JobFinderSourceDebugActionInputSchema.extend({
+    requestId: z.string().max(200).nullable().optional(),
+    readabilityTimeoutMs: z.number().finite().positive().optional(),
+  });
+
 export const JobFinderOpenBrowserSessionInputSchema = z.object({
   targetId: NonEmptyStringSchema.nullable().default(null),
 });

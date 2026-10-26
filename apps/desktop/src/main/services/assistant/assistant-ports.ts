@@ -21,6 +21,7 @@ import path from "node:path";
 import { extractResumeDocument } from "../../adapters/resume-document";
 import { getApplicationStore } from "../job-finder/application-store";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { loadEmbeddedBrowser } from "../browser/load-embedded-browser";
 import { getCandidateAssetLibrary } from "../job-finder/candidate-asset-library-instance";
 import {
   importResumeFromSourcePath,
@@ -222,7 +223,7 @@ export function createAssistantHostPorts(input: {
     isResumeImportActive: isDesktopResumeImportActive,
     async prepareAppNavigation() {
       if (input.browserHost === "embedded") {
-        await getEmbeddedBrowser().command({ type: "minimize" });
+        await (await loadEmbeddedBrowser()).command({ type: "minimize" });
       }
     },
     resolveApprovedJobs: (selection) =>

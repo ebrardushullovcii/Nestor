@@ -56,13 +56,18 @@ async function getSearchService(): Promise<JobSearchService> {
   }
   searchServicePending ??= createSearchService().then((service) => {
     searchService = service;
-    // What main sends is checked here; the preload passes it through.
-    service.onStatus((status) =>
-      broadcastToJobSubscribers(
-        JOBS_SEARCH_STATUS_CHANNEL,
-        JobSearchStatusSchema.parse(status),
-      ),
-    );
+    // What main sends is checked here; the preload passes it through. A bad
+    // status is dropped with a warning rather than thrown into the runner.
+    service.onStatus((status) => {
+      const checked = JobSearchStatusSchema.safeParse(status);
+      if (checked.success)
+        broadcastToJobSubscribers(JOBS_SEARCH_STATUS_CHANNEL, checked.data);
+      else
+        console.warn(
+          "[Desktop] Dropped a malformed search status.",
+          checked.error,
+        );
+    });
     return service;
   });
   try {
