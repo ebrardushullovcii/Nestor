@@ -1,6 +1,7 @@
 import type {
   JobSelectionInput,
   ApplyRawPageHands,
+  RawApplyPage,
   CandidateAsset,
   JobPosting,
   SaveFoundJobsResult,
@@ -23,9 +24,11 @@ export interface AssistantHostPorts {
   readPersonalState(): Promise<AssistantPersonalState>;
   /** Store commands registered by the host, shared with the screens. */
   commands?: readonly AssistantToolDefinition[];
+  /** Saves verified page postings (see `savePageJobs`); never a model tool. */
   savePageJobs(input: {
     postings: readonly JobPosting[];
     pageUrl: string;
+    applyOnThisPage?: boolean;
   }): Promise<SaveFoundJobsResult>;
   /** Only registered desktop actions; never raw IPC or arbitrary file access. */
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
@@ -91,6 +94,14 @@ export interface AssistantBrowserPort {
   show?(): Promise<void>;
   /** The tab on screen now, if the browser is open. */
   visibleTab(): { tabId: string; url: string; title: string | null } | null;
+  /**
+   * Reads the exact retained form of one application attempt without lending,
+   * showing or focusing its tab; passwords come back empty. Null when that
+   * form's tab is gone.
+   */
+  inspectApplication?(
+    applicationResultId: string,
+  ): Promise<RawApplyPage | null>;
   lease(input: {
     tabId: string | null;
     applicationResultId?: string;

@@ -4,7 +4,9 @@ const { mockCreateJobFinderWorkspaceServiceAsync } = vi.hoisted(() => ({
   mockCreateJobFinderWorkspaceServiceAsync: vi.fn(),
 }));
 
+// The runtime under the workspace service (repository, browser, writers).
 vi.mock("./create-workspace-service", () => ({
+  createJobFinderRuntimeAsync: () => Promise.resolve({}),
   createJobFinderWorkspaceServiceAsync:
     mockCreateJobFinderWorkspaceServiceAsync,
 }));
@@ -70,7 +72,9 @@ describe("getJobFinderWorkspaceService", () => {
     const firstCall = getJobFinderWorkspaceService();
     const secondCall = getJobFinderWorkspaceService();
 
-    expect(mockCreateJobFinderWorkspaceServiceAsync).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(mockCreateJobFinderWorkspaceServiceAsync).toHaveBeenCalledTimes(1),
+    );
 
     service.resolve();
     await expect(firstCall).resolves.toMatchObject({ label: "single-flight" });

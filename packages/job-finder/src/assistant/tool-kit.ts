@@ -431,7 +431,7 @@ async function resolvePageJobReferences(
       postings: [posting.data],
       pageUrl: set.pageUrl ?? "about:blank",
     });
-    const savedId = [...saved.added, ...saved.merged][0]?.toString();
+    const savedId = saved.ids[0]?.toString();
     if (!savedId) return itemId;
     // Only ids saved from a verified collected posting become grant targets.
     await context.session.createResultSet({

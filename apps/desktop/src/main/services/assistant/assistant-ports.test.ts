@@ -1,12 +1,6 @@
 import { createHash } from "node:crypto";
 import type * as FsPromises from "node:fs/promises";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -140,13 +134,13 @@ async function approvedResume() {
 }
 
 describe("Assistant store-backed resume files", () => {
-  it("lists one bounded page of approved PDF metadata without reading file contents", async () => {
+  it("lists every approved PDF's metadata, a page at a time, without reading file contents", async () => {
     const { ports } = await approvedResume();
     const documents = await ports.listDocuments();
     expect(documents).toHaveLength(51);
     expect(runAssistantReadCommand).toHaveBeenCalledWith("list_shortlisted", {
       stage: "resume",
-      limit: 50,
+      limit: 200,
     });
     expect(readFile).not.toHaveBeenCalled();
     expect(getJobFinderWorkspaceService).not.toHaveBeenCalled();

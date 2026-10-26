@@ -54,7 +54,12 @@ it("reports a UI import even before the new import has a stored run and only off
             ...ports,
             ...assistantTestReads(workspaceService),
             readPersonalState: () =>
-              Promise.resolve({ ...snapshot, enabledSiteCount: 1 }),
+              Promise.resolve({
+                ...snapshot,
+                enabledSiteCount: 1,
+                latestResumeImportReviewCandidates: [],
+                latestResumeImportBundle: null,
+              }),
           },
         },
       )
@@ -75,7 +80,12 @@ it("reports a UI import even before the new import has a stored run and only off
         ...ports,
         ...assistantTestReads(workspaceService),
         readPersonalState: () =>
-          Promise.resolve({ ...snapshot, enabledSiteCount: 1 }),
+          Promise.resolve({
+            ...snapshot,
+            enabledSiteCount: 1,
+            latestResumeImportReviewCandidates: [],
+            latestResumeImportBundle: null,
+          }),
       },
     },
   );

@@ -10,16 +10,16 @@ import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { runJobCommand } from "../services/job-commands";
 
 /**
- * Apply's service starts inside the old workspace service; both load on
- * first use rather than with main.
+ * Apply's service starts with the Job Finder runtime; both load on first
+ * use rather than with main.
  */
 async function applicationService() {
-  const [{ getJobFinderWorkspaceService }, { getApplicationService }] =
+  const [{ startJobFinderRuntime }, { getApplicationService }] =
     await Promise.all([
       import("../services/job-finder/workspace-service"),
       import("../services/applications"),
     ]);
-  await getJobFinderWorkspaceService();
+  await startJobFinderRuntime();
   return getApplicationService();
 }
 

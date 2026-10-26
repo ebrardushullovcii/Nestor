@@ -5,7 +5,7 @@ import {
   createTrackerStore,
 } from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
-import { createJobCommandRunner } from "../job-commands";
+import { createJobCommandRunner, savePageJobs } from "../job-commands";
 import { createNeedsYouCommandRunner } from "../applications/needs-you-commands";
 import { workspaceHarnessInputs } from "../workspace-service.test-harness";
 import type { AssistantHostPorts } from "./ports";
@@ -69,6 +69,8 @@ function makeReads(service: object) {
           } as never)
         : (null as never);
     }
+    if (name === "list_application_work")
+      return applications.listApplications(input as never) as never;
     if (name === "applications_for_jobs")
       return applications.forJobs(
         (input as { jobIds: number[] }).jobIds,
@@ -86,7 +88,7 @@ function makeReads(service: object) {
     applications,
     readCommand,
     savePageJobs: (input: Parameters<AssistantHostPorts["savePageJobs"]>[0]) =>
-      jobs("import_page_jobs", input),
+      Promise.resolve(savePageJobs(store, input)),
     async readPersonalState() {
       const [
         profile,
@@ -103,6 +105,18 @@ function makeReads(service: object) {
         repository.getActivityControl(),
         repository.getLatestResumeImportRun(),
       ]);
+      const [latestResumeImportReviewCandidates, bundles] =
+        latestResumeImportRun
+          ? await Promise.all([
+              repository.listResumeImportFieldCandidates({
+                runId: latestResumeImportRun.id,
+                resolutions: ["needs_review", "abstained"],
+              }),
+              repository.listResumeImportDocumentBundles({
+                runId: latestResumeImportRun.id,
+              }),
+            ])
+          : [[], []];
       return {
         profile,
         searchPreferences,
@@ -110,6 +124,8 @@ function makeReads(service: object) {
         profileSetupState,
         activityControl,
         latestResumeImportRun,
+        latestResumeImportReviewCandidates,
+        latestResumeImportBundle: bundles[0] ?? null,
         resumeImportActive: false,
         enabledSiteCount: searchPreferences.discovery.targets.filter(
           (site) => site.enabled,

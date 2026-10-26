@@ -50,10 +50,42 @@ async function popupsOf(page: Page): Promise<Page[]> {
 export function createAssistantBrowserPort(
   browser: EmbeddedBrowser,
   readApplication: (id: number) => Promise<ApplicationDetails | null>,
+  holdsFormAt: (url: string) => boolean,
 ): AssistantBrowserPort {
+  /** The tabs of one attempt that still carry its preparation mark. */
+  const markedTabs = async (applicationResultId: string) => {
+    const matches: string[] = [];
+    for (const tabId of browser.getApplicationTabIds(applicationResultId)) {
+      const mark = await browser.readTab<string | null>(
+        tabId,
+        `window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication')`,
+      );
+      if (mark?.value === applicationResultId) matches.push(tabId);
+    }
+    return matches;
+  };
   return {
     async show() {
       await browser.command({ type: "open" });
+    },
+    async inspectApplication(applicationResultId) {
+      const [tabId, ...others] = await markedTabs(applicationResultId);
+      if (!tabId || others.length > 0) return null;
+      const page = await findPageForTab(
+        browser,
+        await browser.connect(),
+        tabId,
+      );
+      if (!page) return null;
+      const raw = await createPlaywrightApplyPageMechanics(page).readPage();
+      return {
+        ...raw,
+        controls: raw.controls.map((control) =>
+          control.inputType.toLowerCase() === "password"
+            ? { ...control, value: "" }
+            : control,
+        ),
+      };
     },
     visibleTab() {
       const state = browser.getState();
@@ -81,16 +113,7 @@ export function createAssistantBrowserPort(
             "This application is not waiting for editing. Check its send outcome first.",
           );
         preparedRecordId = String(details.application.id);
-        const matches: string[] = [];
-        for (const tabId of browser.getApplicationTabIds(
-          input.applicationResultId,
-        )) {
-          const mark = await browser.readTab<string | null>(
-            tabId,
-            `window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication')`,
-          );
-          if (mark?.value === input.applicationResultId) matches.push(tabId);
-        }
+        const matches = await markedTabs(input.applicationResultId);
         input.signal?.throwIfAborted();
         if (matches.length !== 1)
           throw new Error(
@@ -176,6 +199,10 @@ export function createAssistantBrowserPort(
                 .catch(() => null);
               guard();
               if (binding) return true;
+              // With no exact mark, protect a page a saved application still
+              // points at. A URL match is only a conservative refusal, never
+              // evidence that this is the application's retained tab.
+              if (holdsFormAt(current.url())) return true;
               const tabId = await browser.identifyAutomationPage(current);
               guard();
               return !tabId || browser.isApplicationTab(tabId);

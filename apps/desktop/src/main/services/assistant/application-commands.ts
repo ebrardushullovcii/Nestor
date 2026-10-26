@@ -15,13 +15,10 @@ import {
 } from "@nestor/job-finder";
 import { runApplicationCommand } from "../application-commands";
 import { getApplicationStore } from "../job-finder/application-store";
-import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
-import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
+import { startJobFinderRuntime } from "../job-finder/workspace-service";
 
 async function savedMode() {
-  const service = await getJobFinderWorkspaceService();
-  const repository = getJobFinderRepositoryForWorkspaceService(service);
-  if (!repository) throw new Error("Apply settings are unavailable.");
+  const { jobFinderRepository: repository } = await startJobFinderRuntime();
   if ((await repository.getActivityControl()).paused)
     throw new AssistantToolError(
       "refused",

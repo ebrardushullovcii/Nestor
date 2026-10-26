@@ -39,6 +39,10 @@ function createOptions() {
     loadJobFinderServices: () => {
       counts.jobFinderServices += 1;
       return Promise.resolve({
+        startJobFinderRuntime: () => {
+          calls.push("runtime");
+          return Promise.resolve(undefined);
+        },
         getJobFinderWorkspaceService: () => {
           calls.push("workspace");
           return Promise.resolve(undefined);
@@ -112,6 +116,7 @@ describe("deferred background initialization", () => {
     await flushMicrotasks();
 
     expect(counts.jobFinderServices).toBe(1);
+    expect(calls).toContain("runtime");
     expect(calls).toContain("workspace");
     expect(calls).toContain("asset-lifecycle");
     expect(calls).toContain("live-assistant");
@@ -183,6 +188,7 @@ describe("deferred background initialization", () => {
     vi.useFakeTimers();
     const { options, counts } = createOptions();
     const servicesLoad = createManualPromise<{
+      startJobFinderRuntime: () => Promise<void>;
       getJobFinderWorkspaceService: () => Promise<void>;
     }>();
     options.loadJobFinderServices = () => servicesLoad.promise;
@@ -195,6 +201,8 @@ describe("deferred background initialization", () => {
     // Quit wins the race against the still-initializing chain.
     controller.beginQuitTeardown();
     servicesLoad.resolve({
+      startJobFinderRuntime: () =>
+        Promise.reject(new Error("runtime must not start during quit")),
       getJobFinderWorkspaceService: () =>
         Promise.reject(
           new Error("workspace service must not be created during quit"),

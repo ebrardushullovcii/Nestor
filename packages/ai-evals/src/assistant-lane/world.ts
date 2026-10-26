@@ -36,7 +36,10 @@ import {
   createTrackerStore,
   type JobStore,
 } from "@nestor/db/job-store";
-import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
+import {
+  createJobCommandRunner,
+  savePageJobs,
+} from "@nestor/job-finder/job-commands";
 import {
   AssistantSessionHost,
   assistantCommandTools,
@@ -297,7 +300,7 @@ function recordingPorts(
   const runJobCommand = createJobCommandRunner({ store });
   const tracker = createTrackerStore(store);
   return {
-    savePageJobs: (input) => runJobCommand("import_page_jobs", input),
+    savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
     readCommand: async (name, input) => {
       if (name === "list_applications")
         return tracker.list(input as never) as never;
@@ -328,6 +331,8 @@ function recordingPorts(
         profileSetupState,
         activityControl,
         latestResumeImportRun,
+        latestResumeImportReviewCandidates: [],
+        latestResumeImportBundle: null,
         enabledSiteCount: 0,
         resumeImportActive: false,
         availableResumeTemplates: [],

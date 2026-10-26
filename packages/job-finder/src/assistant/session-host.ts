@@ -1762,27 +1762,30 @@ export class AssistantSessionHost {
         const lease = await this.ports.browser.lease({
           tabId,
           ...(applicationResultId ? { applicationResultId } : {}),
+          // The edit already happened; its tracker note is best-effort, so a
+          // job with no tracker row yet does not turn the edit into an error.
           onApplicationChange: async (recordId, field) => {
-            const application = await this.ports.readCommand(
-              "get_application_details",
-              { id: Number(recordId) },
-            );
-            if (!application)
-              throw new Error("The application is no longer available.");
-            const command = this.ports.commands?.find(
-              (command) => command.name === "add_event",
-            );
-            if (!command)
-              throw new Error("Application tracking is unavailable.");
-            await command.execute(
-              {
-                jobId: application.application.jobId,
-                kind: "note",
-                title: "Prepared form edited",
-                body: `Assistant changed ${field.slice(0, 160)} in the prepared form. Nothing was sent.`,
-              },
-              { service: this.service, ports: this.ports, session },
-            );
+            try {
+              const application = await this.ports.readCommand(
+                "get_application_details",
+                { id: Number(recordId) },
+              );
+              const command = this.ports.commands?.find(
+                (command) => command.name === "add_event",
+              );
+              if (application && command)
+                await command.execute(
+                  {
+                    jobId: application.application.jobId,
+                    kind: "note",
+                    title: "Prepared form edited",
+                    body: `Assistant changed ${field.slice(0, 160)} in the prepared form. Nothing was sent.`,
+                  },
+                  { service: this.service, ports: this.ports, session },
+                );
+            } catch (error) {
+              this.log("Could not note a prepared-form edit", error);
+            }
             this.ports.publishWorkspaceUpdate();
           },
           conversationId,
@@ -2496,26 +2499,51 @@ export class AssistantSessionHost {
 
   async searchMentions(query: string): Promise<AssistantMentionCandidate[]> {
     const candidates: AssistantMentionCandidate[] = [];
-    const [jobs, applications, resumes] = await Promise.all([
-      this.ports.readCommand("list_jobs", {
-        stage: "found",
-        text: query,
-        limit: 15,
-      }),
+    const jobStages = ["found", "shortlisted", "resume", "applied"] as const;
+    const [personal, applications, jobPages, resumePages] = await Promise.all([
+      this.ports.readPersonalState(),
       this.ports.readCommand("list_applications", { text: query, limit: 10 }),
-      this.ports.readCommand("list_shortlisted", {
-        stage: "shortlisted",
-        text: query,
-        limit: 10,
-      }),
+      Promise.all(
+        jobStages.map((stage) =>
+          this.ports.readCommand("list_jobs", {
+            stage,
+            text: query,
+            limit: 10,
+          }),
+        ),
+      ),
+      Promise.all(
+        (["shortlisted", "resume"] as const).map((stage) =>
+          this.ports.readCommand("list_shortlisted", {
+            stage,
+            text: query,
+            limit: 10,
+          }),
+        ),
+      ),
     ]);
-    for (const job of jobs.rows)
+    const jobs = jobPages.flatMap((page) => page.rows);
+    const resumes = resumePages.flatMap((page) => page.rows);
+    const comparable = (name: string) =>
+      name
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[^a-z0-9]+/gu, " ")
+        .trim();
+    const excluded = new Set(
+      personal.searchPreferences.companyBlacklist.map(comparable),
+    );
+    for (const job of jobs) {
+      // Excluded employers stay out of suggestions unless already in play.
+      if (job.stage === "found" && excluded.has(comparable(job.company)))
+        continue;
       candidates.push({
         kind: "job",
         id: String(job.id),
         label: `${job.title} at ${job.company}`.slice(0, 300),
         detail: job.location.slice(0, 300),
       });
+    }
     for (const row of applications.rows)
       candidates.push({
         kind: "application",
@@ -2523,7 +2551,7 @@ export class AssistantSessionHost {
         label: `Application: ${row.title} at ${row.company}`.slice(0, 300),
         detail: row.status,
       });
-    for (const row of resumes.rows)
+    for (const row of resumes)
       candidates.push({
         kind: "resume",
         id: String(row.id),
@@ -2632,11 +2660,26 @@ export class AssistantSessionHost {
           });
           continue;
         }
-        const applicationStatus =
-          operation.run.kind === "apply_batch" ||
-          operation.run.kind === "apply_run"
-            ? await readRunStatus(this.ports, run)
-            : null;
+        // A watch that can no longer be read (its run is gone or was saved
+        // in an older shape) ends here; it must not stop the others.
+        let applicationStatus: Awaited<
+          ReturnType<typeof readRunStatus>
+        > | null = null;
+        try {
+          applicationStatus =
+            operation.run.kind === "apply_batch" ||
+            operation.run.kind === "apply_run"
+              ? await readRunStatus(this.ports, run)
+              : null;
+        } catch {
+          await this.repository.upsertOperation({
+            ...operation,
+            status: "failed",
+            resultSummary: "This watch could not be read after the restart.",
+            endedAt: this.now(),
+          });
+          continue;
+        }
         this.watches.set(key, {
           conversationId: conversation.id,
           run,

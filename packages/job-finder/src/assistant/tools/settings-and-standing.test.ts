@@ -5,6 +5,7 @@ import { assistantTestReads } from "../store-reads.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
 import {
+  pauseActivityTool,
   setAppearanceTool,
   updateWorkspaceBehaviorTool,
 } from "./settings-tools";
@@ -64,5 +65,52 @@ describe("settings and application standing the assistant reports", () => {
     expect(summaries).toEqual([
       "Changed Collapse the side menu while the assistant is open: off",
     ]);
+  });
+
+  it("says applications already filling keep going when work is paused", async () => {
+    const { workspaceService } = createWorkspaceServiceHarness();
+    const reads = assistantTestReads(workspaceService);
+    const { ids } = reads.store.saveFoundJobs({
+      searchId: null,
+      jobs: [
+        {
+          title: "Designer",
+          company: "Northfield",
+          location: "Remote",
+          workModes: ["remote"],
+          url: "https://board.example.test/jobs/1",
+          applyUrl: null,
+          sourceId: "board",
+          sourceLabel: "Board",
+          sourceJobId: "1",
+          postedAt: null,
+          salaryText: null,
+          salaryMin: null,
+          salaryMax: null,
+          salaryCurrency: null,
+          seniority: null,
+          employmentType: null,
+          summary: null,
+          description: "Listing",
+        },
+      ],
+    });
+    reads.store.setStage(ids, "resume");
+    reads.applications.applyJobs({ selection: { ids } });
+    reads.applications.claimNext();
+    const session = {
+      assertCurrent: () => undefined,
+    } as unknown as AssistantTurnSession;
+    const paused = await pauseActivityTool.execute(
+      { paused: true, finishCurrent: false },
+      {
+        service: workspaceService,
+        session,
+        ports: portsFor(workspaceService),
+      },
+    );
+    expect(paused.summary).toContain(
+      "Current applications are still finishing.",
+    );
   });
 });

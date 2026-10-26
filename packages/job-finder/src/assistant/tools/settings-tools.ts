@@ -339,10 +339,20 @@ export const pauseActivityTool = defineTool({
     });
     const after = await ports.readPersonalState();
     const work = readAssistantWorkState(ports, after);
+    // Applications already filling or sending finish; pausing stops the next.
+    const finishing = input.paused
+      ? (
+          await Promise.all(
+            (["running", "submitting"] as const).map((state) =>
+              ports.readCommand("list_application_work", { state, limit: 1 }),
+            ),
+          )
+        ).some((page) => page.rows.length > 0)
+      : false;
     ports.publishWorkspaceUpdate();
     return {
       summary: input.paused
-        ? `Background work is paused.${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}`
+        ? `Background work is paused.${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${finishing ? " Current applications are still finishing." : ""}`
         : "Resumed.",
       data: {
         activityPaused: after.activityControl.paused,

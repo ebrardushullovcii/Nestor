@@ -599,7 +599,12 @@ describe("sidebar resume import outcomes", () => {
     vi.spyOn(
       assistantTestReads(workspaceService),
       "readPersonalState",
-    ).mockResolvedValue({ ...snapshot, enabledSiteCount: 1 });
+    ).mockResolvedValue({
+      ...snapshot,
+      enabledSiteCount: 1,
+      latestResumeImportReviewCandidates: [],
+      latestResumeImportBundle: null,
+    });
     const imports = vi
       .spyOn(workspaceService, "getResumeImportState")
       .mockResolvedValue({

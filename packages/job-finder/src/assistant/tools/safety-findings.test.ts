@@ -267,26 +267,55 @@ describe("R3 assistant safety findings", () => {
     },
   );
 
-  it("inspects the current store application's exact binding without using the visible unrelated tab", async () => {
+  it.each(["ready", "stopped"] as const)(
+    "reads a %s application's exact retained form without leasing, showing or focusing a tab",
+    async (state) => {
+      const ctx = world();
+      ctx.ports.readCommand = vi.fn(() =>
+        Promise.resolve([{ id: 7, attempt: 2, state }]),
+      ) as unknown as AssistantHostPorts["readCommand"];
+      const visibleTab = vi.fn();
+      const inspectApplication = vi.fn(() =>
+        Promise.resolve(page("http://127.0.0.1:47950/spruce/apply/1")),
+      );
+      const leaseTab = vi.fn();
+      ctx.ports.browser = { visibleTab, lease: leaseTab, inspectApplication };
+      const browserLease = vi.fn();
+      ctx.session.browserLease = browserLease;
+      const observed = await browserUseApplicationTool.execute(
+        { jobId: "3" },
+        ctx,
+      );
+      expect(inspectApplication).toHaveBeenCalledWith(
+        "application_7_attempt_2",
+      );
+      expect(browserLease).not.toHaveBeenCalled();
+      expect(leaseTab).not.toHaveBeenCalled();
+      expect(visibleTab).not.toHaveBeenCalled();
+      expect(observed.data).toMatchObject({
+        url: "http://127.0.0.1:47950/spruce/apply/1",
+      });
+      expect(observed.summary).toContain("nothing was sent");
+    },
+  );
+
+  it("refuses to inspect an application being sent or already sent", async () => {
     const ctx = world();
-    ctx.ports.readCommand = vi.fn(() =>
-      Promise.resolve([{ id: 7, attempt: 2, state: "ready" }]),
-    ) as unknown as AssistantHostPorts["readCommand"];
-    const visibleTab = vi.fn();
-    ctx.ports.browser = { visibleTab, lease: vi.fn() };
-    const browserLease = vi.fn(() =>
-      Promise.resolve(lease(page("http://127.0.0.1:47950/spruce/apply/1"))),
-    );
-    ctx.session.browserLease = browserLease;
-    const observed = await browserUseApplicationTool.execute(
-      { jobId: "3" },
-      ctx,
-    );
-    expect(browserLease).toHaveBeenCalledWith({
-      applicationResultId: "application_7_attempt_2",
-    });
-    expect(visibleTab).not.toHaveBeenCalled();
-    expect(observed.summary).toContain("Nothing was sent");
+    for (const state of ["submitting", "submitted"]) {
+      ctx.ports.readCommand = vi.fn(() =>
+        Promise.resolve([{ id: 7, attempt: 2, state }]),
+      ) as unknown as AssistantHostPorts["readCommand"];
+      const inspectApplication = vi.fn();
+      ctx.ports.browser = {
+        visibleTab: vi.fn(),
+        lease: vi.fn(),
+        inspectApplication,
+      };
+      await expect(
+        browserUseApplicationTool.execute({ jobId: "3" }, ctx),
+      ).rejects.toThrow("no prepared form");
+      expect(inspectApplication).not.toHaveBeenCalled();
+    }
   });
 
   it("inspection closes all form/submit windows before reading the exact saved application", async () => {

@@ -1,4 +1,6 @@
-import { runJobCommand } from "../job-commands";
+import { savePageJobs } from "@nestor/job-finder/job-commands";
+import { createResumeStore } from "@nestor/db/job-store";
+import { getJobStore } from "../job-store";
 import {
   readAssistantPersonalState,
   runAssistantReadCommand,
@@ -7,6 +9,7 @@ import {
   CandidateAssetSchema,
   type CandidateAsset,
   type CandidateProfile,
+  type ShortlistedPage,
 } from "@nestor/contracts";
 import {
   savedResumeDigestMatches,
@@ -76,12 +79,32 @@ function resumeMime(fileName: string): string {
   if (extension === ".docx")
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (extension === ".md") return "text/markdown";
+  if (extension === ".html" || extension === ".htm") return "text/html";
   return "text/plain";
 }
 
 interface ResumeDocument {
   asset: CandidateAsset;
   filePath: string;
+}
+
+/** Every approved job, a page at a time. */
+async function approvedJobIds(): Promise<number[]> {
+  const ids: number[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: ShortlistedPage = await runAssistantReadCommand(
+      "list_shortlisted",
+      {
+        stage: "resume",
+        limit: 200,
+        ...(cursor ? { cursor } : {}),
+      },
+    );
+    ids.push(...page.rows.map((row) => row.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return ids;
 }
 
 /**
@@ -122,39 +145,34 @@ async function listResumeDocuments(
   const jobId = documentId?.startsWith(APPROVED_RESUME_DOCUMENT_PREFIX)
     ? Number(documentId.slice(APPROVED_RESUME_DOCUMENT_PREFIX.length))
     : null;
-  const ids = jobId
-    ? [jobId]
-    : documentId
-      ? []
-      : (
-          await runAssistantReadCommand("list_shortlisted", {
-            stage: "resume",
-            limit: 50,
-          })
-        ).rows.map((row) => row.id);
+  const ids = jobId ? [jobId] : documentId ? [] : await approvedJobIds();
   for (const id of ids) {
     const { job, resume } = await runAssistantReadCommand("get_resume", {
       jobId: id,
     });
-    if (
-      !resume?.approvedAt ||
-      !resume.pdfPath ||
-      !resume.pdfSha256 ||
-      resume.state !== "ready"
-    )
+    if (!resume?.approvedAt || !resume.pdfPath || resume.state !== "ready")
       continue;
     const filePath = resume.pdfPath;
     const metadata = await stat(filePath).catch(() => null);
     if (!metadata?.isFile() || !metadata.size) continue;
+    // Approved before hashes were kept: the file is hashed the first time
+    // it is needed, and later uploads must match that.
+    let sha256 = resume.pdfSha256;
+    if (!sha256) {
+      sha256 = createHash("sha256")
+        .update(await readFile(filePath))
+        .digest("hex");
+      createResumeStore(getJobStore()).rememberPdfHash(id, sha256);
+    }
     documents.push({
       filePath,
       asset: CandidateAssetSchema.parse({
         id: `${APPROVED_RESUME_DOCUMENT_PREFIX}${id}`,
         kind: "resume",
         originalName: path.basename(filePath).slice(0, 255),
-        mime: "application/pdf",
+        mime: resumeMime(filePath),
         byteSize: metadata.size,
-        sha256: resume.pdfSha256,
+        sha256,
         createdAt: resume.approvedAt,
         sensitivity: "sensitive",
         consentScope: "job_application_attachment",
@@ -194,7 +212,8 @@ export function createAssistantHostPorts(input: {
     commands: assistantAppCommands(),
     readPersonalState: readAssistantPersonalState,
     readCommand: runAssistantReadCommand,
-    savePageJobs: (input) => runJobCommand("import_page_jobs", input),
+    savePageJobs: (input) =>
+      Promise.resolve(savePageJobs(getJobStore(), input)),
     async executeAction(actionId, input) {
       const { executeDesktopJobFinderAction } =
         await import("./desktop-actions");
@@ -299,6 +318,7 @@ export function createAssistantHostPorts(input: {
     ports.browser = createAssistantBrowserPort(
       getEmbeddedBrowser(),
       async (id) => runAssistantReadCommand("get_application_details", { id }),
+      (url) => getApplicationStore().holdsFormAt(url),
     );
   }
   return ports;

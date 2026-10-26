@@ -19,14 +19,13 @@ import {
 } from "./resume-export-path";
 
 /**
- * The resume service starts with the workspace's AI client and renderer;
- * it and the resume code load on first use, so registering these routes at
- * startup stays cheap.
+ * The resume service starts with the Job Finder runtime (AI client and
+ * renderer); it and the resume code load on first use, so registering these
+ * routes at startup stays cheap.
  */
 async function resumeService() {
-  const { getJobFinderWorkspaceService } =
-    await import("../services/job-finder");
-  await getJobFinderWorkspaceService();
+  const { startJobFinderRuntime } = await import("../services/job-finder");
+  await startJobFinderRuntime();
   const { getResumeService } = await import("../services/resumes");
   return getResumeService();
 }

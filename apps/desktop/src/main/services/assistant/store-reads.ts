@@ -68,6 +68,8 @@ export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"]
           profileSetupState: initial.profileSetupState,
           activityControl: initial.activityControl,
           latestResumeImportRun: null,
+          latestResumeImportReviewCandidates: [],
+          latestResumeImportBundle: null,
         };
     const sites = await runJobCommand("list_sites", {
       filter: "enabled",

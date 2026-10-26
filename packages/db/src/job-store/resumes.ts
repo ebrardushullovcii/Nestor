@@ -107,6 +107,11 @@ export interface ResumeStore {
    * Cleanup of generated files must keep all of them.
    */
   pdfPathsInUse(): string[];
+  /**
+   * Records the hash of an approved PDF that has none yet: one approved
+   * before hashes were kept, hashed the first time it is attached.
+   */
+  rememberPdfHash(jobId: number, sha256: string): void;
 }
 
 export function createResumeStore(store: JobStore): ResumeStore {
@@ -139,6 +144,13 @@ export function createResumeStore(store: JobStore): ResumeStore {
   };
 
   return {
+    rememberPdfHash(jobId, sha256) {
+      sql(
+        `INSERT OR IGNORE INTO resume_pdf_assets (job_id, path, approved_at, sha256)
+         SELECT job_id, pdf_path, approved_at, ? FROM resumes
+         WHERE job_id = ? AND pdf_path IS NOT NULL AND approved_at IS NOT NULL`,
+      ).run(sha256, jobId);
+    },
     pdfPathsInUse() {
       return (
         sql(

@@ -10,6 +10,8 @@ import type {
   ProfileSetupState,
   JobFinderActivityControl,
   ResumeImportRun,
+  ResumeImportFieldCandidate,
+  ResumeDocumentBundle,
   ResumeTemplateDefinition,
   JobCommandOutputs,
   ResumeCommandOutputs,
@@ -49,6 +51,9 @@ export interface AssistantPersonalState {
   profileSetupState: ProfileSetupState;
   activityControl: JobFinderActivityControl;
   latestResumeImportRun: ResumeImportRun | null;
+  /** That run's candidates still waiting for the person, for setup review. */
+  latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidate[];
+  latestResumeImportBundle: ResumeDocumentBundle | null;
   resumeImportActive: boolean;
   availableResumeTemplates: readonly ResumeTemplateDefinition[];
   generatedAt: string;

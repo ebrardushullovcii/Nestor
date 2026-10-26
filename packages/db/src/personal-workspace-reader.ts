@@ -6,6 +6,8 @@ import {
   ProfileSetupStateSchema,
   JobFinderActivityControlSchema,
   ResumeImportRunSchema,
+  ResumeImportFieldCandidateSchema,
+  ResumeDocumentBundleSchema,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
 import { getSingletonValue } from "./internal/state";
@@ -28,11 +30,33 @@ export function readPersonalWorkspaceState(
     const profile =
       getSingletonValue(database, "profile", CandidateProfileSchema) ??
       initial.profile;
+    // The newest import of any file: a failed import of a new resume must
+    // read as failed, not as the earlier file's finished one.
     const run = database
       .prepare(
-        "SELECT value FROM resume_import_runs WHERE source_resume_id = ? ORDER BY started_at DESC, id LIMIT 1",
+        "SELECT id, value FROM resume_import_runs ORDER BY started_at DESC, id DESC LIMIT 1",
       )
-      .get(profile.baseResume.id) as { value: string } | undefined;
+      .get() as { id: string; value: string } | undefined;
+    // What setup review is built from: that run's open candidates and the
+    // document it read them from.
+    const candidates = run
+      ? (
+          database
+            .prepare(
+              "SELECT value FROM resume_import_field_candidates WHERE run_id = ? AND resolution IN ('needs_review', 'abstained')",
+            )
+            .all(run.id) as { value: string }[]
+        ).map((row) =>
+          ResumeImportFieldCandidateSchema.parse(JSON.parse(row.value)),
+        )
+      : [];
+    const bundle = run
+      ? (database
+          .prepare(
+            "SELECT value FROM resume_import_document_bundles WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(run.id) as { value: string } | undefined)
+      : undefined;
     const value = {
       profile,
       searchPreferences:
@@ -58,6 +82,10 @@ export function readPersonalWorkspaceState(
         ) ?? initial.activityControl,
       latestResumeImportRun: run
         ? ResumeImportRunSchema.parse(JSON.parse(run.value))
+        : null,
+      latestResumeImportReviewCandidates: candidates,
+      latestResumeImportBundle: bundle
+        ? ResumeDocumentBundleSchema.parse(JSON.parse(bundle.value))
         : null,
     };
     database.exec("COMMIT");

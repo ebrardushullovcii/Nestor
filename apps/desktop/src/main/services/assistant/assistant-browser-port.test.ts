@@ -84,7 +84,7 @@ function world(bound = false) {
       ) => work(loan.signal, () => undefined, vi.fn()),
     ),
   } as unknown as EmbeddedBrowser;
-  const state = { protected: false };
+  const state = { protected: false, savedFormUrl: null as string | null };
   const details = ApplicationDetailsSchema.parse({
     application: {
       id: 7,
@@ -109,7 +109,11 @@ function world(bound = false) {
   browser.isApplicationTab = () => state.protected;
   const readApplication = vi.fn(() => Promise.resolve(details));
   return {
-    port: createAssistantBrowserPort(browser, readApplication),
+    port: createAssistantBrowserPort(
+      browser,
+      readApplication,
+      (url) => url === state.savedFormUrl,
+    ),
     state,
     details,
     readApplication,
@@ -244,6 +248,21 @@ describe("assistant browser tab safety", () => {
     },
   );
 
+  it("after a restart, a page a saved application points at stays protected without its mark", async () => {
+    const ctx = world();
+    // The mark is gone and the browser no longer knows the tab it filled.
+    ctx.original.evaluate.mockResolvedValue(null);
+    ctx.state.protected = false;
+    ctx.state.savedFormUrl = ctx.original.url();
+    const lease = await lend(ctx, "original");
+    expect(await lease.isApplicationBound()).toBe(true);
+    await expect(lease.hands.fillText("name", "late")).rejects.toThrow(
+      "This tab holds a prepared application",
+    );
+    expect(mechanics.fillText).not.toHaveBeenCalled();
+    await lease.release("finished");
+  });
+
   it("fences mechanics after Stop or the person's takeover", async () => {
     const ctx = world();
     const turn = new AbortController();
@@ -265,7 +284,11 @@ it("shows a focused retained tab through the browser open command", async () => 
   const command = vi.fn().mockResolvedValue(undefined);
   const browser = { command } as unknown as EmbeddedBrowser;
   const readWorkspace = vi.fn();
-  await createAssistantBrowserPort(browser, readWorkspace).show?.();
+  await createAssistantBrowserPort(
+    browser,
+    readWorkspace,
+    () => false,
+  ).show?.();
   expect(command).toHaveBeenCalledWith({ type: "open" });
   expect(readWorkspace).not.toHaveBeenCalled();
 });

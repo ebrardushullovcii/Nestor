@@ -1,5 +1,3 @@
-import { JobPostingSchema } from "./discovery";
-import type { SaveFoundJobsResult } from "./jobs";
 import { RetrySourceInputSchema } from "./source-access";
 import { z } from "zod";
 import type { AppCommandDefinition } from "./app-commands";
@@ -39,37 +37,6 @@ const NoInputSchema = z.object({}).strict();
  * descriptions are written for both.
  */
 export const JOB_COMMANDS = {
-  import_page_jobs: {
-    effect: "local_write",
-    description:
-      "Save verified job postings collected from a browser page into Find jobs; duplicates retain their stage. Prefer save_page_jobs for a collected result set.",
-    input: z
-      .object({
-        postings: z
-          .array(
-            JobPostingSchema.pick({
-              title: true,
-              company: true,
-              location: true,
-              workMode: true,
-              canonicalUrl: true,
-              applicationUrl: true,
-              sourceJobId: true,
-              postedAt: true,
-              salaryText: true,
-              normalizedCompensation: true,
-              seniority: true,
-              employmentType: true,
-              summary: true,
-              description: true,
-            }),
-          )
-          .min(1)
-          .max(50),
-        pageUrl: z.string().url(),
-      })
-      .strict(),
-  },
   list_jobs: {
     effect: "read",
     description:
@@ -184,7 +151,6 @@ export type JobCommandInput<K extends JobCommandName> = z.input<
 >;
 
 export interface JobCommandOutputs {
-  import_page_jobs: SaveFoundJobsResult;
   list_jobs: JobListPage;
   get_job: JobDetail | null;
   stage_counts: JobStageCounts;

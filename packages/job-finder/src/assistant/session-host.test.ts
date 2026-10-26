@@ -11,10 +11,13 @@ import {
   type NeedsYouDetails,
 } from "@nestor/contracts";
 import { createAssistantRepository } from "@nestor/db";
+import type { JobStore } from "@nestor/db/job-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { createSeed } from "../workspace-service.test-support";
-import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
+import {
+  createSeed,
+  createWorkspaceServiceHarness,
+} from "../workspace-service.test-support";
 import { createScriptedAssistantModelHandle } from "./model-handle";
 import type { AssistantHostPorts } from "./ports";
 import type { AssistantTurnSession } from "./tool-kit";
@@ -188,6 +191,49 @@ describe("assistant session host", () => {
     );
     return result;
   }
+
+  it("offers every saved job to mention, but not one from an excluded employer in Find jobs", async () => {
+    const seed = createSeed();
+    seed.searchPreferences = {
+      ...seed.searchPreferences,
+      companyBlacklist: ["Avoid Co"],
+    };
+    const { host, ports } = setup({ seed });
+    const { store } = ports as unknown as { store: JobStore };
+    const job = (n: number, company: string) => ({
+      title: `Designer ${n}`,
+      company,
+      location: "Remote",
+      workModes: ["remote" as const],
+      url: `https://board.example.test/jobs/${n}`,
+      applyUrl: null,
+      sourceId: "board",
+      sourceLabel: "Board",
+      sourceJobId: String(n),
+      postedAt: null,
+      salaryText: null,
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: null,
+      seniority: null,
+      employmentType: null,
+      summary: null,
+      description: `Listing ${n}`,
+    });
+    const { ids } = store.saveFoundJobs({
+      searchId: null,
+      jobs: [job(1, "Northfield"), job(2, "Avoid Co"), job(3, "Harbor")],
+    });
+    const [found, excluded, approved] = ids as [number, number, number];
+    store.setStage([approved], "resume");
+    const labels = (await host.searchMentions("designer"))
+      .filter((candidate) => candidate.kind === "job")
+      .map((candidate) => candidate.id);
+    expect(labels).toEqual(
+      expect.arrayContaining([String(found), String(approved)]),
+    );
+    expect(labels).not.toContain(String(excluded));
+  });
 
   it("loads off-screen profile tools and refreshes facts without changing the system prefix", async () => {
     const systems: string[] = [];
@@ -1490,5 +1536,10 @@ describe("assistant session host", () => {
       }),
       expect.anything(),
     );
+    // With no tracker row the note fails; the edit itself still stands.
+    addEvent.mockRejectedValueOnce(
+      new Error("That application was not found."),
+    );
+    await expect(noteChange!("7", "Phone")).resolves.toBeUndefined();
   });
 });

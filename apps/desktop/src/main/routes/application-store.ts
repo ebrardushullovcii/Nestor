@@ -22,10 +22,9 @@ import type { IpcMain } from "electron";
 import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
-import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";
 import { getApplicationService } from "../services/applications";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
-import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
+import { startJobFinderRuntime } from "../services/job-finder/workspace-service";
 
 /** The registered Assistant actions and preload bridge execute the same commands. */
 export async function executeApplicationStoreCommand(
@@ -37,10 +36,7 @@ export async function executeApplicationStoreCommand(
   switch (actionId) {
     case "apply-jobs": {
       const value = ApplyJobsInputSchema.parse(input);
-      const service = await getJobFinderWorkspaceService();
-      const repository = getJobFinderRepositoryForWorkspaceService(service);
-      if (!repository)
-        throw new Error("Job Finder could not read the Apply setting.");
+      const { jobFinderRepository: repository } = await startJobFinderRuntime();
       const settings = await repository.getSettings();
       if ((await repository.getActivityControl()).paused)
         throw new Error(
@@ -82,17 +78,17 @@ export async function executeApplicationStoreCommand(
       });
     }
     case "stop-application":
-      await getJobFinderWorkspaceService();
+      await startJobFinderRuntime();
       return (await getApplicationService()).stopApplication(
         ApplicationTargetSchema.parse(input).id,
       );
     case "send-application":
-      await getJobFinderWorkspaceService();
+      await startJobFinderRuntime();
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
     case "open-application": {
-      await getJobFinderWorkspaceService();
+      await startJobFinderRuntime();
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);

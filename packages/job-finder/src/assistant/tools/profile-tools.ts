@@ -308,12 +308,15 @@ function setupReadiness(snapshot: AssistantPersonalState) {
         ]
       : []),
   ];
+  // Built as the Profile screen builds them, from the latest import's open
+  // candidates: without them a pending item on an empty field was dropped
+  // and Finish looked possible.
   const requiredReviewItems = buildProfileSetupReviewItems({
     currentState: snapshot.profileSetupState,
     profile: snapshot.profile,
     searchPreferences: snapshot.searchPreferences,
-    candidates: [],
-    documentBundle: null,
+    candidates: snapshot.latestResumeImportReviewCandidates,
+    documentBundle: snapshot.latestResumeImportBundle,
     now: snapshot.generatedAt,
   })
     .filter(isProfileSetupFinishBlockingReviewItem)
