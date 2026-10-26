@@ -127,6 +127,16 @@ const operationCases: Record<
       },
     },
   },
+  replace_answer_bank_fields: {
+    input: {
+      operation: "replace_answer_bank_fields",
+      value: { availability: "Two weeks after an offer." },
+    },
+    expected: {
+      operation: "replace_answer_bank_fields",
+      value: { availability: "Two weeks after an offer." },
+    },
+  },
   replace_application_identity_fields: {
     input: {
       operation: "replace_application_identity_fields",
@@ -357,6 +367,31 @@ const operationCases: Record<
   remove_proof_point: {
     input: { operation: "remove_proof_point", recordId: "proof_point_1" },
     expected: { operation: "remove_proof_point", recordId: "proof_point_1" },
+  },
+  upsert_reusable_answer: {
+    input: {
+      operation: "upsert_reusable_answer",
+      record: {
+        kind: "notice_period",
+        label: "Notice period",
+        question: "When can you start?",
+        answer: "Two weeks after signing.",
+      },
+    },
+    expected: {
+      operation: "upsert_reusable_answer",
+      record: {
+        id: null,
+        kind: "notice_period",
+        label: "Notice period",
+        question: "When can you start?",
+        answer: "Two weeks after signing.",
+      },
+    },
+  },
+  remove_reusable_answer: {
+    input: { operation: "remove_reusable_answer", recordId: "answer_1" },
+    expected: { operation: "remove_reusable_answer", recordId: "answer_1" },
   },
   resolve_review_items: {
     input: {

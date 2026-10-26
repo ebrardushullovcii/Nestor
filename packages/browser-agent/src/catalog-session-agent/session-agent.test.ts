@@ -262,6 +262,10 @@ describe("createCatalogSessionAgent", () => {
         },
         approvalMode: "review_before_submit",
         tailoringMode: "balanced",
+        discovery: {
+          targets: [],
+          historyLimit: 5,
+        },
       }),
     ).rejects.toThrow(/not ready for automation/i);
   });
