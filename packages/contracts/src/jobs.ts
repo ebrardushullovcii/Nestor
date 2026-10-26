@@ -2,6 +2,7 @@ import { JobSiteSelectionSchema } from "./job-sites";
 import { z } from "zod";
 
 import { WorkModeSchema, type WorkMode } from "./base";
+import { JOB_FIT_BANDS } from "./plain-values";
 
 /**
  * Where a job is in the person's hunt. Every job has exactly one stage, kept
@@ -299,8 +300,7 @@ export const JobSearchSettingsSchema = z
 export type JobSearchSettings = z.infer<typeof JobSearchSettingsSchema>;
 export type JobSearchSettingsInput = z.input<typeof JobSearchSettingsSchema>;
 
-/** The score bands used by fit judgments, labels and pickiness. */
-export const JOB_FIT_BANDS = { strong: 85, good: 65, stretch: 40 } as const;
+export { JOB_FIT_BANDS } from "./plain-values";
 
 /** The lowest fit each pickiness shows first. */
 export const PICKY_MIN_FIT: Record<JobSearchSettings["picky"], number | null> =

@@ -35,20 +35,7 @@ export const assistantScreenValues = [
 export const AssistantScreenSchema = z.enum(assistantScreenValues);
 export type AssistantScreen = z.infer<typeof AssistantScreenSchema>;
 
-/** Each screen by the name the app shows for it. */
-export const ASSISTANT_SCREEN_LABELS: Record<AssistantScreen, string> = {
-  home: "Home",
-  profile: "Profile",
-  setup: "Setup",
-  discovery: "Find jobs",
-  review_queue: "Shortlisted",
-  resume_studio: "Shortlisted › Resume",
-  applications: "Applications",
-  actions: "Needs you",
-  settings: "Settings",
-  browser: "Browser",
-  other: "Job Finder",
-};
+export { ASSISTANT_SCREEN_LABELS } from "./plain-values";
 
 export const assistantEntityKindValues = [
   "job",
