@@ -3,6 +3,7 @@ import {
   AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
   matchesAssistantListView,
+  matchesJobFinderNavigationSearch,
   type AssistantNavigationDisplay,
 } from "@nestor/contracts";
 
@@ -13,6 +14,25 @@ function shownElements(selector: string): Element[] {
         '[data-kept-route="hidden"], [hidden], [aria-hidden="true"]',
       ),
   );
+}
+
+function renderedPane(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  for (
+    let node: HTMLElement | null = element;
+    node;
+    node = node.parentElement
+  ) {
+    const style = getComputedStyle(node);
+    if (
+      node.hidden ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.contentVisibility === "hidden"
+    )
+      return false;
+  }
+  return true;
 }
 
 /** A route request is complete only after its content is mounted and uncovered. */
@@ -77,9 +97,7 @@ export async function waitForDisplayedDestination(
     const matches =
       actual.pathname === expected.pathname &&
       (!expected.hash || actual.hash === expected.hash) &&
-      [...expected.searchParams].every(
-        ([key, value]) => actual.searchParams.get(key) === value,
-      );
+      matchesJobFinderNavigationSearch(expected, actual);
     const expectedSection =
       expected.pathname === "/job-finder/settings"
         ? expected.hash.slice(1) || null
@@ -111,9 +129,18 @@ export async function waitForDisplayedDestination(
       shownElements("main [data-resume-mode]").some(
         (element) =>
           element.getAttribute("data-resume-mode") === resumeMode &&
-          (!jobId || element.getAttribute("data-job-detail-id") === jobId),
+          (!jobId || element.getAttribute("data-job-detail-id") === jobId) &&
+          renderedPane(
+            element.querySelector(`[data-resume-pane="${resumeMode}"]`),
+          ) &&
+          !renderedPane(
+            element.querySelector(
+              `[data-resume-pane="${resumeMode === "edit" ? "read" : "edit"}"]`,
+            ),
+          ),
       );
     let viewDisplayed = true;
+    let listPreferencesOnBoard = false;
     const trackerView = expected.pathname === "/job-finder/applications";
     const needsView = expected.pathname === "/job-finder/actions";
     const schema = needsView
@@ -135,10 +162,15 @@ export async function waitForDisplayedDestination(
         const state = shownElements(
           `main [${stateAttribute}]`,
         )[0]?.getAttribute(stateAttribute);
-        viewDisplayed = matchesAssistantListView(
-          schema.parse(JSON.parse(state ?? "null")),
-          requested,
-        );
+        const displayed = schema.parse(JSON.parse(state ?? "null"));
+        listPreferencesOnBoard =
+          trackerView &&
+          "layout" in displayed &&
+          displayed.layout === "board" &&
+          ("density" in requested || "columns" in requested);
+        viewDisplayed =
+          !listPreferencesOnBoard &&
+          matchesAssistantListView(displayed, requested);
         if (needsView) {
           const focusId = AssistantNeedsViewSchema.parse(requested).focusId;
           if (focusId !== undefined)
@@ -160,12 +192,14 @@ export async function waitForDisplayedDestination(
       reason:
         overlay !== "none"
           ? "An overlay still covers the destination."
-          : needsView &&
-              view &&
-              !viewDisplayed &&
-              shownElements('main [data-needs-editing="true"]').length > 0
-            ? "Needs you has unsaved answer text. Save it before changing its view."
-            : "The requested page or section has not been displayed.",
+          : listPreferencesOnBoard
+            ? "Density and columns apply to the Applications list. The board does not display them."
+            : needsView &&
+                view &&
+                !viewDisplayed &&
+                shownElements('main [data-needs-editing="true"]').length > 0
+              ? "Needs you has unsaved answer text. Save it before changing its view."
+              : "The requested page or section has not been displayed.",
     };
     if (
       matches &&

@@ -295,7 +295,6 @@ describe("R3 assistant safety findings", () => {
     }
   });
 
-
   it("R3-008 preserves job sites across separate preference changes", async () => {
     const ctx = world();
     const before = await ctx.service.getWorkspaceSnapshot();
@@ -526,6 +525,19 @@ describe("R3 assistant safety findings", () => {
   });
 
   it("opens Settings anchors and resume modes only on their matching destinations", async () => {
+    expect(
+      openInAppTool.input.safeParse({
+        screen: "settings",
+        settingsSectoin: "application-authority",
+      }).success,
+    ).toBe(false);
+    for (const columns of [[], ["status", "status"]])
+      expect(
+        openInAppTool.input.safeParse({
+          screen: "applications",
+          applicationView: { columns },
+        }).success,
+      ).toBe(false);
     const ctx = world();
     await openInAppTool.execute(
       { screen: "settings", settingsSection: "application-authority" },

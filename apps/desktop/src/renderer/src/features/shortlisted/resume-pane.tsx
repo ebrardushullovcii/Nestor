@@ -1,6 +1,12 @@
-import type { ResumeLevel, StoredResume } from "@nestor/contracts";
+import {
+  ResumeViewModeSchema,
+  RESUME_VIEW_MODE_OPTIONS,
+  type ResumeViewMode,
+  type ResumeLevel,
+  type StoredResume,
+} from "@nestor/contracts";
 import { Download, ExternalLink, RotateCcw, Undo2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
@@ -10,6 +16,7 @@ import { openUrlInJobFinderBrowser } from "@renderer/features/job-finder/compone
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
 import { LIST_DETAIL_REGION_ID } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
+import { useKeptRouteHidden } from "@renderer/features/job-finder/lib/kept-route-visibility";
 
 import { ResumeEditor } from "./resume-editor";
 import { ResumePreview } from "./resume-preview";
@@ -32,14 +39,55 @@ export function ResumePane(props: {
   const { job, resume, draft } = view;
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"read" | "edit">("read");
-  const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState<ResumeViewMode>("read");
+  const [explicitMode, setExplicitMode] = useState(false);
+  const consumedMode = useRef<{ key: string; waiting: boolean } | null>(null);
+  const hidden = useKeptRouteHidden();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { key: navigationKey } = useLocation();
-  const requestedMode = searchParams.get("resumeMode");
+  const parsedMode = ResumeViewModeSchema.safeParse(
+    searchParams.get("resumeMode"),
+  );
+  const requestedMode = parsedMode.success ? parsedMode.data : null;
   useEffect(() => {
-    if (requestedMode === "read" || requestedMode === "edit")
-      setMode(requestedMode);
-  }, [requestedMode, navigationKey]);
+    consumedMode.current = null;
+    setExplicitMode(false);
+  }, [job?.id]);
+  useEffect(() => {
+    if (hidden) return;
+    if (!requestedMode) {
+      if (consumedMode.current?.waiting)
+        consumedMode.current = { key: navigationKey, waiting: false };
+      else if (
+        consumedMode.current &&
+        consumedMode.current.key !== navigationKey
+      ) {
+        consumedMode.current = null;
+        setExplicitMode(false);
+      }
+      return;
+    }
+    if (!draft || String(job?.id) !== searchParams.get("jobId")) return;
+    setMode(requestedMode);
+    setExplicitMode(true);
+    consumedMode.current = { key: navigationKey, waiting: true };
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("resumeMode");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [
+    requestedMode,
+    navigationKey,
+    job?.id,
+    draft,
+    searchParams,
+    setSearchParams,
+    hidden,
+  ]);
 
   if (!job) {
     return (
@@ -258,20 +306,21 @@ export function ResumePane(props: {
 
       {draft ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <SegmentedControl<"read" | "edit">
-            className={cn("self-start", !requestedMode && "2xl:hidden")}
+          <SegmentedControl<ResumeViewMode>
+            className={cn("self-start", !explicitMode && "2xl:hidden")}
             label="Read or edit the resume"
-            onValueChange={setMode}
-            options={[
-              { value: "read", label: "Resume" },
-              { value: "edit", label: "Edit" },
-            ]}
+            onValueChange={(next) => {
+              consumedMode.current = null;
+              setMode(next);
+              setExplicitMode(false);
+            }}
+            options={RESUME_VIEW_MODE_OPTIONS}
             value={mode}
           />
           <div className="flex min-h-0 flex-1 gap-4">
             <ResumeEditor
               className={cn(
-                !requestedMode && "2xl:flex",
+                !explicitMode && "2xl:flex",
                 mode === "read" && "hidden",
               )}
               disabled={busy || resume?.state === "writing"}
@@ -280,9 +329,10 @@ export function ResumePane(props: {
               templates={view.templates}
             />
             <div
+              data-resume-pane="read"
               className={cn(
                 "flex min-h-0 min-w-0 flex-1",
-                !requestedMode && "2xl:flex",
+                !explicitMode && "2xl:flex",
                 mode === "edit" && "hidden",
               )}
             >

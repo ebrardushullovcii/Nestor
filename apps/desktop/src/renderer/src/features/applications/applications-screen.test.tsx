@@ -154,7 +154,7 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
-  it("applies and persists the Assistant's layout, density and columns", async () => {
+  it("keeps list preferences for later without advertising them as rendered board columns", async () => {
     const view = {
       layout: "board",
       density: "comfortable",
@@ -178,7 +178,7 @@ describe("Applications", () => {
             .querySelector("[data-application-list-state]")!
             .getAttribute("data-application-list-state")!,
         ),
-      ).toMatchObject(view);
+      ).toMatchObject({ layout: "board" });
       expect(
         JSON.parse(window.localStorage.getItem("nestor.applications.view")!),
       ).toEqual(view);
@@ -188,6 +188,13 @@ describe("Applications", () => {
         .getByRole("button", { name: "Board" })
         .getAttribute("aria-pressed"),
     ).toBe("true");
+    const displayed: unknown = JSON.parse(
+      document
+        .querySelector("[data-application-list-state]")!
+        .getAttribute("data-application-list-state")!,
+    );
+    expect(displayed).not.toHaveProperty("density");
+    expect(displayed).not.toHaveProperty("columns");
   });
 
   it("moves a sent application on, and Undo takes it back", async () => {

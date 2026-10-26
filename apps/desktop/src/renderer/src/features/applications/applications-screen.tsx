@@ -482,7 +482,7 @@ export function ApplicationsScreen() {
         <ListDetailLayout
           applicationState={{
             ...query,
-            ...prefs,
+            layout: prefs.layout,
             selectedIds: [...selection.ids],
             all: selection.all,
           }}

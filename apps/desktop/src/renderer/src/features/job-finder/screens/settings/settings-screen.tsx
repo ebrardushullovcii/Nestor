@@ -1,3 +1,9 @@
+import {
+  JOB_FINDER_SETTINGS_SECTIONS,
+  JOB_FINDER_SETTINGS_SECTION_IDS,
+  settingsSectionElementId,
+  type JobFinderSettingsSection,
+} from "@nestor/contracts";
 import type {
   AppearanceTheme,
   BrowserSessionState,
@@ -49,68 +55,31 @@ import { SettingsWorkspaceControls } from "./settings-workspace-controls";
 // ADR 0022: one switch decides whether Job Finder sends the application or
 // leaves it filled in for the person to send. The section is named for the
 // thing it decides.
-export const SETTINGS_APPLICATION_AUTHORITY_LABEL = "Applying";
-export const SETTINGS_WORKSPACE_BEHAVIOR_LABEL = "Browser & saved jobs";
+export const SETTINGS_APPLICATION_AUTHORITY_LABEL =
+  JOB_FINDER_SETTINGS_SECTIONS["application-authority"].label;
+export const SETTINGS_WORKSPACE_BEHAVIOR_LABEL =
+  JOB_FINDER_SETTINGS_SECTIONS["workspace-behavior"].label;
 
-const settingsSections = [
+const sectionIcons: Record<JobFinderSettingsSection, typeof MonitorSmartphone> =
   {
-    headingId: "settings-app-device-heading",
-    href: "#settings-app-device",
-    icon: MonitorSmartphone,
-    id: "settings-app-device",
-    label: "App & device",
-    tone: "default",
-  },
-  {
-    headingId: "settings-ai-behavior-heading",
-    href: "#settings-ai-behavior",
-    icon: Sparkles,
-    id: "settings-ai-behavior",
-    label: SETTINGS_AI_BEHAVIOR_LABEL,
-    tone: "default",
-  },
-  {
-    headingId: "settings-application-defaults-heading",
-    href: "#settings-application-defaults",
-    icon: Palette,
-    id: "settings-application-defaults",
-    label: SETTINGS_RESUME_LOOK_LABEL,
-    tone: "default",
-  },
-  {
-    headingId: "settings-application-authority-heading",
-    href: "#settings-application-authority",
-    icon: Send,
-    id: "settings-application-authority",
-    label: SETTINGS_APPLICATION_AUTHORITY_LABEL,
-    tone: "default",
-  },
-  {
-    headingId: "settings-workspace-behavior-heading",
-    href: "#settings-workspace-behavior",
-    icon: AppWindow,
-    id: "settings-workspace-behavior",
-    label: SETTINGS_WORKSPACE_BEHAVIOR_LABEL,
-    tone: "default",
-  },
-  {
-    headingId: "settings-diagnostics-heading",
-    href: "#settings-diagnostics",
-    icon: Activity,
-    id: "settings-diagnostics",
-    label: "Diagnostics",
-    tone: "default",
-  },
-  {
-    headingId: "settings-danger-zone-heading",
-    href: "#settings-danger-zone",
-    icon: Trash2,
-    id: "settings-danger-zone",
-    label: "Delete everything",
-    // The only section that can destroy work says so before it is opened.
-    tone: "destructive",
-  },
-] as const;
+    "app-device": MonitorSmartphone,
+    "ai-behavior": Sparkles,
+    "application-defaults": Palette,
+    "application-authority": Send,
+    "workspace-behavior": AppWindow,
+    diagnostics: Activity,
+    "danger-zone": Trash2,
+  };
+const settingsSections = JOB_FINDER_SETTINGS_SECTION_IDS.map((section) => {
+  const id = settingsSectionElementId(section);
+  return {
+    ...JOB_FINDER_SETTINGS_SECTIONS[section],
+    id,
+    headingId: `${id}-heading`,
+    href: `#${id}`,
+    icon: sectionIcons[section],
+  };
+});
 
 // The sticky section subnav sits over the page scroller. Its wrapped height is
 // layout-dependent (it wraps at native zoom levels and narrow windows), so its
@@ -224,7 +193,7 @@ export function SettingsScreen(props: {
   // navigation. The active section is tracked so the nav can say where the
   // reader is.
   const [activeSectionId, setActiveSectionId] = useState<string>(
-    settingsSections[0].id,
+    settingsSections[0]!.id,
   );
   const location = useLocation();
   const { dirtySections, registry } = useSettingsDirtySections();

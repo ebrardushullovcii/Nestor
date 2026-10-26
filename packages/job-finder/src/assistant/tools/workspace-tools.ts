@@ -5,6 +5,10 @@ import {
   AssistantJobViewSchema,
   AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
+  JOB_FINDER_SETTINGS_SECTION_IDS,
+  JobFinderSettingsSectionSchema,
+  RESUME_VIEW_MODES,
+  ResumeViewModeSchema,
   JobIdSchema,
   JobDetailSchema,
   NonEmptyStringSchema,
@@ -317,16 +321,6 @@ const APP_ROUTES = {
   settings: "/job-finder/settings",
 } as const;
 
-const SETTINGS_SECTIONS = [
-  "app-device",
-  "ai-behavior",
-  "application-defaults",
-  "application-authority",
-  "workspace-behavior",
-  "diagnostics",
-  "danger-zone",
-] as const;
-
 export const openInAppTool = defineTool({
   name: "open_in_app",
   group: "workspace",
@@ -342,11 +336,11 @@ export const openInAppTool = defineTool({
     ),
     resume: json.boolean(),
     resumeMode: json.enumOf(
-      ["read", "edit"],
+      RESUME_VIEW_MODES,
       "Read or edit the saved resume; requires resume=true and jobId.",
     ),
     settingsSection: json.enumOf(
-      SETTINGS_SECTIONS,
+      JOB_FINDER_SETTINGS_SECTION_IDS,
       "Settings section to show. application-defaults is Resume look; application-authority is Applying; workspace-behavior is Browser & saved jobs.",
     ),
     needsView: json.looseObject(
@@ -360,28 +354,30 @@ export const openInAppTool = defineTool({
       "Profile tab to show. Languages are in background.",
     ),
   }),
-  input: z.object({
-    screen: z
-      .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
-      .optional(),
-    jobId: JobIdSchema.optional(),
-    applicationView: AssistantTrackerViewSchema.optional(),
-    resume: z.boolean().optional(),
-    resumeMode: z.enum(["read", "edit"]).optional(),
-    settingsSection: z.enum(SETTINGS_SECTIONS).optional(),
-    needsView: AssistantNeedsViewSchema.optional(),
-    view: AssistantJobViewSchema.optional(),
-    section: z
-      .enum([
-        "basics",
-        "experience",
-        "background",
-        "preferences",
-        "sources",
-        "files",
-      ])
-      .optional(),
-  }),
+  input: z
+    .object({
+      screen: z
+        .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
+        .optional(),
+      jobId: JobIdSchema.optional(),
+      applicationView: AssistantTrackerViewSchema.optional(),
+      resume: z.boolean().optional(),
+      resumeMode: ResumeViewModeSchema.optional(),
+      settingsSection: JobFinderSettingsSectionSchema.optional(),
+      needsView: AssistantNeedsViewSchema.optional(),
+      view: AssistantJobViewSchema.optional(),
+      section: z
+        .enum([
+          "basics",
+          "experience",
+          "background",
+          "preferences",
+          "sources",
+          "files",
+        ])
+        .optional(),
+    })
+    .strict(),
   label: () => "Opening it in the app",
   effect: "read",
   async execute(input, context) {

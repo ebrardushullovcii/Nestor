@@ -7,7 +7,13 @@ import {
   screen,
 } from "@testing-library/react";
 import { useState } from "react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { useKeptRouteHidden } from "@renderer/features/job-finder/lib/kept-route-visibility";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
@@ -25,6 +31,7 @@ afterEach(cleanup);
 function Counter(props: { name: string }) {
   const [count, setCount] = useState(0);
   const hidden = useKeptRouteHidden();
+  const location = useLocation();
   return (
     <section>
       <h1>{props.name}</h1>
@@ -32,6 +39,9 @@ function Counter(props: { name: string }) {
         {`${props.name} count ${count}`}
       </button>
       <p>{`${props.name} hidden ${String(hidden)}`}</p>
+      <output aria-label={`${props.name} navigation key`}>
+        {location.key}
+      </output>
     </section>
   );
 }
@@ -79,6 +89,16 @@ function renderApp() {
 }
 
 describe("JobFinderKeptRoutesOutlet", () => {
+  it("passes a new navigation key to a kept screen when the URL is identical", () => {
+    renderApp();
+    const before = screen.getByLabelText(
+      "Find jobs navigation key",
+    ).textContent;
+    fireEvent.click(screen.getByText("go find jobs"));
+    expect(
+      screen.getByLabelText("Find jobs navigation key").textContent,
+    ).not.toBe(before);
+  });
   it("keeps Find jobs mounted and marked hidden while Home shows", () => {
     renderApp();
     fireEvent.click(screen.getByText("Find jobs count 0"));

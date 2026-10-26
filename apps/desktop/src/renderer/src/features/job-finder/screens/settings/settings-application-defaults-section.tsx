@@ -1,3 +1,4 @@
+import { JOB_FINDER_SETTINGS_SECTIONS } from "@nestor/contracts";
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
@@ -26,7 +27,8 @@ import {
  * button remains only to retry a failed save.
  */
 
-export const SETTINGS_RESUME_LOOK_LABEL = "Resume look";
+export const SETTINGS_RESUME_LOOK_LABEL =
+  JOB_FINDER_SETTINGS_SECTIONS["application-defaults"].label;
 
 const fontPresetOptions: ReadonlyArray<{
   description: string;
