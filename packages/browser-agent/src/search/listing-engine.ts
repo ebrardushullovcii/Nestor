@@ -233,7 +233,7 @@ export async function collectSource(
             body.text &&
             (input.lane === "browser" || !body.renderSuggested) &&
             !/\b(?:loading|please wait|wird geladen)\b/iu.test(body.text) &&
-            !/<(?:a|button|input|select|iframe)\b/iu.test(body.html)
+            !body.hasInteractiveContent
           ) {
             recognized = true;
             notes.push(`No listings found at ${page.finalUrl}.`);

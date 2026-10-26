@@ -12,7 +12,11 @@ import {
   readListings,
   screenCards,
 } from "./listing-engine";
-import { readInventoryHtml, listingSignInRequired } from "./listing-html";
+import {
+  readInventoryHtml,
+  readListingHtml,
+  listingSignInRequired,
+} from "./listing-html";
 import { htmlToPlainText } from "./listing-detail-extraction";
 import { listingClosedReason } from "./listing-status";
 import { publicBoardFeed } from "./public-board-feed";
@@ -30,6 +34,33 @@ const card = (title: string, id = title): ListingCard => ({
   cardFingerprint: id,
   sourceId: source.id,
   sourceLabel: source.label,
+});
+
+test("detail reads retain all visible requirements and interactive controls without parsing script payloads", () => {
+  const detail = readListingHtml(
+    `<style>.hidden { display:none }</style><script>window.state=${JSON.stringify({ payload: "script-only ".repeat(25000) })}</script><main><article><h1>Engineer</h1><p>First requirement: TypeScript.</p><p>Final requirement: German B1.</p><a href="/apply">Apply</a></article></main>`,
+    "Engineer",
+  );
+  expect(detail.text).toContain("First requirement: TypeScript.");
+  expect(detail.text).toContain("Final requirement: German B1.");
+  expect(detail.text).not.toContain("script-only");
+  expect(detail).toMatchObject({
+    detailHeading: true,
+    renderSuggested: false,
+    hasInteractiveContent: true,
+  });
+  expect(
+    readListingHtml(
+      '<main>Loading</main><script src="app.js"></script>',
+      "Engineer",
+    ).renderSuggested,
+  ).toBe(true);
+  expect(
+    readListingHtml(
+      '<main>No open jobs</main><script type="application/ld+json">{}</script>',
+      "Engineer",
+    ).renderSuggested,
+  ).toBe(false);
 });
 
 test("collects all observed pages without AI, ignoring editorial links and preserving query identities", async () => {

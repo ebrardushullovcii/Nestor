@@ -1,9 +1,5 @@
 import { listingClosedReason } from "./listing-status";
-import {
-  parse,
-  serializeOuter,
-  type DefaultTreeAdapterTypes as Tree,
-} from "parse5";
+import { parse, type DefaultTreeAdapterTypes as Tree } from "parse5";
 import type { ListingCard } from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import { htmlToPlainText } from "./listing-detail-extraction";
@@ -43,10 +39,22 @@ const element = (node: Node): node is Element => "tagName" in node;
 const attr = (node: Element, key: string): string =>
   node.attrs.find((a) => a.name === key)?.value ?? "";
 function descendants(node: Node): Element[] {
-  if (!("childNodes" in node)) return [];
-  return node.childNodes.flatMap((child) =>
-    element(child) ? [child, ...descendants(child)] : [],
-  );
+  const result: Element[] = [],
+    pending: Node[] = [];
+  const pushChildren = (parent: Node) => {
+    if (!("childNodes" in parent)) return;
+    for (let i = parent.childNodes.length - 1; i >= 0; i--) {
+      const child = parent.childNodes[i];
+      if (child && element(child)) pending.push(child);
+    }
+  };
+  pushChildren(node);
+  while (pending.length) {
+    const child = pending.pop()!;
+    if (element(child)) result.push(child);
+    pushChildren(child);
+  }
+  return result;
 }
 function textOf(node: Node): string {
   if (node.nodeName === "#text") return (node as Tree.TextNode).value;
@@ -91,6 +99,8 @@ function excluded(node: Element, excludeForms = true): boolean {
 
 /** A login widget or script on a public page is not an access wall. */
 export function listingSignInRequired(html: string): boolean {
+  // Without a password field there is no sign-in form; most pages skip the parse.
+  if (!/password|&#/iu.test(html)) return false;
   const nodes = descendants(parse(html));
   if (
     !nodes.some(
@@ -573,11 +583,28 @@ export function readListingHtml(
   expectedTitle: string,
 ): {
   text: string;
-  html: string;
+  hasInteractiveContent: boolean;
   detailHeading: boolean;
   renderSuggested: boolean;
 } {
-  const doc = parse(html),
+  // These nodes never contribute visible detail text. Keep the original HTML
+  // for published facts and links, but avoid parsing large hydration payloads
+  // into a second tree just to discard them while reading the listing body.
+  let hasApplicationScript = false;
+  const visibleHtml = html.replace(
+    /<(script|style)\b([^>]*)>[\s\S]*?<\/\1\s*>/giu,
+    (_match, tag: string, attributes: string) => {
+      if (
+        tag.toLowerCase() === "script" &&
+        !/\btype\s*=\s*["']?application\/ld\+json(?:["'\s]|$)/iu.test(
+          attributes,
+        )
+      )
+        hasApplicationScript = true;
+      return " ";
+    },
+  );
+  const doc = parse(visibleHtml),
     nodes = descendants(doc);
   const articles = nodes.filter((node) => node.tagName === "article");
   const article = articles.find((node) =>
@@ -594,21 +621,18 @@ export function readListingHtml(
     ) ??
     nodes.find((node) => node.tagName === "body") ??
     doc;
-  const detailHeading = descendants(root).some(
+  const rootNodes = descendants(root);
+  const detailHeading = rootNodes.some(
     (node) =>
       node.tagName === "h1" &&
       text(node).toLowerCase() === expectedTitle.toLowerCase(),
   );
   return {
     text: text(root),
-    html: element(root) ? serializeOuter(root) : html,
+    hasInteractiveContent: rootNodes.some((node) =>
+      ["a", "button", "input", "select", "iframe"].includes(node.tagName),
+    ),
     detailHeading,
-    renderSuggested:
-      !detailHeading &&
-      nodes.some(
-        (node) =>
-          node.tagName === "script" &&
-          attr(node, "type") !== "application/ld+json",
-      ),
+    renderSuggested: !detailHeading && hasApplicationScript,
   };
 }
