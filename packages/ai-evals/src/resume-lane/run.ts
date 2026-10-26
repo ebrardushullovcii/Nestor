@@ -66,9 +66,15 @@ export function tokensUsed(captures: readonly EvalHttpCapture[]) {
     let usage: Record<string, unknown> | null = null;
     for (const payload of payloads) {
       try {
-        const parsed = JSON.parse(payload) as { usage?: unknown };
-        if (parsed.usage && typeof parsed.usage === "object")
-          usage = parsed.usage as Record<string, unknown>;
+        // Chat completions put usage on the payload; the Responses API puts
+        // it on the response inside its completed event.
+        const parsed = JSON.parse(payload) as {
+          usage?: unknown;
+          response?: { usage?: unknown };
+        };
+        const found = parsed.usage ?? parsed.response?.usage;
+        if (found && typeof found === "object")
+          usage = found as Record<string, unknown>;
       } catch {
         // Not JSON: a keep-alive or a cut-off chunk.
       }

@@ -2,7 +2,9 @@ import { ResumeDraftSchema } from "@nestor/contracts";
 import { resumeClaimContentHash } from "@nestor/job-finder/resumes";
 import { describe, expect, it } from "vitest";
 
+import type { EvalHttpCapture } from "../contracts";
 import { flagsLeft, inventedFacts, levelVerdicts } from "./checks";
+import { tokensUsed } from "./run";
 
 const AT = "2026-10-26T00:00:00.000Z";
 const SOURCE = `CASEY ROWAN
@@ -135,4 +137,17 @@ describe("resume lane checks", () => {
       aggressive: "2 invented facts.",
     });
   });
+});
+
+it("counts tokens from chat completions and from the Responses API's completed event", () => {
+  const capture = (responseBody: string) =>
+    ({ responseBody }) as unknown as EvalHttpCapture;
+  expect(
+    tokensUsed([
+      capture('{"usage":{"prompt_tokens":10,"completion_tokens":2}}'),
+      capture(
+        'data: {"type":"response.output_text.delta","delta":"x"}\n\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":30,"output_tokens":4}}}\n\ndata: [DONE]\n',
+      ),
+    ]),
+  ).toEqual({ prompt: 40, completion: 6 });
 });
