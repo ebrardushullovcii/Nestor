@@ -1,4 +1,5 @@
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
+import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
 import {
@@ -89,6 +90,109 @@ test("the selected file reaches a separate signed storage target, with no other 
       )
     ).allowed,
   ).toBe(false);
+});
+
+test.each([false, true])(
+  "a signed key and policy may repeat only the exact selected filename (encoded=%s)",
+  async (encoded) => {
+    const fileName = realShapes.fileName;
+    const embedded = encoded
+      ? [...new TextEncoder().encode(fileName)]
+          .map((byte) => `%${byte.toString(16).padStart(2, "0")}`)
+          .join("")
+      : fileName;
+    const key = `${realShapes.keyPrefix}${embedded}/${embedded}`;
+    const policy = (objectKey: string) =>
+      Buffer.from(
+        JSON.stringify({
+          ...replay.policy,
+          conditions: [...replay.policy.conditions, { key: objectKey }],
+        }),
+      ).toString("base64");
+    const input = {
+      ...(await multipart(
+        { ...fields, key, Policy: policy(key) },
+        bytes,
+        fileName,
+      )),
+      window: { ...grant, fileName },
+      preparedValues: [
+        realShapes.name,
+        realShapes.firstName,
+        realShapes.lastName,
+        "90000",
+      ],
+    };
+    expect(await classifyAttachmentUpload(input)).toMatchObject({
+      allowed: true,
+      containsFile: true,
+    });
+    for (const [badKey, badPolicyKey] of [
+      [`${key}/Taylor`, key],
+      [key, `${key}/Morgan`],
+      [`${key}/90000`, key],
+    ]) {
+      const request = {
+        ...input,
+        ...(await multipart(
+          { ...fields, key: badKey, Policy: policy(badPolicyKey) },
+          bytes,
+          fileName,
+        )),
+        window: input.window,
+      };
+      expect(await classifyAttachmentUpload(request)).toMatchObject({
+        allowed: false,
+      });
+    }
+  },
+);
+
+test("Rails upload markers and a generic binary MIME remain attachment-only", async () => {
+  const input = {
+    ...(await multipart(
+      { ...fields, ...realShapes.rails },
+      bytes,
+      realShapes.fileName,
+    )),
+    window: { ...grant, fileName: realShapes.fileName },
+    preparedValues: [realShapes.firstName, realShapes.lastName],
+  };
+  expect(await classifyAttachmentUpload(input)).toMatchObject({
+    allowed: true,
+  });
+  for (const bad of realShapes.refusedRails) {
+    const request = {
+      ...input,
+      ...(await multipart(
+        { ...fields, ...realShapes.rails, ...bad },
+        bytes,
+        realShapes.fileName,
+      )),
+      window: input.window,
+    };
+    expect(await classifyAttachmentUpload(request)).toMatchObject({
+      allowed: false,
+    });
+  }
+  for (const pathname of realShapes.refusedPaths)
+    expect(
+      await classifyAttachmentUpload({
+        ...input,
+        url: `https://storage.example.test${pathname}`,
+      }),
+    ).toMatchObject({ allowed: false });
+  expect(
+    await classifyAttachmentUpload({
+      ...input,
+      ...(await multipart(
+        { ...fields, ...realShapes.rails, final: "true" },
+        bytes,
+        realShapes.fileName,
+      )),
+      window: input.window,
+    }),
+  ).toMatchObject({ allowed: false });
 });
 test("a same-origin file-handle presign contains only upload metadata", async () => {
   const request = {

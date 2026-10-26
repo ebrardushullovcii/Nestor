@@ -1,7 +1,13 @@
 import type { Response } from "playwright";
 
+const refusal =
+  /(?<![\p{L}\p{N}])(?:fail(?:ed|ure|s)?|reject(?:ed|s)?|invalid|unsupported|not (?:allowed|accepted|supported)|too (?:large|big)|exceed(?:s|ed)?|errors?|could ?n[o']t|cannot|unable)(?![\p{L}\p{N}])/iu;
+const messageKey = /^(?:message|msg|detail|description|reason)$/iu;
+
 /** A successful status does not override an explicit refusal in its response body. */
 export function mutationResponseSaysError(value: unknown, depth = 0): boolean {
+  if (depth > 2) return false;
+  if (typeof value === "string") return refusal.test(value);
   if (!value || typeof value !== "object" || depth > 2) return false;
   if (Array.isArray(value))
     return value.some((entry) => mutationResponseSaysError(entry, depth + 1));
@@ -23,6 +29,17 @@ export function mutationResponseSaysError(value: unknown, depth = 0): boolean {
     typeof body.statusCode === "string" &&
     /^\d{3}$/u.test(body.statusCode.trim()) &&
     Number(body.statusCode) >= 400
+  )
+    return true;
+  const messages = Object.entries(body).filter(
+    ([, value]) => value !== null && value !== undefined && value !== "",
+  );
+  if (
+    messages.length &&
+    messages.every(([key]) => messageKey.test(key)) &&
+    messages.some(
+      ([, value]) => typeof value === "string" && refusal.test(value),
+    )
   )
     return true;
   if (
@@ -59,6 +76,7 @@ export async function inspectMutationResponse(
     body = text.trim() ? JSON.parse(text) : null;
   } catch {
     if (type.includes("json")) return { accepted: false, body: null };
+    if (type.startsWith("text/plain")) body = text;
   }
   return { accepted: !mutationResponseSaysError(body), body };
 }

@@ -1,10 +1,10 @@
-import type { Page, Response } from "playwright";
+import type { Page, Request as PageRequest, Response } from "playwright";
 import { inspectMutationResponse } from "./mutation-response";
 
 interface ObservedMutationResponse {
   method: string;
   url: string;
-  requestBody: string;
+  bodyKey: string;
   startedAt: number;
   status: number | null;
   text: string | null;
@@ -25,11 +25,26 @@ export function installMutationResponseBodyObserver(): void {
         : body instanceof URLSearchParams
           ? body.toString()
           : null;
-    if (text === null || text.length > 64_000) return null;
+    let bodyKey: string;
+    if (text !== null && text.length <= 64_000) bodyKey = `text:${text}`;
+    else if (body instanceof FormData) {
+      const files = [...body]
+        .filter(
+          (entry): entry is [string, File] => typeof entry[1] !== "string",
+        )
+        .map(([field, file]) => [field, file.name, file.size]);
+      bodyKey = JSON.stringify(
+        files.length ? ["files", files] : ["fields", [...body]],
+      );
+      if (bodyKey.length > 64_000) return null;
+    } else if (body instanceof Blob) bodyKey = `bytes:${body.size}`;
+    else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
+      bodyKey = `bytes:${body.byteLength}`;
+    else return null;
     const entry: ObservedMutationResponse = {
       method,
       url: new URL(url, location.href).href,
-      requestBody: text,
+      bodyKey,
       startedAt: Date.now(),
       status: null,
       text: null,
@@ -132,6 +147,36 @@ export function installMutationResponseBodyObserver(): void {
 
 const requestTokens = new WeakMap<Response, string>();
 
+async function requestBodyKeys(request: PageRequest): Promise<string[]> {
+  const bytes = request.postDataBuffer();
+  if (!bytes || bytes.byteLength > 50 * 1024 * 1024) return [];
+  const keys = [`bytes:${bytes.byteLength}`];
+  const contentType = request.headers()["content-type"] ?? "";
+  if (/\bmultipart\/form-data\b/iu.test(contentType)) {
+    try {
+      const form = await new Request("http://localhost/", {
+        method: "POST",
+        headers: { "content-type": contentType },
+        body: new Uint8Array(bytes),
+      }).formData();
+      const files = [...form]
+        .filter(
+          (entry): entry is [string, File] => typeof entry[1] !== "string",
+        )
+        .map(([field, file]) => [field, file.name, file.size]);
+      keys.push(
+        JSON.stringify(files.length ? ["files", files] : ["fields", [...form]]),
+      );
+    } catch {
+      return [];
+    }
+  } else {
+    const text = request.postData();
+    if (text !== null && text.length <= 64_000) keys.push(`text:${text}`);
+  }
+  return keys;
+}
+
 /** Only a unique exact request observed on its own frame can supply a fallback body. */
 export async function inspectPageMutationResponse(
   page: Page,
@@ -143,10 +188,9 @@ export async function inspectPageMutationResponse(
     requestTokens.set(response, token);
   }
   const request = response.request();
-  const requestBody = request.postData();
   const fallback = async (): Promise<string> => {
-    if (requestBody === null || requestBody.length > 64_000)
-      throw Error("Opaque request body");
+    const bodyKeys = await requestBodyKeys(request);
+    if (!bodyKeys.length) throw Error("Opaque request body");
     const frame = request.frame();
     if (frame.page() !== page) throw Error("Wrong page");
     for (let attempt = 0; attempt < 15; attempt += 1) {
@@ -162,7 +206,7 @@ export async function inspectPageMutationResponse(
                 (!entry.claimedBy || entry.claimedBy === input.token) &&
                 entry.method === input.method &&
                 entry.url === input.url &&
-                entry.requestBody === input.body &&
+                input.bodyKeys.includes(entry.bodyKey) &&
                 Date.now() - entry.startedAt < 15_000,
             ) ?? [];
           if (matches.length !== 1) return null;
@@ -174,7 +218,7 @@ export async function inspectPageMutationResponse(
         {
           method: request.method(),
           url: request.url(),
-          body: requestBody,
+          bodyKeys,
           status: response.status(),
           token,
         },

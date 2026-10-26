@@ -43,3 +43,16 @@ test("a redirect or unreadable JSON body alone cannot confirm a save", async () 
       }),
     ).toMatchObject({ accepted: false });
 });
+
+test.each(replay.plainText)(
+  "a plain-text response is judged by refusal wording: $text",
+  async ({ text, accepted }) => {
+    expect(
+      await inspectMutationResponse({
+        status: () => 200,
+        headers: () => ({ "content-type": "text/plain; charset=utf-8" }),
+        text: () => Promise.resolve(text),
+      }),
+    ).toMatchObject({ accepted });
+  },
+);

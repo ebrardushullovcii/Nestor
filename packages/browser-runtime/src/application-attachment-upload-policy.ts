@@ -39,6 +39,21 @@ function containsPreparedAnswer(
   });
 }
 
+/** The authorized filename may be embedded in a signed key or decoded policy. */
+function withoutAttachmentName(text: string, fileName: string): string {
+  let value = text.split(fileName).join("");
+  for (let pass = 0; pass < 2; pass++) {
+    try {
+      const decoded = decodeURIComponent(value);
+      value = decoded.split(fileName).join("");
+      if (decoded === value && !/%[\da-f]{2}/iu.test(value)) break;
+    } catch {
+      break;
+    }
+  }
+  return value;
+}
+
 function uploadMetadata(
   value: unknown,
   grant: AttachmentUploadWindow,
@@ -152,7 +167,9 @@ function storageMetadata(
     case "bucket":
       return /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(value);
     case "content-type":
-      return value === grant.mimeType;
+      return value === grant.mimeType || value === "application/octet-stream";
+    case "utf8":
+      return value === "✓";
     case "filename":
     case "file_name":
       return value === grant.fileName;
@@ -238,8 +255,9 @@ function storageMetadata(
     case "csrftoken":
     case "csrfmiddlewaretoken":
     case "_csrftoken":
-    case "authenticity_token":
       return sameOrigin && /^[\w+/=-]{16,4096}$/u.test(value);
+    case "authenticity_token":
+      return /^[\w+/=-]{1,4096}$/u.test(value);
     default:
       return false;
   }
@@ -281,7 +299,13 @@ export async function classifyAttachmentUpload(input: {
   const preparedAnswers = (input.preparedValues ?? []).filter(
     (value) => value !== grant.fileName,
   );
-  if (requestUrlCarriesPreparedValue(url.href, preparedAnswers)) return denied;
+  if (
+    requestUrlCarriesPreparedValue(
+      withoutAttachmentName(url.href, grant.fileName),
+      preparedAnswers,
+    )
+  )
+    return denied;
   let signal: string;
   try {
     signal = splitCase(decodeURIComponent(url.pathname + url.search));
@@ -342,7 +366,10 @@ export async function classifyAttachmentUpload(input: {
           url.origin === grant.sourceOrigin,
         ) ||
         value.length > 8192 ||
-        containsPreparedAnswer(decoded, preparedAnswers) ||
+        containsPreparedAnswer(
+          withoutAttachmentName(decoded, grant.fileName),
+          preparedAnswers,
+        ) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
         return { allowed: false, containsFile: true };
