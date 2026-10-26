@@ -1,4 +1,7 @@
-import { ApplyAgentTimingSchema } from "./agent-timing";
+import {
+  ApplyAgentTimingSchema,
+  ApplicationApplyUsageTotalsSchema,
+} from "./agent-timing";
 import { ApplicationAnswerDependenciesSchema } from "./application-answer-dependencies";
 import { z } from "zod";
 
@@ -2322,6 +2325,7 @@ export const ApplyExecutionResultSchema = z.object({
     [],
   ),
   skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
+  applyUsageTotals: optionalStoredField(ApplicationApplyUsageTotalsSchema.nullable(), null),
   questionContexts: optionalStoredField(
     z
       .array(

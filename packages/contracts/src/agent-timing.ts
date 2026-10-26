@@ -7,6 +7,22 @@ export const ModelTokenUsageSchema = z.object({
   reasoningTokens: z.number().int().nonnegative(),
 });
 export type ModelTokenUsage = z.infer<typeof ModelTokenUsageSchema>;
+export interface ModelRequestAttempt {
+  attempt: number;
+  maxAttempts: number;
+}
+
+export const ModelUsageTotalsSchema = ModelTokenUsageSchema.extend({
+  calls: z.number().int().nonnegative(),
+  unreportedCalls: z.number().int().nonnegative(),
+});
+export type ModelUsageTotals = z.infer<typeof ModelUsageTotalsSchema>;
+export const ApplicationApplyUsageTotalsSchema = ModelUsageTotalsSchema.extend({
+  preparationAttempts: z.number().int().nonnegative(),
+});
+export type ApplicationApplyUsageTotals = z.infer<
+  typeof ApplicationApplyUsageTotalsSchema
+>;
 
 /** Durations overlap: tool time includes checks; auxiliary model calls may run during tools. */
 const ApplyAgentTimingRecordSchema = z.object({
@@ -15,6 +31,8 @@ const ApplyAgentTimingRecordSchema = z.object({
   modelTurns: z.number().int().nonnegative(),
   auxiliaryModelMs: z.number().finite().nonnegative(),
   auxiliaryModelCalls: z.number().int().nonnegative(),
+  transportCalls: z.number().int().nonnegative().optional(),
+  transportRetries: z.number().int().nonnegative().optional(),
   tokenUsage: ModelTokenUsageSchema.extend({
     reportedCalls: z.number().int().nonnegative(),
     unreportedCalls: z.number().int().nonnegative(),

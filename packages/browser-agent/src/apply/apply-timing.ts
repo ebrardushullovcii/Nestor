@@ -11,6 +11,8 @@ export function createApplyTiming(now: () => Date) {
     modelTurns: 0,
     auxiliaryModelMs: 0,
     auxiliaryModelCalls: 0,
+    transportCalls: 0,
+    transportRetries: 0,
     tokenUsage: {
       reportedCalls: 0,
       unreportedCalls: 0,
@@ -171,6 +173,14 @@ export function createApplyTiming(now: () => Date) {
           const response = await client.chatWithTools(messages, tools, {
             ...options,
             includeUsage: true,
+            onRequestAttempt: (event) => {
+              timing.transportCalls! += 1;
+              if (event.attempt > 0) {
+                timing.transportRetries! += 1;
+                usage.unreportedCalls += 1;
+              }
+              options?.onRequestAttempt?.(event);
+            },
           });
           if (response.usage) {
             usage.unreportedCalls -= 1;

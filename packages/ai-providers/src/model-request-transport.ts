@@ -32,6 +32,11 @@ import {
   type ResponsesPayload,
   normalizeModelPayload,
 } from "./openai-compatible-transport";
+import {
+  hasModelUsageScope,
+  recordModelRequestAttempt,
+  recordModelRequestUsage,
+} from "./model-usage-scope";
 
 export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 120_000;
 export const DEFAULT_MODEL_MAX_ATTEMPTS = 5;
@@ -760,7 +765,9 @@ export async function performModelRequest(
     );
   }
   try {
-    return await performModelRequestAttempts(input);
+    const payload = await performModelRequestAttempts(input);
+    recordModelRequestUsage(payload.usage);
+    return payload;
   } catch (error) {
     if (
       error instanceof ModelRequestHttpError &&
@@ -791,7 +798,15 @@ async function performModelRequestAttempts(
   const startedAt = Date.now();
   const deadline = startedAt + input.totalTimeoutMs;
   const requestBody = JSON.stringify(
-    streaming ? { ...input.body, stream: true } : input.body,
+    streaming
+      ? {
+          ...input.body,
+          stream: true,
+          ...(hasModelUsageScope() && input.apiMode === "chat_completions"
+            ? { stream_options: { include_usage: true } }
+            : {}),
+        }
+      : input.body,
   );
   const headers = {
     ...input.headers,
@@ -812,6 +827,7 @@ async function performModelRequestAttempts(
     }
 
     input.onEvent?.({ type: "attempt_started", attempt, maxAttempts });
+    recordModelRequestAttempt();
     input.onStreamEvent?.({ type: "attempt_started", attempt });
 
     const attemptController = new AbortController();
