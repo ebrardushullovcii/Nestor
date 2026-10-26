@@ -235,9 +235,9 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       value.answer,
     );
     const previous = sql(
-      "SELECT id FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
+      "SELECT id,option_fallback_json FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
     ).get(value.key, value.scope.country, value.scope.siteOrigin) as
-      | { id: number }
+      | { id: number; option_fallback_json: string | null }
       | undefined;
     if (previous)
       answerChange?.capture({ table: "form_answers", id: previous.id });
@@ -262,10 +262,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ) as { id: number };
     if (!previous)
       answerChange?.capture({ table: "form_answers", id: result.id }, null);
+    const rule =
+      value.optionFallback === undefined
+        ? previous?.option_fallback_json
+          ? SavedOptionFallbackSchema.parse(
+              JSON.parse(previous.option_fallback_json) as unknown,
+            )
+          : null
+        : value.optionFallback;
     sql("UPDATE form_answers SET option_fallback_json=? WHERE id=?").run(
-      value.optionFallback
-        ? JSON.stringify({ ...value.optionFallback, primary: value.answer })
-        : null,
+      rule ? JSON.stringify({ ...rule, primary: value.answer }) : null,
       result.id,
     );
     return result.id;

@@ -50,6 +50,17 @@ it("persists a saved fallback and visible skipped application across restart wit
     )[0]?.optionFallback,
   ).toEqual(rule);
   expect(readSavedApplicationAnswers(jobs)[0]?.optionFallback).toEqual(rule);
+  applications.needsYou.remember({
+    key: "country",
+    prompt: "Country of residence",
+    answer: rule.primary,
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(applications.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
+    rule,
+  );
   applications.applyJobs({ selection: { ids: add(jobs, 1) } });
   const work = applications.claimNext()!;
   expect(
@@ -76,6 +87,26 @@ it("persists a saved fallback and visible skipped application across restart wit
     optionFallback: null,
   });
   expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toBeNull();
+});
+
+it("skipping retires only this application's questions and keeps a shared question for other applications", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const a = applications.claimNext()!,
+    b = applications.claimNext()!;
+  applications.needsYou.request(question(a.id, a.attempt));
+  applications.needsYou.request(question(b.id, b.attempt));
+  applications.needsYou.request({
+    ...question(a.id, a.attempt),
+    key: "unique-question",
+    fieldKey: "unique-question",
+    prompt: "Unique question",
+  });
+  expect(applications.needsYou.list().total).toBe(2);
+  applications.skip(a.id, a.attempt, "Saved rule says to skip.");
+  expect(applications.needsYou.forApplication(a.id)).toEqual([]);
+  expect(applications.needsYou.list().total).toBe(1);
+  expect(applications.needsYou.forApplication(b.id)).toHaveLength(1);
 });
 
 it("persists guarded answer Undo without retracting answers that released applications", () => {

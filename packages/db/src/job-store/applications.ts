@@ -665,11 +665,23 @@ export function createApplicationStore(store: JobStore) {
     skip(id: number, attempt: number, reason: string): boolean {
       return store.transaction(() => {
         const row = sql(
-          "UPDATE applications SET state='stopped', disposition='skipped', error=?, updated_at=? WHERE id=? AND attempt=? AND state='running' RETURNING job_id",
+          "UPDATE applications SET state='stopped', disposition='skipped', error=?, updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
         ).get(reason, Date.now(), id, attempt) as
           | { job_id: number }
           | undefined;
-        if (row) changed([row.job_id]);
+        if (row) {
+          const detached = sql(
+            "DELETE FROM application_needs_you WHERE application_id=? RETURNING task_id",
+          ).all(id) as { task_id: number }[];
+          for (const task of detached)
+            sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id WHERE n.task_id=needs_you.id AND n.attempt=a.attempt)
+            AND NOT EXISTS (SELECT 1 FROM source_needs_you s WHERE s.task_id=needs_you.id)`).run(
+              Date.now(),
+              task.task_id,
+            );
+          changed([row.job_id]);
+        }
         return !!row;
       });
     },
