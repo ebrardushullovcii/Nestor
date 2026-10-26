@@ -1,4 +1,5 @@
 import {
+  collectListingRequestedSkills,
   completeTailoredResumeDraft,
   type JobFinderAiClient,
 } from "@nestor/ai-providers";
@@ -275,13 +276,14 @@ export async function writeResume(
     ),
     written.coreSkills,
   );
-  // Aggressive accepted stretching when the person chose it, so only its
-  // numbers are held to the evidence; the other levels have every written
-  // line checked by the model once. Either way a failed line takes the
-  // checker's fix, goes back to the person's own wording, or is left off.
+  // Aggressive rewrites every line, so its facts are held to the evidence
+  // here without another model call: numbers and the listing's tools. The
+  // other levels have every written line checked by the model once. Either
+  // way a failed line takes the checker's fix, goes back to the person's own
+  // wording, or is left off.
   const checked =
     input.level === "aggressive"
-      ? withNumberChecks(sanitized, profile)
+      ? withEvidenceChecks(sanitized, profile, job)
       : await withResumeClaimChecks({ ...check, draft: sanitized });
   const settled = settleResumeClaimLines({
     draft: checked,
@@ -300,33 +302,60 @@ const numbersIn = (text: string) =>
     value.replace(/[,.]+$/u, "").replace(/,/gu, ""),
   );
 
+/** Whether `text` names `skill` as a whole word or phrase. */
+function names(text: string, skill: string): boolean {
+  const escaped = skill.trim().replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return (
+    escaped.length > 0 &&
+    new RegExp(`(^|[^A-Za-z0-9+#])${escaped}($|[^A-Za-z0-9+#])`, "iu").test(
+      text,
+    )
+  );
+}
+
 /**
- * Marks each written line that states a number the person's evidence does
- * not have as unsupported, so settling restores or drops it.
+ * Marks each written line that states a number, or names a tool the
+ * listing asks for, that the person's evidence does not have as
+ * unsupported, so settling restores or drops it.
  */
-function withNumberChecks(
+function withEvidenceChecks(
   draft: ResumeDraft,
   profile: CandidateProfile,
+  job: SavedJob,
 ): ResumeDraft {
+  const evidence = [
+    ...buildResumeClaimEvidenceBank(profile).map((entry) => entry.text),
+    profile.baseResume.textContent ?? "",
+    profile.skills.join(", "),
+  ];
+  const evidenceText = evidence.join("\n");
   const known = new Set(
     [
-      ...buildResumeClaimEvidenceBank(profile).map((entry) => entry.text),
-      profile.baseResume.textContent ?? "",
+      ...evidence,
       // Aggressive may round evidenced years up by one.
       ...(profile.yearsExperience
         ? [`${profile.yearsExperience} ${profile.yearsExperience + 1}`]
         : []),
     ].flatMap(numbersIn),
   );
+  const missingTools = collectListingRequestedSkills(job).filter(
+    (skill) => !names(evidenceText, skill),
+  );
   const isPersonsOwn = buildPersonsOwnResumeClaimMatcher({ draft, profile });
   const checkedAt = new Date().toISOString();
   const claimChecks = buildResumeClaimDescriptors(draft)
     .filter((line) => !isPersonsOwn(line))
-    .filter((line) => numbersIn(line.text).some((value) => !known.has(value)))
-    .map((line) => ({
+    .flatMap((line) => {
+      const tool = missingTools.find((skill) => names(line.text, skill));
+      const number = numbersIn(line.text).some((value) => !known.has(value));
+      return tool || number ? [{ line, tool }] : [];
+    })
+    .map(({ line, tool }) => ({
       contentHash: resumeClaimContentHash(line.text),
       verdict: "unsupported" as const,
-      reason: "States a number the profile does not have.",
+      reason: tool
+        ? `Names ${tool}, which the profile does not mention.`
+        : "States a number the profile does not have.",
       evidenceIds: [],
       fix: null,
       evidenceKey: null,

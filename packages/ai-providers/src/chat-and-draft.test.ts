@@ -1610,8 +1610,9 @@ describe("openai-compatible chat and draft behavior", () => {
       expect(userPayload.targetJob?.description?.length ?? 0).toBeLessThan(
         `Job description ${"requirement ".repeat(5000)}`.length,
       );
+      // Tailored rewrites the summary and the relevant bullets, more than Light.
       expect(body.messages?.[0]?.content).toContain(
-        "Compose {} when the cited evidence is already as clear and professional",
+        "the summary rewritten for this job",
       );
       expect(body.messages?.[0]?.content).not.toContain(
         "Return one JSON object",
