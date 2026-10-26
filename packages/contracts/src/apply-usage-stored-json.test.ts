@@ -26,6 +26,7 @@ test("old execution JSON reads with no invented historical usage totals", () => 
     longestSteps: [],
     requests: [],
   });
-  expect(timing.transportCalls).toBe(0);
-  expect(timing.transportRetries).toBe(0);
+  // An old run did not count provider requests; it does not claim zero.
+  expect(timing.transportCalls).toBeUndefined();
+  expect(timing.transportRetries).toBeUndefined();
 });

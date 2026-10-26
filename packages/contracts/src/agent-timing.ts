@@ -32,8 +32,9 @@ const ApplyAgentTimingRecordSchema = z.object({
   modelTurns: z.number().int().nonnegative(),
   auxiliaryModelMs: z.number().finite().nonnegative(),
   auxiliaryModelCalls: z.number().int().nonnegative(),
-  transportCalls: optionalStoredField(z.number().int().nonnegative(), 0),
-  transportRetries: optionalStoredField(z.number().int().nonnegative(), 0),
+  // Absent on runs from before provider requests were counted: not zero, unknown.
+  transportCalls: z.number().int().nonnegative().optional(),
+  transportRetries: z.number().int().nonnegative().optional(),
   tokenUsage: ModelTokenUsageSchema.extend({
     reportedCalls: z.number().int().nonnegative(),
     unreportedCalls: z.number().int().nonnegative(),
