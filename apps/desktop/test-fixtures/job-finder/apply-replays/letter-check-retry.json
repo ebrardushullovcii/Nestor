@@ -1,0 +1,8 @@
+{
+  "question": "Cover letter",
+  "answerSentence": "The role is an opportunity for an Analyst to contribute and build reliable work together. ",
+  "repetitions": 100,
+  "firstAttemptMs": 55000,
+  "retryMs": 45000,
+  "firstError": "incomplete: max_output_tokens"
+}

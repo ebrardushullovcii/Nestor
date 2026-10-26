@@ -1,6 +1,7 @@
 import type { ApplyAgentTiming, ApplyPickerAttempt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
+  ApplyAnswerTags,
   ApplyBlockedAttempt,
   CoverLetterPreference,
   AiApplyingBehavior,
@@ -78,6 +79,8 @@ export interface ApplyFormControl {
   validationMessage: string;
   /** What the question is about, so an answer can be sourced for it. */
   questionKind: ApplicationQuestionKind;
+  /** Model reading bound to the observed instructions and current source catalog. */
+  answerTags?: ApplyAnswerTags | null;
   /** Model reading of current pay versus the person's saved expected pay. */
   asksCurrentPay?: boolean;
   /** Model reading: this asks for this application's hiring country. */
@@ -193,6 +196,8 @@ export interface ApplyFormObservation {
   step: ApplyStepPosition;
   /** A bounded excerpt of what the page says. `read_text` gets the rest. */
   bodyTextExcerpt: string;
+  /** Read from the full observed page before its model excerpt is shortened. */
+  ownWordsRequired?: boolean;
   headings: ApplyHeading[];
   controls: ApplyFormControl[];
   actions: ApplyFormAction[];
@@ -281,6 +286,7 @@ export interface ApplyAnswer {
 }
 
 export interface ApplyAnswerSources {
+  listingDiscovery?: { label: string; url: string };
   profile: CandidateProfile;
   preferences?: JobSearchPreferences | undefined;
   /** Plain text of the resume that goes with this application, when there is one. */

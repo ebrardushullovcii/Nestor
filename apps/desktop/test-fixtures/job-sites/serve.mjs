@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { handleMoreSites, moreSites } from "./sites/router.mjs";
 import { handleRealUploadShapes } from "./real-upload-shapes.mjs";
+import { handlePersonalClaims } from "./personal-claims.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -444,6 +445,7 @@ const server = http.createServer(async (req, res) => {
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )
       return;
+    if (handlePersonalClaims(req, res, url, { send })) return;
     if (await handleMoreSites(req, res, url, { send, readPost, logPost }))
       return;
     if (req.method === "POST") {

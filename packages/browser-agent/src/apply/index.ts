@@ -97,5 +97,9 @@ export {
 } from "./written-answer-grounding";
 
 export { applicationFacts } from "./application-facts";
+export { requiresSavedNationalityAnswer } from "./person-nationality";
+export { requiresSavedOpinionAnswer } from "./answer-evidence";
 export { createQuestionClassifier } from "./question-classification";
 export { replaceApprovedApplicationLetter } from "./approved-letter";
+
+export { checkClassifiedApplicationAnswers } from "./classified-answer-check";

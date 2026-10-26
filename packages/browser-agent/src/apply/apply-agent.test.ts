@@ -150,6 +150,9 @@ function config(
         headline: "Platform engineer",
         summary: "Builds dependable internal tools.",
         currentLocation: "Manchester",
+        workEligibility: {
+          authorizedWorkCountries: ["United Kingdom", "Germany"],
+        },
         yearsExperience: 8,
         baseResume: {
           id: "resume_test",
@@ -185,13 +188,77 @@ function config(
  * The fact check's answer when a scripted model is asked to check answers:
  * every answer supported. It does not use up a scripted turn.
  */
+function flowEvidence(
+  applicant: Record<string, unknown>,
+  answer: { question: string; proposedAnswer: string },
+) {
+  const scalars: Array<{ path: string; value: string }> = [];
+  const visit = (value: unknown, path: string) => {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+      scalars.push({ path, value: String(value) });
+    else if (value && typeof value === "object")
+      for (const [key, item] of Object.entries(value))
+        visit(
+          item,
+          `${path}/${key.replace(/~/gu, "~0").replace(/\//gu, "~1")}`,
+        );
+  };
+  visit(applicant, "");
+  const saved = Array.isArray(applicant.savedAnswers)
+    ? applicant.savedAnswers
+    : [];
+  const savedIndex = saved.findIndex((entry: unknown) => {
+    const item = entry as { question?: string; answer?: string };
+    return (
+      item.question === answer.question && item.answer === answer.proposedAnswer
+    );
+  });
+  const field =
+    savedIndex >= 0
+      ? scalars.find(
+          (entry) => entry.path === `/savedAnswers/${savedIndex}/answer`,
+        )
+      : /authori[sz]ed/iu.test(answer.question) &&
+          answer.proposedAnswer === "Yes"
+        ? scalars.find((entry) =>
+            entry.path.startsWith(
+              "/workEligibility/Countries where you can work/",
+            ),
+          )
+        : /\bFrom$/iu.test(answer.question) &&
+            /^\d{4}-\d{2}$/u.test(answer.proposedAnswer)
+          ? scalars.find((entry) =>
+              /^\/experiences\/\d+\/startDate$/u.test(entry.path),
+            )
+          : (scalars.find((entry) =>
+              entry.value.includes(answer.proposedAnswer),
+            ) ?? scalars.find((entry) => entry.path === "/summary"));
+  return field
+    ? [
+        {
+          kind: "applicant_fact",
+          claim: answer.proposedAnswer,
+          source: "applicant",
+          path: field.path,
+          quote: field.value,
+        },
+      ]
+    : [];
+}
+
 function supportedChecks(
   messages: Parameters<LLMClient["chatWithTools"]>[0],
   definitions: Parameters<LLMClient["chatWithTools"]>[1],
 ): ReturnType<LLMClient["chatWithTools"]> | null {
   if (definitions[0]?.function.name !== "report_answer_checks") return null;
   const asked = JSON.parse(String(messages[1]?.content ?? "{}")) as {
-    answers?: unknown[];
+    applicant: Record<string, unknown>;
+    postingContextOnly?: { description?: string };
+    answers?: Array<{ question: string; proposedAnswer: string }>;
   };
   return Promise.resolve({
     toolCalls: [
@@ -201,10 +268,23 @@ function supportedChecks(
         function: {
           name: "report_answer_checks",
           arguments: JSON.stringify({
-            checks: (asked.answers ?? []).map((_, index) => ({
+            checks: (asked.answers ?? []).map((answer, index) => ({
               index,
               supported: true,
               reason: "Supported by the applicant facts.",
+              evidence:
+                /why this role/iu.test(answer.question) &&
+                asked.postingContextOnly?.description
+                  ? [
+                      {
+                        kind: "role_motivation",
+                        claim: answer.proposedAnswer,
+                        source: "posting",
+                        path: "/description",
+                        quote: asked.postingContextOnly.description,
+                      },
+                    ]
+                  : flowEvidence(asked.applicant, answer),
             })),
           }),
         },
@@ -393,6 +473,53 @@ test.each(["upload", "type"] as const)(
       tool === "upload" ? result.attachments : result.filled,
     ).not.toHaveLength(0);
     if (tool === "type") expect(source.controls[1].value).toBe(text);
+  },
+);
+
+test.each(
+  ["Passport Country", "Citizenship", "Nationality"].flatMap((label) =>
+    [false, true].map((prefilled) => ({ label, prefilled })),
+  ),
+)(
+  "nationality refusal never retains residence in the review ($label, prefilled=$prefilled)",
+  async ({ label, prefilled }) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          label,
+          value: prefilled ? "Primary territory" : "",
+          required: true,
+        },
+      ],
+    });
+    const input = config(source);
+    input.sources.profile.currentRegion = "Primary territory";
+    input.sources.profile.currentCountry = "Primary territory";
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "type",
+          args: {
+            ref: "c0",
+            text: "Primary territory",
+            storedFactId: "profile.currentRegion",
+          },
+        },
+        { name: "finish", args: { reason: "Done" } },
+      ]),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(result.filled).toEqual([]);
+    expect(result.reviewFilled).toEqual([]);
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .some((question) => question.prompt.includes(label)),
+    ).toBe(true);
+    expect(source.controls[0].value).toBe(prefilled ? "Primary territory" : "");
   },
 );
 
@@ -1079,12 +1206,29 @@ describe("written answer fact check recovery", () => {
     const client: LLMClient = {
       chatWithTools: vi.fn().mockResolvedValue({
         toolCalls: [
-          call({ supported: true, reason: "Only ordinary motivation." }),
+          call({
+            supported: true,
+            reason: "Only ordinary motivation.",
+            evidence: [
+              {
+                kind: "role_motivation",
+                claim: "Interest in the work",
+                source: "posting",
+                path: "/description",
+                quote: "Own the internal platform.",
+              },
+            ],
+          }),
         ],
       }),
     };
     await expect(
-      checkWrittenApplicationAnswer({ ...input(), client }),
+      checkWrittenApplicationAnswer({
+        ...input(),
+        question: "What work is advertised?",
+        answer: "Owning the internal platform.",
+        client,
+      }),
     ).resolves.toEqual({
       supported: true,
       reason: "Only ordinary motivation.",
@@ -2966,7 +3110,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
   const source = page({
     controls: [
       text(0, "Full name"),
-      text(1, "Why do you want this role?"),
+      text(1, "Describe your platform experience"),
       {
         ...text(2, "Country"),
         tagName: "select",
@@ -2993,6 +3137,10 @@ test("fill_fields fills a page in one step with one fact check for the answers t
   };
   let checkCalls = 0;
   let checkedAnswers: unknown[] = [];
+  const input = config(source, {
+    hands: { ...base, fillText: answered, chooseOption: answered },
+  });
+  input.sources.profile.summary = "I build dependable internal tools.";
   let turns = 0;
   const model: LLMClient = {
     chatWithTools: (messages, definitions) => {
@@ -3009,10 +3157,18 @@ test("fill_fields fills a page in one step with one fact check for the answers t
               function: {
                 name: "report_answer_checks",
                 arguments: JSON.stringify({
-                  checks: checkedAnswers.map((_, index) => ({
+                  checks: checkedAnswers.map((raw, index) => ({
                     index,
                     supported: true,
                     reason: "Supported.",
+                    evidence: flowEvidence(
+                      (
+                        JSON.parse(String(messages[1]?.content)) as {
+                          applicant: Record<string, unknown>;
+                        }
+                      ).applicant,
+                      raw as { question: string; proposedAnswer: string },
+                    ),
                   })),
                 }),
               },
@@ -3031,7 +3187,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
                   {
                     tool: "type",
                     ref: "c1",
-                    text: "I want to keep building dependable internal tools.",
+                    text: "I build dependable internal tools.",
                   },
                   { tool: "select", ref: "c2", option: "united kingdom" },
                 ],
@@ -3050,12 +3206,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
     },
   };
 
-  const result = await runApplyAgent(
-    config(source, {
-      hands: { ...base, fillText: answered, chooseOption: answered },
-    }),
-    model,
-  );
+  const result = await runApplyAgent(input, model);
 
   expect(turns).toBe(2);
   // The stored name needs no check; the prose and the country are checked
@@ -3066,7 +3217,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
   expect(written.get("c2")).toBe("United Kingdom");
   expect(result.filled.map((entry) => entry.label)).toEqual([
     "Full name",
-    "Why do you want this role?",
+    "Describe your platform experience",
     "Country",
   ]);
   expect(result.outcome).toBe("prepared");
@@ -3137,6 +3288,14 @@ describe("apply readiness regressions", () => {
                     function: {
                       name: "report_question_kinds",
                       arguments: JSON.stringify({
+                        tags: [
+                          {
+                            index: 0,
+                            kind: "other",
+                            country: null,
+                            sourceId: null,
+                          },
+                        ],
                         questions: [
                           {
                             index: 0,
@@ -4909,7 +5068,7 @@ describe("fill_fields visible steps", () => {
         id: "remote",
         kind: "other",
         label: "Remote",
-        question: "Open to remote work? — Yes",
+        question: "Open to remote work?",
         answer: "Yes",
         roleFamilies: [],
         proofEntryIds: [],
@@ -5313,7 +5472,7 @@ test("renumbered handles keep current answers and two equal-worded questions dis
   ]);
 });
 
-test("batch classification, answer checks and safety page read overlap before any write", async () => {
+test("classification settles before starting a sourced writing check and before any write", async () => {
   const source = page({
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
   });
@@ -5353,6 +5512,14 @@ test("batch classification, answer checks and safety page read overlap before an
               function: {
                 name,
                 arguments: JSON.stringify({
+                  tags: [
+                    {
+                      index: 0,
+                      kind: "motivation",
+                      country: null,
+                      sourceId: "posting.description",
+                    },
+                  ],
                   questions: [
                     { index: 0, asksAboutPay: false, declarationKind: null },
                   ],
@@ -5381,7 +5548,7 @@ test("batch classification, answer checks and safety page read overlap before an
                         {
                           tool: "type",
                           ref: "c0",
-                          text: "My platform experience fits this role.",
+                          text: "The role is to own the internal platform.",
                         },
                       ],
                     }
@@ -5396,13 +5563,13 @@ test("batch classification, answer checks and safety page read overlap before an
   for (let i = 0; i < 20 && !events.includes("answers"); i += 1)
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   expect(events).toContain("classification");
-  expect(events).toContain("answers");
+  expect(events).not.toContain("answers");
   expect(
     events.filter((event) => event === "read").length,
-  ).toBeGreaterThanOrEqual(2);
+  ).toBeGreaterThanOrEqual(1);
   expect(events).not.toContain("write");
   releaseKinds();
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await vi.waitFor(() => expect(events).toContain("answers"));
   expect(events).not.toContain("write");
   releaseAnswers();
   const result = await resultPromise;
@@ -5436,6 +5603,14 @@ test("form turns and question reading are apply work; answer checks are fact che
               function: {
                 name,
                 arguments: JSON.stringify({
+                  tags: [
+                    {
+                      index: 0,
+                      kind: "motivation",
+                      country: null,
+                      sourceId: "posting.description",
+                    },
+                  ],
                   questions: [
                     { index: 0, asksAboutPay: false, declarationKind: null },
                   ],
@@ -5464,7 +5639,7 @@ test("form turns and question reading are apply work; answer checks are fact che
                         {
                           tool: "type",
                           ref: "c0",
-                          text: "My platform experience fits this role.",
+                          text: "I would welcome the opportunity to own the internal platform.",
                         },
                       ],
                     }
@@ -5485,33 +5660,33 @@ test.each([
   {
     label: "Years of professional experience",
     answer: "8 years",
-    tasks: ["apply"],
+    tasks: [],
   },
   {
     label: "Why this role?",
     answer: "My platform experience fits this role.",
-    tasks: ["claim_check"],
+    tasks: [],
   },
   {
     label: "Are you legally authorized to work in this country?",
     answer: "Yes",
-    tasks: ["claim_check"],
+    tasks: [],
   },
   {
-    label: "Preferred start date",
+    label: "Available start date",
     answer: "2026-11-20",
-    tasks: ["apply"],
+    tasks: [],
     unread: true,
   },
   {
-    label: "Preferred office",
+    label: "Workplace country",
     answer: "London",
-    tasks: ["apply", "claim_check"],
+    tasks: [],
     unread: true,
     flagged: { asksHiringCountry: true },
   },
 ])(
-  "a short value is checked at the form-turn effort, other answers at the fact-check effort: $label",
+  "a question without typed source tags pauses without a speculative checker call: $label",
   async ({
     label,
     answer,
@@ -5536,17 +5711,14 @@ test.each([
     };
     const checkTasks: Array<string | undefined> = [];
     let turns = 0;
-    let releaseReading = () => {};
-    const reading = new Promise<void>((resolve) => {
-      releaseReading = resolve;
-    });
     await runApplyAgent(input, {
       chatWithTools: async (messages, definitions, options) => {
         const name = definitions[0]?.function.name;
         if (name === "report_question_kinds") {
-          // An unread page: the quick check starts before the reading comes
-          // back, and a reading that flags the question redoes it in full.
-          if (unread) await reading;
+          // The writer waits for this reading instead of launching a
+          // speculative answer check while the page remains unread.
+          if (unread)
+            await new Promise<void>((resolve) => setTimeout(resolve, 5));
           return {
             toolCalls: [
               {
@@ -5580,10 +5752,9 @@ test.each([
         }
         if (name === "report_answer_checks") {
           checkTasks.push(options?.reasoningTask);
-          releaseReading();
           return (await supportedChecks(messages, definitions))!;
         }
-        // The page's questions are read while the model decides.
+        // Every writer turn already has the page's reading.
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
         return {
           toolCalls: [
@@ -5805,7 +5976,12 @@ test.each([true, false])(
 test("stored facts fill while earlier written and eligibility answers wait for their check", async () => {
   const source = page({
     controls: [
-      { ...nameControl(), index: 0, label: "Why this role?", value: "" },
+      {
+        ...nameControl(),
+        index: 0,
+        label: "Describe your platform work",
+        value: "",
+      },
       {
         ...nameControl(),
         index: 1,
@@ -5837,6 +6013,7 @@ test("stored facts fill while earlier written and eligibility answers wait for t
       ownershipScope: null,
     },
   ];
+  input.sources.profile.summary = "I build dependable platforms.";
   const writes: string[] = [];
   input.hands.fillText = (ref, value) => {
     writes.push(ref);
@@ -5871,7 +6048,7 @@ test("stored facts fill while earlier written and eligibility answers wait for t
                         {
                           tool: "type",
                           ref: "c0",
-                          text: "I enjoy building dependable platforms.",
+                          text: "I build dependable platforms.",
                         },
                         { tool: "type", ref: "c1", text: "Yes" },
                         {

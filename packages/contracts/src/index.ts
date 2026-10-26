@@ -74,3 +74,6 @@ export * from "./preferences-store";
 
 export * from "./profile-commands";
 export * from "./profile-workflow";
+export * from "./apply-answer-tags";
+
+export { preserveTechnologyTokens } from "./technology-text";

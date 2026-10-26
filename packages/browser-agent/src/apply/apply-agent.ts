@@ -1,4 +1,10 @@
+import {
+  answerSourceCatalog,
+  classifyAnswerPermission,
+} from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
+import { requiresSavedOpinionAnswer } from "./answer-evidence";
+import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
 import {
@@ -6,6 +12,7 @@ import {
   runAgentLoop,
   type AgentLoopFinish,
   type AgentLoopModel,
+  type AgentLoopResult,
   type AgentLoopTool,
   type AgentLoopToolOutcome,
 } from "@nestor/agent-runtime";
@@ -69,6 +76,15 @@ import {
 import { matchOption } from "./option-match";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
+  nationalityQuestionIdentity,
+  NATIONALITY_ANSWER_REASON,
+} from "./person-nationality";
+import {
+  OWN_WORDS_REASON,
+  formWritingInstructions,
+  ownWordsAppliesToQuestion,
+} from "./own-words";
+import {
   checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
   isShortValueAnswer,
@@ -89,6 +105,8 @@ import type {
   ApplyPause,
   ApplyProposal,
 } from "./types";
+
+class QuestionReadUnavailableError extends Error {}
 
 const DEFAULT_MAX_STEPS = 200;
 // Long forms on a slow model took 16 minutes to reach the review step;
@@ -347,6 +365,7 @@ async function runMeasuredApplyAgent(
         client: llmClient,
         signal: config.signal,
         cacheScope: config.questionReadCacheScope,
+        sources: () => answerSourceCatalog(runConfig.sources),
       })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
@@ -361,7 +380,52 @@ async function runMeasuredApplyAgent(
       ? {
           letters: {
             ...config.letters,
-            provide: (request) => {
+            provide: async (request) => {
+              if (
+                !request.approvedText &&
+                ownWordsAppliesToQuestion(
+                  formWritingInstructions(pageTools.state.observation),
+                  request.prompt,
+                )
+              )
+                return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
+              if (!request.approvedText && classifyQuestions) {
+                const page = pageTools.state.observation;
+                const control = page?.controls.find(
+                  (control) => questionPrompt(control) === request.prompt,
+                );
+                if (!page || !control)
+                  return {
+                    ok: false,
+                    reason: "The letter question is not on the current form.",
+                  };
+                const readings = await classifyQuestions(
+                  page.controls,
+                  JSON.stringify({
+                    instructions: formWritingInstructions(page),
+                  }),
+                ).catch(() => undefined);
+                const reading =
+                  readings?.get(
+                    questionClassificationKey(control, page.controls),
+                  ) ?? readings?.get(request.prompt);
+                const permission = classifyAnswerPermission({
+                  control,
+                  controls: page.controls,
+                  tags: reading?.answerTags,
+                  sources: runConfig.sources,
+                  answer: "",
+                  pageInstructions: formWritingInstructions(page),
+                });
+                if (permission.kind !== "writing")
+                  return {
+                    ok: false,
+                    reason:
+                      permission.kind === "needs_you"
+                        ? permission.reason
+                        : "This form needs your unchanged letter.",
+                  };
+              }
               const key = JSON.stringify(request);
               let pending = letterRequests.get(key);
               if (!pending) {
@@ -390,7 +454,7 @@ async function runMeasuredApplyAgent(
     const observation = pageTools.state.observation;
     return observation
       ? {
-          pageText: observation.bodyTextExcerpt,
+          pageText: formWritingInstructions(observation),
           fields: observation.controls
             .filter(
               (control) =>
@@ -524,7 +588,31 @@ async function runMeasuredApplyAgent(
       case "click":
         return null; // The executor checks files and click-derived answers itself.
     }
+    if (answer !== null && classifyQuestions) {
+      const readings = classifyQuestions.settled(
+        observation.controls,
+        JSON.stringify({
+          instructions: formWritingInstructions(observation),
+        }),
+      );
+      const tags = (
+        readings?.get(
+          questionClassificationKey(control, observation.controls),
+        ) ?? readings?.get(questionPrompt(control))
+      )?.answerTags;
+      const permission = classifyAnswerPermission({
+        control,
+        controls: observation.controls,
+        tags,
+        sources: runConfig.sources,
+        answer,
+        pageInstructions: formWritingInstructions(observation),
+      });
+      if (permission.kind !== "writing") return null;
+    }
     return answer !== null &&
+      !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
+      !asksListingDiscovery(questionPrompt(control)) &&
       control.attestationKind === null &&
       !isCoverLetterControl(control) &&
       (savedAnswerForQuestion(
@@ -620,7 +708,11 @@ async function runMeasuredApplyAgent(
     // the first answer does not wait for it. Writes await the same result.
     void classifyQuestions?.(
       next.controls,
-      JSON.stringify({ url: next.url, step: next.step }),
+      JSON.stringify({
+        url: next.url,
+        step: next.step,
+        instructions: formWritingInstructions(next),
+      }),
     ).catch(() => undefined);
     // A person or a later page write may have answered a previously pending
     // question. Keep the live controls authoritative when continuing.
@@ -645,6 +737,30 @@ async function runMeasuredApplyAgent(
       if (control.disabled || (!control.visible && control.kind !== "file"))
         continue;
       const label = questionPrompt(control);
+      const nationality = nationalityQuestionIdentity(label);
+      const nationalitySaved = nationality
+        ? savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
+        : null;
+      if (
+        nationality &&
+        (!nationalitySaved ||
+          nationalityQuestionIdentity(nationalitySaved.question) !==
+            nationality)
+      ) {
+        control.answered = false;
+        if (control.value.trim())
+          pendingQuestions.set(
+            pendingQuestionKey(control),
+            buildPendingQuestion({
+              control,
+              jobId: runConfig.application.jobId,
+              detectedAt: next.observedAt,
+              siblings: next.controls,
+              suggestion: null,
+              reason: NATIONALITY_ANSWER_REASON,
+            }),
+          );
+      }
       const matchingQuestions = next.controls.filter(
         (entry) => questionPrompt(entry) === label,
       );
@@ -895,7 +1011,11 @@ async function runMeasuredApplyAgent(
           const observation = await pageTools.observe();
           const classifications = await classifyQuestions?.(
             observation.controls,
-            JSON.stringify({ url: observation.url, step: observation.step }),
+            JSON.stringify({
+              url: observation.url,
+              step: observation.step,
+              instructions: formWritingInstructions(observation),
+            }),
           ).catch(() => undefined);
           // Cache the native question set before adding the model's required marker.
           syncObservation(observation);
@@ -960,7 +1080,11 @@ async function runMeasuredApplyAgent(
         const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
-          JSON.stringify({ url: observation.url, step: observation.step }),
+          JSON.stringify({
+            url: observation.url,
+            step: observation.step,
+            instructions: formWritingInstructions(observation),
+          }),
         ).catch(() => undefined);
         // Inferred required markers are results, not changed native questions.
         syncObservation(observation);
@@ -1572,6 +1696,14 @@ async function runMeasuredApplyAgent(
         // Starting both together could ask the provider to write two letters.
         break;
       }
+      if (classifyQuestions) {
+        await classifyQuestions(
+          observation.controls,
+          JSON.stringify({
+            instructions: formWritingInstructions(observation),
+          }),
+        ).catch(() => undefined);
+      }
       // Reorder only independent value writes in a contiguous segment. Clicks,
       // uploads, repeated refs and shared choice groups are order barriers.
       // Every write still gets a fresh page read and the same policy executor.
@@ -1613,6 +1745,7 @@ async function runMeasuredApplyAgent(
       const stepKey = JSON.stringify({
         url: observation.url,
         step: observation.step,
+        instructions: formWritingInstructions(observation),
       });
       const checkAnswers = (shortValues: boolean) =>
         checkWrittenApplicationAnswers({
@@ -1639,7 +1772,10 @@ async function runMeasuredApplyAgent(
             observation.controls,
           ),
         );
-      const settledReadings = classifyQuestions?.settled(observation.controls);
+      const settledReadings = classifyQuestions?.settled(
+        observation.controls,
+        stepKey,
+      );
       const shortShape =
         toCheck.length > 0 &&
         toCheck.every((entry) =>
@@ -2004,7 +2140,39 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
-      if (parsed.finishWhenReady && !stopped && !leftAnswerForPerson) {
+      const finalPage = pageTools.state.observation;
+      const allObservedFieldsDone =
+        !!finalPage &&
+        finalPage.controls
+          .filter(
+            (control) =>
+              !control.disabled &&
+              !control.readOnly &&
+              (control.visible || control.kind === "file"),
+          )
+          .every(
+            (control) =>
+              control.answered ||
+              (!!control.choiceGroupKey &&
+                finalPage.controls.some(
+                  (sibling) =>
+                    sibling.choiceGroupKey === control.choiceGroupKey &&
+                    sibling.checked,
+                )),
+          );
+      const completedKnownPage =
+        !!classifyQuestions &&
+        wrote &&
+        allObservedFieldsDone &&
+        !!finalPage &&
+        pendingQuestions.size === 0 &&
+        pauses.length === 0 &&
+        checkFormReadiness(finalPage).ok;
+      if (
+        (parsed.finishWhenReady || completedKnownPage) &&
+        !stopped &&
+        !leftAnswerForPerson
+      ) {
         observationNeeded = false;
         return outcomeToLoop({
           kind: "finished",
@@ -2238,6 +2406,39 @@ async function runMeasuredApplyAgent(
   const loopClient: LLMClient = {
     chatWithTools: async (messages, tools, options) => {
       await refreshReusableAnswers();
+      const observation = pageTools.state.observation;
+      if (classifyQuestions && observation) {
+        const readings = await classifyQuestions(
+          observation.controls,
+          JSON.stringify({
+            instructions: formWritingInstructions(observation),
+          }),
+        );
+        if ([...readings.values()].some((reading) => reading.readFailed)) {
+          const reason =
+            "Job Finder could not read the form's questions after two attempts. Complete them here or on the form.";
+          for (const control of observation.controls) {
+            if (
+              !control.visible ||
+              control.disabled ||
+              control.readOnly ||
+              control.kind === "file" ||
+              !questionPrompt(control)
+            )
+              continue;
+            const question = buildPendingQuestion({
+              control,
+              jobId: config.application.jobId,
+              detectedAt: now().toISOString(),
+              suggestion: null,
+              siblings: observation.controls,
+            });
+            question.note = reason;
+            pendingQuestions.set(pendingQuestionKey(control), question);
+          }
+          throw new QuestionReadUnavailableError(reason);
+        }
+      }
       return llmClient.chatWithTools(
         currentReusableAnswers === initialReusableAnswers
           ? messages
@@ -2416,12 +2617,28 @@ async function runMeasuredApplyAgent(
       : {}),
     ...(config.signal ? { signal: config.signal } : {}),
     now,
-  }).finally(async () => {
-    // Stop aborts the provider through the run's signal; cleanup still drains
-    // the local drafts if a page change left their writes unattempted.
-    runAbort.abort();
-    await Promise.allSettled(letterRequests.values());
-  });
+  })
+    .catch((error: unknown): AgentLoopResult => {
+      if (!(error instanceof QuestionReadUnavailableError)) throw error;
+      note(error.message);
+      return {
+        ending: "stopped",
+        reason: error.message,
+        finish: null,
+        stop: { reason: error.message },
+        steps: 0,
+        progressSteps: 0,
+        turnNotes: [],
+        messages: [],
+        timing: { totalMs: 0, modelMs: 0, toolMs: 0, modelTurns: 0 },
+      };
+    })
+    .finally(async () => {
+      // Stop aborts the provider through the run's signal; cleanup still drains
+      // the local drafts if a page change left their writes unattempted.
+      runAbort.abort();
+      await Promise.allSettled(letterRequests.values());
+    });
 
   for (const pause of pauses) {
     if (pause.code !== "document_needs_you") continue;

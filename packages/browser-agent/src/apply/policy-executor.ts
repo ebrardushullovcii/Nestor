@@ -1,4 +1,17 @@
+import { classifyAnswerPermission } from "./answer-source-catalog";
 import { questionClassificationKey } from "./question-classification";
+import {
+  OPINION_ANSWER_REASON,
+  requiresSavedOpinionAnswer,
+} from "./answer-evidence";
+import {
+  asksListingDiscovery,
+  listingDiscoveryAnswer,
+} from "./listing-discovery-answer";
+import {
+  nationalityQuestionIdentity,
+  NATIONALITY_ANSWER_REASON,
+} from "./person-nationality";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
@@ -30,6 +43,11 @@ import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
+import {
+  OWN_WORDS_REASON,
+  formWritingInstructions,
+  ownWordsAppliesToQuestion,
+} from "./own-words";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -490,14 +508,18 @@ async function withModelQuestionKinds(
   control: ApplyFormControl,
 ): Promise<ApplyFormControl> {
   if (!deps.classifyQuestions) {
-    return control;
+    return { ...control, answerTags: null };
   }
   let classification: ApplyQuestionClassification | undefined;
   let payCurrency = false;
   try {
     const classifications = await deps.classifyQuestions(
       observation.controls,
-      JSON.stringify({ url: observation.url, step: observation.step }),
+      JSON.stringify({
+        url: observation.url,
+        step: observation.step,
+        instructions: formWritingInstructions(observation),
+      }),
     );
     classification =
       classifications.get(
@@ -515,13 +537,14 @@ async function withModelQuestionKinds(
             )?.asksAboutPay === true,
         ));
   } catch {
-    return control;
+    return { ...control, answerTags: null };
   }
   if (!classification) {
-    return control;
+    return { ...control, answerTags: null };
   }
   return {
     ...control,
+    answerTags: classification.answerTags ?? null,
     questionKind:
       classification.eligibilityKind ??
       (classification.asksAboutPay || payCurrency
@@ -632,6 +655,8 @@ async function decideAnswer(input: {
   value: string;
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
+  pageText: string;
+  controls: readonly ApplyFormControl[];
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
   const value = formatGithubAnswer(control, input.value);
@@ -648,11 +673,137 @@ async function decideAnswer(input: {
       permission: true,
     };
   }
+  if (deps.classifyQuestions) {
+    const permission = classifyAnswerPermission({
+      control,
+      controls: input.controls,
+      tags: control.answerTags,
+      sources: config.sources,
+      answer: value,
+      pageInstructions: input.pageText,
+      approvedAttestations: config.authority.preApprovedAttestationKinds,
+    });
+    if (permission.kind === "needs_you")
+      return {
+        kind: "leave",
+        reason: permission.reason,
+        suggestion: null,
+        permission: true,
+      };
+    if (permission.kind === "literal") {
+      if (
+        control.questionKind === "salary_expectation" &&
+        !payDisclosed &&
+        !isAnswerFromThisApplication(
+          savedAnswerForQuestion(
+            control,
+            config.sources.reusableAnswers,
+            input.controls,
+          ),
+          config.application,
+          config.sources.posting.location,
+        ) &&
+        !permission.source.id.startsWith("answerLibrary.application_")
+      )
+        return {
+          kind: "leave",
+          reason: PAY_KEPT_PRIVATE_REASON,
+          suggestion: saved,
+          permission: true,
+        };
+      deps.onAnswerSource?.("stored_fact");
+      return {
+        kind: "use",
+        answer: {
+          value,
+          kind: control.questionKind,
+          sourceKind:
+            permission.source.purpose === "saved"
+              ? "answer_library"
+              : "profile",
+          sourceId: permission.source.id,
+          provenanceLabel: "your matching saved answer or profile fact",
+          groundedIn: [permission.source.id],
+        },
+      };
+    }
+    // Writing permission never falls through the legacy literal shortcuts.
+    if (!deps.checkWrittenAnswer)
+      return {
+        kind: "leave",
+        reason: "This writing could not be checked against your sources.",
+        suggestion: null,
+        permission: true,
+      };
+    deps.onAnswerSource?.("checked");
+    const check = await deps
+      .checkWrittenAnswer(questionPrompt(control), value)
+      .catch(() => null);
+    if (!check?.supported)
+      return {
+        kind: "leave",
+        reason:
+          check?.reason ??
+          "This writing could not be checked against your sources.",
+        suggestion: null,
+        permission: true,
+      };
+    return {
+      kind: "use",
+      answer: {
+        value,
+        kind: control.questionKind,
+        sourceKind: "generated",
+        sourceId: `written.${control.ref}`,
+        provenanceLabel: "written for this application",
+        groundedIn: input.groundedIn?.length
+          ? [...input.groundedIn]
+          : [permission.source.id],
+      },
+    };
+    // Only requested writing reaches the independent claim checker below.
+  }
+  if (asksListingDiscovery(questionPrompt(control))) {
+    const answer = listingDiscoveryAnswer(control, config.sources);
+    return answer
+      ? { kind: "use", answer }
+      : {
+          kind: "leave",
+          reason:
+            "The form does not offer the source where Nestor found this listing. Please choose your answer.",
+          suggestion: null,
+          permission: true,
+        };
+  }
   // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
     control,
     config.sources.reusableAnswers,
   );
+  if (!saved && requiresSavedOpinionAnswer(questionPrompt(control), value)) {
+    return {
+      kind: "leave",
+      reason: OPINION_ANSWER_REASON,
+      suggestion: null,
+      permission: true,
+    };
+  }
+  const nationalityQuestion = nationalityQuestionIdentity(
+    questionPrompt(control),
+  );
+  if (
+    nationalityQuestion &&
+    (!saved ||
+      nationalityQuestionIdentity(savedRecord?.question ?? "") !==
+        nationalityQuestion)
+  ) {
+    return {
+      kind: "leave",
+      reason: NATIONALITY_ANSWER_REASON,
+      suggestion: null,
+      permission: true,
+    };
+  }
   const isApplicationAnswer =
     isAnswerFromThisApplication(
       savedRecord,
@@ -741,6 +892,14 @@ async function decideAnswer(input: {
   if (stored) {
     deps.onAnswerSource?.("stored_fact");
     return { kind: "use", answer: stored };
+  }
+  if (ownWordsAppliesToQuestion(input.pageText, questionPrompt(control))) {
+    return {
+      kind: "leave",
+      reason: OWN_WORDS_REASON,
+      suggestion: null,
+      permission: true,
+    };
   }
   if (!deps.checkWrittenAnswer) {
     return {
@@ -832,16 +991,20 @@ function leaveUnansweredForPerson(input: {
     kind: "suggestion",
     answer: suggestion,
     note: `"${questionPrompt(control)}" needs the person's answer. ${reason} Leave it unchanged and carry on with the rest of the form.`,
-    question: control.required
-      ? buildPendingQuestion({
-          control,
-          jobId: config.application.jobId,
-          detectedAt: at,
-          suggestion,
-          siblings: observation.controls,
-          reason,
-        })
-      : null,
+    question:
+      control.required ||
+      input.reason === OWN_WORDS_REASON ||
+      input.reason === OPINION_ANSWER_REASON ||
+      input.reason === NATIONALITY_ANSWER_REASON
+        ? buildPendingQuestion({
+            control,
+            jobId: config.application.jobId,
+            detectedAt: at,
+            suggestion,
+            siblings: observation.controls,
+            reason,
+          })
+        : null,
     controlRef: control.ref,
     observation,
   };
@@ -1718,6 +1881,35 @@ export async function executeApplyProposal(
             observation,
           };
         }
+        if (
+          deps.classifyQuestions &&
+          !approvedApplicationLetter(config, control)
+        ) {
+          const permission = classifyAnswerPermission({
+            control,
+            controls: observation.controls,
+            tags: control.answerTags,
+            sources: config.sources,
+            answer: "",
+            pageInstructions: formWritingInstructions(observation),
+          });
+          if (permission.kind !== "writing")
+            return notEntered({
+              deps,
+              control,
+              observation,
+              at,
+              decision: {
+                kind: "leave",
+                reason:
+                  permission.kind === "needs_you"
+                    ? permission.reason
+                    : "This form needs your unchanged letter.",
+                suggestion: null,
+                permission: true,
+              },
+            });
+        }
         const letter = await provideApplicationLetter(deps, control);
         if (letter.kind !== "ok") {
           return letter.outcome;
@@ -1779,8 +1971,10 @@ export async function executeApplyProposal(
       // The model read the question and the person's facts and chose what to
       // type (ADR 0041); decideAnswer keeps it to the person's own facts.
       const decision = await decideAnswer({
+        controls: observation.controls,
         deps,
         control,
+        pageText: formWritingInstructions(observation),
         value: proposal.text,
         groundedIn: proposal.groundedIn,
         storedFactId: proposal.storedFactId,
@@ -1840,8 +2034,10 @@ export async function executeApplyProposal(
       }
       const control = await withModelQuestionKinds(deps, observation, found);
       const choice = await decideAnswer({
+        controls: observation.controls,
         deps,
         control,
+        pageText: formWritingInstructions(observation),
         value: matchOption(control.options, proposal.option) ?? proposal.option,
         storedFactId: proposal.storedFactId,
       });
@@ -1961,6 +2157,7 @@ export async function executeApplyProposal(
             config.sources.posting.location,
           ));
       if (
+        deps.classifyQuestions ||
         ownToggle ||
         ((control.kind === "radio" ||
           control.answerControlType === "multi_choice") &&
@@ -1980,8 +2177,10 @@ export async function executeApplyProposal(
               : "No"
             : control.label || control.value;
         const choice = await decideAnswer({
+          controls: observation.controls,
           deps,
           control,
+          pageText: formWritingInstructions(observation),
           value: proposedOption,
           storedFactId: proposal.storedFactId,
         });
@@ -2252,6 +2451,35 @@ export async function executeApplyProposal(
             observation,
           };
         }
+        if (
+          deps.classifyQuestions &&
+          !approvedApplicationLetter(config, control)
+        ) {
+          const permission = classifyAnswerPermission({
+            control,
+            controls: observation.controls,
+            tags: control.answerTags,
+            sources: config.sources,
+            answer: "",
+            pageInstructions: formWritingInstructions(observation),
+          });
+          if (permission.kind !== "writing")
+            return notEntered({
+              deps,
+              control,
+              observation,
+              at,
+              decision: {
+                kind: "leave",
+                reason:
+                  permission.kind === "needs_you"
+                    ? permission.reason
+                    : "This form needs your unchanged letter.",
+                suggestion: null,
+                permission: true,
+              },
+            });
+        }
         const letter = await provideApplicationLetter(deps, control);
         if (letter.kind !== "ok") {
           return letter.outcome;
@@ -2517,6 +2745,26 @@ async function provideApplicationLetter(
   const { config } = deps;
   const letters = config.letters;
   const approvedText = approvedApplicationLetter(config, control);
+  const observation = await config.hands.observe();
+  if (
+    !approvedText &&
+    ownWordsAppliesToQuestion(
+      formWritingInstructions(observation),
+      questionPrompt(control),
+    )
+  ) {
+    return {
+      kind: "stop",
+      outcome: leaveUnansweredForPerson({
+        control,
+        observation,
+        config,
+        at: deps.now().toISOString(),
+        reason: OWN_WORDS_REASON,
+        suggestion: null,
+      }),
+    };
+  }
   if (!letters && approvedText && control.kind !== "file") {
     return {
       kind: "ok",

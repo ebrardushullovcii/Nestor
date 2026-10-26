@@ -2,6 +2,68 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { LLMClient } from "../agent/contracts";
+import letterRetry from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/letter-check-retry.json";
+
+test("a slow incomplete letter check leaves time for its grounded retry", async () => {
+  vi.useFakeTimers();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  });
+  try {
+    let calls = 0;
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(
+      (_messages, _tools, options) =>
+        new Promise((resolve, reject) => {
+          const first = calls++ === 0;
+          const timer = setTimeout(
+            () =>
+              first
+                ? reject(new Error(letterRetry.firstError))
+                : resolve(checkedReply),
+            first ? letterRetry.firstAttemptMs : letterRetry.retryMs,
+          );
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new Error("Aborted"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const pending = checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      answers: [
+        {
+          question: letterRetry.question,
+          answer: letterRetry.answerSentence.repeat(letterRetry.repetitions),
+        },
+      ],
+    });
+    const result = expect(pending).resolves.toEqual([
+      { supported: true, reason: "Supported" },
+    ]);
+    await vi.advanceTimersByTimeAsync(
+      letterRetry.firstAttemptMs + letterRetry.retryMs,
+    );
+    await result;
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
+    expect(
+      chatWithTools.mock.calls[0][2]?.maxOutputTokens,
+    ).toBeGreaterThanOrEqual(8_000);
+    const prompt = JSON.stringify(chatWithTools.mock.calls[0][0]);
+    expect(prompt).toContain("shortest verbatim passage");
+  } finally {
+    timeout.mockRestore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
 
 test("passes current eligibility, No and limited-permit conditions to the independent check", async () => {
   const profile = CandidateProfileSchema.parse({
@@ -129,12 +191,163 @@ const checkedReply = {
       function: {
         name: "report_answer_checks",
         arguments: JSON.stringify({
-          checks: [{ index: 0, supported: true, reason: "Supported" }],
+          checks: [
+            {
+              index: 0,
+              supported: true,
+              reason: "Supported",
+              evidence: [
+                {
+                  kind: "role_motivation",
+                  claim: "Interest in the work",
+                  source: "posting",
+                  path: "/description",
+                  quote: "Analyst",
+                },
+              ],
+            },
+          ],
         }),
       },
     },
   ],
 };
+
+test.each([
+  { label: "a missing source quote", evidence: [] },
+  {
+    label: "a fabricated resume quote",
+    evidence: [
+      {
+        kind: "applicant_fact",
+        claim: "Four years using Rust",
+        source: "resume",
+        path: "",
+        quote: "Four years using Rust",
+      },
+    ],
+  },
+  {
+    label: "a posting used as evidence of personal experience",
+    evidence: [
+      {
+        kind: "applicant_fact",
+        claim: "Experience as an analyst",
+        source: "posting",
+        path: "/description",
+        quote: "Analyst",
+      },
+    ],
+  },
+  {
+    label: "an isolated No without its question or fact",
+    evidence: [
+      {
+        kind: "applicant_fact",
+        claim: "Never worked for this employer",
+        source: "applicant",
+        path: "",
+        quote: "No",
+      },
+    ],
+  },
+])(
+  "a positive verdict with $label cannot authorize an answer",
+  async ({ evidence }) => {
+    const chatWithTools = vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockResolvedValue({
+        toolCalls: [
+          {
+            id: "check",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  { index: 0, supported: true, reason: "Supported", evidence },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    const result = await checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      answers: [
+        {
+          question: "Describe your Rust experience",
+          answer: "Four years using Rust",
+        },
+      ],
+    });
+    expect(result[0]?.supported).toBe(false);
+    expect(result[0]?.reason).toContain("could not verify");
+    expect(chatWithTools).toHaveBeenCalledOnce();
+  },
+);
+
+test("the person's exact saved No and numeric zero remain usable evidence", async () => {
+  const saved = [
+    {
+      id: "previous_work",
+      kind: "other" as const,
+      label: "Previous work",
+      question: "Have you worked for Example Workshop?",
+      answer: "No",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+    {
+      id: "skill_years",
+      kind: "other" as const,
+      label: "Rust years",
+      question: "Years using Rust",
+      answer: "0",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+    toolCalls: [
+      {
+        id: "check",
+        type: "function",
+        function: {
+          name: "report_answer_checks",
+          arguments: JSON.stringify({
+            checks: saved.map((answer, index) => ({
+              index,
+              supported: true,
+              reason: "The person answered this question.",
+              evidence: [
+                {
+                  kind: "applicant_fact",
+                  claim: answer.answer,
+                  source: "applicant",
+                  path: `/savedAnswers/${index}/answer`,
+                  quote: answer.answer,
+                },
+              ],
+            })),
+          }),
+        },
+      },
+    ],
+  });
+  const result = await checkWrittenApplicationAnswers({
+    client: { chatWithTools },
+    sources: { ...sources, reusableAnswers: saved },
+    payDisclosed: false,
+    answers: saved.map((answer) => ({
+      question: answer.question,
+      answer: answer.answer,
+    })),
+  });
+  expect(result.map((value) => value.supported)).toEqual([true, true]);
+});
 
 test("budgets letters by text length and retries incomplete output once with more room", async () => {
   const chatWithTools = vi
@@ -147,7 +360,7 @@ test("budgets letters by text length and retries incomplete output once with mor
       sources,
       payDisclosed: false,
       answers: [
-        { question: "Letter", answer: "Supported long letter. ".repeat(250) },
+        { question: "Letter", answer: letterRetry.answerSentence.repeat(250) },
       ],
     }),
   ).resolves.toEqual([{ supported: true, reason: "Supported" }]);

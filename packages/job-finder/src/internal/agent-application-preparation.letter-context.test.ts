@@ -3,6 +3,23 @@ import { describe, expect, test } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { buildApplyLetterDependencies } from "./agent-application-preparation";
 
+// These tests stub semantic judgment to inspect the letter boundary. The source
+// quote is the supplied synthetic context; answer-grounding tests check verdicts.
+function supportedEvidence(messages: readonly { content?: string }[]) {
+  const data = JSON.parse(String(messages[1]?.content ?? "{}")) as {
+    applicant: { summary: string; name: { full: string } };
+  };
+  return [
+    {
+      kind: "applicant_fact",
+      claim: "Scripted supported letter",
+      source: "applicant",
+      path: "/summary",
+      quote: data.applicant.summary,
+    },
+  ];
+}
+
 describe("application document writer context", () => {
   test("passes grounded context, preferences, and prior text to the actual model boundary", async () => {
     const seed = createSeed();
@@ -25,6 +42,7 @@ describe("application document writer context", () => {
                             {
                               index: 0,
                               supported: true,
+                              evidence: supportedEvidence(messages),
                               reason: "Matches the current profile",
                             },
                           ],
@@ -33,7 +51,7 @@ describe("application document writer context", () => {
                     },
                   ],
                 }
-              : { content: "Revised grounded letter." },
+              : { content: seed.profile.summary ?? "" },
           );
         },
       },
@@ -132,6 +150,7 @@ test.each([true, false])(
                             {
                               index: 0,
                               supported,
+                              evidence: supportedEvidence(args[0]),
                               reason: supported
                                 ? "Uses saved contact and supported facts"
                                 : "The rejected email and claimed editorial results are unsupported",
@@ -142,7 +161,7 @@ test.each([true, false])(
                     },
                   ],
                 }
-              : { content: "A proposed letter with personal claims." },
+              : { content: seed.profile.summary ?? "" },
           );
         },
       },
@@ -165,10 +184,7 @@ test.each([true, false])(
       preference: dependencies.preference,
       priorText: null,
     });
-    if (supported)
-      await expect(writing).resolves.toBe(
-        "A proposed letter with personal claims.",
-      );
+    if (supported) await expect(writing).resolves.toBe(seed.profile.summary);
     else
       await expect(writing).rejects.toThrow(
         "The rejected email and claimed editorial results are unsupported",
@@ -223,14 +239,19 @@ test("writer input uses application facts, excludes pay answers and trims the re
                       name: "report_answer_checks",
                       arguments: JSON.stringify({
                         checks: [
-                          { index: 0, supported: true, reason: "Supported" },
+                          {
+                            index: 0,
+                            supported: true,
+                            reason: "Supported",
+                            evidence: supportedEvidence(messages),
+                          },
                         ],
                       }),
                     },
                   },
                 ],
               }
-            : { content: "Supported letter." },
+            : { content: seed.profile.summary ?? "" },
         );
       },
     },

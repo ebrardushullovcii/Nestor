@@ -1,3 +1,4 @@
+import reviewFixture from "./stored-json/application-review-card.full.json";
 import { SubmissionOutcomeRecordSchema } from "@nestor/contracts";
 import type {
   FoundJob,
@@ -1130,4 +1131,66 @@ it("knows the page of an unsent prepared form after a restart, and forgets it on
     .sql("UPDATE applications SET state = 'submitted' WHERE id = ?")
     .run(row.id);
   expect(applications.holdsFormAt(pageUrl)).toBe(false);
+});
+
+it("clears a refused standalone letter, preserves an intervening edit, and is idempotent", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  const card = {
+    ...reviewFixture,
+    answers: [],
+    letter: {
+      ...reviewFixture.letter,
+      text: "Old refused text",
+      fields: ["Cover letter"],
+    },
+  };
+  jobs
+    .sql(
+      "INSERT INTO application_details(application_id,attempt,resume_artifact_json,review_json,profile_digest) VALUES(?,?,'{}',?,'digest')",
+    )
+    .run(row.id, row.attempt, JSON.stringify(card));
+  const read = () =>
+    JSON.parse(
+      String(
+        jobs
+          .sql(
+            "SELECT review_json FROM application_details WHERE application_id=?",
+          )
+          .get(row.id)?.review_json,
+      ),
+    ) as { letter: unknown };
+  expect(
+    applications.discardReviewAnswers(
+      row.id,
+      row.attempt + 1,
+      ["Cover letter"],
+      "Old refused text",
+    ),
+  ).toBe(false);
+  expect(read().letter).not.toBeNull();
+  expect(
+    applications.discardReviewAnswers(
+      row.id,
+      row.attempt,
+      ["Cover letter"],
+      "Earlier snapshot",
+    ),
+  ).toBe(true);
+  expect(read().letter).not.toBeNull();
+  applications.discardReviewAnswers(
+    row.id,
+    row.attempt,
+    ["Cover letter"],
+    "Old refused text",
+  );
+  expect(read().letter).toBeNull();
+  applications.discardReviewAnswers(
+    row.id,
+    row.attempt,
+    ["Cover letter"],
+    "Old refused text",
+  );
+  expect(read().letter).toBeNull();
 });

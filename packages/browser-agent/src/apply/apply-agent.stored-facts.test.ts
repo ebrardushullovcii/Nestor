@@ -1,3 +1,4 @@
+import { answerSourceCatalog } from "./answer-source-catalog";
 import * as questionClassification from "./question-classification";
 import { questionPrompt } from "./policy-executor";
 import { readFileSync } from "node:fs";
@@ -96,6 +97,7 @@ async function ledgerleafRun(conditionalContact = false) {
   });
   let step = 0;
   let addedHistory = false;
+  let legalProposed = false;
   const values = new Map<string, string>();
   const rawControl = (field: FixtureField, index: number): RawApplyControl => ({
     index,
@@ -354,6 +356,47 @@ async function ledgerleafRun(conditionalContact = false) {
         );
         return Promise.resolve(
           reply(name, {
+            tags: questions.map((question) => {
+              const observed = observe().controls.find(
+                (control) => questionPrompt(control) === question.question,
+              );
+              const field = currentFields()[Number(observed?.ref.slice(1))];
+              const proposalValues: Record<string, string | null> = {
+                name: profile.fullName,
+                fullName: profile.fullName,
+                email: profile.email,
+                phone: profile.phone,
+                workTitle: "Principal Frontend Engineer",
+                workCompany: "Northstar Parcel Software",
+                workFrom: "2021-03",
+              };
+              const catalog = answerSourceCatalog(input.sources);
+              const saved = catalog.find(
+                (source) =>
+                  source.purpose === "saved" &&
+                  source.question === question.question,
+              );
+              const literal = catalog.find((source) =>
+                observed?.answerControlType === "multi_choice"
+                  ? /^profile\.skills\.\d+$/u.test(source.id) &&
+                    currentFields().some(
+                      (choice) =>
+                        choice.groupLabel === field?.groupLabel &&
+                        choice.label === source.value,
+                    )
+                  : source.value === proposalValues[field?.name ?? ""],
+              );
+              return {
+                index: question.index,
+                kind: question.question.includes("authorized")
+                  ? "work_auth"
+                  : question.question.includes("sponsorship")
+                    ? "sponsorship"
+                    : "other",
+                country: null,
+                sourceId: saved?.id ?? literal?.id ?? null,
+              };
+            }),
             questions: questions.map((question) => ({
               index: question.index,
               required: question.nativeRequired,
@@ -461,12 +504,8 @@ async function ledgerleafRun(conditionalContact = false) {
             thenContinue: "a0",
           }),
         );
-      if (
-        step === 3 &&
-        !calls.checks.some((batch) =>
-          batch.some((answer) => answer.question.includes("authorized")),
-        )
-      )
+      if (step === 3 && !legalProposed) {
+        legalProposed = true;
         return Promise.resolve(
           reply("fill_fields", {
             fields: [
@@ -475,7 +514,8 @@ async function ledgerleafRun(conditionalContact = false) {
             ],
           }),
         );
-      // Four eligibility/personal questions remain on the first handoff step.
+        // Four eligibility/personal questions remain on the first handoff step.
+      }
       return Promise.resolve(
         reply("finish", {
           reason: "The remaining questions need your answers.",
@@ -484,7 +524,8 @@ async function ledgerleafRun(conditionalContact = false) {
       );
     },
   };
-  return { result: await runApplyAgent(input, model), calls, values };
+  const result = await runApplyAgent(input, model);
+  return { result, calls, values };
 }
 
 test("Ledgerleaf stored history does not need an answer check before the first handoff", async () => {
@@ -497,7 +538,7 @@ test("Ledgerleaf stored history does not need an answer check before the first h
   expect(calls.turns).toBe(6);
   expect(calls.classifications).toBe(4);
   expect(result.timing?.questionReadingCalls).toBe(4);
-  expect(result.timing?.answerCheckCalls).toBe(1);
+  expect(result.timing?.answerCheckCalls).toBe(0);
   expect(
     result.timing?.requests.map((request) => request.storedFactFills),
   ).toEqual([3, 0, 3, 6, 0, 0]);
@@ -505,12 +546,8 @@ test("Ledgerleaf stored history does not need an answer check before the first h
   // left for the person no longer stops the second.
   expect(
     result.timing?.requests.map((request) => request.answersWaited),
-  ).toEqual([0, 0, 0, 0, 2, 0]);
-  expect(calls.checks).toHaveLength(1);
-  expect(calls.checks[0].map((answer) => answer.question)).toEqual([
-    "Are you authorized to work in the job's country?",
-    "Will you need visa sponsorship?",
-  ]);
+  ).toEqual([0, 0, 0, 0, 0, 0]);
+  expect(calls.checks).toHaveLength(0);
   expect(calls.misses).toEqual([]);
   expect(
     result.pauses.flatMap(
@@ -521,7 +558,7 @@ test("Ledgerleaf stored history does not need an answer check before the first h
     "stored_fact_fills_per_turn=[3,0,3,6,0,0]",
   );
   expect(result.notes.at(-1)).toContain(
-    "answers_waited_per_turn=[0,0,0,0,2,0]",
+    "answers_waited_per_turn=[0,0,0,0,0,0]",
   );
 });
 
@@ -567,6 +604,7 @@ test("Ledgerleaf recording compares the previous whole-step cache with per-quest
         if (cached?.key === key) return cached.result;
         const result = questionClassification.classifyApplicationQuestions({
           ...input,
+          sources: input.sources?.(),
           questions,
         });
         byStep.set(step, { key, result });
@@ -602,7 +640,7 @@ test("Ledgerleaf recording compares the previous whole-step cache with per-quest
     before.calls.classifications,
   );
   expect(readCount(after)).toBeLessThan(readCount(before));
-  expect(before.calls.checks).toHaveLength(1);
-  expect(after.calls.checks).toHaveLength(1);
+  expect(before.calls.checks).toHaveLength(0);
+  expect(after.calls.checks).toHaveLength(0);
   expect(after.values).toEqual(before.values);
 });

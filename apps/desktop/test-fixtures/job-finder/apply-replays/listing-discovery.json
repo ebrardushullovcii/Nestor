@@ -1,0 +1,24 @@
+{
+  "label": "Example Board",
+  "url": "https://listing.example.test/jobs/42",
+  "question": "How did you hear about this job?",
+  "cases": [
+    { "kind": "text", "options": [], "expected": "Example Board" },
+    {
+      "kind": "select",
+      "options": ["Referral", "Example Board", "Other"],
+      "expected": "Example Board"
+    },
+    {
+      "kind": "select",
+      "options": ["Company website", "Other", "Referral"],
+      "expected": "Other"
+    },
+    {
+      "kind": "select",
+      "options": ["Company website", "Referral"],
+      "expected": null
+    },
+    { "kind": "combobox", "options": [], "expected": null }
+  ]
+}

@@ -16,15 +16,108 @@ import { describe, expect, test, vi } from "vitest";
 import {
   buildApplyReviewCard,
   mergeApplyReviewCards,
-  createApplyFormPreparer,
+  createApplyFormPreparer as createProductionApplyFormPreparer,
   resolveApplicationDocumentMimeType,
   resolveApplicationPreparationTarget,
   resolveApplySiteLabel,
-  runAgentApplicationPreparation,
+  runAgentApplicationPreparation as runProductionApplicationPreparation,
   applyingConversationKey,
   toApplyDocuments,
   toApplyLlmClient,
 } from "./agent-application-preparation";
+
+// This file tests the preparation/store seam. Give its scripted writers a
+// complete question read; classifier failures and meaning are tested in the
+// browser-agent gate regressions, not by returning "finish" to the reader.
+function fixtureQuestionReadings(client: LLMClient): LLMClient {
+  return {
+    chatWithTools: (messages, tools, options) => {
+      if (tools[0]?.function.name !== "report_question_kinds")
+        return client.chatWithTools(messages, tools, options);
+      const questions = JSON.parse(String(messages[1]?.content)) as Array<{
+        index: number;
+        question: string;
+      }>;
+      const { sources } = JSON.parse(String(messages[2]?.content)) as {
+        sources: Array<{
+          id: string;
+          purpose: string;
+          question?: string;
+          country: string | null;
+        }>;
+      };
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "question-read",
+            type: "function",
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: questions.map((question) => question.index),
+                flagged: [],
+                tags: questions.map((question) => {
+                  const saved = sources.find(
+                    (source) =>
+                      source.purpose === "saved" &&
+                      source.question === question.question,
+                  );
+                  const label = question.question
+                    .split(" — ")
+                    .at(-1)
+                    ?.toLowerCase();
+                  const id =
+                    saved?.id ??
+                    (label === "full name"
+                      ? "profile.fullName"
+                      : label === "email"
+                        ? "profile.email"
+                        : null);
+                  return {
+                    index: question.index,
+                    kind: question.question.includes("authorized")
+                      ? "work_auth"
+                      : "other",
+                    country:
+                      saved?.country ??
+                      sources.find((source) => source.id === "posting.location")
+                        ?.country ??
+                      null,
+                    sourceId: id,
+                  };
+                }),
+              }),
+            },
+          },
+        ],
+      });
+    },
+  };
+}
+
+function runAgentApplicationPreparation(
+  input: Parameters<typeof runProductionApplicationPreparation>[0],
+) {
+  return runProductionApplicationPreparation({
+    ...input,
+    llmClient: fixtureQuestionReadings(input.llmClient),
+  });
+}
+function createApplyFormPreparer(
+  input: Parameters<typeof createProductionApplyFormPreparer>[0],
+) {
+  const chat = input.aiClient.chatWithTools;
+  return createProductionApplyFormPreparer({
+    ...input,
+    aiClient: chat
+      ? {
+          ...input.aiClient,
+          chatWithTools: fixtureQuestionReadings({ chatWithTools: chat })
+            .chatWithTools,
+        }
+      : input.aiClient,
+  });
+}
 
 describe("resolveApplicationDocumentMimeType", () => {
   test.each([
@@ -1706,6 +1799,7 @@ test("a paused unchecked letter stays on the review card without an attachment",
 
 test("preparation honors an eligibility answer saved on an earlier attempt of this application", async () => {
   const facts = executionInput();
+  facts.job.location = "United Kingdom";
   facts.applicationPageBindingKey = "new_result";
   const rememberedAnswers = [
     {
@@ -1719,7 +1813,7 @@ test("preparation honors an eligibility answer saved on an earlier attempt of th
       applicationScope: {
         resultId: "old_result",
         applicationRecordId: "same_application",
-        location: "Remote",
+        location: "United Kingdom",
       },
     },
   ];
@@ -2248,12 +2342,8 @@ test.each([false, true])(
       answers: [
         expect.objectContaining({
           answer: "Yes",
-          source: settingOn
-            ? "your Settings (on by default)"
-            : "your answer to this question",
-          sourceId: settingOn
-            ? "authority.attestation.background_check_consent"
-            : "answerLibrary.saved_declaration",
+          source: "your matching saved answer or profile fact",
+          sourceId: "answerLibrary.saved_declaration",
         }),
       ],
     });

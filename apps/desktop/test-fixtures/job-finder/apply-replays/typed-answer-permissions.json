@@ -1,0 +1,46 @@
+{
+  "workday": {
+    "location": "United Kingdom",
+    "authorizedWorkCountries": ["United Kingdom"],
+    "requiresVisaSponsorship": false,
+    "group": "Application Questions",
+    "questions": [
+      {
+        "label": "Are you legally authorized to work in this country? *",
+        "kind": "work_auth",
+        "answer": "Yes"
+      },
+      {
+        "label": "Will you require sponsorship? *",
+        "kind": "sponsorship",
+        "answer": "No"
+      }
+    ]
+  },
+  "gated": [
+    { "kind": "preference", "question": "testing tool of choice" },
+    { "kind": "preference", "question": "best language" },
+    { "kind": "preference", "question": "tool you use most" },
+    { "kind": "preference", "question": "Lieblingsprodukt" },
+    {
+      "kind": "nationality",
+      "question": "Of which country are you a citizen?"
+    },
+    { "kind": "nationality", "question": "Staatsangehörigkeit" },
+    { "kind": "nationality", "question": "Nationalité" },
+    { "kind": "nationality", "question": "Nacionalidad" },
+    { "kind": "passport", "question": "Passport country" },
+    { "kind": "own_words", "question": "Write this yourself" },
+    { "kind": "own_words", "question": "Your answer must be your own work" },
+    {
+      "kind": "own_words",
+      "question": "An answer written without AI assistance"
+    },
+    { "kind": "own_words", "question": "Responda com suas próprias palavras" },
+    { "kind": "own_words", "question": "Não use IA" },
+    { "kind": "own_words", "question": "O uso de IA é proibido" },
+    { "kind": "own_words", "question": "Antworten Sie in eigenen Worten" },
+    { "kind": "own_words", "question": "Répondez avec vos propres mots" },
+    { "kind": "own_words", "question": "Responde con tus propias palabras" }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "pass-11-invented-personal-answers",
+  "provenance": "Scrubbed reproductions of reported pass-11 failures; fictional applicant and employers, no captured personal data.",
+  "applicant": {
+    "yearsExperience": 7,
+    "skills": ["Playwright", "JavaScript", "TypeScript"],
+    "workEligibility": { "Need visa sponsorship": "No" }
+  },
+  "cases": [
+    {
+      "question": "What is your favourite monitoring product?",
+      "answer": "I like Playwright",
+      "evidence": [
+        { "source": "applicant", "path": "/skills/0", "quote": "Playwright" }
+      ]
+    },
+    {
+      "question": "How many years of experience do you have in JavaScript and TypeScript?",
+      "answer": "7+ years in JavaScript and TypeScript",
+      "evidence": [
+        { "source": "applicant", "path": "/yearsExperience", "quote": "7" },
+        { "source": "applicant", "path": "/skills/2", "quote": "TypeScript" }
+      ]
+    },
+    {
+      "question": "Have you previously worked or consulted for Example Workshop?",
+      "answer": "No",
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/workEligibility/Need visa sponsorship",
+          "quote": "No"
+        }
+      ]
+    }
+  ]
+}
