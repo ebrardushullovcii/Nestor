@@ -780,14 +780,6 @@ export function createJobFinderWorkspaceService(
   const sourceDebugMethods = createWorkspaceSourceDebugMethods(context);
   context.runSourceDebugWorkflow = sourceDebugMethods.runSourceDebugWorkflow;
   /**
-   * Explicit user actions (Search now, Check source, Prepare, opening the
-   * browser) resume paused background work instead of failing. The pause is
-   * raised when the person takes the browser over or presses Pause; their next
-   * deliberate click is the clearest signal they are ready to continue, and
-   * "press Resume on Home first" was a dead end in the Profile footer.
-   * Scheduled runs never come through here; they keep obeying the pause.
-   */
-  /**
    * A person starting browser work. It refuses while work is paused: only an
    * explicit Resume, or the last step of a finished reset, lowers a pause.
    */

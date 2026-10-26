@@ -29,7 +29,6 @@ async function readState(): Promise<ProfileWorkflowState> {
     import("../services/job-finder/import-resume"),
   ]);
   const personal = readPersonalWorkspaceState(
-    null,
     createEmptyJobFinderRepositoryState(),
     getJobStore(),
   );
