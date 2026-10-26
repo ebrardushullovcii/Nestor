@@ -5,6 +5,7 @@ import {
 import { expect, test } from "vitest";
 import { classifyAnswerPermission } from "./answer-source-catalog";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+import { ownWordsAppliesToQuestion } from "./own-words";
 
 function source(): ApplyAnswerSources {
   return {
@@ -76,6 +77,185 @@ function decide(
     pageInstructions: "",
   });
 }
+
+test.each([
+  ["City", "profile.currentCity", "London"],
+  ["Country of residence", "profile.currentCountry", "Germany"],
+  ["Total years of experience", "profile.yearsExperience", "2"],
+  ["Notice period", "profile.workEligibility.noticePeriodDays", "30 days"],
+  [
+    "Are you willing to relocate?",
+    "profile.workEligibility.willingToRelocate",
+    "Yes",
+  ],
+  ["School", "profile.education.school.schoolName", "Example University"],
+])(
+  "an explicit profile source answers the literal field %s",
+  (label, sourceId, answer) => {
+    const sources = source();
+    sources.profile.currentCity = "London";
+    sources.profile.workEligibility.noticePeriodDays = 30;
+    sources.profile.workEligibility.willingToRelocate = true;
+    sources.profile = CandidateProfileSchema.parse({
+      ...sources.profile,
+      education: [{ id: "school", schoolName: "Example University" }],
+    });
+    const field = {
+      ...control(label),
+      groupLabel: label === "School" ? "Education" : "",
+    };
+    expect(
+      decide(sources, field, { kind: "other", country: null, sourceId }, answer)
+        .kind,
+    ).toBe("literal");
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId: null },
+        answer,
+      ).kind,
+    ).toBe("needs_you");
+  },
+);
+
+test("a shared job title follows the employer on this entry, and its recorded date can be formatted", () => {
+  const sources = source();
+  sources.profile = CandidateProfileSchema.parse({
+    ...sources.profile,
+    experiences: [
+      {
+        id: "old",
+        companyName: "Old Company",
+        title: "Engineer",
+        startDate: "January 2020",
+      },
+      {
+        id: "new",
+        companyName: "New Company",
+        title: "Engineer",
+        startDate: "January 2024",
+      },
+    ],
+  });
+  const employer = {
+    ...control("Company"),
+    groupLabel: "Work experience",
+    value: "New Company",
+    ref: "company",
+  };
+  const title = { ...control("Job title"), groupLabel: "Work experience" };
+  const decision = decide(
+    sources,
+    title,
+    { kind: "other", country: null, sourceId: "profile.experiences.old.title" },
+    "Engineer",
+    [employer, title],
+  );
+  expect(decision.kind).toBe("literal");
+  if (decision.kind === "literal")
+    expect(decision.source.id).toBe("profile.experiences.new.title");
+  const date = {
+    ...control("Start date"),
+    groupLabel: "Work experience",
+    kind: "date" as const,
+  };
+  const tags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.experiences.new.startDate",
+  } as const;
+  expect(decide(sources, date, tags, "2024-01", [employer, date]).kind).toBe(
+    "literal",
+  );
+  expect(decide(sources, date, tags, "2024-01-01", [employer, date]).kind).toBe(
+    "needs_you",
+  );
+});
+
+test.each([
+  [
+    "Are you legally eligible to work in the United Kingdom?",
+    "work_auth",
+    "profile.workEligibility.authorizedWorkCountries.0",
+    "Yes",
+  ],
+  [
+    "Will you now or in the future require sponsorship for employment visa status?",
+    "sponsorship",
+    "profile.workEligibility.requiresVisaSponsorship.GB",
+    "No",
+  ],
+] as const)(
+  "standard legal wording reuses its country-bound fact: %s",
+  (label, kind, sourceId, answer) => {
+    const sources = source();
+    sources.profile.workEligibility.authorizedWorkCountries = [
+      "United Kingdom",
+    ];
+    expect(
+      decide(sources, control(label), { kind, country: "GB", sourceId }, answer)
+        .kind,
+    ).toBe("literal");
+  },
+);
+
+test.each(["consent", "acknowledgement", "personal_fact"] as const)(
+  "routine declaration meaning: %s",
+  (purpose) => {
+    const field = {
+      ...control(
+        "I hereby certify that all information provided in this application is true and complete to the best of my knowledge",
+      ),
+      kind: "checkbox" as const,
+      attestationKind: "truthfulness_certification" as const,
+    };
+    const result = classifyAnswerPermission({
+      control: field,
+      controls: [field],
+      tags: {
+        kind: "other",
+        country: null,
+        sourceId: null,
+        declarationPurpose: purpose,
+      },
+      sources: source(),
+      answer: "Yes",
+      pageInstructions: "",
+      approvedAttestations: ["truthfulness_certification"],
+    });
+    expect(result.kind).toBe(
+      purpose === "personal_fact" ? "needs_you" : "literal",
+    );
+  },
+);
+
+test("a cover-letter own-words rule keeps its scope", () => {
+  const sources = source(),
+    field = control("Why do you want to join this company?");
+  const input = {
+    control: field,
+    controls: [field],
+    tags: {
+      kind: "motivation",
+      country: null,
+      sourceId: "posting.description",
+    } as const,
+    sources,
+    answer: "I am excited to build services.",
+    pageInstructions: "Write your cover letter in your own words.",
+  };
+  expect(classifyAnswerPermission(input).kind).toBe("writing");
+  expect(
+    classifyAnswerPermission({
+      ...input,
+      pageInstructions: "Write all answers in your own words.",
+    }).kind,
+  ).toBe("needs_you");
+  expect(
+    ownWordsAppliesToQuestion(input.pageInstructions, "Cover letter"),
+  ).toBe(true);
+});
 
 test.each([
   ["no classification", null],

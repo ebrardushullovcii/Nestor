@@ -129,8 +129,20 @@ async function readApplicationQuestions(
                     description:
                       "The ID of a relevant verbatim source in the supplied catalog; null if none.",
                   },
+                  declarationPurpose: {
+                    type: ["string", "null"],
+                    enum: ["consent", "acknowledgement", "personal_fact", null],
+                    description:
+                      "Consent/acknowledgement only, or an assertion of a personal fact. Null for a non-declaration.",
+                  },
                 },
-                required: ["index", "kind", "country", "sourceId"],
+                required: [
+                  "index",
+                  "kind",
+                  "country",
+                  "sourceId",
+                  "declarationPurpose",
+                ],
                 additionalProperties: false,
               },
             },
@@ -189,6 +201,7 @@ async function readApplicationQuestions(
         "asksCurrentPay: true only for current/past earnings or pay history. Expected or desired pay, currency and period are false; a saved salary expectation answers those without disclosing current pay.",
         "required: read the question and group wording, including required markers such as an asterisk. A checkbox skills group marked required needs at least one selection even when its individual inputs are optional. Preserve native required fields. Do not mark optional work history or voluntary questions required.",
         `declarationKind: when the question is a statement the applicant makes or agrees to about themselves, name it: ${DECLARATION_KINDS.join(", ")}. Otherwise null.`,
+        "declarationPurpose: consent for permission to check, process or contact; acknowledgement for accepting terms/privacy or certifying that this application's supplied information is accurate; personal_fact when the statement asserts a specific fact about the person (a driving licence, convictions, qualifications, citizenship, history, availability). A consent category never proves such a fact, including when it is embedded in a longer declaration. Classify the whole statement, in every language. Non-declarations use null.",
       ].join(" "),
     },
     {
@@ -289,6 +302,9 @@ async function readApplicationQuestions(
       kind: record.kind,
       country: record.country,
       sourceId: record.sourceId,
+      ...(record.declarationPurpose !== undefined
+        ? { declarationPurpose: record.declarationPurpose }
+        : {}),
     });
     tagged.set(index, parsed.success ? parsed.data : null);
   }

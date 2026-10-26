@@ -122,7 +122,7 @@ const writingGlue = new Set(
     "yes no true false i my me we our you your the a an this that these those it its own owning " +
     "and or but of for in on at to with by from as an am is are was were be been being " +
     "have has had do does did would could can will may might should " +
-    "want welcome opportunity chance contribute contribution excited interested interest " +
+    "want welcome like love appreciate opportunity chance contribute contribution excited interested interest drawn motivated look forward hope " +
     "role position team company work working join joining build building help helping " +
     "apply applying bring bringing use using used develop developing support supporting " +
     "reliable dependable meaningful thoughtful strong stronger good great well " +
@@ -148,11 +148,11 @@ export function concreteClaimsSupported(
         clause,
       );
     const roleSubject =
-      /^(?:(?:The|Your|This) )?(?:role|position|company|organisation|organization|team|posting|job)\b|^Owning the\b/iu.test(
+      /^(?:(?:The|Your|This) )?(?:role|position|company|organisation|organization|team|posting|job|mission|product|work)\b|^Owning the\b/iu.test(
         clause.trim(),
       );
     const roleIntent =
-      /^(?:I|We) (?:would (?:welcome|like|love|appreciate)|am excited to|am interested in|want to (?:join|contribute|build|work))\b/iu.test(
+      /^(?:I|We) (?:would (?:welcome|like|love|appreciate)|am (?:excited (?:to|about)|interested in|drawn to|motivated by)|hope to|look forward to|want to (?:join|contribute|build|work))\b/iu.test(
         clause.trim(),
       ) &&
       !/\b(?:I|we|my|our)\b/iu.test(clause.trim().replace(/^(?:I|We)\b/iu, ""));

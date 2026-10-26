@@ -10,7 +10,8 @@ import type {
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { storedFacts, savedAnswerForQuestion } from "./application-facts";
 import { countriesIn, countryTerms } from "./concrete-answer-claims";
-import { requiresOwnWords } from "./own-words";
+import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
+import { employmentMonthEvidence } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
@@ -59,6 +60,21 @@ export function answerSourceCatalog(
     purpose: "context",
     country: country(sources.posting.location),
   });
+  const eligibilityFacts = sources.profile.workEligibility;
+  if (eligibilityFacts.noticePeriodDays !== null)
+    rows.push({
+      id: "profile.workEligibility.noticePeriodDays",
+      value: String(eligibilityFacts.noticePeriodDays),
+      purpose: "profile",
+      country: null,
+    });
+  if (eligibilityFacts.willingToRelocate !== null)
+    rows.push({
+      id: "profile.workEligibility.willingToRelocate",
+      value: eligibilityFacts.willingToRelocate ? "Yes" : "No",
+      purpose: "profile",
+      country: null,
+    });
   if (sources.listingDiscovery?.label.trim())
     rows.push({
       id: "listingDiscovery",
@@ -148,6 +164,36 @@ const contactLabels: Record<string, readonly string[]> = {
   "profile.lastName": ["last name", "surname", "family name"],
   "profile.email": ["email", "email address", "your email"],
   "profile.phone": ["phone", "phone number", "telephone", "telephone number"],
+  "profile.currentCity": [
+    "city",
+    "current city",
+    "city of residence",
+    "your city",
+  ],
+  "profile.currentCountry": [
+    "country",
+    "country of residence",
+    "residence country",
+    "current country",
+  ],
+  "profile.yearsExperience": [
+    "years of experience",
+    "total experience",
+    "total years of experience",
+    "years of professional experience",
+    "overall years of experience",
+  ],
+  "profile.workEligibility.noticePeriodDays": [
+    "notice period",
+    "notice period days",
+    "notice period in days",
+    "what is your notice period",
+  ],
+  "profile.workEligibility.willingToRelocate": [
+    "relocation",
+    "willing to relocate",
+    "are you willing to relocate",
+  ],
   "profile.linkedinUrl": ["professional profile", "professional profile url"],
   "profile.githubUrl": ["code profile", "code profile url"],
   "profile.portfolioUrl": ["portfolio", "portfolio url"],
@@ -165,7 +211,7 @@ function knownLiteralField(
       normalizeFormQuestionPrompt(control.groupLabel),
     );
   const historyLeaf =
-    /^profile\.(experiences|education)\.[^.]+\.(companyName|title|startDate|endDate|institution|degree|fieldOfStudy)$/u.exec(
+    /^profile\.(experiences|education)\.[^.]+\.(companyName|title|startDate|endDate|schoolName|degree|fieldOfStudy)$/u.exec(
       source.id,
     );
   const historyLabels: Record<string, readonly string[]> = {
@@ -173,7 +219,7 @@ function knownLiteralField(
     title: ["job title", "position title"],
     startDate: ["from", "start date", "start month"],
     endDate: ["to optional", "end date", "end month"],
-    institution: ["institution", "school", "university"],
+    schoolName: ["institution", "school", "university", "school name"],
     degree: ["degree"],
     fieldOfStudy: ["field of study"],
   };
@@ -222,6 +268,9 @@ function knownLiteralField(
       "my information",
       "your details",
       "personal details",
+      "application questions",
+      "work eligibility",
+      "eligibility",
     ].includes(group);
   return (
     personal && aliases.includes(normalizeFormQuestionPrompt(control.label))
@@ -240,7 +289,7 @@ function historyRecordMatches(
   const leaves =
     record[2] === "experiences"
       ? ["companyName", "title", "startDate", "endDate"]
-      : ["institution", "degree", "fieldOfStudy", "startDate", "endDate"];
+      : ["schoolName", "degree", "fieldOfStudy", "startDate", "endDate"];
   return input.controls
     .filter(
       (control) =>
@@ -256,8 +305,37 @@ function historyRecordMatches(
       );
       if (!leaf) return true;
       const expected = catalog.find((row) => row.id === `${prefix}.${leaf}`);
-      return !!expected && expected.value.trim() === control.value.trim();
+      return (
+        !!expected && literalValueMatches(expected, control, control.value)
+      );
     });
+}
+
+function literalValueMatches(
+  source: ClassifiedAnswerSource,
+  control: ApplyFormControl,
+  answer: string,
+): boolean {
+  if (source.value.trim() === answer.trim()) return true;
+  if (source.id === "profile.workEligibility.noticePeriodDays")
+    return (
+      answer.trim() === `${source.value} days` ||
+      answer.trim() === `${source.value} day`
+    );
+  const date =
+    /^profile\.(experiences|education)\.[^.]+\.(startDate|endDate)$/u.exec(
+      source.id,
+    );
+  return (
+    !!date &&
+    employmentMonthEvidence(control.label, answer, [
+      {
+        source: "applicant",
+        path: `/${date[1]}/0/${date[2]}`,
+        quote: source.value,
+      },
+    ]) === true
+  );
 }
 
 // Permission to acknowledge a form is not evidence of a new personal fact.
@@ -396,6 +474,7 @@ export function classifyAnswerPermission(input: {
   const authorizationPrefixes = [
     "are you legally authorized to work in ",
     "are you legally authorised to work in ",
+    "are you legally eligible to work in ",
     "are you authorized to work in ",
     "are you authorised to work in ",
     "do you have the right to work in ",
@@ -425,6 +504,10 @@ export function classifyAnswerPermission(input: {
           "will you now or in the future require visa sponsorship",
           "do you now or in the future require sponsorship",
           "do you now or in the future require visa sponsorship",
+          "will you require sponsorship for employment visa status",
+          "do you require sponsorship for employment visa status",
+          "will you now or in the future require sponsorship for employment visa status",
+          "do you now or in the future require sponsorship for employment visa status",
         ].includes(question));
   if (matchingSaved) {
     const human = catalog.find(
@@ -433,16 +516,31 @@ export function classifyAnswerPermission(input: {
     if (human && (!legal || human.country === target)) source = human;
   }
   if (
+    source &&
+    tags.kind === "other" &&
+    /^profile\.skills\.\d+$/u.test(source.id) &&
+    input.control.answerControlType === "multi_choice" &&
+    knownLiteralField(source, input.control)
+  )
+    source =
+      catalog.find(
+        (row) =>
+          /^profile\.skills\.\d+$/u.test(row.id) && row.value === input.answer,
+      ) ?? source;
+  if (
     !source &&
     tags.kind === "other" &&
     input.control.attestationKind &&
     input.approvedAttestations?.includes(input.control.attestationKind) &&
-    inferAttestationKind(input.control) === input.control.attestationKind &&
-    routineDeclarations[input.control.attestationKind]?.some(
-      (statement) =>
-        normalizeFormQuestionPrompt(statement) ===
-        normalizeFormQuestionPrompt(input.control.label),
-    ) &&
+    tags.declarationPurpose !== "personal_fact" &&
+    (tags.declarationPurpose === "consent" ||
+      tags.declarationPurpose === "acknowledgement" ||
+      (inferAttestationKind(input.control) === input.control.attestationKind &&
+        routineDeclarations[input.control.attestationKind]?.some(
+          (statement) =>
+            normalizeFormQuestionPrompt(statement) ===
+            normalizeFormQuestionPrompt(input.control.label),
+        ))) &&
     input.answer === "Yes"
   )
     source = {
@@ -499,8 +597,12 @@ export function classifyAnswerPermission(input: {
       "preference",
       "own_words",
     ].includes(tags.kind) ||
-    requiresOwnWords(`${input.control.groupLabel}\n${input.control.label}`) ||
-    (requiresOwnWords(input.pageInstructions) && tags.kind === "motivation") ||
+    requiresOwnWords(input.control.label) ||
+    (tags.kind === "motivation" &&
+      ownWordsAppliesToQuestion(
+        `${input.control.groupLabel}\n${input.pageInstructions}`,
+        input.control.label,
+      )) ||
     requiresSavedNationalityAnswer(input.control.label) ||
     requiresSavedOpinionAnswer(input.control.label, input.answer);
   if (gated)
@@ -556,6 +658,26 @@ export function classifyAnswerPermission(input: {
   }
   if (exactSaved) return { kind: "literal", source };
   if (
+    tags.kind === "other" &&
+    source.purpose === "profile" &&
+    !historyRecordMatches(source, input, catalog)
+  ) {
+    const leaf = /^(profile\.(?:experiences|education))\.[^.]+\.([^.]+)$/u.exec(
+      source.id,
+    );
+    const alternatives = leaf
+      ? catalog.filter(
+          (row) =>
+            row.id.startsWith(`${leaf[1]}.`) &&
+            row.id.endsWith(`.${leaf[2]}`) &&
+            knownLiteralField(row, input.control) &&
+            literalValueMatches(row, input.control, input.answer) &&
+            historyRecordMatches(row, input, catalog),
+        )
+      : [];
+    if (alternatives.length === 1 && alternatives[0]) source = alternatives[0];
+  }
+  if (
     source.purpose === "profile" &&
     !historyRecordMatches(source, input, catalog)
   )
@@ -565,7 +687,7 @@ export function classifyAnswerPermission(input: {
   if (
     tags.kind === "other" &&
     source.purpose === "profile" &&
-    source.value.trim() === input.answer.trim() &&
+    literalValueMatches(source, input.control, input.answer) &&
     knownLiteralField(source, input.control)
   )
     return { kind: "literal", source };

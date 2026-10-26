@@ -1049,7 +1049,9 @@ it.each([
     const action = vi.fn();
     Object.assign(f.browser, { executeExactlyOneFinalAction: action });
     expect(await f.service.sendPrepared(row.id)).toBe(false);
-    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    // The lying answer report is not a usable question reading. It gets
+    // exactly one retry, then the card is returned to Needs you.
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
     expect(action).not.toHaveBeenCalled();
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
     expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);

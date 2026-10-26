@@ -26,6 +26,10 @@ export const ApplyAnswerTagsSchema = z
       .refine((value) => countries.has(value), "Use an ISO country code")
       .nullable(),
     sourceId: z.string().trim().min(1).max(2000).nullable(),
+    declarationPurpose: z
+      .enum(["consent", "acknowledgement", "personal_fact"])
+      .nullable()
+      .optional(),
   })
   .strict();
 export type ApplyAnswerTags = z.infer<typeof ApplyAnswerTagsSchema>;

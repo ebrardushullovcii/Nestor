@@ -35,6 +35,66 @@ const sources = {
   },
 };
 
+test.each([
+  "I am excited about the opportunity to build engineering workflow tools at Example Workshop.",
+  "I am drawn to engineering workflow tools at Example Workshop.",
+  "I would like to build engineering workflow tools at Example Workshop.",
+])(
+  "ordinary motivation stays available beside a scoped own-words letter: %s",
+  async (answer) => {
+    const chatWithTools = vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockResolvedValue({
+        toolCalls: [
+          {
+            id: "check",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Role motivation",
+                    evidence: [
+                      {
+                        kind: "role_motivation",
+                        source: "posting",
+                        path: "/company",
+                        quote: "Example Workshop",
+                        claim: answer,
+                      },
+                      {
+                        kind: "role_motivation",
+                        source: "posting",
+                        path: "/description",
+                        quote: "Engineering workflow tools",
+                        claim: answer,
+                      },
+                    ],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    const result = await checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      formContext: {
+        pageText: "Write your cover letter in your own words.",
+        fields: [],
+      },
+      answers: [{ question: "Why should we hire you?", answer }],
+    });
+    expect(result[0]?.supported).toBe(true);
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+  },
+);
+
 test.each(["A friend referred me", discovery.label])(
   "listing source is checked deterministically: %s",
   async (answer) => {

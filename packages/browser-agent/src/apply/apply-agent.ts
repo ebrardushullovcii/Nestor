@@ -79,7 +79,11 @@ import {
   nationalityQuestionIdentity,
   NATIONALITY_ANSWER_REASON,
 } from "./person-nationality";
-import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
+import {
+  OWN_WORDS_REASON,
+  formWritingInstructions,
+  ownWordsAppliesToQuestion,
+} from "./own-words";
 import {
   checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
@@ -379,8 +383,9 @@ async function runMeasuredApplyAgent(
             provide: async (request) => {
               if (
                 !request.approvedText &&
-                requiresOwnWords(
-                  `${pageTools.state.observation?.ownWordsRequired ? "In your own words" : (pageTools.state.observation?.bodyTextExcerpt ?? "")}\n${request.prompt}`,
+                ownWordsAppliesToQuestion(
+                  formWritingInstructions(pageTools.state.observation),
+                  request.prompt,
                 )
               )
                 return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
@@ -397,9 +402,7 @@ async function runMeasuredApplyAgent(
                 const readings = await classifyQuestions(
                   page.controls,
                   JSON.stringify({
-                    instructions: page.ownWordsRequired
-                      ? "In your own words"
-                      : page.bodyTextExcerpt,
+                    instructions: formWritingInstructions(page),
                   }),
                 ).catch(() => undefined);
                 const reading =
@@ -412,9 +415,7 @@ async function runMeasuredApplyAgent(
                   tags: reading?.answerTags,
                   sources: runConfig.sources,
                   answer: "",
-                  pageInstructions: page.ownWordsRequired
-                    ? "In your own words"
-                    : page.bodyTextExcerpt,
+                  pageInstructions: formWritingInstructions(page),
                 });
                 if (permission.kind !== "writing")
                   return {
@@ -453,9 +454,7 @@ async function runMeasuredApplyAgent(
     const observation = pageTools.state.observation;
     return observation
       ? {
-          pageText: observation.ownWordsRequired
-            ? "In your own words"
-            : observation.bodyTextExcerpt,
+          pageText: formWritingInstructions(observation),
           fields: observation.controls
             .filter(
               (control) =>
@@ -593,9 +592,7 @@ async function runMeasuredApplyAgent(
       const readings = classifyQuestions.settled(
         observation.controls,
         JSON.stringify({
-          instructions: observation.ownWordsRequired
-            ? "In your own words"
-            : observation.bodyTextExcerpt,
+          instructions: formWritingInstructions(observation),
         }),
       );
       const tags = (
@@ -609,9 +606,7 @@ async function runMeasuredApplyAgent(
         tags,
         sources: runConfig.sources,
         answer,
-        pageInstructions: observation.ownWordsRequired
-          ? "In your own words"
-          : observation.bodyTextExcerpt,
+        pageInstructions: formWritingInstructions(observation),
       });
       if (permission.kind !== "writing") return null;
     }
@@ -716,9 +711,7 @@ async function runMeasuredApplyAgent(
       JSON.stringify({
         url: next.url,
         step: next.step,
-        instructions: next.ownWordsRequired
-          ? "In your own words"
-          : next.bodyTextExcerpt,
+        instructions: formWritingInstructions(next),
       }),
     ).catch(() => undefined);
     // A person or a later page write may have answered a previously pending
@@ -1021,9 +1014,7 @@ async function runMeasuredApplyAgent(
             JSON.stringify({
               url: observation.url,
               step: observation.step,
-              instructions: observation.ownWordsRequired
-                ? "In your own words"
-                : observation.bodyTextExcerpt,
+              instructions: formWritingInstructions(observation),
             }),
           ).catch(() => undefined);
           // Cache the native question set before adding the model's required marker.
@@ -1092,9 +1083,7 @@ async function runMeasuredApplyAgent(
           JSON.stringify({
             url: observation.url,
             step: observation.step,
-            instructions: observation.ownWordsRequired
-              ? "In your own words"
-              : observation.bodyTextExcerpt,
+            instructions: formWritingInstructions(observation),
           }),
         ).catch(() => undefined);
         // Inferred required markers are results, not changed native questions.
@@ -1711,9 +1700,7 @@ async function runMeasuredApplyAgent(
         await classifyQuestions(
           observation.controls,
           JSON.stringify({
-            instructions: observation.ownWordsRequired
-              ? "In your own words"
-              : observation.bodyTextExcerpt,
+            instructions: formWritingInstructions(observation),
           }),
         ).catch(() => undefined);
       }
@@ -1758,9 +1745,7 @@ async function runMeasuredApplyAgent(
       const stepKey = JSON.stringify({
         url: observation.url,
         step: observation.step,
-        instructions: observation.ownWordsRequired
-          ? "In your own words"
-          : observation.bodyTextExcerpt,
+        instructions: formWritingInstructions(observation),
       });
       const checkAnswers = (shortValues: boolean) =>
         checkWrittenApplicationAnswers({
@@ -2426,9 +2411,7 @@ async function runMeasuredApplyAgent(
         const readings = await classifyQuestions(
           observation.controls,
           JSON.stringify({
-            instructions: observation.ownWordsRequired
-              ? "In your own words"
-              : observation.bodyTextExcerpt,
+            instructions: formWritingInstructions(observation),
           }),
         );
         if ([...readings.values()].some((reading) => reading.readFailed)) {

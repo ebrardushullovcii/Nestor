@@ -22,7 +22,7 @@ const opinion =
 const preference =
   /\b(?:go[\s-]*to|best\s+(?:time|contact\s+time)|top\s+skill|prefer(?:ence|red|s)?|favou?rites?|of\s+choice)\b/iu;
 const motivation =
-  /\b(?:why|what)\b.*\b(?:join|apply|work|company|us|role|position|attracts?|appeals?|interests?)\b|\b(?:cover|application|motivation)\s+letter\b|\b(?:motivation|motivates|interested in (?:this|the) (?:role|position))\b/iu;
+  /\b(?:why|what)\b.*\b(?:join|apply|work|company|us|role|position|hire|attracts?|appeals?|interests?)\b|\btell us about yourself\b|\b(?:cover|application|motivation)\s+letter\b|\b(?:motivation|motivates|interested in (?:this|the) (?:role|position))\b/iu;
 
 export const OPINION_ANSWER_REASON =
   "This question asks for your opinion or preference. Please supply your answer.";
@@ -94,16 +94,16 @@ function labelMatches(
   return words.length > 2 && asked === words;
 }
 
-function employmentMonthEvidence(
+export function employmentMonthEvidence(
   question: string,
   answer: string,
   evidence: readonly AnswerEvidence[],
 ): boolean | null {
   if (!/^\d{4}-\d{2}(?:-\d{2})?$/u.test(answer)) return null;
   const asked = normalize(question).replace(/ optional$/u, "");
-  const field = /\b(?:from|start date)$/u.test(asked)
+  const field = /\b(?:from|start (?:date|month))(?: mm yyyy)?$/u.test(asked)
     ? "startDate"
-    : /\b(?:to|end date)$/u.test(asked)
+    : /\b(?:to|end (?:date|month))(?: mm yyyy)?$/u.test(asked)
       ? "endDate"
       : null;
   if (!field) return null;
@@ -114,7 +114,9 @@ function employmentMonthEvidence(
   return evidence.some((entry) => {
     if (
       entry.source !== "applicant" ||
-      !new RegExp(`^/experiences/\\d+/${field}$`, "u").test(entry.path)
+      !new RegExp(`^/(?:experiences|education)/\\d+/${field}$`, "u").test(
+        entry.path,
+      )
     )
       return false;
     const quote = entry.quote.trim();

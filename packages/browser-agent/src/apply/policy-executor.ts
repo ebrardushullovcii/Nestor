@@ -43,7 +43,11 @@ import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
-import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
+import {
+  OWN_WORDS_REASON,
+  formWritingInstructions,
+  ownWordsAppliesToQuestion,
+} from "./own-words";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -514,9 +518,7 @@ async function withModelQuestionKinds(
       JSON.stringify({
         url: observation.url,
         step: observation.step,
-        instructions: observation.ownWordsRequired
-          ? "In your own words"
-          : observation.bodyTextExcerpt,
+        instructions: formWritingInstructions(observation),
       }),
     );
     classification =
@@ -891,7 +893,7 @@ async function decideAnswer(input: {
     deps.onAnswerSource?.("stored_fact");
     return { kind: "use", answer: stored };
   }
-  if (requiresOwnWords(`${input.pageText}\n${questionPrompt(control)}`)) {
+  if (ownWordsAppliesToQuestion(input.pageText, questionPrompt(control))) {
     return {
       kind: "leave",
       reason: OWN_WORDS_REASON,
@@ -1889,9 +1891,7 @@ export async function executeApplyProposal(
             tags: control.answerTags,
             sources: config.sources,
             answer: "",
-            pageInstructions: observation.ownWordsRequired
-              ? "In your own words"
-              : observation.bodyTextExcerpt,
+            pageInstructions: formWritingInstructions(observation),
           });
           if (permission.kind !== "writing")
             return notEntered({
@@ -1974,9 +1974,7 @@ export async function executeApplyProposal(
         controls: observation.controls,
         deps,
         control,
-        pageText: observation.ownWordsRequired
-          ? "In your own words"
-          : observation.bodyTextExcerpt,
+        pageText: formWritingInstructions(observation),
         value: proposal.text,
         groundedIn: proposal.groundedIn,
         storedFactId: proposal.storedFactId,
@@ -2039,9 +2037,7 @@ export async function executeApplyProposal(
         controls: observation.controls,
         deps,
         control,
-        pageText: observation.ownWordsRequired
-          ? "In your own words"
-          : observation.bodyTextExcerpt,
+        pageText: formWritingInstructions(observation),
         value: matchOption(control.options, proposal.option) ?? proposal.option,
         storedFactId: proposal.storedFactId,
       });
@@ -2184,9 +2180,7 @@ export async function executeApplyProposal(
           controls: observation.controls,
           deps,
           control,
-          pageText: observation.ownWordsRequired
-            ? "In your own words"
-            : observation.bodyTextExcerpt,
+          pageText: formWritingInstructions(observation),
           value: proposedOption,
           storedFactId: proposal.storedFactId,
         });
@@ -2467,9 +2461,7 @@ export async function executeApplyProposal(
             tags: control.answerTags,
             sources: config.sources,
             answer: "",
-            pageInstructions: observation.ownWordsRequired
-              ? "In your own words"
-              : observation.bodyTextExcerpt,
+            pageInstructions: formWritingInstructions(observation),
           });
           if (permission.kind !== "writing")
             return notEntered({
@@ -2756,8 +2748,9 @@ async function provideApplicationLetter(
   const observation = await config.hands.observe();
   if (
     !approvedText &&
-    requiresOwnWords(
-      `${observation.ownWordsRequired ? "In your own words" : observation.bodyTextExcerpt}\n${questionPrompt(control)}`,
+    ownWordsAppliesToQuestion(
+      formWritingInstructions(observation),
+      questionPrompt(control),
     )
   ) {
     return {

@@ -16,3 +16,35 @@ export function requiresOwnWords(text: string): boolean {
   ];
   return rules.some((rule) => rule.test(normalized));
 }
+
+/** Retain the instruction's scope; the boolean alone loses which field it names. */
+export function formWritingInstructions(
+  page:
+    | {
+        bodyTextExcerpt: string;
+        ownWordsRequired?: boolean;
+      }
+    | null
+    | undefined,
+): string {
+  const text = page?.bodyTextExcerpt ?? "";
+  return page?.ownWordsRequired && !requiresOwnWords(text)
+    ? `${text}\nIn your own words`
+    : text;
+}
+
+export function ownWordsAppliesToQuestion(
+  instructions: string,
+  question: string,
+): boolean {
+  if (requiresOwnWords(question)) return true;
+  const letter =
+    /\b(?:cover\s+letter|application\s+letter|anschreiben|lettre\s+de\s+motivation|carta\s+de\s+(?:presentacion|apresentacao))\b/iu;
+  return instructions.split(/[\n.!?;]+/u).some((clause) => {
+    if (!requiresOwnWords(clause)) return false;
+    return (
+      !letter.test(clause.normalize("NFKD").replace(/\p{M}/gu, "")) ||
+      letter.test(question.normalize("NFKD").replace(/\p{M}/gu, ""))
+    );
+  });
+}

@@ -376,12 +376,15 @@ async function ledgerleafRun(conditionalContact = false) {
                   source.purpose === "saved" &&
                   source.question === question.question,
               );
-              const literal = catalog.find(
-                (source) =>
-                  source.value ===
-                  (field?.type === "checkbox"
-                    ? field.label
-                    : proposalValues[field?.name ?? ""]),
+              const literal = catalog.find((source) =>
+                observed?.answerControlType === "multi_choice"
+                  ? /^profile\.skills\.\d+$/u.test(source.id) &&
+                    currentFields().some(
+                      (choice) =>
+                        choice.groupLabel === field?.groupLabel &&
+                        choice.label === source.value,
+                    )
+                  : source.value === proposalValues[field?.name ?? ""],
               );
               return {
                 index: question.index,

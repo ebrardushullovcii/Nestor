@@ -51,7 +51,7 @@ describe("application document writer context", () => {
                     },
                   ],
                 }
-              : { content: seed.profile.summary },
+              : { content: seed.profile.summary ?? "" },
           );
         },
       },
@@ -161,7 +161,7 @@ test.each([true, false])(
                     },
                   ],
                 }
-              : { content: seed.profile.summary },
+              : { content: seed.profile.summary ?? "" },
           );
         },
       },
@@ -251,7 +251,7 @@ test("writer input uses application facts, excludes pay answers and trims the re
                   },
                 ],
               }
-            : { content: seed.profile.summary },
+            : { content: seed.profile.summary ?? "" },
         );
       },
     },

@@ -9,7 +9,7 @@ import {
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
-import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
+import { OWN_WORDS_REASON, ownWordsAppliesToQuestion } from "./own-words";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { normalizeSignal } from "./control-classification";
 
@@ -156,7 +156,10 @@ export async function checkWrittenApplicationAnswers(input: {
   // Remove prohibited writing before constructing a model request. A lying
   // checker, an unavailable checker, and retries all get the same decision.
   const prohibited = input.answers.map((entry) =>
-    requiresOwnWords(`${input.formContext?.pageText ?? ""}\n${entry.question}`),
+    ownWordsAppliesToQuestion(
+      input.formContext?.pageText ?? "",
+      entry.question,
+    ),
   );
   if (prohibited.some(Boolean)) {
     const allowed = await checkWrittenApplicationAnswers({
