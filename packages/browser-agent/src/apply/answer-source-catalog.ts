@@ -14,6 +14,7 @@ import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
 import { employmentMonthEvidence } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
+import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
 export interface ClassifiedAnswerSource {
@@ -203,6 +204,8 @@ function knownLiteralField(
   source: ClassifiedAnswerSource,
   control: ApplyFormControl,
 ): boolean {
+  if (/^profile\.(?:githubUrl|links\.[^.]+)#username$/u.test(source.id))
+    return applicantContactGroup(control) && asksGithubUsername(control);
   if (
     /^profile\.skills\.\d+$/u.test(source.id) &&
     control.answerControlType === "multi_choice"
@@ -245,6 +248,10 @@ function knownLiteralField(
   }
   const profileLink = /^profile\.([a-zA-Z]+)Url$/u.exec(source.id);
   if (profileLink) {
+    if (source.id === "profile.githubUrl" && fieldNamesAnotherPerson(control))
+      return false;
+    if (source.id === "profile.githubUrl" && asksGithubUsername(control))
+      return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
     if (
       [
@@ -258,8 +265,14 @@ function knownLiteralField(
   }
   const aliases = contactLabels[source.id];
   if (!aliases) return false;
+  return (
+    applicantContactGroup(control) &&
+    aliases.includes(normalizeFormQuestionPrompt(control.label))
+  );
+}
+function applicantContactGroup(control: ApplyFormControl): boolean {
   const group = normalizeFormQuestionPrompt(control.groupLabel);
-  const personal =
+  return (
     !group ||
     [
       "personal information",
@@ -271,9 +284,7 @@ function knownLiteralField(
       "application questions",
       "work eligibility",
       "eligibility",
-    ].includes(group);
-  return (
-    personal && aliases.includes(normalizeFormQuestionPrompt(control.label))
+    ].includes(group)
   );
 }
 function historyRecordMatches(
@@ -538,6 +549,18 @@ export function classifyAnswerPermission(input: {
       (row) => row.id === `answerLibrary.${matchingSaved.id}`,
     );
     if (human && (!legal || human.country === target)) source = human;
+  }
+  // Formatting an explicitly selected profile URL may use only that same
+  // account's derived username. A null or unrelated source grants nothing.
+  if (
+    source?.purpose === "profile" &&
+    /^profile\.(?:githubUrl|links\.[^.]+)$/u.test(source.id) &&
+    tags.kind === "other" &&
+    asksGithubUsername(input.control)
+  ) {
+    const sourceId = source.id;
+    const username = catalog.find((row) => row.id === `${sourceId}#username`);
+    if (username?.value === input.answer) source = username;
   }
   if (
     source &&

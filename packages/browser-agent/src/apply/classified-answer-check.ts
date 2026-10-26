@@ -59,10 +59,12 @@ export async function checkClassifiedApplicationAnswers(input: {
   const readings = await classifyApplicationQuestions({
     client: input.client,
     signal: input.signal,
-    questions: input.answers.map((answer) => ({
+    questions: input.answers.map((answer, index) => ({
       prompt: answer.question,
-      kind: "text",
-      options: [],
+      kind: controls[index]?.kind ?? "text",
+      options: controls[index]?.options ?? [],
+      hint: controls[index]?.hint ?? "",
+      placeholder: controls[index]?.placeholder ?? "",
     })),
     pageInstructions: input.formContext.pageText,
     sources: answerSourceCatalog(input.sources),

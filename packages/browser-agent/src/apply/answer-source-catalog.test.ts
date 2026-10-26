@@ -78,6 +78,178 @@ function decide(
   });
 }
 
+test.each(["profile.githubUrl", "profile.links.code"])(
+  "a requested GitHub username uses the selected account's canonical source: %s",
+  (sourceId) => {
+    const sources = source();
+    sources.profile.githubUrl = "https://github.com/synthetic-alex";
+    sources.profile.links = [
+      {
+        id: "code",
+        label: "Code",
+        kind: "github",
+        url: "https://github.com/synthetic-alex",
+        isDraft: false,
+      },
+    ];
+    const field = {
+      ...control("GitHub"),
+      hint: "Please provide your GitHub username, if you have one.",
+      groupLabel: "Personal information",
+    };
+    for (const id of [sourceId, `${sourceId}#username`]) {
+      const decision = decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId: id },
+        "synthetic-alex",
+      );
+      expect(decision.kind).toBe("literal");
+      if (decision.kind === "literal")
+        expect(decision.source.id).toBe(`${sourceId}#username`);
+    }
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId: null },
+        "synthetic-alex",
+      ).kind,
+    ).toBe("needs_you");
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId },
+        "https://github.com/synthetic-alex",
+      ).kind,
+    ).toBe("needs_you");
+    expect(
+      decide(
+        sources,
+        { ...field, groupLabel: "Professional reference" },
+        { kind: "other", country: null, sourceId },
+        "synthetic-alex",
+      ).kind,
+    ).toBe("needs_you");
+  },
+);
+
+test.each([
+  {
+    label: "GitHub username",
+    hint: "Please provide the full URL of your GitHub profile",
+    placeholder: "",
+  },
+  { label: "GitHub username", hint: "", placeholder: "Full URL" },
+  { label: "GitHub username URL", hint: "Enter your handle", placeholder: "" },
+  {
+    label: "Please enter the GitHub username of your professional reference",
+    hint: "",
+    placeholder: "",
+  },
+  {
+    label: "GitHub username",
+    hint: "Please enter the GitHub username of your professional reference",
+    placeholder: "",
+  },
+  {
+    label: "GitHub",
+    hint: "Please enter your emergency contact's GitHub username",
+    placeholder: "",
+  },
+])(
+  "URL and other-person instructions refuse an applicant handle: $label $hint $placeholder",
+  (shape) => {
+    const sources = source();
+    sources.profile.githubUrl = "https://github.com/synthetic-alex";
+    const field = { ...control(shape.label), ...shape };
+    for (const sourceId of ["profile.githubUrl", "profile.githubUrl#username"])
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId },
+          "synthetic-alex",
+        ).kind,
+      ).toBe("needs_you");
+    if (shape.hint.includes("emergency contact"))
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId: "profile.githubUrl" },
+          sources.profile.githubUrl,
+        ).kind,
+      ).toBe("needs_you");
+  },
+);
+
+test.each(["other", null] as const)(
+  "a community account is not a personal GitHub source: %s",
+  (kind) => {
+    const sources = source();
+    sources.profile.githubUrl = "https://github.com/synthetic-alex";
+    sources.profile.links = [
+      {
+        id: "community",
+        label: "Open source community organization",
+        kind,
+        url: "https://github.com/synthetic-community",
+        isDraft: false,
+      },
+    ];
+    const field = control("GitHub username");
+    for (const sourceId of [
+      "profile.links.community",
+      "profile.links.community#username",
+      "profile.githubUrl",
+    ])
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId },
+          "synthetic-community",
+        ).kind,
+      ).toBe("needs_you");
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId: "profile.githubUrl" },
+        "synthetic-alex",
+      ).kind,
+    ).toBe("literal");
+  },
+);
+
+test.each([
+  "Your GitHub username will be shown publicly",
+  "Your GitHub handle will be shown publicly",
+])("a public-display notice grants no username conversion: %s", (label) => {
+  const sources = source();
+  sources.profile.githubUrl = "https://github.com/synthetic-alex";
+  const tags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.githubUrl#username",
+  } as const;
+  expect(decide(sources, control(label), tags, "synthetic-alex").kind).toBe(
+    "needs_you",
+  );
+  const url = control("GitHub URL");
+  expect(decide(sources, url, tags, "synthetic-alex").kind).toBe("needs_you");
+  expect(
+    decide(
+      sources,
+      url,
+      { ...tags, sourceId: "profile.githubUrl" },
+      sources.profile.githubUrl,
+    ).kind,
+  ).toBe("literal");
+});
+
 test.each([
   ["City", "profile.currentCity", "London"],
   ["Country of residence", "profile.currentCountry", "Germany"],

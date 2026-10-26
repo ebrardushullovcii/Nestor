@@ -43,6 +43,8 @@ interface QuestionReadInput {
     identity?: string;
     kind: string;
     options: readonly string[];
+    hint?: string;
+    placeholder?: string;
     required?: boolean;
   }>;
   pageInstructions?: string;
@@ -211,6 +213,8 @@ async function readApplicationQuestions(
           index,
           question: question.prompt,
           control: question.kind,
+          hint: question.hint ?? "",
+          placeholder: question.placeholder ?? "",
           options: question.options.slice(0, 12),
           nativeRequired: question.required ?? false,
         })),
@@ -338,6 +342,8 @@ export function questionClassificationKey(
     control.groupLabel,
     control.kind,
     options,
+    control.hint ?? "",
+    control.placeholder,
   ]);
 }
 
@@ -358,6 +364,8 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
                 identity: questionClassificationKey(control, controls),
                 prompt: questionPrompt(control),
                 kind: control.kind,
+                hint: control.hint ?? "",
+                placeholder: control.placeholder,
                 options: [...control.options],
                 required: control.required,
               },

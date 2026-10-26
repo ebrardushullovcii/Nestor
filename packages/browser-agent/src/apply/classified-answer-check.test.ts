@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { concreteClaimsSupported } from "./concrete-answer-claims";
+import type { ApplyFormControl } from "./types";
 
 test("motivation cannot turn a posting requirement into an applicant fact", () => {
   const quote = "Already holding a valid driving licence";
@@ -78,6 +79,71 @@ function reader(tags: unknown[]): LLMClient {
     ),
   };
 }
+test.each([
+  {
+    label: "GitHub",
+    hint: "Please provide your GitHub username, if you have one.",
+    answer: "synthetic-alex",
+    sourceId: "profile.githubUrl",
+    supported: true,
+  },
+  {
+    label: "GitHub URL",
+    hint: "",
+    answer: "https://github.com/synthetic-alex",
+    sourceId: "profile.githubUrl",
+    supported: true,
+  },
+  {
+    label: "Your GitHub handle will be shown publicly",
+    hint: "",
+    answer: "synthetic-alex",
+    sourceId: "profile.githubUrl#username",
+    supported: false,
+  },
+])("preflight preserves the requested GitHub format: $label", async (row) => {
+  const client = reader([
+    { index: 0, kind: "other", country: null, sourceId: row.sourceId },
+  ]);
+  const field: ApplyFormControl = {
+    ref: "github",
+    kind: "text",
+    label: row.label,
+    hint: row.hint,
+    groupLabel: "",
+    placeholder: "",
+    required: true,
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value: row.answer,
+    checked: false,
+    options: [],
+    selectedOptionLabel: "",
+    invalid: false,
+    validationMessage: "",
+    questionKind: "other",
+    answerControlType: "text",
+    attestationKind: null,
+    answered: true,
+  };
+  const checks = await checkClassifiedApplicationAnswers({
+    client,
+    sources: {
+      ...sources,
+      profile: {
+        ...sources.profile,
+        githubUrl: "https://github.com/synthetic-alex",
+      },
+    },
+    payDisclosed: false,
+    answers: [{ question: row.label, answer: row.answer }],
+    formContext: { pageText: "", fields: [] },
+    formControls: [field],
+  });
+  expect(checks[0]?.supported).toBe(row.supported);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
 test("preflight reuses the Workday country-bound facts without a prose check", async () => {
   const answers = replay.workday.questions.map((row) => ({
     question: `${replay.workday.group} — ${row.label}`,

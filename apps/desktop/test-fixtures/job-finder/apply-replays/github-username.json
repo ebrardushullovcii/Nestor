@@ -9,7 +9,7 @@
       "label": "GitHub username",
       "placeholder": "Username only, no URL",
       "hint": "",
-      "expected": "synthetic-developer"
+      "expected": "https://github.com/synthetic-developer/"
     },
     {
       "label": "GitHub username",
@@ -117,6 +117,36 @@
       "label": "GitHub",
       "placeholder": "URL",
       "hint": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub username",
+      "hint": "Please provide the full URL of your GitHub profile",
+      "placeholder": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub username",
+      "hint": "",
+      "placeholder": "Full URL",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub username URL",
+      "hint": "Please enter your handle",
+      "placeholder": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "Please enter the GitHub username of your professional reference",
+      "hint": "",
+      "placeholder": "",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub username",
+      "hint": "Please enter the GitHub username of your professional reference",
+      "placeholder": "",
       "expected": "https://github.com/synthetic-developer/"
     }
   ],

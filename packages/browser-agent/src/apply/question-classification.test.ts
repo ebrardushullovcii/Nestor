@@ -612,3 +612,24 @@ test("duplicate or malformed tags never become an answer permission", async () =
   expect(result.get("One")?.answerTags).toBeNull();
   expect(result.get("Two")?.answerTags).toBeNull();
 });
+
+test("a GitHub help-text change is read again instead of reusing the URL reading", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: false, declarationKind: null },
+  ]);
+  const page = controls("GitHub");
+  page[0].hint = "Please provide your GitHub username";
+  const classify = createQuestionClassifier({ client });
+  await classify(page);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
+  ).toContain(page[0].hint);
+  await classify(page);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  page[0].hint = "Please provide your GitHub profile URL";
+  await classify(page);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1][0]),
+  ).toContain(page[0].hint);
+});
