@@ -5,7 +5,7 @@ import {
 } from "@nestor/contracts";
 import { describeFormQuestion, type FormQuestion } from "./questions";
 
-test("the same question keeps its key across wizard headings, without discarding scope or meaningful group context", () => {
+test("the same question keeps its key across progress counters without discarding scope or group context", () => {
   const field: FormQuestion = {
     prompt: "Are you willing to relocate?",
     kind: "relocation",
@@ -16,9 +16,8 @@ test("the same question keeps its key across wizard headings, without discarding
   const plain = describeFormQuestion(field, place).key;
   for (const prefix of [
     "Application",
-    "Step 4 of 6: Eligibility questions",
-    "Step 2 of 5: Your skills",
-    "Application — Step 2 of 3: Questions",
+    "Step 4 of 6",
+    "Application — Step 2 of 3",
   ])
     expect(
       describeFormQuestion(
@@ -32,19 +31,47 @@ test("the same question keeps its key across wizard headings, without discarding
   expect(normalizeFormQuestionPrompt("Employment — From")).not.toBe(
     normalizeFormQuestionPrompt("Education — From"),
   );
-  expect(
-    cleanFormQuestionPrompt("Step 4 of 6: Questions — Employment — From"),
-  ).toBe("Employment — From");
+  expect(cleanFormQuestionPrompt("Step 4 of 6: Employment — From")).toBe(
+    "Employment — From",
+  );
   expect(
     normalizeFormQuestionPrompt(
-      cleanFormQuestionPrompt("Step 3 of 6: Marketing consent — I agree", true),
+      cleanFormQuestionPrompt("Step 3 of 6: Marketing consent — I agree"),
     ),
   ).not.toBe(
     normalizeFormQuestionPrompt(
-      cleanFormQuestionPrompt("Step 4 of 6: Terms — I agree", true),
+      cleanFormQuestionPrompt("Step 4 of 6: Terms — I agree"),
     ),
   );
+  expect(cleanFormQuestionPrompt("Step 4 of 6: Compensation — I agree")).toBe(
+    "Compensation — I agree",
+  );
+});
+
+test.each([
+  [
+    "Step 2 of 6: Employment — Start date",
+    "Step 3 of 6: Education — Start date",
+  ],
+  [
+    "Step 4 of 7: Reference 1 — Email address",
+    "Step 5 of 7: Reference 2 — Email address",
+  ],
+  ["Step 2 of 6: Terms — I agree", "Step 4 of 6: Marketing — I agree"],
+])("%s and %s have separate answer keys", (first, second) => {
+  const job = { id: 1, location: "Remote" };
+  const question = {
+    kind: "other",
+    answerControlType: "text",
+    answerOptions: [],
+  } as const;
   expect(
-    cleanFormQuestionPrompt("Step 4 of 6: Compensation — I agree", true),
-  ).toBe("Compensation — I agree");
+    describeFormQuestion({ ...question, answerOptions: [], prompt: first }, job)
+      .key,
+  ).not.toBe(
+    describeFormQuestion(
+      { ...question, answerOptions: [], prompt: second },
+      job,
+    ).key,
+  );
 });

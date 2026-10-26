@@ -341,11 +341,8 @@ export interface FormAnswerMatch {
   roleFamilies?: string[];
   proofEntryIds?: string[];
 }
-/** Page legends describe the wizard, not the question or its answer's scope. */
-export function cleanFormQuestionPrompt(
-  value: string,
-  keepProgressSection = false,
-): string {
+/** Progress counters are chrome; the section can distinguish equal labels. */
+export function cleanFormQuestionPrompt(value: string): string {
   const parts = value
     .trim()
     .replace(/^application\s*-\s*/iu, "")
@@ -360,8 +357,7 @@ export function cleanFormQuestionPrompt(
     );
     if (!step) break;
     const section = step[1]!.trim();
-    // Declarations keep their section: it can change what "I agree" means.
-    if (section && keepProgressSection) {
+    if (section) {
       parts[0] = section;
       break;
     }

@@ -1,5 +1,4 @@
 import {
-  cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
   type CandidateReusableAnswer,
 } from "@nestor/contracts";
@@ -336,10 +335,6 @@ export function savedAnswerForQuestion(
   control: ApplyFormControl,
   reusableAnswers: readonly CandidateReusableAnswer[],
 ): CandidateReusableAnswer | null {
-  const normalizeQuestion = (value: string): string =>
-    normalizeFormQuestionPrompt(
-      cleanFormQuestionPrompt(value, control.attestationKind !== null),
-    );
   const asked = new Set(
     [
       control.label,
@@ -349,7 +344,7 @@ export function savedAnswerForQuestion(
         .join(" — "),
       control.placeholder,
     ]
-      .map(normalizeQuestion)
+      .map(normalizeFormQuestionPrompt)
       .filter((text) => text.length > 0),
   );
   return (
@@ -357,12 +352,12 @@ export function savedAnswerForQuestion(
       (saved) =>
         !saved.needsConfirmation &&
         saved.id.startsWith("application_") &&
-        asked.has(normalizeQuestion(saved.question)),
+        asked.has(normalizeFormQuestionPrompt(saved.question)),
     ) ??
     reusableAnswers.find(
       (saved) =>
         !saved.needsConfirmation &&
-        asked.has(normalizeQuestion(saved.question)),
+        asked.has(normalizeFormQuestionPrompt(saved.question)),
     ) ??
     null
   );

@@ -10,7 +10,12 @@ import {
 } from "./apply-prompts";
 import type { FillFieldsEntry } from "./apply-tools";
 import { buildApplyFormObservation } from "./page-hands";
-import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
+import {
+  createApplyGuardState,
+  executeApplyProposal,
+  questionPrompt,
+} from "./policy-executor";
+import { savedAnswerForQuestion } from "./application-facts";
 import type { ApplyAgentConfig, ApplyPageHands } from "./types";
 import {
   checkWrittenApplicationAnswer,
@@ -830,11 +835,11 @@ test.each([
   { groupLabel: "", question: "Annual salary expectation" },
   {
     groupLabel: "Step 3 of 6: Compensation",
-    question: "Annual salary expectation",
+    question: "Step 1 of 4: Compensation — Annual salary expectation",
   },
   {
     groupLabel: "Application",
-    question: "Step 3 of 6: Compensation — Annual salary expectation *",
+    question: "Annual salary expectation *",
   },
 ])(
   "explicit pay answers remain usable with automatic pay answering off: $groupLabel / $question",
@@ -935,6 +940,62 @@ test("a terms answer cannot approve a different declaration under a wizard headi
     ]),
   );
   expect(source.controls[0]?.checked).toBe(false);
+});
+
+test.each([
+  [
+    "Step 2 of 6: Employment",
+    "Step 3 of 6: Education",
+    "Start date",
+    "2020-01-01",
+  ],
+  [
+    "Step 4 of 7: Reference 1",
+    "Step 5 of 7: Reference 2",
+    "Email address",
+    "first@example.test",
+  ],
+  ["Step 2 of 6: Terms", "Step 4 of 6: Marketing", "I agree", "Yes"],
+])(
+  "saved answers keep %s distinct from %s before question classification",
+  (first, second, label, answer) => {
+    const observation = buildApplyFormObservation(
+      page({ controls: [{ ...nameControl(), label, groupLabel: second }] }),
+      new Date().toISOString(),
+    );
+    const control = { ...observation.controls[0]!, attestationKind: null };
+    expect(
+      savedAnswerForQuestion(control, [
+        {
+          id: "remembered_first",
+          kind: "other",
+          label,
+          question: `${first} — ${label}`,
+          answer,
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ]),
+    ).toBeNull();
+  },
+);
+
+test("a counter-only declaration prompt keeps its heading instead of becoming empty", () => {
+  const observation = buildApplyFormObservation(
+    page(),
+    new Date().toISOString(),
+  );
+  const control = {
+    ...observation.controls[0]!,
+    kind: "checkbox" as const,
+    attestationKind: "terms_acceptance" as const,
+    label: "Step 2 of 6",
+    groupLabel: "",
+  };
+  expect(questionPrompt(control)).toBe("Step 2 of 6");
+  expect(
+    questionPrompt({ ...control, kind: "radio", groupLabel: "Step 2 of 6" }),
+  ).toBe("Step 2 of 6");
 });
 
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {

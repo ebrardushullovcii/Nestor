@@ -272,7 +272,7 @@ export function questionPrompt(control: ApplyFormControl): string {
     group.length > 0
   )
     return control.attestationKind !== null
-      ? cleanFormQuestionPrompt(group, true)
+      ? cleanFormQuestionPrompt(group) || group
       : group;
   const groupAddsSomething =
     normalizedGroup.length > 0 &&
@@ -287,7 +287,7 @@ export function questionPrompt(control: ApplyFormControl): string {
   // A declaration's section can change what "I agree" means. Keep that
   // context for both its saved answer and the model's permission check.
   return control.attestationKind !== null
-    ? cleanFormQuestionPrompt(described, true)
+    ? cleanFormQuestionPrompt(described) || described
     : described;
 }
 
