@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ProfileEditsDraft } from "@nestor/contracts";
+import { ProfileRecordSchema, type ProfileEditsDraft } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 const label = (key: string) =>
@@ -64,6 +64,21 @@ export function RecoveredProfileDraft({
       ([key, item]) => [`Preferences · ${key}`, item] as const,
     ),
   ];
+  const recordEdits = edits.upsert.map((row) => {
+    const before = edits.expectedRecords.find(
+      (expected) =>
+        expected.collection === row.collection && expected.id === row.record.id,
+    )?.value;
+    const fields = Object.fromEntries(
+      Object.entries(row.record).filter(
+        ([key, item]) =>
+          key !== "id" &&
+          (!before ||
+            JSON.stringify(leaf(before.record, key)) !== JSON.stringify(item)),
+      ),
+    );
+    return { row, fields };
+  });
   async function recover() {
     if (!draft) return;
     setBusy(true);
@@ -87,6 +102,19 @@ export function RecoveredProfileDraft({
         draftId: draft.id,
         requireCurrentDraft: true,
         expectedRecords,
+        upsert: recordEdits.map(({ row, fields }) => {
+          const current = expectedRecords.find(
+            (expected) =>
+              expected.collection === row.collection &&
+              expected.id === row.record.id,
+          )?.value;
+          return current
+            ? ProfileRecordSchema.parse({
+                collection: row.collection,
+                record: { ...current.record, ...fields },
+              })
+            : row;
+        }),
         profile: edits.profile
           ? {
               ...edits.profile,
@@ -154,16 +182,11 @@ export function RecoveredProfileDraft({
               {label(key)}: {value(item)}
             </li>
           ))}
-          {edits.upsert.map((row) => (
+          {recordEdits.map(({ row, fields }) => (
             <li key={`${row.collection}:${row.record.id}`}>
               {label(row.collection)}:{" "}
-              {Object.entries(row.record)
-                .filter(
-                  ([key, item]) =>
-                    key !== "id" && typeof item === "string" && item,
-                )
-                .slice(0, 3)
-                .map(([, item]) => String(item))
+              {Object.entries(fields)
+                .map(([key, item]) => `${label(key)}: ${value(item)}`)
                 .join(" · ")}
             </li>
           ))}

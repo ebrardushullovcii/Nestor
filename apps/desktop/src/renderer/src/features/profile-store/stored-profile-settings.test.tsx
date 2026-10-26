@@ -253,7 +253,11 @@ test("a competing Assistant record edit is kept; the blocked draft survives leav
   act(() => {
     profile.records.upsert({
       ...original,
-      record: { ...original.record, title: "Assistant's current title" },
+      record: {
+        ...original.record,
+        title: "Assistant's current title",
+        summary: "Assistant context must stay",
+      },
     });
   });
   await act(() => Promise.resolve().then(() => release!()));
@@ -279,6 +283,7 @@ test("a competing Assistant record edit is kept; the blocked draft survives leav
   await waitFor(() =>
     expect(profile.records.get("experiences", "work-0")?.record).toMatchObject({
       title: "My kept title",
+      summary: "Assistant context must stay",
     }),
   );
   expect(await window.nestor.jobs.run("get_profile_draft", {})).toBeNull();
