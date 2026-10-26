@@ -64,6 +64,18 @@
       "placeholder": "Type here...",
       "hint": "",
       "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "",
+      "hint": "Your username will be shown publicly.",
+      "expected": "https://github.com/synthetic-developer/"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "",
+      "hint": "Enter your GitHub handle.",
+      "expected": "synthetic-developer"
     }
   ],
   "linearPage": "<div class=\"field\"><label for=\"gh\">Github <span>*</span></label><p>Please provide your GitHub username. We'll need this info to host final interview rounds.</p><input id=\"gh\" type=\"text\" placeholder=\"Type here...\" required></div><div class=\"field\"><label for=\"li\">LinkedIn</label><p>Please provide the link to your LinkedIn profile.</p><input id=\"li\" type=\"text\" placeholder=\"Type here...\"></div>"

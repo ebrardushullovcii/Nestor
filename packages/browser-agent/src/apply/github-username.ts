@@ -58,6 +58,11 @@ export function githubUsername(
 
 const GITHUB = /\bgit\s?hub\b/iu;
 const HANDLE = /\b(?:user\s*name|handle)\b/iu;
+// Help text must ask for the handle ("Please provide your GitHub username",
+// "Enter your handle", "Username only"); "Your username will be shown
+// publicly" mentions one without asking for it.
+const ASKS_HANDLE =
+  /\b(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:your\s+)?git\s?hub\s+(?:user\s*name|handle)|(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:user\s*name|handle))\b/iu;
 const URL_WORDS =
   /\b(?:url|link|address|website|https?)\b|\b[a-z\d-]+\.com\b/iu;
 // In a label, "GitHub profile" asks for the address too.
@@ -92,7 +97,7 @@ export function asksGithubUsername(
   if (HANDLE.test(label)) return true;
   // Help text such as "Please provide your GitHub username" decides it.
   if (hint && URL_WORDS.test(hint)) return false;
-  if (hint && HANDLE.test(hint)) return true;
+  if (hint && ASKS_HANDLE.test(hint)) return true;
   const example = clean(placeholder);
   if (HANDLE.test(example)) return !URL_WORDS.test(example);
   return HANDLE_EXAMPLE.test(example) && !GITHUB.test(example);
