@@ -134,7 +134,8 @@ function seedRows(db: DatabaseSync, tables: ReadonlySet<string>) {
         pk: number;
       }[]
     ).filter(
-      (column) => column.notnull && column.dflt_value === null && !column.pk,
+      // Key columns too: a WITHOUT ROWID table has no rowid to fill them.
+      (column) => (column.notnull && column.dflt_value === null) || column.pk,
     );
     const values = columns.map((column) =>
       /INT|REAL|NUM/iu.test(column.type) ? 1 : "seed",
@@ -206,6 +207,39 @@ describe("job store schema", () => {
           current.get(table),
           `${table}.${column} is listed as added but no fresh store has it`,
         ).toContain(column);
+    });
+  });
+
+  it("seeds a row in every table, keyed ones included", () => {
+    withFile((file) => {
+      openJobStore(file).close();
+      const db = new DatabaseSync(file);
+      const tables = new Set(
+        (
+          db
+            .prepare(
+              `SELECT name FROM sqlite_master WHERE type = 'table'
+               AND name NOT LIKE 'sqlite%' AND sql NOT LIKE 'CREATE VIRTUAL%'
+               AND name NOT IN (SELECT name || suffix FROM sqlite_master,
+                 (SELECT '_data' AS suffix UNION SELECT '_idx' UNION SELECT '_content'
+                  UNION SELECT '_docsize' UNION SELECT '_config')
+                 WHERE sql LIKE 'CREATE VIRTUAL%')`,
+            )
+            .all() as { name: string }[]
+        ).map(({ name }) => name),
+      );
+      expect(tables).toContain("resume_pdf_assets");
+      seedRows(db, tables);
+      const empty = [...tables].filter(
+        (table) =>
+          (
+            db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as {
+              n: number;
+            }
+          ).n === 0,
+      );
+      db.close();
+      expect(empty).toEqual([]);
     });
   });
 
