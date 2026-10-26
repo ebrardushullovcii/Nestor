@@ -67,6 +67,9 @@ const ASKS_HANDLE =
 const ADDRESS =
   /\b(?:url|link|address|website|https?|profile)\b|\b[a-z\d-]+\.com\b/iu;
 // "e.g. octocat" or "@octocat": an example handle, not an address.
+// Negated address wording is a handle request only if no positive address wording remains.
+const NOT_ADDRESS =
+  /\b(?:no|not|without|instead of|rather than)\s+(?:a\s+|an\s+|the\s+|your\s+)?(?:full\s+)?(?:profile\s+)?(?:url|link)s?\b/giu;
 const HANDLE_EXAMPLE =
   /^(?:e\.?\s?g\.?,?:?\s*|example:?\s*)?@?[a-z\d][a-z\d-]{0,38}$/iu;
 
@@ -92,10 +95,10 @@ export function asksGithubUsername(
     "label" | "groupLabel" | "placeholder" | "hint"
   >,
 ): boolean {
-  const clean = (text: string | undefined) => (text ?? "").trim();
+  const clean = (text: string | undefined) => (text ?? "").replace(NOT_ADDRESS, " ").trim();
   const label = clean(`${control.groupLabel} ${control.label}`);
   const hint = clean(control.hint);
-  const placeholder = control.placeholder.trim();
+  const placeholder = clean(control.placeholder);
   if (fieldNamesAnotherPerson(control)) return false;
   if (!GITHUB.test(label) && !GITHUB.test(hint)) return false;
   if ([label, hint, placeholder].some((text) => ADDRESS.test(text)))
