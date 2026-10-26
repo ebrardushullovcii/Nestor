@@ -3008,6 +3008,13 @@ async function runMeasuredApplyAgent(
     beforeModelTurn: async () => {
       await refreshReusableAnswers();
       let current = pageTools.state.observation;
+      if (current?.blocker?.code === "browser_blocked")
+        return {
+          reason: current.blocker.summary,
+          needsPerson: true,
+          stuck: false,
+          data: {},
+        };
       if (current?.blocker) return null;
       // A saved picker rule is applied as soon as its question is on the
       // page; the picker itself says whether the choices are there.

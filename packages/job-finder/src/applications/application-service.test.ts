@@ -116,6 +116,58 @@ const ready = () =>
     nextActionLabel: "Open form",
   });
 const cleanups: (() => void | Promise<void>)[] = [];
+
+it("shares one blocked-site item, closes tabs, and never retries the site or subsequent jobs", async () => {
+  const f = await setup(2, 1);
+  preparation.blocker = {
+    code: "browser_blocked",
+    requiresPerson: true,
+    summary: "The site refused this browser.",
+    detail: "Open the job by hand.",
+    nextActionLabel: "Open in my browser",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "blocked" }).rows,
+    ).toHaveLength(2),
+  );
+  expect(f.execute).toHaveBeenCalledTimes(1);
+  const tasks = f.applications.needsYou.list().rows;
+  expect(tasks).toHaveLength(1);
+  expect(tasks[0]?.blockedUrl).toBe(f.execute.mock.calls[0]?.[1].job.canonicalUrl);
+  expect(
+    f.applications.needsYou.details(tasks[0]!.id)?.applications,
+  ).toHaveLength(2);
+  expect(await f.service.checkAccess(tasks[0]!.id)).toBe(false);
+  expect(f.browser.readApplicationPageBinding).not.toHaveBeenCalled();
+  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledTimes(2);
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  expect(
+    f.applications.listApplications({ state: "queued" }).rows,
+  ).toHaveLength(0);
+});
+
+it("closes a saved-rule skip without adding a Needs you question", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!({
+    ...ready(),
+    skipReason: "Neither saved option is offered.",
+  });
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "skipped" }).rows,
+    ).toHaveLength(1),
+  );
+  expect(f.applications.needsYou.list().total).toBe(0);
+  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledTimes(1);
+});
 afterEach(async () => {
   preparation.blocker = null;
   preparation.answers = [];

@@ -5,6 +5,7 @@ import {
   type NeedsYouCommandOutput,
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
+import { shell } from "electron";
 import { getApplicationStore } from "../services/job-finder/application-store";
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { runJobCommand } from "../services/job-commands";
@@ -28,6 +29,14 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
     await runJobCommand("retry_source", { id });
   },
   open: async (id) => {
+    const blocked = getApplicationStore().needsYou.details(id)?.task.blockedUrl;
+    if (blocked) {
+      const url = new URL(blocked);
+      if (!["https:", "http:"].includes(url.protocol))
+        throw new Error("This job link cannot be opened.");
+      await shell.openExternal(url.href);
+      return true;
+    }
     const task = getApplicationStore().needsYou.list({
       after: id - 1,
       limit: 1,

@@ -386,16 +386,19 @@ export function TaskPane(props: {
           ) : (
             <>
               <h2 className="font-medium">
-                {task.kind === "sign_in"
-                  ? "Sign in to continue"
-                  : task.kind === "captcha"
-                    ? "Complete the CAPTCHA"
-                    : "Complete verification"}
+                {task.blockedUrl
+                  ? "This site blocked the browser"
+                  : task.kind === "sign_in"
+                    ? "Sign in to continue"
+                    : task.kind === "captcha"
+                      ? "Complete the CAPTCHA"
+                      : "Complete verification"}
               </h2>
               <p className="text-sm text-foreground-soft">{task.prompt}</p>
               <p className="text-sm text-foreground-muted">
-                Finish this step in the browser. Waiting applications continue
-                automatically once their pages are accessible.
+                {task.blockedUrl
+                  ? "Open the job in your own browser to apply by hand. These applications stay blocked; Job Finder will not retry this site."
+                  : "Finish this step in the browser. Waiting applications continue automatically once their pages are accessible."}
               </p>
               {task.scope.siteOrigin ? (
                 <p className="break-all text-sm">{task.scope.siteOrigin}</p>
@@ -413,27 +416,33 @@ export function TaskPane(props: {
                   })
                 }
               >
-                Open in browser
+                {task.blockedUrl ? "Open in my browser" : "Open in browser"}
               </Button>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void act(async () => {
-                    if (await window.nestor.needsYou.run("check_need", { id }))
-                      onResolved(
-                        id,
-                        "The browser step is complete. Applications continue.",
-                      );
-                    else
-                      setError(
-                        "The page is still waiting. Finish the browser step, then check again.",
-                      );
-                  })
-                }
-              >
-                Check again
-              </Button>
+              {task.blockedUrl ? (
+                <p className="text-sm break-all">{task.blockedUrl}</p>
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    void act(async () => {
+                      if (
+                        await window.nestor.needsYou.run("check_need", { id })
+                      )
+                        onResolved(
+                          id,
+                          "The browser step is complete. Applications continue.",
+                        );
+                      else
+                        setError(
+                          "The page is still waiting. Finish the browser step, then check again.",
+                        );
+                    })
+                  }
+                >
+                  Check again
+                </Button>
+              )}
             </>
           )}
         </div>

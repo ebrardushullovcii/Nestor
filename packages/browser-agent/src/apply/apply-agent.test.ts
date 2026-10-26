@@ -8040,3 +8040,19 @@ test("resumed picker replay never counts leftover search text as a confirmed ans
     expect(source.controls[0].value).toBe(selected);
   }
 });
+
+test("a browser refusal hands over before any model call or browser action", async () => {
+  const input = config(
+    page({
+      bodyText: "Access denied. You have been blocked.",
+      controls: [],
+      actions: [],
+    }),
+  );
+  const model = { chatWithTools: vi.fn() } as unknown as LLMClient;
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("paused");
+  expect(result.pauses[0]?.blocker?.code).toBe("browser_blocked");
+  expect(result.modelTurns).toBe(0);
+  expect(result.readyToSend).toBeNull();
+});

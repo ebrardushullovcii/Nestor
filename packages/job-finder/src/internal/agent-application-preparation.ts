@@ -230,6 +230,7 @@ const BLOCKER_CODES: Record<
   application_closed: "application_closed",
   application_page_unreachable: "application_page_unreachable",
   site_saves_as_you_go: "site_saves_as_you_go",
+  browser_blocked: "browser_blocked",
 };
 
 /**

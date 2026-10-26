@@ -1,0 +1,4 @@
+{
+  "refusals": ["Access denied. Just a moment while we check your browser.", "You have been blocked. Automated requests are not allowed.", "This browser is not supported."],
+  "notRefusals": ["Checking your browser. Just a moment.", "Verify you are human. Complete the CAPTCHA.", "We build tools that help teams investigate access denied errors."]
+}

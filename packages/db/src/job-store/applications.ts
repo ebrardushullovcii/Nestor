@@ -826,6 +826,18 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    block(id: number, attempt: number, reason: string): boolean {
+      return store.transaction(() => {
+        const row = sql(
+          "UPDATE applications SET state='needs_you',disposition='blocked',error=?,updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
+        ).get(reason, Date.now(), id, attempt) as
+          | { job_id: number }
+          | undefined;
+        if (row) changed([row.job_id]);
+        return !!row;
+      });
+    },
+
     stop(id: number): boolean {
       return store.transaction(() => {
         const row = sql(
