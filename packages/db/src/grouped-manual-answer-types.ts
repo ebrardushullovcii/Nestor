@@ -18,11 +18,11 @@ import type {
 export interface CommitGroupedManualAnswerInput {
   /** The pending decision exactly as persisted; the decision CAS baseline. */
   expectedDecision: GroupedManualAnswerDecision;
-  /** The approved decision output of `approveGroupedManualAnswer`. */
+  /** The decision as approved. */
   decision: GroupedManualAnswerDecision;
-  /** The applied-at-stamped lineage output of `approveGroupedManualAnswer`. */
+  /** The decision's job lineage, stamped with when it applied. */
   lineage: readonly GroupedDecisionJobLineage[];
-  /** The verifying requests output of `approveGroupedManualAnswer`. */
+  /** The user action requests the approval moved to verifying. */
   requests: readonly UserActionRequest[];
   /** Persisted question records as of projection (full-value CAS baseline). */
   expectedQuestions: readonly ApplicationQuestionRecord[];

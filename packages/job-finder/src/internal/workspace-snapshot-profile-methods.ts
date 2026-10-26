@@ -126,9 +126,7 @@ import {
   createCampaign,
   ensureCampaignState,
 } from "./campaign-dashboard";
-import {
-  projectDiscoveryJobViews,
-} from "./listing-activity";
+import { projectDiscoveryJobViews } from "./listing-activity";
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
@@ -895,13 +893,6 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   async function recoverInterruptedApplyRunsOnLoad(): Promise<void> {
-    if (
-      ctx.activeApplyRunAbortControllers.size > 0 ||
-      ctx.activeApplyRunPromises.size > 0
-    ) {
-      return;
-    }
-
     if (interruptedApplyRecoveryPromise) {
       await interruptedApplyRecoveryPromise;
       return;
@@ -920,13 +911,6 @@ export function createWorkspaceSnapshotProfileMethods(
             : Promise.resolve([]),
           ctx.repository.getActivityControl(),
         ]);
-
-      if (
-        ctx.activeApplyRunAbortControllers.size > 0 ||
-        ctx.activeApplyRunPromises.size > 0
-      ) {
-        return;
-      }
 
       const resultsByRunId = groupApplyJobResultsByRunId(allResults);
       const runById = new Map(runs.map((run) => [run.id, run]));
@@ -1228,16 +1212,9 @@ export function createWorkspaceSnapshotProfileMethods(
             result.id,
           );
           if (hasBinding) continue;
-          // Binding checks are asynchronous. A continuation or send may have
-          // claimed this exact run while the runtime answered, so recheck the
-          // in-memory owners and the persisted request immediately before any
-          // terminal write.
-          if (
-            ctx.activeApplyRunAbortControllers.has(result.runId) ||
-            ctx.activeApplyRunPromises.has(result.runId)
-          ) {
-            continue;
-          }
+          // Binding checks are asynchronous. A step may have begun verifying
+          // while the runtime answered, so recheck the persisted request
+          // immediately before any terminal write.
           const beganResuming = (
             await ctx.repository.listUserActionRequests({
               states: ["verifying"],
@@ -2710,14 +2687,18 @@ export function createWorkspaceSnapshotProfileMethods(
       const nextResumeApplicationMode =
         nextSettings.resumeApplicationMode ?? "tailored_per_job";
 
-      const updateSettings = (latest: JobFinderSettings): JobFinderSettings => ({
+      const updateSettings = (
+        latest: JobFinderSettings,
+      ): JobFinderSettings => ({
         ...nextSettings,
         applicationAutomationMode:
           settings.applicationAutomationMode ??
           latest.applicationAutomationMode ??
           "confirm_before_submit",
         salaryDisclosure:
-          settings.salaryDisclosure ?? latest.salaryDisclosure ?? "pause_for_user",
+          settings.salaryDisclosure ??
+          latest.salaryDisclosure ??
+          "pause_for_user",
       });
       if (currentResumeApplicationMode === nextResumeApplicationMode) {
         await ctx.repository.commitSettingsUpdate(updateSettings);

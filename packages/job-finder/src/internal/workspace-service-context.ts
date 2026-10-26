@@ -96,8 +96,6 @@ export interface WorkspaceServiceContext {
   activeSourceDebugExecutionIdRef: MutableRef<string | null>;
   activeSourceDebugAbortControllerRef: MutableRef<AbortController | null>;
   activeSourceDebugPromiseRef: MutableRef<Promise<unknown> | null>;
-  activeApplyRunAbortControllers: Map<string, AbortController>;
-  activeApplyRunPromises: Map<string, Promise<void>>;
   applyRunTransitionTails: Map<string, Promise<void>>;
   markApplicationPreparationStarted(
     input: { resultId: string; runId: string; jobId: string },

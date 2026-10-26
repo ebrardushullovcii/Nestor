@@ -21,9 +21,7 @@ import {
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import { isDeepStrictEqual } from "node:util";
-import {
-  localDateKey,
-} from "./internal/application-preparation-capacity";
+import { localDateKey } from "./internal/application-preparation-capacity";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
@@ -39,9 +37,7 @@ import {
 } from "./internal/workspace-assistant-page-jobs";
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
-import {
-  getPreferredSessionAdapter,
-} from "./internal/workspace-helpers";
+import { getPreferredSessionAdapter } from "./internal/workspace-helpers";
 import type {
   ApplicationPreparationCapacityToken,
   WorkspaceServiceContext,
@@ -55,9 +51,7 @@ import { mergeSessionStates } from "./internal/workspace-service-helpers";
 import { createWorkspaceSnapshotProfileMethods } from "./internal/workspace-snapshot-profile-methods";
 import { createWorkspaceSourceDebugMethods } from "./internal/workspace-source-debug-methods";
 import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
-import {
-  createWorkspaceUserActionMethods,
-} from "./internal/workspace-user-action-methods";
+import { createWorkspaceUserActionMethods } from "./internal/workspace-user-action-methods";
 
 const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
   "question_capture",
@@ -237,8 +231,6 @@ export function createJobFinderWorkspaceService(
   const activeSourceDebugPromiseRef = {
     current: null as Promise<unknown> | null,
   };
-  const activeApplyRunAbortControllers = new Map<string, AbortController>();
-  const activeApplyRunPromises = new Map<string, Promise<void>>();
   const applyRunTransitionTails = new Map<string, Promise<void>>();
   let applicationCrmTransitionTail: Promise<void> = Promise.resolve();
   let intelligenceTransitionTail: Promise<void> = Promise.resolve();
@@ -273,12 +265,6 @@ export function createJobFinderWorkspaceService(
       activeSourceDebugPromiseRef.current
     ) {
       labels.add("source debug");
-    }
-    if (
-      activeApplyRunAbortControllers.size > 0 ||
-      activeApplyRunPromises.size > 0
-    ) {
-      labels.add("application preparation");
     }
     if (
       activeResumeVisionRunIds.size > 0 ||
@@ -386,8 +372,6 @@ export function createJobFinderWorkspaceService(
     activeSourceDebugExecutionIdRef,
     activeSourceDebugAbortControllerRef,
     activeSourceDebugPromiseRef,
-    activeApplyRunAbortControllers,
-    activeApplyRunPromises,
     applyRunTransitionTails,
     markApplicationPreparationStarted,
     withApplicationCrmTransition<T>(operation: () => Promise<T>): Promise<T> {
@@ -656,9 +640,7 @@ export function createJobFinderWorkspaceService(
     },
     hasActiveBrowserWorkflow: () =>
       activeSourceDebugAbortControllerRef.current !== null ||
-      activeSourceDebugPromiseRef.current !== null ||
-      activeApplyRunAbortControllers.size > 0 ||
-      activeApplyRunPromises.size > 0,
+      activeSourceDebugPromiseRef.current !== null,
     async updateJob(
       jobId: string,
       updater: (job: SavedJob) => SavedJob,
@@ -728,7 +710,6 @@ export function createJobFinderWorkspaceService(
       }
     }
   }
-
 
   async function readDisplayProjection() {
     return (
@@ -805,12 +786,6 @@ export function createJobFinderWorkspaceService(
     await onExplicitUserStart?.();
   }
 
-
-
-
-
-
-
   async function markApplicationPreparationStarted(
     input: { resultId: string; runId: string; jobId: string },
     token?: ApplicationPreparationCapacityToken,
@@ -848,8 +823,6 @@ export function createJobFinderWorkspaceService(
       return marked.result;
     });
   }
-
-
 
   async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,

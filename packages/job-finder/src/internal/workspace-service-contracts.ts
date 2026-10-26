@@ -408,8 +408,6 @@ export interface CreateJobFinderWorkspaceServiceOptions {
   onActivityControlChanged?: (
     control: JobFinderActivityControl,
   ) => void | Promise<void>;
-  /** Publishes the terminal snapshot of a queue resumed after restart. */
-  onDetachedApplyRunFinished?: () => void;
   onResumeEvidenceFinished?: () => void;
   /** A resume started by shortlisting was queued, written or withdrawn. */
   onShortlistResumeChanged?: () => void;

@@ -115,7 +115,7 @@ export function buildJobFinderDiagnosticExport(input: {
     evidence: {
       sourceDebugRuns: input.workspace.recentSourceDebugRuns.length,
       resumeImports: input.workspace.latestResumeImportRun ? 1 : 0,
-      applicationAttempts: applicationTotal,
+      applications: applicationTotal,
       userActionEvents: input.workspace.userActionEvents.length,
     },
     redactionManifest: {

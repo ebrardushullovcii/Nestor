@@ -800,7 +800,6 @@ export async function createJobFinderWorkspaceServiceAsync(
     candidateAssetResolver: getCandidateAssetLibrary(),
     ...(researchAdapter ? { researchAdapter } : {}),
     fetchListingHtml,
-    onDetachedApplyRunFinished: () => publishJobFinderWorkspaceUpdate(),
     onResumeEvidenceFinished: () => publishJobFinderWorkspaceUpdate(),
     onShortlistResumeChanged: () => publishJobFinderWorkspaceUpdate(),
     onListingAssessmentFinished: () => publishJobFinderWorkspaceUpdate(),
