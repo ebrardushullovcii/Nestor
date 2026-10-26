@@ -1,9 +1,14 @@
 import type { JobFinderRepositorySeed } from "./index";
-import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
+import {
+  CandidateAnswerBankSchema,
+  JobDiscoveryPreferencesSchema,
+  JobFinderIntelligenceStateSchema,
+} from "@nestor/contracts";
 
 export function createSeed(): JobFinderRepositorySeed {
   return {
     profile: {
+      answerBank: CandidateAnswerBankSchema.parse({}),
       id: "candidate_1",
       resumeIdentityOwnership: null,
       firstName: "Alex",
@@ -90,6 +95,7 @@ export function createSeed(): JobFinderRepositorySeed {
       spokenLanguages: [],
     },
     searchPreferences: {
+      discovery: JobDiscoveryPreferencesSchema.parse({}),
       targetRoles: ["Principal Designer"],
       jobFamilies: [],
       locations: ["Remote"],

@@ -9,6 +9,8 @@ import type {
 } from "@nestor/contracts";
 import {
   FRESH_START_CANDIDATE_PROFILE_ID,
+  CandidateAnswerBankSchema,
+  JobDiscoveryPreferencesSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   SavedJobDiscoveryProvenanceSchema,
@@ -109,6 +111,7 @@ export function createSeed(): JobFinderRepositorySeed & {
       },
     ],
     profile: {
+      answerBank: CandidateAnswerBankSchema.parse({}),
       id: "candidate_1",
       firstName: "Alex",
       lastName: "Vanguard",
@@ -256,6 +259,7 @@ export function createSeed(): JobFinderRepositorySeed & {
       spokenLanguages: [],
     },
     searchPreferences: {
+      discovery: JobDiscoveryPreferencesSchema.parse({}),
       targetRoles: [
         "Principal Designer",
         "Senior Product Designer",
