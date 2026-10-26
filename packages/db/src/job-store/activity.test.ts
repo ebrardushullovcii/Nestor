@@ -81,6 +81,7 @@ describe("activity feed", () => {
       [ids[1], "ready"],
     ]);
     expect(feed.resumes[0]?.title).toBe("Analyst 1");
+    expect(feed.resumes[0]?.stage).toBe("found");
     expect(feed.applications.map((row) => [row.jobId, row.state])).toEqual([
       [ids[3], "running"],
       [ids[5], "submitted"],

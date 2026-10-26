@@ -26,6 +26,7 @@ const feed: ActivityFeed = {
   resumes: [
     {
       jobId: 7,
+      stage: "applied",
       title: "Supply Chain Analyst",
       company: "Spool",
       state: "ready",
@@ -95,7 +96,9 @@ describe("JobFinderTaskCenter", () => {
     );
     expect(running.textContent).toContain("Job search");
     expect(running.textContent).toContain("3 of 12 sites read · 5 new jobs");
-    const finished = screen.getByRole("region", { name: "Finished today" });
+    const finished = screen.getByRole("region", {
+      name: "Finished in the last day",
+    });
     expect(finished.textContent).toContain("Spool · Resume written");
     expect(finished.textContent).toContain("Ledger · Sent");
   });
@@ -122,11 +125,47 @@ describe("JobFinderTaskCenter", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Clear finished" }),
     );
-    expect(screen.queryByRole("region", { name: "Finished today" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Finished in the last day" }),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Close Activity" }));
     fireEvent.click(summary());
     await screen.findByRole("region", { name: "Running now" });
-    expect(screen.queryByRole("region", { name: "Finished today" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Finished in the last day" }),
+    ).toBeNull();
+  });
+
+  test("opens a written resume's job where it is now", async () => {
+    const onNavigate = await renderTaskCenter();
+    fireEvent.click(summary());
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Supply Chain Analyst/ }),
+    );
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenCalledWith(
+        "/job-finder/applications?jobId=7",
+      ),
+    );
+  });
+
+  test("says Activity could not be read, and reads it again", async () => {
+    // The read at launch and the one opening Activity both fail.
+    readFeed
+      .mockRejectedValueOnce(new Error("database is locked"))
+      .mockRejectedValueOnce(new Error("database is locked"));
+    await renderTaskCenter();
+    fireEvent.click(summary());
+    expect(
+      await screen.findByText("Activity could not be read.", undefined, {
+        timeout: 3000,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Loading activity…")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("region", { name: "Running now" }),
+    ).toBeTruthy();
   });
 });

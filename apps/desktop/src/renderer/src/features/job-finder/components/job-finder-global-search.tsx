@@ -31,6 +31,8 @@ export type JobFinderGlobalSearchMore = (query: string) => Promise<{
   entries: readonly JobFinderGlobalSearchEntry[];
   /** Part of the search could not be read; `entries` is what came back. */
   incomplete: boolean;
+  /** None of it could be read. */
+  failed: boolean;
 }>;
 
 export function JobFinderGlobalSearch(props: {
@@ -51,7 +53,10 @@ export function JobFinderGlobalSearch(props: {
     query: string;
     entries: readonly JobFinderGlobalSearchEntry[];
     incomplete: boolean;
-  }>({ query: "", entries: [], incomplete: false });
+    failed: boolean;
+  }>({ query: "", entries: [], incomplete: false, failed: false });
+  // Bumped by "Try again" to search the same words again.
+  const [attempt, setAttempt] = useState(0);
   const { searchMore } = props;
   useEffect(() => {
     if (!isQueryLongEnough || !searchMore) return undefined;
@@ -62,13 +67,22 @@ export function JobFinderGlobalSearch(props: {
       },
       () => {
         if (current)
-          setMore({ query: deferredQuery, entries: [], incomplete: true });
+          setMore({
+            query: deferredQuery,
+            entries: [],
+            incomplete: true,
+            failed: true,
+          });
       },
     );
     return () => {
       current = false;
     };
-  }, [deferredQuery, isQueryLongEnough, searchMore]);
+  }, [attempt, deferredQuery, isQueryLongEnough, searchMore]);
+  const retry = () => {
+    setMore((previous) => ({ ...previous, query: "" }));
+    setAttempt((count) => count + 1);
+  };
   const groups = useMemo(
     () =>
       isQueryLongEnough
@@ -233,17 +247,30 @@ export function JobFinderGlobalSearch(props: {
           >
             {searching
               ? "Searching your saved jobs…"
-              : `${resultCount} ${resultCount === 1 ? "result" : "results"}`}
+              : incomplete && resultCount === 0
+                ? null
+                : `${resultCount} ${resultCount === 1 ? "result" : "results"}`}
           </p>
           {incomplete ? (
-            <p
-              className="rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-sm text-foreground-soft"
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-sm text-foreground-soft"
               role="alert"
             >
-              {groups.length === 0
-                ? "Your saved jobs could not be searched. Try again."
-                : "Some of your saved jobs could not be searched; these are the ones that could."}
-            </p>
+              <span>
+                {more.failed
+                  ? "Your saved jobs could not be searched."
+                  : more.entries.length > 0
+                    ? "Some of your saved jobs could not be searched; these are the ones that could."
+                    : "Some of your saved jobs could not be searched, and none of the rest match."}
+              </span>
+              <button
+                className="rounded-(--radius-field) px-2 py-1 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                onClick={retry}
+                type="button"
+              >
+                Try again
+              </button>
+            </div>
           ) : null}
           {groups.length === 0 && !searching && !incomplete ? (
             <p className="rounded-(--radius-field) px-3 py-5 text-center text-sm text-foreground-soft">

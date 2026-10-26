@@ -1,4 +1,8 @@
-import type { ActivityFeed, ApplicationWorkState } from "@nestor/contracts";
+import type {
+  ActivityFeed,
+  ApplicationWorkState,
+  JobStage,
+} from "@nestor/contracts";
 
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import type { BadgeTone } from "../../lib/job-finder-types";
@@ -48,6 +52,15 @@ const APPLICATION_WORDS: Record<
     detail: "Sent? Check the site",
   },
 };
+
+/** The screen that lists a job where it is now. */
+function jobHref(jobId: number, stage: JobStage): string {
+  if (stage === "applied")
+    return `${JOB_FINDER_ROUTE_PATHS.applications}?jobId=${jobId}`;
+  if (stage === "shortlisted" || stage === "resume")
+    return `${JOB_FINDER_ROUTE_PATHS.reviewQueue}?jobId=${jobId}`;
+  return `${JOB_FINDER_ROUTE_PATHS.discovery}?job=${jobId}`;
+}
 
 function tone(status: ActivityStatus): BadgeTone {
   if (status === "running") return "active";
@@ -129,7 +142,7 @@ export function toActivityItems(feed: ActivityFeed): {
               ? "Written"
               : "Failed",
       tone: tone(status),
-      href: `${JOB_FINDER_ROUTE_PATHS.reviewQueue}?jobId=${resume.jobId}`,
+      href: jobHref(resume.jobId, resume.stage),
       at: resume.at,
     });
   }
