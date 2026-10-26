@@ -14,7 +14,7 @@ import {
   type JobFinderWorkspaceEntityMutationInput,
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,7 +50,6 @@ type RegisteredHandler = (
 ) => Promise<unknown>;
 
 const {
-  mockApplyGroupedManualAnswer,
   mockBrowserWindowFromWebContents,
   mockBuildApplicationPacket,
   mockExportResumePdf,
@@ -63,20 +62,17 @@ const {
   mockImportResumeFromSourcePath,
   mockRetryInterruptedResumeImport,
   mockIsDesktopTestApiEnabled,
-  mockProjectGroupedManualAnswer,
   mockProposeProfileCopilotChange,
   mockQueueJobForReview,
   mockRunDesktopResumeQualityBenchmark,
   mockShowOpenDialog,
   mockShowSaveDialog,
   mockGetPath,
-  mockSnoozeGroupedDecision,
   mockUpdateAppearanceTheme,
   mockUpdateApplicationDefaults,
   mockUpdateWorkspaceBehavior,
   mockUpdateAiBehavior,
 } = vi.hoisted(() => ({
-  mockApplyGroupedManualAnswer: vi.fn(),
   mockBrowserWindowFromWebContents: vi.fn(
     (): {
       id: string;
@@ -96,14 +92,12 @@ const {
   mockImportResumeFromSourcePath: vi.fn(),
   mockRetryInterruptedResumeImport: vi.fn(),
   mockIsDesktopTestApiEnabled: vi.fn(() => false),
-  mockProjectGroupedManualAnswer: vi.fn(),
   mockProposeProfileCopilotChange: vi.fn(),
   mockQueueJobForReview: vi.fn(),
   mockRunDesktopResumeQualityBenchmark: vi.fn(),
   mockShowOpenDialog: vi.fn(),
   mockShowSaveDialog: vi.fn(),
   mockGetPath: vi.fn<(name: string) => string>(() => process.cwd()),
-  mockSnoozeGroupedDecision: vi.fn(),
   mockUpdateAppearanceTheme: vi.fn(),
   mockUpdateApplicationDefaults: vi.fn(),
   mockUpdateWorkspaceBehavior: vi.fn(),
@@ -149,7 +143,6 @@ vi.mock("../services/job-finder", () => ({
   setJobFinderWorkspaceServiceTestEnv: vi.fn(),
 }));
 
-import { onJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
 import {
   RETIRED_CHAT_MESSAGE,
   registerJobFinderRouteHandlers,
@@ -789,175 +782,8 @@ describe("job-finder resume import picker route", () => {
   });
 });
 
-describe("job-finder sending a form prepared earlier", () => {
-  it.each(["autonomous_submit", "prepare_only"] as const)(
-    "under %s, scopes one permission to the pressed jobs before sending each",
-    async (applicationAutomationMode) => {
-      const callOrder: string[] = [];
-      const job = {
-        id: "job_ready",
-        title: "Ready Engineer",
-        company: "Example",
-        source: "target_site",
-        canonicalUrl: "https://jobs.example.test/jobs/1",
-        applicationUrl: "https://apply.example.test/apply/1",
-        resumeApplicationMode: "tailored_per_job",
-        resumeTailoringMode: "balanced",
-      };
-      const repository = {
-        getProfileWithRevision: vi.fn().mockResolvedValue({
-          profile: { baseResume: { sha256: "b".repeat(64) } },
-          revision: 1,
-        }),
-        getSettings: vi.fn().mockResolvedValue({
-          applicationAutomationMode,
-          resumeApplicationMode: "tailored_per_job",
-        }),
-        listResumeExportArtifacts: vi.fn().mockResolvedValue([
-          {
-            id: "export_ready",
-            jobId: job.id,
-            exportedAt: "2026-09-22T16:00:00.000Z",
-            isApproved: true,
-            sha256: "a".repeat(64),
-          },
-        ]),
-        listSavedJobs: vi
-          .fn()
-          .mockResolvedValue([job, { ...job, id: "job_other" }]),
-        // Both forms were filled in by one run of three jobs.
-        listApplyRuns: vi
-          .fn()
-          .mockResolvedValue([
-            { id: "run_prepared", jobIds: [job.id, "job_other", "job_third"] },
-          ]),
-        listApplyJobResults: vi.fn().mockResolvedValue([
-          {
-            id: "result_a",
-            runId: "run_prepared",
-            jobId: job.id,
-            state: "awaiting_review",
-            updatedAt: "2026-09-22T16:00:00.000Z",
-          },
-          {
-            id: "result_b",
-            runId: "run_prepared",
-            jobId: "job_other",
-            state: "awaiting_review",
-            updatedAt: "2026-09-22T16:00:00.000Z",
-          },
-        ]),
-      };
-      const workspaceService = {
-        submitPreparedApplication: vi.fn().mockImplementation(() => {
-          callOrder.push("send");
-          return Promise.resolve(
-            createEmptyWorkspace("2026-09-22T16:01:00.000Z"),
-          );
-        }),
-      };
-      const authorityService = {
-        approveCurrentAnswers: vi.fn().mockResolvedValue({ status: "created" }),
-        create: vi.fn().mockImplementation(() => {
-          callOrder.push("authority");
-          return Promise.resolve({ status: "applied" });
-        }),
-        list: vi.fn().mockResolvedValue([]),
-        revoke: vi.fn(),
-        update: vi.fn(),
-      };
-      mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue(
-        repository as never,
-      );
-      mockGetJobFinderApplicationAuthorityService.mockReturnValue(
-        authorityService,
-      );
-      mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
-      const handlers = new Map<string, RegisteredHandler>();
-      registerJobFinderRouteHandlers({
-        handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-          handlers.set(channel, handler);
-        }),
-      } as unknown as IpcMain);
-
-      await handlers.get("job-finder:send-prepared-applications")!(
-        { sender: {} },
-        { jobIds: [job.id, "job_other"] },
-      );
-
-      expect(callOrder).toEqual(
-        applicationAutomationMode === "prepare_only"
-          ? ["send", "send"]
-          : ["authority", "send", "send"],
-      );
-      expect(workspaceService.submitPreparedApplication).toHaveBeenCalledWith(
-        "job_other",
-      );
-      if (applicationAutomationMode !== "prepare_only") {
-        // One permission for the press, sized for the run the forms came
-        // from: a permission for one send stopped the second one with
-        // "Remaining per-run capacity is exhausted".
-        expect(authorityService.create).toHaveBeenCalledTimes(1);
-        expect(authorityService.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            mode: "autonomous_submit",
-            scope: { campaignId: null, jobIds: [job.id, "job_other"] },
-            maxApplicationsPerRun: 3,
-          }),
-        );
-      }
-    },
-  );
-});
-
-describe("job-finder sending forms that already went out", () => {
-  it("says there is nothing left to send instead of sending again", async () => {
-    const repository = {
-      getSettings: vi.fn().mockResolvedValue({
-        applicationAutomationMode: "autonomous_submit",
-      }),
-      listApplyJobResults: vi.fn().mockResolvedValue([
-        {
-          id: "result_old",
-          runId: "run_prepared",
-          jobId: "job_sent",
-          state: "awaiting_review",
-          updatedAt: "2026-09-22T16:00:00.000Z",
-        },
-        {
-          id: "result_new",
-          runId: "run_prepared",
-          jobId: "job_sent",
-          state: "submitted",
-          updatedAt: "2026-09-22T16:05:00.000Z",
-        },
-      ]),
-    };
-    const workspaceService = { submitPreparedApplication: vi.fn() };
-    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValueOnce(
-      repository as never,
-    );
-    mockGetJobFinderWorkspaceService.mockResolvedValue(workspaceService);
-    const handlers = new Map<string, RegisteredHandler>();
-    registerJobFinderRouteHandlers({
-      handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-        handlers.set(channel, handler);
-      }),
-    } as unknown as IpcMain);
-
-    await expect(
-      handlers.get("job-finder:send-prepared-applications")!(
-        { sender: {} },
-        { jobIds: ["job_sent"] },
-      ),
-    ).rejects.toThrow(/Nothing left to send/);
-    expect(workspaceService.submitPreparedApplication).not.toHaveBeenCalled();
-  });
-});
-
-describe("job-finder application packet export route", () => {
+describe("job-finder workspace routes", () => {
   let temporaryDirectory: string;
-  let exportHandler: RegisteredHandler;
   let bootstrapHandler: RegisteredHandler;
   let syncHandler: RegisteredHandler;
   let entityMutationHandler: RegisteredHandler;
@@ -1005,13 +831,6 @@ describe("job-finder application packet export route", () => {
     } as unknown as IpcMain;
 
     registerJobFinderRouteHandlers(ipcMain);
-    const registeredHandler = handlers.get(
-      "job-finder:export-application-packet",
-    );
-    if (!registeredHandler) {
-      throw new Error("Application packet export handler was not registered.");
-    }
-    exportHandler = registeredHandler;
     const registeredBootstrapHandler = handlers.get(
       "job-finder:get-workspace-bootstrap",
     );
@@ -1049,52 +868,6 @@ describe("job-finder application packet export route", () => {
       generatedAt: "2026-08-09T09:59:00.000Z",
     });
     expect(mockGetWorkspaceBootstrap).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns cancelled without writing when the save dialog is cancelled", async () => {
-    mockShowSaveDialog.mockResolvedValue({
-      canceled: true,
-      filePath: undefined,
-    });
-
-    const result = await exportHandler(
-      { sender: {} },
-      {
-        runId: "run-1",
-        jobId: "job-1",
-        applicationRecordId: "application-1",
-      },
-    );
-
-    expect(result).toEqual({ status: "cancelled" });
-    expect(mockBuildApplicationPacket).toHaveBeenCalledWith(
-      "run-1",
-      "job-1",
-      "application-1",
-    );
-    await expect(readdir(temporaryDirectory)).resolves.toEqual([]);
-  });
-
-  it("writes the exact schema-validated packet as formatted JSON", async () => {
-    const selectedPath = path.join(temporaryDirectory, "application-packet");
-    mockShowSaveDialog.mockResolvedValue({
-      canceled: false,
-      filePath: selectedPath,
-    });
-
-    const result = await exportHandler(
-      { sender: {} },
-      {
-        runId: "run-1",
-        jobId: "job-1",
-        applicationRecordId: "application-1",
-      },
-    );
-
-    expect(result).toEqual({ status: "saved" });
-    const savedContents = await readFile(`${selectedPath}.json`, "utf8");
-    expect(savedContents).toBe(`${JSON.stringify(packet, null, 2)}\n`);
-    expect(JSON.parse(savedContents)).toEqual(packet);
   });
 
   it("returns a typed delta for a bounded entity mutation", async () => {
@@ -1313,146 +1086,6 @@ describe("job-finder scoped settings routes", () => {
   });
 });
 
-describe("job-finder grouped manual-answer routes", () => {
-  let projectHandler: RegisteredHandler;
-  let applyHandler: RegisteredHandler;
-  let snoozeHandler: RegisteredHandler;
-
-  beforeEach(() => {
-    const groupedSnapshot = createEmptyWorkspace("2026-08-15T10:00:00.000Z");
-    mockProjectGroupedManualAnswer.mockResolvedValue(groupedSnapshot);
-    mockApplyGroupedManualAnswer.mockResolvedValue(groupedSnapshot);
-    mockSnoozeGroupedDecision.mockResolvedValue(groupedSnapshot);
-    mockGetJobFinderWorkspaceService.mockResolvedValue({
-      applyGroupedManualAnswer: mockApplyGroupedManualAnswer,
-      projectGroupedManualAnswer: mockProjectGroupedManualAnswer,
-      snoozeGroupedDecision: mockSnoozeGroupedDecision,
-    });
-
-    const handlers = new Map<string, RegisteredHandler>();
-    const ipcMain = {
-      handle: vi.fn((channel: string, handler: RegisteredHandler) => {
-        handlers.set(channel, handler);
-      }),
-    } as unknown as IpcMain;
-    registerJobFinderRouteHandlers(ipcMain);
-    const project = handlers.get("job-finder:project-grouped-manual-answer");
-    const apply = handlers.get("job-finder:apply-grouped-manual-answer");
-    const snooze = handlers.get("job-finder:snooze-grouped-decision");
-    if (!project || !apply || !snooze) {
-      throw new Error("Grouped manual-answer handlers were not registered.");
-    }
-    projectHandler = project;
-    applyHandler = apply;
-    snoozeHandler = snooze;
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("projects a typed grouped manual-answer command and returns the parsed snapshot", async () => {
-    const result = await projectHandler(
-      { sender: {} },
-      {
-        groupKey: "group_1",
-        requestId: "request_a",
-        expectedRequestRevision: 1,
-        answer: { type: "text", value: "5 years" },
-        saveScope: "reusable_profile",
-      },
-    );
-
-    expect(mockProjectGroupedManualAnswer).toHaveBeenCalledWith({
-      groupKey: "group_1",
-      requestId: "request_a",
-      expectedRequestRevision: 1,
-      answer: { type: "text", value: "5 years" },
-      saveScope: "reusable_profile",
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a project command whose answer is not reusable text", async () => {
-    await expect(
-      projectHandler(
-        { sender: {} },
-        {
-          groupKey: "group_1",
-          requestId: "request_a",
-          expectedRequestRevision: 1,
-          answer: { type: "single_choice", value: "Yes" },
-        },
-      ),
-    ).rejects.toThrow();
-    expect(mockProjectGroupedManualAnswer).not.toHaveBeenCalled();
-  });
-
-  it("applies a typed grouped manual-answer input and returns the parsed snapshot", async () => {
-    const result = await applyHandler(
-      { sender: {} },
-      {
-        decisionId: "group_1:abc123",
-        requestIds: ["request_a", "request_b"],
-        expectedRequestRevisions: { request_a: 1, request_b: 1 },
-        answer: { type: "text", value: "5 years" },
-      },
-    );
-
-    expect(mockApplyGroupedManualAnswer).toHaveBeenCalledWith({
-      decisionId: "group_1:abc123",
-      requestIds: ["request_a", "request_b"],
-      expectedRequestRevisions: { request_a: 1, request_b: 1 },
-      answer: { type: "text", value: "5 years" },
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects an apply input whose revisions do not cover every request id", async () => {
-    await expect(
-      applyHandler(
-        { sender: {} },
-        {
-          decisionId: "group_1:abc123",
-          requestIds: ["request_a", "request_b"],
-          expectedRequestRevisions: { request_a: 1 },
-          answer: { type: "text", value: "5 years" },
-        },
-      ),
-    ).rejects.toThrow();
-    expect(mockApplyGroupedManualAnswer).not.toHaveBeenCalled();
-  });
-
-  it("snoozes a grouped decision and defaults a missing reason to null", async () => {
-    const result = await snoozeHandler(
-      { sender: {} },
-      {
-        decisionId: "group_1:abc123",
-        expectedRevision: 1,
-        until: "2026-08-17T10:00:00.000Z",
-      },
-    );
-
-    expect(mockSnoozeGroupedDecision).toHaveBeenCalledWith({
-      decisionId: "group_1:abc123",
-      expectedRevision: 1,
-      until: "2026-08-17T10:00:00.000Z",
-      reason: null,
-    });
-    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
-  });
-
-  it("rejects a snooze payload without a decision id", async () => {
-    await expect(
-      snoozeHandler(
-        { sender: {} },
-        { expectedRevision: 1, until: "2026-08-17T10:00:00.000Z" },
-      ),
-    ).rejects.toThrow();
-    expect(mockSnoozeGroupedDecision).not.toHaveBeenCalled();
-  });
-});
-
 describe("job-finder synthetic save failure route", () => {
   const originalTestApiFlag = process.env.NESTOR_ENABLE_TEST_API;
 
@@ -1601,50 +1234,6 @@ it("Fill-in only retries a changed permission revision and revokes the broader p
     expectedRevision: 2,
   });
   expect(authorityService.replaceUsed).not.toHaveBeenCalled();
-});
-
-it("publishes one workspace refresh after a burst of answer draft saves", async () => {
-  vi.useFakeTimers();
-  const saveUserActionAnswerDraft = vi.fn().mockResolvedValue(undefined);
-  mockGetJobFinderWorkspaceService.mockResolvedValue({
-    saveUserActionAnswerDraft,
-  });
-  const handlers = new Map<string, RegisteredHandler>();
-  registerJobFinderRouteHandlers({
-    handle: (channel: string, handler: RegisteredHandler) =>
-      handlers.set(channel, handler),
-  } as unknown as IpcMain);
-  const handler = handlers.get("job-finder:save-user-action-answer-draft")!;
-  const listener = vi.fn();
-  const stop = onJobFinderWorkspaceUpdate(listener);
-  try {
-    await handler(
-      { sender: {} },
-      {
-        requestId: "request",
-        expectedRevision: 1,
-        editedAt: 1,
-        draft: { answers: { Start: "Monday" } },
-      },
-    );
-    await vi.advanceTimersByTimeAsync(100);
-    await handler(
-      { sender: {} },
-      {
-        requestId: "request",
-        expectedRevision: 1,
-        editedAt: 2,
-        draft: { answers: { Start: "Friday" } },
-      },
-    );
-    expect(saveUserActionAnswerDraft).toHaveBeenCalledTimes(2);
-    expect(listener).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(150);
-    expect(listener).toHaveBeenCalledTimes(1);
-  } finally {
-    stop();
-    vi.useRealTimers();
-  }
 });
 
 it("publishes a browser-bar shortlist immediately while listing checks run", async () => {

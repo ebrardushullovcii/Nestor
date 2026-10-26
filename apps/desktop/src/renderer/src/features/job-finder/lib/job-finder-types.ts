@@ -1,29 +1,12 @@
 import type {
   AppearanceTheme,
-  ApplicationCrmBulkStageMutationInput,
-  ApplicationCrmExportInput,
-  ApplicationCrmFileExportResult,
-  ApplicationCrmMutationInput,
-  ApplicationCrmSettings,
-  ApplyGroupedManualAnswerInput,
-  ApplyRunDetails,
   CandidateAnswerKind,
   CandidateLinkKind,
   CandidateProfile,
   CandidateReusableAnswer,
-  ClearApplicationAnswerCommandInput,
   EditableSourceInstructionArtifact,
-  JobFinderApplicationPacketExportResult,
-  JobFinderApplicationStartTarget,
-  JobFinderApplyQueueActionInput,
-  JobFinderApplyQueueControlInput,
-  JobFinderApplyRunActionInput,
-  JobFinderApplyRunDetailsQuery,
   JobFinderOpenBrowserSessionInput,
-  JobFinderPreparedApplicationPageInput,
-  JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
-  JobFinderReturnApplicationToShortlistInput,
   JobFinderSettings,
   JobSearchPreferences,
   JobSourceAdapterKind,
@@ -31,21 +14,15 @@ import type {
   ProfileSetupReviewAction,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
-  ProjectGroupedManualAnswerCommand,
-  ResolveSubmissionOutcomeInput,
-  ResolveSubmissionOutcomeResult,
   ResumeTimelineRepairAction,
   RevealSavedFileResult,
-  SaveApplicationAnswerCommandInput,
   SetJobFinderActivityControlInput,
-  SnoozeGroupedDecisionInput,
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceInstructionStatus,
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-  UserActionCommandInput,
   WorkMode,
 } from "@nestor/contracts";
 
@@ -83,9 +60,6 @@ export interface JobFinderShellActions {
     input?: JobFinderOpenBrowserSessionInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   checkBrowserSession: () => Promise<JobFinderRendererWorkspaceSnapshot>;
-  performUserAction: (
-    command: UserActionCommandInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   refreshWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   requestWorkspaceRefresh?: () => void;
   resetWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
@@ -96,30 +70,6 @@ export interface JobFinderShellActions {
     options?: { readabilityTimeoutMs?: number },
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   getSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
-  getApplyRunDetails: (
-    input: JobFinderApplyRunDetailsQuery,
-  ) => Promise<ApplyRunDetails>;
-  saveApplicationAnswer: (
-    command: SaveApplicationAnswerCommandInput,
-  ) => Promise<ApplyRunDetails>;
-  clearApplicationAnswer: (
-    command: ClearApplicationAnswerCommandInput,
-  ) => Promise<ApplyRunDetails>;
-  projectGroupedManualAnswer: (
-    command: ProjectGroupedManualAnswerCommand,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  applyGroupedManualAnswer: (
-    input: ApplyGroupedManualAnswerInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  snoozeGroupedDecision: (
-    input: SnoozeGroupedDecisionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  exportApplicationPacket: (
-    input: JobFinderApplyRunDetailsQuery,
-  ) => Promise<JobFinderApplicationPacketExportResult>;
-  resolveSubmissionOutcome: (
-    input: ResolveSubmissionOutcomeInput,
-  ) => Promise<ResolveSubmissionOutcomeResult>;
   saveSourceInstructionArtifact: (
     targetId: string,
     artifact: EditableSourceInstructionArtifact,
@@ -162,9 +112,6 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateAppearanceTheme: (
     appearanceTheme: AppearanceTheme,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  updateTrackerCrm: (
-    applicationCrm: ApplicationCrmSettings,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveProfileSetupState: (
     profileSetupState: ProfileSetupState,
@@ -213,62 +160,6 @@ export interface JobFinderShellActions {
    * opened or executed, only selected.
    */
   revealSavedFile: (path: string) => Promise<RevealSavedFileResult>;
-  startAutoApplyRun: (
-    input: JobFinderApplicationStartTarget,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  startAutoApplyQueueRun: (
-    jobIds: JobFinderApplyQueueActionInput["jobIds"],
-    applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  controlApplyQueue: (
-    input: JobFinderApplyQueueControlInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** Takes waiting jobs out of the Apply queue before they start. */
-  removeFromApplyQueue: (
-    input: JobFinderRemoveFromApplyQueueInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** Applications -> Shortlisted for an unsent application; never sends. */
-  returnApplicationToShortlist: (
-    input: JobFinderReturnApplicationToShortlistInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  undoReturnApplicationToShortlist: (
-    jobId: string,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  approveApplyRun: (
-    input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  cancelApplyRun: (
-    input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  revokeApplyRunApproval: (
-    input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  focusPreparedApplicationPage: (
-    input: JobFinderPreparedApplicationPageInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** Sends one application the person has already looked over. */
-  submitPreparedApplication: (input: {
-    jobId: string;
-  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  /** Send for me: sends each filled-in form under one permission. */
-  sendPreparedApplications: (input: {
-    jobIds: string[];
-  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  approveApply: (
-    input: JobFinderApplicationStartTarget,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  mutateApplicationCrm: (
-    input: ApplicationCrmMutationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  mutateApplicationCrmBulkStage: (
-    input: ApplicationCrmBulkStageMutationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  runApplicationNoResponseAutomation: (
-    settings?: ApplicationCrmSettings,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  exportApplicationCrm: (
-    input: ApplicationCrmExportInput,
-  ) => Promise<ApplicationCrmFileExportResult>;
 }
 
 export interface ScreenDefinition {

@@ -2,25 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
-  getApplicationRecordIndex,
   getDiscoverySelectionIndex,
-  getLatestApplicationAttemptIndex,
   getReviewSelectionIndex,
 } from "./job-finder-page-selection";
 
 type SelectedState = string | null;
-
-export function useApplicationSelection(initialValue: SelectedState) {
-  const [value, setValue] = useState<SelectedState>(initialValue);
-
-  useEffect(() => {
-    // Restore the initial selection after hydration, then keep the current
-    // application while background work updates the service suggestion.
-    setValue((current) => current ?? initialValue);
-  }, [initialValue]);
-
-  return [value, setValue] as const;
-}
 
 const NO_VALID_IDS: ReadonlySet<string> = new Set();
 
@@ -464,35 +450,6 @@ export { getResumeWorkspaceJobIdFromPathname as getActiveResumeWorkspaceJobId } 
 
 export function isProfileSetupPath(pathname: string): boolean {
   return pathname === "/job-finder/profile/setup";
-}
-
-export function getLatestApplicationAttempt(
-  workspace: {
-    applicationRecords: Readonly<
-      JobFinderRendererWorkspaceSnapshot["applicationRecords"]
-    >;
-    applicationAttempts: Readonly<
-      JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
-    >;
-  },
-  selectedApplicationRecordId: string | null,
-) {
-  const selectedApplicationRecord = selectedApplicationRecordId
-    ? (getApplicationRecordIndex(workspace.applicationRecords).get(
-        selectedApplicationRecordId,
-      ) ?? null)
-    : (workspace.applicationRecords[0] ?? null);
-
-  const selectedApplicationAttempt = selectedApplicationRecord
-    ? (getLatestApplicationAttemptIndex(workspace.applicationAttempts).get(
-        selectedApplicationRecord.id,
-      ) ?? null)
-    : null;
-
-  return {
-    selectedApplicationAttempt,
-    selectedApplicationRecord,
-  };
 }
 
 export function getJobFinderWorkspaceSelection(

@@ -27,13 +27,6 @@ import {
   type ApplicationListQuery,
   type ApplyJobsInput,
   type JobChange,
-  ApplicationPageStatesInputSchema,
-  ApplicationPageStatesSchema,
-  ReopenApplicationPageInputSchema,
-  ApplicationPageStateSchema,
-  ApplicationPageReopenProgressSchema,
-  type ReopenApplicationPageInput,
-  type ApplicationPageReopenProgress,
 } from "@nestor/contracts";
 import {
   contextBridge,
@@ -45,18 +38,11 @@ import { createAssistantBridge } from "./assistant";
 import { createJobsBridge } from "./jobs";
 import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
-  ApplicationCrmBulkStageMutationInput,
-  ApplicationCrmExportInput,
-  ApplicationCrmFileExportResult,
-  ApplicationCrmMutationInput,
-  ApplicationCrmSettings,
   ApplicationDocumentExportResult,
   ApplicationDocumentListResult,
   ApplicationDocumentRevision,
   AppearanceTheme,
   ApproveApplicationDocumentInput,
-  ApplyGroupedManualAnswerInput,
-  ApplyRunDetails,
   CandidateAssetDeleteInput,
   CandidateAssetDeleteResult,
   CandidateAssetImportInput,
@@ -68,7 +54,6 @@ import type {
   CandidateAssetRestoreInput,
   CandidateAssetRestoreResult,
   CandidateProfile,
-  ClearApplicationAnswerCommandInput,
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
@@ -106,22 +91,12 @@ import type {
   SaveInterviewSetupInput,
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
-  JobFinderApplicationPacketExportResult,
   JobFinderDiagnosticExportResult,
-  JobFinderApplyQueueActionInput,
-  JobFinderApplyRunActionInput,
-  JobFinderApplyQueueControlInput,
-  JobFinderRemoveFromApplyQueueInput,
-  JobFinderReturnApplicationToShortlistInput,
-  JobFinderApplyRunDetailsQuery,
-  JobFinderApplicationStartTarget,
-  JobFinderPreparedApplicationPageInput,
   JobFinderOpenBrowserSessionInput,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProposeApplicationDocumentInput,
   JobFinderPerformanceSnapshot,
-  SaveApplicationAnswerCommandInput,
   ResumeImportBenchmarkReport,
   ResumeImportBenchmarkCase,
   ResumeImportBenchmarkRequest,
@@ -137,7 +112,6 @@ import type {
   JobFinderTestSaveSurface,
   JobFinderSettings,
   ProfileSetupState,
-  ProjectGroupedManualAnswerCommand,
   SourceDebugProgressEvent,
   SourceDebugRunRecord,
   SourceDebugRunDetails,
@@ -148,15 +122,12 @@ import type {
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
   SetJobFinderActivityControlInput,
-  SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
   UpdateApplicationAuthorityEnvelopeInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
   WorkspaceRevision,
   WriteClipboardTextResult,
-  SaveUserActionAnswerDraftInput,
-  UserActionCommandInput,
   LaunchContext,
 } from "@nestor/contracts";
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
@@ -815,16 +786,6 @@ const desktopApi = {
       ipcRenderer.invoke(
         "job-finder:check-browser-session",
       ) as Promise<JobFinderWorkspaceSyncResult>,
-    saveUserActionAnswerDraft: (input: SaveUserActionAnswerDraftInput) =>
-      ipcRenderer.invoke(
-        "job-finder:save-user-action-answer-draft",
-        input,
-      ) as Promise<void>,
-    performUserAction: (command: UserActionCommandInput) =>
-      ipcRenderer.invoke(
-        "job-finder:perform-user-action",
-        command,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     saveProfile: (profile: CandidateProfile) =>
       ipcRenderer.invoke(
         "job-finder:save-profile",
@@ -876,11 +837,6 @@ const desktopApi = {
       ipcRenderer.invoke(
         "job-finder:update-appearance-theme",
         appearanceTheme,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    updateTrackerCrm: (applicationCrm: ApplicationCrmSettings) =>
-      ipcRenderer.invoke(
-        "job-finder:update-tracker-crm",
-        applicationCrm,
       ) as Promise<JobFinderWorkspaceSyncResult>,
     saveProfileSetupState: (profileSetupState: ProfileSetupState) =>
       ipcRenderer.invoke(
@@ -1056,36 +1012,6 @@ const desktopApi = {
       ipcRenderer.invoke("job-finder:get-source-debug-run-details", {
         runId,
       }) as Promise<SourceDebugRunDetails>,
-    getApplyRunDetails: (input: JobFinderApplyRunDetailsQuery) =>
-      ipcRenderer.invoke(
-        "job-finder:get-apply-run-details",
-        input,
-      ) as Promise<ApplyRunDetails>,
-    saveApplicationAnswer: (command: SaveApplicationAnswerCommandInput) =>
-      ipcRenderer.invoke(
-        "job-finder:save-application-answer",
-        command,
-      ) as Promise<ApplyRunDetails>,
-    clearApplicationAnswer: (command: ClearApplicationAnswerCommandInput) =>
-      ipcRenderer.invoke(
-        "job-finder:clear-application-answer",
-        command,
-      ) as Promise<ApplyRunDetails>,
-    projectGroupedManualAnswer: (command: ProjectGroupedManualAnswerCommand) =>
-      ipcRenderer.invoke(
-        "job-finder:project-grouped-manual-answer",
-        command,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    applyGroupedManualAnswer: (input: ApplyGroupedManualAnswerInput) =>
-      ipcRenderer.invoke(
-        "job-finder:apply-grouped-manual-answer",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    snoozeGroupedDecision: (input: SnoozeGroupedDecisionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:snooze-grouped-decision",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     exportDiagnostics: () =>
       ipcRenderer.invoke(
         "job-finder:export-diagnostics",
@@ -1094,11 +1020,6 @@ const desktopApi = {
       ipcRenderer.invoke(
         "job-finder:get-performance-snapshot",
       ) as Promise<JobFinderPerformanceSnapshot>,
-    exportApplicationPacket: (input: JobFinderApplyRunDetailsQuery) =>
-      ipcRenderer.invoke(
-        "job-finder:export-application-packet",
-        input,
-      ) as Promise<JobFinderApplicationPacketExportResult>,
     saveSourceInstructionArtifact: (
       targetId: string,
       artifact: EditableSourceInstructionArtifact,
@@ -1165,130 +1086,6 @@ const desktopApi = {
       ipcRenderer.invoke("job-finder:write-clipboard-text", {
         text,
       }) as Promise<WriteClipboardTextResult>,
-    getApplicationPageStates: async (resultIds: string[]) =>
-      ApplicationPageStatesSchema.parse(
-        await ipcRenderer.invoke(
-          "job-finder:get-application-page-states",
-          ApplicationPageStatesInputSchema.parse({ resultIds }),
-        ),
-      ),
-    reopenApplicationPage: async (
-      input: ReopenApplicationPageInput,
-      onProgress?: (progress: ApplicationPageReopenProgress) => void,
-    ) => {
-      const command = ReopenApplicationPageInputSchema.parse(input);
-      const requestId = `reopen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const channel = `job-finder:application-page-reopen-progress:${requestId}`;
-      const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-        const parsed = ApplicationPageReopenProgressSchema.safeParse(payload);
-        if (parsed.success && parsed.data.resultId === command.resultId)
-          onProgress?.(parsed.data);
-      };
-      ipcRenderer.on(channel, handler);
-      try {
-        return ApplicationPageStateSchema.parse(
-          await ipcRenderer.invoke("job-finder:reopen-application-page", {
-            ...command,
-            requestId,
-          }),
-        );
-      } finally {
-        ipcRenderer.off(channel, handler);
-      }
-    },
-    startAutoApplyRun: (input: JobFinderApplicationStartTarget) =>
-      ipcRenderer.invoke(
-        "job-finder:start-auto-apply-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    startAutoApplyQueueRun: (
-      jobIds: JobFinderApplyQueueActionInput["jobIds"],
-      applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-    ) =>
-      ipcRenderer.invoke("job-finder:start-auto-apply-queue-run", {
-        jobIds,
-        ...(applicationAutomationMode ? { applicationAutomationMode } : {}),
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
-      ipcRenderer.invoke(
-        "job-finder:control-apply-queue",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
-      ipcRenderer.invoke(
-        "job-finder:remove-from-apply-queue",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    returnApplicationToShortlist: (
-      input: JobFinderReturnApplicationToShortlistInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:return-application-to-shortlist",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    undoReturnApplicationToShortlist: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:undo-return-application-to-shortlist", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    approveApplyRun: (input: JobFinderApplyRunActionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:approve-apply-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    cancelApplyRun: (input: JobFinderApplyRunActionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:cancel-apply-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    revokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:revoke-apply-run-approval",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    focusPreparedApplicationPage: (
-      input: JobFinderPreparedApplicationPageInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:focus-prepared-application-page",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    submitPreparedApplication: (input: { jobId: string }) =>
-      ipcRenderer.invoke(
-        "job-finder:submit-prepared-application",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    sendPreparedApplications: (input: { jobIds: string[] }) =>
-      ipcRenderer.invoke(
-        "job-finder:send-prepared-applications",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    approveApply: (input: JobFinderApplicationStartTarget) =>
-      ipcRenderer.invoke(
-        "job-finder:approve-apply",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    mutateApplicationCrm: (input: ApplicationCrmMutationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-application-crm",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    mutateApplicationCrmBulkStage: (
-      input: ApplicationCrmBulkStageMutationInput,
-    ) =>
-      ipcRenderer.invoke(
-        "job-finder:mutate-application-crm-bulk-stage",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    runApplicationNoResponseAutomation: (settings?: ApplicationCrmSettings) =>
-      ipcRenderer.invoke(
-        "job-finder:run-application-no-response-automation",
-        settings,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    exportApplicationCrm: (input: ApplicationCrmExportInput) =>
-      ipcRenderer.invoke(
-        "job-finder:export-application-crm",
-        input,
-      ) as Promise<ApplicationCrmFileExportResult>,
     ...(testApiEnabled
       ? {
           test: {
