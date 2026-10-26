@@ -93,9 +93,23 @@ export interface JobStore {
   close(): void;
 }
 
+/** Closes `db` when `work` throws, so a failed open never leaks a handle. */
+function closingOnFailure<T>(db: DatabaseSync, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (db.isOpen) {
+      if (db.isTransaction) db.exec("ROLLBACK");
+      db.close();
+    }
+    throw error;
+  }
+}
+
 function openDatabase(filePath: string): DatabaseSync {
   const db = new DatabaseSync(filePath);
-  db.exec(`
+  closingOnFailure(db, () =>
+    db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
     PRAGMA foreign_keys = ON;
@@ -103,7 +117,8 @@ function openDatabase(filePath: string): DatabaseSync {
     PRAGMA busy_timeout = 5000;
     PRAGMA cache_size = -32768;
     PRAGMA mmap_size = 268435456;
-  `);
+  `),
+  );
   return db;
 }
 
@@ -144,7 +159,7 @@ export function openJobStore(filePath: string): JobStore {
   const inMemory = filePath === ":memory:";
   if (!inMemory) mkdirSync(path.dirname(filePath), { recursive: true });
   let db = openDatabase(filePath);
-  const found = readVersion(db);
+  const found = closingOnFailure(db, () => readVersion(db));
   if (
     !found.empty &&
     found.version < JOB_STORE_KEPT_FROM_VERSION &&
@@ -156,30 +171,27 @@ export function openJobStore(filePath: string): JobStore {
     }
     db = openDatabase(filePath);
   }
-  db.exec("BEGIN IMMEDIATE");
-  try {
+  const sql = closingOnFailure(db, () => {
+    db.exec("BEGIN IMMEDIATE");
     // Columns first: a new index in the schema may cover a new column.
     addMissingColumns(db, JOB_STORE_ADDED_COLUMNS);
     for (const ddl of JOB_STORE_SCHEMA) db.exec(ddl);
     if (found.version < JOB_STORE_KEPT_FROM_VERSION)
       db.exec(`PRAGMA user_version = ${JOB_STORE_KEPT_FROM_VERSION}`);
     db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    db.close();
-    throw error;
-  }
-  if (!inMemory && process.platform !== "win32") {
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try {
-        chmodSync(`${filePath}${suffix}`, 0o600);
-      } catch {
-        // The -wal and -shm files appear on first write.
+    if (!inMemory && process.platform !== "win32") {
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try {
+          chmodSync(`${filePath}${suffix}`, 0o600);
+        } catch {
+          // The -wal and -shm files appear on first write.
+        }
       }
     }
-  }
-
-  const sql = createStatements(db);
+    return createStatements(db);
+  });
+  // Its setup writes (a search cut off by the last close is stopped).
+  const searches = closingOnFailure(db, () => createSearches(sql));
   const listeners = new Set<(change: JobChange) => void>();
   let depth = 0;
   let pending: JobChange[] = [];
@@ -338,7 +350,7 @@ export function openJobStore(filePath: string): JobStore {
            ORDER BY found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),
-    searches: createSearches(sql),
+    searches,
 
     listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
     getJob: (id) => getJob(sql, id),

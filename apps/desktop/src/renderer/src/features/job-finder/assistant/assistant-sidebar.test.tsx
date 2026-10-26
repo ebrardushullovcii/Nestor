@@ -127,6 +127,7 @@ describe("assistant composer keeps what the person wrote", () => {
       startedAt: new Date().toISOString(),
     });
     await renderSidebar(bridge);
+    // The conversation (and its activity) loads after the composer shows.
     expect(
       await screen.findByText("Writing resumes: 2 of 5 finished"),
     ).toBeTruthy();
