@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 /**
  * Built-app check of the app-wide assistant sidebar (ADR 0037-0039).
@@ -133,6 +135,39 @@ export default async function assistantHarness(qa) {
       jobCompany: "Comet Teacup Labs",
     },
   );
+  // Apply works on the job store: the same replica job, with its Original
+  // resume approved, is what the assistant can apply to and send.
+  const jobStore = new DatabaseSync(
+    path.join(qa.userDataDir, "job-finder.sqlite"),
+  );
+  try {
+    const now = Date.now();
+    const job = jobStore
+      .prepare(
+        "INSERT INTO jobs(stage,stage_at,title,company,location,found_at,seen_at,source_label,url,apply_url,work_modes) VALUES('resume',?,?,?,'Remote',?,?,'Replica Greenhouse',?,?,1)",
+      )
+      .run(
+        now,
+        "Platform Engineer, Comet Systems",
+        "Comet Teacup Labs",
+        now,
+        now,
+        new URL("/greenhouse/jobs/3", qa.sites.url).href,
+        applicationUrl,
+      );
+    jobStore
+      .prepare(
+        "INSERT INTO job_details(job_id,description,facts_json) VALUES(?,?,?)",
+      )
+      .run(job.lastInsertRowid, "Synthetic replica listing.", "{}");
+    jobStore
+      .prepare(
+        "INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path) VALUES(?,'original','ready',?,?,NULL)",
+      )
+      .run(job.lastInsertRowid, now, now);
+  } finally {
+    jobStore.close();
+  }
   await qa.page.reload();
   await setSize(qa, 1440, 900);
   await nav(qa, "Home");
@@ -349,6 +384,33 @@ export default async function assistantHarness(qa) {
     if (details.some((entry) => entry.application.state === "submitted")) {
       submitted = details;
       break;
+    }
+    // Apply may stop on form questions the synthetic profile cannot
+    // answer; answer them in Needs you as a person would, up to five times.
+    if (
+      details.some((entry) => entry.application.state === "needs_you") &&
+      answered < 5
+    ) {
+      const asked = await qa.page.evaluate(async () => {
+        const { rows } = await window.nestor.needsYou.run("list_needs_you", {});
+        for (const task of rows)
+          await window.nestor.needsYou.run("answer_need", {
+            id: task.id,
+            answer:
+              task.input === "boolean"
+                ? "Yes"
+                : task.input === "number"
+                  ? "1"
+                  : (task.options?.[0] ?? "Not applicable"),
+            remember: false,
+          });
+        return rows.map((task) => task.prompt);
+      });
+      if (asked.length) {
+        answered += 1;
+        record("answered Needs you", asked.join(" | ").slice(0, 160));
+        continue;
+      }
     }
     const view = await currentConversation(qa);
     const open = view.messages
