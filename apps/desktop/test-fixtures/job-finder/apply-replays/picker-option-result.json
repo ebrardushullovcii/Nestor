@@ -1,1 +1,9 @@
-{ "missing": "Primary territory", "offered": ["Fallback region", "Other region"], "unrelated": "Unrelated picker option" }
+{
+  "provenance": "Synthetic picker shapes from the pass-13 real round (async native list, search box showing No results, uncommitted search); no applicant data.",
+  "missing": "Primary territory",
+  "offered": ["Fallback region", "Other region"],
+  "unrelated": "Unrelated picker option",
+  "variant": "Fallback region (Local name)",
+  "longListSize": 300,
+  "longListWantedIndex": 250
+}
