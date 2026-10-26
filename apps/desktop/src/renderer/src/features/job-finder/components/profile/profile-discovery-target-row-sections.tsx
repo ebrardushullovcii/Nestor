@@ -1,10 +1,7 @@
 import type { ChangeEventHandler } from "react";
-import { Button } from "@renderer/components/ui/button";
 import { CheckboxField } from "../checkbox-field";
 import { FieldLabel } from "@renderer/components/ui/field";
 import { ProfileInput, ProfileTextarea } from "./profile-form-primitives";
-import { formatDuration } from "@renderer/features/job-finder/lib/job-finder-utils";
-import type { SourceDebugRunRecord } from "@nestor/contracts";
 import type {
   LearnedInstructionIntelligenceSummary,
   LearnedInstructionField,
@@ -19,18 +16,13 @@ interface DiscoveryTargetFormFieldsProps {
   instructionStatusSummary: string;
   instructionsId: string;
   labelId: string;
-  latestDebugRun: SourceDebugRunRecord | null;
-  latestDebugRunLabel: string | null;
   onCustomInstructionsChange: ChangeEventHandler<HTMLTextAreaElement>;
   onLabelChange: ChangeEventHandler<HTMLInputElement>;
-  onReviewLatestRun: () => void;
   onStartingUrlChange: ChangeEventHandler<HTMLInputElement>;
   startingUrl: string;
   startingUrlId: string;
   targetEnabled: boolean;
   onToggleEnabled: (checked: boolean) => void;
-  isSourceDebugPending: boolean;
-  reviewCheckAriaLabel: string;
 }
 
 export function DiscoveryTargetFormFields(
@@ -41,26 +33,15 @@ export function DiscoveryTargetFormFields(
     labelValue,
     instructionStatusSummary,
     instructionsId,
-    isSourceDebugPending,
     labelId,
-    latestDebugRun,
-    latestDebugRunLabel,
     onCustomInstructionsChange,
     onLabelChange,
-    onReviewLatestRun,
     onStartingUrlChange,
     onToggleEnabled,
-    reviewCheckAriaLabel,
     startingUrl,
     startingUrlId,
     targetEnabled,
   } = props;
-  const trimmedLatestDebugRunLabel = latestDebugRunLabel?.trim() || null;
-  const latestDebugRunSummary = latestDebugRun
-    ? latestDebugRun.manualPrerequisiteSummary?.trim() ||
-      latestDebugRun.finalSummary?.trim() ||
-      null
-    : null;
 
   return (
     <>
@@ -113,47 +94,6 @@ export function DiscoveryTargetFormFields(
             <strong>{instructionStatusSummary}</strong>
           </p>
         </div>
-        {latestDebugRun ? (
-          <div className="surface-card-tint grid h-full min-w-0 content-start gap-1 rounded-(--radius-field) border border-(--surface-panel-border) p-3 md:col-span-2">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <p className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
-                Last source check
-              </p>
-              <Button
-                aria-label={reviewCheckAriaLabel}
-                pending={isSourceDebugPending}
-                onClick={onReviewLatestRun}
-                type="button"
-                variant="ghost"
-              >
-                Review check
-              </Button>
-            </div>
-            <div aria-live="polite" className="grid gap-1" role="status">
-              {trimmedLatestDebugRunLabel ? (
-                <p className="text-(length:--text-field) leading-6 text-foreground">
-                  {trimmedLatestDebugRunLabel}
-                </p>
-              ) : null}
-              {latestDebugRunSummary ? (
-                <p className="text-(length:--text-description) leading-6 text-foreground-soft">
-                  {latestDebugRunSummary}
-                </p>
-              ) : null}
-              {latestDebugRun.timing ? (
-                <p className="text-(length:--text-small) leading-6 text-foreground-muted">
-                  {`Duration: ${formatDuration(latestDebugRun.timing.totalDurationMs)}`}
-                  {latestDebugRun.timing.longestGapMs > 10000
-                    ? ` · Longest quiet gap: ${formatDuration(latestDebugRun.timing.longestGapMs)}`
-                    : ""}
-                  {latestDebugRun.timing.finalReviewMs != null
-                    ? ` · AI review: ${formatDuration(latestDebugRun.timing.finalReviewMs)}`
-                    : ""}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
       </div>
     </>
   );
@@ -167,7 +107,6 @@ interface DiscoveryTargetInstructionsProps {
   editingInstructionValue: string;
   intelligenceSummaries: readonly LearnedInstructionIntelligenceSummary[];
   instructionArtifact: Parameters<typeof describeLearnedInstructionUsage>[0];
-  latestDebugRun: Parameters<typeof describeLearnedInstructionUsage>[1];
   isEditingInstructionPending: boolean;
   isInstructionEditPending: (
     section: LearnedInstructionSection,
@@ -203,7 +142,6 @@ export function DiscoveryTargetInstructions(
       intelligenceSummaries={props.intelligenceSummaries}
       instructionArtifactDescription={describeLearnedInstructionUsage(
         props.instructionArtifact,
-        props.latestDebugRun,
       )}
       isEditingInstructionPending={props.isEditingInstructionPending}
       isInstructionEditPending={props.isInstructionEditPending}

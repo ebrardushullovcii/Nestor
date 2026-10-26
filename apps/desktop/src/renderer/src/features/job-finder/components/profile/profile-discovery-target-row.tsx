@@ -2,15 +2,12 @@ import { useMemo, useState } from "react";
 import type {
   EditableSourceInstructionArtifact,
   JobSite,
-  SourceDebugRunDetails,
-  SourceDebugRunRecord,
   SourceInstructionArtifact,
   UpdateJobSiteInput,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { openUrlInJobFinderBrowser } from "../open-outside-links";
-import { ProfileSourceDebugReviewModal } from "./profile-source-debug-review-modal";
 import {
   DiscoveryTargetFormFields,
   DiscoveryTargetInstructions,
@@ -23,20 +20,15 @@ import {
   type LearnedInstructionField,
   type LearnedInstructionSection,
 } from "./profile-source-debug-instruction-utils";
-import { useProfileSourceDebugReview } from "./use-profile-source-debug-review";
 
 export interface SiteDebugActions {
   isSourceDebugPending: (id: string) => boolean;
   isSourceInstructionPending: (id: string) => boolean;
-  isSourceInstructionVerifyPending: (id: string) => boolean;
-  onGetSourceDebugRunDetails: (id: string) => Promise<SourceDebugRunDetails>;
   onRunSourceDebug: (id: string) => void;
   onSaveSourceInstructionArtifact: (
     id: string,
     artifact: EditableSourceInstructionArtifact,
   ) => void;
-  onVerifySourceInstructions: (id: string, instructionId: string) => void;
-  recentSourceDebugRuns: readonly SourceDebugRunRecord[];
 }
 
 export function ProfileDiscoveryTargetRow(
@@ -90,27 +82,6 @@ export function ProfileDiscoveryTargetRow(
       buildLearnedInstructionIntelligenceSummaries(props.instructionArtifact),
     [props.instructionArtifact],
   );
-  const {
-    latestDebugRun,
-    reviewDetails,
-    reviewError,
-    reviewLoading,
-    reviewOpen,
-    selectedRunId,
-    targetRuns,
-    handleCloseReview,
-    handleLoadRun,
-    handleReviewLatestRun,
-    handleRerun,
-    handleVerify,
-  } = useProfileSourceDebugReview({
-    getRunDetails: props.onGetSourceDebugRunDetails,
-    onRunSourceDebug: props.onRunSourceDebug,
-    onVerifySourceInstructions: props.onVerifySourceInstructions,
-    recentSourceDebugRuns: props.recentSourceDebugRuns,
-    targetId,
-    targetLastDebugRunId: site.lastDebugRunId,
-  });
   const [editingInstruction, setEditingInstruction] = useState<{
     field: LearnedInstructionField;
     normalizedKey: string;
@@ -283,8 +254,6 @@ export function ProfileDiscoveryTargetRow(
             }
             instructionsId={`site-${site.id}-notes`}
             labelId={`site-${site.id}-label`}
-            latestDebugRun={latestDebugRun}
-            latestDebugRunLabel={latestDebugRun?.state ?? null}
             onCustomInstructionsChange={(event) =>
               setDraft((current) => ({
                 ...current,
@@ -294,7 +263,6 @@ export function ProfileDiscoveryTargetRow(
             onLabelChange={(event) =>
               setDraft((current) => ({ ...current, label: event.target.value }))
             }
-            onReviewLatestRun={handleReviewLatestRun}
             onStartingUrlChange={(event) =>
               setDraft((current) => ({ ...current, url: event.target.value }))
             }
@@ -304,8 +272,6 @@ export function ProfileDiscoveryTargetRow(
             onToggleEnabled={(enabled) => {
               void update({ enabled }).catch(() => undefined);
             }}
-            isSourceDebugPending={isTargetSourceDebugPending}
-            reviewCheckAriaLabel={`Review check for ${site.label}`}
           />
         </div>
         <DiscoveryTargetInstructions
@@ -333,7 +299,6 @@ export function ProfileDiscoveryTargetRow(
           }
           isInstructionSavePending={isInstructionSavePending}
           instructionArtifact={props.instructionArtifact}
-          latestDebugRun={latestDebugRun}
           onBeginEditingInstruction={beginEditingInstruction}
           onCancelEditingInstruction={cancelEditingInstruction}
           onChangeEditingInstructionValue={setEditingInstructionValue}
@@ -343,21 +308,6 @@ export function ProfileDiscoveryTargetRow(
           targetId={targetId}
         />
       </div>
-      <ProfileSourceDebugReviewModal
-        details={reviewDetails}
-        errorMessage={reviewError}
-        isSourceDebugPending={isTargetSourceDebugPending}
-        isVerifyPending={props.isSourceInstructionVerifyPending}
-        loading={reviewLoading}
-        onClose={handleCloseReview}
-        onLoadRun={handleLoadRun}
-        onRerun={handleRerun}
-        onVerify={handleVerify}
-        open={reviewOpen}
-        recentRuns={targetRuns}
-        selectedRunId={selectedRunId}
-        targetLabel={site.label}
-      />
     </section>
   );
 }

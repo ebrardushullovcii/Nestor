@@ -227,7 +227,6 @@ const RULES: readonly Rule[] = [
  */
 export const PENDING_ADOPTION = {
   rawThrownMessage: [
-    "features/job-finder/components/profile/use-profile-source-debug-review.ts",
     "features/job-finder/hooks/use-job-finder-workspace.ts",
     "pages/use-job-finder-page-controller-actions.ts",
   ],

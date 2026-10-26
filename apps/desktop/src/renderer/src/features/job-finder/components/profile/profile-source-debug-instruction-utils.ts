@@ -1,6 +1,5 @@
 import type {
   EditableSourceInstructionArtifact,
-  SourceDebugRunRecord,
   SourceInstructionArtifact,
 } from "@nestor/contracts";
 export { buildLearnedInstructionIntelligenceSummaries } from "../../lib/source-intelligence-utils";
@@ -181,15 +180,9 @@ export function isRenderableLearnedInstructionLine(line: string): boolean {
 
 export function describeLearnedInstructionUsage(
   artifact: SourceInstructionArtifact | null,
-  latestRun?: SourceDebugRunRecord | null,
 ): string {
   if (!artifact) {
     return "Saved from the latest source check.";
-  }
-
-  if (latestRun?.state === "failed" && artifact.basedOnRunId !== latestRun.id) {
-    const checkedAt = latestRun.completedAt ?? latestRun.updatedAt;
-    return `This retained guidance comes from an earlier successful check. The latest check failed${checkedAt ? ` on ${new Date(checkedAt).toLocaleString()}` : ""} and did not re-verify or replace it.`;
   }
 
   if (artifact.status === "validated") {
