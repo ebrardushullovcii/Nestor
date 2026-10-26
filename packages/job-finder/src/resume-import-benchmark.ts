@@ -1120,8 +1120,6 @@ function createBenchmarkContext(input: {
     activeSourceDebugExecutionIdRef: { current: null },
     activeSourceDebugAbortControllerRef: { current: null },
     activeSourceDebugPromiseRef: { current: null },
-    activeApplyRunAbortControllers: new Map<string, AbortController>(),
-    activeApplyRunPromises: new Map<string, Promise<void>>(),
     applyRunTransitionTails: new Map<string, Promise<void>>(),
     markApplicationPreparationStarted: () =>
       Promise.reject(
@@ -1147,7 +1145,6 @@ function createBenchmarkContext(input: {
         ),
       ),
     getActiveCampaignId: () => Promise.resolve(null),
-    resumeApplicationUserAction: () => Promise.resolve(undefined),
     runSourceDebugWorkflow: () =>
       Promise.reject(
         new Error("Source debug is not available in the benchmark harness."),

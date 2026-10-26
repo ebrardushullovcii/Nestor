@@ -86,7 +86,6 @@ import {
   hasResumeAffectingProfileChange,
   hasResumeAffectingSettingsChange,
 } from "./resume-workspace-staleness";
-import { selectLatestApplyRunId } from "./workspace-apply-run-support";
 import {
   groupApplyJobResultsByRunId,
   isInterruptedApplyJobState,
@@ -257,10 +256,6 @@ const BorrowedSnapshotRestSchema = JobFinderWorkspaceSnapshotSchema.omit({
   resumeDrafts: true,
   resumeExportArtifacts: true,
   resumeResearchArtifacts: true,
-  applyRuns: true,
-  applyJobResults: true,
-  applicationRecords: true,
-  applicationAttempts: true,
   sourceInstructionArtifacts: true,
   profileCopilotMessages: true,
   profileRevisions: true,
@@ -855,13 +850,6 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   async function recoverInterruptedApplyRunsOnLoad(): Promise<void> {
-    if (
-      ctx.activeApplyRunAbortControllers.size > 0 ||
-      ctx.activeApplyRunPromises.size > 0
-    ) {
-      return;
-    }
-
     if (interruptedApplyRecoveryPromise) {
       await interruptedApplyRecoveryPromise;
       return;
@@ -880,13 +868,6 @@ export function createWorkspaceSnapshotProfileMethods(
             : Promise.resolve([]),
           ctx.repository.getActivityControl(),
         ]);
-
-      if (
-        ctx.activeApplyRunAbortControllers.size > 0 ||
-        ctx.activeApplyRunPromises.size > 0
-      ) {
-        return;
-      }
 
       const resultsByRunId = groupApplyJobResultsByRunId(allResults);
       const runById = new Map(runs.map((run) => [run.id, run]));
@@ -1188,16 +1169,9 @@ export function createWorkspaceSnapshotProfileMethods(
             result.id,
           );
           if (hasBinding) continue;
-          // Binding checks are asynchronous. A continuation or send may have
-          // claimed this exact run while the runtime answered, so recheck the
-          // in-memory owners and the persisted request immediately before any
-          // terminal write.
-          if (
-            ctx.activeApplyRunAbortControllers.has(result.runId) ||
-            ctx.activeApplyRunPromises.has(result.runId)
-          ) {
-            continue;
-          }
+          // Binding checks are asynchronous. A step may have begun verifying
+          // while the runtime answered, so recheck the persisted request
+          // immediately before any terminal write.
           const beganResuming = (
             await ctx.repository.listUserActionRequests({
               states: ["verifying"],
@@ -1855,8 +1829,6 @@ export function createWorkspaceSnapshotProfileMethods(
         setupContext.latestResumeImportReviewCandidateSummaries,
       profileCopilotMessages,
       profileRevisions,
-      selectedApplyRunId: selectLatestApplyRunId(applyRuns),
-      selectedApplicationRecordId: orderedApplicationRecords[0]?.id ?? null,
       settings,
       userActionRequests: campaignUserActionRequests,
       userActionEvents: campaignUserActionEvents,
@@ -1888,12 +1860,6 @@ export function createWorkspaceSnapshotProfileMethods(
       resumeDrafts: draftSummaries(normalizedResumeDrafts),
       resumeExportArtifacts: exportSummaries(resumeExportArtifacts),
       resumeResearchArtifacts: researchSummaries(resumeResearchArtifacts),
-      applyRuns: applyRuns as JobFinderWorkspaceSnapshot["applyRuns"],
-      applyJobResults:
-        applyJobResults as JobFinderWorkspaceSnapshot["applyJobResults"],
-      applicationRecords: orderedApplicationRecords,
-      applicationAttempts:
-        applicationAttempts as JobFinderWorkspaceSnapshot["applicationAttempts"],
       sourceInstructionArtifacts:
         sourceInstructionArtifacts as JobFinderWorkspaceSnapshot["sourceInstructionArtifacts"],
       profileCopilotMessages:
@@ -2105,8 +2071,6 @@ export function createWorkspaceSnapshotProfileMethods(
         setupContext.latestResumeImportReviewCandidateSummaries,
       profileCopilotMessages: [],
       profileRevisions: [],
-      selectedApplyRunId: null,
-      selectedApplicationRecordId: null,
       settings,
       campaigns: bootstrapCampaignState.campaigns,
       activeCampaignId: bootstrapCampaignState.activeCampaignId,

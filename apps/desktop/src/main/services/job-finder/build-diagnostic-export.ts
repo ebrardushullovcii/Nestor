@@ -7,14 +7,18 @@ import {
 
 export function buildJobFinderDiagnosticExport(input: {
   workspace: JobFinderWorkspaceSnapshot;
+  /** The job store's applications, counted by state. */
+  applications: Partial<Record<string, number>>;
   performance: JobFinderPerformanceSnapshot;
   build: JobFinderDiagnosticExport["build"];
   generatedAt?: string;
 }): JobFinderDiagnosticExport {
-  const latestAttempt = input.workspace.applicationAttempts.at(0) ?? null;
-  const latestApplyDurationMs =
-    latestAttempt?.executionTimings.find((entry) => entry.stage === "total")
-      ?.durationMs ?? null;
+  const applicationTotal = Object.values(input.applications).reduce<number>(
+    (sum, count) => sum + (count ?? 0),
+    0,
+  );
+  // Preparation timings live on each application's own work now.
+  const latestApplyDurationMs = null;
   const warnings: JobFinderDiagnosticExport["warnings"] =
     input.performance.budgetEvaluations.flatMap((entry, index) =>
       entry.status === "pass"
@@ -53,7 +57,7 @@ export function buildJobFinderDiagnosticExport(input: {
         configuredSources: input.workspace.siteCounts.all,
         visibleJobs: input.workspace.discoveryJobs.length,
         shortlistedJobs: input.workspace.reviewQueue.length,
-        applications: input.workspace.applicationRecords.length,
+        applications: applicationTotal,
         unresolvedActions: input.workspace.userActionRequests.filter(
           (request) =>
             request.state !== "resolved" &&
@@ -103,14 +107,14 @@ export function buildJobFinderDiagnosticExport(input: {
       originalResumeReady:
         input.workspace.latestResumeImportRun?.status === "review_ready",
       tailoredResumeCount: input.workspace.resumeExportArtifacts.length,
-      prepareOnlyApplicationCount: input.workspace.applyJobResults.length,
+      prepareOnlyApplicationCount: input.applications.ready ?? 0,
       finalSubmissionAuthorized: false,
       accountCreationAuthorized: false,
     },
     evidence: {
       sourceDebugRuns: input.workspace.recentSourceDebugRuns.length,
       resumeImports: input.workspace.latestResumeImportRun ? 1 : 0,
-      applicationAttempts: input.workspace.applicationAttempts.length,
+      applications: applicationTotal,
       userActionEvents: input.workspace.userActionEvents.length,
     },
     redactionManifest: {

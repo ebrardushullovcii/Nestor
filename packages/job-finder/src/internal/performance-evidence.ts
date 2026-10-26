@@ -49,7 +49,7 @@ export type JobFinderRuntimePerformanceObservation = {
 
 type PerformanceEvidenceWorkspace = Pick<
   JobFinderWorkspaceSnapshot,
-  "applicationAttempts" | "latestResumeImportRun"
+  "latestResumeImportRun"
 >;
 
 function buildBudgetMetadata(
@@ -182,46 +182,6 @@ function buildResumeImportEvidence(
   });
 }
 
-function buildApplicationPreparationEvidence(
-  workspace: PerformanceEvidenceWorkspace,
-  budgetEvaluations: readonly PerformanceBudgetEvaluation[],
-): JobFinderPerformanceEvidence {
-  const attempt = [...workspace.applicationAttempts]
-    .filter(
-      (candidate) =>
-        candidate.executionTimings.length > 0 || candidate.agentTiming,
-    )
-    .sort(
-      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-    )[0];
-  if (!attempt) {
-    return unavailableEvidence("application_preparation");
-  }
-
-  const total = attempt.executionTimings.find(
-    (timing) => timing.stage === "total",
-  );
-  const stageDurations = attempt.executionTimings.flatMap((timing) =>
-    timing.stage === "total"
-      ? []
-      : [
-          {
-            id: `application_preparation.${timing.stage}` as const,
-            durationMs: timing.durationMs,
-          },
-        ],
-  );
-
-  return measuredEvidence({
-    area: "application_preparation",
-    budgetEvaluations,
-    durationMs: total?.durationMs ?? attempt.agentTiming?.totalMs ?? null,
-    ...(attempt.agentTiming ? { agentTiming: attempt.agentTiming } : {}),
-    method: "application_attempt",
-    recordedAt: total?.completedAt ?? attempt.updatedAt,
-    stageDurations,
-  });
-}
 
 function buildRuntimeEvidence(
   observation: JobFinderRuntimePerformanceObservation,
@@ -259,10 +219,9 @@ export function buildJobFinderPerformanceSnapshot(input: {
     ],
     ["resume_generation", unavailableEvidence("resume_generation")],
     ["discovery", unavailableEvidence("discovery")],
-    [
-      "application_preparation",
-      buildApplicationPreparationEvidence(input.workspace, budgetEvaluations),
-    ],
+    // Applications are prepared on the job store; the old attempt timings
+    // are gone, like the old search runs above.
+    ["application_preparation", unavailableEvidence("application_preparation")],
     ["persistence", unavailableEvidence("persistence")],
     ["ipc", unavailableEvidence("ipc")],
     ["renderer_commit", unavailableEvidence("renderer_commit")],

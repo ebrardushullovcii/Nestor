@@ -1,5 +1,4 @@
 import {
-  ApplicationAttemptSchema,
   ResumeImportRunSchema,
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -9,14 +8,13 @@ import { buildJobFinderPerformanceSnapshot } from "./performance-evidence";
 
 type EvidenceWorkspace = Pick<
   JobFinderWorkspaceSnapshot,
-  "applicationAttempts" | "latestResumeImportRun"
+  "latestResumeImportRun"
 >;
 
 const startedAt = "2026-08-09T10:00:00.000Z";
 const completedAt = "2026-08-09T10:00:08.000Z";
 
 function createWorkspace(): EvidenceWorkspace {
-
   return {
     latestResumeImportRun: ResumeImportRunSchema.parse({
       id: "resume-import-performance",
@@ -40,40 +38,6 @@ function createWorkspace(): EvidenceWorkspace {
         ],
       },
     }),
-    applicationAttempts: [
-      ApplicationAttemptSchema.parse({
-        id: "attempt-performance",
-        jobId: "job-1",
-        state: "paused",
-        summary: "Prepared without final submission.",
-        detail: "Stopped at the final safe checkpoint.",
-        startedAt,
-        updatedAt: completedAt,
-        completedAt,
-        outcome: "approved",
-        nextActionLabel: null,
-        executionTimings: [
-          {
-            stage: "browser_preparation",
-            startedAt,
-            completedAt: "2026-08-09T10:00:02.000Z",
-            durationMs: 2_000,
-          },
-          {
-            stage: "form_preparation",
-            startedAt: "2026-08-09T10:00:02.000Z",
-            completedAt: "2026-08-09T10:00:07.000Z",
-            durationMs: 5_000,
-          },
-          {
-            stage: "total",
-            startedAt,
-            completedAt,
-            durationMs: 8_000,
-          },
-        ],
-      }),
-    ],
   };
 }
 
@@ -106,13 +70,13 @@ describe("buildJobFinderPerformanceSnapshot", () => {
       durationMs: 0,
       budgetStatus: "not_evaluated",
     });
-    // Searches run on the job store; the old run timings are gone.
+    // Searches and applications run on the job store; the old run timings
+    // are gone.
     expect(byArea.get("discovery")).toMatchObject({
       measurementStatus: "unavailable",
     });
     expect(byArea.get("application_preparation")).toMatchObject({
-      measurementStatus: "available",
-      durationMs: 8_000,
+      measurementStatus: "unavailable",
     });
     expect(byArea.get("persistence")).toMatchObject({
       measurementStatus: "available",
@@ -126,46 +90,6 @@ describe("buildJobFinderPerformanceSnapshot", () => {
     });
     expect(byArea.get("ipc")?.durationMs).toBeNull();
     expect(byArea.get("renderer_commit")?.durationMs).toBeNull();
-  });
-
-  it("marks stage-only telemetry partial instead of inventing a total", () => {
-    const workspace = createWorkspace();
-    workspace.latestResumeImportRun = ResumeImportRunSchema.parse({
-      ...workspace.latestResumeImportRun,
-      timing: {
-        ...workspace.latestResumeImportRun?.timing,
-        totalMs: null,
-      },
-    });
-    workspace.applicationAttempts = [
-      ApplicationAttemptSchema.parse({
-        ...workspace.applicationAttempts[0],
-        executionTimings:
-          workspace.applicationAttempts[0]?.executionTimings.filter(
-            (timing) => timing.stage !== "total",
-          ),
-      }),
-    ];
-
-    const snapshot = buildJobFinderPerformanceSnapshot({
-      workspace,
-      latestSourceDebugRun: null,
-      generatedAt: completedAt,
-    });
-    const byArea = new Map(
-      snapshot.evidence.map((entry) => [entry.area, entry]),
-    );
-
-    expect(byArea.get("resume_import")).toMatchObject({
-      measurementStatus: "partial",
-      durationMs: null,
-      unavailableReason: "total_not_recorded",
-    });
-    expect(byArea.get("application_preparation")).toMatchObject({
-      measurementStatus: "partial",
-      durationMs: null,
-      unavailableReason: "total_not_recorded",
-    });
   });
 
   it("aggregates generation, IPC, and renderer observations into the same ordered snapshot", () => {
@@ -188,9 +112,7 @@ describe("buildJobFinderPerformanceSnapshot", () => {
           area: "ipc",
           durationMs: 14,
           recordedAt: completedAt,
-          stageDurations: [
-            { id: "ipc.workspace_round_trip", durationMs: 14 },
-          ],
+          stageDurations: [{ id: "ipc.workspace_round_trip", durationMs: 14 }],
         },
         {
           area: "renderer_commit",
@@ -230,54 +152,4 @@ describe("buildJobFinderPerformanceSnapshot", () => {
       durationMs: 7,
     });
   });
-
-  it("returns an explicit unavailable entry for every area when no timing exists", () => {
-    const snapshot = buildJobFinderPerformanceSnapshot({
-      workspace: {
-        latestResumeImportRun: null,
-        applicationAttempts: [],
-      },
-      latestSourceDebugRun: null,
-      generatedAt: completedAt,
-    });
-
-    expect(snapshot.evidence).toHaveLength(7);
-    expect(
-      snapshot.evidence.every(
-        (entry) =>
-          entry.measurementStatus === "unavailable" &&
-          entry.durationMs === null &&
-          entry.sampleCount === 0,
-      ),
-    ).toBe(true);
-  });
-});
-
-it("passes persisted form-agent timings to Settings beside the existing workflow stages", () => {
-  const workspace = createWorkspace();
-  const agentTiming = {
-    totalMs: 4200,
-    modelMs: 3000,
-    modelTurns: 3,
-    auxiliaryModelMs: 400,
-    auxiliaryModelCalls: 2,
-    toolMs: 1000,
-    pageReadMs: 300,
-    pageReads: 12,
-    writeMs: 100,
-    uploadMs: 50,
-    longestSteps: [{ toolName: "fill_fields", durationMs: 600 }],
-    requests: [{ turn: 1, historyChars: 15000, observationChars: 2000 }],
-  };
-  workspace.applicationAttempts[0]!.agentTiming = agentTiming;
-  const snapshot = buildJobFinderPerformanceSnapshot({
-    workspace,
-    latestSourceDebugRun: null,
-    generatedAt: completedAt,
-  });
-  const evidence = snapshot.evidence.find(
-    (entry) => entry.area === "application_preparation",
-  );
-  expect(evidence).toMatchObject({ durationMs: 8000, agentTiming });
-  expect(evidence?.stageDurations).toHaveLength(2);
 });

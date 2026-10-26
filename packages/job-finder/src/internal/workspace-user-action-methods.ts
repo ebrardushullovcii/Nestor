@@ -36,7 +36,6 @@ import {
 import type { JobFinderRepository } from "@nestor/db";
 
 import type {
-  TaskLocalApplicationCredentials,
   WorkspaceServiceContext,
 } from "./workspace-service-context";
 import type { JobFinderWorkspaceService } from "./workspace-service-contracts";
@@ -137,24 +136,6 @@ async function runBounded<T>(
   if (firstError !== null && firstError !== undefined) {
     throw new Error("User-action resumption failed with an unknown error.");
   }
-}
-
-function isApplicationResumptionAction(request: UserActionRequest): boolean {
-  if (request.scope.type !== "application") return false;
-
-  return (
-    ((request.state === "verifying" || request.state === "resolved") &&
-      isApplicationAuthenticationUserActionKind(request.kind) &&
-      request.verification.type === "source_access") ||
-    (isApplicationPrepareOnlyUserAction(request) &&
-      (request.state === "verifying" || request.state === "resolved"))
-  );
-}
-
-function getApplicationResumptionFlightKey(request: UserActionRequest): string {
-  const targetRevision =
-    request.state === "verifying" ? request.revision + 1 : request.revision;
-  return `${request.id}:${targetRevision}`;
 }
 
 /** Latest persisted answer record for a question, with a deterministic tie-break. */
@@ -818,7 +799,6 @@ export function createWorkspaceUserActionMethods(
   const requestTransitionTails = new Map<string, Promise<void>>();
   const manualAnswersBeingStored = new Set<string>();
   const verificationFlights = new Map<string, Promise<void>>();
-  const applicationResumptionFlights = new Map<string, Promise<void>>();
 
   async function closeTerminalParkedDiscoverySession(
     request: UserActionRequest,
@@ -855,41 +835,6 @@ export function createWorkspaceUserActionMethods(
     await ctx.closeRunBrowserSession(request.scope.source).catch(() => {});
   }
 
-  function resumeApplicationSingleFlight(
-    request: UserActionRequest,
-    taskLocalCredentials?: TaskLocalApplicationCredentials,
-  ): Promise<void> {
-    if (!isApplicationResumptionAction(request)) {
-      return Promise.resolve();
-    }
-    // Its answer is still being stored; the answering command resumes it.
-    if (manualAnswersBeingStored.has(request.id)) {
-      return Promise.resolve();
-    }
-
-    const key = getApplicationResumptionFlightKey(request);
-    const existing = applicationResumptionFlights.get(key);
-    if (existing) return existing;
-
-    const flight = (async () => {
-      // The page is locked again by the resumer itself, only once it knows
-      // it will work on it. Locking here, for every resolved step every
-      // snapshot re-checks, took a filled-in form back from the person the
-      // moment they opened it to send it themselves.
-      // Fail-closed activity gate immediately before any application flow
-      // work: a paused or unreadable workspace must not launch flows. The
-      // skipped action keeps its persisted state and stays resumable.
-      if (await isWorkspaceActivityPaused(ctx.repository)) return;
-      await ctx.resumeApplicationUserAction(request, taskLocalCredentials);
-    })().finally(() => {
-      if (applicationResumptionFlights.get(key) === flight) {
-        applicationResumptionFlights.delete(key);
-      }
-    });
-    applicationResumptionFlights.set(key, flight);
-    return flight;
-  }
-
   function verifySingleFlight(request: UserActionRequest): Promise<void> {
     const key = getUserActionVerificationFlightKey(request);
     const existing = verificationFlights.get(key);
@@ -906,14 +851,11 @@ export function createWorkspaceUserActionMethods(
       // verification drives the browser, so it must not start while global
       // activity is paused or unreadable.
       if (await isWorkspaceActivityPaused(ctx.repository)) return;
-      const resolvedRequest = await verifySourceAccessUserAction({
+      await verifySourceAccessUserAction({
         browserRuntime: ctx.browserRuntime,
         repository: ctx.repository,
         request,
       });
-      if (resolvedRequest) {
-        await resumeApplicationSingleFlight(resolvedRequest);
-      }
     })().finally(() => {
       if (verificationFlights.get(key) === flight) {
         verificationFlights.delete(key);
@@ -1010,39 +952,13 @@ export function createWorkspaceUserActionMethods(
     await runBounded(
       verifyingRequests,
       USER_ACTION_RESUMPTION_CONCURRENCY,
-      (request) => {
-        // An active application continuation owns the retained page and its
-        // request revision. Join it before considering a source-access probe.
-        // Unclaimed sign-in confirmations still need that probe, including
-        // confirmations deferred by Pause or an app restart.
-        if (isApplicationResumptionAction(request)) {
-          const activeFlight = applicationResumptionFlights.get(
-            getApplicationResumptionFlightKey(request),
-          );
-          if (activeFlight) return activeFlight;
-        }
-        return isSourceAccessUserAction(request)
+      // Sign-in confirmations, including ones deferred by Pause or a
+      // restart, are probed again. Nothing resumes an old application run:
+      // applications run on the job store.
+      (request) =>
+        isSourceAccessUserAction(request)
           ? verifySingleFlight(request)
-          : resumeApplicationSingleFlight(request);
-      },
-    );
-
-    // Recheck between phases so a pause that lands mid-run cannot start the
-    // next phase's application flows.
-    if (await isWorkspaceActivityPaused(ctx.repository)) return;
-
-    const resolvedApplicationRequests =
-      await ctx.repository.listUserActionRequests({
-        states: ["resolved"],
-        scopeType: "application",
-      });
-    const resumableResolvedRequests = resolvedApplicationRequests.filter(
-      isApplicationResumptionAction,
-    );
-    await runBounded(
-      resumableResolvedRequests,
-      USER_ACTION_RESUMPTION_CONCURRENCY,
-      (request) => resumeApplicationSingleFlight(request),
+          : Promise.resolve(),
     );
   }
 
@@ -1078,11 +994,10 @@ export function createWorkspaceUserActionMethods(
               event.resultingRevision === request.revision,
           )
         ) {
-          await resumeApplicationSingleFlight(request, {
-            reference: command.commandId,
-            identifier: command.identifier,
-            password: command.password,
-          });
+          // The old engine took sign-in credentials here to continue its
+          // run; with no run to continue, the credentials are dropped.
+          command.identifier = "";
+          command.password = "";
         }
       }
       if (
@@ -1120,8 +1035,6 @@ export function createWorkspaceUserActionMethods(
           isSourceAccessUserAction(request)
         ) {
           await verifySingleFlight(request);
-        } else if (isApplicationResumptionAction(request)) {
-          await resumeApplicationSingleFlight(request);
         }
       }
       return ctx.getWorkspaceSnapshot();
@@ -1309,8 +1222,6 @@ export function createWorkspaceUserActionMethods(
           isSourceAccessUserAction(current)
         ) {
           await verifySingleFlight(current);
-        } else if (isApplicationResumptionAction(current)) {
-          await resumeApplicationSingleFlight(current);
         }
       }
       return ctx.getWorkspaceSnapshot();
@@ -1379,26 +1290,13 @@ export function createWorkspaceUserActionMethods(
         isSourceAccessUserAction(commandCommit.request)
       ) {
         await verifySingleFlight(commandCommit.request);
-      } else if (isApplicationResumptionAction(commandCommit.request)) {
-        await resumeApplicationSingleFlight(commandCommit.request);
       }
     }
 
     if (command.action === "submit_task_local_credentials") {
-      const taskLocalCredentials = {
-        reference: command.commandId,
-        identifier: command.identifier,
-        password: command.password,
-      };
-      // The resumer owns the only copy after this point and clears it as soon
-      // as the exact sign-in callback returns, before form preparation keeps
-      // working. The parsed command must not retain another copy meanwhile.
+      // No old application run takes these any more; keep no copy.
       command.identifier = "";
       command.password = "";
-      await resumeApplicationSingleFlight(
-        commandCommit.request,
-        taskLocalCredentials,
-      );
     }
 
     // R4: cancelling a step said it was closed while the application it

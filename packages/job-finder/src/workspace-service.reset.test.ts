@@ -1,8 +1,4 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
-import {
-  ApplicationCrmSettingsSchema,
-  ApplicationRecordSchema,
-} from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
 
@@ -26,78 +22,6 @@ function createDeferred<T>() {
 }
 
 describe("workspace reset safety", () => {
-  test("re-evaluates no-response automation for the reset seed", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
-    const createWorkspaceService = () =>
-      createJobFinderWorkspaceService({
-        repository,
-        browserRuntime: createBrowserRuntime(),
-        aiClient: createAiClient(),
-        documentManager: createDocumentManager(),
-      });
-    const workspaceService = createWorkspaceService();
-
-    await workspaceService.getWorkspaceSnapshot();
-
-    const resetSeed = createSeed();
-    resetSeed.settings = {
-      ...resetSeed.settings,
-      applicationCrm: ApplicationCrmSettingsSchema.parse({
-        noResponseAutomation: { enabled: true, afterDays: 14 },
-      }),
-    };
-    resetSeed.applicationRecords = [
-      ApplicationRecordSchema.parse({
-        id: "application_reset_old",
-        jobId: "job_reset_old",
-        title: "Senior Product Designer",
-        company: "Reset Systems",
-        status: "submitted",
-        lastActionLabel: "Application submitted",
-        nextActionLabel: "Awaiting employer response",
-        lastUpdatedAt: "2020-01-01T10:00:00.000Z",
-        crm: {
-          revision: 1,
-          stage: "applied",
-          stageChangedAt: "2020-01-01T10:00:00.000Z",
-          appliedAt: "2020-01-01T10:00:00.000Z",
-        },
-      }),
-    ];
-
-    const resetSnapshot = await workspaceService.resetWorkspace(resetSeed);
-    const resetRecord = resetSnapshot.applicationRecords.find(
-      (record) => record.id === "application_reset_old",
-    );
-
-    const restartedSnapshot =
-      await createWorkspaceService().getWorkspaceSnapshot();
-    const restartedRecord = restartedSnapshot.applicationRecords.find(
-      (record) => record.id === "application_reset_old",
-    );
-
-    expect(resetRecord).toBeDefined();
-    expect(restartedRecord).toBeDefined();
-    expect(resetRecord?.crm?.stage).toBe("no_response");
-    expect(restartedRecord).toEqual(resetRecord);
-    expect(resetRecord).toMatchObject({
-      lastActionLabel: "No response after 14 days",
-      nextActionLabel: "Follow up with the employer",
-      crm: {
-        revision: 2,
-        stage: "no_response",
-        events: [
-          {
-            kind: "automation",
-            title: "No response after 14 days",
-            fromStage: "applied",
-            toStage: "no_response",
-            source: "automation",
-          },
-        ],
-      },
-    });
-  });
 
   test("blocks reset during a profile proposal and prevents new work during reset", async () => {
     const seed = createSeed();

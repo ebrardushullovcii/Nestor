@@ -227,59 +227,6 @@ describe("application page ownership", () => {
   );
 });
 
-test.each(["blocked", "awaiting_review"])(
-  "restart retires a missing %s form and its stale question controls",
-  async (state) => {
-    const seed = seedPages([state]);
-    if (state === "blocked")
-      seed.applyJobResults[0]!.blockerReason = "required_human_input";
-    const request = UserActionRequestSchema.parse({
-      id: "missing_form_answer",
-      dedupeKey: "missing_form_answer",
-      revision: 1,
-      kind: "manual_answer",
-      state: "pending",
-      title: "Answer dates",
-      summary: "Answer dates",
-      instructions: ["Answer"],
-      createdAt: now,
-      updatedAt: now,
-      verification: {
-        type: "page_blocker_absent",
-        blockerFingerprint: "dates",
-      },
-      scope: {
-        type: "application",
-        source: "target_site",
-        runId: "run_a",
-        resultId: "result_0",
-        jobId: "job_ready",
-        applicationRecordId: "application_a",
-      },
-    });
-    seed.userActionRequests = [request];
-    expect(isUnsentPreparedApplication(seed.applyJobResults[0]!)).toBe(true);
-    const harness = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: {
-        ...createBrowserRuntime(),
-        hasApplicationPageBinding: () => Promise.resolve(false),
-      },
-    });
-    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
-    expect(
-      snapshot.applicationRecords.find(
-        (record) => record.id === "application_a",
-      ),
-    ).toMatchObject({
-      lastAttemptState: "failed",
-      nextActionLabel: "Prepare again",
-    });
-    expect(
-      (await harness.repository.getUserActionRequest(request.id))?.state,
-    ).toBe("cancelled");
-  },
-);
 
 test("releasing one skipped job keeps another job's filling page", async () => {
   const seed = seedPages(["skipped"]);

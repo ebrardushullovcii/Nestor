@@ -144,7 +144,7 @@ export const JobFinderDiagnosticExportSchema = z
       .object({
         sourceDebugRuns: CountSchema,
         resumeImports: CountSchema,
-        applicationAttempts: CountSchema,
+        applications: CountSchema,
         userActionEvents: CountSchema,
       })
       .strict(),

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 /**
  * Built-app check of the app-wide assistant sidebar (ADR 0037-0039).
@@ -133,6 +135,39 @@ export default async function assistantHarness(qa) {
       jobCompany: "Comet Teacup Labs",
     },
   );
+  // Apply works on the job store: the same replica job, with its Original
+  // resume approved, is what the assistant can apply to and send.
+  const jobStore = new DatabaseSync(
+    path.join(qa.userDataDir, "job-finder.sqlite"),
+  );
+  try {
+    const now = Date.now();
+    const job = jobStore
+      .prepare(
+        "INSERT INTO jobs(stage,stage_at,title,company,location,found_at,seen_at,source_label,url,apply_url,work_modes) VALUES('resume',?,?,?,'Remote',?,?,'Replica Greenhouse',?,?,1)",
+      )
+      .run(
+        now,
+        "Platform Engineer, Comet Systems",
+        "Comet Teacup Labs",
+        now,
+        now,
+        new URL("/greenhouse/jobs/3", qa.sites.url).href,
+        applicationUrl,
+      );
+    jobStore
+      .prepare(
+        "INSERT INTO job_details(job_id,description,facts_json) VALUES(?,?,?)",
+      )
+      .run(job.lastInsertRowid, "Synthetic replica listing.", "{}");
+    jobStore
+      .prepare(
+        "INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path) VALUES(?,'original','ready',?,?,NULL)",
+      )
+      .run(job.lastInsertRowid, now, now);
+  } finally {
+    jobStore.close();
+  }
   await qa.page.reload();
   await setSize(qa, 1440, 900);
   await nav(qa, "Home");
@@ -330,15 +365,52 @@ export default async function assistantHarness(qa) {
   let answered = 0;
   const started = Date.now();
   let submitted = null;
+  // Applications live on the job store: a row reaches "submitted" only
+  // after the site confirmed it.
+  const applications = () =>
+    qa.page.evaluate(async () => {
+      const { rows } = await window.nestor.jobFinder.listApplications({
+        limit: 50,
+      });
+      return Promise.all(
+        rows.map((row) =>
+          window.nestor.jobFinder.getApplicationDetails({ id: row.id }),
+        ),
+      );
+    });
   for (;;) {
-    const snapshot = await workspace(qa);
-    const application = snapshot.applicationRecords.find(
-      (entry) => entry.jobId === "job_ready",
-    );
-    const state = `${application?.status ?? ""} ${application?.lastAttemptState ?? ""}`;
-    if (/submitted/u.test(state)) {
-      submitted = snapshot;
+    const details = (await applications()).filter(Boolean);
+    const state = details.map((entry) => entry.application.state).join(" ");
+    if (details.some((entry) => entry.application.state === "submitted")) {
+      submitted = details;
       break;
+    }
+    // Apply may stop on form questions the synthetic profile cannot
+    // answer; answer them in Needs you as a person would, up to five times.
+    if (
+      details.some((entry) => entry.application.state === "needs_you") &&
+      answered < 5
+    ) {
+      const asked = await qa.page.evaluate(async () => {
+        const { rows } = await window.nestor.needsYou.run("list_needs_you", {});
+        for (const task of rows)
+          await window.nestor.needsYou.run("answer_need", {
+            id: task.id,
+            answer:
+              task.input === "boolean"
+                ? "Yes"
+                : task.input === "number"
+                  ? "1"
+                  : (task.options?.[0] ?? "Not applicable"),
+            remember: false,
+          });
+        return rows.map((task) => task.prompt);
+      });
+      if (asked.length) {
+        answered += 1;
+        record("answered Needs you", asked.join(" | ").slice(0, 160));
+        continue;
+      }
     }
     const view = await currentConversation(qa);
     const open = view.messages
@@ -373,18 +445,12 @@ export default async function assistantHarness(qa) {
     }
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
-  for (const entry of submitted.applicationRecords) {
-    if (!/submitted/u.test(`${entry.status} ${entry.lastAttemptState}`))
-      continue;
-    const target = submitted.discoveryJobs.find(
-      (item) => item.id === entry.jobId,
-    );
-    if (
-      !isReplicaUrl(target?.applicationUrl ?? null, qa.sites.url) &&
-      entry.jobId !== "job_ready"
-    ) {
+  for (const entry of submitted) {
+    if (entry.application.state !== "submitted") continue;
+    const page = entry.reviewCard?.pageUrl ?? null;
+    if (!isReplicaUrl(page, qa.sites.url)) {
       throw new Error(
-        `A submitted record targets a non-replica job: ${entry.jobId}`,
+        `A submitted application targets a non-replica page: ${page ?? "unknown"}`,
       );
     }
   }

@@ -426,11 +426,36 @@ describe("applications on the job store", () => {
     expect(applications.stop(second.id)).toBe(false);
     // Only the person's check moves an uncertain send, and only that one.
     expect(applications.resolveUncertainSend(first.id, receipt)).toBe(false);
+    // The outcome must name this row's own job, application and attempt.
+    expect(() =>
+      applications.resolveUncertainSend(second.id, {
+        ...receipt,
+        id: "resolution",
+        outcome: "not_submitted",
+      }),
+    ).toThrow("another application attempt");
+    // The same check, asked first, so nothing else records a resolution
+    // the row would refuse.
+    const own = {
+      jobId: String(second.jobId),
+      applicationRecordId: `application_${second.id}`,
+      runId: `application_run_${second.id}`,
+      resultId: `application_${second.id}_attempt_${second.attempt}`,
+    };
+    expect(applications.canResolveUncertainSend(second.id, receipt)).toBe(
+      false,
+    );
+    expect(applications.canResolveUncertainSend(second.id, own)).toBe(true);
+    expect(applications.canResolveUncertainSend(first.id, own)).toBe(false);
     expect(
       applications.resolveUncertainSend(second.id, {
         ...receipt,
         id: "resolution",
         outcome: "not_submitted",
+        jobId: String(second.jobId),
+        applicationRecordId: `application_${second.id}`,
+        runId: `application_run_${second.id}`,
+        resultId: `application_${second.id}_attempt_${second.attempt}`,
       }),
     ).toBe(true);
     expect(applications.getApplication(second.id)).toMatchObject({

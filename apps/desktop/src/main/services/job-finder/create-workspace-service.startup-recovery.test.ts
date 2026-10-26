@@ -690,7 +690,6 @@ describe("startup reset recovery before workspace exposure", () => {
     try {
       const snapshot = await firstService.getWorkspaceSnapshot();
       expect(snapshot.settings.allowAutoSubmitOverride).toBe(false);
-      expect(snapshot.applyRuns).toEqual([]);
     } finally {
       await firstService.shutdown();
     }

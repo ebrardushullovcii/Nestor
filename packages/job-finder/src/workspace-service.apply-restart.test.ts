@@ -3,7 +3,6 @@ import {
   ApplicationRecordSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
-  ApplySubmitApprovalSchema,
   UserActionRequestSchema,
 } from "@nestor/contracts";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
@@ -14,7 +13,6 @@ import { terminalizeApplicationAfterPreparedPageLost } from "./internal/workspac
 import {
   createAiClient,
   createBrowserRuntime,
-  createSavedJob,
   createDocumentManager,
   createSeed,
 } from "./workspace-service.test-support";
@@ -35,278 +33,25 @@ function createService(
   });
 }
 
+/**
+ * Loading the workspace runs the old engine's load-time recovery over its
+ * stored runs, results, attempts and records; these read them back from the
+ * repository, since the snapshot no longer carries them.
+ */
+async function recoveredState(
+  repository: ReturnType<typeof createInMemoryJobFinderRepository>,
+  load: Promise<unknown>,
+) {
+  await load;
+  return {
+    applyRuns: await repository.listApplyRuns(),
+    applyJobResults: await repository.listApplyJobResults(),
+    applicationAttempts: await repository.listApplicationAttempts(),
+    applicationRecords: await repository.listApplicationRecords(),
+  };
+}
+
 describe("apply restart recovery", () => {
-  test("shutdown preserves a live Home queue after its first result commits while paused", async () => {
-    // Exercise a deliberately parked queue with one unfinished job.
-    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "1");
-    const seed = createSeed();
-    const now = "2026-03-20T10:05:00.000Z";
-    seed.settings.resumeApplicationMode = "original_resume";
-    seed.profile.baseResume.storagePath = "/tmp/alex-vanguard.pdf";
-    seed.savedJobs.push(
-      createSavedJob({
-        ...seed.savedJobs[0]!,
-        id: "job_second",
-        sourceJobId: "linkedin_pause_case",
-        canonicalUrl: "https://www.linkedin.com/jobs/view/linkedin_pause_case",
-        applicationUrl:
-          "https://www.linkedin.com/jobs/view/linkedin_pause_case/apply",
-        title: "Principal UX Engineer",
-      }),
-    );
-    seed.activityControl = {
-      paused: true,
-      pausedAt: now,
-      reason: "Paused by you.",
-      pauseBehavior: "finish_current",
-    };
-    seed.applyRuns = [
-      ApplyRunSchema.parse({
-        id: "apply_run_live_park",
-        mode: "queue_auto",
-        state: "running",
-        jobIds: ["job_ready", "job_second"],
-        submitApprovalId: "approval_live_park",
-        createdAt: now,
-        updatedAt: now,
-        totalJobs: 2,
-        pendingJobs: 2,
-        summary: "Automatic apply queue is running.",
-        detail: "Two jobs are waiting.",
-      }),
-    ];
-    seed.applySubmitApprovals = [
-      ApplySubmitApprovalSchema.parse({
-        id: "approval_live_park",
-        runId: "apply_run_live_park",
-        mode: "queue_auto",
-        jobIds: ["job_ready", "job_second"],
-        status: "approved",
-        createdAt: now,
-        approvedAt: now,
-      }),
-    ];
-    seed.applyJobResults = ["job_ready", "job_second"].map((jobId, index) =>
-      ApplyJobResultSchema.parse({
-        id: `result_live_${index}`,
-        runId: "apply_run_live_park",
-        jobId,
-        applicationRecordId: `application_${jobId}`,
-        queuePosition: index,
-        state: "planned",
-        summary: "Not started.",
-        detail: "Waiting for Resume.",
-        startedAt: now,
-        updatedAt: now,
-      }),
-    );
-    seed.applicationRecords = ["job_ready", "job_second"].map((jobId) =>
-      ApplicationRecordSchema.parse({
-        id: `application_${jobId}`,
-        jobId,
-        title:
-          jobId === "job_ready"
-            ? "Senior Product Designer"
-            : "Principal UX Engineer",
-        company: "Signal Systems",
-        status: "approved",
-        lastActionLabel: "Waiting for Resume.",
-        nextActionLabel: null,
-        lastUpdatedAt: now,
-      }),
-    );
-    const repository = createInMemoryJobFinderRepository(seed);
-    const baseRuntime = createBrowserRuntime();
-    let flowCount = 0;
-    let releaseFirst: (() => void) | undefined;
-    const firstGate = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const service = createService(repository, {
-      ...baseRuntime,
-      async executeApplicationFlow(...args) {
-        flowCount += 1;
-        if (flowCount === 1) await firstGate;
-        return baseRuntime.executeApplicationFlow(...args);
-      },
-    });
-    await service.getWorkspaceSnapshot();
-    await service.setActivityControl({ paused: false });
-    await vi.waitFor(() => expect(flowCount).toBe(1));
-    await service.setActivityControl({
-      paused: true,
-      pauseBehavior: "finish_current",
-      reason: "Paused by you.",
-    });
-    releaseFirst?.();
-    await vi.waitFor(async () =>
-      expect(
-        (await repository.listApplyJobResults()).find(
-          (result) => result.id === "result_live_0",
-        )?.state,
-      ).toBe("awaiting_review"),
-    );
-    expect(
-      (await repository.listApplyJobResults()).find(
-        (result) => result.id === "result_live_1",
-      )?.state,
-    ).toBe("planned");
-    expect(flowCount).toBe(1);
-    await service.shutdown();
-    expect((await repository.listApplyRuns())[0]).toMatchObject({
-      id: "apply_run_live_park",
-      state: "running",
-    });
-    expect(
-      (await repository.listApplyJobResults()).map((result) => result.state),
-    ).toEqual(["awaiting_review", "planned"]);
-  });
-
-  test("reopens a safely parked Home queue and resumes its same run only once", async () => {
-    const seed = createSeed();
-    const now = "2026-03-20T10:05:00.000Z";
-    seed.settings.resumeApplicationMode = "original_resume";
-    seed.profile.baseResume.storagePath = "/tmp/alex-vanguard.pdf";
-    seed.activityControl = {
-      paused: true,
-      pausedAt: now,
-      reason: "Paused by you.",
-      pauseBehavior: "finish_current",
-    };
-    seed.applyRuns = [
-      ApplyRunSchema.parse({
-        id: "apply_run_parked",
-        mode: "queue_auto",
-        state: "running",
-        jobIds: ["job_settled", "job_ready"],
-        currentJobId: "job_settled",
-        submitApprovalId: "approval_parked",
-        createdAt: now,
-        updatedAt: now,
-        totalJobs: 2,
-        pendingJobs: 1,
-        failedJobs: 1,
-        summary: "Paused before the next application.",
-        detail: "The first result was committed before pausing.",
-      }),
-    ];
-    seed.applySubmitApprovals = [
-      ApplySubmitApprovalSchema.parse({
-        id: "approval_parked",
-        runId: "apply_run_parked",
-        mode: "queue_auto",
-        jobIds: ["job_settled", "job_ready"],
-        status: "approved",
-        createdAt: now,
-        approvedAt: now,
-      }),
-    ];
-    seed.applyJobResults = [
-      ApplyJobResultSchema.parse({
-        id: "result_settled",
-        runId: "apply_run_parked",
-        jobId: "job_settled",
-        applicationRecordId: "application_settled",
-        queuePosition: 0,
-        state: "failed",
-        summary: "Could not prepare this application.",
-        detail: "The first result was committed.",
-        startedAt: now,
-        updatedAt: now,
-        completedAt: now,
-      }),
-      ApplyJobResultSchema.parse({
-        id: "result_planned",
-        runId: "apply_run_parked",
-        jobId: "job_ready",
-        applicationRecordId: "application_ready",
-        queuePosition: 1,
-        state: "planned",
-        summary: "Not started.",
-        detail: "Waiting for Resume.",
-        startedAt: now,
-        updatedAt: now,
-      }),
-    ];
-    seed.applicationRecords = [
-      ApplicationRecordSchema.parse({
-        id: "application_ready",
-        jobId: "job_ready",
-        title: "Senior Product Designer",
-        company: "Signal Systems",
-        status: "approved",
-        lastActionLabel: "Waiting for Resume.",
-        nextActionLabel: null,
-        lastUpdatedAt: now,
-      }),
-    ];
-    const repository = createInMemoryJobFinderRepository(seed);
-    const beforeClose = createService(repository);
-    expect(
-      (await beforeClose.getWorkspaceSnapshot()).applyRuns.find(
-        (run) => run.id === "apply_run_parked",
-      )?.state,
-    ).toBe("running");
-    const persisted = await repository.exportState();
-    await beforeClose.shutdown();
-
-    const baseRuntime = createBrowserRuntime();
-    let flowCount = 0;
-    let releaseFlow: (() => void) | undefined;
-    const flowGate = new Promise<void>((resolve) => {
-      releaseFlow = resolve;
-    });
-    const reopenedRepository = createInMemoryJobFinderRepository(persisted);
-    const reopened = createService(
-      reopenedRepository,
-      {
-        ...baseRuntime,
-        async executeApplicationFlow(...args) {
-          flowCount += 1;
-          await flowGate;
-          return baseRuntime.executeApplicationFlow(...args);
-        },
-      },
-    );
-    const reopenedSnapshot = await reopened.getWorkspaceSnapshot();
-    expect(reopenedSnapshot.activityControl.paused).toBe(true);
-    expect(
-      reopenedSnapshot.applyRuns.find((run) => run.id === "apply_run_parked")
-        ?.state,
-    ).toBe("running");
-    expect(
-      reopenedSnapshot.applyJobResults.find(
-        (result) => result.id === "result_settled",
-      )?.state,
-    ).toBe("failed");
-    expect(
-      reopenedSnapshot.applyJobResults.find(
-        (result) => result.id === "result_planned",
-      )?.state,
-    ).toBe("planned");
-
-    await Promise.all([
-      reopened.setActivityControl({ paused: false }),
-      reopened.setActivityControl({ paused: false }),
-    ]);
-    await vi.waitFor(() => expect(flowCount).toBe(1));
-    expect((await reopenedRepository.listApplyRuns())[0]?.id).toBe("apply_run_parked");
-    releaseFlow?.();
-    await vi.waitFor(async () =>
-      expect((await reopenedRepository.listApplyRuns())[0]?.state).not.toBe("running"),
-    );
-    expect(flowCount).toBe(1);
-    expect(
-      (await reopenedRepository.listApplyJobResults()).find(
-        (result) => result.id === "result_planned",
-      )?.state,
-    ).not.toBe("planned");
-    expect(
-      (await reopenedRepository.listApplyJobResults()).find(
-        (result) => result.id === "result_settled",
-      )?.state,
-    ).toBe("failed");
-  });
   test("marks a hard-interrupted running apply as failed when the workspace reopens", async () => {
     const seed = createSeed();
     seed.applyRuns = [
@@ -335,7 +80,10 @@ describe("apply restart recovery", () => {
     const repository = createInMemoryJobFinderRepository(seed);
 
     const reopenedService = createService(repository);
-    const snapshot = await reopenedService.getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      reopenedService.getWorkspaceSnapshot(),
+    );
     const recoveredRun = snapshot.applyRuns.find(
       (run) => run.id === "apply_run_before_restart",
     );
@@ -352,7 +100,10 @@ describe("apply restart recovery", () => {
     );
     expect((await repository.listApplyRuns())[0]).toEqual(recoveredRun);
 
-    const secondSnapshot = await reopenedService.getWorkspaceSnapshot();
+    const secondSnapshot = await recoveredState(
+      repository,
+      reopenedService.getWorkspaceSnapshot(),
+    );
     expect(
       secondSnapshot.applyRuns.find(
         (run) => run.id === "apply_run_before_restart",
@@ -400,7 +151,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     const recoveredRun = snapshot.applyRuns.find(
       (run) => run.id === "apply_run_marked_before_restart",
     );
@@ -423,8 +177,10 @@ describe("apply restart recovery", () => {
       recoveredResult,
     );
 
-    const secondSnapshot =
-      await createService(repository).getWorkspaceSnapshot();
+    const secondSnapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     expect(
       secondSnapshot.applyRuns.find(
         (run) => run.id === "apply_run_marked_before_restart",
@@ -493,7 +249,10 @@ describe("apply restart recovery", () => {
     const repository = createInMemoryJobFinderRepository(seed);
 
     const service = createService(repository);
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      service.getWorkspaceSnapshot(),
+    );
     const recoveredRun = snapshot.applyRuns.find(
       (run) => run.id === "apply_run_mixed_queue",
     );
@@ -543,7 +302,10 @@ describe("apply restart recovery", () => {
       ),
     ).toEqual(recoveredBegunResult);
 
-    const secondSnapshot = await service.getWorkspaceSnapshot();
+    const secondSnapshot = await recoveredState(
+      repository,
+      service.getWorkspaceSnapshot(),
+    );
     expect(
       secondSnapshot.applyRuns.find(
         (run) => run.id === "apply_run_mixed_queue",
@@ -628,7 +390,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     const recoveredRun = snapshot.applyRuns.find(
       (run) => run.id === "apply_run_inflight_before_restart",
     );
@@ -677,8 +442,10 @@ describe("apply restart recovery", () => {
     const persistedRecords = await repository.listApplicationRecords();
     expect(persistedRecords[0]).toEqual(recoveredRecord);
 
-    const secondSnapshot =
-      await createService(repository).getWorkspaceSnapshot();
+    const secondSnapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     expect(
       secondSnapshot.applicationAttempts.find(
         (attempt) => attempt.id === "attempt_inflight_before_restart",
@@ -795,7 +562,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
 
     // The awaiting-review row sits at a truthful user-owned checkpoint and
     // must survive restart recovery byte-for-byte.
@@ -925,7 +695,10 @@ describe("apply restart recovery", () => {
         documentManager: createDocumentManager(),
       });
 
-      const snapshot = await service.getWorkspaceSnapshot();
+      const snapshot = await recoveredState(
+        repository,
+        service.getWorkspaceSnapshot(),
+      );
 
       expect(hasApplicationPageBinding).toHaveBeenCalledWith(
         "target_site",
@@ -962,15 +735,18 @@ describe("apply restart recovery", () => {
       const liveBindingRepository =
         createInMemoryJobFinderRepository(liveBindingSeed);
       const liveBindingCheck = vi.fn().mockResolvedValue(true);
-      const liveBindingSnapshot = await createJobFinderWorkspaceService({
-        repository: liveBindingRepository,
-        browserRuntime: {
-          ...createBrowserRuntime(),
-          hasApplicationPageBinding: liveBindingCheck,
-        },
-        aiClient: createAiClient(),
-        documentManager: createDocumentManager(),
-      }).getWorkspaceSnapshot();
+      const liveBindingSnapshot = await recoveredState(
+        liveBindingRepository,
+        createJobFinderWorkspaceService({
+          repository: liveBindingRepository,
+          browserRuntime: {
+            ...createBrowserRuntime(),
+            hasApplicationPageBinding: liveBindingCheck,
+          },
+          aiClient: createAiClient(),
+          documentManager: createDocumentManager(),
+        }).getWorkspaceSnapshot(),
+      );
 
       expect(liveBindingCheck).toHaveBeenCalledWith(
         "target_site",
@@ -1103,7 +879,10 @@ describe("apply restart recovery", () => {
         documentManager: createDocumentManager(),
       });
 
-      const snapshot = await service.getWorkspaceSnapshot();
+      const snapshot = await recoveredState(
+        repository,
+        service.getWorkspaceSnapshot(),
+      );
 
       expect(hasApplicationPageBinding).not.toHaveBeenCalled();
       expect(
@@ -1243,7 +1022,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
 
     // The legacy null-lineage result itself terminalizes truthfully...
     expect(
@@ -1383,7 +1165,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
 
     // The orphaned filling row terminalizes even though its parent run is no
     // longer running, and keeps its capacity mark.
@@ -1464,8 +1249,10 @@ describe("apply restart recovery", () => {
     });
 
     // Reopening again is a no-op: every sweep write is idempotent.
-    const secondSnapshot =
-      await createService(repository).getWorkspaceSnapshot();
+    const secondSnapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     expect(
       secondSnapshot.applyRuns.find((r) => r.id === persistedRun.id),
     ).toEqual(persistedRun);
@@ -1572,7 +1359,7 @@ describe("apply restart recovery", () => {
     const repository = createInMemoryJobFinderRepository(seed);
 
     const reopenedService = createService(repository);
-    await reopenedService.getWorkspaceSnapshot();
+    await recoveredState(repository, reopenedService.getWorkspaceSnapshot());
 
     const results = await repository.listApplyJobResults();
     expect(
@@ -1669,7 +1456,7 @@ describe("apply restart recovery", () => {
     const repository = createInMemoryJobFinderRepository(seed);
     const service = createService(repository);
 
-    await service.getWorkspaceSnapshot();
+    await recoveredState(repository, service.getWorkspaceSnapshot());
 
     const results = await repository.listApplyJobResults();
     expect(
@@ -1736,7 +1523,10 @@ describe("apply restart recovery", () => {
     ];
     const repository = createInMemoryJobFinderRepository(seed);
 
-    const snapshot = await createService(repository).getWorkspaceSnapshot();
+    const snapshot = await recoveredState(
+      repository,
+      createService(repository).getWorkspaceSnapshot(),
+    );
     const recoveredRun = snapshot.applyRuns.find(
       (run) => run.id === "apply_run_submitting_before_restart",
     );

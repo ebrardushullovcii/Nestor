@@ -20,7 +20,6 @@ import type {
   ParkedBrowserTabReference,
   SavedJob,
   SourceDebugRunRecord,
-  UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import type { createListingActivityIdentityIndex } from "./listing-activity-identity-index";
@@ -99,8 +98,6 @@ export interface WorkspaceServiceContext {
   activeSourceDebugExecutionIdRef: MutableRef<string | null>;
   activeSourceDebugAbortControllerRef: MutableRef<AbortController | null>;
   activeSourceDebugPromiseRef: MutableRef<Promise<unknown> | null>;
-  activeApplyRunAbortControllers: Map<string, AbortController>;
-  activeApplyRunPromises: Map<string, Promise<void>>;
   applyRunTransitionTails: Map<string, Promise<void>>;
   markApplicationPreparationStarted(
     input: { resultId: string; runId: string; jobId: string },
@@ -127,10 +124,6 @@ export interface WorkspaceServiceContext {
    */
   readWorkspaceProjection?: () => Promise<JobFinderWorkspaceSnapshot>;
   getActiveCampaignId: () => Promise<string | null>;
-  resumeApplicationUserAction: (
-    request: UserActionRequest,
-    taskLocalCredentials?: TaskLocalApplicationCredentials,
-  ) => Promise<void>;
   runSourceDebugWorkflow: (
     targetId: string,
     signal?: AbortSignal,

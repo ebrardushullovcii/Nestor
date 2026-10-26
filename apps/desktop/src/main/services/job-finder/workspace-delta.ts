@@ -26,16 +26,10 @@ const DELTA_OR_IGNORED_KEYS = new Set<keyof JobFinderRendererWorkspaceSnapshot>(
     "discoveryJobs",
     "companyJobs",
     "reviewQueue",
-    "applyRuns",
-    "applyJobResults",
-    "applicationRecords",
-    "applicationAttempts",
     "userActionRequests",
     "userActionEvents",
     "selectedDiscoveryJobId",
     "selectedReviewJobId",
-    "selectedApplyRunId",
-    "selectedApplicationRecordId",
   ],
 );
 
@@ -244,8 +238,6 @@ export function buildJobFinderWorkspaceDelta(input: {
       : {}),
     selectedDiscoveryJobId: input.current.selectedDiscoveryJobId,
     selectedReviewJobId: input.current.selectedReviewJobId,
-    selectedApplyRunId: input.current.selectedApplyRunId,
-    selectedApplicationRecordId: input.current.selectedApplicationRecordId,
     discoveryJobs: buildEntitySlice(
       input.previous.discoveryJobs,
       input.current.discoveryJobs,
@@ -262,26 +254,6 @@ export function buildJobFinderWorkspaceDelta(input: {
       input.previous.reviewQueue,
       input.current.reviewQueue,
       (value) => value.jobId,
-    ),
-    applyRuns: buildEntitySlice(
-      input.previous.applyRuns,
-      input.current.applyRuns,
-      (value) => value.id,
-    ),
-    applyJobResults: buildEntitySlice(
-      input.previous.applyJobResults,
-      input.current.applyJobResults,
-      (value) => value.id,
-    ),
-    applicationRecords: buildEntitySlice(
-      input.previous.applicationRecords,
-      input.current.applicationRecords,
-      (value) => value.id,
-    ),
-    applicationAttempts: buildEntitySlice(
-      input.previous.applicationAttempts,
-      input.current.applicationAttempts,
-      (value) => value.id,
     ),
     userActionRequests: buildEntitySlice(
       input.previous.userActionRequests,

@@ -233,55 +233,6 @@ describe("cancelled application hand-offs", () => {
   });
 });
 
-test("cancelling one paused item records cancellation and leaves its batch sibling alone", async () => {
-  const { repository, workspaceService } = harness(true);
-  const sibling = (await repository.listApplyJobResults()).find(
-    (result) => result.id === "result_b",
-  );
-  const siblingRecord = (await repository.listApplicationRecords()).find(
-    (record) => record.id === "application_b",
-  );
-  const snapshot = await workspaceService.performUserAction({
-    action: "cancel",
-    requestId: "request_a",
-    commandId: "cancel_item",
-    expectedRevision: 1,
-    credentialsPolicy: "browser_only",
-    submitAuthorized: false,
-    accountCreationAuthorized: false,
-  });
-  expect(
-    snapshot.applyJobResults.find((result) => result.id === "result_a"),
-  ).toMatchObject({
-    state: "cancelled",
-    summary: "Cancelled by you",
-    blockerReason: null,
-    blockerSummary: null,
-  });
-  expect(
-    snapshot.applicationRecords.find((record) => record.id === "application_a"),
-  ).toMatchObject({
-    lastAttemptState: "cancelled",
-    lastActionLabel: "Cancelled by you",
-    latestBlocker: null,
-  });
-  expect(
-    snapshot.applyJobResults.find((result) => result.id === "result_b"),
-  ).toEqual(sibling);
-  expect(
-    snapshot.applicationRecords.find((record) => record.id === "application_b"),
-  ).toEqual(siblingRecord);
-  expect(await repository.getUserActionRequest("request_b")).toMatchObject({
-    state: "pending",
-    revision: 1,
-  });
-  expect(snapshot.applyRuns.find((run) => run.id === "run_a")).toMatchObject({
-    state: "paused_for_user_review",
-    pendingJobs: 1,
-    failedJobs: 0,
-    summary: "1 cancelled · 1 waiting on you",
-  });
-});
 
 
 

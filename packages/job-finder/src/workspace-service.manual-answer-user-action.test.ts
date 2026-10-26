@@ -422,59 +422,6 @@ describe("workspace manual-answer persistence races", () => {
     );
   });
 
-  test("an answer whose store failed after the step moved on is asked again, never skipped", async () => {
-    const seed = createSeed();
-    seed.userActionRequests = [
-      createManualAnswerRequest({
-        scope: {
-          type: "application",
-          runId: "run_manual",
-          jobId: "job_ready",
-          applicationRecordId: "application_a",
-          resultId: "result_a",
-          replayCheckpointId: "checkpoint_a",
-          source: "target_site",
-        },
-      }),
-    ];
-    seed.applicationQuestionRecords = [createQuestion()];
-    const harness = createWorkspaceServiceHarness({ seed });
-    const originalCommit =
-      harness.repository.commitApplicationAnswerMutation.bind(
-        harness.repository,
-      );
-    let failNext = true;
-    harness.repository.commitApplicationAnswerMutation = async (mutation) => {
-      if (failNext) {
-        failNext = false;
-        throw new Error("disk full");
-      }
-      return originalCommit(mutation);
-    };
-
-    await expect(
-      harness.workspaceService.performUserAction(submitManualAnswerCommand()),
-    ).rejects.toThrow("disk full");
-    // The step committed, but neither the answer nor its question changed.
-    expect(await harness.repository.listApplicationAnswerRecords()).toEqual([]);
-    expect(
-      (await harness.repository.listApplicationQuestionRecords())[0],
-    ).toEqual(createQuestion());
-    expect(await harness.repository.getUserActionRequest("request_a")).toEqual(
-      expect.objectContaining({ state: "verifying", revision: 2 }),
-    );
-
-    // The person presses again: the application must not carry on without
-    // the answer; the question comes back to them instead.
-    await harness.workspaceService.performUserAction(
-      submitManualAnswerCommand("command_submit_again"),
-    );
-    expect(await harness.repository.getUserActionRequest("request_a")).toEqual(
-      expect.objectContaining({ state: "still_blocked" }),
-    );
-    expect(await harness.repository.listApplicationAttempts()).toEqual([]);
-  });
-
   test("a snapshot taken while the answer is being stored leaves the step alone", async () => {
     const seed = createSeed();
     seed.userActionRequests = [
@@ -531,10 +478,6 @@ describe("workspace manual-answer persistence races", () => {
     releaseStore();
     await answering;
 
-    // The answer's own continuation then checks the step (this harness has
-    // no retained page, so it ends there).
-    const attempts = await harness.repository.listApplicationAttempts();
-    expect(attempts).toHaveLength(1);
     expect(
       await harness.repository.listApplicationAnswerRecords({
         runId: "run_manual",

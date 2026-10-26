@@ -362,64 +362,6 @@ function decrementPendingScope(
   return nextState;
 }
 
-export function describePreparedApplicationSubmitResult(
-  snapshot: JobFinderRendererWorkspaceSnapshot,
-  jobId: string,
-): string {
-  const result = [...snapshot.applyJobResults]
-    .filter((entry) => entry.jobId === jobId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  const outcome = result?.privacyReceipt?.submissionOutcome?.outcome ?? null;
-
-  if (result?.state === "submitted" && outcome === "submitted") {
-    return "Application sent.";
-  }
-  if (outcome === "outcome_uncertain") {
-    return "The employer site did not confirm whether this was sent. Check the application before trying again.";
-  }
-  return result?.summary ?? "Application status updated.";
-}
-
-/** One line for a Send-all press: how many went out, and what did not. */
-export function describePreparedApplicationsSendResult(
-  snapshot: JobFinderRendererWorkspaceSnapshot,
-  jobIds: readonly string[],
-): string {
-  if (jobIds.length === 1) {
-    return describePreparedApplicationSubmitResult(snapshot, jobIds[0]!);
-  }
-  const sent = jobIds.filter((jobId) => {
-    const result = [...snapshot.applyJobResults]
-      .filter((entry) => entry.jobId === jobId)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-    return result?.state === "submitted";
-  }).length;
-  const notSent = jobIds.length - sent;
-  return notSent === 0
-    ? `Sent all ${sent} applications.`
-    : `Sent ${sent} of ${jobIds.length} applications. The others are in Applications with what stopped them.`;
-}
-
-export function preparedApplicationsToastTone(
-  snapshot: JobFinderRendererWorkspaceSnapshot,
-  jobIds: readonly string[],
-): "success" | "warning" {
-  return jobIds.every((jobId) => {
-    const result = [...snapshot.applyJobResults]
-      .filter((entry) => entry.jobId === jobId)
-      .sort(
-        (left, right) =>
-          Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-      )[0];
-    return (
-      result?.state === "submitted" &&
-      result.privacyReceipt?.submissionOutcome?.outcome === "submitted"
-    );
-  })
-    ? "success"
-    : "warning";
-}
-
 export function createActionRunners(args: {
   saveCoordinator?: JobFinderSaveCoordinator;
   setActionState: Dispatch<SetStateAction<ActionState>>;

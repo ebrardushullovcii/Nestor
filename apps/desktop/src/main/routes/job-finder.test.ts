@@ -1,6 +1,5 @@
 import {
   AppearanceThemeSchema,
-  ApplicationPacketSchema,
   DiscoveryJobViewSchema,
   JobFinderProfileCopilotPatchGroupActionInputSchema,
   JobFinderUndoProfileRevisionInputSchema,
@@ -51,7 +50,6 @@ type RegisteredHandler = (
 
 const {
   mockBrowserWindowFromWebContents,
-  mockBuildApplicationPacket,
   mockExportResumePdf,
   mockGetResumeWorkspace,
   mockGetWorkspaceBootstrap,
@@ -81,7 +79,6 @@ const {
       show: ReturnType<typeof vi.fn>;
     } | null => null,
   ),
-  mockBuildApplicationPacket: vi.fn(),
   mockExportResumePdf: vi.fn(),
   mockGetResumeWorkspace: vi.fn(),
   mockGetWorkspaceBootstrap: vi.fn(),
@@ -149,52 +146,6 @@ import {
   syncApplicationAuthorityForSavedMode,
 } from "./job-finder";
 
-const packet = ApplicationPacketSchema.parse({
-  generatedAt: "2026-07-30T12:00:00.000Z",
-  job: {
-    id: "job-1",
-    source: "target_site",
-    title: "Senior Engineer",
-    company: "Example",
-    location: "Remote",
-    listingDestination: {
-      origin: "https://jobs.example.com",
-      safePath: "/jobs/123",
-    },
-    applicationDestination: {
-      origin: "https://apply.example.com",
-      safePath: "/applications/123",
-    },
-    summary: "Build reliable systems.",
-  },
-  run: {
-    id: "run-1",
-    mode: "copilot",
-    state: "paused_for_user_review",
-  },
-  result: {
-    id: "result-1",
-    applicationRecordId: "application-1",
-    state: "awaiting_review",
-    summary: "Prepared",
-    detail: "Stopped before final submit.",
-    blockerReason: null,
-    blockerSummary: null,
-    updatedAt: "2026-07-30T12:00:00.000Z",
-  },
-  resume: {
-    source: "original_upload",
-    sourceDocumentId: "document-1",
-    exportArtifactId: null,
-    fileName: "Original CV.pdf",
-    sha256: null,
-  },
-  questions: [],
-  consent: [],
-  checkpoints: [],
-  privacyReceipt: null,
-  submissionOccurred: false,
-});
 
 describe("interactive routes use main workspace projections", () => {
   afterEach(() => {
@@ -791,9 +742,8 @@ describe("job-finder workspace routes", () => {
 
   beforeEach(async () => {
     temporaryDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nestor-application-packet-"),
+      path.join(os.tmpdir(), "nestor-workspace-routes-"),
     );
-    mockBuildApplicationPacket.mockResolvedValue(packet);
     mockGetWorkspaceProjection.mockResolvedValue(
       createEmptyWorkspace("2026-08-09T10:00:00.000Z"),
     );
@@ -814,7 +764,6 @@ describe("job-finder workspace routes", () => {
       tailoredAsset: null,
     });
     mockGetJobFinderWorkspaceService.mockResolvedValue({
-      buildApplicationPacket: mockBuildApplicationPacket,
       exportResumePdf: mockExportResumePdf,
       getResumeWorkspace: mockGetResumeWorkspace,
       getWorkspaceBootstrap: mockGetWorkspaceBootstrap,

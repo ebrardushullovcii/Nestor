@@ -2,6 +2,7 @@ import { app } from "electron";
 import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { getApplicationStore } from "./application-store";
 import { buildJobFinderDiagnosticExport } from "./build-diagnostic-export";
 import { collectJobFinderPerformanceSnapshot } from "./collect-performance-snapshot";
 
@@ -15,6 +16,7 @@ export async function buildDiagnosticsFileExport(
   });
   const content = buildJobFinderDiagnosticExport({
     workspace,
+    applications: getApplicationStore().stateCounts(),
     performance,
     build: {
       appVersion: app.getVersion(),

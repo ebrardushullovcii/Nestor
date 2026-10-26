@@ -552,6 +552,7 @@ describe("Job Finder application authority service", () => {
         receipt: uncertainOutcome,
         pageUrl: "https://jobs.example.com/apply?step=2",
       })),
+      canResolve: vi.fn(() => true),
       resolve: vi.fn(),
     };
     vi.spyOn(repository, "getSubmissionOutcomeRecord").mockResolvedValue(
@@ -640,5 +641,24 @@ describe("Job Finder application authority service", () => {
     });
     expect(blocked.status).toBe("blocked");
     expect(resolve).not.toHaveBeenCalled();
+
+    // An outcome the store row would refuse (another attempt) is refused
+    // before the authority record commits, so nothing is left half-done.
+    applicationSends.read.mockReturnValue({
+      receipt: uncertainOutcome,
+      pageUrl: "https://jobs.example.com/apply",
+    });
+    applicationSends.canResolve.mockReturnValue(false);
+    applicationSends.resolve.mockClear();
+    releaseApplicationPage.mockClear();
+    const mismatched = await service.resolveSubmissionOutcome({
+      uncertainOutcomeId: uncertainOutcome.id,
+      resolution: "submitted",
+      confirmedOnEmployerSite: true,
+    });
+    expect(mismatched.status).toBe("blocked");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(applicationSends.resolve).not.toHaveBeenCalled();
+    expect(releaseApplicationPage).not.toHaveBeenCalled();
   });
 });

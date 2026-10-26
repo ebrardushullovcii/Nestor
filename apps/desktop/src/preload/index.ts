@@ -129,14 +129,6 @@ let jobFinderRoutesReadyPromise: Promise<void> | null = null;
 let jobFinderAssetRoutesReadyPromise: Promise<void> | null = null;
 let liveAssistantRoutesReadyPromise: Promise<void> | null = null;
 
-const jobFinderAssetChannels = new Set([
-  "job-finder:list-application-documents",
-  "job-finder:propose-application-document",
-  "job-finder:approve-application-document",
-  "job-finder:edit-application-document",
-  "job-finder:export-application-document",
-]);
-
 function isDeferredFeatureChannel(channel: unknown): channel is string {
   return (
     typeof channel === "string" &&
@@ -156,10 +148,7 @@ function ensureFeatureRoutesReady(channel: string): Promise<void> {
         .then(() => undefined);
       return jobFinderBootstrapRoutesReadyPromise;
     }
-    if (
-      channel.startsWith("job-finder:candidate-assets:") ||
-      jobFinderAssetChannels.has(channel)
-    ) {
+    if (channel.startsWith("job-finder:candidate-assets:")) {
       jobFinderAssetRoutesReadyPromise ??= nativeIpcRenderer
         .invoke("system:job-finder-asset-routes-ready")
         .then(() => undefined);
