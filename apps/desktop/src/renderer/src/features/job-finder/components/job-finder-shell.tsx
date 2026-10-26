@@ -578,10 +578,8 @@ export function JobFinderShell({
     icon: LucideIcon;
   }
 
-  // Every badge below reads one exported owner from `lib/destination-counts.ts`
-  // named for its population. No count is derived inline here any more: four
-  // of them used to count something other than what their destination page
-  // prints, and nothing could hold the two together.
+  // Every badge is the job store's own count for the list its destination
+  // shows, so a badge and its page cannot disagree.
   const screenDefinitions = useMemo<readonly ShellScreenDefinition[]>(() => {
     return [
       {
