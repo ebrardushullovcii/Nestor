@@ -434,16 +434,25 @@ export function createJobSearchRunner(
         if (!http.active && !browser.active) break;
       }
       signal.throwIfAborted();
-      const failed = resultRows.compact(run.record!.id).progress?.failed ?? 0;
-      const allFailed =
+      const progress = resultRows.compact(run.record!.id).progress;
+      const failed = progress?.failed ?? 0,
+        needsYou = progress?.needsYou ?? 0;
+      const unreadable = failed + needsYou;
+      const nothingReadable =
         run.record!.sourcesTotal > 0 &&
-        failed === run.record!.sourcesTotal &&
+        unreadable === run.record!.sourcesTotal &&
         run.record!.found === 0;
+      const blockedSummary = needsYou
+        ? `${needsYou} site${needsYou === 1 ? " needs" : "s need"} sign-in in Needs you. `
+        : "";
+      const recovery = failed
+        ? "Check each site's results, fix the URL or try the board's main jobs URL, then search again."
+        : "Open Needs you to sign in, then retry.";
       finish(
         run,
-        allFailed ? "failed" : "done",
-        allFailed
-          ? `${failed} sites could not be read. Check each site's results, fix the URL or try the board's main jobs URL, then search again.`
+        nothingReadable ? "failed" : "done",
+        nothingReadable
+          ? `${unreadable} site${unreadable === 1 ? "" : "s"} could not be read. ${blockedSummary}${recovery}`
           : fitError,
       );
     } catch (error) {

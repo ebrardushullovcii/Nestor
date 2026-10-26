@@ -880,7 +880,44 @@ test("single vacancies also preserve explicitly labelled employer and location a
 test("a breadcrumb above a vacancy is not its hiring employer", () => {
   const html =
     '<main><p>Home · Careers</p><h1>Backend Engineer</h1><h2>About the role</h2><p>Build production services and collaborate with engineers on reliable software, APIs and data systems.</p><a href="/apply">Apply</a></main>';
-  expect(
-    readInventoryHtml(html, source.url, source).cards[0]?.companyHint,
-  ).toBeUndefined();
+  const [card] = readInventoryHtml(html, source.url, source).cards;
+  expect(card?.companyHint).toBeUndefined();
+  expect(card?.locationHint).toBeUndefined();
+});
+
+test("a known employer beside a breadcrumb still needs the real location read", async () => {
+  const html =
+    '<main><p>Home · Careers</p><h1>Backend Engineer</h1><p class="company">Real Employer</p><p>Berlin</p><h2>About the role</h2><p>Build production services and collaborate with engineers on reliable software, APIs and data systems.</p><a href="/apply">Apply</a></main>';
+  const cards = readInventoryHtml(html, source.url, source).cards;
+  expect(cards[0]?.companyHint).toBe("Real Employer");
+  expect(cards[0]?.locationHint).toBeUndefined();
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: JSON.stringify({
+          jobs: [
+            {
+              id: 0,
+              title: "Backend Engineer",
+              company: "Real Employer",
+              location: "Berlin",
+              workModes: [],
+              sourceJobId: null,
+              employmentType: null,
+              seniority: null,
+              salaryText: null,
+              closed: false,
+            },
+          ],
+        }),
+      }),
+    ),
+  };
+  const result = await readListings({
+    cards,
+    client,
+    readPage: () => Promise.resolve({ html, finalUrl: source.url }),
+  });
+  expect(result.jobs[0]?.location).toBe("Berlin");
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });

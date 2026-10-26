@@ -449,19 +449,21 @@ export function readInventoryHtml(
       );
       const place = field(/(?:^|[\s_-])(?:location|jobLocation)(?:$|[\s_-])/iu);
       const bylineEmployer = byline[0];
+      const hasEmployerByline =
+        byline.length >= 2 &&
+        bylineEmployer &&
+        bylineEmployer.toLowerCase() !== title.toLowerCase() &&
+        !/^(?:home|careers|jobs|opportunities|remote|hybrid|on[ -]?site)$/iu.test(
+          bylineEmployer,
+        );
       const companyHint = employer
         ? text(employer)
-        : byline.length >= 2 &&
-            bylineEmployer &&
-            bylineEmployer.toLowerCase() !== title.toLowerCase() &&
-            !/^(?:home|careers|jobs|opportunities|remote|hybrid|on[ -]?site)$/iu.test(
-              bylineEmployer,
-            )
+        : hasEmployerByline
           ? bylineEmployer
           : undefined;
       const locationHint = place
         ? text(place)
-        : byline.length >= 2
+        : hasEmployerByline
           ? byline[1]
           : undefined;
       if (

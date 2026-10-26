@@ -193,3 +193,42 @@ it("shows failed sites and recovery advice instead of a successful empty search"
       ?.open,
   ).toBe(true);
 });
+
+it("sends an all-sign-in-blocked search to Needs you rather than failed-site URL advice", async () => {
+  store.sql("DELETE FROM jobs").run();
+  const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+  const sources = createSearchSourcesStore(store);
+  sources.put(search.id, {
+    sourceId: "1",
+    label: "Sign-in board",
+    url: "https://signin.example/",
+    state: "needs_you",
+    lane: "browser",
+    phase: null,
+    cards: 0,
+    related: 0,
+    unrelated: 0,
+    seen: 0,
+    failedReads: 0,
+    found: 0,
+    added: 0,
+    hidden: 0,
+    message: "Sign in to read this site.",
+  });
+  searchStatus = {
+    search: store.searches.finish(search.id, "failed", "1 site needs sign-in"),
+    ...sources.compact(search.id),
+    sourceRevision: 1,
+  };
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <FindJobsScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("Some sites need you");
+  expect(screen.getByText(/1 site needs you/)).toBeTruthy();
+  expect(screen.queryByText("Some sites could not be read")).toBeNull();
+  expect(screen.queryByText(/nothing new/i)).toBeNull();
+});

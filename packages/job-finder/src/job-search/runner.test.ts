@@ -510,3 +510,50 @@ test("an entirely unreadable source set finishes as failed with its per-site rea
     createSearchSourcesStore(store).list({ state: "failed" }).rows,
   ).toHaveLength(2);
 });
+
+test.each(["mixed", "sign-in only", "one failed", "one readable"])(
+  "%s sources distinguish an unreadable search from a successfully read empty board",
+  async (kind) => {
+    const { runner, engine, store, context } = setup();
+    const sites = createJobSitesStore(store);
+    sites.add({ text: "https://failed.example/\nhttps://sign-in.example/" });
+    context.sources = sites
+      .enabled()
+      .map(jobSiteTarget)
+      .slice(0, kind === "one failed" ? 1 : 2);
+    engine.collectSource.mockImplementation(({ target }) => {
+      if (kind === "one readable" && target.id === "2")
+        return Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: true,
+          notes: ["No open jobs"],
+        });
+      if (kind === "sign-in only" || target.id === "2")
+        return Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: false,
+          needsYou: true,
+          notes: ["Sign in to view jobs"],
+        });
+      return Promise.reject(Error("The site could not be reached"));
+    });
+    await runner.start({});
+    const status = await finished(runner);
+    expect(status.search?.state).toBe(
+      kind === "one readable" ? "done" : "failed",
+    );
+    if (kind === "one failed")
+      expect(status.search?.error).toContain("1 site could not be read.");
+    if (kind === "mixed") {
+      expect(status.search?.error).toContain("2 sites could not be read.");
+      expect(status.search?.error).toContain(
+        "1 site needs sign-in in Needs you.",
+      );
+      expect(status.progress).toMatchObject({ failed: 1, needsYou: 1 });
+    }
+    if (kind === "sign-in only")
+      expect(status.progress).toMatchObject({ failed: 0, needsYou: 2 });
+  },
+);
