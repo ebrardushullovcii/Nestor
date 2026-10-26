@@ -58,7 +58,8 @@ describe("searchSavedJobs", () => {
     store.setStage([added[2]!], "applied");
     store.setStage([added[3]!], "hidden");
 
-    const entries = await searchSavedJobs("analyst");
+    const { entries, incomplete } = await searchSavedJobs("analyst");
+    expect(incomplete).toBe(false);
 
     expect(
       entries.map((entry) => [entry.title, entry.kind, entry.href]),
@@ -74,10 +75,38 @@ describe("searchSavedJobs", () => {
     expect(entries[0]?.subtitle).toBe("Spool · Remote · Found");
     expect(entries[2]?.subtitle).toBe("Freight · Remote · Hidden");
 
-    const [shortlisted] = await searchSavedJobs("crate");
+    const [shortlisted] = (await searchSavedJobs("crate")).entries;
     expect(shortlisted?.href).toBe(
       `/job-finder/review-queue?jobId=${added[1]}`,
     );
-    expect(await searchSavedJobs("nothing here")).toEqual([]);
+    expect((await searchSavedJobs("nothing here")).entries).toEqual([]);
+  });
+
+  it("finds nothing for a query without a word", async () => {
+    store.saveFoundJobs({ searchId: null, jobs: [job(1, "Analyst", "Spool")] });
+    for (const query of ['""', '"', "  "])
+      expect(await searchSavedJobs(query)).toEqual({
+        entries: [],
+        incomplete: false,
+      });
+  });
+
+  it("keeps the stages it could read when one fails", async () => {
+    const { added } = store.saveFoundJobs({
+      searchId: null,
+      jobs: [job(1, "Data Analyst", "Ledger"), job(2, "Analyst", "Spool")],
+    });
+    store.setStage([added[1]!], "shortlisted");
+    Object.assign(window.nestor.jobs, {
+      run: (_name: string, input: JobListQueryInput) =>
+        input.stage === "shortlisted"
+          ? Promise.reject(new Error("database is locked"))
+          : Promise.resolve(store.listJobs(input)),
+    });
+
+    const { entries, incomplete } = await searchSavedJobs("analyst");
+
+    expect(incomplete).toBe(true);
+    expect(entries.map((entry) => entry.title)).toEqual(["Data Analyst"]);
   });
 });

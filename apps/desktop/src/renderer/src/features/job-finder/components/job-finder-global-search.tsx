@@ -27,9 +27,11 @@ const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
 export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
 
 /** Finds more entries for a query, such as saved jobs from the job store. */
-export type JobFinderGlobalSearchMore = (
-  query: string,
-) => Promise<readonly JobFinderGlobalSearchEntry[]>;
+export type JobFinderGlobalSearchMore = (query: string) => Promise<{
+  entries: readonly JobFinderGlobalSearchEntry[];
+  /** Part of the search could not be read; `entries` is what came back. */
+  incomplete: boolean;
+}>;
 
 export function JobFinderGlobalSearch(props: {
   entries: readonly JobFinderGlobalSearchEntry[];
@@ -48,16 +50,20 @@ export function JobFinderGlobalSearch(props: {
   const [more, setMore] = useState<{
     query: string;
     entries: readonly JobFinderGlobalSearchEntry[];
-  }>({ query: "", entries: [] });
+    incomplete: boolean;
+  }>({ query: "", entries: [], incomplete: false });
   const { searchMore } = props;
   useEffect(() => {
     if (!isQueryLongEnough || !searchMore) return undefined;
     let current = true;
     void searchMore(deferredQuery.trim()).then(
-      (entries) => {
-        if (current) setMore({ query: deferredQuery, entries });
+      (found) => {
+        if (current) setMore({ query: deferredQuery, ...found });
       },
-      () => undefined,
+      () => {
+        if (current)
+          setMore({ query: deferredQuery, entries: [], incomplete: true });
+      },
     );
     return () => {
       current = false;
@@ -74,6 +80,8 @@ export function JobFinderGlobalSearch(props: {
   );
   // Saved jobs are still being read for what was typed.
   const searching = Boolean(searchMore) && more.query !== deferredQuery;
+  const incomplete =
+    !searching && more.query === deferredQuery && more.incomplete;
   const visibleEntries = useMemo(
     () => groups.flatMap((group) => [...group.entries]),
     [groups],
@@ -227,7 +235,17 @@ export function JobFinderGlobalSearch(props: {
               ? "Searching your saved jobs…"
               : `${resultCount} ${resultCount === 1 ? "result" : "results"}`}
           </p>
-          {groups.length === 0 && !searching ? (
+          {incomplete ? (
+            <p
+              className="rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-sm text-foreground-soft"
+              role="alert"
+            >
+              {groups.length === 0
+                ? "Your saved jobs could not be searched. Try again."
+                : "Some of your saved jobs could not be searched; these are the ones that could."}
+            </p>
+          ) : null}
+          {groups.length === 0 && !searching && !incomplete ? (
             <p className="rounded-(--radius-field) px-3 py-5 text-center text-sm text-foreground-soft">
               Nothing in your saved jobs, applications or screens matches
               &ldquo;{query}&rdquo;.

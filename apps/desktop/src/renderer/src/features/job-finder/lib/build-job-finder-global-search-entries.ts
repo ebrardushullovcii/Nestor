@@ -98,12 +98,18 @@ const SEARCHED_STAGES: readonly JobStage[] = [
 /**
  * The saved jobs whose title, company or place match `query`, read from the
  * job store a few per stage, best fit first. Applied jobs are applications.
+ * A stage that can't be read leaves the rest and marks the search incomplete.
  */
 export async function searchSavedJobs(
   query: string,
   perStage = 8,
-): Promise<readonly JobFinderGlobalSearchEntry[]> {
-  const pages = await Promise.all(
+): Promise<{
+  entries: readonly JobFinderGlobalSearchEntry[];
+  incomplete: boolean;
+}> {
+  // The store's text filter needs a word; without one it would list any job.
+  if (!/[\p{L}\p{N}]/u.test(query)) return { entries: [], incomplete: false };
+  const pages = await Promise.allSettled(
     SEARCHED_STAGES.map((stage) =>
       window.nestor.jobs.run("list_jobs", {
         stage,
@@ -113,17 +119,25 @@ export async function searchSavedJobs(
       }),
     ),
   );
-  return pages.flatMap((page) =>
-    page.rows.map((row) => ({
-      href: jobHref(row),
-      id: `job:${row.id}`,
-      kind:
-        row.stage === "applied" ? ("application" as const) : ("job" as const),
-      metadata: [],
-      subtitle: [row.company, row.location, STAGE_LABEL[row.stage]]
-        .filter(Boolean)
-        .join(" · "),
-      title: row.title,
-    })),
+  const entries = pages.flatMap((page) =>
+    page.status === "fulfilled"
+      ? page.value.rows.map((row) => ({
+          href: jobHref(row),
+          id: `job:${row.id}`,
+          kind:
+            row.stage === "applied"
+              ? ("application" as const)
+              : ("job" as const),
+          metadata: [],
+          subtitle: [row.company, row.location, STAGE_LABEL[row.stage]]
+            .filter(Boolean)
+            .join(" · "),
+          title: row.title,
+        }))
+      : [],
   );
+  return {
+    entries,
+    incomplete: pages.some((page) => page.status === "rejected"),
+  };
 }
