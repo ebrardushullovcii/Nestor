@@ -242,6 +242,27 @@ function storageMetadata(
   }
 }
 
+/** Every string in a decoded storage policy; unreadable is one opaque string. */
+function policyStrings(json: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [json];
+  }
+  const strings: string[] = [];
+  const visit = (value: unknown) => {
+    if (typeof value === "string") strings.push(value);
+    else if (value && typeof value === "object")
+      for (const [key, item] of Object.entries(value)) {
+        strings.push(key);
+        visit(item);
+      }
+  };
+  visit(parsed);
+  return strings;
+}
+
 /** No form answers: one exact selected file and bounded upload metadata only. */
 export async function classifyAttachmentUpload(input: {
   window: AttachmentUploadWindow | null;
@@ -333,10 +354,12 @@ export async function classifyAttachmentUpload(input: {
       if (typeof value !== "string") continue;
       // Storage signing fields have constrained values. They are never an
       // escape hatch for a form answer, including inside a decoded policy.
+      // A policy is read value by value: run together, its words make up
+      // answers that are not there ("credential" + "EXAMPLE" holds "Alex").
       const decoded =
         key.toLowerCase() === "policy"
-          ? Buffer.from(value, "base64").toString("utf8")
-          : value;
+          ? policyStrings(Buffer.from(value, "base64").toString("utf8"))
+          : [value];
       if (
         !storageMetadata(
           key,
@@ -345,9 +368,11 @@ export async function classifyAttachmentUpload(input: {
           url.origin === grant.sourceOrigin,
         ) ||
         value.length > 8192 ||
-        containsPreparedAnswer(
-          withoutAttachmentName(decoded, grant.fileName),
-          preparedAnswers,
+        decoded.some((text) =>
+          containsPreparedAnswer(
+            withoutAttachmentName(text, grant.fileName),
+            preparedAnswers,
+          ),
         ) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
