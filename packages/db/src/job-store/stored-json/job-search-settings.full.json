@@ -1,0 +1,12 @@
+{
+  "depth": "quick",
+  "sites": {
+    "all": true,
+    "except": [
+      1
+    ]
+  },
+  "picky": "open",
+  "postedWithin": "week",
+  "note": "note-sample"
+}

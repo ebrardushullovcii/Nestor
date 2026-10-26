@@ -1,0 +1,167 @@
+{
+  "id": "id-sample",
+  "jobId": "jobId-sample",
+  "status": "draft",
+  "templateId": "classic_ats",
+  "language": "language-sample",
+  "writtenLanguage": "writtenLanguage-sample",
+  "listingLanguage": "listingLanguage-sample",
+  "identity": {
+    "fullName": "fullName-sample",
+    "headline": "headline-sample",
+    "location": "location-sample",
+    "email": "email-sample",
+    "phone": "phone-sample",
+    "portfolioUrl": "portfolioUrl-sample",
+    "linkedinUrl": "linkedinUrl-sample",
+    "githubUrl": "githubUrl-sample",
+    "personalWebsiteUrl": "personalWebsiteUrl-sample",
+    "additionalLinks": [
+      "additionalLinks0-sample"
+    ]
+  },
+  "sections": [
+    {
+      "id": "id-sample",
+      "kind": "header",
+      "label": "label-sample",
+      "text": "text-sample",
+      "bullets": [
+        {
+          "id": "id-sample",
+          "text": "text-sample",
+          "origin": "imported",
+          "locked": true,
+          "included": true,
+          "sourceRefs": [
+            {
+              "id": "id-sample",
+              "sourceKind": "resume",
+              "sourceId": "sourceId-sample",
+              "snippet": "snippet-sample"
+            }
+          ],
+          "lastGeneratedContentHash": "fnv1a32:0a1b2c3d",
+          "updatedAt": "2026-10-26T09:00:00.000Z"
+        }
+      ],
+      "entries": [
+        {
+          "id": "id-sample",
+          "entryType": "experience",
+          "title": "title-sample",
+          "subtitle": "subtitle-sample",
+          "location": "location-sample",
+          "dateRange": "dateRange-sample",
+          "startDate": "startDate-sample",
+          "endDate": "endDate-sample",
+          "isCurrent": true,
+          "summary": "summary-sample",
+          "bullets": [
+            {
+              "id": "id-sample",
+              "text": "text-sample",
+              "origin": "imported",
+              "locked": true,
+              "included": true,
+              "sourceRefs": [
+                {
+                  "id": "id-sample",
+                  "sourceKind": "resume",
+                  "sourceId": "sourceId-sample",
+                  "snippet": "snippet-sample"
+                }
+              ],
+              "lastGeneratedContentHash": "fnv1a32:0a1b2c3d",
+              "updatedAt": "2026-10-26T09:00:00.000Z"
+            }
+          ],
+          "origin": "imported",
+          "locked": true,
+          "included": true,
+          "sortOrder": 0,
+          "profileRecordId": "profileRecordId-sample",
+          "sourceRefs": [
+            {
+              "id": "id-sample",
+              "sourceKind": "resume",
+              "sourceId": "sourceId-sample",
+              "snippet": "snippet-sample"
+            }
+          ],
+          "updatedAt": "2026-10-26T09:00:00.000Z"
+        }
+      ],
+      "origin": "imported",
+      "locked": true,
+      "included": true,
+      "sortOrder": 0,
+      "entryOrderMode": "chronology",
+      "profileRecordId": "profileRecordId-sample",
+      "sourceRefs": [
+        {
+          "id": "id-sample",
+          "sourceKind": "resume",
+          "sourceId": "sourceId-sample",
+          "snippet": "snippet-sample"
+        }
+      ],
+      "updatedAt": "2026-10-26T09:00:00.000Z"
+    }
+  ],
+  "targetPageCount": 1,
+  "generationMethod": "ai",
+  "approvedAt": "2026-10-26T09:00:00.000Z",
+  "approvedExportId": "approvedExportId-sample",
+  "staleReason": "staleReason-sample",
+  "workHistoryReviewAcknowledgments": [
+    {
+      "id": "id-sample",
+      "draftId": "draftId-sample",
+      "profileRecordId": "profileRecordId-sample",
+      "kind": "weak_fit",
+      "action": "consider_showing",
+      "messageContentHash": "fnv1a32:0a1b2c3d",
+      "reason": "intentional_omission",
+      "acknowledgedAt": "2026-10-26T09:00:00.000Z"
+    }
+  ],
+  "claimConfirmations": [
+    {
+      "id": "id-sample",
+      "draftId": "draftId-sample",
+      "field": "entry_bullet",
+      "sectionId": "sectionId-sample",
+      "entryId": "entryId-sample",
+      "bulletId": "bulletId-sample",
+      "confirmedClaimContentHash": "fnv1a32:0a1b2c3d",
+      "ownershipStatement": "I confirm this content is accurate and my own.",
+      "confirmedAt": "2026-10-26T09:00:00.000Z"
+    }
+  ],
+  "issueApprovals": [
+    {
+      "id": "id-sample",
+      "draftId": "draftId-sample",
+      "issueId": "issueId-sample",
+      "approvedContentHash": "fnv1a32:0a1b2c3d",
+      "approvedAt": "2026-10-26T09:00:00.000Z"
+    }
+  ],
+  "claimChecks": [
+    {
+      "contentHash": "contentHash-sample",
+      "verdict": "supported",
+      "reason": "reason-sample",
+      "evidenceIds": [
+        "evidenceIds0-sample"
+      ],
+      "fix": "fix-sample",
+      "style": "style-sample",
+      "evidenceKey": "evidenceKey-sample",
+      "checkedAt": "2026-10-26T09:00:00.000Z"
+    }
+  ],
+  "createdAt": "2026-10-26T09:00:00.000Z",
+  "updatedAt": "2026-10-26T09:00:00.000Z"
+}

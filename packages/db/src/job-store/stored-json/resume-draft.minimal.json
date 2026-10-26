@@ -1,0 +1,8 @@
+{
+  "id": "id-sample",
+  "jobId": "jobId-sample",
+  "status": "draft",
+  "templateId": "classic_ats",
+  "createdAt": "2026-10-26T09:00:00.000Z",
+  "updatedAt": "2026-10-26T09:00:00.000Z"
+}

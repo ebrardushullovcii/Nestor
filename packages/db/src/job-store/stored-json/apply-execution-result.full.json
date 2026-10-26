@@ -1,0 +1,344 @@
+{
+  "answerDependencies": {
+    "form": [
+      {
+        "key": "key-sample",
+        "prompt": "prompt-sample",
+        "reusePrompt": true,
+        "kind": "work_authorization",
+        "answer": "answer-sample"
+      }
+    ],
+    "context": [
+      {
+        "id": 1,
+        "kind": "work_authorization",
+        "answer": "answer-sample",
+        "roleFamilies": [
+          "roleFamilies0-sample"
+        ],
+        "proofEntryIds": [
+          "proofEntryIds0-sample"
+        ]
+      }
+    ]
+  },
+  "state": "not_started",
+  "summary": "summary-sample",
+  "detail": "detail-sample",
+  "submittedAt": "2026-10-26T09:00:00.000Z",
+  "outcome": "discovered",
+  "checkpoints": [
+    {
+      "id": "id-sample",
+      "at": "2026-10-26T09:00:00.000Z",
+      "label": "label-sample",
+      "detail": "detail-sample",
+      "state": "not_started",
+      "visualEvidence": [
+        {
+          "snapshotId": "snapshotId-sample",
+          "observationSetId": "observationSetId-sample",
+          "summary": "summary-sample",
+          "capturedAt": "2026-10-26T09:00:00.000Z",
+          "storagePath": "storagePath-sample",
+          "retention": "temporary",
+          "redactionLevel": "none",
+          "confidence": 0,
+          "reconciliationStatus": "agreement"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "id-sample",
+      "prompt": "prompt-sample",
+      "description": "description-sample",
+      "kind": "work_authorization",
+      "answerControlType": "text",
+      "inputConstraints": {
+        "type": "number",
+        "min": "min-sample",
+        "max": "max-sample",
+        "step": "step-sample"
+      },
+      "isRequired": true,
+      "note": "note-sample",
+      "detectedAt": "2026-10-26T09:00:00.000Z",
+      "answerOptions": [
+        "answerOptions0-sample"
+      ],
+      "suggestedAnswers": [
+        {
+          "id": "id-sample",
+          "text": "text-sample",
+          "sourceKind": "profile",
+          "sourceId": "sourceId-sample",
+          "confidenceLabel": "confidenceLabel-sample",
+          "provenance": [
+            {
+              "id": "id-sample",
+              "sourceKind": "profile",
+              "sourceId": "sourceId-sample",
+              "label": "label-sample",
+              "snippet": "snippet-sample"
+            }
+          ]
+        }
+      ],
+      "submittedAnswer": "submittedAnswer-sample",
+      "status": "detected"
+    }
+  ],
+  "blocker": {
+    "code": "missing_candidate_answer",
+    "userActionKind": "login",
+    "summary": "summary-sample",
+    "detail": "detail-sample",
+    "questionIds": [
+      "questionIds0-sample"
+    ],
+    "sourceDebugEvidenceRefIds": [
+      "sourceDebugEvidenceRefIds0-sample"
+    ],
+    "url": "https://jobs.example.test/listing"
+  },
+  "listingSignalEvidence": {
+    "jobId": "jobId-sample",
+    "evidenceId": "evidenceId-sample",
+    "signal": "stale",
+    "detail": "detail-sample",
+    "detectedAt": "2026-10-26T09:00:00.000Z",
+    "confidence": 0,
+    "provenance": "provider",
+    "explanation": "explanation-sample",
+    "recoveryGuidance": "recoveryGuidance-sample"
+  },
+  "consentDecisions": [
+    {
+      "id": "id-sample",
+      "kind": "resume_use",
+      "label": "label-sample",
+      "status": "requested",
+      "decidedAt": "2026-10-26T09:00:00.000Z",
+      "detail": "detail-sample"
+    }
+  ],
+  "replay": {
+    "sourceInstructionArtifactId": "sourceInstructionArtifactId-sample",
+    "sourceDebugEvidenceRefIds": [
+      "sourceDebugEvidenceRefIds0-sample"
+    ],
+    "lastUrl": "https://jobs.example.test/listing",
+    "checkpointUrls": [
+      "https://jobs.example.test/listing"
+    ]
+  },
+  "visualEvidence": [
+    {
+      "snapshotId": "snapshotId-sample",
+      "observationSetId": "observationSetId-sample",
+      "summary": "summary-sample",
+      "capturedAt": "2026-10-26T09:00:00.000Z",
+      "storagePath": "storagePath-sample",
+      "retention": "temporary",
+      "redactionLevel": "none",
+      "confidence": 0,
+      "reconciliationStatus": "agreement"
+    }
+  ],
+  "visualObservationSets": [
+    {
+      "id": "id-sample",
+      "snapshotId": "snapshotId-sample",
+      "observedAt": "2026-10-26T09:00:00.000Z",
+      "url": "https://jobs.example.test/listing",
+      "purpose": "normal_discovery",
+      "providerKind": "deterministic",
+      "providerLabel": "providerLabel-sample",
+      "summary": "summary-sample",
+      "observations": [
+        {
+          "id": "id-sample",
+          "kind": "blocker",
+          "label": "label-sample",
+          "description": "description-sample",
+          "confidence": 0,
+          "severity": "info",
+          "evidenceRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1
+          },
+          "relatedText": "relatedText-sample",
+          "tags": [
+            "tags0-sample"
+          ]
+        }
+      ],
+      "blockers": [
+        "blockers0-sample"
+      ],
+      "visibleControls": [
+        "visibleControls0-sample"
+      ],
+      "jobCardClues": [
+        "jobCardClues0-sample"
+      ],
+      "applyPathClues": [
+        "applyPathClues0-sample"
+      ],
+      "fieldControls": [
+        "fieldControls0-sample"
+      ],
+      "validationErrors": [
+        "validationErrors0-sample"
+      ],
+      "buttonStates": [
+        "buttonStates0-sample"
+      ],
+      "questionContexts": [
+        {
+          "id": "id-sample",
+          "snapshotId": "snapshotId-sample",
+          "observationSetId": "observationSetId-sample",
+          "promptHint": "promptHint-sample",
+          "fieldKindHint": "fieldKindHint-sample",
+          "isRequiredHint": true,
+          "confidence": 0
+        }
+      ],
+      "recoveryNotes": [
+        "recoveryNotes0-sample"
+      ],
+      "uncertainty": [
+        "uncertainty0-sample"
+      ],
+      "reconciliations": [
+        {
+          "id": "id-sample",
+          "targetKind": "job_card",
+          "status": "agreement",
+          "domSummary": "domSummary-sample",
+          "visualSummary": "visualSummary-sample",
+          "confidence": 0,
+          "recommendedHandling": "recommendedHandling-sample"
+        }
+      ],
+      "rejectedOutputReasons": [
+        "rejectedOutputReasons0-sample"
+      ],
+      "fallbackUsed": true
+    }
+  ],
+  "visualCheckpoints": [
+    {
+      "id": "id-sample",
+      "label": "label-sample",
+      "purpose": "normal_discovery",
+      "snapshotId": "snapshotId-sample",
+      "observationSetId": "observationSetId-sample",
+      "summary": "summary-sample",
+      "capturedAt": "2026-10-26T09:00:00.000Z",
+      "retained": true,
+      "storagePath": "storagePath-sample",
+      "blockers": [
+        "blockers0-sample"
+      ],
+      "fieldControls": [
+        "fieldControls0-sample"
+      ],
+      "validationErrors": [
+        "validationErrors0-sample"
+      ],
+      "buttonStates": [
+        "buttonStates0-sample"
+      ],
+      "questionContextIds": [
+        "questionContextIds0-sample"
+      ],
+      "reconciliations": [
+        {
+          "id": "id-sample",
+          "targetKind": "job_card",
+          "status": "agreement",
+          "domSummary": "domSummary-sample",
+          "visualSummary": "visualSummary-sample",
+          "confidence": 0,
+          "recommendedHandling": "recommendedHandling-sample"
+        }
+      ]
+    }
+  ],
+  "nextActionLabel": "nextActionLabel-sample",
+  "executionTimings": [
+    {
+      "stage": "browser_preparation",
+      "startedAt": "2026-10-26T09:00:00.000Z",
+      "completedAt": "2026-10-26T09:00:00.000Z",
+      "durationMs": 0
+    }
+  ],
+  "agentTiming": {
+    "totalMs": 0,
+    "modelMs": 0,
+    "modelTurns": 0,
+    "auxiliaryModelMs": 0,
+    "auxiliaryModelCalls": 0,
+    "tokenUsage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCalls": 0,
+      "unreportedCalls": 0
+    },
+    "questionReadingCalls": 0,
+    "questionReadingMs": 0,
+    "answerCheckCalls": 0,
+    "answerCheckMs": 0,
+    "toolMs": 0,
+    "pageReadMs": 0,
+    "pageReads": 0,
+    "writeMs": 0,
+    "uploadMs": 0,
+    "longestSteps": [
+      {
+        "toolName": "toolName-sample",
+        "durationMs": 0
+      }
+    ],
+    "requests": [
+      {
+        "turn": 1,
+        "historyChars": 0,
+        "observationChars": 0,
+        "fieldsAttempted": 0,
+        "fieldsFilled": 0,
+        "storedFactFills": 0,
+        "answersWaited": 0,
+        "stepsAdvanced": 0,
+        "uploadsAttached": 0
+      }
+    ]
+  },
+  "externalWrites": [
+    {
+      "category": "resume_attachment",
+      "fieldLabel": "fieldLabel-sample",
+      "occurredAt": "2026-10-26T09:00:00.000Z",
+      "verified": true
+    }
+  ],
+  "modelUse": [
+    {
+      "purpose": "application_answering",
+      "providerLabel": "providerLabel-sample",
+      "modelLabel": "modelLabel-sample",
+      "occurredAt": "2026-10-26T09:00:00.000Z",
+      "turns": 0
+    }
+  ]
+}
