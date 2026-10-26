@@ -210,6 +210,18 @@ export function fileUploadProblems(
   });
 }
 
+/**
+ * Whether a field holds its answer. Some widgets (Greenhouse) empty their
+ * file input once they have the file; the storage's receipt for the file
+ * Nestor gave it still makes the field attached.
+ */
+export function holdsAnswer(control: FileControl): boolean {
+  return (
+    control.answered ||
+    (control.kind === "file" && control.upload?.network === "accepted")
+  );
+}
+
 export function unresolvedRequiredControls(observation: ApplyFormObservation) {
   return observation.controls.filter((control, _index, controls) => {
     if (control.disabled || (!control.visible && control.kind !== "file"))
@@ -233,7 +245,7 @@ export function unresolvedRequiredControls(observation: ApplyFormObservation) {
         group[0] === control
       );
     }
-    return control.required && (!control.answered || control.invalid);
+    return control.required && (!holdsAnswer(control) || control.invalid);
   });
 }
 

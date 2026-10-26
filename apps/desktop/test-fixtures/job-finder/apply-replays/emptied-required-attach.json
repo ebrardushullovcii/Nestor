@@ -1,0 +1,21 @@
+{
+  "id": "emptied-required-attach",
+  "provenance": "Shape of the Greenhouse-shaped replica in the 5c70756d replica gate (Fill in for me): the file input is labelled only \"Attach\", described by \"Resume/CV *\", and the widget empties it once it has the file. Storage accepted the selected resume, yet the run asked the person for \"Attach\". Synthetic names; no applicant data.",
+  "url": "http://127.0.0.1:47950/greenhouse-shape/apply/1",
+  "fields": [
+    { "id": "first_name", "label": "First Name *", "value": "Robin" },
+    { "id": "last_name", "label": "Last Name *", "value": "Ashford" },
+    { "id": "email", "label": "Email *", "value": "robin@example.test" }
+  ],
+  "file": {
+    "id": "resume",
+    "label": "Attach",
+    "described": "Resume/CV *",
+    "nearby": "Resume/CV * Attach",
+    "afterUpload": {
+      "value": "",
+      "nearby": "Resume/CV * Attach resume.txt",
+      "network": "accepted"
+    }
+  }
+}
