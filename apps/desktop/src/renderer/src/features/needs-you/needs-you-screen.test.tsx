@@ -15,7 +15,11 @@ import {
   createApplicationStore,
   type ApplicationStore,
 } from "@nestor/db/applications";
-import { openJobStore, type JobStore } from "@nestor/db/job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "@nestor/db/job-store";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import { NeedsYouScreen } from "./needs-you-screen";
@@ -85,7 +89,7 @@ beforeEach(() => {
       }),
     ),
   });
-  jobs.setStage(added, "resume");
+  approveOriginalResumesForTests(jobs, added);
   applications = createApplicationStore(jobs);
   applications.applyJobs({ selection: { ids: added } });
   claimed = [

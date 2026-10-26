@@ -1,5 +1,6 @@
 import type {
   ActivityFeed,
+  ActivityMove,
   ApplicationWorkState,
   JobStage,
 } from "@nestor/contracts";
@@ -167,4 +168,53 @@ export function toActivityItems(feed: ActivityFeed): {
     running: items.filter((item) => item.status === "running").sort(newest),
     finished: items.filter((item) => item.status !== "running").sort(newest),
   };
+}
+
+/** What a move did, in the words its button used. */
+export function describeMove(move: ActivityMove): {
+  title: string;
+  detail: string;
+} {
+  const what = move.count === 1 ? move.title : plural(move.count, "job");
+  const title =
+    move.to === "shortlisted"
+      ? `Shortlisted ${what}`
+      : move.to === "hidden"
+        ? `Hid ${what}`
+        : `Moved ${what} back to Find jobs`;
+  const detail =
+    move.count === 1
+      ? move.company
+      : `${move.title} and ${plural(move.count - 1, "other")}`;
+  return { title, detail };
+}
+
+/** How many of a move's jobs have moved on since, when some have. */
+export function describeMovedOn(move: ActivityMove): string | null {
+  const movedOn = move.count - move.stillThere;
+  return movedOn > 0 && move.stillThere > 0
+    ? `${plural(movedOn, "job")} moved on since`
+    : null;
+}
+
+/**
+ * What Undo did when some jobs had moved on since: those stay where they are.
+ * Null when every job came back.
+ */
+export function describeUndo(
+  move: ActivityMove,
+  putBack: number,
+): { title: string; description: string } | null {
+  const movedOn = move.count - putBack;
+  if (movedOn <= 0) return null;
+  const stayed = `${movedOn === 1 ? "It" : "They"} stayed where ${movedOn === 1 ? "it is" : "they are"}.`;
+  return putBack === 0
+    ? {
+        title: "Nothing to put back",
+        description: `${move.count === 1 ? "This job" : `All ${move.count} jobs`} had moved on since. ${stayed}`,
+      }
+    : {
+        title: `Put back ${plural(putBack, "job")}`,
+        description: `${plural(movedOn, "job")} had moved on since. ${stayed}`,
+      };
 }

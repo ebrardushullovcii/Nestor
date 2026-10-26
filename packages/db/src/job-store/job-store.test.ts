@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createApplicationStore } from "./applications";
 import { openJobStore, type JobStore } from "./job-store";
 
 function found(n: number, overrides: Partial<FoundJob> = {}): FoundJob {
@@ -231,6 +232,81 @@ describe("job store", () => {
     store.moveJobs({ selection: { ids: [a] }, to: "found" });
     store.moveJobs({ selection: { ids: [a] }, to: "shortlisted" });
     expect(approval(a)).toEqual({ approved_at: null, pdf_path: null });
+  });
+
+  it("leaves a job that moved on since a move where it is when that move is undone", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({
+      searchId: "s1",
+      jobs: [found(1), found(2), found(3)],
+    });
+    const [approved, hidden, other] = added as [number, number, number];
+    store.setStage([approved], "resume");
+    store
+      .sql(
+        `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path)
+         VALUES (?, 'tailored', 'ready', 1, 1, 'C:/generated/resume.pdf')`,
+      )
+      .run(approved);
+
+    // Approved, back to Find jobs (A), shortlisted again, which clears the
+    // approval, and back to Find jobs (C). Undoing A must not make it
+    // approved again without an approval.
+    const a = store.moveJobs({ selection: { ids: [approved] }, to: "found" });
+    store.moveJobs({ selection: { ids: [approved] }, to: "shortlisted" });
+    store.moveJobs({ selection: { ids: [approved] }, to: "found" });
+    expect(store.undoMove(a.moveId!).moved).toBe(0);
+    expect(store.getJob(approved)?.stage).toBe("found");
+
+    // Hidden, shown, hidden again: undoing the first hide changes nothing.
+    const firstHide = store.moveJobs({
+      selection: { ids: [hidden, other] },
+      to: "hidden",
+    });
+    store.moveJobs({ selection: { ids: [hidden] }, to: "found" });
+    store.moveJobs({ selection: { ids: [hidden] }, to: "hidden" });
+    const undone = store.undoMove(firstHide.moveId!);
+    expect(undone.moved).toBe(1);
+    expect(store.getJob(hidden)?.stage).toBe("hidden");
+    expect(store.getJob(other)?.stage).toBe("found");
+  });
+
+  it("never undoes a job back into Approved without its approval", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({ searchId: "s1", jobs: [found(1)] });
+    const [id] = added as [number];
+    store.setStage([id], "resume");
+    store
+      .sql(
+        `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path)
+         VALUES (?, 'tailored', 'ready', 1, 1, 'C:/generated/resume.pdf')`,
+      )
+      .run(id);
+
+    // Approved, back to Find jobs (A), shortlisted again, which clears the
+    // approval (B), back to Find jobs (C); then Undo C, B and A in order.
+    const a = store.moveJobs({ selection: { ids: [id] }, to: "found" });
+    const b = store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    const c = store.moveJobs({ selection: { ids: [id] }, to: "found" });
+    expect(store.undoMove(c.moveId!).moved).toBe(1);
+    expect(store.undoMove(b.moveId!).moved).toBe(1);
+    expect(store.undoMove(a.moveId!).moved).toBe(0);
+
+    expect(store.getJob(id)?.stage).toBe("found");
+    expect(
+      createApplicationStore(store).applyJobs({ selection: { ids: [id] } }),
+    ).toEqual({ queued: 0, unchanged: 0, notApproved: 1 });
+  });
+
+  it("undoes a move again once a later move of its jobs is undone", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({ searchId: "s1", jobs: [found(1)] });
+    const [id] = added as [number];
+    const hide = store.moveJobs({ selection: { ids: [id] }, to: "hidden" });
+    const show = store.moveJobs({ selection: { ids: [id] }, to: "found" });
+    store.undoMove(show.moveId!);
+    expect(store.undoMove(hide.moveId!).moved).toBe(1);
+    expect(store.getJob(id)?.stage).toBe("found");
   });
 
   it("pages through a stage in fit order with filters and counts", () => {

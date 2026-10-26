@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createApplicationStore } from "./applications";
 import { createHomeStore } from "./home";
-import { openJobStore, type JobStore } from "./job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "./job-store";
 import { createTrackerStore } from "./tracker";
 
 const DAY = 86_400_000;
@@ -44,7 +48,7 @@ function workspace(now: number) {
     jobs: [1, 2, 3, 4, 5, 6].map(job),
   });
   const approved = added.slice(0, 5);
-  store.setStage(approved, "resume");
+  approveOriginalResumesForTests(store, approved);
   createApplicationStore(store).applyJobs({
     selection: { ids: approved.slice(0, 4) },
   });
@@ -83,6 +87,15 @@ describe("Home summary", () => {
     expect(home.applyWorking).toBe(1);
     expect(home.jobs.found).toBe(1);
     expect(home.foundToday).toBe(1);
+
+    // A job in Approved without an approval is not ready to apply.
+    store
+      .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
+      .run(ids[4]!);
+    expect(
+      createHomeStore(store).summary({ utcOffsetMinutes: 60 }, now)
+        .readyToApply,
+    ).toBe(0);
   });
 
   it("counts only unfinished applications as Apply's work", () => {

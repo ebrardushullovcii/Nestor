@@ -81,6 +81,14 @@ function toRow(row: Row): ApplicationRow {
 }
 
 /** These commands write only the selected rows, inside the shared transaction. */
+/**
+ * Job `j` has an approved resume. Apply works only on these, whatever the
+ * job's stage says; for Original that is the approved row with no tailored
+ * PDF (the imported file).
+ */
+export const HAS_APPROVED_RESUME = `EXISTS (
+  SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
+
 export function createApplicationStore(store: JobStore) {
   const { sql } = store;
   const changed = (ids: number[] | null = null) =>
@@ -107,7 +115,7 @@ export function createApplicationStore(store: JobStore) {
         throw new Error("Apply requires the Approved filter.");
       const filter = toFilterSql(selection.filter);
       return (
-        sql(`SELECT j.id FROM jobs j WHERE ${filter.where}
+        sql(`SELECT j.id FROM jobs j WHERE ${filter.where} AND ${HAS_APPROVED_RESUME}
         AND j.id NOT IN (SELECT value FROM json_each(?)) ORDER BY j.id`).all(
           ...filter.params,
           JSON.stringify(selection.except),
@@ -142,14 +150,20 @@ export function createApplicationStore(store: JobStore) {
         ...filter.params,
         ...("ids" in selection ? [] : [JSON.stringify(selection.except)]),
       ];
+      // A job in Approved without an approval is reported as not approved.
+      const approvedWhere = `${where} AND ${HAS_APPROVED_RESUME}`;
       return store.transaction(() => {
-        const { n: approved } = sql(
-          `SELECT count(*) AS n FROM jobs j WHERE ${where}`,
-        ).get(...params) as { n: number };
+        const count = (condition: string) =>
+          (
+            sql(`SELECT count(*) AS n FROM jobs j WHERE ${condition}`).get(
+              ...params,
+            ) as { n: number }
+          ).n;
+        const approved = count(approvedWhere);
         const now = Date.now();
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
-           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${where}
+           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
            ON CONFLICT(job_id) DO UPDATE SET
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL
@@ -175,7 +189,7 @@ export function createApplicationStore(store: JobStore) {
         return {
           queued,
           unchanged: approved - queued,
-          notApproved: selected ? selected.length - approved : 0,
+          notApproved: (selected ? selected.length : count(where)) - approved,
         };
       });
     },
@@ -611,6 +625,7 @@ export function createApplicationStore(store: JobStore) {
            WHERE id = (
              SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
              WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND j.stage = 'resume'
+               AND ${HAS_APPROVED_RESUME}
              ORDER BY a.queued_at, a.id LIMIT 1
            ) RETURNING id, job_id`,
         ).get(Date.now()) as { id: number; job_id: number } | undefined;

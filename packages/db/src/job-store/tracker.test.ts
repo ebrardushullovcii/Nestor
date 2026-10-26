@@ -2,7 +2,11 @@ import type { FoundJob } from "@nestor/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApplicationStore } from "./applications";
-import { openJobStore, type JobStore } from "./job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "./job-store";
 import { createTrackerStore } from "./tracker";
 
 const stores: JobStore[] = [];
@@ -41,7 +45,7 @@ function sent(count: number) {
     searchId: null,
     jobs: Array.from({ length: count }, (_, i) => job(i + 1)),
   });
-  store.setStage(added, "resume");
+  approveOriginalResumesForTests(store, added);
   createApplicationStore(store).applyJobs({ selection: { ids: added } });
   const tracker = createTrackerStore(store);
   const send = (ids: readonly number[]) =>

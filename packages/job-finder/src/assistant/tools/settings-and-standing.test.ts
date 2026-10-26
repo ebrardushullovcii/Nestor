@@ -1,3 +1,4 @@
+import { approveOriginalResumesForTests } from "@nestor/db/job-store";
 import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
@@ -95,7 +96,7 @@ describe("settings and application standing the assistant reports", () => {
         },
       ],
     });
-    reads.store.setStage(ids, "resume");
+    approveOriginalResumesForTests(reads.store, ids);
     reads.applications.applyJobs({ selection: { ids } });
     reads.applications.claimNext();
     const session = {

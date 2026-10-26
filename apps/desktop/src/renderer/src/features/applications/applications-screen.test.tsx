@@ -4,6 +4,7 @@ import type { ApplicationDetails, FoundJob } from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   createTrackerStore,
+  approveOriginalResumesForTests,
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -67,7 +68,7 @@ beforeEach(() => {
     searchId: null,
     jobs: [job(1), job(2)],
   }));
-  store.setStage(ids, "resume");
+  approveOriginalResumesForTests(store, ids);
   createApplicationStore(store).applyJobs({ selection: { ids } });
   applyWrites(
     ids[0]!,

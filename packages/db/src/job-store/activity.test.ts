@@ -89,6 +89,54 @@ describe("activity feed", () => {
     expect(feed.running).toBe(3);
   });
 
+  it("counts a job moved away and back again as moved on since", () => {
+    const first = store.moveJobs({
+      selection: { ids: [ids[0]!] },
+      to: "hidden",
+    });
+    store.moveJobs({ selection: { ids: [ids[0]!] }, to: "found" });
+    store.moveJobs({ selection: { ids: [ids[0]!] }, to: "hidden" });
+
+    const moves = createActivityStore(store).feed().moves;
+
+    expect(moves.find((move) => move.id === first.moveId)?.stillThere).toBe(0);
+    expect(moves[0]?.stillThere).toBe(1);
+  });
+
+  it("lists the person's moves of the day, and how many jobs each still holds", () => {
+    const shortlist = store.moveJobs({
+      selection: { ids: [ids[0]!, ids[1]!] },
+      to: "shortlisted",
+    });
+    const hide = store.moveJobs({
+      selection: { ids: [ids[2]!] },
+      to: "hidden",
+    });
+    // Something else moved one shortlisted job on since.
+    store.setStage([ids[1]!], "applied");
+
+    const moves = createActivityStore(store).feed().moves;
+
+    expect(
+      moves.map((move) => [move.id, move.to, move.count, move.stillThere]),
+    ).toEqual([
+      [hide.moveId, "hidden", 1, 1],
+      [shortlist.moveId, "shortlisted", 2, 1],
+    ]);
+    expect(moves[1]).toMatchObject({
+      from: ["found"],
+      title: "Analyst 1",
+      company: "Spool 1",
+    });
+
+    store.undoMove(hide.moveId!);
+    expect(
+      createActivityStore(store)
+        .feed()
+        .moves.map((move) => move.id),
+    ).toEqual([shortlist.moveId]);
+  });
+
   it("keeps a finished search for a day", () => {
     const search = store.searches.start(JobSearchSettingsSchema.parse({}), 2);
     store.searches.finish(search.id, "done");

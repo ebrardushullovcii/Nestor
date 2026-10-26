@@ -45,19 +45,44 @@ const feed: ActivityFeed = {
       error: null,
     },
   ],
+  moves: [
+    {
+      id: 11,
+      at: "2026-10-26T11:00:00.000Z",
+      to: "hidden",
+      from: ["found"],
+      count: 1,
+      title: "Platform Engineer",
+      company: "Acme",
+      stillThere: 1,
+    },
+    {
+      id: 10,
+      at: "2026-10-26T10:30:00.000Z",
+      to: "shortlisted",
+      from: ["found"],
+      count: 3,
+      title: "Product Analyst",
+      company: "Globex",
+      stillThere: 0,
+    },
+  ],
   running: 4,
 };
 
 let readFeed: ReturnType<typeof vi.fn>;
+let runJobs: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.resetModules();
   readFeed = vi.fn(() => Promise.resolve(feed));
+  runJobs = vi.fn(() => Promise.resolve({ moveId: 11, moved: 1, counts: {} }));
   Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       activity: { feed: readFeed },
       jobs: {
+        run: runJobs,
         onChange: vi.fn(() => vi.fn()),
         onSearchStatus: vi.fn(() => vi.fn()),
       },
@@ -166,6 +191,57 @@ describe("JobFinderTaskCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(
       await screen.findByRole("region", { name: "Running now" }),
+    ).toBeTruthy();
+  });
+
+  test("undoes one of the person's recent moves", async () => {
+    await renderTaskCenter();
+    fireEvent.click(summary());
+    const moves = await screen.findByRole("region", {
+      name: "Your recent moves",
+    });
+    expect(moves.textContent).toContain("Hid Platform Engineer");
+    expect(moves.textContent).toContain("Shortlisted 3 jobs");
+    expect(moves.textContent).toContain("Product Analyst and 2 others");
+    expect(moves.textContent).toContain("Moved on since");
+    const calls = readFeed.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    await waitFor(() =>
+      expect(runJobs).toHaveBeenCalledWith("undo_move", { moveId: 11 }),
+    );
+    await waitFor(() =>
+      expect(readFeed.mock.calls.length).toBeGreaterThan(calls),
+    );
+  });
+
+  test("says how many jobs came back and how many had moved on since", async () => {
+    readFeed.mockResolvedValue({
+      ...feed,
+      moves: [{ ...feed.moves[1]!, id: 12, stillThere: 2 }],
+    });
+    runJobs.mockResolvedValue({ moveId: 12, moved: 1, counts: {} });
+    const { JobFinderTaskCenter } = await import("./job-finder-task-center");
+    const { ToastProvider } = await import("@renderer/components/ui/toast");
+    render(
+      <ToastProvider>
+        <JobFinderTaskCenter onNavigate={vi.fn()} />
+      </ToastProvider>,
+    );
+    fireEvent.click(summary());
+    const moves = await screen.findByRole("region", {
+      name: "Your recent moves",
+    });
+    expect(moves.textContent).toContain("1 job moved on since");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByText("Put back 1 job")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "2 jobs had moved on since. They stayed where they are.",
+      ),
     ).toBeTruthy();
   });
 });

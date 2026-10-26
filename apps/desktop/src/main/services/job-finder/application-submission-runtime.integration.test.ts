@@ -11,7 +11,11 @@ import {
 } from "@nestor/contracts";
 import { createFileJobFinderRepository } from "@nestor/db";
 import { createApplicationStore } from "@nestor/db/applications";
-import { openJobStore, type JobStore } from "@nestor/db/job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "@nestor/db/job-store";
 import {
   executeExactlyOneFinalAction,
   observeApplicationForm,
@@ -198,7 +202,7 @@ describe("desktop main application submission composition", () => {
           },
         ],
       }).added;
-      jobs.setStage([jobId!], "resume");
+      approveOriginalResumesForTests(jobs, [jobId!]);
       const applications = createApplicationStore(jobs);
       applications.applyJobs(
         { selection: { ids: [jobId!] } },

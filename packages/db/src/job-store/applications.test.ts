@@ -14,7 +14,11 @@ import {
   createSavedAnswersStore,
   readSavedApplicationAnswers,
 } from "./applications";
-import { openJobStore, type JobStore } from "./job-store";
+import {
+  approveOriginalResumesForTests,
+  openJobStore,
+  type JobStore,
+} from "./job-store";
 
 const stores: JobStore[] = [];
 const folders: string[] = [];
@@ -95,7 +99,8 @@ function add(
     }),
   );
   const { added } = jobs.saveFoundJobs({ searchId: "search", jobs: rows });
-  jobs.setStage(added, stage);
+  if (stage === "resume") approveOriginalResumesForTests(jobs, added);
+  else jobs.setStage(added, stage);
   return added;
 }
 
@@ -377,6 +382,44 @@ describe("applications on the job store", () => {
       "autonomous_submit",
     );
   });
+  it("applies only to jobs whose resume is approved, whatever their stage says", () => {
+    const { jobs, applications } = open();
+    const [approved, unapproved, noResume] = add(jobs, 3);
+    jobs
+      .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
+      .run(unapproved!);
+    jobs.sql("DELETE FROM resumes WHERE job_id = ?").run(noResume!);
+
+    expect(
+      applications.applyJobs({
+        selection: { ids: [approved!, unapproved!, noResume!] },
+      }),
+    ).toEqual({ queued: 1, unchanged: 0, notApproved: 2 });
+    expect(
+      applications.applyJobs({
+        selection: { filter: { stage: "resume" }, except: [] },
+      }),
+    ).toEqual({ queued: 0, unchanged: 1, notApproved: 2 });
+  });
+
+  it("claims and freezes only jobs whose resume is still approved", () => {
+    const { jobs, applications } = open();
+    const [kept, unapproved] = add(jobs, 2);
+    applications.applyJobs({ selection: { ids: [kept!, unapproved!] } });
+    jobs
+      .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
+      .run(unapproved!);
+
+    expect(
+      applications.selectedJobIds({
+        filter: { stage: "resume" },
+        except: [],
+      }),
+    ).toEqual([kept]);
+    expect(applications.claimNext()?.jobId).toBe(kept);
+    expect(applications.claimNext()).toBeNull();
+  });
+
   it("queues ids or the complete Approved filter once, skips unapproved jobs, and pages the queue", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 7);
