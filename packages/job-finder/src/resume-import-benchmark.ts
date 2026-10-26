@@ -1147,7 +1147,6 @@ function createBenchmarkContext(input: {
         ),
       ),
     getActiveCampaignId: () => Promise.resolve(null),
-    resumeApplicationUserAction: () => Promise.resolve(undefined),
     runSourceDebugWorkflow: () =>
       Promise.reject(
         new Error("Source debug is not available in the benchmark harness."),

@@ -32,12 +32,6 @@ import {
   hasResumeAffectingJobChange,
 } from "./internal/resume-workspace-staleness";
 import { createWorkspaceApplicationMethods } from "./internal/workspace-application-methods";
-import {
-  isSafelyParkedApplyQueue,
-  recoverInterruptedApplyJobResult,
-  recoverInterruptedApplyRun,
-  recoverInterruptedExactLineageProjections,
-} from "./internal/workspace-apply-run-recovery";
 import { createWorkspaceAssistantEditMethods } from "./internal/workspace-assistant-edit-methods";
 import {
   extractJobsFromPageText,
@@ -229,7 +223,6 @@ export function createJobFinderWorkspaceService(
     researchAdapter,
     fetchListingHtml,
     onActivityControlChanged,
-    onDetachedApplyRunFinished,
     onResumeEvidenceFinished,
     onShortlistResumeChanged,
     onListingAssessmentFinished,
@@ -431,10 +424,6 @@ export function createJobFinderWorkspaceService(
       Promise.reject(new Error("Workspace snapshot reader not initialized.")),
     getActiveCampaignId: async () =>
       (await repository.getCampaignState())?.activeCampaignId ?? null,
-    resumeApplicationUserAction: () =>
-      Promise.reject(
-        new Error("Application user action resumer not initialized."),
-      ),
     runSourceDebugWorkflow: () =>
       Promise.reject(new Error("Source debug workflow not initialized.")),
     persistDiscoveryState: (updater) =>
@@ -721,11 +710,6 @@ export function createJobFinderWorkspaceService(
     saveSettings: (settings) => snapshotProfileMethods.saveSettings(settings),
   });
   const applicationMethods = createWorkspaceApplicationMethods(context);
-  context.resumeApplicationUserAction = (request, taskLocalCredentials) =>
-    applicationMethods.resumeApplicationUserAction(
-      request,
-      taskLocalCredentials,
-    );
   const userActionMethods = createWorkspaceUserActionMethods(context);
   let userActionRecoveryPromise: Promise<void> | null = null;
 
@@ -883,23 +867,13 @@ export function createJobFinderWorkspaceService(
     });
     await repository.saveActivityControl(control);
     await onActivityControlChanged?.(control);
-    // Home's Pause new work lets the current application reach a safe
-    // boundary. The queue waits between jobs and Resume continues that same
-    // run. Browser takeover and shutdown still abort immediately.
+    // Browser takeover and Pause stop a running source check at once.
     if (input.paused && input.pauseBehavior !== "finish_current") {
-      const activeRunIds = [...activeApplyRunAbortControllers.keys()];
       activeSourceDebugAbortControllerRef.current?.abort();
-      for (const controller of activeApplyRunAbortControllers.values()) {
-        controller.abort();
-      }
       await Promise.allSettled(
-        [
-          activeSourceDebugPromiseRef.current,
-          ...activeApplyRunPromises.values(),
-        ].filter((value): value is Promise<unknown> => value != null),
-      );
-      await Promise.allSettled(
-        activeRunIds.map((runId) => applicationMethods.cancelApplyRun(runId)),
+        [activeSourceDebugPromiseRef.current].filter(
+          (value): value is Promise<unknown> => value != null,
+        ),
       );
     } else if (previousControl.paused) {
       // Startup may have checked verifying actions while the workspace was
@@ -908,12 +882,6 @@ export function createJobFinderWorkspaceService(
       // the snapshot below immediately processes the already-persisted
       // verifying actions instead of waiting for another app restart.
       userActionRecoveryPromise = null;
-      if (previousControl.pauseBehavior === "finish_current") {
-        await applicationMethods.resumeParkedApplyRuns(
-          previousControl,
-          onDetachedApplyRunFinished,
-        );
-      }
     }
   }
   async function setActivityControl(
@@ -934,98 +902,12 @@ export function createJobFinderWorkspaceService(
 
     shutdownPromiseRef.current = (async () => {
       invalidateListingReads();
-      const activeApplyRunIds = [...activeApplyRunAbortControllers.keys()];
       activeSourceDebugAbortControllerRef.current?.abort();
-      for (const controller of activeApplyRunAbortControllers.values()) {
-        controller.abort();
-      }
-
       await Promise.allSettled(
-        [
-          activeSourceDebugPromiseRef.current,
-          ...activeApplyRunPromises.values(),
-        ].filter((value): value is Promise<unknown> => value != null),
+        [activeSourceDebugPromiseRef.current].filter(
+          (value): value is Promise<unknown> => value != null,
+        ),
       );
-
-      if (activeApplyRunIds.length > 0) {
-        const activeApplyRunIdSet = new Set(activeApplyRunIds);
-        const [applyRuns, applyResults, activityControl] = await Promise.all([
-          repository.listApplyRuns().catch(() => []),
-          repository.listApplyJobResults().catch(() => []),
-          repository.getActivityControl(),
-        ]);
-        const completedAt = new Date().toISOString();
-        const parkedRunIds = new Set(
-          applyRuns
-            .filter(
-              (run) =>
-                activeApplyRunIdSet.has(run.id) &&
-                isSafelyParkedApplyQueue({
-                  run,
-                  results: applyResults.filter(
-                    (result) => result.runId === run.id,
-                  ),
-                  control: activityControl,
-                }),
-            )
-            .map((run) => run.id),
-        );
-        const activeRunningRuns = applyRuns.filter(
-          (run) =>
-            activeApplyRunIdSet.has(run.id) &&
-            run.state === "running" &&
-            !parkedRunIds.has(run.id),
-        );
-        const activeResults = applyResults.filter(
-          (result) =>
-            activeApplyRunIdSet.has(result.runId) &&
-            !parkedRunIds.has(result.runId),
-        );
-        const recoveredRuns = activeRunningRuns.map((run) =>
-          recoverInterruptedApplyRun(
-            run,
-            completedAt,
-            activeResults.filter((result) => result.runId === run.id),
-          ),
-        );
-        const recoveredResults: ApplyJobResult[] = [];
-        const terminalizedRecordIds = new Set<string>();
-        for (const result of activeResults) {
-          const recoveredResult = recoverInterruptedApplyJobResult(
-            result,
-            completedAt,
-          );
-          if (!recoveredResult) {
-            continue;
-          }
-          // Exact applicationRecordId lineage only: legacy null-lineage
-          // rows are terminalized without being attributed to a record.
-          if (result.applicationRecordId) {
-            terminalizedRecordIds.add(result.applicationRecordId);
-          }
-          recoveredResults.push(recoveredResult);
-        }
-        // Crash-resumable persist order: exact-lineage projections land
-        // before the run/result commits, so a crash mid-shutdown leaves the
-        // parent runs durably non-terminal and the next startup replay
-        // finishes the job idempotently instead of stranding in-progress
-        // attempt/record rows under already-terminal runs.
-        await Promise.allSettled([
-          recoverInterruptedExactLineageProjections({
-            repository,
-            interruptedRecordIds: terminalizedRecordIds,
-            completedAt,
-            eventIdFor: (recordId) =>
-              `event_shutdown_app_closed_recovery_${recordId}`,
-          }),
-        ]);
-        await Promise.allSettled([
-          ...recoveredRuns.map((run) => repository.upsertApplyRun(run)),
-          ...recoveredResults.map((result) =>
-            repository.upsertApplyJobResult(result),
-          ),
-        ]);
-      }
 
       const shutdownResults = await Promise.allSettled([
         ...(resumeDraftProcessor ? [resumeDraftProcessor.close()] : []),

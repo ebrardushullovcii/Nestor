@@ -19,7 +19,6 @@ import type {
   ParkedBrowserTabReference,
   SavedJob,
   SourceDebugRunRecord,
-  UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import type { createListingActivityIdentityIndex } from "./listing-activity-identity-index";
@@ -125,10 +124,6 @@ export interface WorkspaceServiceContext {
    */
   readWorkspaceProjection?: () => Promise<JobFinderWorkspaceSnapshot>;
   getActiveCampaignId: () => Promise<string | null>;
-  resumeApplicationUserAction: (
-    request: UserActionRequest,
-    taskLocalCredentials?: TaskLocalApplicationCredentials,
-  ) => Promise<void>;
   runSourceDebugWorkflow: (
     targetId: string,
     signal?: AbortSignal,
