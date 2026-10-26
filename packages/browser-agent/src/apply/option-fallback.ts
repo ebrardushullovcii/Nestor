@@ -5,13 +5,16 @@ import { matchOption } from "./option-match";
 export function resolveOptionFallback(
   options: readonly string[],
   rule: SavedOptionFallback,
+  complete = true,
 ):
   | { kind: "unknown" }
   | { kind: "choice"; value: string }
   | { kind: "skip"; reason: string } {
   if (!options.length) return { kind: "unknown" };
-  const value =
-    matchOption(options, rule.primary) ?? matchOption(options, rule.fallback);
+  const primary = matchOption(options, rule.primary);
+  if (primary) return { kind: "choice", value: primary };
+  if (!complete) return { kind: "unknown" };
+  const value = matchOption(options, rule.fallback);
   return value
     ? { kind: "choice", value }
     : {

@@ -6467,3 +6467,70 @@ test.each(fallbackReplay.cases)(
     }
   },
 );
+test.each([true, false])(
+  "a saved custom-picker rule tries primary then fallback once (fallback offered: %s)",
+  async (offered) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          role: "combobox",
+          label: fallbackReplay.question,
+          value: "",
+          options: ["Other region"],
+        },
+      ],
+    });
+    const input = config(source);
+    input.sources.reusableAnswers = [
+      {
+        id: "saved-rule",
+        kind: "other",
+        label: fallbackReplay.question,
+        question: fallbackReplay.question,
+        answer: fallbackReplay.primary,
+        roleFamilies: [],
+        proofEntryIds: [],
+        optionFallback: {
+          primary: fallbackReplay.primary,
+          fallback: fallbackReplay.fallback,
+          whenNeitherOffered: "skip_application",
+        },
+      },
+    ];
+    const choose = vi.fn((_ref: string, value: string) => {
+      if (offered && value === fallbackReplay.fallback) {
+        source.controls[0].value = value;
+        source.controls[0].selectedOptionLabel = value;
+        return Promise.resolve({ ok: true as const, observedValue: value });
+      }
+      source.controls[0].value = value;
+      return Promise.resolve({
+        ok: false as const,
+        error: "Not offered",
+        reason: "option_not_offered" as const,
+        offeredOptions: ["Other region"],
+      });
+    });
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "select", args: { ref: "c0", option: fallbackReplay.primary } },
+        { name: "finish", args: { reason: "Done" } },
+      ]),
+    );
+    expect(choose.mock.calls.map((call) => call[1])).toEqual([
+      fallbackReplay.primary,
+      fallbackReplay.fallback,
+    ]);
+    expect(result.readyToSend).toBeNull();
+    if (offered)
+      expect(result.filled[0]?.answer.value).toBe(fallbackReplay.fallback);
+    else {
+      expect(result.skipReason).toContain("neither");
+      expect(result.pauses).toHaveLength(0);
+      expect(result.modelTurns).toBe(1);
+    }
+  },
+);

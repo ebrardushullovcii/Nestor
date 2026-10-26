@@ -30,6 +30,7 @@ import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
 import type {
+  ApplyWriteResult,
   ApplyAgentConfig,
   ApplyAnswer,
   ApplyAttachedDocument,
@@ -1042,11 +1043,9 @@ async function writeUnderGuard(
   deps: ApplyExecutorDeps,
   input: {
     declaredValue: string | null;
-    write: () => Promise<
-      { ok: true; observedValue: string } | { ok: false; error: string }
-    >;
+    write: () => Promise<ApplyWriteResult>;
   },
-): Promise<{ ok: true; observedValue: string } | { ok: false; error: string }> {
+): Promise<ApplyWriteResult> {
   const safety = deps.config.safety;
   if (!safety) {
     return input.write();
@@ -1348,7 +1347,9 @@ export async function executeApplyProposal(
       control,
       config.sources.reusableAnswers,
     )?.optionFallback;
-    const decision = rule ? resolveOptionFallback(control.options, rule) : null;
+    const decision = rule
+      ? resolveOptionFallback(control.options, rule, control.kind === "select")
+      : null;
     if (decision?.kind === "skip")
       return { kind: "skipped", reason: decision.reason };
   }
@@ -1810,7 +1811,11 @@ export async function executeApplyProposal(
         config.sources.reusableAnswers,
       );
       const rule = savedRule?.optionFallback
-        ? resolveOptionFallback(control.options, savedRule.optionFallback)
+        ? resolveOptionFallback(
+            control.options,
+            savedRule.optionFallback,
+            control.kind === "select",
+          )
         : null;
       if (rule?.kind === "skip")
         return { kind: "skipped", reason: rule.reason };
@@ -1824,7 +1829,7 @@ export async function executeApplyProposal(
           at,
         );
       if (
-        rule?.kind !== "choice" &&
+        !savedRule?.optionFallback &&
         control.options.length &&
         !matchOption(control.options, proposal.option)
       )
@@ -1835,32 +1840,33 @@ export async function executeApplyProposal(
           `Offered: ${control.options.join(", ")}.`,
           at,
         );
-      const choice: AnswerDecision =
-        rule?.kind === "choice"
-          ? {
-              kind: "use",
-              answer: {
-                value: rule.value,
-                kind: control.questionKind,
-                sourceKind: "answer_library",
-                sourceId: `answerLibrary.${savedRule!.id}`,
-                provenanceLabel: "your saved picker fallback rule",
-                groundedIn: ["your saved picker fallback rule"],
-              },
-            }
-          : await decideAnswer({
-              deps,
-              control,
+      const choice: AnswerDecision = savedRule?.optionFallback
+        ? {
+            kind: "use",
+            answer: {
               value:
-                matchOption(control.options, proposal.option) ??
-                proposal.option,
-              storedFactId: proposal.storedFactId,
-            });
+                rule?.kind === "choice"
+                  ? rule.value
+                  : savedRule.optionFallback.primary,
+              kind: control.questionKind,
+              sourceKind: "answer_library",
+              sourceId: `answerLibrary.${savedRule!.id}`,
+              provenanceLabel: "your saved picker fallback rule",
+              groundedIn: ["your saved picker fallback rule"],
+            },
+          }
+        : await decideAnswer({
+            deps,
+            control,
+            value:
+              matchOption(control.options, proposal.option) ?? proposal.option,
+            storedFactId: proposal.storedFactId,
+          });
       if (choice.kind === "leave") {
         return notEntered({ deps, control, observation, at, decision: choice });
       }
-      const option =
-        control.options.length > 0
+      let option =
+        !savedRule?.optionFallback && control.options.length > 0
           ? matchOption(control.options, choice.answer.value)
           : choice.answer.value;
       if (!option)
@@ -1871,16 +1877,41 @@ export async function executeApplyProposal(
           `Offered: ${control.options.join(", ")}.`,
           at,
         );
-      const write = await writeUnderGuard(deps, {
+      let write = await writeUnderGuard(deps, {
         declaredValue: option,
         write: () => config.hands.chooseOption(control.ref, option),
       });
+      if (
+        !write.ok &&
+        write.reason === "option_not_offered" &&
+        savedRule?.optionFallback &&
+        control.kind === "combobox"
+      ) {
+        const fallbackOption = savedRule.optionFallback.fallback;
+        option = fallbackOption;
+        write = await writeUnderGuard(deps, {
+          declaredValue: option,
+          write: () => config.hands.chooseOption(control.ref, fallbackOption),
+        });
+        if (!write.ok && write.reason === "option_not_offered")
+          return {
+            kind: "skipped",
+            reason: `The form's list has neither ${savedRule.optionFallback.primary} nor ${savedRule.optionFallback.fallback}. Your saved rule says to skip this application.`,
+          };
+        if (!write.ok)
+          deps.guardState.pickerFailures.set(key, MAX_PICKER_ATTEMPTS - 1);
+      }
       if (!write.ok) {
         const after = await config.hands.observe();
         return pickerHandover(
           deps,
           after,
-          findControl(after, control.ref) ?? control,
+          {
+            ...(findControl(after, control.ref) ?? control),
+            options:
+              write.offeredOptions ??
+              (findControl(after, control.ref) ?? control).options,
+          },
           write.error,
           at,
         );

@@ -2361,7 +2361,11 @@ async function runMeasuredApplyAgent(
           runConfig.sources.reusableAnswers,
         )?.optionFallback;
         const decision = rule
-          ? resolveOptionFallback(control.options, rule)
+          ? resolveOptionFallback(
+              control.options,
+              rule,
+              control.kind === "select",
+            )
           : null;
         if (decision?.kind === "skip") {
           skipReason = decision.reason;
