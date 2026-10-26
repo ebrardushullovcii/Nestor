@@ -543,7 +543,12 @@ describe("Job Finder application authority service", () => {
       revokedAt: null,
     });
     const applicationSends = {
-      read: vi.fn((_applicationRecordId: string) => ({
+      read: vi.fn<
+        (applicationRecordId: string) => {
+          receipt: typeof uncertainOutcome;
+          pageUrl: string;
+        }
+      >(() => ({
         receipt: uncertainOutcome,
         pageUrl: "https://jobs.example.com/apply?step=2",
       })),
