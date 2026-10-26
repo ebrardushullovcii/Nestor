@@ -357,3 +357,61 @@ test("a picker in a frame reports only that frame's choices despite matching lis
     expect(await control.inputValue()).toBe(replay.offered[0]);
   });
 }, 20_000);
+
+test("rows a search left are never the form's choices when the full list cannot be read", async () => {
+  // Typing filters the list; clearing the search closes it, so the full list
+  // is never read.
+  await withPage(async (page) => {
+    const options = [...replay.offered, replay.variant];
+    await page.setContent(`
+      <label>Country<input role="combobox" aria-controls="search-options"></label>
+      <div id="search-options" role="listbox"></div>
+      <script>
+        const options = ${JSON.stringify(options)};
+        const input = document.querySelector("input");
+        const list = document.getElementById("search-options");
+        input.addEventListener("input", () => {
+          list.replaceChildren();
+          if (!input.value) return;
+          for (const text of options.filter((entry) => entry.toLowerCase().includes(input.value.toLowerCase().slice(0, 3)))) {
+            const row = document.createElement("div");
+            row.setAttribute("role", "option");
+            row.textContent = text;
+            list.appendChild(row);
+          }
+        });
+      </script>`);
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      "Fallback territory",
+    );
+    expect(result.ok).toBe(false);
+    expect(result).not.toHaveProperty("reason");
+  });
+}, 30_000);
+
+test("a windowed list with no scroll box of its own is not read as complete", async () => {
+  // 300 rows, 12 drawn, each saying where it sits and how many there are;
+  // nothing in reach scrolls, so the first window is all that can be seen.
+  await withPage(async (page) => {
+    await page.setContent(`
+      <label>Country<input role="combobox" readonly aria-controls="window-options"></label>
+      <div style="height:240px;overflow:hidden"><div><div><div id="window-options" role="listbox">
+        ${longList
+          .slice(0, 12)
+          .map(
+            (text, index) =>
+              `<div role="option" aria-setsize="${longList.length}" aria-posinset="${index + 1}">${text}</div>`,
+          )
+          .join("")}
+      </div></div></div></div>`);
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      longList[replay.longListWantedIndex]!,
+    );
+    expect(result.ok).toBe(false);
+    expect(result).not.toHaveProperty("reason");
+  });
+}, 30_000);

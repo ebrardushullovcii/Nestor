@@ -221,9 +221,19 @@ async function readWholeList(
         }
         return found;
       };
+      // A list that draws only some of its rows says how many it has
+      // (aria-setsize) or where a row sits (aria-posinset).
+      const windowed = () =>
+        Array.from(
+          element.querySelectorAll<HTMLElement>("[role='option']"),
+        ).some(
+          (option) =>
+            Number(option.getAttribute("aria-setsize") ?? 0) > seen.size ||
+            Number(option.getAttribute("aria-posinset") ?? 0) > seen.size,
+        );
       const done = (complete: boolean, found: string | null) => ({
         options: [...seen.values()],
-        complete,
+        complete: found !== null || (complete && !windowed()),
         found,
       });
       let found = collect();
@@ -486,12 +496,12 @@ async function chooseFromList(
       observedValue: await clickRow(listed.list, whole.found),
     };
   await leave();
+  // The rows a search left are not what the form offers: without the whole
+  // list nothing proves the choice absent.
   if (!whole?.complete)
-    return searched
-      ? missing(label, searched)
-      : uncertain(
-          "The search found nothing and the full list could not be read, so its choices could not be confirmed.",
-        );
+    return uncertain(
+      "The full option list could not be read after the search, so its choices could not be confirmed.",
+    );
   const offered = [...(searched ?? [])];
   for (const option of whole.options)
     if (
