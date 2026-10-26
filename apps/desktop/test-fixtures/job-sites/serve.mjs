@@ -445,6 +445,24 @@ const server = http.createServer(async (req, res) => {
     if (await scale.handle(req, res, url)) return;
     if (await handleHandoverOptions(req, res, url, { send, readPost, logPost }))
       return;
+    // A site whose protection refuses automated browsers: its listings
+    // read, its application pages answer 403 with a block notice.
+    const blocked = /^\/blocked-site\/(jobs|apply)\/([12])$/u.exec(path);
+    if (blocked) {
+      if (blocked[1] === "jobs")
+        return send(
+          200,
+          page(
+            "blocked-site",
+            `Support Engineer ${blocked[2]}`,
+            `<p>Shield Gate Replica · Remote, Worldwide</p><p>Help fictional customers.</p><a href="/blocked-site/apply/${blocked[2]}">Apply</a>`,
+          ),
+        );
+      return send(
+        403,
+        "<!doctype html><title>Access denied</title><h1>You have been blocked.</h1><p>Automated requests are not allowed.</p>",
+      );
+    }
     if (
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )
