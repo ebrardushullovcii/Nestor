@@ -270,8 +270,9 @@ export function storedFacts(
   add(profile.personalWebsiteUrl, "profile.personalWebsiteUrl", "your website");
   for (const link of profile.links) {
     add(link.url, `profile.links.${link.id}`, "a link on your profile");
+    // A link may be someone else's repository; only an account link names the person.
     add(
-      githubUsername(link.url),
+      githubUsername(link.url, { profileOnly: true }),
       `profile.links.${link.id}#username`,
       "the username from your code profile",
     );
@@ -303,9 +304,10 @@ export function storedFactFor(input: {
   value: string;
   storedFactId?: string | undefined;
 }): ApplyAnswer | null {
+  const wantsUsername = asksGithubUsername(input.control);
   const wanted = formatGithubAnswer(input.control, input.value).trim();
   const factId =
-    asksGithubUsername(input.control) &&
+    wantsUsername &&
     input.storedFactId &&
     (input.storedFactId === "profile.githubUrl" ||
       input.storedFactId.startsWith("profile.links.")) &&
@@ -327,7 +329,10 @@ export function storedFactFor(input: {
     payDisclosed: input.payDisclosed,
   }).find(
     (candidate) =>
-      (!factId || candidate.sourceId === factId) && candidate.value === wanted,
+      (!factId || candidate.sourceId === factId) &&
+      candidate.value === wanted &&
+      // A bare username is no answer to a field that asks for the address.
+      (wantsUsername || !candidate.sourceId.endsWith("#username")),
   );
   if (!fact) return null;
   // A short value such as Yes, No or a number answers whatever it is put

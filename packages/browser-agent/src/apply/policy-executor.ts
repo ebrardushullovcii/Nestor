@@ -5,6 +5,8 @@ import {
   cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
   type ApplicationAttemptQuestion,
+  type ApplyPickerAttempt,
+  type ApplyWriteResult,
 } from "@nestor/contracts";
 
 import {
@@ -141,7 +143,15 @@ export interface ApplyExecutorDeps {
 }
 
 export interface ApplyGuardState {
-  pickerFailures: Map<string, number>;
+  /**
+   * Choices each picker question on this application refused, across runs,
+   * and what its list offered then. A refused choice is never tried again.
+   */
+  pickerAttempts: Map<string, ApplyPickerAttempt>;
+  /** Pickers whose last attempt in this run failed: not answered, whatever the box shows. */
+  openPickers: Set<string>;
+  /** Pickers the model asked for a refused choice again: it has no other to try. */
+  repeatedPickers: Set<string>;
   acknowledged: Set<string>;
   hasWritten: boolean;
   lastFieldLabel: string | null;
@@ -159,9 +169,15 @@ export interface ApplyGuardState {
   lastOnSiteUrl: string | null;
 }
 
-export function createApplyGuardState(): ApplyGuardState {
+export function createApplyGuardState(
+  pickerAttempts: readonly ApplyPickerAttempt[] = [],
+): ApplyGuardState {
   return {
-    pickerFailures: new Map(),
+    pickerAttempts: new Map(
+      pickerAttempts.map((attempt) => [attempt.question, attempt]),
+    ),
+    openPickers: new Set(),
+    repeatedPickers: new Set(),
     acknowledged: new Set<string>(),
     hasWritten: false,
     lastFieldLabel: null,
@@ -174,41 +190,81 @@ export function createApplyGuardState(): ApplyGuardState {
   };
 }
 
+/** Distinct choices a picker may refuse before Job Finder stops choosing for it. */
 export const MAX_PICKER_ATTEMPTS = 2;
-export function pickerFieldKey(
-  page: ApplyFormObservation,
-  control: ApplyFormControl,
-): string {
-  return JSON.stringify([
-    page.url,
-    page.step.index ?? page.step.label,
-    questionPrompt(control),
-  ]);
+
+/** One picker question on this application, the same across reloads and reruns. */
+export function pickerQuestionKey(control: ApplyFormControl): string {
+  return normalizeFormQuestionPrompt(questionPrompt(control));
 }
+
+export function pickerExhausted(
+  guardState: ApplyGuardState,
+  control: ApplyFormControl,
+): boolean {
+  const key = pickerQuestionKey(control);
+  return (
+    guardState.repeatedPickers.has(key) ||
+    (guardState.pickerAttempts.get(key)?.tried.length ?? 0) >=
+      MAX_PICKER_ATTEMPTS
+  );
+}
+
+/** Remembers a refused choice and what the list offered instead, when it said. */
+function recordPickerFailure(
+  guardState: ApplyGuardState,
+  control: ApplyFormControl,
+  option: string,
+  offeredOptions: readonly string[] | undefined,
+): void {
+  const question = pickerQuestionKey(control);
+  const previous = guardState.pickerAttempts.get(question);
+  const tried = normalizeSignal(option);
+  guardState.pickerAttempts.set(question, {
+    question,
+    tried: [
+      ...(previous?.tried ?? []).filter((value) => value !== tried),
+      tried,
+    ].slice(-20),
+    offeredOptions: offeredOptions?.length
+      ? offeredOptions.slice(0, 500)
+      : (previous?.offeredOptions ?? []),
+  });
+  guardState.openPickers.add(question);
+}
+
+/**
+ * A picker that would not take the choice. A required one goes to the person
+ * with the choices the form's own list showed; an optional one is left blank.
+ */
 function pickerHandover(
   deps: ApplyExecutorDeps,
   observation: ApplyFormObservation,
   control: ApplyFormControl,
+  option: string,
   detail: string,
   at: string,
 ): ApplyExecutionOutcome {
-  const key = pickerFieldKey(observation, control);
-  const count = Math.min(
-    MAX_PICKER_ATTEMPTS,
-    (deps.guardState.pickerFailures.get(key) ?? 0) + 1,
-  );
-  deps.guardState.pickerFailures.set(key, count);
   control.answered = false;
-  const reason =
-    count >= MAX_PICKER_ATTEMPTS
-      ? `This picker could not select an offered option after ${MAX_PICKER_ATTEMPTS} tries. Choose from the form's options or open the form yourself. ${detail}`
-      : `The form did not offer that choice. Use a fallback only if the person saved a rule for this question; otherwise leave it for them. ${detail}`;
+  const offered =
+    deps.guardState.pickerAttempts.get(pickerQuestionKey(control))
+      ?.offeredOptions ?? [];
+  const exhausted = pickerExhausted(deps.guardState, control);
+  if (!control.required)
+    return {
+      kind: "refused",
+      reason: `"${questionPrompt(control)}" is optional and its list did not take "${option}". Leave it blank and carry on. ${detail}`,
+      observation,
+    };
+  const reason = offered.length
+    ? `The form's list does not include "${option}". Choose one of the options it offers.`
+    : `The form's list did not take "${option}". Enter the answer the way the form lists it.`;
   return {
     kind: "suggestion",
     answer: null,
     controlRef: control.ref,
     observation,
-    note: reason,
+    note: `${detail} ${exhausted ? "No further automatic attempts will be made on this picker; it is now with the person." : "Choose a different option only if the person saved a rule for this question; otherwise it is with the person."}`,
     question: {
       ...buildPendingQuestion({
         control,
@@ -218,7 +274,7 @@ function pickerHandover(
         siblings: observation.controls,
         reason,
       }),
-      answerOptions: [...control.options],
+      answerOptions: [...offered],
     },
   };
 }
@@ -1040,11 +1096,9 @@ async function writeUnderGuard(
   deps: ApplyExecutorDeps,
   input: {
     declaredValue: string | null;
-    write: () => Promise<
-      { ok: true; observedValue: string } | { ok: false; error: string }
-    >;
+    write: () => Promise<ApplyWriteResult>;
   },
-): Promise<{ ok: true; observedValue: string } | { ok: false; error: string }> {
+): Promise<ApplyWriteResult> {
   const safety = deps.config.safety;
   if (!safety) {
     return input.write();
@@ -1347,25 +1401,22 @@ export async function executeApplyProposal(
     };
   }
 
-  if (
-    (proposal.tool === "click" ||
-      proposal.tool === "type" ||
-      proposal.tool === "select") &&
-    "ref" in proposal
-  ) {
+  // Typing into or choosing in a picker goes through the select checks
+  // below; clicking it open is the one way round them.
+  if (proposal.tool === "click") {
     const control = findControl(observation, proposal.ref);
     if (
       control &&
       (control.kind === "select" || control.kind === "combobox") &&
-      (deps.guardState.pickerFailures.get(
-        pickerFieldKey(observation, control),
-      ) ?? 0) >= MAX_PICKER_ATTEMPTS
+      !control.answered &&
+      pickerExhausted(deps.guardState, control)
     )
       return pickerHandover(
         deps,
         observation,
         control,
-        "No further automatic attempts will be made on this picker.",
+        control.selectedOptionLabel || control.value || questionPrompt(control),
+        "This picker refused its choices already.",
         at,
       );
   }
@@ -1788,26 +1839,6 @@ export async function executeApplyProposal(
         };
       }
       const control = await withModelQuestionKinds(deps, observation, found);
-      const key = pickerFieldKey(observation, control);
-      if ((deps.guardState.pickerFailures.get(key) ?? 0) >= MAX_PICKER_ATTEMPTS)
-        return pickerHandover(
-          deps,
-          observation,
-          control,
-          "No further automatic attempts will be made on this picker.",
-          at,
-        );
-      if (
-        control.options.length &&
-        !matchOption(control.options, proposal.option)
-      )
-        return pickerHandover(
-          deps,
-          observation,
-          control,
-          `Offered: ${control.options.join(", ")}.`,
-          at,
-        );
       const choice = await decideAnswer({
         deps,
         control,
@@ -1817,16 +1848,35 @@ export async function executeApplyProposal(
       if (choice.kind === "leave") {
         return notEntered({ deps, control, observation, at, decision: choice });
       }
+      // The list read with the page may stop short of the form's real
+      // choices, so a choice missing from it still goes to the picker.
       const option =
-        control.options.length > 0
-          ? matchOption(control.options, choice.answer.value)
-          : choice.answer.value;
-      if (!option)
+        matchOption(control.options, choice.answer.value) ??
+        choice.answer.value;
+      const key = pickerQuestionKey(control);
+      const attempts = deps.guardState.pickerAttempts.get(key);
+      if (attempts?.tried.includes(normalizeSignal(option))) {
+        deps.guardState.repeatedPickers.add(key);
         return pickerHandover(
           deps,
           observation,
           control,
-          `Offered: ${control.options.join(", ")}.`,
+          option,
+          `"${option}" was already tried on this application and the form did not take it.`,
+          at,
+        );
+      }
+      // After two refused choices only the person's own answers are tried.
+      if (
+        pickerExhausted(deps.guardState, control) &&
+        choice.answer.sourceKind === "generated"
+      )
+        return pickerHandover(
+          deps,
+          observation,
+          control,
+          option,
+          `This picker refused ${MAX_PICKER_ATTEMPTS} choices already.`,
           at,
         );
       const write = await writeUnderGuard(deps, {
@@ -1834,16 +1884,27 @@ export async function executeApplyProposal(
         write: () => config.hands.chooseOption(control.ref, option),
       });
       if (!write.ok) {
+        recordPickerFailure(
+          deps.guardState,
+          control,
+          option,
+          write.reason === "option_not_offered"
+            ? write.offeredOptions
+            : undefined,
+        );
         const after = await config.hands.observe();
         return pickerHandover(
           deps,
           after,
           findControl(after, control.ref) ?? control,
+          option,
           write.error,
           at,
         );
       }
-      deps.guardState.pickerFailures.delete(key);
+      // Earlier refusals stay on record: a later success, perhaps with a
+      // substitute, does not make the refused choices available.
+      deps.guardState.openPickers.delete(key);
       afterWrite(deps, questionPrompt(control));
       const stop = await guardStop(deps, observation.url);
       if (stop) {

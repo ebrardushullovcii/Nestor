@@ -6386,8 +6386,13 @@ test("picker replay: two attempts end in Needs you with offered options, even wh
   input.sources.profile.currentCountry = pickerReplay.primary;
   const chooseOption = vi.fn((_ref: string, option: string) => {
     source.controls[0].value = option;
-    source.controls[0].options = pickerReplay.options;
-    return Promise.resolve({ ok: false as const, error: "No matching option" });
+    source.controls[0].options = pickerReplay.snapshotOptions;
+    return Promise.resolve({
+      ok: false as const,
+      reason: "option_not_offered" as const,
+      offeredOptions: pickerReplay.options,
+      error: "No matching option",
+    });
   });
   input.hands.chooseOption = chooseOption;
   const model = repeatingModel("select", {
@@ -6402,5 +6407,79 @@ test("picker replay: two attempts end in Needs you with offered options, even wh
   const questions = result.pauses.flatMap(
     (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
   );
+  // The form's own list, not the part of it read with the page.
   expect(questions[0].answerOptions).toEqual(pickerReplay.options);
+  expect(result.pickerAttempts).toEqual([
+    expect.objectContaining({
+      tried: [pickerReplay.primary.toLowerCase()],
+      offeredOptions: pickerReplay.options,
+    }),
+  ]);
+
+  // A rerun of the same application does not spend the picker again.
+  const rerunSource = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: pickerReplay.question,
+        role: "combobox",
+        value: "",
+        options: [],
+      },
+    ],
+  });
+  const rerun = config(rerunSource, {
+    initialPickerAttempts: result.pickerAttempts,
+  });
+  rerun.sources.profile.currentCountry = pickerReplay.primary;
+  const rerunChoose = vi.fn(chooseOption);
+  rerun.hands.chooseOption = rerunChoose;
+  const again = await runApplyAgent(
+    rerun,
+    repeatingModel("select", { ref: "c0", option: pickerReplay.primary }),
+  );
+  expect(again.outcome).toBe("paused");
+  expect(rerunChoose).not.toHaveBeenCalled();
+  expect(again.modelTurns).toBe(1);
+});
+
+test("picker replay: an optional picker that refuses its choice is left blank and the form still finishes", async () => {
+  const source = page({
+    controls: [
+      nameControl(),
+      {
+        ...nameControl(),
+        index: 1,
+        id: "f1",
+        name: "f1",
+        label: pickerReplay.question,
+        role: "combobox",
+        required: false,
+        value: "",
+        options: [],
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.profile.currentCountry = pickerReplay.primary;
+  const chooseOption = vi.fn(() =>
+    Promise.resolve({
+      ok: false as const,
+      reason: "option_not_offered" as const,
+      offeredOptions: pickerReplay.options,
+      error: "No matching option",
+    }),
+  );
+  input.hands.chooseOption = chooseOption;
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "select", args: { ref: "c1", option: pickerReplay.primary } },
+      { name: "select", args: { ref: "c1", option: pickerReplay.primary } },
+      { name: "finish", args: { reason: "Filled the form." } },
+    ]),
+  );
+  expect(chooseOption).toHaveBeenCalledTimes(1);
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  expect(result.outcome).toBe("prepared");
 });

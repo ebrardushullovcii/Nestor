@@ -171,6 +171,7 @@ export function buildApplyFormObservation(
           }
         : {}),
       label: rawControl.label.trim(),
+      ...(rawControl.hint?.trim() ? { hint: rawControl.hint.trim() } : {}),
       groupLabel: rawControl.groupLabel.trim(),
       ...(kind === "radio" || (kind === "checkbox" && !rawControl.required)
         ? {

@@ -1,8 +1,11 @@
 {
   "id": "unavailable-picker-option",
-  "provenance": "Synthetic unavailable option and picker loop; no applicant data.",
+  "provenance": "Synthetic unavailable option and picker loop; shapes from the pass-13 real round (a country list without the person's country, a search left uncommitted) and the L1 review; no applicant data.",
   "question": "Country of residence",
   "primary": "Unlisted territory",
   "options": ["Listed region", "Other region"],
-  "savedRule": "If Unlisted territory is missing, use Listed region if offered; otherwise skip this application."
+  "snapshotOptions": ["Listed region"],
+  "savedRule": "If Unlisted territory is missing, use Listed region if offered; otherwise skip this application.",
+  "readListSize": 200,
+  "beyondReadList": "Region 250"
 }
