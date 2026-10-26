@@ -54,7 +54,6 @@ import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
   ApplicationResumeArtifactSchema,
-  JobFinderInterviewFollowUpInputSchema,
   isResumeTemplateApplyEligible,
   SavedJobSchema,
   type SavedJob,
@@ -92,7 +91,7 @@ import {
   mergeEvents,
   resolveActiveSourceInstructionArtifact,
 } from "./workspace-helpers";
-import { createUniqueId, uniqueStrings } from "./shared";
+import { uniqueStrings } from "./shared";
 import {
   DEFAULT_RESUME_APPLICATION_MODE,
   resolveJobResumeApplicationMode,
@@ -183,7 +182,6 @@ type WorkspaceApplicationMethods = Pick<
   | "queueJobsForReview"
   | "removeJobFromReview"
   | "removeJobsFromReview"
-  | "recordLiveAssistantApplicationAction"
 > & {
   /** Stops an old apply run that is still running from saved state. */
   cancelApplyRun(
@@ -2982,99 +2980,6 @@ export function createWorkspaceApplicationMethods(
             });
         });
       }
-    },
-    async recordLiveAssistantApplicationAction(rawInput) {
-      const input = JobFinderInterviewFollowUpInputSchema.parse(rawInput);
-      const locatedRecords = await ctx.repository.listApplicationRecords();
-      const locatedRecord = locatedRecords.find(
-        (record) => record.id === input.applicationRecordId,
-      );
-
-      if (!locatedRecord) {
-        throw new Error(
-          `Unknown Job Finder application record '${input.applicationRecordId}'.`,
-        );
-      }
-
-      await withExactApplicationRecordTransition(
-        locatedRecord.id,
-        locatedRecord.jobId,
-        async () => {
-          const applicationRecords =
-            await ctx.repository.listApplicationRecords();
-          const existingRecord = applicationRecords.find(
-            (record) => record.id === input.applicationRecordId,
-          );
-
-          if (!existingRecord) {
-            throw new Error(
-              `Unknown Job Finder application record '${input.applicationRecordId}'.`,
-            );
-          }
-
-          const now = new Date().toISOString();
-          const note = input.note?.trim();
-          const terminalStatuses = new Set([
-            "offer",
-            "rejected",
-            "withdrawn",
-            "archived",
-          ]);
-          const shouldMarkInterview =
-            input.action === "mark_interviewed" &&
-            !terminalStatuses.has(existingRecord.status);
-          const nextStatus = shouldMarkInterview
-            ? "interview"
-            : existingRecord.status;
-          const lastActionLabel =
-            input.action === "mark_interviewed"
-              ? "Interview completed"
-              : "Interview follow-up note added";
-          const eventTitle =
-            input.action === "mark_interviewed"
-              ? "Interview marked complete"
-              : "Interview follow-up note added";
-          const eventDetail =
-            note && note.length > 0
-              ? `Live Assistant session ${input.sessionId}: ${note}`
-              : `Live Assistant session ${input.sessionId} was reviewed and linked to this application record.`;
-
-          if (shouldMarkInterview) {
-            if (await readSavedJob(ctx.repository, existingRecord.jobId)) {
-              await ctx.updateJob(existingRecord.jobId, (job) =>
-                SavedJobSchema.parse({
-                  ...job,
-                  status: "interview",
-                }),
-              );
-            }
-          }
-
-          const nextRecord = ApplicationRecordSchema.parse({
-            ...existingRecord,
-            status: nextStatus,
-            lastActionLabel,
-            nextActionLabel:
-              input.action === "mark_interviewed"
-                ? "Add a follow-up note or track the interview outcome."
-                : existingRecord.nextActionLabel,
-            lastUpdatedAt: now,
-            events: mergeEvents(existingRecord.events, [
-              {
-                id: createUniqueId("event"),
-                at: now,
-                title: eventTitle,
-                detail: eventDetail,
-                emphasis:
-                  input.action === "mark_interviewed" ? "positive" : "neutral",
-              },
-            ]),
-          });
-
-          await ctx.repository.upsertApplicationRecord(nextRecord);
-        },
-      );
-      return ctx.getWorkspaceSnapshot();
     },
     async assessJobListing(jobId) {
       if (!ctx.fetchListingHtml)

@@ -18,7 +18,6 @@ import type {
   CandidateProfile,
   EditableSourceInstructionArtifact,
   JobFinderActivityControl,
-  JobFinderInterviewFollowUpInput,
   JobFinderOpenBrowserSessionInput,
   JobFinderResumePreview,
   JobFinderSettings,
@@ -221,9 +220,6 @@ export interface JobFinderWorkspaceService {
   removeJobFromReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** Moves several jobs back to Find jobs, then reads the workspace once. */
   removeJobsFromReview?(jobIds: readonly string[]): Promise<void>;
-  recordLiveAssistantApplicationAction(
-    input: JobFinderInterviewFollowUpInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * The shared assistant-edit operation (ADR 0037): typed profile operations
    * committed with attribution, returning the exact values touched so one
