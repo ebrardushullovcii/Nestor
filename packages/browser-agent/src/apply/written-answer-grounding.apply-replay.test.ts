@@ -90,6 +90,15 @@ test.each(k1.cases)("K1 lying-checker replay: $name", async (entry) => {
       profile: CandidateProfileSchema.parse({
         ...sources.profile,
         currentRegion: "Germany",
+        experiences: [
+          {
+            id: "synthetic-employment",
+            companyName: "Example Workshop",
+            title: "Engineer",
+            startDate: "January 2014",
+            isCurrent: true,
+          },
+        ],
         workEligibility: {
           ...sources.profile.workEligibility,
           authorizedWorkCountries: ["Germany", "France"],

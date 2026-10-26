@@ -22,7 +22,7 @@ const numbers = (text: string) =>
     ),
   ].map((match) => numberWords.get(match[0].toLowerCase()) ?? match[0]);
 const ordinaryCapitals = new Set(
-  "i my we our the a an this that these those it its your you with as since from for in on at to and or by why how what when where who yes no true false dear hiring team manager sincerely regards thank thanks hello yours supported january february march april may june july august september october november december engineering software building developing working joining applying experience professional years".split(
+  "i my we our the a an this that these those it its your you with as since from for in on at to and or by why how what when where who yes no true false dear hiring team manager sincerely regards thank thanks hello yours supported january february march april may june july august september october november december engineering software building developing working joining applying experience professional years owning throughout over during alongside beyond across having through before previously currently additionally together helping improving".split(
     " ",
   ),
 );

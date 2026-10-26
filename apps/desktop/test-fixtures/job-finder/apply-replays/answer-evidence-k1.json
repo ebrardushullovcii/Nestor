@@ -265,6 +265,32 @@
           "quote": "Germany"
         }
       ]
+    },
+    {
+      "name": "Employment month keeps recorded precision: 2014-01",
+      "question": "Work experience 2 — From",
+      "answer": "2014-01",
+      "supported": true,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/experiences/0/startDate",
+          "quote": "January 2014"
+        }
+      ]
+    },
+    {
+      "name": "Employment month keeps recorded precision: 2014-01-01",
+      "question": "Work experience 2 — From",
+      "answer": "2014-01-01",
+      "supported": false,
+      "evidence": [
+        {
+          "source": "applicant",
+          "path": "/experiences/0/startDate",
+          "quote": "January 2014"
+        }
+      ]
     }
   ]
 }

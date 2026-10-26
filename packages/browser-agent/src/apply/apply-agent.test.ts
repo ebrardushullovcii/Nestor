@@ -229,9 +229,14 @@ function flowEvidence(
               "/workEligibility/Countries where you can work/",
             ),
           )
-        : (scalars.find((entry) =>
-            entry.value.includes(answer.proposedAnswer),
-          ) ?? scalars.find((entry) => entry.path === "/summary"));
+        : /\bFrom$/iu.test(answer.question) &&
+            /^\d{4}-\d{2}$/u.test(answer.proposedAnswer)
+          ? scalars.find((entry) =>
+              /^\/experiences\/\d+\/startDate$/u.test(entry.path),
+            )
+          : (scalars.find((entry) =>
+              entry.value.includes(answer.proposedAnswer),
+            ) ?? scalars.find((entry) => entry.path === "/summary"));
   return field
     ? [
         {
@@ -3135,19 +3140,18 @@ test("fill_fields fills a page in one step with one fact check for the answers t
               function: {
                 name: "report_answer_checks",
                 arguments: JSON.stringify({
-                  checks: checkedAnswers.map((_, index) => ({
+                  checks: checkedAnswers.map((raw, index) => ({
                     index,
                     supported: true,
                     reason: "Supported.",
-                    evidence: [
-                      {
-                        kind: "applicant_fact",
-                        claim: "Scripted supported answer",
-                        source: "resume",
-                        path: "",
-                        quote: "8 years of platform engineering",
-                      },
-                    ],
+                    evidence: flowEvidence(
+                      (
+                        JSON.parse(String(messages[1]?.content)) as {
+                          applicant: Record<string, unknown>;
+                        }
+                      ).applicant,
+                      raw as { question: string; proposedAnswer: string },
+                    ),
                   })),
                 }),
               },

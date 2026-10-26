@@ -79,6 +79,43 @@ function labelMatches(
   return words.length > 2 && asked === words;
 }
 
+function employmentMonthEvidence(
+  question: string,
+  answer: string,
+  evidence: readonly AnswerEvidence[],
+): boolean | null {
+  if (!/^\d{4}-\d{2}(?:-\d{2})?$/u.test(answer)) return null;
+  const asked = normalize(question).replace(/ optional$/u, "");
+  const field = /\b(?:from|start date)$/u.test(asked)
+    ? "startDate"
+    : /\b(?:to|end date)$/u.test(asked)
+      ? "endDate"
+      : null;
+  if (!field) return null;
+  const months =
+    "january february march april may june july august september october november december".split(
+      " ",
+    );
+  return evidence.some((entry) => {
+    if (
+      entry.source !== "applicant" ||
+      !new RegExp(`^/experiences/\\d+/${field}$`, "u").test(entry.path)
+    )
+      return false;
+    const quote = entry.quote.trim();
+    if (/^\d{4}-\d{2}(?:-\d{2})?$/u.test(quote))
+      return (
+        quote === answer ||
+        (answer.length === 7 && quote.startsWith(answer + "-"))
+      );
+    const match = /^([a-z]+)\s+(\d{4})$/iu.exec(quote);
+    const month = match ? months.indexOf(match[1]!.toLowerCase()) + 1 : 0;
+    return (
+      month > 0 && answer === `${match![2]}-${String(month).padStart(2, "0")}`
+    );
+  });
+}
+
 function skillYearClaim(
   question: string,
   answer: string,
@@ -178,6 +215,8 @@ export function evidenceFitsQuestion(input: {
   )
     return exactSaved;
   if (exactSaved) return true;
+  const month = employmentMonthEvidence(question, answer, evidence);
+  if (month !== null) return month;
   if (
     !concreteClaimsSupported(answer, evidence) ||
     !authorizationCountryMatches(question, answer, evidence)
