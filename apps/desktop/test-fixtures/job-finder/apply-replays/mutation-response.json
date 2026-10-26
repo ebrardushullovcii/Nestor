@@ -1,0 +1,15 @@
+{
+  "refused": [
+    {"error":"Save refused"},
+    {"errors":[{"message":"Save refused"}]},
+    {"success":false},
+    {"ok":false},
+    {"uploaded":false},
+    {"status":"failed"},
+    {"statusCode":422},
+    {"statusCode":"400"},
+    {"errorCode":"INVALID_ATTACHMENT"},
+    {"data":{"result":{"error":"Save refused"}}}
+  ],
+  "accepted": [{"success":true,"errors":[],"error":null},{"ok":true},{"uploaded":true}]
+}

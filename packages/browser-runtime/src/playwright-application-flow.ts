@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { inspectMutationResponse } from "./mutation-response";
 import {
   classifyAttachmentUpload,
   type AttachmentUploadWindow,
@@ -1652,15 +1653,22 @@ export async function ensurePrepareOnlyMutationGuard(
   }
   if (!networkGuardState.responseListenerInstalled) {
     page.on("response", (response) => {
-      const request = response.request();
-      if (
-        networkGuardState.allowedIntermediateRequests.has(request) &&
-        response.status() >= 200 &&
-        response.status() < 400
-      ) {
-        networkGuardState.allowedIntermediateRequests.delete(request);
-        networkGuardState.verifiedIntermediateWriteCount += 1;
-      }
+      let request: Request | null = response.request();
+      while (
+        request &&
+        !networkGuardState.allowedIntermediateRequests.has(request)
+      )
+        request = request.redirectedFrom();
+      if (!request) return;
+      if (response.status() >= 300 && response.status() < 400) return;
+      networkGuardState.allowedIntermediateRequests.delete(request);
+      void inspectMutationResponse(response)
+        .then(({ accepted }) => {
+          if (accepted) networkGuardState.verifiedIntermediateWriteCount += 1;
+        })
+        .catch(() => {
+          /* An unreadable response cannot confirm a save. */
+        });
     });
     networkGuardState.responseListenerInstalled = true;
   }

@@ -1,6 +1,7 @@
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
 import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
 import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
+import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -21,6 +22,7 @@ import {
   openPrepareOnlyAttachmentUploadWindow,
   openPrepareOnlyIntermediateMutationWindow,
   readServiceWorkerRegisterGuardInPage,
+  readPrepareOnlyIntermediateWriteCount,
   registerPrepareOnlyPreparedValueInPage,
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
@@ -44,6 +46,7 @@ interface FixtureServer {
   registerHtml: (path: string, html: string) => void;
   registerScript: (path: string, js: string) => void;
   registerAttachment: (path: string, content: string) => void;
+  registerJson: (path: string, value: unknown) => void;
   close: () => Promise<void>;
 }
 
@@ -52,6 +55,7 @@ function startFixtureServer(): Promise<FixtureServer> {
   const htmlRoutes = new Map<string, string>();
   const scriptRoutes = new Map<string, string>();
   const attachmentRoutes = new Map<string, string>();
+  const jsonRoutes = new Map<string, unknown>();
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -66,6 +70,11 @@ function startFixtureServer(): Promise<FixtureServer> {
         body: Buffer.concat(chunks).toString("utf8"),
       });
       const html = htmlRoutes.get(url.pathname);
+      if (jsonRoutes.has(url.pathname)) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(jsonRoutes.get(url.pathname)));
+        return;
+      }
       if (html !== undefined) {
         response.writeHead(200, { "content-type": "text/html" });
         response.end(html);
@@ -112,6 +121,9 @@ function startFixtureServer(): Promise<FixtureServer> {
         hits,
         registerHtml: (path, html) => {
           htmlRoutes.set(path, html);
+        },
+        registerJson: (path, value) => {
+          jsonRoutes.set(path, value);
         },
         registerScript: (path, js) => {
           scriptRoutes.set(path, js);
@@ -534,6 +546,39 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
     expect(writes).toHaveLength(finalMutationReplay.allowed.length);
     expect(writes.map(({ path, body }) => ({ path, body }))).toEqual(
       finalMutationReplay.allowed,
+    );
+  });
+
+  test("a 2xx refusal never counts as a saved intermediate step", async () => {
+    const app = await startTrackedServer();
+    app.registerHtml("/response-replay", "<p>Application form</p>");
+    for (const [index, body] of responseReplay.refused.entries())
+      app.registerJson(`/api/save-refusal-${index}`, body);
+    app.registerJson("/api/save-ok", { ok: true });
+    const { page } = await newGuardedPage();
+    await page.goto(`${app.baseUrl}/response-replay`);
+    await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    await page.evaluate(async (count) => {
+      for (let index = 0; index < count; index++) {
+        const response = await fetch(`/api/save-refusal-${index}`, {
+          method: "POST",
+          body: '{"fieldAnswers":{}}',
+        });
+        await response.text();
+      }
+      await (
+        await fetch("/api/save-ok", {
+          method: "POST",
+          body: '{"fieldAnswers":{}}',
+        })
+      ).text();
+    }, responseReplay.refused.length);
+    await expect
+      .poll(() => readPrepareOnlyIntermediateWriteCount(page))
+      .toBe(1);
+    expect(app.hits.filter((hit) => hit.method === "POST")).toHaveLength(
+      responseReplay.refused.length + 1,
     );
   });
 

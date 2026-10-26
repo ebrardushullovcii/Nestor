@@ -4,17 +4,38 @@
       "path": "/api/jobs/42/apply",
       "body": "{\"fieldAnswers\":{\"name\":\"Synthetic Applicant\"}}"
     },
-    { "path": "/api/jobs/42/apply/", "body": "{\"answer\":\"synthetic\"}" },
-    { "path": "/api/jobs/42/%61pply", "body": "{\"fieldAnswers\":{}}" },
-    { "path": "/api/jobs/42/submit", "body": "{\"fieldAnswers\":{}}" },
-    { "path": "/api/applications", "body": "{\"fieldAnswers\":{}}" },
+    {
+      "path": "/api/jobs/42/apply/",
+      "body": "{\"answer\":\"synthetic\"}"
+    },
+    {
+      "path": "/api/jobs/42/%61pply",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/jobs/42/submit",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/applications",
+      "body": "{\"fieldAnswers\":{}}"
+    },
     {
       "path": "/graphql",
       "body": "{\"operationName\":\"SaveApplication\",\"final\":true}"
     },
-    { "path": "/api/save", "body": "{\"fieldAnswers\":{},\"isFinal\":true}" },
-    { "path": "/api/save", "body": "{\"fieldAnswers\":{},\"submit\":true}" },
-    { "path": "/api/save", "body": "operationName=SaveApplication&final=true" },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"isFinal\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"submit\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "operationName=SaveApplication&final=true"
+    },
     {
       "path": "/api/save",
       "body": "operationName=SaveApplication&variables=%7B%22final%22%3Atrue%7D"
@@ -22,6 +43,54 @@
     {
       "path": "/api/save",
       "body": "[[\"fieldAnswers\",\"synthetic\"],[\"final\",\"true\"]]"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"submitted\":true,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"submitted\",\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"status\":\"SUBMITTED\",\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"draft\":false,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"isDraft\":false,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"complete\":true,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"step\":\"final\",\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/applications/42",
+      "body": "{\"status\":\"submitted\",\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/complete",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/send",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/apply.json",
+      "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/apply;v=1",
+      "body": "{\"fieldAnswers\":{}}"
     }
   ],
   "allowed": [
@@ -36,6 +105,10 @@
     {
       "path": "/api/applications/42/answers",
       "body": "{\"answer\":\"synthetic\"}"
+    },
+    {
+      "path": "/workday/api/save",
+      "body": "{\"step\":2,\"final\":false,\"draft\":true,\"complete\":false,\"fieldAnswers\":{}}"
     }
   ]
 }
