@@ -8,9 +8,8 @@ import {
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { resetJobFinderBrowser } from "../services/job-finder/reset-workspace";
 import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import { access } from "node:fs/promises";
-import { app, BrowserWindow, clipboard, dialog, shell } from "electron";
+import { BrowserWindow, clipboard, dialog, shell } from "electron";
 import type {
   IpcMain,
   IpcMainInvokeEvent,
@@ -18,7 +17,6 @@ import type {
   SaveDialogOptions,
 } from "electron";
 import {
-  ApplicationCrmFileExportResultSchema,
   DesktopTestOkResponseSchema,
   JobFinderRepositoryStateSchema,
   JobFinderStartupDatabaseRecoveryFactSchema,

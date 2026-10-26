@@ -38,7 +38,6 @@ import { createAssistantBridge } from "./assistant";
 import { createJobsBridge } from "./jobs";
 import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
-  ApplicationCrmFileExportResult,
   ApplicationDocumentExportResult,
   ApplicationDocumentListResult,
   ApplicationDocumentRevision,
