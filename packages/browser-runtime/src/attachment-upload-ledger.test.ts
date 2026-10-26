@@ -18,7 +18,8 @@ import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
 type Answer =
   | { status: number; body?: string; type?: string }
   | { redirect: string }
-  | "hold";
+  | "hold"
+  | "drop";
 
 interface Server {
   url: string;
@@ -53,6 +54,10 @@ async function startServer(html?: string): Promise<Server> {
           return;
         }
         const answer = answers.get(path) ?? { status: 404 };
+        if (answer === "drop") {
+          request.socket.destroy();
+          return;
+        }
         if (answer === "hold") {
           await held;
           response
@@ -289,6 +294,20 @@ describe("a raw storage PUT", () => {
       letter: { status: 422, body: '{"message":"Upload failed"}' },
     });
     await expect.poll(() => outcome("resume")).toBe("rejected");
+  });
+
+  test("a resume PUT whose connection drops is refused, and one still waiting is pending, never attached", async () => {
+    const dropped = await attachBoth({
+      resume: "drop",
+      letter: { status: 201, body: '{"uploadId":"up_7"}' },
+    });
+    await expect.poll(() => dropped("resume")).toBe("rejected");
+    const waiting = await attachBoth({
+      resume: "hold",
+      letter: { status: 201, body: '{"uploadId":"up_7"}' },
+    });
+    await expect.poll(() => waiting("letter")).toBe("accepted");
+    expect(await waiting("resume")).toBe("pending");
   });
 
   test("a same-size cover letter that succeeded never clears the failed resume", async () => {

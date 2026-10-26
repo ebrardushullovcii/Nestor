@@ -2,7 +2,10 @@ import type { Page, Request, Response } from "playwright";
 import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 
 import { inspectPageMutationResponse } from "./mutation-response-body";
-import { getPrepareOnlyRequestPermit } from "./playwright-application-flow";
+import {
+  getPrepareOnlyRequestPermit,
+  onPrepareOnlyUploadPermit,
+} from "./playwright-application-flow";
 
 /**
  * What the site's own server said about each file sent from a page.
@@ -290,6 +293,8 @@ export function watchAttachmentUploads(page: Page): void {
   page.on("request", (request) => {
     try {
       // A redirect continues the same request; its final answer decides.
+      // Already named by its upload permit.
+      if (tracked.has(request)) return;
       const from = request.redirectedFrom();
       const followed = from ? tracked.get(from) : undefined;
       const record = followed ?? track(records, request);
@@ -297,6 +302,32 @@ export function watchAttachmentUploads(page: Page): void {
     } catch {
       // An unreadable body is not an upload this ledger can judge.
     }
+  });
+  // The fence names a carrier when it lets the file out, before any answer:
+  // a carrier whose answer never comes, or whose connection drops, is then
+  // pending or refused, never silently attached.
+  onPrepareOnlyUploadPermit(page, (request, permit) => {
+    if (permit.uploadLeg !== "file") return;
+    let record = tracked.get(request);
+    if (!record) {
+      record = add(records, {
+        completedAt: null,
+        url: request.url().toLowerCase(),
+        tokens: [],
+        status: "pending",
+        blocked: false,
+        identity: null,
+        carriesFile: true,
+        names: [],
+        size: null,
+        text: "",
+      });
+      tracked.set(request, record);
+    }
+    record.carriesFile = true;
+    record.names = [permit.file.name.toLowerCase()];
+    record.size = permit.file.size;
+    record.identity = { ...permit.file };
   });
   page.on("response", (response) => {
     const record = tracked.get(response.request());
