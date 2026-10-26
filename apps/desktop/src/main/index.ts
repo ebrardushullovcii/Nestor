@@ -22,6 +22,7 @@ import { closeJobStore, getJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerHomeRoutes } from "./routes/home";
+import { registerProfileWorkflowRoutes } from "./routes/profile-workflow";
 import { registerActivityRoutes } from "./routes/activity";
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { readLaunchContext } from "@nestor/db/launch-context";
@@ -269,6 +270,7 @@ if (hasSingleInstanceLock) {
   registerNeedsYouRoutes(ipcMain);
   registerTrackerRoutes(ipcMain);
   registerHomeRoutes(ipcMain);
+  registerProfileWorkflowRoutes(ipcMain);
   registerActivityRoutes(ipcMain);
   ipcMain.handle(LAUNCH_CONTEXT_CHANNEL, () =>
     readLaunchContext(getJobStore()),

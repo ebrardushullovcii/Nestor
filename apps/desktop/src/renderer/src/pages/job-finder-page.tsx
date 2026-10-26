@@ -1,9 +1,4 @@
 import { useStageCounts } from "@renderer/features/job-lists/use-stage-counts";
-import type { JobFinderWorkspaceState } from "@renderer/features/job-finder/hooks/use-job-finder-workspace";
-import {
-  needsLegacyWorkspace,
-  useLegacyWorkspaceWanted,
-} from "@renderer/features/job-finder/lib/legacy-workspace-demand";
 import { useNeedsYouCount } from "@renderer/features/needs-you/use-needs-you-count";
 import { AssistantProvider } from "../features/job-finder/assistant/assistant-provider";
 import { JobFinderShell } from "@renderer/features/job-finder/components/job-finder-shell";
@@ -25,25 +20,12 @@ import {
   UserRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import {
-  createContext,
-  lazy,
-  memo,
-  Suspense,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-} from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
-import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery-copy";
-import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
-import type { JobFinderPageContext } from "./job-finder-page-context";
-import { useLegacyControllerView } from "./legacy-controller-view";
 
 // The recovery notice reads its state after the first screen, so its code
 // (and the schema it checks that state with) loads then too.
@@ -177,60 +159,17 @@ startLaunchReads();
 export {};
 
 const MemoizedJobFinderShell = memo(JobFinderShell);
-const JobFinderPageRouteContext = createContext<JobFinderPageContext | null>(
-  null,
-);
-
-const JobFinderWorkspaceStateContext = createContext<JobFinderWorkspaceState>({
-  status: "loading",
-});
-
 function JobFinderPageOutlet() {
-  const context = useContext(JobFinderPageRouteContext);
-  const workspaceState = useContext(JobFinderWorkspaceStateContext);
   const location = useLocation();
-  const skeleton = (
-    <RouteSkeleton
-      panes={getRouteSkeletonPanes(location.pathname)}
-      title={getOpeningRouteLabel(location.pathname)}
-    />
-  );
-
-  // Profile, setup and Settings still read the old workspace; they wait for
-  // it here while every other screen opens straight from the store.
-  if (!context && needsLegacyWorkspace(location.pathname)) {
-    if (workspaceState.status !== "error") return skeleton;
-    // A typed recovery incident offers no retry: retrying would run recovery
-    // again with no new information, and every retained file stays as it is.
-    return (
-      <WorkspaceStateScreen
-        {...(workspaceState.startupDatabaseRecovery
-          ? {}
-          : {
-              action: {
-                label: "Retry opening Job Finder",
-                onClick: workspaceState.retry,
-              },
-            })}
-        kicker="Workspace error"
-        message={
-          workspaceState.startupDatabaseRecovery
-            ? buildJobFinderStartupDatabaseRecoveryBlockedDetail({
-                incidentId: workspaceState.startupDatabaseRecovery.incidentId,
-                outcome: workspaceState.startupDatabaseRecovery.outcome,
-              })
-            : workspaceState.message
-        }
-        title="Couldn't open Job Finder"
-        tone="error"
-      />
-    );
-  }
-
   return (
     <JobFinderKeptRoutesOutlet
-      context={context}
-      fallback={skeleton}
+      context={null}
+      fallback={
+        <RouteSkeleton
+          panes={getRouteSkeletonPanes(location.pathname)}
+          title={getOpeningRouteLabel(location.pathname)}
+        />
+      }
       readyMarker={<JobFinderRouteReadyMarker />}
     />
   );
@@ -239,13 +178,6 @@ function JobFinderPageOutlet() {
 // Outlet reads its context independently. Updating the inspected row no longer
 // sends a new children prop through the shell and its workspace-wide summaries.
 const jobFinderPageOutlet = <JobFinderPageOutlet />;
-
-const loadLegacyController = () => import("./job-finder-legacy-controller");
-const JobFinderLegacyController = lazy(async () => ({
-  default: (await loadLegacyController()).JobFinderLegacyController,
-}));
-
-const IDLE_WORKSPACE_STATE: JobFinderWorkspaceState = { status: "loading" };
 
 export function JobFinderPage() {
   const location = useLocation();
@@ -257,11 +189,7 @@ export function JobFinderPage() {
   const stageCounts = useStageCounts();
   const needsYouCount = useNeedsYouCount();
   const startupContext = useLaunchReads().context;
-  const loadWorkspace = useLegacyWorkspaceWanted(location.pathname);
-  const legacy = useLegacyControllerView();
   const shellMarkedRef = useRef(false);
-  const context = legacy?.context ?? null;
-  const workspace = legacy?.workspace ?? null;
 
   // The router wraps a plain navigate in a transition, which rendered the
   // next screen in 5 ms slices over several frames; a click should land in
@@ -283,41 +211,19 @@ export function JobFinderPage() {
 
   return withJobFinderWindowCloseGuard(
     <ThemeProvider
-      preference={
-        legacy?.appearanceTheme ||
-        startupContext?.settings?.appearanceTheme ||
-        "system"
-      }
+      preference={startupContext?.settings?.appearanceTheme || "system"}
     >
-      {loadWorkspace ? (
-        <Suspense fallback={null}>
-          <JobFinderLegacyController />
-        </Suspense>
-      ) : null}
       <AssistantProvider>
-        <JobFinderWorkspaceStateContext.Provider
-          value={legacy?.workspaceState ?? IDLE_WORKSPACE_STATE}
+        <MemoizedJobFinderShell
+          needsYouCount={needsYouCount}
+          onNavigate={navigateDirectly}
+          platform={INITIAL_PLATFORM}
+          stageCounts={stageCounts}
+          startupContext={startupContext}
+          workspace={null}
         >
-          <JobFinderPageRouteContext.Provider value={context}>
-            <MemoizedJobFinderShell
-              needsYouCount={needsYouCount}
-              {...(legacy
-                ? {
-                    onDismissSavedStatus: legacy.dismissSavedStatus,
-                    onRetrySave: legacy.retryLastSave,
-                    saveState: legacy.saveState,
-                  }
-                : {})}
-              onNavigate={legacy?.navigateFromShell ?? navigateDirectly}
-              platform={legacy?.platform ?? INITIAL_PLATFORM}
-              stageCounts={stageCounts}
-              startupContext={startupContext}
-              workspace={workspace}
-            >
-              {jobFinderPageOutlet}
-            </MemoizedJobFinderShell>
-          </JobFinderPageRouteContext.Provider>
-        </JobFinderWorkspaceStateContext.Provider>
+          {jobFinderPageOutlet}
+        </MemoizedJobFinderShell>
       </AssistantProvider>
       {/* The window-close responder is mounted once by
           withJobFinderWindowCloseGuard above this tree. */}

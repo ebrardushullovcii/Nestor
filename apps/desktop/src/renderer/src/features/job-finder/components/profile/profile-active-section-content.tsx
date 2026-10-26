@@ -1,11 +1,7 @@
 import type {
-  DiscoveryRunRecord,
   EditableSourceInstructionArtifact,
   ResumeApplicationMode,
   ResumeApproach,
-  SourceAccessPrompt,
-  SourceDebugRunDetails,
-  SourceDebugRunRecord,
   SourceInstructionArtifact,
 } from "@nestor/contracts";
 import type { ReactNode } from "react";
@@ -33,23 +29,14 @@ interface ProfileActiveSectionContentProps {
   /** The Job sources filter a link asked for (`show=` in the route). */
   requestedSourceFilter?: string | null;
   backgroundArrays: ProfileBackgroundArrays;
-  /** Discovery runs used to classify source health exactly like Home does. */
-  activeDiscoveryRun?: DiscoveryRunRecord | null;
-  discoveryRuns?: readonly DiscoveryRunRecord[];
   experienceArray: UseFieldArrayReturn<
     ProfileEditorValues,
     "records.experiences",
     ProfileFieldArrayKeyName
   >;
-  isBrowserSessionPending: (targetId: string) => boolean;
   isProfileMutationPending: boolean;
   isSourceDebugPending: (targetId: string) => boolean;
   isSourceInstructionPending: (targetId: string) => boolean;
-  isSourceInstructionVerifyPending: (instructionId: string) => boolean;
-  isTargetDiscoveryPending: (targetId: string) => boolean;
-  onGetSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
-  onOpenBrowserSessionForTarget: (targetId: string) => void;
-  onRunDiscoveryForTarget?: (targetId: string) => void;
   onSaveNow?: () => void;
   onRunSourceDebug: (
     targetId: string,
@@ -59,15 +46,12 @@ interface ProfileActiveSectionContentProps {
     targetId: string,
     artifact: EditableSourceInstructionArtifact,
   ) => void;
-  onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
   profileForm: UseFormReturn<ProfileEditorValues>;
   onResumeApproachChange?: (
     approach: ResumeApproach,
   ) => Promise<boolean | void> | void;
   resumeApplicationMode?: ResumeApplicationMode | null | undefined;
-  recentSourceDebugRuns: readonly SourceDebugRunRecord[];
-  sourceAccessPrompts: readonly SourceAccessPrompt[];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
 }
 
@@ -78,15 +62,11 @@ export function ProfileActiveSectionContent({
   isProfileMutationPending,
   isSourceDebugPending,
   isSourceInstructionPending,
-  isSourceInstructionVerifyPending,
-  onGetSourceDebugRunDetails,
   onRunSourceDebug,
   onSaveSourceInstructionArtifact,
-  onVerifySourceInstructions,
   onResumeApproachChange,
   preferencesForm,
   profileForm,
-  recentSourceDebugRuns,
   requestedFileKind = null,
   resumeApplicationMode,
   requestedSourceFilter = null,
@@ -122,12 +102,8 @@ export function ProfileActiveSectionContent({
         requestedFilter={requestedSourceFilter}
         isSourceDebugPending={isSourceDebugPending}
         isSourceInstructionPending={isSourceInstructionPending}
-        isSourceInstructionVerifyPending={isSourceInstructionVerifyPending}
-        onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
         onRunSourceDebug={onRunSourceDebug}
         onSaveSourceInstructionArtifact={onSaveSourceInstructionArtifact}
-        onVerifySourceInstructions={onVerifySourceInstructions}
-        recentSourceDebugRuns={recentSourceDebugRuns}
         sourceInstructionArtifacts={sourceInstructionArtifacts}
       />
     ),

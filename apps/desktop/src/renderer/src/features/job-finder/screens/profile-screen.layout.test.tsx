@@ -5,7 +5,6 @@ import type {
   JobSearchPreferences,
   ProfileSetupState,
   ResumeImportFieldCandidateSummary,
-  SourceDebugRunDetails,
 } from "@nestor/contracts";
 import {
   CandidateProfileSchema,
@@ -107,19 +106,14 @@ function buildProfileScreenProps(
     onApplyProfileSetupReviewAction: vi.fn(),
     onApplyResumeTimelineRepairAction: async () => {},
     onAnalyzeProfileFromResume: vi.fn(),
-    onGetSourceDebugRunDetails: () =>
-      Promise.resolve({} as SourceDebugRunDetails),
     onImportResume: vi.fn(),
-    onOpenBrowserSessionForTarget: vi.fn(),
     onProfileSurfaceDirtyChange: vi.fn(),
     onResumeProfileSetup: vi.fn(),
     onRunSourceDebug: vi.fn(),
     onSaveAll: vi.fn(),
     onSaveSourceInstructionArtifact: vi.fn(),
-    onVerifySourceInstructions: vi.fn(),
     pendingActions: {
       analyzeProfile: false,
-      browserSession: () => false,
       importResume: false,
       profileCopilotBusy: false,
       profileMutation: false,
@@ -127,15 +121,11 @@ function buildProfileScreenProps(
       profileReviewItem: () => false,
       sourceDebug: () => false,
       sourceInstruction: () => false,
-      sourceInstructionVerify: () => false,
-      targetDiscovery: () => false,
     },
     profile,
     profileSetupState,
-    recentSourceDebugRuns: [],
     resumeImportProgress: null,
     searchPreferences: overrides.searchPreferences ?? searchPreferences,
-    sourceAccessPrompts: [],
     sourceInstructionArtifacts: [],
   };
 

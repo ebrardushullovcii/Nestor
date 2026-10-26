@@ -3,9 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import type {
   CandidateProfile,
-  DiscoveryRunRecord,
   EditableSourceInstructionArtifact,
-  JobFinderRendererWorkspaceSnapshot,
   JobSearchPreferences,
   ProfileSetupState,
   ProfileSetupReviewActionOptions,
@@ -17,8 +15,6 @@ import type {
   ResumeImportRun,
   ProfileOverview,
   ResumeTimelineRepairAction,
-  SourceDebugRunDetails,
-  SourceDebugRunRecord,
   SourceInstructionArtifact,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
@@ -29,8 +25,6 @@ import {
 } from "@nestor/job-finder/resume-identity";
 import { LockedScreenLayout } from "../components/locked-screen-layout";
 import { ProfileActiveSectionContent } from "../components/profile/profile-active-section-content";
-import { DiscoveryRunFeedbackCallout } from "./discovery/discovery-run-feedback-callout";
-import type { DiscoveryRunFeedback } from "./discovery/discovery-run-feedback";
 import {
   PROFILE_SECTION_SCROLL_AREA_ID,
   focusProfileDeepLink,
@@ -92,7 +86,6 @@ function parseProfileSection(value: string | null): ProfileSection | null {
 
 type ProfileScreenPendingActions = {
   analyzeProfile: boolean;
-  browserSession: (targetId: string) => boolean;
   importResume: boolean;
   profileCopilotBusy: boolean;
   profileMutation: boolean;
@@ -100,8 +93,6 @@ type ProfileScreenPendingActions = {
   profileReviewItem: (reviewItemId: string) => boolean;
   sourceDebug: (targetId: string) => boolean;
   sourceInstruction: (targetId: string) => boolean;
-  sourceInstructionVerify: (instructionId: string) => boolean;
-  targetDiscovery: (targetId: string) => boolean;
 };
 
 export function ProfileScreen(props: {
@@ -110,7 +101,6 @@ export function ProfileScreen(props: {
   recordSummary?: Pick<ProfileOverview, "counts" | "experienceRequired">;
   sourceInfo?: { hasResumeText: boolean; hasSavedResumeFile: boolean };
   actionState: { message: string | null };
-  discoveryRunFeedback?: DiscoveryRunFeedback | null;
   importResumeGuardMessage: string | null;
   pendingActions: ProfileScreenPendingActions;
   onApplyProfileSetupReviewAction: (
@@ -119,7 +109,6 @@ export function ProfileScreen(props: {
     options?: ProfileSetupReviewActionOptions,
   ) => void;
   onAnalyzeProfileFromResume: () => void;
-  onGetSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
   onImportResume: () => void;
   /** Imports again the file a stopped import saved; no file picker. */
   onRetryInterruptedImport?: () => void;
@@ -128,7 +117,6 @@ export function ProfileScreen(props: {
     proposalId: string,
     action: ResumeTimelineRepairAction,
   ) => Promise<void>;
-  onOpenBrowserSessionForTarget: (targetId: string) => void;
   onProfileSurfaceDirtyChange: (
     dirty: boolean,
     blockNavigation?: boolean,
@@ -139,7 +127,6 @@ export function ProfileScreen(props: {
    */
   onProfileSurfaceDraftEdited?: () => void;
   onResumeProfileSetup: (step?: ProfileSetupStep) => void;
-  onRunDiscoveryForTarget?: (targetId: string) => void;
   onRunSourceDebug: (
     targetId: string,
     options?: { readabilityTimeoutMs?: number },
@@ -162,57 +149,39 @@ export function ProfileScreen(props: {
     savedSection?: "sources",
     baseline?: { profile: CandidateProfile; goals: JobSearchPreferences },
   ) => Promise<boolean | void> | void;
-  onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   latestResumeImportRun: ResumeImportRun | null;
   resumeImportProgress: ResumeImportProgressEvent | null;
   profile: CandidateProfile;
   profileSetupState: ProfileSetupState;
-  /**
-   * Discovery runs behind source health. The Job sources tab classifies from
-   * the same evidence as the Home badge, so both screens agree.
-   */
-  activeDiscoveryRun?: DiscoveryRunRecord | null;
-  discoveryRuns?: readonly DiscoveryRunRecord[];
-  recentSourceDebugRuns: readonly SourceDebugRunRecord[];
   /** The resume level preference lives in Profile (Preferences tab). */
   resumeApplicationMode?: ResumeApplicationMode | null | undefined;
   onUpdateResumeApproach?: (
     approach: ResumeApproach,
   ) => Promise<boolean | void> | void;
   searchPreferences: JobSearchPreferences;
-  sourceAccessPrompts: JobFinderRendererWorkspaceSnapshot["sourceAccessPrompts"];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
 }) {
   const {
     importResumeGuardMessage,
     pendingActions,
-    discoveryRunFeedback = null,
     onAnalyzeProfileFromResume,
-    onGetSourceDebugRunDetails,
     onImportResume,
     onApplyResumeTimelineRepairAction,
-    onOpenBrowserSessionForTarget,
     onProfileSurfaceDirtyChange,
     onProfileSurfaceDraftEdited,
     onResumeProfileSetup,
-    onRunDiscoveryForTarget,
     onRunSourceDebug,
     onSaveSourceInstructionArtifact,
     onSaveAll,
-    onVerifySourceInstructions,
     latestResumeImportReviewCandidates,
     latestResumeImportRun,
     resumeImportProgress,
     profile,
     profileSetupState,
-    activeDiscoveryRun = null,
-    discoveryRuns = [],
-    recentSourceDebugRuns,
     resumeApplicationMode,
     onUpdateResumeApproach,
     searchPreferences,
-    sourceAccessPrompts,
     sourceInstructionArtifacts,
   } = props;
 
@@ -499,63 +468,6 @@ export function ProfileScreen(props: {
   const identityChoiceProfile =
     buildProfilePayload(profile, profileForm.getValues()).payload ??
     overviewProfile;
-
-  // Per-source Search now outcomes are shown next to the source rows that
-  // started them; all-source outcomes stay on the Find jobs screen.
-  const [sourceRowFeedbackTargetId, setSourceRowFeedbackTargetId] = useState<
-    string | null
-  >(null);
-  useEffect(() => {
-    let current = true;
-    setSourceRowFeedbackTargetId(null);
-    const label = discoveryRunFeedback?.targetLabel;
-    const id = Number(discoveryRunFeedback?.targetId);
-    if (activeSection === "sources" && window.nestor?.jobs?.run) {
-      if (Number.isSafeInteger(id) && id > 0) {
-        void window.nestor.jobs
-          .run("get_site", { id })
-          .then((site) => {
-            if (current && site) setSourceRowFeedbackTargetId(String(site.id));
-          })
-          .catch(() => undefined);
-      } else if (label) {
-        void window.nestor.jobs
-          .run("list_sites", { text: label, limit: 25 })
-          .then((page) => {
-            if (current)
-              setSourceRowFeedbackTargetId(
-                String(
-                  page.rows.find((row) => row.label === label)?.id ?? "",
-                ) || null,
-              );
-          })
-          .catch(() => undefined);
-      }
-    }
-    return () => {
-      current = false;
-    };
-  }, [
-    activeSection,
-    discoveryRunFeedback?.targetLabel,
-    discoveryRunFeedback?.targetId,
-  ]);
-  const [dismissedSourceFeedbackKey, setDismissedSourceFeedbackKey] = useState<
-    string | null
-  >(null);
-  const sourceFeedbackKey =
-    discoveryRunFeedback && sourceRowFeedbackTargetId
-      ? `${discoveryRunFeedback.status}|${discoveryRunFeedback.headline}|${sourceRowFeedbackTargetId}`
-      : null;
-  const visibleSourceRowFeedback =
-    activeSection === "sources" &&
-    discoveryRunFeedback !== null &&
-    (discoveryRunFeedback.targetLabel !== null ||
-      discoveryRunFeedback.targetId != null) &&
-    sourceRowFeedbackTargetId !== null &&
-    sourceFeedbackKey !== dismissedSourceFeedbackKey
-      ? discoveryRunFeedback
-      : null;
 
   function handleSaveAll() {
     const profileResult = buildCanonicalAwareProfilePayload({
@@ -915,24 +827,6 @@ export function ProfileScreen(props: {
                     />
                   </div>
                 ) : null}
-                {visibleSourceRowFeedback && sourceRowFeedbackTargetId ? (
-                  <div className="mb-3">
-                    <DiscoveryRunFeedbackCallout
-                      feedback={visibleSourceRowFeedback}
-                      isRecoveryPending={pendingActions.browserSession(
-                        sourceRowFeedbackTargetId,
-                      )}
-                      onDismiss={() =>
-                        setDismissedSourceFeedbackKey(sourceFeedbackKey)
-                      }
-                      onOpenBrowserSession={() => {
-                        onOpenBrowserSessionForTarget(
-                          sourceRowFeedbackTargetId,
-                        );
-                      }}
-                    />
-                  </div>
-                ) : null}
                 {activeSection === "basics" ? (
                   <div className="mb-3">
                     <ResumeIdentityChoiceNotice
@@ -953,37 +847,20 @@ export function ProfileScreen(props: {
                       activeSection={activeSection}
                       requestedFileKind={searchParams.get("kind")}
                       requestedSourceFilter={searchParams.get("show")}
-                      activeDiscoveryRun={activeDiscoveryRun}
                       onSaveNow={() => {
                         void handleSaveAll();
                       }}
                       backgroundArrays={backgroundArrays}
-                      discoveryRuns={discoveryRuns}
                       experienceArray={experienceArray}
-                      isBrowserSessionPending={pendingActions.browserSession}
                       isProfileMutationPending={pendingActions.profileMutation}
                       isSourceDebugPending={pendingActions.sourceDebug}
                       isSourceInstructionPending={
                         pendingActions.sourceInstruction
                       }
-                      isSourceInstructionVerifyPending={
-                        pendingActions.sourceInstructionVerify
-                      }
-                      isTargetDiscoveryPending={pendingActions.targetDiscovery}
-                      onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
-                      onOpenBrowserSessionForTarget={
-                        onOpenBrowserSessionForTarget
-                      }
-                      {...(onRunDiscoveryForTarget
-                        ? {
-                            onRunDiscoveryForTarget: onRunDiscoveryForTarget,
-                          }
-                        : {})}
                       onRunSourceDebug={onRunSourceDebug}
                       onSaveSourceInstructionArtifact={
                         onSaveSourceInstructionArtifact
                       }
-                      onVerifySourceInstructions={onVerifySourceInstructions}
                       preferencesForm={preferencesForm}
                       profileForm={profileForm}
                       {...(onUpdateResumeApproach
@@ -992,8 +869,6 @@ export function ProfileScreen(props: {
                             resumeApplicationMode,
                           }
                         : {})}
-                      recentSourceDebugRuns={recentSourceDebugRuns}
-                      sourceAccessPrompts={sourceAccessPrompts}
                       sourceInstructionArtifacts={sourceInstructionArtifacts}
                     />
                   )}

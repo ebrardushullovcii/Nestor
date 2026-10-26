@@ -24,6 +24,7 @@ import type {
   DesktopAssistantBridge,
   DesktopBrowserBridge,
   DesktopJobsBridge,
+  DesktopProfileWorkflowBridge,
   ApplicationListPage,
   ApplicationListQuery,
   ApplicationStoreDemoResult,
@@ -120,6 +121,7 @@ declare global {
       tracker: DesktopTrackerBridge;
       home: DesktopHomeBridge;
       activity: DesktopActivityBridge;
+      profileWorkflow: DesktopProfileWorkflowBridge;
       ping: () => Promise<DesktopPlatformPing>;
       /** The first screen is usable; main starts its background services. */
       firstScreenShown: () => void;

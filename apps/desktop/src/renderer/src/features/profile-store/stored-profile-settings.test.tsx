@@ -9,17 +9,24 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import type { ComponentProps } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  RouterProvider,
+  Routes,
+  createMemoryRouter,
+} from "react-router-dom";
 import {
   CandidateExperienceSchema,
+  ResumeImportRunSchema,
   type DesktopJobsBridge,
+  type DesktopProfileWorkflowBridge,
+  type ProfileWorkflowState,
 } from "@nestor/contracts";
 import {
   openJobStore,
   createProfileStore,
   createPreferencesStore,
-  createJobSitesStore,
   type JobStore,
 } from "@nestor/db/job-store";
 import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
@@ -90,59 +97,44 @@ afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
-function profileScreen(
-  section = "basics",
-  analyzing = false,
-  feedback: ComponentProps<
-    typeof StoredProfileScreen
-  >["discoveryRunFeedback"] = null,
-) {
-  render(
-    <MemoryRouter initialEntries={[`/job-finder/profile?section=${section}`]}>
-      <StoredProfileScreen
-        discoveryRunFeedback={feedback}
-        actionState={{ message: null }}
-        importResumeGuardMessage={null}
-        latestResumeImportReviewCandidates={[]}
-        latestResumeImportRun={null}
-        recentSourceDebugRuns={[]}
-        resumeImportProgress={null}
-        sourceAccessPrompts={[]}
-        sourceInstructionArtifacts={[]}
-        profileSetupState={{
-          status: "completed",
-          currentStep: "ready_check",
-          completedAt: "2026-01-01T00:00:00.000Z",
-          lastResumedAt: null,
-          reviewItems: [],
-        }}
-        pendingActions={{
-          analyzeProfile: analyzing,
-          importResume: false,
-          profileCopilotBusy: false,
-          profileMutation: false,
-          profileSetup: false,
-          browserSession: () => false,
-          profileReviewItem: () => false,
-          sourceDebug: () => false,
-          sourceInstruction: () => false,
-          sourceInstructionVerify: () => false,
-          targetDiscovery: () => false,
-        }}
-        onApplyProfileSetupReviewAction={() => {}}
-        onAnalyzeProfileFromResume={() => {}}
-        onApplyResumeTimelineRepairAction={async () => {}}
-        onGetSourceDebugRunDetails={() => Promise.reject(Error("unused"))}
-        onImportResume={() => {}}
-        onOpenBrowserSessionForTarget={() => {}}
-        onProfileSurfaceDirtyChange={() => {}}
-        onResumeProfileSetup={() => {}}
-        onRunSourceDebug={() => {}}
-        onSaveSourceInstructionArtifact={() => {}}
-        onVerifySourceInstructions={() => {}}
-      />
-    </MemoryRouter>,
+function profileScreen(section = "basics", analyzing = false) {
+  const state: ProfileWorkflowState = {
+    profileSetupState: {
+      status: "completed",
+      currentStep: "ready_check",
+      completedAt: "2026-01-01T00:00:00.000Z",
+      lastResumedAt: null,
+      reviewItems: [],
+    },
+    // A run still reading the resume is how Profile knows analysis is on.
+    latestResumeImportRun: analyzing
+      ? ResumeImportRunSchema.parse({
+          id: "synthetic",
+          sourceResumeId: "synthetic",
+          sourceResumeFileName: "synthetic.pdf",
+          status: "parsing",
+          startedAt: "2026-10-26T00:00:00.000Z",
+        })
+      : null,
+    latestResumeImportReviewCandidates: [],
+    resumeImportActive: analyzing,
+  };
+  Object.assign(window.nestor, {
+    profileWorkflow: {
+      run: () =>
+        Promise.resolve({ state, message: null, siteInstructions: [] }),
+      importResume: () => new Promise(() => {}),
+      cancelImportResume: () => {},
+      checkSite: () => new Promise(() => {}),
+    } satisfies DesktopProfileWorkflowBridge,
+  });
+  // Profile guards unsaved edits with a route blocker, which needs a data
+  // router.
+  const router = createMemoryRouter(
+    [{ path: "*", element: <StoredProfileScreen /> }],
+    { initialEntries: [`/job-finder/profile?section=${section}`] },
   );
+  render(<RouterProvider router={router} />);
 }
 test("Profile saves an edited field without loading or sending unseen work history", async () => {
   profileScreen();
@@ -392,29 +384,6 @@ test("edits typed during resume analysis are flushed when Profile unmounts", asy
       "Kept during analysis",
     ),
   );
-});
-
-test("per-source feedback uses the current site row even after its label changed", async () => {
-  const sites = createJobSitesStore(store);
-  sites.add({ text: "https://synthetic.test/jobs" });
-  const site = sites.list().rows[0]!;
-  sites.update({ id: site.id, label: "Renamed source" });
-  profileScreen("sources", false, {
-    status: "failed",
-    detail: "Read failed",
-    headline: "This site's read failed.",
-    recovery: null,
-    targetLabel: "Old source label",
-    targetId: String(site.id),
-  });
-  expect(await screen.findByText("This site's read failed.")).not.toBeNull();
-  expect(
-    calls.some(
-      (call) =>
-        call.name === "get_site" &&
-        JSON.stringify(call.input) === JSON.stringify({ id: site.id }),
-    ),
-  ).toBe(true);
 });
 
 test("a primary contact autosave cannot replay its former application email", async () => {

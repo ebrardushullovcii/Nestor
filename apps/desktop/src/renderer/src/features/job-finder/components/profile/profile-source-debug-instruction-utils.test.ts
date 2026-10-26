@@ -1,27 +1,21 @@
-import type {
-  SourceDebugRunRecord,
-  SourceInstructionArtifact,
-} from "@nestor/contracts";
+import type { SourceInstructionArtifact } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { describeLearnedInstructionUsage } from "./profile-source-debug-instruction-utils";
 
 describe("describeLearnedInstructionUsage", () => {
-  it("makes retained older guidance explicit after the latest check fails", () => {
-    const artifact = {
-      status: "validated",
-      basedOnRunId: "source_check_previous",
-    } as SourceInstructionArtifact;
-    const failedRun = {
-      id: "source_check_latest",
-      state: "failed",
-      updatedAt: "2026-08-11T00:23:14.000Z",
-      completedAt: "2026-08-11T00:23:14.000Z",
-    } as SourceDebugRunRecord;
-
-    const description = describeLearnedInstructionUsage(artifact, failedRun);
-
-    expect(description).toContain("earlier successful check");
-    expect(description).toContain("latest check failed");
-    expect(description).toContain("did not re-verify or replace it");
+  it("says how saved guidance is used, from the guidance alone", () => {
+    expect(
+      describeLearnedInstructionUsage({
+        status: "validated",
+      } as SourceInstructionArtifact),
+    ).toContain("used automatically");
+    expect(
+      describeLearnedInstructionUsage({
+        status: "draft",
+      } as SourceInstructionArtifact),
+    ).toContain("draft guidance");
+    expect(describeLearnedInstructionUsage(null)).toBe(
+      "Saved from the latest source check.",
+    );
   });
 });

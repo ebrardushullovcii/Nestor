@@ -1001,6 +1001,16 @@ export function useProfileSetupForms(input: {
   return {
     backgroundArrays,
     markOwnSave,
+    /**
+     * The profile and goals the form's draft was built on: the newest values
+     * the form adopted, which stay put while a conflicting background change
+     * is held back. A save must be checked against these, not the newest
+     * store values, or a held-back change would be overwritten.
+     */
+    saveBaseline: () => ({
+      profile: latestProfileRef.current,
+      goals: latestSearchPreferencesRef.current,
+    }),
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
     draftAwareReviewItems,

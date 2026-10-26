@@ -1,16 +1,13 @@
+import { useMemo, useState, useRef, useCallback } from "react";
 import {
-  useMemo,
-  useState,
-  useRef,
-  useCallback,
-  type ComponentProps,
-} from "react";
-import { useSearchParams } from "react-router-dom";
+  Navigate,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import {
-  CandidateProfileSchema,
   type ProfileRecord,
   type ProfileRecordCollection,
-  type ProfileOverview,
   type CandidateProfile,
   type JobSearchPreferences,
   type ProfileEditBatch,
@@ -22,61 +19,18 @@ import { PageHeaderStack } from "@renderer/features/job-finder/components/page-h
 import { Button } from "@renderer/components/ui/button";
 import { useStoredSettings } from "./use-stored-settings";
 import { useStoredProfile, useProfileRecordPage } from "./use-stored-profile";
-import { profileEdits } from "./profile-edits";
+import { editorProfile, profileEdits } from "./profile-edits";
 import { RecoveredProfileDraft } from "./recovered-profile-draft";
+import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
+import { useProfileWorkflow } from "./use-profile-workflow";
+import { ProfileLeaveGuard } from "./profile-leave-guard";
+import { resumeGuidedSetup } from "./guided-setup";
 
-function expand(
-  values: Record<string, unknown>,
-  target: Record<string, unknown> = {},
-) {
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined) continue;
-    const path = key.split(".");
-    let parent = target;
-    for (const part of path.slice(0, -1)) {
-      const child = parent[part];
-      if (!child || typeof child !== "object" || Array.isArray(child))
-        parent[part] = {};
-      parent = parent[part] as Record<string, unknown>;
-    }
-    parent[path.at(-1)!] = value;
-  }
-  return target;
-}
-function editorProfile(
-  overview: ProfileOverview,
-  rows: Partial<Record<ProfileRecordCollection, readonly ProfileRecord[]>>,
-) {
-  const fields = expand({ ...overview.fields, ...overview.lists });
-  for (const [kind, values] of Object.entries(rows))
-    fields[kind] = values.map((row) => row.record);
-  return CandidateProfileSchema.parse({
-    ...fields,
-    id: overview.id,
-    baseResume: { ...overview.resume, textContent: null, storagePath: null },
-    resumeIdentityOwnership: overview.resumeIdentityOwnership,
-    workEligibility: {
-      ...(fields.workEligibility as Record<string, unknown>),
-      limitedWorkPermissions: overview.limitedWorkPermissions,
-    },
-  });
-}
-type ProfilePorts = Omit<
-  ComponentProps<typeof ProfileScreen>,
-  | "profile"
-  | "searchPreferences"
-  | "onSaveAll"
-  | "onPreserveEdits"
-  | "onDiscardEdits"
-  | "onUpdateResumeApproach"
-  | "resumeApplicationMode"
-  | "recordPaging"
-  | "recordStatus"
-  | "recordSummary"
-  | "sourceInfo"
->;
+const IMPORT_GUARD =
+  "Save this step before importing or refreshing from a resume.";
+
 /** Reads are local to Profile; autosave commits only edited rows and fields. */
-export function StoredProfileScreen(props: ProfilePorts) {
+export function StoredProfileScreen() {
   const store = useStoredProfile(),
     settings = useStoredSettings(),
     [dirty, setDirty] = useState(false),
@@ -84,9 +38,15 @@ export function StoredProfileScreen(props: ProfilePorts) {
       upsert: ProfileRecord[];
       remove: { collection: ProfileRecordCollection; id: string }[];
     }>({ upsert: [], remove: [] }),
-    [message, setMessage] = useState<string | null>(null),
+    [blockLeave, setBlockLeave] = useState(false),
     [params] = useSearchParams(),
     section = params.get("section") ?? "basics";
+  const workflow = useProfileWorkflow({
+      siteInstructions: section === "sources",
+    }),
+    setMessage = workflow.setMessage;
+  const navigate = useNavigate();
+  const location = useLocation();
   const ownWrites = useRef(
     new Map<string, { before: unknown; after: unknown }>(),
   );
@@ -109,14 +69,13 @@ export function StoredProfileScreen(props: ProfilePorts) {
   const onDirtyChange = useCallback(
     (value: boolean, blockNavigation = false) => {
       setDirty(value);
-      props.onProfileSurfaceDirtyChange(value && blockNavigation);
+      setBlockLeave(value && blockNavigation);
     },
-    [props.onProfileSurfaceDirtyChange],
+    [],
   );
   const onDraftEdited = useCallback(() => {
     setMessage(null);
-    props.onProfileSurfaceDraftEdited?.();
-  }, [props.onProfileSurfaceDraftEdited]);
+  }, [setMessage]);
   function changePage(collection: ProfileRecordCollection, change: () => void) {
     setSaved((previous) => ({
       upsert: previous.upsert.filter((row) => row.collection !== collection),
@@ -214,7 +173,18 @@ export function StoredProfileScreen(props: ProfilePorts) {
       keptDraft.current = { key, id: crypto.randomUUID() };
     return { id: keptDraft.current.id, edits: patch };
   }
-  if (!profile || !store.goals || !store.overview)
+  const setupState = workflow.state?.profileSetupState;
+  if (
+    setupState &&
+    getDefaultProfileRoute(setupState, {
+      forceFullProfile: Boolean(
+        (location.state as { forceFullProfile?: boolean } | null)
+          ?.forceFullProfile,
+      ),
+    }) !== "/job-finder/profile"
+  )
+    return <Navigate replace to="/job-finder/profile/setup" />;
+  if (!profile || !store.goals || !store.overview || !workflow.state)
     return (
       <LockedScreenLayout
         topContent={
@@ -224,10 +194,17 @@ export function StoredProfileScreen(props: ProfilePorts) {
           />
         }
       >
-        {store.error ? (
+        {(store.error ?? workflow.error) ? (
           <p role="alert">
-            {store.error}{" "}
-            <Button onClick={() => void store.refresh()}>Try again</Button>
+            {store.error ?? workflow.error}{" "}
+            <Button
+              onClick={() => {
+                void store.refresh();
+                void workflow.refresh();
+              }}
+            >
+              Try again
+            </Button>
           </p>
         ) : (
           <p role="status">Loading your profile…</p>
@@ -307,10 +284,43 @@ export function StoredProfileScreen(props: ProfilePorts) {
         <p role="alert">{store.error ?? settings.error}</p>
       ) : null}
       <RecoveredProfileDraft onRestored={store.refresh} />
+      <ProfileLeaveGuard
+        dirty={blockLeave}
+        saving={store.saving ? "Profile" : null}
+      />
       <ProfileScreen
-        {...props}
         onProfileSurfaceDraftEdited={onDraftEdited}
-        actionState={{ message }}
+        actionState={{ message: workflow.message }}
+        importResumeGuardMessage={blockLeave ? IMPORT_GUARD : null}
+        onApplyProfileSetupReviewAction={(reviewItemId, action, options) =>
+          void workflow.applyReviewAction(reviewItemId, action, options)
+        }
+        onAnalyzeProfileFromResume={() => {
+          if (blockLeave) setMessage(IMPORT_GUARD);
+          else void workflow.analyzeResume();
+        }}
+        onApplyResumeTimelineRepairAction={workflow.applyTimelineRepair}
+        onImportResume={() => {
+          if (blockLeave) setMessage(IMPORT_GUARD);
+          else void workflow.importResume();
+        }}
+        onRetryInterruptedImport={() =>
+          void workflow.importResume({ retryInterrupted: true })
+        }
+        onResumeProfileSetup={(step) =>
+          void resumeGuidedSetup(workflow, navigate, location.pathname, step)
+        }
+        onRunSourceDebug={(targetId) => void workflow.checkSite(targetId)}
+        onSaveSourceInstructionArtifact={(targetId, artifact) =>
+          void workflow.saveSiteInstructions(targetId, artifact)
+        }
+        latestResumeImportReviewCandidates={
+          workflow.state.latestResumeImportReviewCandidates
+        }
+        latestResumeImportRun={workflow.state.latestResumeImportRun}
+        resumeImportProgress={workflow.importProgress}
+        profileSetupState={workflow.state.profileSetupState}
+        sourceInstructionArtifacts={workflow.siteInstructions}
         profile={profile}
         searchPreferences={store.goals}
         sourceInfo={store.overview}
@@ -333,8 +343,14 @@ export function StoredProfileScreen(props: ProfilePorts) {
           ) : null
         }
         pendingActions={{
-          ...props.pendingActions,
-          profileMutation: store.saving || props.pendingActions.profileMutation,
+          analyzeProfile: workflow.isPending("analyze"),
+          importResume: workflow.isPending("import"),
+          profileCopilotBusy: false,
+          profileMutation: store.saving,
+          profileSetup: workflow.isPending("setup"),
+          profileReviewItem: (id) => workflow.isPending(`review:${id}`),
+          sourceDebug: (id) => workflow.isPending(`site:${id}`),
+          sourceInstruction: (id) => workflow.isPending(`instruction:${id}`),
         }}
         onProfileSurfaceDirtyChange={onDirtyChange}
         resumeApplicationMode={settings.settings?.resumeApplicationMode}

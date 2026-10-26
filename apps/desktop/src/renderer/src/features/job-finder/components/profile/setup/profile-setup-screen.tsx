@@ -15,7 +15,6 @@ import {
   type ResumeImportFieldCandidateSummary,
   type ResumeImportRun,
   type ResumeImportProgressEvent,
-  type SourceDebugRunRecord,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
@@ -146,10 +145,6 @@ export function ProfileSetupScreen(props: {
    */
   onProfileSurfaceDraftEdited?: () => void;
   onResumeSetup: (step: ProfileSetupStep) => void;
-  onRunSourceDebug?: (
-    targetId: string,
-    options?: { readabilityTimeoutMs?: number },
-  ) => void;
   onSaveSetupStep: (
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
@@ -159,12 +154,16 @@ export function ProfileSetupScreen(props: {
       message?: string;
       openProfile?: boolean;
       resolvedReviewItems?: readonly ProfileSetupResolvedReviewItem[];
+      resumeApplicationMode?: ResumeApplicationMode;
       stayOnCurrentStep?: boolean;
+      /** What the draft was built on; see `saveBaseline`. */
+      baseline?: { profile: CandidateProfile; goals: JobSearchPreferences };
     },
   ) => void;
+  /** Why the last step did not save, shown on the step. */
+  saveError?: string | null;
   profile: CandidateProfile;
   profileSetupState: ProfileSetupState;
-  recentSourceDebugRuns?: readonly SourceDebugRunRecord[];
   resumeApplicationMode?: ResumeApplicationMode;
   searchPreferences: JobSearchPreferences;
 }) {
@@ -187,11 +186,9 @@ export function ProfileSetupScreen(props: {
     onProfileSurfaceDirtyChange,
     onProfileSurfaceDraftEdited,
     onResumeSetup,
-    onRunSourceDebug,
     onSaveSetupStep,
     profile,
     profileSetupState,
-    recentSourceDebugRuns = [],
     resumeApplicationMode,
     searchPreferences,
   } = props;
@@ -209,6 +206,7 @@ export function ProfileSetupScreen(props: {
   const {
     backgroundArrays,
     markOwnSave,
+    saveBaseline,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
     draftAwareReviewItems,
@@ -276,7 +274,10 @@ export function ProfileSetupScreen(props: {
     onResumeSetup,
     onSaveSetupStep: (nextProfile, nextPreferences, nextStep, options) => {
       markOwnSave(nextProfile, nextPreferences);
-      onSaveSetupStep(nextProfile, nextPreferences, nextStep, options);
+      onSaveSetupStep(nextProfile, nextPreferences, nextStep, {
+        ...options,
+        baseline: saveBaseline(),
+      });
     },
     resumeApplicationMode: selectedResumeApplicationMode,
     preferencesFormValues: () => preferencesForm.getValues(),
@@ -490,7 +491,7 @@ export function ProfileSetupScreen(props: {
               });
             }}
             remainingBlockerLabels={remainingBlockerLabels}
-            validationMessage={validationMessage}
+            validationMessage={validationMessage ?? props.saveError ?? null}
           />
         )
       }
@@ -695,15 +696,13 @@ export function ProfileSetupScreen(props: {
                 onSaveAndGoToStep={(step) => handleSaveStep(step)}
                 onResumeApplicationModeChange={setSelectedResumeApplicationMode}
                 registerPendingSourceFlush={registerPendingSourceFlush}
-                {...(onRunSourceDebug ? { onRunSourceDebug } : {})}
                 profile={profile}
                 profileForm={profileForm}
                 profileSetupReviewItems={draftAwareReviewItems}
                 preferencesForm={preferencesForm}
                 resumeApplicationMode={selectedResumeApplicationMode}
                 searchPreferences={searchPreferences}
-                recentSourceDebugRuns={recentSourceDebugRuns}
-                validationMessage={validationMessage}
+                validationMessage={validationMessage ?? props.saveError ?? null}
               />
             </fieldset>
           </div>
