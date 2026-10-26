@@ -69,9 +69,7 @@ function labelMatches(
     return keys[label]?.test(question) ?? false;
   }
   if (entry.path === "/yearsExperience")
-    return (
-      /\b(?:overall|total)\b/iu.test(question) && /\byears?\b/iu.test(question)
-    );
+    return /\byears?\b/iu.test(question) && !skillYearClaim(question, "1");
   const words = normalize(label.replace(/([a-z])([A-Z])/gu, "$1 $2"));
   return words.length > 2 && asked === words;
 }

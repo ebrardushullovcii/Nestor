@@ -459,13 +459,16 @@ function createHarnessModel(
     chatWithTools: (_messages, _tools, options) => {
       if (_tools[0]?.function.name === "report_answer_checks") {
         const asked = JSON.parse(String(_messages[1]?.content ?? "{}")) as {
-          applicant: Record<string, unknown>;
-          answers?: unknown[];
+          applicant: {
+            yearsExperience: number;
+            workEligibility: Record<string, unknown>;
+          };
+          answers?: Array<{ question: string; proposedAnswer: string }>;
         };
         return Promise.resolve({
           toolCalls: [
             call("report_answer_checks", {
-              checks: (asked.answers ?? []).map((_, index) => ({
+              checks: (asked.answers ?? []).map((answer, index) => ({
                 index,
                 supported: true,
                 evidence: [
@@ -473,8 +476,22 @@ function createHarnessModel(
                     kind: "applicant_fact",
                     claim: "Scripted fixture verdict",
                     source: "applicant",
-                    path: "",
-                    quote: JSON.stringify(asked.applicant),
+                    path: /years/iu.test(answer.question)
+                      ? "/yearsExperience"
+                      : /notice/iu.test(answer.question)
+                        ? "/workEligibility/Notice period in days"
+                        : "/workEligibility/Available start date",
+                    quote: String(
+                      /years/iu.test(answer.question)
+                        ? asked.applicant.yearsExperience
+                        : /notice/iu.test(answer.question)
+                          ? asked.applicant.workEligibility[
+                              "Notice period in days"
+                            ]
+                          : asked.applicant.workEligibility[
+                              "Available start date"
+                            ],
+                    ),
                   },
                 ],
                 reason:
@@ -569,7 +586,18 @@ function createConfig(
         location: "Manchester, United Kingdom",
         description: "Own the internal platform.",
       },
-      reusableAnswers: [],
+      reusableAnswers: [
+        {
+          id: "own-motivation",
+          kind: "other",
+          question: "Why do you want to work here?",
+          label: "Motivation",
+          answer:
+            "I want to build dependable platforms for the teams who use them.",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ],
       documents: [createResumeDocument()],
     },
     application: {

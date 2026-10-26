@@ -7,15 +7,15 @@ import { buildApplyLetterDependencies } from "./agent-application-preparation";
 // quote is the supplied synthetic context; answer-grounding tests check verdicts.
 function supportedEvidence(messages: readonly { content?: string }[]) {
   const data = JSON.parse(String(messages[1]?.content ?? "{}")) as {
-    applicant: Record<string, unknown>;
+    applicant: { name: { full: string } };
   };
   return [
     {
       kind: "applicant_fact",
       claim: "Scripted supported letter",
       source: "applicant",
-      path: "",
-      quote: JSON.stringify(data.applicant),
+      path: "/name/full",
+      quote: data.applicant.name.full,
     },
   ];
 }
