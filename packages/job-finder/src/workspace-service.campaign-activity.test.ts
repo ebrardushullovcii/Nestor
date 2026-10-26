@@ -9,7 +9,6 @@ import {
   createSeed,
 } from "./workspace-service.test-support";
 
-
 function createService() {
   const repository = createInMemoryJobFinderRepository(createSeed());
   const service = createJobFinderWorkspaceService({
@@ -24,7 +23,7 @@ function createService() {
 }
 
 describe("workspace campaign and activity controls", () => {
-  test("persists pause state, and an explicit user action resumes it instead of failing", async () => {
+  test("persists pause state; Check source and opening the browser refuse while paused, only Resume lowers it", async () => {
     const { service } = createService();
     const paused = await service.setActivityControl({
       paused: true,
@@ -35,14 +34,15 @@ describe("workspace campaign and activity controls", () => {
       paused: true,
       reason: "Pause all browser work.",
     });
-    // A deliberate Check source click clears the pause; it must never fail
-    // with "press Resume on Home first" (whatever the check itself returns).
-    await service.runSourceDebug("1").catch((error) => {
-      expect(String(error)).not.toContain("activity is paused");
-    });
-    expect((await service.getWorkspaceSnapshot()).activityControl.paused).toBe(
-      false,
+    await expect(service.runSourceDebug("1")).rejects.toThrow(
+      "Background work is paused",
     );
+    await expect(service.openBrowserSession()).rejects.toThrow(
+      "Background work is paused",
+    );
+    expect(
+      (await service.getWorkspaceSnapshot()).activityControl,
+    ).toMatchObject({ paused: true, reason: "Pause all browser work." });
 
     await service.setActivityControl({ paused: true, reason: "Again." });
     const resumed = await service.setActivityControl({ paused: false });
@@ -52,7 +52,4 @@ describe("workspace campaign and activity controls", () => {
       reason: null,
     });
   });
-
-
-
 });
