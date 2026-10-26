@@ -3,30 +3,21 @@ import { createHomeBridge } from "./home";
 import { createActivityBridge } from "./activity";
 import { createNeedsYouBridge } from "./needs-you";
 import { createTrackerBridge } from "./tracker";
-import {
-  ApplicationListPageSchema,
-  ApplicationListQuerySchema,
-  ApplyJobsInputSchema,
-  ApplyJobsResultSchema,
-  JobChangeSchema,
-  ApplicationStoreDemoInputSchema,
-  ApplicationStoreDemoResultSchema,
-  ApplicationTargetSchema,
-  ApplicationsForJobsInputSchema,
-  ApplicationRowSchema,
-  ApplicationDetailsSchema,
-  ApplicationCommandResultSchema,
-  NeedsYouListQuerySchema,
-  NeedsYouPageSchema,
-  AnswerNeedsYouInputSchema,
-  AnswerNeedsYouResultSchema,
-  type ApplicationTarget,
-  type ApplicationsForJobsInput,
-  type NeedsYouListQuery,
-  type AnswerNeedsYouInput,
-  type ApplicationListQuery,
-  type ApplyJobsInput,
-  type JobChange,
+import type {
+  AnswerNeedsYouInput,
+  AnswerNeedsYouResult,
+  ApplicationDetails,
+  ApplicationListPage,
+  ApplicationListQuery,
+  ApplicationRow,
+  ApplicationStoreDemoResult,
+  ApplicationTarget,
+  ApplicationsForJobsInput,
+  ApplyJobsInput,
+  ApplyJobsResult,
+  JobChange,
+  NeedsYouListQuery,
+  NeedsYouPage,
 } from "@nestor/contracts";
 import {
   contextBridge,
@@ -114,9 +105,9 @@ import type {
 } from "@nestor/contracts";
 import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
-import {
-  JobFinderStartupDatabaseRecoveryFactSchema,
-  JobFinderStartupResetRecoveryFactSchema,
+import type {
+  JobFinderStartupDatabaseRecoveryFact,
+  JobFinderStartupResetRecoveryFact,
 } from "@nestor/contracts";
 
 let activeResumeImportRequestId: string | null = null;
@@ -500,61 +491,47 @@ const desktopApi = {
   },
   jobFinder: {
     applyJobs: (input: ApplyJobsInput) =>
-      ipcRenderer
-        .invoke("job-finder:apply-jobs", ApplyJobsInputSchema.parse(input))
-        .then((result) => ApplyJobsResultSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:apply-jobs",
+        input,
+      ) as Promise<ApplyJobsResult>,
     listApplications: (input: ApplicationListQuery = {}) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:list-applications",
-          ApplicationListQuerySchema.parse(input),
-        )
-        .then((result) => ApplicationListPageSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:list-applications",
+        input,
+      ) as Promise<ApplicationListPage>,
     applicationsForJobs: (input: ApplicationsForJobsInput) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:applications-for-jobs",
-          ApplicationsForJobsInputSchema.parse(input),
-        )
-        .then((result) => ApplicationRowSchema.array().parse(result)),
+      ipcRenderer.invoke("job-finder:applications-for-jobs", input) as Promise<
+        ApplicationRow[]
+      >,
     getApplicationDetails: (input: ApplicationTarget) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:get-application-details",
-          ApplicationTargetSchema.parse(input),
-        )
-        .then((result) => ApplicationDetailsSchema.nullable().parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:get-application-details",
+        input,
+      ) as Promise<ApplicationDetails | null>,
     openApplication: (input: ApplicationTarget) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:open-application",
-          ApplicationTargetSchema.parse(input),
-        )
-        .then((result) => ApplicationCommandResultSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:open-application",
+        input,
+      ) as Promise<boolean>,
     stopApplication: (input: ApplicationTarget) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:stop-application",
-          ApplicationTargetSchema.parse(input),
-        )
-        .then((result) => ApplicationCommandResultSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:stop-application",
+        input,
+      ) as Promise<boolean>,
     listNeedsYou: (input: NeedsYouListQuery = {}) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:list-needs-you",
-          NeedsYouListQuerySchema.parse(input),
-        )
-        .then((result) => NeedsYouPageSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:list-needs-you",
+        input,
+      ) as Promise<NeedsYouPage>,
     answerNeedsYou: (input: AnswerNeedsYouInput) =>
-      ipcRenderer
-        .invoke(
-          "job-finder:answer-needs-you",
-          AnswerNeedsYouInputSchema.parse(input),
-        )
-        .then((result) => AnswerNeedsYouResultSchema.parse(result)),
+      ipcRenderer.invoke(
+        "job-finder:answer-needs-you",
+        input,
+      ) as Promise<AnswerNeedsYouResult>,
     onApplicationsChange: (listener: (change: JobChange) => void) => {
       const handler = (_event: unknown, value: unknown) =>
-        listener(JobChangeSchema.parse(value));
+        listener(value as JobChange);
       ipcRenderer.on("job-finder:applications-changed", handler);
       return () =>
         ipcRenderer.removeListener("job-finder:applications-changed", handler);
@@ -912,23 +889,17 @@ const desktopApi = {
         "job-finder:reset-workspace",
       ) as Promise<JobFinderWorkspaceSyncResult>,
     getStartupResetRecovery: () =>
-      ipcRenderer
-        .invoke("job-finder:get-startup-reset-recovery")
-        .then((payload: unknown) =>
-          JobFinderStartupResetRecoveryFactSchema.parse(payload),
-        ),
+      ipcRenderer.invoke(
+        "job-finder:get-startup-reset-recovery",
+      ) as Promise<JobFinderStartupResetRecoveryFact>,
     getStartupDatabaseRecovery: () =>
-      ipcRenderer
-        .invoke("job-finder:get-startup-database-recovery")
-        .then((payload: unknown) =>
-          JobFinderStartupDatabaseRecoveryFactSchema.parse(payload),
-        ),
+      ipcRenderer.invoke(
+        "job-finder:get-startup-database-recovery",
+      ) as Promise<JobFinderStartupDatabaseRecoveryFact>,
     dismissStartupDatabaseRecoveryNotice: () =>
-      ipcRenderer
-        .invoke("job-finder:dismiss-startup-database-recovery-notice")
-        .then((payload: unknown) =>
-          JobFinderStartupDatabaseRecoveryFactSchema.parse(payload),
-        ),
+      ipcRenderer.invoke(
+        "job-finder:dismiss-startup-database-recovery-notice",
+      ) as Promise<JobFinderStartupDatabaseRecoveryFact>,
     queueJobForReview: (jobId: string) =>
       ipcRenderer.invoke("job-finder:queue-job-for-review", {
         jobId,
@@ -954,14 +925,10 @@ const desktopApi = {
               sourceUrl: string;
               trackApplications?: boolean;
             }) =>
-              ipcRenderer
-                .invoke(
-                  "job-finder:test-load-applications-store-demo",
-                  ApplicationStoreDemoInputSchema.parse(input),
-                )
-                .then((result) =>
-                  ApplicationStoreDemoResultSchema.parse(result),
-                ),
+              ipcRenderer.invoke(
+                "job-finder:test-load-applications-store-demo",
+                input,
+              ) as Promise<ApplicationStoreDemoResult>,
             getSystemThemeOverride: () => currentSystemThemeOverride,
             setSystemThemeOverride: (theme: "dark" | "light" | null) =>
               Promise.resolve().then(() => {

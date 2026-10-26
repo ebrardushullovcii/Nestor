@@ -225,9 +225,11 @@ export const ResumePdfExportInputSchema = z
   .object({ jobId: JobIdSchema })
   .strict();
 
-export const RESUMES_RUN_CHANNEL = "resumes:run";
-export const RESUMES_PREVIEW_CHANNEL = "resumes:preview";
-export const RESUMES_EXPORT_PDF_CHANNEL = "resumes:export-pdf";
+export {
+  RESUMES_EXPORT_PDF_CHANNEL,
+  RESUMES_PREVIEW_CHANNEL,
+  RESUMES_RUN_CHANNEL,
+} from "./ipc-channels";
 
 /** The live preview's render of a draft that may not be saved yet. */
 export interface ResumePreviewResult {

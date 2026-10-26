@@ -165,7 +165,7 @@ export type NeedsYouCommandInput<K extends NeedsYouCommandName> = z.input<
 >;
 export type NeedsYouCommandOutput<K extends NeedsYouCommandName> =
   NeedsYouCommandOutputs[K];
-export const NEEDS_YOU_RUN_CHANNEL = "needs-you:run";
+export { NEEDS_YOU_RUN_CHANNEL } from "./ipc-channels";
 export type NeedsYouCommandOutputs = {
   [K in NeedsYouCommandName]: z.output<
     (typeof NEEDS_YOU_COMMANDS)[K]["output"]

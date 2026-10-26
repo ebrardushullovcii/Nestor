@@ -4,6 +4,8 @@ import {
   JOBS_RUN_CHANNEL,
   JOBS_SEARCH_STATUS_CHANNEL,
   JOBS_SUBSCRIBE_CHANNEL,
+  JobChangeSchema,
+  JobSearchStatusSchema,
   type JobCommandName,
   type JobSearchStatus,
 } from "@nestor/contracts";
@@ -54,8 +56,12 @@ async function getSearchService(): Promise<JobSearchService> {
   }
   searchServicePending ??= createSearchService().then((service) => {
     searchService = service;
+    // What main sends is checked here; the preload passes it through.
     service.onStatus((status) =>
-      broadcastToJobSubscribers(JOBS_SEARCH_STATUS_CHANNEL, status),
+      broadcastToJobSubscribers(
+        JOBS_SEARCH_STATUS_CHANNEL,
+        JobSearchStatusSchema.parse(status),
+      ),
     );
     return service;
   });
@@ -122,9 +128,15 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     return { ok: true as const };
   });
   const store = getJobStore();
-  store.onChange((change) =>
-    broadcastToJobSubscribers(JOBS_CHANGED_CHANNEL, change),
-  );
+  store.onChange((change) => {
+    // Checked here, since the preload passes it through. A bad change is
+    // dropped rather than thrown into the write that made it.
+    const checked = JobChangeSchema.safeParse(change);
+    if (checked.success)
+      broadcastToJobSubscribers(JOBS_CHANGED_CHANNEL, checked.data);
+    else
+      console.warn("[Desktop] Dropped a malformed job change.", checked.error);
+  });
   if (store.unscoredJobIds(1).length > 0) {
     setTimeout(scoreUnscoredJobs, 5_000).unref?.();
   }

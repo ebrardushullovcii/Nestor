@@ -1,24 +1,28 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("electron", () => ({
-  BrowserWindow: { fromWebContents: vi.fn() },
+  BrowserWindow: {
+    fromWebContents: (contents: { id: number }) => ({ webContents: contents }),
+  },
   dialog: {},
 }));
 vi.mock("../services/job-finder/workspace-service", () => ({
   getJobFinderWorkspaceService: vi.fn(),
 }));
+const acknowledgeNavigation = vi.hoisted(() => vi.fn());
 vi.mock("../services/assistant/assistant-service", () => ({
-  getAssistantHost: vi.fn(),
+  getAssistantHost: () => Promise.resolve({ acknowledgeNavigation }),
 }));
 vi.mock("../services/job-finder/candidate-asset-library-instance", () => ({
   getCandidateAssetLibrary: vi.fn(),
 }));
 
 import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
-import { inferAssetKind } from "./assistant";
+import { inferAssetKind, registerAssistantRouteHandlers } from "./assistant";
 
 describe("sidebar file attachment classification", () => {
   test.each([
@@ -72,3 +76,32 @@ describe("sidebar file attachment classification", () => {
   });
 });
 
+// The preload passes this through, so main is where it is checked.
+test("checks a displayed navigation acknowledgment before the assistant sees it", async () => {
+  const handlers = new Map<
+    string,
+    (event: IpcMainInvokeEvent, payload: unknown) => Promise<unknown>
+  >();
+  registerAssistantRouteHandlers({
+    handle: (name: string, handler: never) => handlers.set(name, handler),
+  } as unknown as IpcMain);
+  const acknowledge = handlers.get(
+    "job-finder:assistant:acknowledge-navigation",
+  )!;
+  const event = { sender: { id: 1 } } as unknown as IpcMainInvokeEvent;
+  const ack = {
+    conversationId: "conversation",
+    navigationRequestId: "request",
+    displayedRoute: "x".repeat(4000),
+    section: "tracker",
+    overlay: "none",
+    status: "displayed",
+    reason: null,
+  };
+  await acknowledge(event, ack);
+  expect(acknowledgeNavigation).toHaveBeenCalledWith(ack);
+  await expect(
+    acknowledge(event, { ...ack, displayedRoute: "x".repeat(4001) }),
+  ).rejects.toThrow();
+  expect(acknowledgeNavigation).toHaveBeenCalledTimes(1);
+});

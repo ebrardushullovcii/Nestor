@@ -160,7 +160,7 @@ describe("preload startup recovery boundary", () => {
     mockInvoke.mockClear();
   });
 
-  it("parses getStartupDatabaseRecovery responses through the contract schema", async () => {
+  it("passes the startup database recovery fact main checked", async () => {
     const fact = {
       status: "restored",
       incidentId: "incident-1",
@@ -184,18 +184,7 @@ describe("preload startup recovery boundary", () => {
     );
   });
 
-  it("fails closed when getStartupDatabaseRecovery returns a malformed fact", async () => {
-    mockInvoke.mockResolvedValueOnce({
-      status: "restored",
-      incidentId: "",
-    });
-
-    await expect(exposedJobFinder.getStartupDatabaseRecovery()).rejects.toThrow(
-      /restored/,
-    );
-  });
-
-  it("parses getStartupResetRecovery responses through the contract schema", async () => {
+  it("passes the startup reset recovery fact main checked", async () => {
     const fact = {
       status: "degraded",
       reason: "marker_quarantined_malformed",
@@ -211,15 +200,7 @@ describe("preload startup recovery boundary", () => {
     );
   });
 
-  it("fails closed when getStartupResetRecovery returns a malformed fact", async () => {
-    mockInvoke.mockResolvedValueOnce({ status: "completed" });
-
-    await expect(exposedJobFinder.getStartupResetRecovery()).rejects.toThrow(
-      /required/i,
-    );
-  });
-
-  it("parses dismissStartupDatabaseRecoveryNotice responses through the contract schema", async () => {
+  it("passes the dismissal response main checked", async () => {
     const fact = { status: "idle" };
     mockInvoke.mockResolvedValueOnce({ ...fact });
 
@@ -275,13 +256,23 @@ describe("preload bulk shortlist boundary", () => {
 it("exposes the store Apply selection and paged applications without a workspace response", async () => {
   mockInvoke.mockReset();
   mockInvoke.mockImplementation((channel: string) => {
-    if (channel === "job-finder:apply-jobs") return Promise.resolve({ queued: 2, unchanged: 0, notApproved: 0 });
-    if (channel === "job-finder:list-applications") return Promise.resolve({ rows: [], nextCursor: null });
+    if (channel === "job-finder:apply-jobs")
+      return Promise.resolve({ queued: 2, unchanged: 0, notApproved: 0 });
+    if (channel === "job-finder:list-applications")
+      return Promise.resolve({ rows: [], nextCursor: null });
     return Promise.resolve({ ready: true });
   });
-  expect(await exposedJobFinder.applyJobs({ selection: { ids: [1, 2] } })).toEqual({ queued: 2, unchanged: 0, notApproved: 0 });
-  expect(mockInvoke).toHaveBeenCalledWith("job-finder:apply-jobs", { selection: { ids: [1, 2] } });
-  expect(() => exposedJobFinder.applyJobs({ selection: { ids: [-1] } })).toThrow();
-  expect(await exposedJobFinder.listApplications({ state: "queued", limit: 20 })).toEqual({ rows: [], nextCursor: null });
-  expect(mockInvoke).toHaveBeenCalledWith("job-finder:list-applications", { state: "queued", cursor: null, limit: 20 });
+  expect(
+    await exposedJobFinder.applyJobs({ selection: { ids: [1, 2] } }),
+  ).toEqual({ queued: 2, unchanged: 0, notApproved: 0 });
+  expect(mockInvoke).toHaveBeenCalledWith("job-finder:apply-jobs", {
+    selection: { ids: [1, 2] },
+  });
+  expect(
+    await exposedJobFinder.listApplications({ state: "queued", limit: 20 }),
+  ).toEqual({ rows: [], nextCursor: null });
+  expect(mockInvoke).toHaveBeenCalledWith("job-finder:list-applications", {
+    state: "queued",
+    limit: 20,
+  });
 });

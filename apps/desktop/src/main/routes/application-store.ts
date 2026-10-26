@@ -10,6 +10,7 @@ import {
   ApplicationRowSchema,
   ApplicationsForJobsInputSchema,
   ApplicationDetailsSchema,
+  ApplicationCommandResultSchema,
   NeedsYouListQuerySchema,
   NeedsYouPageSchema,
   AnswerNeedsYouInputSchema,
@@ -82,8 +83,10 @@ export async function executeApplicationStoreCommand(
     }
     case "stop-application":
       await startJobFinderRuntime();
-      return (await getApplicationService()).stopApplication(
-        ApplicationTargetSchema.parse(input).id,
+      return ApplicationCommandResultSchema.parse(
+        await (
+          await getApplicationService()
+        ).stopApplication(ApplicationTargetSchema.parse(input).id),
       );
     case "send-application":
       await startJobFinderRuntime();
@@ -96,7 +99,7 @@ export async function executeApplicationStoreCommand(
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);
       if (opened) await getEmbeddedBrowser().command({ type: "open" });
-      return opened;
+      return ApplicationCommandResultSchema.parse(opened);
     }
     case "list-needs-you":
       return NeedsYouPageSchema.parse(

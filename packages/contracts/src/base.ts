@@ -1,10 +1,12 @@
 import { z } from "zod";
 
+import type { suiteModules } from "./plain-values";
+
 export const IsoDateTimeSchema = z.string().datetime();
 export const NonEmptyStringSchema = z.string().trim().min(1);
 export const UrlStringSchema = z.string().trim().url();
 
-export const suiteModules = ["job-finder", "live-assistant"] as const;
+export { suiteModules } from "./plain-values";
 export type SuiteModule = (typeof suiteModules)[number];
 
 export const applicationStatusValues = [

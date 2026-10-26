@@ -335,8 +335,7 @@ export interface TrackerCommandOutputs {
 export type TrackerCommandOutput<K extends TrackerCommandName> =
   TrackerCommandOutputs[K];
 
-export const TRACKER_RUN_CHANNEL = "tracker:run";
-export const TRACKER_EXPORT_CHANNEL = "tracker:export";
+export { TRACKER_EXPORT_CHANNEL, TRACKER_RUN_CHANNEL } from "./ipc-channels";
 /** What Export did: the file it wrote and how many rows, or null when cancelled. */
 export interface TrackerExportResult {
   outputPath: string | null;

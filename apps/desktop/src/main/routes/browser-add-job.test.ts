@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 const mocks = vi.hoisted(() => ({
   readTab: vi.fn(),
+  capture: vi.fn(),
   add: vi.fn(),
   publish: vi.fn(),
   owns: vi.fn(),
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../services/browser/embedded-browser", () => ({
   getEmbeddedBrowser: () => ({
     readTab: mocks.readTab,
+    captureActivePage: mocks.capture,
     ownsRenderer: mocks.owns,
   }),
 }));
@@ -76,4 +78,16 @@ it("validates exact-tab IPC, reads that page in main and publishes its saved res
   ).rejects.toThrow();
   mocks.owns.mockReturnValue(false);
   await expect(add(event, { tabId: "chosen" })).rejects.toThrow("app window");
+});
+
+it("checks a captured page in main before it reaches the renderer", async () => {
+  const mainFrame = {};
+  const event = {
+    sender: { id: 1, mainFrame },
+    senderFrame: mainFrame,
+  } as unknown as IpcMainInvokeEvent;
+  mocks.capture.mockResolvedValue({ url: 42 });
+  await expect(
+    Promise.resolve(handlers.get("browser:capture-page")!(event, undefined)),
+  ).rejects.toThrow();
 });

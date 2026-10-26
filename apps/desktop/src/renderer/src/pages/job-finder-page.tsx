@@ -15,7 +15,6 @@ import {
   getRouteSkeletonPanes,
   RouteSkeleton,
 } from "@renderer/features/job-finder/components/route-skeleton";
-import { StartupDatabaseRecoveryNotice } from "@renderer/features/job-finder/components/startup-database-recovery-notice";
 import { ThemeProvider } from "@renderer/app/theme-provider";
 import {
   ClipboardCheck,
@@ -39,12 +38,20 @@ import {
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
-import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery";
+import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery-copy";
 import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import { useLegacyControllerView } from "./legacy-controller-view";
+
+// The recovery notice reads its state after the first screen, so its code
+// (and the schema it checks that state with) loads then too.
+const StartupDatabaseRecoveryNotice = lazy(async () => ({
+  default: (
+    await import("@renderer/features/job-finder/components/startup-database-recovery-notice")
+  ).StartupDatabaseRecoveryNotice,
+}));
 
 export type { JobFinderPageContext } from "./job-finder-page-context";
 export {
@@ -314,7 +321,9 @@ export function JobFinderPage() {
       </AssistantProvider>
       {/* The window-close responder is mounted once by
           withJobFinderWindowCloseGuard above this tree. */}
-      <StartupDatabaseRecoveryNotice />
+      <Suspense fallback={null}>
+        <StartupDatabaseRecoveryNotice />
+      </Suspense>
     </ThemeProvider>,
   );
 }

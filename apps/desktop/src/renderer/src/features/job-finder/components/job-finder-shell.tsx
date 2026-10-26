@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { lazy, Suspense, type CSSProperties, type ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebarSlot } from "../assistant/assistant-sidebar-slot";
@@ -56,7 +56,6 @@ import {
   JobFinderGlobalSearchDialog,
 } from "./job-finder-global-search";
 import { JobFinderTaskCenter } from "./task-center/job-finder-task-center";
-import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
 import { toDestinationBadgeCount } from "../lib/destination-counts";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
@@ -88,6 +87,13 @@ import {
   JOB_FINDER_SHORTCUTS_DIALOG_LABEL,
   JobFinderShortcutsDialog,
 } from "./job-finder-shortcuts-dialog";
+
+// The reset notice reads its state after the first screen, so its code (and
+// the schema it checks that state with) loads then too.
+const StartupResetRecoveryBanner = lazy(async () => ({
+  default: (await import("./startup-reset-recovery-banner"))
+    .StartupResetRecoveryBanner,
+}));
 
 interface JobFinderShellProps {
   children: ReactNode;
@@ -1963,7 +1969,9 @@ export function JobFinderShell({
           >
             {/* Each screen mounts fresh per path inside the outlet, except
                 the kept lists, so the container itself is not keyed. */}
-            <StartupResetRecoveryBanner key={location.pathname} />
+            <Suspense fallback={null}>
+              <StartupResetRecoveryBanner key={location.pathname} />
+            </Suspense>
             {children}
           </div>
         </main>

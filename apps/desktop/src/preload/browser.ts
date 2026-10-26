@@ -1,62 +1,47 @@
 import { ipcRenderer } from "electron";
-import {
-  AddBrowserJobInputSchema,
-  AddBrowserJobResultSchema,
-  DesktopBrowserCommandSchema,
-  DesktopBrowserImportInputSchema,
-  DesktopBrowserImportResultSchema,
-  DesktopBrowserImportSourcesSchema,
-  DesktopBrowserSnapshotSchema,
-  DesktopBrowserStateSchema,
-  DesktopBrowserViewportSchema,
-  type DesktopBrowserBridge,
+import type {
+  AddBrowserJobResult,
+  DesktopBrowserBridge,
+  DesktopBrowserImportResult,
+  DesktopBrowserImportSources,
+  DesktopBrowserSnapshot,
+  DesktopBrowserState,
 } from "@nestor/contracts";
 
+// Main checks every input and result against its schema; the bridge passes
+// them through, so the preload builds no schema when the window opens.
 export const browserBridge: DesktopBrowserBridge = {
-  addCurrentJob: async (input) =>
-    AddBrowserJobResultSchema.parse(
-      await ipcRenderer.invoke(
-        "browser:add-job",
-        AddBrowserJobInputSchema.parse(input),
-      ),
-    ),
-  getState: async () =>
-    DesktopBrowserStateSchema.parse(
-      await ipcRenderer.invoke("browser:get-state"),
-    ),
-  command: async (command) =>
-    DesktopBrowserStateSchema.parse(
-      await ipcRenderer.invoke(
-        "browser:command",
-        DesktopBrowserCommandSchema.parse(command),
-      ),
-    ),
+  addCurrentJob: (input) =>
+    ipcRenderer.invoke(
+      "browser:add-job",
+      input,
+    ) as Promise<AddBrowserJobResult>,
+  getState: () =>
+    ipcRenderer.invoke("browser:get-state") as Promise<DesktopBrowserState>,
+  command: (command) =>
+    ipcRenderer.invoke(
+      "browser:command",
+      command,
+    ) as Promise<DesktopBrowserState>,
   setViewport: async (viewport) => {
-    await ipcRenderer.invoke(
-      "browser:set-viewport",
-      DesktopBrowserViewportSchema.parse(viewport),
-    );
+    await ipcRenderer.invoke("browser:set-viewport", viewport);
   },
-  captureActivePage: async () =>
-    DesktopBrowserSnapshotSchema.parse(
-      await ipcRenderer.invoke("browser:capture-page"),
-    ),
-  listImportSources: async () =>
-    DesktopBrowserImportSourcesSchema.parse(
-      await ipcRenderer.invoke("browser:list-import-sources"),
-    ),
-  importFromBrowser: async (input) =>
-    DesktopBrowserImportResultSchema.parse(
-      await ipcRenderer.invoke(
-        "browser:import-from-browser",
-        DesktopBrowserImportInputSchema.parse(input),
-      ),
-    ),
+  captureActivePage: () =>
+    ipcRenderer.invoke(
+      "browser:capture-page",
+    ) as Promise<DesktopBrowserSnapshot>,
+  listImportSources: () =>
+    ipcRenderer.invoke(
+      "browser:list-import-sources",
+    ) as Promise<DesktopBrowserImportSources>,
+  importFromBrowser: (input) =>
+    ipcRenderer.invoke(
+      "browser:import-from-browser",
+      input,
+    ) as Promise<DesktopBrowserImportResult>,
   onStateChanged: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, state: unknown) => {
-      const parsed = DesktopBrowserStateSchema.safeParse(state);
-      if (parsed.success) listener(parsed.data);
-    };
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown) =>
+      listener(state as DesktopBrowserState);
     ipcRenderer.on("browser:state-changed", handler);
     return () => ipcRenderer.off("browser:state-changed", handler);
   },
