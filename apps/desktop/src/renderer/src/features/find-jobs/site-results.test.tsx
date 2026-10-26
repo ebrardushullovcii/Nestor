@@ -73,54 +73,65 @@ test("900 source results page on demand and repeat totals distinguish listings f
   }
 });
 
-test("failed sites show plain reasons before browser diagnostics", async () => {
-  const store = openJobStore(":memory:");
-  try {
-    const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
-    const sources = createSearchSourcesStore(store);
-    sources.put(search.id, {
-      sourceId: "unreachable",
-      label: "Unreachable board",
-      url: "https://board.example/",
-      state: "failed",
-      lane: "browser",
-      phase: null,
-      cards: 0,
-      related: 0,
-      unrelated: 0,
-      seen: 0,
-      failedReads: 0,
-      found: 0,
-      added: 0,
-      hidden: 0,
-      message:
-        "page.goto: net::ERR_CONNECTION_REFUSED. Call log: internal navigation details",
-    });
-    Object.defineProperty(window, "nestor", {
-      configurable: true,
-      value: {
-        jobs: {
-          run: (_name: string, input: JobSearchSourceQuery) =>
-            Promise.resolve(sources.list(input)),
+test.each([
+  [
+    "page.goto: net::ERR_CONNECTION_REFUSED.",
+    "This site could not be reached. Check its address and your connection.",
+  ],
+  ["Listing read returned HTTP 404.", "Page not found. Check the URL."],
+  [
+    "Listing read returned HTTP 500.",
+    "The site returned an error. Check the address or try again later.",
+  ],
+])(
+  "failed sites show a plain reason for %s before diagnostics",
+  async (message, reason) => {
+    const store = openJobStore(":memory:");
+    try {
+      const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+      const sources = createSearchSourcesStore(store);
+      sources.put(search.id, {
+        sourceId: "unreachable",
+        label: "Unreachable board",
+        url: "https://board.example/",
+        state: "failed",
+        lane: "browser",
+        phase: null,
+        cards: 0,
+        related: 0,
+        unrelated: 0,
+        seen: 0,
+        failedReads: 0,
+        found: 0,
+        added: 0,
+        hidden: 0,
+        message: `${message} Call log: internal navigation details`,
+      });
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: {
+          jobs: {
+            run: (_name: string, input: JobSearchSourceQuery) =>
+              Promise.resolve(sources.list(input)),
+          },
         },
-      },
-    });
-    render(<SiteResults searchId={search.id} revision={1} showFailures />);
-    await screen.findByText(
-      "This site could not be reached. Check its address and your connection.",
-    );
-    const diagnostics = screen
-      .getByText("Technical details")
-      .closest("details");
-    expect(diagnostics?.open).toBe(false);
-    expect(
-      screen.getByText(/internal navigation details/).closest("details"),
-    ).toBe(diagnostics);
-    expect(
-      document.querySelector<HTMLDetailsElement>("[data-site-result] > details")
-        ?.open,
-    ).toBe(true);
-  } finally {
-    store.close();
-  }
-});
+      });
+      render(<SiteResults searchId={search.id} revision={1} showFailures />);
+      await screen.findByText(reason);
+      const diagnostics = screen
+        .getByText("Technical details")
+        .closest("details");
+      expect(diagnostics?.open).toBe(false);
+      expect(
+        screen.getByText(/internal navigation details/).closest("details"),
+      ).toBe(diagnostics);
+      expect(
+        document.querySelector<HTMLDetailsElement>(
+          "[data-site-result] > details",
+        )?.open,
+      ).toBe(true);
+    } finally {
+      store.close();
+    }
+  },
+);

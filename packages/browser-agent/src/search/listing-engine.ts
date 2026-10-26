@@ -187,7 +187,8 @@ export async function collectSource(
     notes: string[] = [];
   let complete = true,
     recognized = false,
-    needsAccess = false;
+    needsAccess = false,
+    httpError = false;
   while (queue.length) {
     input.signal?.throwIfAborted();
     const urls = queue.splice(0, 4).filter((url) => !visited.has(url));
@@ -268,6 +269,7 @@ export async function collectSource(
       } catch (error) {
         input.signal?.throwIfAborted();
         complete = false;
+        if (error instanceof DiscoveryPageReadError) httpError = true;
         if (
           error instanceof DiscoveryPageReadError &&
           [401, 403].includes(error.status)
@@ -288,7 +290,7 @@ export async function collectSource(
       needsYou: true,
       notes,
     };
-  if ((!recognized || !complete) && input.navigateFallback) {
+  if ((!recognized || !complete) && input.navigateFallback && !httpError) {
     const fallback = await input.navigateFallback([...visited].at(-1));
     for (const card of fallback.cards) cards.set(card.url, card);
     return {

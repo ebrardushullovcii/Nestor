@@ -21,6 +21,12 @@ const LABELS: Record<JobSearchSourceState["state"], string> = {
   stopped: "Stopped",
 };
 function failureReason(message: string | null): string {
+  if (/\bHTTP 404\b|\bpage not found\b/iu.test(message ?? ""))
+    return "Page not found. Check the URL.";
+  if (/\bHTTP 410\b/iu.test(message ?? ""))
+    return "This page is no longer available. Check the URL.";
+  if (/\bHTTP [45]\d{2}\b/iu.test(message ?? ""))
+    return "The site returned an error. Check the address or try again later.";
   if (
     /ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED|ECONNREFUSED|ENOTFOUND/iu.test(
       message ?? "",

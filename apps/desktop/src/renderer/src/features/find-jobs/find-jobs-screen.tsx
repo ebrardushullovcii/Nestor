@@ -378,7 +378,7 @@ export function FindJobsScreen() {
       ? running
         ? ["Searching your job sites…", "Jobs show up here as they are found."]
         : (status.progress?.failed ?? 0) > 0 ||
-            status.search?.state === "failed"
+            (status.search?.state === "failed" && !status.progress?.needsYou)
           ? [
               "Some sites could not be read",
               "Check the failed sites above, fix their URLs or retry the search.",

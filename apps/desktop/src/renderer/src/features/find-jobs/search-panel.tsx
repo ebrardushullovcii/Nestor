@@ -126,7 +126,9 @@ function lastSearchLine(status: JobSearchStatus): string | null {
           `${failed} of ${plural(search.sourcesTotal, "site")} could not be read`,
         ]
       : []),
-    ...(needsYou > 0 ? [`${plural(needsYou, "site")} need you`] : []),
+    ...(needsYou > 0
+      ? [`${plural(needsYou, "site")} ${needsYou === 1 ? "needs" : "need"} you`]
+      : []),
   ].join("; ");
   const outcome = problems
     ? `${plural(search.added, "new job")}; ${problems}`
