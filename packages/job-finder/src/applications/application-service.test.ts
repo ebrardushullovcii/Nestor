@@ -290,7 +290,7 @@ it("passes the job's current site notes and learned Apply instructions to prepar
   f.jobs
     .sql("UPDATE job_sightings SET source_id=? WHERE job_id=?")
     .run(String(site.id), f.ids[0]!);
-  const readInputs = f.deps.readInputs;
+  const readInputs = f.deps.readInputs.bind(f.deps);
   f.deps.readInputs = async () => ({
     ...(await readInputs()),
     sourceInstructionArtifacts: [

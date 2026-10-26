@@ -341,12 +341,13 @@ function conflictsWithDirtyEdit(
     );
   if (!dirty || typeof dirty !== "object") return false;
   if (Array.isArray(dirty) && Array.isArray(draft)) {
-    const rowFor = (rows: unknown, id: string | null) =>
+    const draftRows: unknown[] = draft;
+    const rowFor = (rows: unknown, id: string | null): unknown =>
       id && Array.isArray(rows)
         ? rows.find((row: unknown) => stableRecordId(row) === id)
         : undefined;
     return dirty.some((child: unknown, index) => {
-      const row = draft[index];
+      const row = draftRows[index];
       const id = stableRecordId(row);
       return conflictsWithDirtyEdit(
         rowFor(before, id),
