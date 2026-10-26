@@ -80,6 +80,8 @@ import {
   isSecurityChallengeControl,
   reportedSecurityChallenge,
 } from "./blockers";
+import { normalizeFormQuestionPrompt } from "@nestor/contracts";
+import { isControlAnswered } from "./control-classification";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -327,6 +329,12 @@ async function runMeasuredApplyAgent(
   // only the part the agent could not do.
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState();
+  const unconfirmedPickers = new Map(
+    (config.initialUnansweredPickerQuestions ?? []).map((question) => [
+      normalizeFormQuestionPrompt(question.prompt),
+      question.options,
+    ]),
+  );
   const questionOccurrences = createQuestionOccurrences(
     config.initialQuestionContexts,
   );
@@ -336,9 +344,21 @@ async function runMeasuredApplyAgent(
     observe: async () => {
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
-      for (const control of observation.controls)
-        if (guardState.pickerFailures.has(pickerFieldKey(observation, control)))
+      for (const control of observation.controls) {
+        const previousOptions =
+          control.kind === "combobox"
+            ? unconfirmedPickers.get(
+                normalizeFormQuestionPrompt(questionPrompt(control)),
+              )
+            : undefined;
+        if (
+          guardState.pickerFailures.has(pickerFieldKey(observation, control)) ||
+          previousOptions
+        )
           control.answered = false;
+        if (previousOptions && !control.options.length)
+          control.options = [...previousOptions];
+      }
       return observation;
     },
   };
@@ -485,6 +505,12 @@ async function runMeasuredApplyAgent(
       (candidate) => candidate.ref === proposal.ref,
     );
     if (!control) return null;
+    if (
+      ["select", "combobox"].includes(control.kind) &&
+      savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
+        ?.optionFallback
+    )
+      return null;
     if (
       control.repeatedQuestion &&
       !savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
@@ -1366,6 +1392,7 @@ async function runMeasuredApplyAgent(
   };
 
   const domainTools: AgentLoopTool[] = [];
+  const handledPickerRules = new Set<string>();
   const completedControlWrites = new Set<string>();
   const controlWriteKey = (proposal: ApplyProposal): string | null => {
     if (
@@ -1419,6 +1446,17 @@ async function runMeasuredApplyAgent(
       },
     );
     const commitField = () => {
+      if (proposal.tool === "select" && outcome.kind === "filled") {
+        const chosen = outcome.observation.controls.find(
+          (control) => control.ref === proposal.ref,
+        );
+        if (chosen) {
+          unconfirmedPickers.delete(
+            normalizeFormQuestionPrompt(questionPrompt(chosen)),
+          );
+          chosen.answered = isControlAnswered(chosen);
+        }
+      }
       if (isField && outcome.kind === "filled") {
         timingRecord.onFieldFilled();
         if (fromStoredFact) timingRecord.onStoredFactFilled();
@@ -2349,6 +2387,7 @@ async function runMeasuredApplyAgent(
     beforeModelTurn: async () => {
       await refreshReusableAnswers();
       const current = pageTools.state.observation;
+      if (current?.blocker) return null;
       for (const control of current?.controls ?? []) {
         if (
           !control.visible ||
@@ -2356,10 +2395,11 @@ async function runMeasuredApplyAgent(
           !["select", "combobox"].includes(control.kind)
         )
           continue;
-        const rule = savedAnswerForQuestion(
+        const savedRule = savedAnswerForQuestion(
           control,
           runConfig.sources.reusableAnswers,
-        )?.optionFallback;
+        );
+        const rule = savedRule?.optionFallback;
         const decision = rule
           ? resolveOptionFallback(
               control.options,
@@ -2375,6 +2415,35 @@ async function runMeasuredApplyAgent(
             needsPerson: false,
             data: {},
           };
+        }
+        const key = current ? pickerFieldKey(current, control) : null;
+        if (
+          rule &&
+          savedRule &&
+          key &&
+          (!control.answered || control.kind === "combobox") &&
+          !handledPickerRules.has(key) &&
+          normalizeFormQuestionPrompt(savedRule.question ?? savedRule.label) ===
+            normalizeFormQuestionPrompt(questionPrompt(control))
+        ) {
+          handledPickerRules.add(key);
+          const outcome = await runProposal(
+            { tool: "select", ref: control.ref, option: rule.primary },
+            () =>
+              Promise.resolve({
+                supported: false,
+                reason: "The saved picker rule changed before selection.",
+              }),
+          );
+          const reported = await outcomeToLoop(outcome, { withPage: false });
+          if (reported.kind === "finish") return reported.finish;
+          if (reported.kind === "stop")
+            return {
+              reason: reported.reason,
+              needsPerson: true,
+              stuck: false,
+              data: {},
+            };
         }
       }
       const exhausted = current?.controls.some(

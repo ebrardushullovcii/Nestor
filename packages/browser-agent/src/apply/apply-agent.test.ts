@@ -6467,6 +6467,64 @@ test.each(fallbackReplay.cases)(
     }
   },
 );
+test("resumed picker replay never counts leftover search text as a confirmed answer", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        role: "combobox",
+        label: pickerReplay.question,
+        value: pickerReplay.primary,
+        options: [],
+      },
+    ],
+  });
+  const makeInput = () =>
+    config(source, {
+      initialUnansweredPickerQuestions: [
+        { prompt: pickerReplay.question, options: pickerReplay.options },
+      ],
+    });
+  const waiting = await runApplyAgent(
+    makeInput(),
+    repeatingModel("finish", { reason: "Looks complete" }),
+  );
+  expect(waiting.outcome).toBe("paused");
+  expect(waiting.readyToSend).toBeNull();
+  expect(
+    waiting.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    )[0]?.answerOptions,
+  ).toEqual(pickerReplay.options);
+  const input = makeInput();
+  const selected = pickerReplay.options[0]!;
+  input.sources.reusableAnswers = [
+    {
+      id: "application-country",
+      kind: "other",
+      label: pickerReplay.question,
+      question: pickerReplay.question,
+      answer: selected,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  input.hands.chooseOption = (_ref, value) => {
+    source.controls[0].value = value;
+    source.controls[0].selectedOptionLabel = value;
+    return Promise.resolve({ ok: true, observedValue: value });
+  };
+  const answered = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "select", args: { ref: "c0", option: selected } },
+      { name: "finish", args: { reason: "Confirmed choice." } },
+    ]),
+  );
+  expect(answered.outcome).toBe("prepared");
+  expect(source.controls[0].value).toBe(selected);
+});
+
 test.each([true, false])(
   "a saved custom-picker rule tries primary then fallback once (fallback offered: %s)",
   async (offered) => {
@@ -6530,7 +6588,7 @@ test.each([true, false])(
     else {
       expect(result.skipReason).toContain("neither");
       expect(result.pauses).toHaveLength(0);
-      expect(result.modelTurns).toBe(1);
+      expect(result.modelTurns).toBe(0);
     }
   },
 );

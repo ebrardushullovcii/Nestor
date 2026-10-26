@@ -478,6 +478,10 @@ export type ApplyProposal =
 
 export interface ApplyAgentConfig {
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
+  initialUnansweredPickerQuestions?: ReadonlyArray<{
+    prompt: string;
+    options: readonly string[];
+  }>;
   hands: ApplyPageHands;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about

@@ -415,6 +415,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       {
         ...facts,
         prepareApplicationForm: createApplyFormPreparer({
+          initialUnansweredPickerQuestions:
+            previous?.execution.questions
+              .filter(
+                (question) =>
+                  question.status === "detected" && !question.submittedAnswer,
+              )
+              .map((question) => ({
+                prompt: question.prompt,
+                options: question.answerOptions,
+              })) ?? [],
           ...(previous?.execution.questionContexts
             ? { initialQuestionContexts: previous.execution.questionContexts }
             : {}),
