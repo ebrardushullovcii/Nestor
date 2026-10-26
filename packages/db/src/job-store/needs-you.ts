@@ -82,10 +82,7 @@ function toTask(row: Task): NeedsYouTask {
     kind: row.kind,
     key: row.answer_key,
     scope: { country: row.country, siteOrigin: row.site_origin },
-    prompt:
-      row.kind === "question"
-        ? cleanFormQuestionPrompt(row.prompt) || row.prompt
-        : row.prompt,
+    prompt: row.prompt,
     input: row.input,
     options,
     openedAt: toIso(row.opened_at),

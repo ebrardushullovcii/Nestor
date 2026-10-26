@@ -271,7 +271,9 @@ export function questionPrompt(control: ApplyFormControl): string {
         control.answerControlType === "multi_choice")) &&
     group.length > 0
   )
-    return group;
+    return control.attestationKind !== null
+      ? cleanFormQuestionPrompt(group, true)
+      : group;
   const groupAddsSomething =
     normalizedGroup.length > 0 &&
     normalizedLabel.length > 0 &&

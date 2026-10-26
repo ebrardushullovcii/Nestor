@@ -360,15 +360,8 @@ export function cleanFormQuestionPrompt(
     );
     if (!step) break;
     const section = step[1]!.trim();
-    // Keep specific policy/reference context. Only general layout headings
-    // can disappear from an otherwise complete question.
-    if (
-      section &&
-      (keepProgressSection ||
-        !/^(?:application|compensation|eligibility questions|questions)$/iu.test(
-          section,
-        ))
-    ) {
+    // Declarations keep their section: it can change what "I agree" means.
+    if (section && keepProgressSection) {
       parts[0] = section;
       break;
     }
