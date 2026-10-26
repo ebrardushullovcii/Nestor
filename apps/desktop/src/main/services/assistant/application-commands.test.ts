@@ -260,3 +260,36 @@ it("keeps the person's pause and refuses a host-generated instruction", async ()
     "typed in this sidebar",
   );
 });
+
+it("reports the actual guard refusal without claiming an unconfirmed send attempt", async () => {
+  const ids = add(1);
+  applications.applyJobs({ selection: { ids } });
+  const row = applications.claimNext()!;
+  applications.finishPreparation({
+    id: row.id,
+    attempt: row.attempt,
+    state: "ready",
+  });
+  const { ctx } = context(ids);
+  await record(ctx, { ids }, "prepare_and_send");
+  send.mockImplementationOnce(() => {
+    applications.submissionRefused(
+      row.id,
+      row.attempt,
+      "The permission to send this application changed.",
+    );
+    return Promise.resolve(false);
+  });
+  const result = await assistantApplicationCommands()
+    .find((tool) => tool.name === "send_application")!
+    .execute({ id: row.id }, ctx);
+  expect(result.summary).toBe(
+    "Not sent: The permission to send this application changed.",
+  );
+  expect(result.data).toMatchObject({
+    application: {
+      state: "ready",
+      error: "The permission to send this application changed.",
+    },
+  });
+});

@@ -259,6 +259,27 @@ it("returns an answer the form still rejects to Needs you instead of failing wit
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
+it("keeps filling while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const recheck =
+    f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
+  expect(await recheck("https://replica.test")).toBe(true);
+  f.applications.needsYou.remember({
+    key: "salary",
+    prompt: "Expected salary",
+    answer: "50000",
+    input: "number",
+    scope: {},
+    options: [],
+  });
+  expect(await recheck("https://replica.test")).toBe(true);
+  f.seed.profile.phone = "+447700900999";
+  expect(await recheck("https://replica.test")).toBe(false);
+});
+
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
   const f = await setup(1);
   await f.service.start();
