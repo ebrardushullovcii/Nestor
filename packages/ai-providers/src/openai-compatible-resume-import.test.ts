@@ -3,6 +3,7 @@ import type {
   AgentProviderStatus,
   ResumeDocumentBundle,
 } from "@nestor/contracts";
+import { CandidateExperienceSchema } from "@nestor/contracts";
 import { createPreferences, createProfile } from "./test-fixtures";
 import { extractOpenAiCompatibleResumeImportStage } from "./openai-compatible-resume-import";
 
@@ -326,7 +327,89 @@ test("sends full text when the parser produced no blocks", async () => {
     },
   });
   expect(sent).toMatchObject({
-    existingProfile: { baseResume: { textContent: null } },
     documentBundle: { fullText: documentBundle.fullText, blocks: [] },
   });
+  expect(sent).not.toHaveProperty("existingProfile.baseResume.textContent");
+});
+
+test("compact and released candidate forms normalize to identical evidence and review data", async () => {
+  const extract = (candidate: unknown) =>
+    extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle,
+      },
+      status,
+      timeoutMs: 1000,
+      fetchModelJson: () => Promise.resolve({ candidates: [candidate] }),
+    });
+  const common = {
+    label: "Full name",
+    value: "Elian Morava",
+    evidenceText: "Elian Morava",
+    sourceBlockIds: ["block_1"],
+    confidence: 0.98,
+  };
+  const released = await extract({
+    ...common,
+    target: { section: "identity", key: "fullName", recordId: null },
+    normalizedValue: null,
+    notes: [],
+    alternatives: [],
+  });
+  const compact = await extract({ ...common, target: "identity.fullName" });
+  expect(compact).toEqual(released);
+});
+
+test("saved-context compaction preserves negative and numeric facts and all nonempty records", async () => {
+  const base = createProfile();
+  const profile = {
+    ...base,
+    summary: null,
+    yearsExperience: 0,
+    skills: [],
+    experiences: [
+      CandidateExperienceSchema.parse({
+        id: "saved-role",
+        title: "Saved role",
+        companyName: "Synthetic company",
+        workMode: [],
+      }),
+    ],
+    workEligibility: {
+      ...base.workEligibility,
+      requiresVisaSponsorship: false,
+      noticePeriodDays: 0,
+    },
+  };
+  let sent: unknown;
+  await extractOpenAiCompatibleResumeImportStage({
+    stageInput: {
+      stage: "experience",
+      existingProfile: profile,
+      existingSearchPreferences: createPreferences(),
+      documentBundle,
+    },
+    status,
+    timeoutMs: 1000,
+    fetchModelJson: (_operation, _prompt, payload) => {
+      sent = payload;
+      return Promise.resolve({ candidates: [] });
+    },
+  });
+  expect(sent).toMatchObject({
+    existingProfile: {
+      yearsExperience: 0,
+      workEligibility: { requiresVisaSponsorship: false, noticePeriodDays: 0 },
+      experiences: profile.experiences.map((row) => ({
+        id: row.id,
+        title: row.title,
+        companyName: row.companyName,
+      })),
+    },
+  });
+  expect(sent).not.toHaveProperty("existingProfile.summary");
+  expect(sent).not.toHaveProperty("existingProfile.skills");
 });
