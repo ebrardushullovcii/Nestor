@@ -4571,7 +4571,7 @@ describe("picker replay: refused choices", () => {
     const second = await propose();
     expect(second.kind).toBe("suggestion");
     expect(chooseOption).toHaveBeenCalledTimes(1);
-    const control = observationOf(source).controls[0]!;
+    const control = observationOf(source).controls[0];
     expect(pickerExhausted(guardState, control)).toBe(true);
     expect(guardState.pickerAttempts.get(pickerQuestionKey(control))).toEqual({
       question: pickerQuestionKey(control),
@@ -4583,7 +4583,7 @@ describe("picker replay: refused choices", () => {
   test("refusals from earlier runs hold: after two, only the person's answer is tried", async () => {
     const source = picker();
     const { config, hands } = configFor(source);
-    const control = observationOf(source).controls[0]!;
+    const control = observationOf(source).controls[0];
     const earlier = [
       {
         question: pickerQuestionKey(control),
@@ -4594,7 +4594,7 @@ describe("picker replay: refused choices", () => {
     const chooseOption = vi.spyOn(hands, "chooseOption");
     const invent = (guardState: ReturnType<typeof createApplyGuardState>) =>
       executeApplyProposal(
-        { tool: "select", ref: "c0", option: pickerReplay.options[1]! },
+        { tool: "select", ref: "c0", option: pickerReplay.options[1] },
         observationOf(source).signature,
         {
           config,
@@ -4613,9 +4613,9 @@ describe("picker replay: refused choices", () => {
     );
     expect(chooseOption).not.toHaveBeenCalled();
 
-    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0]!)];
+    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
     const answered = await executeApplyProposal(
-      { tool: "select", ref: "c0", option: pickerReplay.options[0]! },
+      { tool: "select", ref: "c0", option: pickerReplay.options[0] },
       observationOf(source).signature,
       { config, now, guardState: createApplyGuardState(earlier) },
     );
@@ -4652,14 +4652,14 @@ describe("picker replay: refused choices", () => {
       signature,
       deps,
     );
-    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0]!)];
+    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
     const chosen = await executeApplyProposal(
-      { tool: "select", ref: "c0", option: pickerReplay.options[0]! },
+      { tool: "select", ref: "c0", option: pickerReplay.options[0] },
       signature,
       deps,
     );
     expect(chosen.kind).toBe("filled");
-    const control = observationOf(source).controls[0]!;
+    const control = observationOf(source).controls[0];
     expect(
       guardState.pickerAttempts.get(pickerQuestionKey(control))?.tried,
     ).toEqual([pickerReplay.primary.toLowerCase()]);
