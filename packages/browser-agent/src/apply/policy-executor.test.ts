@@ -1,5 +1,8 @@
 import githubReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
+import typedReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/typed-answer-permissions.json";
+import { answerSourceCatalog } from "./answer-source-catalog";
+import type { ApplyAnswerTags } from "@nestor/contracts";
 import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
 import {
@@ -1289,7 +1292,20 @@ describe("apply policy executor", () => {
                   "Expected salary",
                   { asksAboutPay: true, declarationKind: null },
                 ],
-                ["Currency", { asksAboutPay: false, declarationKind: null }],
+                [
+                  "Currency",
+                  {
+                    asksAboutPay: false,
+                    declarationKind: null,
+                    answerTags: {
+                      kind: "salary" as const,
+                      country: null,
+                      sourceId: ownAnswer
+                        ? "answerLibrary.application_this_currency"
+                        : "answerLibrary.other_job_currency",
+                    },
+                  },
+                ],
               ]),
             ),
         },
@@ -3459,6 +3475,11 @@ describe("one-use answers and compatible originals", () => {
               asksAboutPay: true,
               asksCurrentPay: false,
               declarationKind: null,
+              answerTags: {
+                kind: "salary" as const,
+                country: null,
+                sourceId: "answerLibrary.pay",
+              },
             },
           ],
         ]),
@@ -3480,7 +3501,8 @@ describe("one-use answers and compatible originals", () => {
         checkWrittenAnswer,
       },
     );
-    expect(result.kind).toBe("filled");
+    expect(result.kind).toBe("suggestion");
+    expect(checkWrittenAnswer).not.toHaveBeenCalled();
     source.controls[0].label = "Current compensation";
     config.authority.salaryDisclosure = "pause_for_user";
     const current = await executeApplyProposal(
@@ -3507,7 +3529,7 @@ describe("one-use answers and compatible originals", () => {
       },
     );
     expect(current.kind).toBe("suggestion");
-    expect(checkWrittenAnswer).toHaveBeenCalledTimes(1);
+    expect(checkWrittenAnswer).not.toHaveBeenCalled();
   });
 
   test("attaches an unchanged TXT copy when an Original Markdown resume is rejected", async () => {
@@ -3645,6 +3667,11 @@ test.each([
                 asksAboutPay: true,
                 asksCurrentPay: label !== "Expected compensation",
                 declarationKind: null,
+                answerTags: {
+                  kind: "salary" as const,
+                  country: null,
+                  sourceId: "answerLibrary.saved_pay",
+                },
               },
             ],
           ]),
@@ -3767,7 +3794,7 @@ test("a saved generic eligibility answer is checked again for this hiring countr
         ),
     },
   );
-  expect(check).toHaveBeenCalledOnce();
+  expect(check).not.toHaveBeenCalled();
   expect(choose).not.toHaveBeenCalled();
   expect(outcome.kind).toBe("suggestion");
 });
@@ -3869,10 +3896,7 @@ test.each([true, false])(
           ),
       },
     );
-    expect(check).toHaveBeenCalledWith(
-      "I certify that I am authorized to work in the hiring country",
-      checked ? "Yes" : "No",
-    );
+    expect(check).not.toHaveBeenCalled();
     expect(toggle).not.toHaveBeenCalled();
     expect(outcome.kind).toBe("suggestion");
   },
@@ -4450,7 +4474,7 @@ test("the model's hiring-country question cannot copy residence without a check"
         ),
     },
   );
-  expect(check).toHaveBeenCalledOnce();
+  expect(check).not.toHaveBeenCalled();
   expect(choose).not.toHaveBeenCalled();
   expect(outcome.kind).toBe("suggestion");
 });
@@ -4906,4 +4930,119 @@ describe("picker replay: refused choices", () => {
     expect(outcome.kind).toBe("refused");
     expect(outcome).not.toHaveProperty("question");
   });
+});
+
+describe("typed answer permissions", () => {
+  test.each(typedReplay.workday.questions)(
+    "Workday reuses the explicit UK profile for $kind without a checker or a second question",
+    async (row) => {
+      const page = rawPage({
+        controls: [
+          rawControl({
+            index: 0,
+            tagName: "select",
+            label: row.label,
+            groupLabel: typedReplay.workday.group,
+            required: true,
+            options: ["Yes", "No"],
+          }),
+        ],
+      });
+      const { config, hands } = configFor(page);
+      config.sources.posting.location = typedReplay.workday.location;
+      config.sources.profile.workEligibility.authorizedWorkCountries =
+        typedReplay.workday.authorizedWorkCountries;
+      config.sources.profile.workEligibility.requiresVisaSponsorship = false;
+      const choose = vi.spyOn(hands, "chooseOption");
+      const check = vi
+        .fn()
+        .mockResolvedValue({ supported: true, reason: "lying checker" });
+      const catalog = answerSourceCatalog(config.sources);
+      const source = catalog.find((source) => source.purpose === row.kind)!;
+      const prompt = `${typedReplay.workday.group} — ${row.label}`;
+      const reading = {
+        asksAboutPay: false,
+        declarationKind: null,
+        eligibilityKind:
+          row.kind === "work_auth"
+            ? ("work_authorization" as const)
+            : ("visa_sponsorship" as const),
+        answerTags: {
+          kind: row.kind as ApplyAnswerTags["kind"],
+          country: "GB",
+          sourceId: source.id,
+        },
+      };
+      const outcome = await executeApplyProposal(
+        { tool: "select", ref: "c0", option: row.answer },
+        observationOf(page).signature,
+        {
+          config,
+          now,
+          guardState: createApplyGuardState(),
+          checkWrittenAnswer: check,
+          classifyQuestions: () => Promise.resolve(new Map([[prompt, reading]])),
+        },
+      );
+      expect(outcome.kind).toBe("filled");
+      expect(choose).toHaveBeenCalledWith("c0", row.answer);
+      expect(check).not.toHaveBeenCalled();
+    },
+  );
+  test.each(typedReplay.gated)(
+    "$kind: $question is refused even with a lying checker and a similarly valued source",
+    async (row) => {
+      for (const sourceId of [
+        null,
+        "profile.currentCountry",
+        "profile.skills.0",
+        "missing",
+      ]) {
+        const page = rawPage({
+          controls: [
+            rawControl({ index: 0, label: row.question, required: true }),
+          ],
+        });
+        const { config, hands } = configFor(page);
+        config.sources.profile.currentCountry = "Kosovo";
+        config.sources.profile.skills = ["Playwright"];
+        const fill = vi.spyOn(hands, "fillText");
+        const check = vi
+          .fn()
+          .mockResolvedValue({ supported: true, reason: "lying checker" });
+        const outcome = await executeApplyProposal(
+          {
+            tool: "type",
+            ref: "c0",
+            text:
+              sourceId === "profile.currentCountry" ? "Kosovo" : "Playwright",
+          },
+          observationOf(page).signature,
+          {
+            config,
+            now,
+            guardState: createApplyGuardState(),
+            checkWrittenAnswer: check,
+            classifyQuestions: () => Promise.resolve(new Map([
+                [
+                  row.question,
+                  {
+                    asksAboutPay: false,
+                    declarationKind: null,
+                    answerTags: {
+                      kind: row.kind as ApplyAnswerTags["kind"],
+                      country: null,
+                      sourceId,
+                    },
+                  },
+                ],
+              ])),
+          },
+        );
+        expect(outcome.kind).toBe("suggestion");
+        expect(fill).not.toHaveBeenCalled();
+        expect(check).not.toHaveBeenCalled();
+      }
+    },
+  );
 });

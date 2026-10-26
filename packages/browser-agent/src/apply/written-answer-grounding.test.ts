@@ -360,7 +360,7 @@ test("budgets letters by text length and retries incomplete output once with mor
       sources,
       payDisclosed: false,
       answers: [
-        { question: "Letter", answer: "Supported long letter. ".repeat(250) },
+        { question: "Letter", answer: letterRetry.answerSentence.repeat(250) },
       ],
     }),
   ).resolves.toEqual([{ supported: true, reason: "Supported" }]);

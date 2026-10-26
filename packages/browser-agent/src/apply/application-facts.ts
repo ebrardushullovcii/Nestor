@@ -369,36 +369,47 @@ export function storedFactFor(input: {
 export function savedAnswerForQuestion(
   control: ApplyFormControl,
   reusableAnswers: readonly CandidateReusableAnswer[],
+  controls?: readonly ApplyFormControl[],
 ): CandidateReusableAnswer | null {
-  const asked = new Set(
-    (control.repeatedQuestion
-      ? [control.repeatedQuestion.prompt]
-      : [
-          control.label,
-          control.groupLabel,
-          [control.groupLabel, control.label]
-            .filter((part) => part.trim())
-            .join(" — "),
-          control.placeholder,
-        ]
-    )
-      .map(normalizeFormQuestionPrompt)
-      .filter((text) => text.length > 0),
+  const prompt = (candidate: ApplyFormControl) =>
+    candidate.repeatedQuestion?.prompt ??
+    ((candidate.kind === "radio" ||
+      candidate.answerControlType === "multi_choice") &&
+    candidate.choiceGroupKey &&
+    candidate.groupLabel
+      ? candidate.groupLabel
+      : [candidate.groupLabel, candidate.label]
+          .filter((part) => part.trim())
+          .join(" — "));
+  const target = normalizeFormQuestionPrompt(prompt(control));
+  const matches = reusableAnswers.filter(
+    (saved) =>
+      !saved.needsConfirmation &&
+      normalizeFormQuestionPrompt(saved.question) === target,
   );
-  return (
-    reusableAnswers.find(
-      (saved) =>
-        !saved.needsConfirmation &&
-        saved.id.startsWith("application_") &&
-        asked.has(normalizeFormQuestionPrompt(saved.question)),
-    ) ??
-    reusableAnswers.find(
-      (saved) =>
-        !saved.needsConfirmation &&
-        asked.has(normalizeFormQuestionPrompt(saved.question)),
-    ) ??
-    null
-  );
+  const local = matches.filter((saved) => saved.id.startsWith("application_"));
+  const answers = local.length ? local : matches;
+  if (new Set(answers.map((saved) => saved.answer.trim())).size !== 1)
+    return null;
+  if (controls) {
+    const current = controls.filter(
+      (candidate) =>
+        candidate.visible &&
+        !candidate.disabled &&
+        normalizeFormQuestionPrompt(prompt(candidate)) === target,
+    );
+    const groups = new Set(
+      current.map((candidate) =>
+        (candidate.kind === "radio" ||
+          candidate.answerControlType === "multi_choice") &&
+        candidate.choiceGroupKey
+          ? `radio:${candidate.choiceGroupKey}`
+          : candidate.ref,
+      ),
+    );
+    if (groups.size !== 1) return null;
+  }
+  return answers[0] ?? null;
 }
 
 /** An explicit answer on the retained application is the person's decision. */

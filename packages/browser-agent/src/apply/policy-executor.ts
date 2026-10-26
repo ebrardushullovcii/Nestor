@@ -1,3 +1,4 @@
+import { classifyAnswerPermission } from "./answer-source-catalog";
 import { questionClassificationKey } from "./question-classification";
 import {
   OPINION_ANSWER_REASON,
@@ -503,14 +504,20 @@ async function withModelQuestionKinds(
   control: ApplyFormControl,
 ): Promise<ApplyFormControl> {
   if (!deps.classifyQuestions) {
-    return control;
+    return { ...control, answerTags: null };
   }
   let classification: ApplyQuestionClassification | undefined;
   let payCurrency = false;
   try {
     const classifications = await deps.classifyQuestions(
       observation.controls,
-      JSON.stringify({ url: observation.url, step: observation.step }),
+      JSON.stringify({
+        url: observation.url,
+        step: observation.step,
+        instructions: observation.ownWordsRequired
+          ? "In your own words"
+          : observation.bodyTextExcerpt,
+      }),
     );
     classification =
       classifications.get(
@@ -528,13 +535,14 @@ async function withModelQuestionKinds(
             )?.asksAboutPay === true,
         ));
   } catch {
-    return control;
+    return { ...control, answerTags: null };
   }
   if (!classification) {
-    return control;
+    return { ...control, answerTags: null };
   }
   return {
     ...control,
+    answerTags: classification.answerTags ?? null,
     questionKind:
       classification.eligibilityKind ??
       (classification.asksAboutPay || payCurrency
@@ -646,6 +654,7 @@ async function decideAnswer(input: {
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
   pageText: string;
+  controls: readonly ApplyFormControl[];
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
   const value = formatGithubAnswer(control, input.value);
@@ -673,6 +682,61 @@ async function decideAnswer(input: {
       suggestion: null,
       permission: true,
     };
+  }
+  if (deps.classifyQuestions) {
+    const permission = classifyAnswerPermission({
+      control,
+      controls: input.controls,
+      tags: control.answerTags,
+      sources: config.sources,
+      answer: value,
+      pageInstructions: input.pageText,
+    });
+    if (permission.kind === "needs_you")
+      return {
+        kind: "leave",
+        reason: permission.reason,
+        suggestion: null,
+        permission: true,
+      };
+    if (permission.kind === "literal") {
+      if (
+        control.questionKind === "salary_expectation" &&
+        !payDisclosed &&
+        !isAnswerFromThisApplication(
+          savedAnswerForQuestion(
+            control,
+            config.sources.reusableAnswers,
+            input.controls,
+          ),
+          config.application,
+          config.sources.posting.location,
+        ) &&
+        !permission.source.id.startsWith("answerLibrary.application_")
+      )
+        return {
+          kind: "leave",
+          reason: PAY_KEPT_PRIVATE_REASON,
+          suggestion: saved,
+          permission: true,
+        };
+      deps.onAnswerSource?.("stored_fact");
+      return {
+        kind: "use",
+        answer: {
+          value,
+          kind: control.questionKind,
+          sourceKind:
+            permission.source.purpose === "saved"
+              ? "answer_library"
+              : "profile",
+          sourceId: permission.source.id,
+          provenanceLabel: "your matching saved answer or profile fact",
+          groundedIn: [permission.source.id],
+        },
+      };
+    }
+    // Only requested writing reaches the independent claim checker below.
   }
   // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
@@ -1780,6 +1844,37 @@ export async function executeApplyProposal(
             observation,
           };
         }
+        if (
+          deps.classifyQuestions &&
+          !approvedApplicationLetter(config, control)
+        ) {
+          const permission = classifyAnswerPermission({
+            control,
+            controls: observation.controls,
+            tags: control.answerTags,
+            sources: config.sources,
+            answer: "",
+            pageInstructions: observation.ownWordsRequired
+              ? "In your own words"
+              : observation.bodyTextExcerpt,
+          });
+          if (permission.kind !== "writing")
+            return notEntered({
+              deps,
+              control,
+              observation,
+              at,
+              decision: {
+                kind: "leave",
+                reason:
+                  permission.kind === "needs_you"
+                    ? permission.reason
+                    : "This form needs your unchanged letter.",
+                suggestion: null,
+                permission: true,
+              },
+            });
+        }
         const letter = await provideApplicationLetter(deps, control);
         if (letter.kind !== "ok") {
           return letter.outcome;
@@ -1841,6 +1936,7 @@ export async function executeApplyProposal(
       // The model read the question and the person's facts and chose what to
       // type (ADR 0041); decideAnswer keeps it to the person's own facts.
       const decision = await decideAnswer({
+        controls: observation.controls,
         deps,
         control,
         pageText: observation.ownWordsRequired
@@ -1905,6 +2001,7 @@ export async function executeApplyProposal(
       }
       const control = await withModelQuestionKinds(deps, observation, found);
       const choice = await decideAnswer({
+        controls: observation.controls,
         deps,
         control,
         pageText: observation.ownWordsRequired
@@ -2048,6 +2145,7 @@ export async function executeApplyProposal(
               : "No"
             : control.label || control.value;
         const choice = await decideAnswer({
+          controls: observation.controls,
           deps,
           control,
           pageText: observation.ownWordsRequired
@@ -2322,6 +2420,37 @@ export async function executeApplyProposal(
             reason: "Job Finder has no letter for this application.",
             observation,
           };
+        }
+        if (
+          deps.classifyQuestions &&
+          !approvedApplicationLetter(config, control)
+        ) {
+          const permission = classifyAnswerPermission({
+            control,
+            controls: observation.controls,
+            tags: control.answerTags,
+            sources: config.sources,
+            answer: "",
+            pageInstructions: observation.ownWordsRequired
+              ? "In your own words"
+              : observation.bodyTextExcerpt,
+          });
+          if (permission.kind !== "writing")
+            return notEntered({
+              deps,
+              control,
+              observation,
+              at,
+              decision: {
+                kind: "leave",
+                reason:
+                  permission.kind === "needs_you"
+                    ? permission.reason
+                    : "This form needs your unchanged letter.",
+                suggestion: null,
+                permission: true,
+              },
+            });
         }
         const letter = await provideApplicationLetter(deps, control);
         if (letter.kind !== "ok") {

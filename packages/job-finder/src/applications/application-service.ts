@@ -4,9 +4,7 @@ import { basename } from "node:path";
 import {
   buildApplyFormObservation,
   canContinueApplicationAfterAccess,
-  checkWrittenApplicationAnswers,
-  requiresSavedNationalityAnswer,
-  requiresSavedOpinionAnswer,
+  checkClassifiedApplicationAnswers,
   inferQuestionKind,
   hasSubmissionConfirmationText,
   type ApplyAgentResult,
@@ -717,13 +715,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           // answers from current Profile/resume/scoped answers before arming
           // either automatic sending or the person's sidebar Send instruction.
           const card = applications.getWork(row.id)?.reviewCard;
-          const written =
-            card?.answers.filter(
-              (answer) =>
-                answer.written ||
-                requiresSavedNationalityAnswer(answer.question) ||
-                requiresSavedOpinionAnswer(answer.question, answer.answer),
-            ) ?? [];
+          const written = [...(card?.answers ?? [])];
           if (
             card?.letter &&
             !card.letter.groundedIn.includes(
@@ -774,9 +766,20 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             const client = toApplyLlmClient(deps.aiClient);
             const checks =
               client && form
-                ? await checkWrittenApplicationAnswers({
+                ? await checkClassifiedApplicationAnswers({
                     client,
+                    formControls: buildApplyFormObservation(
+                      form,
+                      new Date().toISOString(),
+                    ).controls,
                     sources: {
+                      listingDiscovery: {
+                        label: job.sourceLabel,
+                        url:
+                          [...job.sightings].sort((a, b) =>
+                            a.seenAt.localeCompare(b.seenAt),
+                          )[0]?.url ?? job.url,
+                      },
                       profile,
                       resumeText: profile.baseResume.textContent,
                       reusableAnswers: saved,
@@ -806,6 +809,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 row.id,
                 row.attempt,
                 rejected.map((question) => question.prompt),
+                card?.letter?.text,
               );
               // The new question supersedes the ungrounded generated value.
               // Do not immediately consume the same unusable saved answer.

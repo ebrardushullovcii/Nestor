@@ -1,3 +1,7 @@
+import {
+  answerSourceCatalog,
+  classifyAnswerPermission,
+} from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksListingDiscovery } from "./listing-discovery-answer";
@@ -354,6 +358,7 @@ async function runMeasuredApplyAgent(
         client: llmClient,
         signal: config.signal,
         cacheScope: config.questionReadCacheScope,
+        sources: () => answerSourceCatalog(runConfig.sources),
       })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
@@ -368,7 +373,7 @@ async function runMeasuredApplyAgent(
       ? {
           letters: {
             ...config.letters,
-            provide: (request) => {
+            provide: async (request) => {
               if (
                 !request.approvedText &&
                 requiresOwnWords(
@@ -376,6 +381,47 @@ async function runMeasuredApplyAgent(
                 )
               )
                 return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
+              if (!request.approvedText && classifyQuestions) {
+                const page = pageTools.state.observation;
+                const control = page?.controls.find(
+                  (control) => questionPrompt(control) === request.prompt,
+                );
+                if (!page || !control)
+                  return {
+                    ok: false,
+                    reason: "The letter question is not on the current form.",
+                  };
+                const readings = await classifyQuestions(
+                  page.controls,
+                  JSON.stringify({
+                    instructions: page.ownWordsRequired
+                      ? "In your own words"
+                      : page.bodyTextExcerpt,
+                  }),
+                ).catch(() => undefined);
+                const reading =
+                  readings?.get(
+                    questionClassificationKey(control, page.controls),
+                  ) ?? readings?.get(request.prompt);
+                const permission = classifyAnswerPermission({
+                  control,
+                  controls: page.controls,
+                  tags: reading?.answerTags,
+                  sources: runConfig.sources,
+                  answer: "",
+                  pageInstructions: page.ownWordsRequired
+                    ? "In your own words"
+                    : page.bodyTextExcerpt,
+                });
+                if (permission.kind !== "writing")
+                  return {
+                    ok: false,
+                    reason:
+                      permission.kind === "needs_you"
+                        ? permission.reason
+                        : "This form needs your unchanged letter.",
+                  };
+              }
               const key = JSON.stringify(request);
               let pending = letterRequests.get(key);
               if (!pending) {
@@ -540,6 +586,32 @@ async function runMeasuredApplyAgent(
       case "click":
         return null; // The executor checks files and click-derived answers itself.
     }
+    if (answer !== null && classifyQuestions) {
+      const readings = classifyQuestions.settled(
+        observation.controls,
+        JSON.stringify({
+          instructions: observation.ownWordsRequired
+            ? "In your own words"
+            : observation.bodyTextExcerpt,
+        }),
+      );
+      const tags = (
+        readings?.get(
+          questionClassificationKey(control, observation.controls),
+        ) ?? readings?.get(questionPrompt(control))
+      )?.answerTags;
+      const permission = classifyAnswerPermission({
+        control,
+        controls: observation.controls,
+        tags,
+        sources: runConfig.sources,
+        answer,
+        pageInstructions: observation.ownWordsRequired
+          ? "In your own words"
+          : observation.bodyTextExcerpt,
+      });
+      if (permission.kind !== "writing") return null;
+    }
     return answer !== null &&
       !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
       !asksListingDiscovery(questionPrompt(control)) &&
@@ -638,7 +710,13 @@ async function runMeasuredApplyAgent(
     // the first answer does not wait for it. Writes await the same result.
     void classifyQuestions?.(
       next.controls,
-      JSON.stringify({ url: next.url, step: next.step }),
+      JSON.stringify({
+        url: next.url,
+        step: next.step,
+        instructions: next.ownWordsRequired
+          ? "In your own words"
+          : next.bodyTextExcerpt,
+      }),
     ).catch(() => undefined);
     // A person or a later page write may have answered a previously pending
     // question. Keep the live controls authoritative when continuing.
@@ -682,6 +760,7 @@ async function runMeasuredApplyAgent(
               jobId: runConfig.application.jobId,
               detectedAt: next.observedAt,
               siblings: next.controls,
+              suggestion: null,
               reason: NATIONALITY_ANSWER_REASON,
             }),
           );
@@ -936,7 +1015,13 @@ async function runMeasuredApplyAgent(
           const observation = await pageTools.observe();
           const classifications = await classifyQuestions?.(
             observation.controls,
-            JSON.stringify({ url: observation.url, step: observation.step }),
+            JSON.stringify({
+              url: observation.url,
+              step: observation.step,
+              instructions: observation.ownWordsRequired
+                ? "In your own words"
+                : observation.bodyTextExcerpt,
+            }),
           ).catch(() => undefined);
           // Cache the native question set before adding the model's required marker.
           syncObservation(observation);
@@ -1001,7 +1086,13 @@ async function runMeasuredApplyAgent(
         const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
-          JSON.stringify({ url: observation.url, step: observation.step }),
+          JSON.stringify({
+            url: observation.url,
+            step: observation.step,
+            instructions: observation.ownWordsRequired
+              ? "In your own words"
+              : observation.bodyTextExcerpt,
+          }),
         ).catch(() => undefined);
         // Inferred required markers are results, not changed native questions.
         syncObservation(observation);
@@ -1613,6 +1704,16 @@ async function runMeasuredApplyAgent(
         // Starting both together could ask the provider to write two letters.
         break;
       }
+      if (classifyQuestions) {
+        await classifyQuestions(
+          observation.controls,
+          JSON.stringify({
+            instructions: observation.ownWordsRequired
+              ? "In your own words"
+              : observation.bodyTextExcerpt,
+          }),
+        ).catch(() => undefined);
+      }
       // Reorder only independent value writes in a contiguous segment. Clicks,
       // uploads, repeated refs and shared choice groups are order barriers.
       // Every write still gets a fresh page read and the same policy executor.
@@ -1654,6 +1755,9 @@ async function runMeasuredApplyAgent(
       const stepKey = JSON.stringify({
         url: observation.url,
         step: observation.step,
+        instructions: observation.ownWordsRequired
+          ? "In your own words"
+          : observation.bodyTextExcerpt,
       });
       const checkAnswers = (shortValues: boolean) =>
         checkWrittenApplicationAnswers({
@@ -1680,7 +1784,10 @@ async function runMeasuredApplyAgent(
             observation.controls,
           ),
         );
-      const settledReadings = classifyQuestions?.settled(observation.controls);
+      const settledReadings = classifyQuestions?.settled(
+        observation.controls,
+        stepKey,
+      );
       const shortShape =
         toCheck.length > 0 &&
         toCheck.every((entry) =>

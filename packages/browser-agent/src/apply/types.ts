@@ -1,6 +1,7 @@
 import type { ApplyAgentTiming, ApplyPickerAttempt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
+  ApplyAnswerTags,
   ApplyBlockedAttempt,
   CoverLetterPreference,
   AiApplyingBehavior,
@@ -78,6 +79,8 @@ export interface ApplyFormControl {
   validationMessage: string;
   /** What the question is about, so an answer can be sourced for it. */
   questionKind: ApplicationQuestionKind;
+  /** Model reading bound to the observed instructions and current source catalog. */
+  answerTags?: ApplyAnswerTags | null;
   /** Model reading of current pay versus the person's saved expected pay. */
   asksCurrentPay?: boolean;
   /** Model reading: this asks for this application's hiring country. */

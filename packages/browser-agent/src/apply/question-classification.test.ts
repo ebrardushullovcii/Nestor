@@ -414,6 +414,7 @@ test("plain questions are named by index and only flagged ones are spelled out",
   expect(tool?.function.parameters.required).toEqual([
     "plainIndexes",
     "flagged",
+    "tags",
   ]);
 });
 
@@ -484,4 +485,92 @@ test("settled readings are offered only once every question has come back", asyn
     declarationKind: null,
   });
   expect(classify.settled(controls("Rate"))).toBeUndefined();
+});
+
+test("typed readings bind page instructions and current sources into their cache", async () => {
+  const client = clientReplying([]);
+  vi.mocked(client.chatWithTools).mockImplementation(() => Promise.resolve(({
+    toolCalls: [
+      {
+        id: "tags",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [
+              { index: 0, kind: "own_words", country: null, sourceId: null },
+            ],
+          }),
+        },
+      },
+    ],
+  })));
+  let value = "Saved text";
+  const classify = createQuestionClassifier({
+    client,
+    sources: () => [
+      { id: "saved", value, purpose: "saved", country: null, question: "Pay" },
+    ],
+  });
+  const page = controls();
+  const context = JSON.stringify({ instructions: "Write this yourself" });
+  expect((await classify(page, context)).get("Pay")?.answerTags?.kind).toBe(
+    "own_words",
+  );
+  await classify(page, context);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  await classify(
+    page,
+    JSON.stringify({ instructions: "Responda com suas próprias palavras" }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  value = "Edited text";
+  expect(classify.settled(page, context)).toBeUndefined();
+  await classify(page, context);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
+  ).toContain("Write this yourself");
+  page[0].groupLabel = "Employment";
+  await classify(page, context);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+});
+test("duplicate or malformed tags never become an answer permission", async () => {
+  const client = clientReplying([]);
+  vi.mocked(client.chatWithTools).mockResolvedValue({
+    toolCalls: [
+      {
+        id: "bad",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0, 1],
+            flagged: [],
+            tags: [
+              { index: 0, kind: "other", country: null, sourceId: "saved" },
+              { index: 0, kind: "other", country: null, sourceId: "other" },
+              {
+                index: 1,
+                kind: "work_auth",
+                country: "ZZ",
+                sourceId: "profile",
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  });
+  const result = await classifyApplicationQuestions({
+    client,
+    questions: [
+      { prompt: "One", kind: "text", options: [] },
+      { prompt: "Two", kind: "text", options: [] },
+    ],
+  });
+  expect(result.get("One")?.answerTags).toBeNull();
+  expect(result.get("Two")?.answerTags).toBeNull();
 });

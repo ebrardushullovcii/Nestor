@@ -413,6 +413,7 @@ export function createApplicationStore(store: JobStore) {
       id: number,
       attempt: number,
       questions: readonly string[],
+      refusedLetterText?: string,
     ): boolean {
       return store.transaction(() => {
         const current = getApplication(id);
@@ -435,11 +436,14 @@ export function createApplicationStore(store: JobStore) {
         );
         const refusedLetter =
           card.letter &&
-          card.answers.some(
-            (answer) =>
-              refused.has(answer.question) &&
-              answer.answer === card.letter!.text,
-          );
+          ((card.letter.text === refusedLetterText &&
+            ((card.letter.fields ?? []).some((field) => refused.has(field)) ||
+              (refused.has("Cover letter") && !card.letter.fields?.length))) ||
+            card.answers.some(
+              (answer) =>
+                refused.has(answer.question) &&
+                answer.answer === card.letter!.text,
+            ));
         const review = ApplicationReviewCardSchema.parse({
           ...card,
           answers,

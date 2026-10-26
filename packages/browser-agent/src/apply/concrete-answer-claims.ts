@@ -112,6 +112,27 @@ function durationInQuote(
   });
 }
 
+// Only connective writing may be new. Content words and numbers must occur
+// together in one cited passage, so a checker cannot assemble a new fact from
+// unrelated numbers, tools, languages or employers across several quotes.
+const writingGlue = new Set(
+  (
+    "yes no true false i my me we our you your the a an this that these those it its own owning " +
+    "and or but of for in on at to with by from as an am is are was were be been being " +
+    "have has had do does did would could can will may might should " +
+    "want welcome opportunity chance contribute contribution excited interested interest " +
+    "role position team company work working join joining build building help helping " +
+    "apply applying bring bringing use using used develop developing support supporting " +
+    "reliable dependable meaningful thoughtful strong stronger good great well " +
+    "because about through into together also especially aligns aligns alignment"
+  ).split(/\s+/u),
+);
+function contentWords(text: string): string[] {
+  return normalize(text)
+    .split(" ")
+    .filter((word) => word && !writingGlue.has(word));
+}
+
 /** Concrete claims must be in the cited text, even when the checker lies about support. */
 export function concreteClaimsSupported(
   answer: string,
@@ -127,6 +148,35 @@ export function concreteClaimsSupported(
     const quotes = evidence
       .filter((entry) => !personalHistory || entry.source !== "posting")
       .map((entry) => entry.quote);
+    const content = contentWords(clause);
+    const claimQuotes =
+      personalHistory ||
+      (/\b(?:I|my|me|our|we)\b/u.test(clause) &&
+        !/^(?:I|We) would (?:welcome|like|love|appreciate)\b/u.test(
+          clause.trim(),
+        ))
+        ? quotes.filter((quote) =>
+            evidence.some(
+              (entry) => entry.source !== "posting" && entry.quote === quote,
+            ),
+          )
+        : quotes;
+    if (
+      content.length &&
+      !claimQuotes.some((quote) =>
+        content.every((word) => contains(quote, word)),
+      )
+    )
+      return false;
+    const literalClaim =
+      personalHistory ||
+      (/\b(?:I|my|me|our|we)\b/u.test(clause) &&
+        !/^(?:I|We) would (?:welcome|like|love|appreciate)\b/u.test(
+          clause.trim(),
+        )) ||
+      numbers(clause).length > 0;
+    if (literalClaim && !claimQuotes.some((quote) => contains(quote, clause)))
+      return false;
     const counts = numbers(clause);
     if (
       counts.some(
@@ -175,19 +225,24 @@ export function concreteClaimsSupported(
 let countryNames:
   | Array<{ code: string; name: string; abbreviation: boolean }>
   | undefined;
-function countriesIn(text: string): Set<string> {
+export function countriesIn(text: string): Set<string> {
   if (!countryNames) {
     countryNames = [];
-    for (const locale of ["en", "de", "fr", "es"]) {
+    for (const locale of ["en", "de", "fr", "es", "pt"]) {
       const display = new Intl.DisplayNames([locale], { type: "region" });
       for (let a = 65; a <= 90; a++)
         for (let b = 65; b <= 90; b++) {
           const code = String.fromCharCode(a, b),
             name = display.of(code);
           if (name && name !== code) {
-            countryNames.push({ code, name, abbreviation: false });
+            const canonical = new Intl.Locale(`und-${code}`).region ?? code;
+            countryNames.push({ code: canonical, name, abbreviation: false });
             if (locale === "en")
-              countryNames.push({ code, name: code, abbreviation: true });
+              countryNames.push({
+                code: canonical,
+                name: code,
+                abbreviation: true,
+              });
           }
         }
     }

@@ -3,7 +3,11 @@ import {
   cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
 } from "@nestor/contracts";
-import { describeFormQuestion, type FormQuestion } from "./questions";
+import {
+  describeFormQuestion,
+  describeSavedFormAnswer,
+  type FormQuestion,
+} from "./questions";
 
 test("the same question keeps its key across progress counters without discarding scope or group context", () => {
   const field: FormQuestion = {
@@ -94,4 +98,32 @@ test("a repeated-step question is application-specific and cannot reuse the firs
   );
   expect(one.reusePrompt).toBe(false);
   expect(one.key).not.toBe(two.key);
+});
+
+test("Workday legal prompt seeds are not country-scoped answers: the typed profile gate must resolve the explicit country", () => {
+  for (const [prompt, kind, answer] of [
+    [
+      "Application Questions — Are you legally authorized to work in this country? *",
+      "work_authorization",
+      "Yes",
+    ],
+    [
+      "Application Questions — Will you require sponsorship? *",
+      "visa_sponsorship",
+      "No",
+    ],
+  ] as const) {
+    const saved = describeSavedFormAnswer(prompt, answer);
+    const question = describeFormQuestion(
+      {
+        prompt,
+        kind,
+        answerControlType: "boolean",
+        answerOptions: ["Yes", "No"],
+      },
+      { id: 1, location: "United Kingdom" },
+    );
+    expect(question.reusePrompt).toBe(false);
+    expect(question.key).not.toBe(saved.key);
+  }
 });

@@ -1002,7 +1002,7 @@ it.each([
         question: entry.question,
         answer: entry.answer,
         source: "Written for this application",
-        written: "written" in entry ? entry.written : true,
+        written: "written" in entry ? entry.written === true : true,
         groundedIn: [],
       },
     ];
@@ -1049,7 +1049,7 @@ it.each([
     const action = vi.fn();
     Object.assign(f.browser, { executeExactlyOneFinalAction: action });
     expect(await f.service.sendPrepared(row.id)).toBe(false);
-    expect(chatWithTools).toHaveBeenCalledTimes(entry.rule ? 0 : 1);
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
     expect(action).not.toHaveBeenCalled();
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
     expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);
