@@ -90,6 +90,9 @@ export interface AgentApplicationPreparationInput {
   initialPickerAttempts?: Parameters<
     typeof runApplyAgent
   >[0]["initialPickerAttempts"];
+  initialUnansweredPickerQuestions?: Parameters<
+    typeof runApplyAgent
+  >[0]["initialUnansweredPickerQuestions"];
   startedAt: string;
   /** What the person would call this site. */
   siteLabel: string;
@@ -625,6 +628,12 @@ export async function runAgentApplicationPreparation(
     ...(input.uploadsConfirmedByPerson?.length
       ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
       : {}),
+    ...(input.initialUnansweredPickerQuestions
+      ? {
+          initialUnansweredPickerQuestions:
+            input.initialUnansweredPickerQuestions,
+        }
+      : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     accountCreationAuthorized:
@@ -820,6 +829,7 @@ export async function runAgentApplicationPreparation(
     agentTiming: result.timing,
     questionContexts: result.questionContexts,
     pickerAttempts: result.pickerAttempts,
+    ...(result.skipReason ? { skipReason: result.skipReason } : {}),
   };
 }
 
@@ -912,6 +922,7 @@ export function createApplyFormPreparer(input: {
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
+  initialUnansweredPickerQuestions?: AgentApplicationPreparationInput["initialUnansweredPickerQuestions"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
   return async ({ session, currentUrl, startedAt, signal, onProgress }) => {
@@ -975,6 +986,12 @@ export function createApplyFormPreparer(input: {
         : {}),
       ...(input.uploadsConfirmedByPerson?.length
         ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
+        : {}),
+      ...(input.initialUnansweredPickerQuestions
+        ? {
+            initialUnansweredPickerQuestions:
+              input.initialUnansweredPickerQuestions,
+          }
         : {}),
       startedAt,
       siteLabel: input.siteLabel,

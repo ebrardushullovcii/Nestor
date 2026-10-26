@@ -3,6 +3,7 @@ import type { SavedFormAnswer } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { AnswerField } from "./answer-field";
 import { describeError } from "./task-pane";
+import { fallbackProblem, OptionFallbackField } from "./option-fallback-field";
 
 export function SavedAnswerPane(props: {
   id: number;
@@ -15,6 +16,7 @@ export function SavedAnswerPane(props: {
   const onMissing = useRef(props.onMissing);
   onMissing.current = props.onMissing;
   const [answer, setAnswer] = useState("");
+  const [fallback, setFallback] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +29,7 @@ export function SavedAnswerPane(props: {
           if (!value) onMissing.current?.(props.id);
           setValue(value);
           setAnswer(value?.answer ?? "");
+          setFallback(value?.optionFallback?.fallback ?? null);
           setLoaded(true);
         }
       })
@@ -85,15 +88,41 @@ export function SavedAnswerPane(props: {
             Changes are used the next time a form is filled. Submitted
             applications keep their original answers.
           </p>
+          {value.input !== "file" ? (
+            <OptionFallbackField
+              answer={answer}
+              value={fallback}
+              disabled={busy}
+              onChange={(next) => {
+                setFallback(next);
+                props.onEditing(true);
+              }}
+            />
+          ) : null}
           <div className="flex gap-2">
             {value.input !== "file" ? (
               <Button
-                disabled={busy || !answer.trim()}
+                disabled={
+                  busy ||
+                  !answer.trim() ||
+                  fallbackProblem(answer, fallback) !== null
+                }
                 onClick={() => {
                   setBusy(true);
                   setError(null);
                   void window.nestor.needsYou
-                    .run("save_form_answer", { id: props.id, answer })
+                    .run("save_form_answer", {
+                      id: props.id,
+                      answer,
+                      optionFallback:
+                        fallback === null
+                          ? null
+                          : {
+                              primary: answer.trim(),
+                              fallback: fallback.trim(),
+                              whenNeitherOffered: "skip_application",
+                            },
+                    })
                     .then(({ saved }) => {
                       if (!saved)
                         throw new Error("This answer no longer exists.");

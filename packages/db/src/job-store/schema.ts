@@ -52,6 +52,14 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   { table: "resume_changes", column: "before_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_move_id", definition: "INTEGER" },
+  // SQLite cannot widen a CHECK later, so the column names both outcomes
+  // now: a saved rule's skip, and the blocked site that the next change records.
+  {
+    table: "applications",
+    column: "disposition",
+    definition: "TEXT CHECK (disposition IN ('skipped', 'blocked'))",
+  },
+  { table: "form_answers", column: "option_fallback_json", definition: "TEXT" },
 ];
 
 const JOBS = `

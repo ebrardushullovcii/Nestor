@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { CandidateAnswerKindSchema } from "./profile";
+import { optionalStoredField } from "./stored-json";
+import {
+  CandidateAnswerKindSchema,
+  SavedOptionFallbackSchema,
+} from "./profile";
 
 /** Facts offered to this form, retained so unrelated answer-bank edits cannot veto Send. */
 export const ApplicationAnswerDependenciesSchema = z.object({
@@ -10,6 +14,10 @@ export const ApplicationAnswerDependenciesSchema = z.object({
       reusePrompt: z.boolean(),
       kind: CandidateAnswerKindSchema.default("other"),
       answer: z.string(),
+      optionFallback: optionalStoredField(
+        SavedOptionFallbackSchema.nullable(),
+        null,
+      ),
     }),
   ),
   context: z.array(
@@ -17,6 +25,10 @@ export const ApplicationAnswerDependenciesSchema = z.object({
       id: z.number().int().positive(),
       kind: CandidateAnswerKindSchema,
       answer: z.string(),
+      optionFallback: optionalStoredField(
+        SavedOptionFallbackSchema.nullable(),
+        null,
+      ),
       roleFamilies: z.array(z.string()),
       proofEntryIds: z.array(z.string()),
     }),

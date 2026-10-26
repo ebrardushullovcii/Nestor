@@ -41,6 +41,7 @@ export function createNeedsYouCommandRunner(
       const { value, ...change } = getStore().needsYou.changeAnswers(() =>
         getStore().needsYou.remember({
           ...describeSavedFormAnswer(input.prompt, input.answer),
+          optionFallback: input.optionFallback,
           prompt: input.prompt,
           scope: {},
         }),

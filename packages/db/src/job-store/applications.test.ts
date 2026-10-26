@@ -91,6 +91,169 @@ it("revokes retired approvals before Apply even when Profile has never been cons
   ).toBeNull();
 });
 
+it("persists a saved fallback and visible skipped application across restart without requeueing", () => {
+  const folder = mkdtempSync(path.join(tmpdir(), "nestor-saved-rule-"));
+  folders.push(folder);
+  const file = path.join(folder, "jobs.sqlite");
+  const { jobs, applications } = open(file);
+  const rule = {
+    primary: "Primary territory",
+    fallback: "Fallback region",
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const answer = applications.needsYou.remember({
+    key: "country",
+    prompt: "Country of residence",
+    answer: rule.primary,
+    input: "text",
+    options: [],
+    scope: {},
+    optionFallback: rule,
+  });
+  expect(
+    applications.needsYou.answersForQuestions(
+      1,
+      [{ key: "country", prompt: "Country of residence", reusePrompt: true }],
+      "https://replica.test",
+    )[0]?.optionFallback,
+  ).toEqual(rule);
+  expect(readSavedApplicationAnswers(jobs)[0]?.optionFallback).toEqual(rule);
+  applications.needsYou.remember({
+    key: "country",
+    prompt: "Country of residence",
+    answer: rule.primary,
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(applications.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
+    rule,
+  );
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const work = applications.claimNext()!;
+  expect(
+    applications.skip(
+      work.id,
+      work.attempt,
+      "Neither saved option is offered.",
+    ),
+  ).toBe(true);
+  expect(applications.needsYou.forApplication(work.id)).toEqual([]);
+  expect(
+    applications.applyJobs(
+      { selection: { ids: [work.jobId] } },
+      "autonomous_submit",
+    ),
+  ).toMatchObject({ queued: 0, unchanged: 1 });
+  expect(applications.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    mode: work.mode,
+    attempt: work.attempt,
+  });
+  jobs.close();
+  const reopened = open(file).applications;
+  expect(reopened.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    error: "Neither saved option is offered.",
+  });
+  expect(reopened.claimNext()).toBeNull();
+  expect(
+    reopened.applyJobs(
+      { selection: { ids: [work.jobId] } },
+      "autonomous_submit",
+    ),
+  ).toMatchObject({ queued: 0, unchanged: 1 });
+  expect(reopened.getApplication(work.id)).toMatchObject({
+    state: "skipped",
+    mode: work.mode,
+    attempt: work.attempt,
+  });
+  expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toEqual(
+    rule,
+  );
+  reopened.needsYou.saveAnswer({
+    id: answer.id,
+    answer: rule.primary,
+    optionFallback: null,
+  });
+  expect(reopened.needsYou.savedAnswer(answer.id)?.optionFallback).toBeNull();
+});
+
+it("a fallback rule stays bound to the answer it was saved with", () => {
+  const { applications } = open();
+  const rule = {
+    primary: "Primary territory",
+    fallback: "Fallback region",
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const remember = (answer: string, optionFallback?: typeof rule | null) =>
+    applications.needsYou.remember({
+      key: "country",
+      prompt: "Country of residence",
+      answer,
+      input: "text",
+      options: [],
+      scope: {},
+      ...(optionFallback !== undefined ? { optionFallback } : {}),
+    });
+  const saved = remember(rule.primary, rule);
+  // Saving the same answer again without mentioning the rule keeps it.
+  remember(` ${rule.primary.toUpperCase()} `);
+  expect(applications.needsYou.savedAnswer(saved.id)?.optionFallback).toEqual(
+    rule,
+  );
+  // A changed answer does not quietly become the rule's first choice.
+  remember("Other region");
+  expect(
+    applications.needsYou.savedAnswer(saved.id)?.optionFallback,
+  ).toBeNull();
+  // Editing keeps or drops the rule the same way, and refuses a mismatch.
+  applications.needsYou.saveAnswer({
+    id: saved.id,
+    answer: rule.primary,
+    optionFallback: rule,
+  });
+  applications.needsYou.saveAnswer({ id: saved.id, answer: "Other region" });
+  expect(
+    applications.needsYou.savedAnswer(saved.id)?.optionFallback,
+  ).toBeNull();
+  expect(() =>
+    applications.needsYou.saveAnswer({
+      id: saved.id,
+      answer: "Other region",
+      optionFallback: rule,
+    }),
+  ).toThrow(/start with the saved answer/u);
+  // A fallback that is the answer itself is no fallback.
+  expect(() =>
+    applications.needsYou.saveAnswer({
+      id: saved.id,
+      answer: rule.primary,
+      optionFallback: { ...rule, fallback: ` ${rule.primary} ` },
+    }),
+  ).toThrow(/different choice/u);
+});
+
+it("skipping retires only this application's questions and keeps a shared question for other applications", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const a = applications.claimNext()!,
+    b = applications.claimNext()!;
+  applications.needsYou.request(question(a.id, a.attempt));
+  applications.needsYou.request(question(b.id, b.attempt));
+  applications.needsYou.request({
+    ...question(a.id, a.attempt),
+    key: "unique-question",
+    fieldKey: "unique-question",
+    prompt: "Unique question",
+  });
+  expect(applications.needsYou.list().total).toBe(2);
+  applications.skip(a.id, a.attempt, "Saved rule says to skip.");
+  expect(applications.needsYou.forApplication(a.id)).toEqual([]);
+  expect(applications.needsYou.list().total).toBe(1);
+  expect(applications.needsYou.forApplication(b.id)).toHaveLength(1);
+});
+
 it("persists guarded answer Undo without retracting answers that released applications", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
   folders.push(folder);

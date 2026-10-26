@@ -105,6 +105,7 @@ export function applicationFacts(
         question: saved.question,
         answer: saved.answer,
         applicationScope: saved.applicationScope,
+        optionFallback: saved.optionFallback,
       })),
     spokenLanguages: profile.spokenLanguages,
     skills: profile.skills,

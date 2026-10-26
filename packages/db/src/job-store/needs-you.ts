@@ -1,4 +1,7 @@
 import {
+  sameSavedChoice,
+  SavedOptionFallbackSchema,
+  type SavedOptionFallback,
   SavedFormAnswerKeySchema,
   SavedFormAnswerChangeSchema,
   NeedsYouSelectionQuerySchema,
@@ -214,6 +217,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           site_origin: string;
           prompt: string;
           answer: string;
+          option_fallback_json: string | null;
           kind: CandidateAnswerKind;
           label: string;
           needs_confirmation: number;
@@ -235,6 +239,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           proofEntryIds: JSON.parse(row.proof_entry_ids_json) as string[],
           prompt: row.prompt,
           answer: row.answer,
+          optionFallback: row.option_fallback_json
+            ? SavedOptionFallbackSchema.parse(
+                JSON.parse(row.option_fallback_json) as unknown,
+              )
+            : null,
           preview: row.answer.slice(0, 140),
           scope: { country: row.country, siteOrigin: row.site_origin },
           input: row.input,
@@ -244,6 +253,30 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       : null;
   };
 
+  /**
+   * The fallback rule an answer keeps. A rule tries the answer first, so it
+   * is stored only with that answer: one given with another first choice is
+   * refused, and an answer changed without its rule leaves the rule behind
+   * rather than quietly pointing it at the new answer.
+   */
+  function ruleForAnswer(
+    previous: string | null | undefined,
+    given: SavedOptionFallback | null | undefined,
+    answer: string,
+  ): string | null {
+    if (given === undefined) {
+      const kept = previous
+        ? SavedOptionFallbackSchema.parse(JSON.parse(previous) as unknown)
+        : null;
+      return kept && sameSavedChoice(kept.primary, answer)
+        ? JSON.stringify(kept)
+        : null;
+    }
+    if (given && !sameSavedChoice(given.primary, answer))
+      throw new Error("A fallback rule must start with the saved answer.");
+    return given ? JSON.stringify(given) : null;
+  }
+
   function writeAnswer(input: RememberFormAnswerInput): number {
     const value = RememberFormAnswerInputSchema.parse(input);
     value.answer = validateAnswer(
@@ -251,10 +284,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       value.answer,
     );
     const previous = sql(
-      "SELECT id FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
+      "SELECT id,option_fallback_json FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
     ).get(value.key, value.scope.country, value.scope.siteOrigin) as
-      | { id: number }
+      | { id: number; option_fallback_json: string | null }
       | undefined;
+    // Checked before anything is written.
+    const rule = ruleForAnswer(
+      previous?.option_fallback_json,
+      value.optionFallback,
+      value.answer,
+    );
     if (previous)
       answerChange?.capture({ table: "form_answers", id: previous.id });
     const result =
@@ -278,6 +317,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ) as { id: number };
     if (!previous)
       answerChange?.capture({ table: "form_answers", id: result.id }, null);
+    sql("UPDATE form_answers SET option_fallback_json=? WHERE id=?").run(
+      rule,
+      result.id,
+    );
     return result.id;
   }
   function resolveMatching(
@@ -478,9 +521,9 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const value = SaveFormAnswerInputSchema.parse(input);
       return store.transaction(() => {
         const previous = sql(
-          "SELECT input,options_json,answer_key,prompt_key,country,site_origin FROM form_answers WHERE id = ?",
+          "SELECT input,options_json,answer_key,prompt_key,country,site_origin,option_fallback_json FROM form_answers WHERE id = ?",
         ).get(value.id) as
-          | Pick<
+          | (Pick<
               Task,
               | "input"
               | "options_json"
@@ -488,14 +531,23 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               | "prompt_key"
               | "country"
               | "site_origin"
-            >
+            > & { option_fallback_json: string | null })
           | undefined;
         if (!previous) return false;
         answerChange?.capture({ table: "form_answers", id: value.id });
         const answer = validateAnswer(previous, value.answer);
+        const rule = ruleForAnswer(
+          previous.option_fallback_json,
+          value.optionFallback,
+          answer,
+        );
         sql(
           "UPDATE form_answers SET answer = ?, needs_confirmation = 0, updated_at = ? WHERE id = ?",
         ).run(answer, Date.now(), value.id);
+        sql("UPDATE form_answers SET option_fallback_json=? WHERE id=?").run(
+          rule,
+          value.id,
+        );
         resolveMatching(
           previous.answer_key,
           previous.prompt_key,
@@ -559,16 +611,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             | { id: number; prompt: string; answer: string | null }
             | undefined;
         if (local?.answer === null) return [];
-        if (local)
-          return [
-            {
-              id: `application:${local.id}`,
-              key: question.key,
-              prompt: local.prompt,
-              answer: local.answer,
-              local: true,
-            },
-          ];
         if (question.reusePrompt && question.kind === "work_authorization") {
           const alternatives =
             sql(`SELECT count(DISTINCT lower(trim(answer))) AS n
@@ -579,7 +621,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           if (alternatives.n > 1) return [];
         }
         let saved =
-          sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND needs_confirmation=0 AND country='' AND site_origin IN ('',?)
+          sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json,option_fallback_json FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND needs_confirmation=0 AND country='' AND site_origin IN ('',?)
           ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
             key,
             origin,
@@ -590,13 +632,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                 prompt: string;
                 answer: string;
                 kind: CandidateAnswerKind;
+                option_fallback_json: string | null;
                 role_families_json: string;
                 proof_entry_ids_json: string;
               }
             | undefined;
         if (!saved && question.kind && question.kind !== "other") {
           saved =
-            sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json FROM form_answers
+            sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json,option_fallback_json FROM form_answers
             WHERE kind=? AND country='' AND site_origin IN ('',?) AND needs_confirmation=0
             ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
               question.kind,
@@ -604,6 +647,19 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               origin,
             ) as typeof saved;
         }
+        if (
+          local &&
+          (!saved?.option_fallback_json || saved.answer !== local.answer)
+        )
+          return [
+            {
+              id: `application:${local.id}`,
+              key: question.key,
+              prompt: local.prompt,
+              answer: local.answer,
+              local: true,
+            },
+          ];
         return saved
           ? [
               {
@@ -612,6 +668,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                 prompt: saved.prompt,
                 answer: saved.answer,
                 local: false,
+                optionFallback: saved.option_fallback_json
+                  ? SavedOptionFallbackSchema.parse(
+                      JSON.parse(saved.option_fallback_json) as unknown,
+                    )
+                  : null,
                 kind: saved.kind,
                 roleFamilies: JSON.parse(saved.role_families_json) as string[],
                 proofEntryIds: JSON.parse(

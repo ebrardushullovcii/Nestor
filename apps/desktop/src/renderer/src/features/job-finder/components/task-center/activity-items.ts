@@ -46,6 +46,11 @@ const APPLICATION_WORDS: Record<
     badge: "Stopped",
     detail: "Stopped before sending",
   },
+  skipped: {
+    status: "stopped",
+    badge: "Skipped",
+    detail: "Your saved rule skipped this application",
+  },
   failed: { status: "failed", badge: "Failed", detail: "Could not apply" },
   uncertain: {
     status: "failed",

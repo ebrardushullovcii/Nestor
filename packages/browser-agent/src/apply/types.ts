@@ -1,4 +1,8 @@
-import type { ApplyAgentTiming, ApplyPickerAttempt } from "@nestor/contracts";
+import type {
+  ApplyAgentTiming,
+  ApplyPickerAttempt,
+  StoredApplyPickerAttempt,
+} from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
   ApplyAnswerTags,
@@ -428,6 +432,7 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  skipReason?: string;
   questionContexts?: Array<{ prompt: string; step: string }>;
   /** Choices pickers on this application refused, for the next run. */
   pickerAttempts?: ApplyPickerAttempt[];
@@ -498,7 +503,11 @@ export type ApplyProposal =
 export interface ApplyAgentConfig {
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
   /** What earlier runs of this application learned about its pickers. */
-  initialPickerAttempts?: readonly ApplyPickerAttempt[];
+  initialPickerAttempts?: readonly StoredApplyPickerAttempt[];
+  initialUnansweredPickerQuestions?: ReadonlyArray<{
+    prompt: string;
+    options: readonly string[];
+  }>;
   hands: ApplyPageHands;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about

@@ -1,3 +1,4 @@
+import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 
 import {
@@ -203,7 +204,33 @@ export const candidateAnswerKindValues = [
 export const CandidateAnswerKindSchema = z.enum(candidateAnswerKindValues);
 export type CandidateAnswerKind = z.infer<typeof CandidateAnswerKindSchema>;
 
+export const SavedOptionFallbackSchema = z
+  .object({
+    primary: z.string().trim().min(1).max(300),
+    fallback: z.string().trim().min(1).max(300),
+    whenNeitherOffered: z.literal("skip_application"),
+  })
+  .strict();
+export type SavedOptionFallback = z.infer<typeof SavedOptionFallbackSchema>;
+
+/** Spelling only: two choices that differ in case or spacing are one choice. */
+export function sameSavedChoice(left: string, right: string): boolean {
+  const plain = (value: string) =>
+    value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
+  return plain(left) === plain(right);
+}
+
+/** A rule the person is saving: its fallback is a different choice. */
+export const SavedOptionFallbackInputSchema = SavedOptionFallbackSchema.refine(
+  (rule) => !sameSavedChoice(rule.primary, rule.fallback),
+  { message: "The fallback must be a different choice.", path: ["fallback"] },
+);
+
 export const CandidateReusableAnswerSchema = z.object({
+  optionFallback: optionalStoredField(
+    SavedOptionFallbackSchema.nullable(),
+    null,
+  ),
   needsConfirmation: z.boolean().optional(),
   id: NonEmptyStringSchema,
   kind: CandidateAnswerKindSchema.default("other"),

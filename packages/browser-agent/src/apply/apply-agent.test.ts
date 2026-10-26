@@ -1,4 +1,5 @@
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
+import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
@@ -7614,4 +7615,256 @@ test("picker replay: an optional picker that refuses its choice is left blank an
   expect(chooseOption).toHaveBeenCalledTimes(1);
   expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
   expect(result.outcome).toBe("prepared");
+});
+
+describe("saved picker fallback replay", () => {
+  const rule = {
+    primary: fallbackReplay.primary,
+    fallback: fallbackReplay.fallback,
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const savedRule = (overrides: Record<string, unknown> = {}) => ({
+    id: "saved-rule",
+    kind: "other" as const,
+    label: fallbackReplay.question,
+    question: fallbackReplay.question,
+    answer: fallbackReplay.primary,
+    roleFamilies: [],
+    proofEntryIds: [],
+    optionFallback: rule,
+    ...overrides,
+  });
+  const picker = (
+    options: string[],
+    overrides: Partial<RawApplyControl> = {},
+  ) =>
+    page({
+      controls: [
+        {
+          ...nameControl(),
+          role: "combobox",
+          label: fallbackReplay.question,
+          value: "",
+          options,
+          ...overrides,
+        },
+      ],
+    });
+  /** A list that takes only what it offers, and says what it offers otherwise. */
+  const list = (source: RawApplyPage, options: string[]) =>
+    vi.fn((_ref: string, value: string) => {
+      if (options.includes(value)) {
+        source.controls[0].value = value;
+        source.controls[0].selectedOptionLabel = value;
+        return Promise.resolve({ ok: true as const, observedValue: value });
+      }
+      return Promise.resolve({
+        ok: false as const,
+        error: `The list did not offer "${value}".`,
+        reason: "option_not_offered" as const,
+        offeredOptions: options,
+      });
+    });
+
+  test.each(fallbackReplay.cases)(
+    "$name: the picker is asked, in the rule's order",
+    async ({ options, chosen, expected }) => {
+      // The page read shows only part of the list; the picker has it all.
+      const source = picker(options.slice(0, 1));
+      const input = config(source);
+      input.sources.reusableAnswers = [savedRule()];
+      const choose = list(source, options);
+      input.hands.chooseOption = choose;
+      const result = await runApplyAgent(
+        input,
+        scriptedModel([
+          {
+            name: "select",
+            args: { ref: "c0", option: fallbackReplay.primary },
+          },
+          { name: "finish", args: { reason: "Filled." } },
+        ]),
+      );
+      expect(choose.mock.calls.map((call) => call[1])).toEqual(chosen);
+      if (expected) {
+        expect(source.controls[0].value).toBe(expected);
+        expect(result.filled[0]?.answer.sourceKind).toBe("answer_library");
+        expect(result.skipReason).toBeUndefined();
+      } else {
+        expect(result.skipReason).toContain(
+          `neither ${fallbackReplay.primary} nor ${fallbackReplay.fallback}`,
+        );
+        expect(result.readyToSend).toBeNull();
+        expect(result.pauses).toHaveLength(0);
+      }
+    },
+  );
+
+  test("a native list is asked too, never skipped from the page read alone", async () => {
+    const source = picker(["Other region"], {
+      tagName: "select",
+      role: "",
+      inputType: "select-one",
+    });
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    // The real list finished loading later and does offer the fallback.
+    const choose = list(source, ["Other region", fallbackReplay.fallback]);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(choose).toHaveBeenCalledTimes(2);
+    expect(result.skipReason).toBeUndefined();
+    expect(source.controls[0].value).toBe(fallbackReplay.fallback);
+  });
+
+  test("a name that only resembles the answer is left to the person, not skipped", async () => {
+    const options = [fallbackReplay.nearName, "Other region"];
+    const source = picker(options);
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    const choose = list(source, options);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    // Asked once by its own name, then left to the person.
+    expect(choose.mock.calls.map((call) => call[1])).toEqual([
+      fallbackReplay.primary,
+    ]);
+    expect(result.skipReason).toBeUndefined();
+    const questions = result.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    );
+    expect(questions[0]?.prompt).toBe(fallbackReplay.question);
+  });
+
+  test("a list that cannot confirm its choices is never a reason to skip", async () => {
+    const source = picker([]);
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    const choose = vi.fn(() =>
+      Promise.resolve({
+        ok: false as const,
+        error: "The option list did not finish loading.",
+      }),
+    );
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+    expect(result.outcome).toBe("paused");
+  });
+
+  test.each([
+    {
+      name: "a State picker grouped under the saved question",
+      control: fallbackReplay.groupedQuestion,
+    },
+    { name: "an optional picker", control: { required: false } },
+    {
+      name: "a picker that already has an answer",
+      control: { value: "Other region", selectedOptionLabel: "Other region" },
+    },
+  ])("the rule does not decide $name", async ({ control }) => {
+    const source = picker(["Other region"], control);
+    const input = config(source);
+    input.sources.reusableAnswers = [savedRule()];
+    const choose = list(source, ["Other region"]);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+    expect(choose).not.toHaveBeenCalled();
+  });
+
+  test("a rule saved for another application stays with it", async () => {
+    const source = picker(["Other region"]);
+    const input = config(source);
+    input.sources.reusableAnswers = [
+      savedRule({
+        applicationScope: { applicationRecordId: "another-application" },
+      }),
+    ];
+    const choose = list(source, ["Other region"]);
+    input.hands.chooseOption = choose;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+    expect(choose).not.toHaveBeenCalled();
+  });
+});
+
+test("resumed picker replay never counts leftover search text as a confirmed answer", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        role: "combobox",
+        label: pickerReplay.question,
+        value: pickerReplay.primary,
+        options: [],
+      },
+    ],
+  });
+  const makeInput = () =>
+    config(source, {
+      initialUnansweredPickerQuestions: [
+        { prompt: pickerReplay.question, options: pickerReplay.options },
+      ],
+    });
+  const waiting = await runApplyAgent(
+    makeInput(),
+    repeatingModel("finish", { reason: "Looks complete" }),
+  );
+  expect(waiting.outcome).toBe("paused");
+  expect(waiting.readyToSend).toBeNull();
+  expect(
+    waiting.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    )[0]?.answerOptions,
+  ).toEqual(pickerReplay.options);
+  const selected = pickerReplay.options[0];
+  for (const tool of ["select", "type"] as const) {
+    source.controls[0].value = pickerReplay.primary;
+    source.controls[0].selectedOptionLabel = "";
+    const input = makeInput();
+    input.sources.reusableAnswers = [
+      {
+        id: "application-country",
+        kind: "other",
+        label: pickerReplay.question,
+        question: pickerReplay.question,
+        answer: selected,
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    input.hands.chooseOption = (_ref, value) => {
+      source.controls[0].value = value;
+      source.controls[0].selectedOptionLabel = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    };
+    // A combobox answered through type is confirmed the same way.
+    const answered = await runApplyAgent(
+      input,
+      scriptedModel([
+        tool === "select"
+          ? { name: "select", args: { ref: "c0", option: selected } }
+          : { name: "type", args: { ref: "c0", text: selected } },
+        { name: "finish", args: { reason: "Confirmed choice." } },
+      ]),
+    );
+    expect(answered.outcome).toBe("prepared");
+    expect(source.controls[0].value).toBe(selected);
+  }
 });

@@ -1,4 +1,9 @@
+import {
+  SavedOptionFallbackInputSchema,
+  SavedOptionFallbackSchema,
+} from "./profile";
 import { SourceAccessReferenceSchema } from "./source-access";
+import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 import { CandidateAnswerKindSchema } from "./profile";
 
@@ -32,6 +37,7 @@ export const applicationWorkStates = [
   "submitting",
   "submitted",
   "stopped",
+  "skipped",
   "failed",
   "uncertain",
 ] as const;
@@ -256,6 +262,10 @@ export const NeedsYouDetailsSchema = z.object({
 });
 export type NeedsYouDetails = z.infer<typeof NeedsYouDetailsSchema>;
 export const SavedFormAnswerSummarySchema = z.object({
+  optionFallback: optionalStoredField(
+    SavedOptionFallbackSchema.nullable(),
+    null,
+  ),
   key: z.string().min(1),
   kind: CandidateAnswerKindSchema,
   label: z.string(),
@@ -294,6 +304,7 @@ export const SavedFormAnswersPageSchema = z.object({
 export type SavedFormAnswersPage = z.infer<typeof SavedFormAnswersPageSchema>;
 export const SaveFormAnswerInputSchema = z
   .object({
+    optionFallback: SavedOptionFallbackInputSchema.nullable().optional(),
     id: z.number().int().positive(),
     answer: z.string().trim().min(1).max(20000),
   })
@@ -301,6 +312,7 @@ export const SaveFormAnswerInputSchema = z
 export type SaveFormAnswerInput = z.infer<typeof SaveFormAnswerInputSchema>;
 export const CreateFormAnswerInputSchema = z
   .object({
+    optionFallback: SavedOptionFallbackInputSchema.nullable().optional(),
     prompt: z.string().trim().min(1).max(2000),
     answer: z.string().trim().min(1).max(20000),
   })
@@ -314,6 +326,7 @@ export const RememberFormAnswerInputSchema = NeedsYouTaskSchema.pick({
   options: true,
 })
   .extend({
+    optionFallback: SavedOptionFallbackInputSchema.nullable().optional(),
     answer: z.string().trim().min(1).max(20000),
     kind: CandidateAnswerKindSchema.default("other"),
     label: z.string().trim().max(2000).default(""),
@@ -332,6 +345,7 @@ export interface FormAnswerLookup {
   kind?: z.infer<typeof CandidateAnswerKindSchema>;
 }
 export interface FormAnswerMatch {
+  optionFallback?: z.infer<typeof SavedOptionFallbackSchema> | null;
   id: string;
   key: string;
   prompt: string;
