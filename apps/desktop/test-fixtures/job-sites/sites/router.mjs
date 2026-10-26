@@ -24,7 +24,36 @@ export async function handleMoreSites(
   url,
   { send, readPost, logPost },
 ) {
-  if (url.pathname === "/replica-upload") {
+  if (url.pathname === "/api/non-user-graphql" && req.method === "POST") {
+    const payload = await readPost(req);
+    logPost(url.pathname, payload);
+    const target = new URL(`http://${req.headers.host}`);
+    target.hostname = "localhost";
+    target.pathname = "/";
+    send(
+      200,
+      JSON.stringify({
+        data: {
+          fileUploadHandle: {
+            url: target.href,
+            fields: {
+              acl: "private",
+              bucket: "replica-files",
+              Policy: "synthetic-policy",
+              "X-Amz-Signature": "synthetic-signature",
+            },
+          },
+        },
+      }),
+      "application/json",
+    );
+    return true;
+  }
+  if (
+    url.pathname === "/" &&
+    req.method === "POST" &&
+    /^localhost:/iu.test(req.headers.host ?? "")
+  ) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     if (req.method !== "POST") send(405, "Method not allowed");
     else {

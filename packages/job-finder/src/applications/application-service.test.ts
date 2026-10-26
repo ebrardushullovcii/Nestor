@@ -266,7 +266,13 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   const recheck =
     f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
-  expect(await recheck("https://replica.test")).toBe(true);
+  expect(f.execute.mock.calls[0]![1]).toMatchObject({
+    intermediateMutationsAuthorized: false,
+    attachmentUploadsAuthorized: true,
+    intermediateMutationAllowedOrigins: ["https://replica.test"],
+  });
+  expect(await recheck("https://replica.test")).toBe(false);
+  expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.applications.needsYou.remember({
     key: "salary",
     prompt: "Expected salary",
@@ -275,9 +281,9 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
     scope: {},
     options: [],
   });
-  expect(await recheck("https://replica.test")).toBe(true);
+  expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.seed.profile.phone = "+447700900999";
-  expect(await recheck("https://replica.test")).toBe(false);
+  expect(await recheck("https://replica.test", "attachment")).toBe(false);
 });
 
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
@@ -436,7 +442,7 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
   expect(f.execute.mock.calls[0]![1].resumeArtifact.filePath).toBe(f.imported);
   expect(
     f.execute.mock.calls[0]![1].intermediateMutationAllowedOrigins,
-  ).toEqual([]);
+  ).toEqual(["https://replica.test"]);
   expect(f.execute.mock.calls[0]![1].applyAllowedOrigins).toEqual([
     "https://replica.test",
   ]);

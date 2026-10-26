@@ -331,12 +331,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
-      intermediateMutationsAuthorized: mode !== "prepare_only",
-      // The form can upload to a separate API/storage origin. The bounded
-      // field-save guard classifies those requests; form navigation and final
-      // submission retain the application's exact allowedOrigins below.
-      intermediateMutationAllowedOrigins: [],
-      recheckIntermediateMutationAuthority: async (observedOrigin) => {
+      intermediateMutationsAuthorized:
+        sends && envelope?.intermediateMutationsAuthorized === true,
+      attachmentUploadsAuthorized: true,
+      intermediateMutationAllowedOrigins: [...allowedOrigins],
+      recheckIntermediateMutationAuthority: async (
+        observedOrigin,
+        purpose = "answers",
+      ) => {
+        if (
+          purpose === "answers" &&
+          (!sends || !envelope?.intermediateMutationsAuthorized)
+        )
+          return false;
         if (
           !current(row) ||
           signal.aborted ||
@@ -358,7 +365,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               new Date().toISOString(),
             ) ||
             !permission.scope.jobIds.includes(String(row.jobId)) ||
-            !permission.allowedResumeSha256.includes(sha256)
+            !permission.allowedResumeSha256.includes(sha256) ||
+            !permission.allowedOrigins.includes(observedOrigin) ||
+            (purpose === "answers" &&
+              !permission.intermediateMutationsAuthorized)
           )
             return false;
         }
@@ -367,7 +377,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          latestMode !== "prepare_only" &&
+          (purpose === "attachment" || latestMode !== "prepare_only") &&
           jobs.getJob(row.jobId)?.stage === "resume" &&
           resume?.approvedAt === approved.approvedAt &&
           resume.pdfPath === approved.pdfPath &&

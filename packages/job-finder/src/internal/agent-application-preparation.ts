@@ -522,14 +522,18 @@ export async function runAgentApplicationPreparation(
 ): Promise<ApplyExecutionResult> {
   const { executionInput, startedAt } = input;
   const now = input.now ?? (() => new Date());
-  const fieldSaveOrigins =
-    executionInput.intermediateMutationAllowedOrigins ??
-    executionInput.applyAllowedOrigins ??
-    [];
+  const fieldSaveOrigins = [
+    ...(executionInput.intermediateMutationAllowedOrigins ??
+      executionInput.applyAllowedOrigins ??
+      []),
+  ];
 
-  // Nothing may leave the page during a prepare-only run. The guard goes in
-  // before the agent is allowed to touch anything.
+  // Install the fence before any field is touched. Attachment uploads have a
+  // separate file-bound grant; ordinary field persistence needs send authority.
   await input.session.installPrepareOnlyGuard({
+    ...(executionInput.attachmentUploadsAuthorized === true
+      ? { attachmentUploadsAuthorized: true }
+      : {}),
     intermediateMutationsAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     allowedOrigins: fieldSaveOrigins,
@@ -544,6 +548,36 @@ export async function runAgentApplicationPreparation(
     allowedOrigins,
   };
   let activeEnvelope = input.envelope ?? null;
+  const recheckWriteAuthority = async (purpose: "answers" | "attachment") => {
+    if (executionInput.recheckIntermediateMutationAuthority) {
+      const page = await input.session.readPage();
+      const origin = page.url ? originOf(page.url) : null;
+      if (
+        !origin ||
+        !(await executionInput.recheckIntermediateMutationAuthority(
+          origin,
+          purpose,
+        ))
+      )
+        throw new Error(
+          "The application's permission to persist this value changed.",
+        );
+      await input.session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized:
+          executionInput.intermediateMutationsAuthorized === true,
+        ...(executionInput.attachmentUploadsAuthorized === true
+          ? { attachmentUploadsAuthorized: true }
+          : {}),
+        allowedOrigins: fieldSaveOrigins,
+      });
+    }
+  };
+  const hands = createApplyPageHands(input.session, now);
+  const uploadFile = hands.uploadFile;
+  hands.uploadFile = async (ref, file) => {
+    await recheckWriteAuthority("attachment");
+    return uploadFile(ref, file);
+  };
   const moveReviewer = createMoveReviewer({
     llmClient: input.llmClient,
     goal: isContinuation
@@ -559,26 +593,11 @@ export async function runAgentApplicationPreparation(
     input.applicationRecordId,
   );
   const outcome = await runApplyAgentSafely(input, {
-    hands: createApplyPageHands(input.session, now),
+    hands,
     safety: {
       ...input.session,
       openIntermediateWriteWindow: async () => {
-        if (executionInput.recheckIntermediateMutationAuthority) {
-          const page = await input.session.readPage();
-          const origin = page.url ? originOf(page.url) : null;
-          if (
-            !origin ||
-            !(await executionInput.recheckIntermediateMutationAuthority(origin))
-          )
-            throw new Error(
-              "The application's permission to save fields changed.",
-            );
-          await input.session.installPrepareOnlyGuard({
-            intermediateMutationsAuthorized:
-              executionInput.intermediateMutationsAuthorized === true,
-            allowedOrigins: fieldSaveOrigins,
-          });
-        }
+        await recheckWriteAuthority("answers");
         await input.session.openIntermediateWriteWindow();
       },
     },
@@ -659,6 +678,7 @@ export async function runAgentApplicationPreparation(
         if (widened) {
           if (widened !== true) activeEnvelope = widened;
           allowedOrigins.push(origin);
+          if (!fieldSaveOrigins.includes(origin)) fieldSaveOrigins.push(origin);
         }
       }
       return review;

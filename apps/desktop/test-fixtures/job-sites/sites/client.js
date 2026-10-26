@@ -252,18 +252,42 @@ if (form) {
     input.addEventListener("change", async () => {
       const label = form.querySelector(`[data-file-name="${input.name}"]`);
       label.textContent = input.files[0]?.name || "No file selected";
-      if (new URLSearchParams(location.search).get("upload") !== "async")
-        return;
+      const transport = new URLSearchParams(location.search).get("upload");
+      if (!["async", "xhr"].includes(transport)) return;
       if (!input.files[0]) return;
       label.textContent = "Uploading resume…";
-      const target = new URL("/replica-upload", location.href);
-      target.hostname = "localhost";
-      const body = new FormData();
-      body.append(input.name, input.files[0]);
       try {
-        const response = await fetch(target, { method: "POST", body });
-        if (!response.ok || !(await response.json()).uploaded)
-          throw new Error("Resume failed to upload");
+        const signed = await fetch("/api/non-user-graphql", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            operationName: "UploadHandle",
+            query: "query UploadHandle { fileUploadHandle { url fields } }",
+            variables: {},
+          }),
+        });
+        const target = (await signed.json()).data.fileUploadHandle;
+        const body = new FormData();
+        body.append(input.name, input.files[0]);
+        for (const [key, value] of Object.entries(target.fields))
+          body.append(key, value);
+        const uploaded =
+          transport === "xhr"
+            ? await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", target.url);
+                xhr.onload = () =>
+                  resolve(
+                    xhr.status === 200 && JSON.parse(xhr.responseText).uploaded,
+                  );
+                xhr.onerror = reject;
+                xhr.send(body);
+              })
+            : await fetch(target.url, { method: "POST", body }).then(
+                async (response) =>
+                  response.ok && (await response.json()).uploaded,
+              );
+        if (!uploaded) throw new Error("Resume failed to upload");
         input.setCustomValidity("");
         label.textContent = `Resume attached: ${input.files[0].name}`;
       } catch {

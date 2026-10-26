@@ -258,6 +258,7 @@ export interface ApplyPageSession extends ApplyRawPageHands {
    * anything. Called once, before the first read.
    */
   installPrepareOnlyGuard: (input: {
+    attachmentUploadsAuthorized?: boolean;
     intermediateMutationsAuthorized: boolean;
     allowedOrigins: readonly string[];
   }) => Promise<void>;

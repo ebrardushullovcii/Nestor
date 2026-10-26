@@ -25,6 +25,7 @@ import {
   getBlockedPrepareOnlyAttempts,
   openPrepareOnlyAuthorizedFormActionWindow,
   openPrepareOnlyIntermediateMutationWindow,
+  openPrepareOnlyAttachmentUploadWindow,
   registerPrepareOnlyPreparedValue,
   type ApplicationRunServiceWorkerSentinel,
   waitForPrepareOnlyAuthorizedFormAction,
@@ -1869,11 +1870,24 @@ export function createPlaywrightApplyPageSession(input: {
 
   return {
     ...mechanics,
+    uploadFile: async (ref, file) => {
+      const control = controlLocator(page, ref);
+      if (
+        control &&
+        (await control.evaluate(
+          (element) =>
+            element instanceof HTMLInputElement && element.type === "file",
+        ))
+      )
+        await openPrepareOnlyAttachmentUploadWindow(page, file);
+      return mechanics.uploadFile(ref, file);
+    },
     installPrepareOnlyGuard: async (guardInput) => {
       await ensurePrepareOnlyMutationGuard(
         page,
         guardInput.intermediateMutationsAuthorized,
         guardInput.allowedOrigins,
+        guardInput.attachmentUploadsAuthorized === true,
       );
     },
     readBlockedAttempt: async (): Promise<ApplyBlockedAttempt | null> => {

@@ -15,6 +15,7 @@ import {
   ensurePrepareOnlyMutationGuard,
   getLatestBlockedPrepareOnlyAttempt,
   openPrepareOnlyFinalActionWindow,
+  openPrepareOnlyAttachmentUploadWindow,
   openPrepareOnlyIntermediateMutationWindow,
   readServiceWorkerRegisterGuardInPage,
   registerPrepareOnlyPreparedValueInPage,
@@ -511,13 +512,11 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
   );
 
   test(
-    "a field save fired from a later document, to the form's own origin, gets through the default window",
+    "a later document keeps its field-save window pinned to its own origin",
     { timeout: 60_000 },
     async () => {
-      // The apply form lives in a document opened after the guard was
-      // installed, and it saves each answer to an ATS origin that is not the
-      // page's. Both were blocked before: the init script started the new
-      // document unauthorized, and the window was pinned to the page origin.
+      // New documents retain a bounded, pinned window. A separate host does
+      // not become an authorized destination for ordinary form answers.
       const site = await startTrackedServer();
       const ats = await startTrackedServer();
       site.registerHtml("/listing", `<a id="apply" href="/apply">Apply</a>`);
@@ -544,77 +543,165 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       await page.selectOption("#school", "u");
       await page.waitForTimeout(600);
 
-      expect(requestHitsFor(ats.hits, "/v1/candidate/8112037")).toHaveLength(1);
+      expect(requestHitsFor(ats.hits, "/v1/candidate/8112037")).toHaveLength(0);
       expect(await getLatestBlockedPrepareOnlyAttempt(page)).toBeNull();
     },
   );
 
-  test("uploads the selected file to a separate service while final actions stay blocked there", async () => {
-    const site = await startTrackedServer();
-    const storage = await startTrackedServer();
-    site.registerHtml(
-      "/apply-with-upload",
-      `<label>Resume <input id="resume" type="file"></label><output id="result"></output>
+  test.each(["fetch", "xhr"])(
+    "a same-origin presign and separate storage %s upload pass while form answers and final actions stay blocked",
+    async (transport) => {
+      const site = await startTrackedServer();
+      const storage = await startTrackedServer();
+      site.registerScript(
+        "/api/non-user-graphql",
+        JSON.stringify({
+          data: {
+            fileUploadHandle: {
+              url: storage.baseUrl + "/",
+              fields: {
+                acl: "private",
+                bucket: "synthetic-files",
+                Policy: "synthetic-policy",
+                "X-Amz-Signature": "synthetic-signature",
+              },
+            },
+          },
+        }),
+      );
+      site.registerHtml(
+        "/apply-with-upload",
+        `<label>Resume <input id="resume" type="file"></label><output id="result"></output>
        <script>
        document.getElementById('resume').addEventListener('change', async function () {
-         const body = new FormData(); body.append('resume', this.files[0]);
          try {
-           const response = await fetch('${storage.baseUrl}/api/resume/upload', {method:'POST',body});
-           document.getElementById('result').textContent = await response.text();
+           const signed = await fetch('/api/non-user-graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'UploadHandle',query:'query UploadHandle { fileUploadHandle { url fields } }',variables:{}})});
+           const target=(await signed.json()).data.fileUploadHandle;
+           const body = new FormData(); body.append('file', this.files[0]);
+           for(const [key,value] of Object.entries(target.fields))body.append(key,value);
+           const result = ${transport === "xhr" ? "await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',target.url);xhr.onload=()=>resolve(xhr.responseText);xhr.onerror=reject;xhr.send(body);})" : "await (await fetch(target.url, {method:'POST',body})).text()"};
+           document.getElementById('result').textContent = result;
          } catch { document.getElementById('result').textContent = 'Upload failed'; }
        });
        </script>`,
-    );
-    const { page } = await newGuardedPage();
-    await page.goto(`${site.baseUrl}/apply-with-upload`);
-    const session = createPlaywrightApplyPageSession({ page });
-    await session.installPrepareOnlyGuard({
-      intermediateMutationsAuthorized: true,
-      allowedOrigins: [],
-    });
-    const resume = (await session.readPage()).controls.find(
-      (field) => field.inputType === "file",
-    )!;
-    await session.openIntermediateWriteWindow();
-    const bytes = new TextEncoder().encode("%PDF-1.4 synthetic resume bytes");
-    expect(
-      await session.uploadFile(resume.ref ?? `c${resume.index}`, {
-        name: "synthetic-resume.pdf",
-        mimeType: "application/pdf",
-        bytes,
-      }),
-    ).toMatchObject({ ok: true });
-    await page.waitForFunction(
-      () => document.getElementById("result")?.textContent === "fixture-ok",
-    );
-    const uploads = requestHitsFor(storage.hits, "/api/resume/upload");
-    expect(uploads).toHaveLength(1);
-    expect(uploads[0]!.body).toContain(new TextDecoder().decode(bytes));
-    for (const request of [
-      { path: "/api/application/submit", body: "resume=synthetic-resume.pdf" },
-      {
-        path: "/api/resume/upload",
-        body: JSON.stringify({ operationName: "SubmitApplication" }),
-      },
-    ])
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${site.baseUrl}/apply-with-upload`);
+      const session = createPlaywrightApplyPageSession({ page });
+      await session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized: false,
+        attachmentUploadsAuthorized: true,
+        allowedOrigins: [site.baseUrl],
+      });
+      const resume = (await session.readPage()).controls.find(
+        (field) => field.inputType === "file",
+      )!;
+      const bytes = new TextEncoder().encode("%PDF-1.4 synthetic resume bytes");
       expect(
-        await page.evaluate(
-          async ({ url, body }) => {
-            try {
-              await fetch(url, { method: "POST", body });
-              return true;
-            } catch {
-              return false;
-            }
-          },
-          { url: storage.baseUrl + request.path, body: request.body },
-        ),
-      ).toBe(false);
-    expect(
-      requestHitsFor(storage.hits, "/api/application/submit"),
-    ).toHaveLength(0);
-    expect(requestHitsFor(storage.hits, "/api/resume/upload")).toHaveLength(1);
-  });
+        await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+          name: "synthetic-resume.pdf",
+          mimeType: "application/pdf",
+          bytes,
+        }),
+      ).toMatchObject({ ok: true });
+      await page.waitForFunction(
+        () => document.getElementById("result")?.textContent === "fixture-ok",
+      );
+      const uploads = requestHitsFor(storage.hits, "/");
+      expect(requestHitsFor(site.hits, "/api/non-user-graphql")).toHaveLength(
+        1,
+      );
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0]!.body).toContain(new TextDecoder().decode(bytes));
+      for (const request of [
+        {
+          path: "/api/application/submit",
+          body: "resume=synthetic-resume.pdf",
+        },
+        {
+          path: "/api/uploads",
+          body: JSON.stringify({ operationName: "SubmitApplication" }),
+        },
+      ])
+        expect(
+          await page.evaluate(
+            async ({ url, body }) => {
+              try {
+                await fetch(url, { method: "POST", body });
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            { url: storage.baseUrl + request.path, body: request.body },
+          ),
+        ).toBe(false);
+      expect(
+        requestHitsFor(storage.hits, "/api/application/submit"),
+      ).toHaveLength(0);
+      expect(requestHitsFor(storage.hits, "/")).toHaveLength(1);
+      for (const origin of [site.baseUrl, storage.baseUrl]) {
+        for (const [path, body] of [
+          ["/api/answers", JSON.stringify({ answer: "private answer" })],
+          [
+            "/api/applications",
+            JSON.stringify({ name: "Synthetic Candidate" }),
+          ],
+          ["/api/users", JSON.stringify({ email: "candidate@example.test" })],
+          [
+            "/graphql",
+            JSON.stringify({
+              operationName: "CreateApplication",
+              query: "mutation { createApplication { id } }",
+            }),
+          ],
+          [
+            "/graphql",
+            JSON.stringify({
+              operationName: "ApplyToJob",
+              query: "mutation { applyToJob { id } }",
+            }),
+          ],
+          [
+            "/api/autosave",
+            " ".repeat(9000) +
+              JSON.stringify({ operationName: "SubmitApplication" }),
+          ],
+        ] as const) {
+          // Keep the attachment grant live: this must not pass merely because
+          // the successful presign and upload exhausted its request budget.
+          await openPrepareOnlyAttachmentUploadWindow(page, {
+            name: "synthetic-resume.pdf",
+            mimeType: "application/pdf",
+            bytes,
+          });
+          expect(
+            await page.evaluate(
+              async ({ url, body }) => {
+                try {
+                  await fetch(url, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body,
+                  });
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
+              { url: origin + path, body },
+            ),
+          ).toBe(false);
+          expect(
+            requestHitsFor(
+              origin === site.baseUrl ? site.hits : storage.hits,
+              path,
+            ),
+          ).toHaveLength(0);
+        }
+      }
+    },
+  );
 
   test(
     "denies a GET image query beacon while allowing a queryless static image",

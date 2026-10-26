@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  classifyAttachmentUpload,
+  type AttachmentUploadWindow,
+} from "./application-attachment-upload-policy";
+import type { ApplyUploadFile } from "@nestor/contracts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type {
@@ -103,6 +108,8 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     allowedIntermediateRequests: WeakSet<Request>;
     verifiedIntermediateWriteCount: number;
     intermediateMutationsAuthorized: boolean;
+    attachmentUploadsAuthorized: boolean;
+    attachmentUploadWindow: AttachmentUploadWindow | null;
     intermediateMutationAllowedOrigins: string[];
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
     authorizedFormActionWindow: {
@@ -285,6 +292,7 @@ export function installPrepareOnlyMutationGuardInPage(
     preparedValues: string[];
     intermediateMutationsAuthorized: boolean;
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
+    attachmentUploadWindow: AttachmentUploadWindow | null;
     authorizedFormActionWindow: AuthorizedFormActionWindow | null;
     submitListenerInstalled: boolean;
     /**
@@ -317,6 +325,7 @@ export function installPrepareOnlyMutationGuardInPage(
     preparedValues: [],
     intermediateMutationsAuthorized,
     intermediateMutationWindow: null,
+    attachmentUploadWindow: null,
     authorizedFormActionWindow: null,
     submitListenerInstalled: false,
     finalActionAllowed: false,
@@ -603,28 +612,65 @@ export function installPrepareOnlyMutationGuardInPage(
     } catch {
       return false;
     }
-    // "*" is the default: field saves are allowed wherever the form lives
-    // (an embedded ATS answers from its own origin, not the page's), and
-    // any write that is not a final send goes through. A pinned origin from
-    // a saved permission keeps the older, narrower rule.
-    const anyOrigin = mutationWindow.expectedOrigin === "*";
-    if (!anyOrigin && parsedUrl.origin !== mutationWindow.expectedOrigin) {
+    if (parsedUrl.origin !== mutationWindow.expectedOrigin) {
       return false;
     }
+    if ((input.bodyText?.length ?? 0) > 65_536) return false;
     const signal = `${parsedUrl.pathname} ${parsedUrl.search} ${
-      input.bodyText?.slice(0, 8_192) ?? ""
+      input.bodyText ?? ""
     }`.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
     const finalActionSignal =
-      /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:now|job)|create[-_\s]*account|register)(?:[^a-z0-9]|$)/iu;
+      /(?:^|[^a-z0-9])(?:submit|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)/iu;
     const intermediateActionSignal =
       /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
     if (
       finalActionSignal.test(signal) ||
-      (!anyOrigin && !intermediateActionSignal.test(signal))
+      !intermediateActionSignal.test(signal)
     ) {
       return false;
     }
     mutationWindow.remainingRequests -= 1;
+    return true;
+  };
+
+  // This only forwards the selected file to the network fence. That fence
+  // verifies its digest and refuses mixed file-and-answer/application payloads.
+  const canForwardAttachment = (
+    method: string,
+    body: unknown,
+    url: string | null,
+  ): boolean => {
+    const grant = state.attachmentUploadWindow;
+    if (
+      !grant ||
+      Date.now() > grant.expiresAtMs ||
+      grant.remainingRequests < 1 ||
+      !["POST", "PUT"].includes(normalizeMethod(method))
+    )
+      return false;
+    if (
+      typeof body === "string" &&
+      body.length <= 16_384 &&
+      url &&
+      new URL(url).origin === grant.sourceOrigin &&
+      /upload|presign/iu.test(body)
+    ) {
+      grant.remainingRequests -= 1;
+      return true;
+    }
+    const files =
+      body instanceof FormData
+        ? [...body.values()].filter((value) => typeof value !== "string")
+        : body instanceof Blob
+          ? [body]
+          : [];
+    if (
+      files.length !== 1 ||
+      files[0]!.size !== grant.byteLength ||
+      (files[0] instanceof File && files[0].name !== grant.fileName)
+    )
+      return false;
+    grant.remainingRequests -= 1;
     return true;
   };
 
@@ -812,6 +858,7 @@ export function installPrepareOnlyMutationGuardInPage(
         (typeof File !== "undefined" && init?.body instanceof File);
       if (
         !isPageOwnedRead(method, url, bodyText, bodyIsFormData) &&
+        !canForwardAttachment(method, init?.body, url) &&
         !canAllowIntermediateRequest({
           bodyText,
           kind: "fetch",
@@ -894,6 +941,7 @@ export function installPrepareOnlyMutationGuardInPage(
             bodyText,
             bodyIsFormData,
           ) &&
+          !canForwardAttachment(request.method, body, request.url) &&
           !canAllowIntermediateRequest({
             bodyText,
             kind: "xhr",
@@ -1329,6 +1377,7 @@ export async function ensurePrepareOnlyMutationGuard(
   page: Page,
   intermediateMutationsAuthorized: boolean,
   intermediateMutationAllowedOrigins: readonly string[] = [],
+  attachmentUploadsAuthorized = false,
 ): Promise<PrepareOnlyGuardSnapshot> {
   let networkGuardState = prepareOnlyNetworkGuardStates.get(page);
   if (!networkGuardState) {
@@ -1338,6 +1387,8 @@ export async function ensurePrepareOnlyMutationGuard(
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       intermediateMutationsAuthorized,
+      attachmentUploadsAuthorized,
+      attachmentUploadWindow: null,
       intermediateMutationAllowedOrigins: [
         ...new Set(intermediateMutationAllowedOrigins),
       ],
@@ -1353,6 +1404,7 @@ export async function ensurePrepareOnlyMutationGuard(
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
         networkGuardState!.authorizedFormActionWindow = null;
+        networkGuardState!.attachmentUploadWindow = null;
       }
     });
     // A page handed to the person stays theirs across its own navigations
@@ -1428,6 +1480,28 @@ export async function ensurePrepareOnlyMutationGuard(
         resourceType === "fetch" || resourceType === "xhr"
           ? resourceType
           : "other";
+      const attachment = await classifyAttachmentUpload({
+        window:
+          networkGuardState!.attachmentUploadsAuthorized &&
+          resourceKind !== "other"
+            ? networkGuardState!.attachmentUploadWindow
+            : null,
+        nowMs: Date.now(),
+        method,
+        url: request.url(),
+        contentType: request.headers()["content-type"] ?? "",
+        body: request.postDataBuffer(),
+      });
+      if (attachment.allowed) {
+        networkGuardState!.attachmentUploadWindow!.remainingRequests -= 1;
+        networkGuardState!.allowedIntermediateRequests.add(request);
+        await route.continue();
+        return;
+      }
+      if (attachment.containsFile) {
+        await denyRequest();
+        return;
+      }
       const decision = classifyIntermediateMutationRequest({
         authorized: networkGuardState!.intermediateMutationsAuthorized,
         bodyText: request.postData(),
@@ -1460,6 +1534,9 @@ export async function ensurePrepareOnlyMutationGuard(
   }
   networkGuardState.intermediateMutationsAuthorized =
     intermediateMutationsAuthorized;
+  networkGuardState.attachmentUploadsAuthorized = attachmentUploadsAuthorized;
+  if (!attachmentUploadsAuthorized)
+    networkGuardState.attachmentUploadWindow = null;
   networkGuardState.intermediateMutationAllowedOrigins = [
     ...new Set(intermediateMutationAllowedOrigins),
   ];
@@ -1596,12 +1673,7 @@ export async function openPrepareOnlyIntermediateMutationWindow(
     }
   }
   await setPrepareOnlyIntermediateMutationWindow(page, {
-    // No pinned origins: the window covers whichever origin the form's
-    // frame saves to. The submit guard is separate and unchanged.
-    expectedOrigin:
-      networkGuardState.intermediateMutationAllowedOrigins.length === 0
-        ? "*"
-        : expectedOrigin,
+    expectedOrigin,
     expiresAtMs: Date.now() + INTERMEDIATE_MUTATION_WINDOW_DURATION_MS,
     remainingRequests: INTERMEDIATE_MUTATION_WINDOW_MAX_REQUESTS,
   });
@@ -1611,6 +1683,42 @@ export async function closePrepareOnlyIntermediateMutationWindow(
   page: Page,
 ): Promise<void> {
   await setPrepareOnlyIntermediateMutationWindow(page, null);
+}
+
+export async function openPrepareOnlyAttachmentUploadWindow(
+  page: Page,
+  file: ApplyUploadFile,
+): Promise<void> {
+  const guard = prepareOnlyNetworkGuardStates.get(page);
+  const origin = new URL(page.url()).origin;
+  if (!guard?.attachmentUploadsAuthorized) return; // Local selection stays local.
+  if (!guard.intermediateMutationAllowedOrigins.includes(origin))
+    throw new Error(
+      "This application is not authorized to upload an attachment here.",
+    );
+  const grant: AttachmentUploadWindow = {
+    sourceOrigin: origin,
+    fileName: file.name,
+    mimeType: file.mimeType,
+    byteLength: file.bytes.byteLength,
+    sha256: createHash("sha256").update(file.bytes).digest("hex"),
+    expiresAtMs: Date.now() + 15_000,
+    remainingRequests: 2,
+  };
+  guard.attachmentUploadWindow = grant;
+  for (const frame of page.frames()) {
+    await ensureFramePrepareOnlyMutationGuard(
+      frame,
+      guard.intermediateMutationsAuthorized,
+      false,
+    );
+    await frame.evaluate((windowGrant) => {
+      const state = (window as unknown as Record<string, unknown>)[
+        "__nestorPrepareOnlyMutationGuardV1"
+      ] as { attachmentUploadWindow: AttachmentUploadWindow | null };
+      state.attachmentUploadWindow = { ...windowGrant };
+    }, grant);
+  }
 }
 
 export async function registerPrepareOnlyPreparedValue(
@@ -1680,6 +1788,8 @@ export function recordPrepareOnlyRunInterruption(
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       intermediateMutationsAuthorized: false,
+      attachmentUploadsAuthorized: false,
+      attachmentUploadWindow: null,
       intermediateMutationAllowedOrigins: [],
       intermediateMutationWindow: null,
       authorizedFormActionWindow: null,
@@ -2041,7 +2151,9 @@ export function createApplicationRunServiceWorkerSentinel(input: {
       const onServiceWorker = (worker: { url(): string }): void => {
         const workerUrl = worker.url();
         const workerOrigin = parseHttpOriginOrNull(workerUrl);
-        const applicationOrigin = parseHttpOriginOrNull(currentApplicationUrl());
+        const applicationOrigin = parseHttpOriginOrNull(
+          currentApplicationUrl(),
+        );
         if (!workerOrigin || workerOrigin === applicationOrigin)
           pendingWorkerEvents.push(workerUrl);
       };

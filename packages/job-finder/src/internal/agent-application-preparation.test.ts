@@ -1977,7 +1977,10 @@ test.each(["file", "text"] as const)(
       },
     });
     expect(result.state).toBe("ready");
-    expect(recheck).toHaveBeenCalledWith(new URL(PAGE_URL).origin);
+    expect(recheck).toHaveBeenCalledWith(
+      new URL(PAGE_URL).origin,
+      delivery === "file" ? "attachment" : "answers",
+    );
     expect(installGuard.mock.calls.length).toBeGreaterThan(1);
     for (const [guard] of installGuard.mock.calls)
       expect(guard).toEqual({
