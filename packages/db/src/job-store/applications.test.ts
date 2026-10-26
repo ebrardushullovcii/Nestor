@@ -171,6 +171,110 @@ describe("applications on the job store", () => {
     expect(read(first.id)).toEqual(["50000"]);
   });
 
+  it("reuses saved pay answers when a wizard wraps the same questions in progress headings", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [prompt, answer] of [
+      ["Annual salary expectation", "50000"],
+      ["Salary currency", "GBP"],
+      ["Notice period", "One month"],
+    ]) {
+      memory.remember({
+        key: prompt!,
+        prompt: `Step 1 of 4: Compensation — ${prompt}`,
+        answer: answer!,
+        input: "text",
+        scope: {},
+        options: [],
+      });
+      const wrapped = `Step 3 of 6: Compensation — ${prompt} *`;
+      expect(
+        memory
+          .answersForQuestions(
+            row.id,
+            [{ key: prompt!, prompt: wrapped, reusePrompt: true }],
+            "https://jobs.example.test",
+          )
+          .map((found) => found.answer),
+      ).toEqual([answer]);
+      expect(
+        memory.request(
+          question(row.id, row.attempt, {
+            key: prompt!,
+            prompt: wrapped,
+            reusePrompt: true,
+            scope: {},
+            input: "text",
+          }),
+        ),
+      ).toEqual({ status: "answered", answer });
+    }
+    expect(memory.list().total).toBe(0);
+  });
+
+  it("keeps equal labels in different wizard sections in separate tasks and never reuses the other section's answer", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!;
+    const memory = applications.needsYou;
+    const pairs = [
+      [
+        "Step 2 of 6: Employment — Start date",
+        "Step 3 of 6: Education — Start date",
+        "2020-01-01",
+      ],
+      [
+        "Step 4 of 7: Reference 1 — Email address",
+        "Step 5 of 7: Reference 2 — Email address",
+        "first@example.test",
+      ],
+      [
+        "Step 2 of 6: Terms — I agree",
+        "Step 4 of 6: Marketing — I agree",
+        "Yes",
+      ],
+    ];
+    for (const [first, second, answer] of pairs) {
+      memory.remember({
+        key: first!,
+        prompt: first!,
+        answer: answer!,
+        input: "text",
+        scope: {},
+        options: [],
+      });
+      expect(
+        memory
+          .answersForQuestions(
+            row.id,
+            [
+              { key: first!, prompt: first!, reusePrompt: true },
+              { key: second!, prompt: second!, reusePrompt: true },
+            ],
+            "https://jobs.example.test",
+          )
+          .map((found) => found.key),
+      ).toEqual([first]);
+      for (const prompt of [first!, second!])
+        memory.request(
+          question(row.id, row.attempt, {
+            key: prompt,
+            fieldKey: prompt,
+            prompt,
+            reusePrompt: true,
+            scope: {},
+            input: "text",
+          }),
+          { reuseAnswers: false },
+        );
+    }
+    expect(memory.list().total).toBe(6);
+    expect(new Set(memory.list().rows.map((task) => task.key)).size).toBe(6);
+    expect(new Set(memory.list().rows.map((task) => task.prompt)).size).toBe(6);
+  });
+
   it("returns an unusable remembered answer to one shared question and waits for its correction", () => {
     const { jobs, applications } = open();
     applications.applyJobs({ selection: { ids: add(jobs, 2) } });

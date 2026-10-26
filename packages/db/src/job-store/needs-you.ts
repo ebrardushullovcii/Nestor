@@ -4,6 +4,7 @@ import {
   type SavedFormAnswerKey,
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
+  cleanFormQuestionPrompt,
   RememberFormAnswerInputSchema,
   type RememberFormAnswerInput,
   type FormAnswerLookup,
@@ -589,6 +590,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       options: { reuseAnswers?: boolean } = {},
     ): RequestNeedsYouResult {
       const value = RequestNeedsYouInputSchema.parse(input);
+      if (value.kind === "question")
+        value.prompt = cleanFormQuestionPrompt(value.prompt) || value.prompt;
       return store.transaction(() => {
         const application = sql(
           "SELECT state, attempt FROM applications WHERE id = ?",

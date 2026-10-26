@@ -65,6 +65,7 @@ import {
   unresolvedRequiredControls,
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
+import { createQuestionOccurrences } from "./question-occurrences";
 import {
   checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
@@ -323,6 +324,18 @@ async function runMeasuredApplyAgent(
   // only the part the agent could not do.
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState();
+  const questionOccurrences = createQuestionOccurrences(
+    config.initialQuestionContexts,
+  );
+  const pageHands = config.hands;
+  config.hands = {
+    ...pageHands,
+    observe: async () => {
+      const observation = await pageHands.observe();
+      questionOccurrences.observe(observation);
+      return observation;
+    },
+  };
   const classifyQuestions = config.modelQuestionClassification
     ? createQuestionClassifier({
         client: llmClient,
@@ -395,11 +408,20 @@ async function runMeasuredApplyAgent(
   const refreshReusableAnswers = async () => {
     if (!config.readReusableAnswers) return;
     const shared = await config.readReusableAnswers(
-      (pageTools.state.observation?.controls ?? []).filter((control) => control.visible && !control.credentialRole).map((control) => ({
-        prompt: questionPrompt(control), kind: control.questionKind,
-        answerControlType: control.answerControlType, answerOptions: control.options,
-        ...(control.inputConstraints ? { inputConstraints: control.inputConstraints } : {}),
-      })),
+      (pageTools.state.observation?.controls ?? [])
+        .filter((control) => control.visible && !control.credentialRole)
+        .map((control) => ({
+          prompt: questionPrompt(control),
+          kind: control.questionKind,
+          ...(control.repeatedQuestion
+            ? { repeatedAtDifferentStep: true }
+            : {}),
+          answerControlType: control.answerControlType,
+          answerOptions: control.options,
+          ...(control.inputConstraints
+            ? { inputConstraints: control.inputConstraints }
+            : {}),
+        })),
     );
     const local = config.sources.reusableAnswers.filter((answer) =>
       answer.id.startsWith("application_"),
@@ -456,6 +478,11 @@ async function runMeasuredApplyAgent(
       (candidate) => candidate.ref === proposal.ref,
     );
     if (!control) return null;
+    if (
+      control.repeatedQuestion &&
+      !savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
+    )
+      return null;
     let answer: string | null;
     switch (proposal.tool) {
       case "type":
@@ -581,6 +608,7 @@ async function runMeasuredApplyAgent(
   });
 
   const syncObservation = (next: ApplyFormObservation): void => {
+    questionOccurrences.observe(next);
     pageTools.state.observation = next;
     // Classify the page's questions now, while the model reads the page, so
     // the first answer does not wait for it. Writes await the same result.
@@ -2479,5 +2507,6 @@ async function runMeasuredApplyAgent(
     modelTurns: agentTiming.modelTurns + agentTiming.auxiliaryModelCalls,
     timing: agentTiming,
     readyToSend,
+    questionContexts: questionOccurrences.snapshot(),
   };
 }

@@ -2,6 +2,8 @@ import { questionClassificationKey } from "./question-classification";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
+  cleanFormQuestionPrompt,
+  normalizeFormQuestionPrompt,
   type ApplicationAttemptQuestion,
 } from "@nestor/contracts";
 
@@ -214,7 +216,10 @@ function questionIdFor(
       ? `_${digest(control.choiceGroupKey)}`
       : "";
   const suffix =
-    choiceSuffix || (same.length > 1 && ordinal > 0 ? `_${ordinal + 1}` : "");
+    (control.repeatedQuestion
+      ? `_repeat_${digest(control.repeatedQuestion.step)}`
+      : "") +
+    (choiceSuffix || (same.length > 1 && ordinal > 0 ? `_${ordinal + 1}` : ""));
   return `question_${jobId}_${slug || "field"}${suffix}`;
 }
 
@@ -255,6 +260,7 @@ export function fileFieldHoldsOtherFile(
 }
 
 export function questionPrompt(control: ApplyFormControl): string {
+  if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
   const label = control.label.trim();
   const group = control.groupLabel.trim();
   // File tasks name the input, without its fieldset legend or required marker.
@@ -269,16 +275,24 @@ export function questionPrompt(control: ApplyFormControl): string {
         control.answerControlType === "multi_choice")) &&
     group.length > 0
   )
-    return group;
+    return control.attestationKind !== null
+      ? cleanFormQuestionPrompt(group) || group
+      : group;
   const groupAddsSomething =
     normalizedGroup.length > 0 &&
     normalizedLabel.length > 0 &&
     !normalizedLabel.includes(normalizedGroup) &&
     !normalizedGroup.includes(normalizedLabel);
   const prompt = groupAddsSomething ? `${group} — ${label}` : label || group;
-  return (
-    prompt || control.placeholder.trim() || "A question on the application form"
-  );
+  const described =
+    prompt ||
+    control.placeholder.trim() ||
+    "A question on the application form";
+  // A declaration's section can change what "I agree" means. Keep that
+  // context for both its saved answer and the model's permission check.
+  return control.attestationKind !== null
+    ? cleanFormQuestionPrompt(described) || described
+    : described;
 }
 
 export function buildPendingQuestion(input: {
@@ -307,6 +321,7 @@ export function buildPendingQuestion(input: {
   return {
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
     prompt: questionPrompt(control),
+    ...(control.repeatedQuestion ? { repeatedAtDifferentStep: true } : {}),
     kind: control.questionKind,
     answerControlType: control.answerControlType,
     ...(control.inputConstraints
@@ -454,7 +469,8 @@ function savedSuggestion(
   }
   const sourceLabel =
     saved &&
-    normalizeSignal(saved.question) === normalizeSignal(questionPrompt(control))
+    normalizeFormQuestionPrompt(saved.question) ===
+      normalizeFormQuestionPrompt(questionPrompt(control))
       ? "your answer to this question"
       : `your saved answer "${saved?.label || saved?.question}"`;
   return saved
@@ -514,6 +530,15 @@ async function decideAnswer(input: {
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
+  if (control.repeatedQuestion && !saved) {
+    return {
+      kind: "leave",
+      reason:
+        "This question appeared on another step. Answer it for this entry so Job Finder does not reuse the earlier answer.",
+      suggestion: null,
+      permission: true,
+    };
+  }
   // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
     control,

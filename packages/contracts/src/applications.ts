@@ -341,10 +341,34 @@ export interface FormAnswerMatch {
   roleFamilies?: string[];
   proofEntryIds?: string[];
 }
+/** Progress counters are chrome; the section can distinguish equal labels. */
+export function cleanFormQuestionPrompt(value: string): string {
+  const parts = value
+    .trim()
+    .replace(/^application\s*-\s*/iu, "")
+    .split(/\s*[—–]\s*|\s+-\s+|\r?\n/u);
+  while (parts.length) {
+    if (/^(?:job\s+)?application(?:\s+form)?$/iu.test(parts[0]!.trim())) {
+      parts.shift();
+      continue;
+    }
+    const step = /^step\s+\d+\s*(?:of|\/)\s*\d+\b\s*[:.…]*\s*(.*)$/iu.exec(
+      parts[0]!,
+    );
+    if (!step) break;
+    const section = step[1]!.trim();
+    if (section) {
+      parts[0] = section;
+      break;
+    }
+    parts.shift();
+  }
+  return parts.join(" — ").trim();
+}
+
 export function normalizeFormQuestionPrompt(value: string): string {
-  return value
+  return (cleanFormQuestionPrompt(value) || value)
     .toLocaleLowerCase("en")
-    .replace(/^application\s*[—–-]\s*/u, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }

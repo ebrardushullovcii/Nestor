@@ -1,4 +1,5 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
+import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import { describe, expect, test, vi } from "vitest";
 
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
@@ -10,7 +11,12 @@ import {
 } from "./apply-prompts";
 import type { FillFieldsEntry } from "./apply-tools";
 import { buildApplyFormObservation } from "./page-hands";
-import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
+import {
+  createApplyGuardState,
+  executeApplyProposal,
+  questionPrompt,
+} from "./policy-executor";
+import { savedAnswerForQuestion } from "./application-facts";
 import type { ApplyAgentConfig, ApplyPageHands } from "./types";
 import {
   checkWrittenApplicationAnswer,
@@ -826,60 +832,171 @@ test("an application sees an answer saved in another open application on its nex
   expect(source.controls[0].value).toBe("Platform team");
 });
 
-test("explicit pay answers for this form remain usable when automatic pay answering is off", async () => {
+test.each([
+  { groupLabel: "", question: "Annual salary expectation" },
+  {
+    groupLabel: "Step 3 of 6: Compensation",
+    question: "Step 1 of 4: Compensation — Annual salary expectation",
+  },
+  {
+    groupLabel: "Application",
+    question: "Annual salary expectation *",
+  },
+])(
+  "explicit pay answers remain usable with automatic pay answering off: $groupLabel / $question",
+  async ({ groupLabel, question }) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          inputType: "number",
+          label: "Annual salary expectation",
+          groupLabel,
+          value: "",
+        },
+      ],
+    });
+    const input = config(source);
+    input.application.applicationRecordId = "application_1";
+    input.sources.reusableAnswers = [
+      {
+        id: "remembered_pay",
+        kind: "salary_expectation",
+        label: "Annual salary expectation",
+        question,
+        answer: "50000",
+        roleFamilies: [],
+        proofEntryIds: [],
+        applicationScope: {
+          applicationRecordId: "application_1",
+          resultId: null,
+          location: null,
+        },
+      },
+    ];
+    const model = scriptedModel([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [
+            {
+              tool: "type",
+              ref: "c0",
+              text: "50000",
+              storedFactId: "answerLibrary.remembered_pay",
+            },
+          ],
+          finishWhenReady: true,
+        },
+      },
+    ]);
+    const chat = vi.spyOn(model, "chatWithTools");
+    const result = await runApplyAgent(input, model);
+    expect(result.outcome).toBe("prepared");
+    expect(source.controls[0].value).toBe("50000");
+    expect(
+      chat.mock.calls[0]?.[0].find((message) =>
+        message.content?.startsWith("The person's facts"),
+      )?.content,
+    ).toContain('"answer":"50000"');
+  },
+);
+
+test("a terms answer cannot approve a different declaration under a wizard heading", async () => {
   const source = page({
     controls: [
       {
         ...nameControl(),
-        inputType: "number",
-        label: "Annual salary expectation",
-        value: "",
+        inputType: "checkbox",
+        label: "I agree",
+        groupLabel: "Step 4 of 6: Marketing consent",
+        value: "yes",
+        checked: false,
       },
     ],
   });
   const input = config(source);
-  input.application.applicationRecordId = "application_1";
   input.sources.reusableAnswers = [
     {
-      id: "remembered_pay",
-      kind: "salary_expectation",
-      label: "Annual salary expectation",
-      question: "Annual salary expectation",
-      answer: "50000",
+      id: "remembered_terms",
+      kind: "other",
+      label: "Terms",
+      question: "Step 2 of 6: Terms — I agree",
+      answer: "Yes",
       roleFamilies: [],
       proofEntryIds: [],
-      applicationScope: {
-        applicationRecordId: "application_1",
-        resultId: null,
-        location: null,
-      },
     },
   ];
-  const model = scriptedModel([
-    {
-      name: "fill_fields",
-      args: {
-        fields: [
-          {
-            tool: "type",
-            ref: "c0",
-            text: "50000",
-            storedFactId: "answerLibrary.remembered_pay",
-          },
-        ],
-        finishWhenReady: true,
+  await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "set_checkbox", args: { ref: "c0", checked: true } },
+      {
+        name: "finish",
+        args: {
+          reason: "The declaration needs the person.",
+          needsPerson: true,
+        },
       },
-    },
-  ]);
-  const chat = vi.spyOn(model, "chatWithTools");
-  const result = await runApplyAgent(input, model);
-  expect(result.outcome).toBe("prepared");
-  expect(source.controls[0].value).toBe("50000");
+    ]),
+  );
+  expect(source.controls[0]?.checked).toBe(false);
+});
+
+test.each([
+  [
+    "Step 2 of 6: Employment",
+    "Step 3 of 6: Education",
+    "Start date",
+    "2020-01-01",
+  ],
+  [
+    "Step 4 of 7: Reference 1",
+    "Step 5 of 7: Reference 2",
+    "Email address",
+    "first@example.test",
+  ],
+  ["Step 2 of 6: Terms", "Step 4 of 6: Marketing", "I agree", "Yes"],
+])(
+  "saved answers keep %s distinct from %s before question classification",
+  (first, second, label, answer) => {
+    const observation = buildApplyFormObservation(
+      page({ controls: [{ ...nameControl(), label, groupLabel: second }] }),
+      new Date().toISOString(),
+    );
+    const control = { ...observation.controls[0], attestationKind: null };
+    expect(
+      savedAnswerForQuestion(control, [
+        {
+          id: "remembered_first",
+          kind: "other",
+          label,
+          question: `${first} — ${label}`,
+          answer,
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ]),
+    ).toBeNull();
+  },
+);
+
+test("a counter-only declaration prompt keeps its heading instead of becoming empty", () => {
+  const observation = buildApplyFormObservation(
+    page(),
+    new Date().toISOString(),
+  );
+  const control = {
+    ...observation.controls[0],
+    kind: "checkbox" as const,
+    attestationKind: "terms_acceptance" as const,
+    label: "Step 2 of 6",
+    groupLabel: "",
+  };
+  expect(questionPrompt(control)).toBe("Step 2 of 6");
   expect(
-    chat.mock.calls[0]?.[0].find((message) =>
-      message.content?.startsWith("The person's facts"),
-    )?.content,
-  ).toContain('"answer":"50000"');
+    questionPrompt({ ...control, kind: "radio", groupLabel: "Step 2 of 6" }),
+  ).toBe("Step 2 of 6");
 });
 
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {
@@ -2236,7 +2353,7 @@ describe("shared navigation and Apply safety stay in one state", () => {
   });
 
   test("navigate then type uses the page the model just saw and reviews the move once", async () => {
-    let current = page();
+    let current = page({ controls: [] });
     let reviews = 0;
     const base = hands(current);
     const dynamicHands: ApplyPageHands = {
@@ -3894,7 +4011,7 @@ describe("fill_fields visible steps", () => {
         field(0, "Full name"),
         field(1, "Email"),
         field(2, "City"),
-      ];
+      ].map((control) => ({ ...control, groupLabel: `Contact set ${step}` }));
       source.actions = [
         {
           index: 0,
@@ -5906,7 +6023,7 @@ test("the same question and value are checked only once across batch and single-
   expect(fill).not.toHaveBeenCalled();
 });
 
-test("an eligibility check is not reused for a different application page", async () => {
+test("the same eligibility question on another page asks before a second answer check", async () => {
   const source = page({
     controls: [
       {
@@ -5924,7 +6041,7 @@ test("an eligibility check is not reused for a different application page", asyn
   };
   let checks = 0;
   let turns = 0;
-  await runApplyAgent(input, {
+  const result = await runApplyAgent(input, {
     chatWithTools: (_messages, definitions) => {
       if (definitions[0]?.function.name === "report_answer_checks") {
         checks += 1;
@@ -5981,7 +6098,15 @@ test("an eligibility check is not reused for a different application page", asyn
       });
     },
   });
-  expect(checks).toBe(2);
+  expect(checks).toBe(1);
+  expect(result.outcome).toBe("paused");
+  expect(
+    result.pauses
+      .flatMap(
+        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+      )
+      .some((question) => question.repeatedAtDifferentStep),
+  ).toBe(true);
 });
 
 test("a letter that needs review joins the other questions while the run fills the rest", async () => {
@@ -6153,4 +6278,94 @@ describe("a model that reports in words instead of calling finish", () => {
     expect(seen[1]).toContain("Answer with one of the tools");
     expect(result.outcome).toBe("prepared");
   });
+});
+
+test("repeated-step replay pauses at the second entry, including after resumption, and uses its own answer", async () => {
+  const source = page({
+    stepLabel: "Step 1 of 2",
+    controls: [
+      {
+        ...nameControl(),
+        label: repeatedStep.question,
+        groupLabel: repeatedStep.section,
+        inputType: "month",
+        value: "",
+      },
+    ],
+    actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+  });
+  const input = config(source);
+  input.sources.reusableAnswers = [
+    {
+      id: "first-date",
+      kind: "other",
+      question: `${repeatedStep.section} � ${repeatedStep.question}`,
+      label: "First employment entry",
+      answer: repeatedStep.firstAnswer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  input.hands.clickElement = () => {
+    source.stepLabel = "Step 2 of 2";
+    source.controls[0].value = "";
+    source.actions = [
+      { index: 0, label: "Submit application", visible: true, disabled: false },
+    ];
+    return Promise.resolve({ ok: true, observedValue: "Step 2" });
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      { name: "click", args: { ref: "a0" } },
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      {
+        name: "finish",
+        args: { reason: "This entry needs the person.", needsPerson: true },
+      },
+    ]),
+  );
+  expect(result.filled).toHaveLength(1);
+  expect(result.outcome).toBe("paused");
+  expect(source.controls[0].value).toBe("");
+  const question = result.pauses.flatMap(
+    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+  )[0];
+  expect(question?.repeatedAtDifferentStep).toBe(true);
+  input.initialQuestionContexts = result.questionContexts;
+  const resumed = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
+      {
+        name: "finish",
+        args: { reason: "This entry needs the person.", needsPerson: true },
+      },
+    ]),
+  );
+  expect(resumed.filled).toHaveLength(0);
+  expect(resumed.outcome).toBe("paused");
+  input.sources.reusableAnswers = [
+    ...input.sources.reusableAnswers,
+    {
+      id: "application_second-date",
+      kind: "other",
+      question: question.prompt,
+      label: "Second employment entry",
+      answer: repeatedStep.secondAnswer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  const answered = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "type", args: { ref: "c0", text: repeatedStep.secondAnswer } },
+      { name: "finish", args: { reason: "The second entry is filled." } },
+    ]),
+  );
+  expect(answered.filled).toHaveLength(1);
+  expect(source.controls[0].value).toBe(repeatedStep.secondAnswer);
+  expect(answered.outcome).toBe("prepared");
 });

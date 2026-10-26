@@ -84,6 +84,9 @@ export interface AgentApplicationPreparationInput {
   searchPreferences?: JobSearchPreferences | undefined;
   llmClient: LLMClient;
   questionReadCacheScope?: object;
+  initialQuestionContexts?: Parameters<
+    typeof runApplyAgent
+  >[0]["initialQuestionContexts"];
   startedAt: string;
   /** What the person would call this site. */
   siteLabel: string;
@@ -585,6 +588,9 @@ export async function runAgentApplicationPreparation(
     ...(input.readReusableAnswers
       ? { readReusableAnswers: input.readReusableAnswers }
       : {}),
+    ...(input.initialQuestionContexts
+      ? { initialQuestionContexts: input.initialQuestionContexts }
+      : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     accountCreationAuthorized:
@@ -766,7 +772,11 @@ export async function runAgentApplicationPreparation(
     externalWrites: toExternalWrites(result),
     modelUse: toModelUse(result, input, startedAt),
   });
-  return { ...prepared, agentTiming: result.timing };
+  return {
+    ...prepared,
+    agentTiming: result.timing,
+    questionContexts: result.questionContexts,
+  };
 }
 
 /**
@@ -855,6 +865,7 @@ export function createApplyFormPreparer(input: {
   onPrepared?: AgentApplicationPreparationInput["onPrepared"];
   onProgress?: AgentApplicationPreparationInput["onProgress"];
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
+  initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
   return async ({ session, currentUrl, startedAt, signal, onProgress }) => {
@@ -909,6 +920,9 @@ export function createApplyFormPreparer(input: {
       questionReadCacheScope: input.aiClient,
       ...(input.readReusableAnswers
         ? { readReusableAnswers: input.readReusableAnswers }
+        : {}),
+      ...(input.initialQuestionContexts
+        ? { initialQuestionContexts: input.initialQuestionContexts }
         : {}),
       startedAt,
       siteLabel: input.siteLabel,

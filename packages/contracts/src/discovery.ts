@@ -2075,6 +2075,7 @@ export const ApplicationQuestionInputConstraintsSchema = z.object({
 export const ApplicationAttemptQuestionSchema = z.object({
   id: NonEmptyStringSchema,
   prompt: NonEmptyStringSchema,
+  repeatedAtDifferentStep: optionalStoredField(z.boolean(), false),
   /**
    * The words around the question on the page — the group it sat in, or the
    * note under it — when they say something the prompt does not.
@@ -2304,6 +2305,14 @@ export type ApplyExecutionModelUse = z.infer<
 >;
 
 export const ApplyExecutionResultSchema = z.object({
+  questionContexts: optionalStoredField(
+    z
+      .array(
+        z.object({ prompt: z.string().max(2000), step: z.string().max(5000) }),
+      )
+      .max(2000),
+    [],
+  ),
   answerDependencies: ApplicationAnswerDependenciesSchema.optional(),
   state: ApplicationAttemptStateSchema,
   summary: NonEmptyStringSchema,
@@ -3220,3 +3229,4 @@ export const SourceDebugPersistenceSchemas = {
   SourceDebugWorkerAttemptSchema,
   SourceInstructionArtifactSchema,
 } as const;
+import { optionalStoredField } from "./stored-json";

@@ -57,6 +57,8 @@ export interface ApplyFormControl {
   acceptedTypes?: string[];
   label: string;
   groupLabel: string;
+  /** A repeated question whose section did not distinguish two form steps. */
+  repeatedQuestion?: { prompt: string; step: string };
   /** Stable identity shared by controls that belong to one choice group. */
   choiceGroupKey?: string;
   placeholder: string;
@@ -408,6 +410,7 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  questionContexts?: Array<{ prompt: string; step: string }>;
   timing?: ApplyAgentTiming;
   outcome: ApplyAgentOutcome;
   /** One plain sentence about how the run ended. Shown to the person as-is. */
@@ -473,6 +476,7 @@ export type ApplyProposal =
     };
 
 export interface ApplyAgentConfig {
+  initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
   hands: ApplyPageHands;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about
@@ -484,7 +488,15 @@ export interface ApplyAgentConfig {
   questionReadCacheScope?: object;
   /** Latest saved answers while other applications in this batch are open. */
   readReusableAnswers?: (
-    questions: readonly Pick<ApplicationAttemptQuestion, "prompt" | "kind" | "answerControlType" | "answerOptions" | "inputConstraints">[],
+    questions: readonly Pick<
+      ApplicationAttemptQuestion,
+      | "prompt"
+      | "kind"
+      | "answerControlType"
+      | "answerOptions"
+      | "inputConstraints"
+      | "repeatedAtDifferentStep"
+    >[],
   ) => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */
   safety?: ApplySafetyHooks;
