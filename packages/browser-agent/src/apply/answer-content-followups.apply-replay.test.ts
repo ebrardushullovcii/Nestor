@@ -51,6 +51,25 @@ test.each([
     supported: true,
   },
   {
+    answer:
+      "I am excited about the Engineer opportunity at Example and would welcome the chance to contribute to your team.",
+    evidence: [
+      {
+        kind: "role_motivation",
+        source: "posting",
+        path: "/postingContextOnly/title",
+        quote: "Engineer",
+      },
+      {
+        kind: "role_motivation",
+        source: "posting",
+        path: "/postingContextOnly/company",
+        quote: "Example",
+      },
+    ],
+    supported: true,
+  },
+  {
     answer: "The role involves building engineering workflow tools.",
     evidence: [posting("Engineering workflow tools.")],
     supported: true,
@@ -105,6 +124,65 @@ test.each([
     expect(chatWithTools).toHaveBeenCalledTimes(1);
   },
 );
+
+test("an employer name cannot erase a qualification assertion, and source roots never cross", async () => {
+  const company = "already holding a valid driving licence";
+  for (const [source, path, quote, answer] of [
+    [
+      "posting",
+      "/postingContextOnly/company",
+      company,
+      `I am excited about ${company}.`,
+    ],
+    [
+      "applicant",
+      "/postingContextOnly/title",
+      "Engineer",
+      "I am excited about the Engineer opportunity.",
+    ],
+  ]) {
+    const client = {
+      chatWithTools: vi
+        .fn<LLMClient["chatWithTools"]>()
+        .mockResolvedValue({
+          toolCalls: [
+            {
+              id: "lie",
+              type: "function",
+              function: {
+                name: "report_answer_checks",
+                arguments: JSON.stringify({
+                  checks: [
+                    {
+                      index: 0,
+                      supported: true,
+                      reason: "Supported",
+                      evidence: [
+                        {
+                          kind: "role_motivation",
+                          source,
+                          path,
+                          quote,
+                          claim: answer,
+                        },
+                      ],
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+    };
+    const checks = await checkWrittenApplicationAnswers({
+      client,
+      sources: { ...sources, posting: { ...sources.posting, company } },
+      payDisclosed: false,
+      answers: [{ question, answer }],
+    });
+    expect(checks[0]?.supported).toBe(false);
+  }
+});
 
 test.each([
   "Write this yourself",

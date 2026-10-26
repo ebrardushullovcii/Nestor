@@ -251,7 +251,8 @@ export function evidenceFitsQuestion(input: {
   if (requiresSavedNationalityAnswer(question)) return exactSaved;
   if (requiresSavedOpinionAnswer(question, answer)) return exactSaved;
   if (exactSaved) return true;
-  if (isPlainMotivationIntent(answer)) return motivation.test(question);
+  if (motivationIntentSupported(answer, evidence))
+    return motivation.test(question);
   // A numeric day count may be displayed with its source field's explicit unit.
   const noticeDays = /^(\d+) days?$/iu.exec(answer.trim());
   if (
@@ -311,5 +312,5 @@ export function evidenceFitsQuestion(input: {
 import {
   authorizationCountryMatches,
   concreteClaimsSupported,
-  isPlainMotivationIntent,
+  motivationIntentSupported,
 } from "./concrete-answer-claims";

@@ -24,6 +24,16 @@ function normalizedEvidence(value: string): string {
   return value.normalize("NFKC").replace(/\s+/gu, " ").trim();
 }
 
+function sourceRelativePath(source: string, path: string): string {
+  const roots =
+    source === "posting" ? ["postingContextOnly", "posting"] : [source];
+  for (const root of roots) {
+    if (path === `/${root}`) return "";
+    if (path.startsWith(`/${root}/`)) return path.slice(root.length + 1);
+  }
+  return path;
+}
+
 function evidenceAt(source: unknown, path: string): unknown {
   if (path === "") return source;
   if (!path.startsWith("/")) return undefined;
@@ -296,7 +306,7 @@ export async function checkWrittenApplicationAnswers(input: {
               {
                 role: "user",
                 content:
-                  "The previous check did not return a valid report_answer_checks call for every answer. Check the same applicant facts and proposed answers again, then call report_answer_checks with index, supported (boolean) and a nonempty reason (string) for each answer.",
+                  "The previous check did not return a valid report_answer_checks call for every answer. checks must be an array of objects, never JSON-encoded text. Check the same facts again, then call report_answer_checks with index, supported (boolean) and a nonempty reason (string) for each answer.",
               },
             ],
         [...tools],
@@ -346,7 +356,16 @@ export async function checkWrittenApplicationAnswers(input: {
       ) {
         const proposedAnswer = input.answers[raw.index];
         if (!proposedAnswer) continue;
-        const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
+        const evidence = Array.isArray(raw.evidence)
+          ? raw.evidence.map((entry: unknown) => {
+              if (!entry || typeof entry !== "object") return entry;
+              const item = entry as Record<string, unknown>;
+              return typeof item.source === "string" &&
+                typeof item.path === "string"
+                ? { ...item, path: sourceRelativePath(item.source, item.path) }
+                : item;
+            })
+          : [];
         const quotesVerified =
           (evidence.length > 0 ||
             isPlainMotivationIntent(proposedAnswer.answer)) &&
@@ -376,14 +395,18 @@ export async function checkWrittenApplicationAnswers(input: {
               return false;
             const quote = normalizedEvidence(item.quote);
             if (!quote) return false;
-            return quoteMatches(
-              evidenceAt(
-                evidenceSources[item.source as keyof typeof evidenceSources],
-                item.path,
-              ),
-              quote,
+            const value = evidenceAt(
+              evidenceSources[item.source as keyof typeof evidenceSources],
               item.path,
             );
+            if (
+              item.source === "posting" &&
+              ["/title", "/company"].includes(item.path)
+            )
+              return (
+                typeof value === "string" && normalizedEvidence(value) === quote
+              );
+            return quoteMatches(value, quote, item.path);
           });
         const verified =
           quotesVerified &&

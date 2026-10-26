@@ -149,7 +149,7 @@ export function isPlainMotivationIntent(text: string): boolean {
   // Only connective words about future participation. No personal qualities,
   // possession, qualifications, named entities, numbers or history fit here.
   const words = new Set(
-    "a an the this that your opportunity chance role position team company work working join joining contribute contributing contribution help helping to in at on about with for and".split(
+    "a an the this that your opportunity chance role position team company work working join joining contribute contributing contribution help helping to in at on about with for and would welcome".split(
       " ",
     ),
   );
@@ -163,6 +163,32 @@ export function isPlainMotivationIntent(text: string): boolean {
     remainder.length <= 40 &&
     remainder.every((word) => words.has(word))
   );
+}
+
+/** Only the named role/opportunity and its employer may qualify plain intent. */
+export function motivationIntentSupported(
+  text: string,
+  evidence: readonly AnswerEvidence[],
+): boolean {
+  let intent = text;
+  for (const entry of evidence) {
+    if (entry.source !== "posting" || !entry.quote.trim()) continue;
+    const quoted = entry.quote.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    if (entry.path === "/title")
+      intent = intent.replace(
+        new RegExp(`${quoted}(?=\\s+(?:opportunity|role|position)\\b)`, "gu"),
+        "role",
+      );
+    if (entry.path === "/company")
+      intent = intent.replace(
+        new RegExp(
+          `(\\b(?:at|join|joining)\\s+)${quoted}(?=$|[\\s.,!;])`,
+          "gu",
+        ),
+        "$1company",
+      );
+  }
+  return isPlainMotivationIntent(intent);
 }
 
 /** A question naming one country carries its own jurisdiction across postings. */
@@ -181,7 +207,7 @@ export function concreteClaimsSupported(
   for (const clause of answer.split(
     /(?<=[.!?])\s+|\n|\b(?:and|but)\s+(?=I\b|I['’]|would\b|hope\b|want\b)/gu,
   )) {
-    if (isPlainMotivationIntent(clause)) continue;
+    if (motivationIntentSupported(clause, evidence)) continue;
     const personalHistory =
       /\b(?:led|worked|managed|built|delivered|earned|achieved|spent|graduated|founded|employed)\b|\bmy\s+(?:experience|work|career|time|tenure)\b/iu.test(
         clause,
