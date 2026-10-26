@@ -15,7 +15,18 @@ export function handlePersonalClaims(req, res, url, { send }) {
     send(405, "This fixture is fill-only.");
     return true;
   }
-  if (url.pathname === "/personal-claims/apply/answer-formats") {
+  if (url.pathname === "/personal-claims/apply/residence") {
+    send(
+      200,
+      `<!doctype html><title>Apply — Synthetic Workshop</title>
+      <h1>Engineer — Synthetic Workshop</h1><form>
+      <label>Full name<input name="name" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>What country are you based in?<input name="based" required></label>
+      <label>What is your current country of residence?*<select name="residence" required><option value="">Choose</option><option>Germany</option><option>France</option></select></label>
+      <button>Send application</button></form>`,
+    );
+  } else if (url.pathname === "/personal-claims/apply/answer-formats") {
     send(
       200,
       `<!doctype html><title>Apply — Synthetic Workshop</title>
