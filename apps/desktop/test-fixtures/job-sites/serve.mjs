@@ -6,6 +6,7 @@ import { handleMoreSites, moreSites } from "./sites/router.mjs";
 import { handleRealUploadShapes } from "./real-upload-shapes.mjs";
 import { handlePersonalClaims } from "./personal-claims.mjs";
 import { handleUploadRepair } from "./upload-repair.mjs";
+import { handleHandoverOptions } from "./handover-options.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -442,6 +443,8 @@ const server = http.createServer(async (req, res) => {
   );
   try {
     if (await scale.handle(req, res, url)) return;
+    if (await handleHandoverOptions(req, res, url, { send, readPost, logPost }))
+      return;
     if (
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )
