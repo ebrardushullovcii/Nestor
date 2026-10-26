@@ -275,7 +275,9 @@ export function storedFacts(
     add(link.url, `profile.links.${link.id}`, "a link on your profile");
     // A link may be someone else's repository; only an account link names the person.
     add(
-      githubUsername(link.url, { profileOnly: true }),
+      link.kind === "github"
+        ? githubUsername(link.url, { profileOnly: true })
+        : null,
       `profile.links.${link.id}#username`,
       "the username from your code profile",
     );

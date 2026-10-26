@@ -136,6 +136,95 @@ test.each(["profile.githubUrl", "profile.links.code"])(
 );
 
 test.each([
+  {
+    label: "GitHub username",
+    hint: "Please provide the full URL of your GitHub profile",
+    placeholder: "",
+  },
+  { label: "GitHub username", hint: "", placeholder: "Full URL" },
+  { label: "GitHub username URL", hint: "Enter your handle", placeholder: "" },
+  {
+    label: "Please enter the GitHub username of your professional reference",
+    hint: "",
+    placeholder: "",
+  },
+  {
+    label: "GitHub username",
+    hint: "Please enter the GitHub username of your professional reference",
+    placeholder: "",
+  },
+  {
+    label: "GitHub",
+    hint: "Please enter your emergency contact's GitHub username",
+    placeholder: "",
+  },
+])(
+  "URL and other-person instructions refuse an applicant handle: $label $hint $placeholder",
+  (shape) => {
+    const sources = source();
+    sources.profile.githubUrl = "https://github.com/synthetic-alex";
+    const field = { ...control(shape.label), ...shape };
+    for (const sourceId of ["profile.githubUrl", "profile.githubUrl#username"])
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId },
+          "synthetic-alex",
+        ).kind,
+      ).toBe("needs_you");
+    if (shape.hint.includes("emergency contact"))
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId: "profile.githubUrl" },
+          sources.profile.githubUrl,
+        ).kind,
+      ).toBe("needs_you");
+  },
+);
+
+test.each(["other", null] as const)(
+  "a community account is not a personal GitHub source: %s",
+  (kind) => {
+    const sources = source();
+    sources.profile.githubUrl = "https://github.com/synthetic-alex";
+    sources.profile.links = [
+      {
+        id: "community",
+        label: "Open source community organization",
+        kind,
+        url: "https://github.com/synthetic-community",
+        isDraft: false,
+      },
+    ];
+    const field = control("GitHub username");
+    for (const sourceId of [
+      "profile.links.community",
+      "profile.links.community#username",
+      "profile.githubUrl",
+    ])
+      expect(
+        decide(
+          sources,
+          field,
+          { kind: "other", country: null, sourceId },
+          "synthetic-community",
+        ).kind,
+      ).toBe("needs_you");
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", country: null, sourceId: "profile.githubUrl" },
+        "synthetic-alex",
+      ).kind,
+    ).toBe("literal");
+  },
+);
+
+test.each([
   "Your GitHub username will be shown publicly",
   "Your GitHub handle will be shown publicly",
 ])("a public-display notice grants no username conversion: %s", (label) => {

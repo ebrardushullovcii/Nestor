@@ -63,22 +63,28 @@ const HANDLE_LABEL = /^(?:your\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)$/iu;
 // publicly" mentions one without asking for it.
 const ASKS_HANDLE =
   /\b(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|what(?:\s+is|['’]s)\s+(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:user\s*name|handle))\b/iu;
-const URL_WORDS =
-  /\b(?:url|link|address|website|https?)\b|\b[a-z\d-]+\.com\b/iu;
 // In a label, "GitHub profile" asks for the address too.
 const ADDRESS =
   /\b(?:url|link|address|website|https?|profile)\b|\b[a-z\d-]+\.com\b/iu;
-// "Username only, no URL" asks for the handle; it is not a request for an address.
-const NOT_ADDRESS =
-  /\b(?:no|not|without|instead of|rather than)\s+(?:a\s+|an\s+|the\s+|your\s+)?(?:full\s+)?(?:profile\s+)?(?:url|link)s?\b/giu;
 // "e.g. octocat" or "@octocat": an example handle, not an address.
 const HANDLE_EXAMPLE =
   /^(?:e\.?\s?g\.?,?:?\s*|example:?\s*)?@?[a-z\d][a-z\d-]{0,38}$/iu;
 
+export function fieldNamesAnotherPerson(
+  control: Pick<
+    ApplyFormControl,
+    "label" | "groupLabel" | "placeholder" | "hint"
+  >,
+): boolean {
+  return /\b(?:references?|referees?|emergency contacts?|another person|other person|someone else|spouse|partner)\b/iu.test(
+    `${control.groupLabel} ${control.label} ${control.hint ?? ""} ${control.placeholder}`,
+  );
+}
+
 /**
  * Whether the field wants a GitHub handle rather than the profile address.
  * Its label, the help text beside it and its example placeholder decide; a
- * field that mentions an address anywhere in its label keeps the address.
+ * address wording anywhere vetoes conversion.
  */
 export function asksGithubUsername(
   control: Pick<
@@ -86,24 +92,22 @@ export function asksGithubUsername(
     "label" | "groupLabel" | "placeholder" | "hint"
   >,
 ): boolean {
-  const clean = (text: string | undefined) =>
-    (text ?? "").replace(NOT_ADDRESS, " ").trim();
+  const clean = (text: string | undefined) => (text ?? "").trim();
   const label = clean(`${control.groupLabel} ${control.label}`);
   const hint = clean(control.hint);
   const placeholder = control.placeholder.trim();
+  if (fieldNamesAnotherPerson(control)) return false;
   if (!GITHUB.test(label) && !GITHUB.test(hint)) return false;
-  if (ADDRESS.test(label)) return false;
-  if (/github\.com|https?:\/\//iu.test(placeholder)) return false;
+  if ([label, hint, placeholder].some((text) => ADDRESS.test(text)))
+    return false;
   if (
     HANDLE_LABEL.test(clean(control.label).replace(/[\s*:?]+$/gu, "")) ||
     ASKS_HANDLE.test(label)
   )
     return true;
   // Help text such as "Please provide your GitHub username" decides it.
-  if (hint && URL_WORDS.test(hint)) return false;
   if (hint && ASKS_HANDLE.test(hint)) return true;
   const example = clean(placeholder);
-  if (URL_WORDS.test(example)) return false;
   if (HANDLE_LABEL.test(example) || ASKS_HANDLE.test(example)) return true;
   return HANDLE_EXAMPLE.test(example) && !GITHUB.test(example);
 }

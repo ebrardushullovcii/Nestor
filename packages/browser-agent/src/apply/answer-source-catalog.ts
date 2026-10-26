@@ -14,7 +14,7 @@ import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
 import { employmentMonthEvidence } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
-import { asksGithubUsername } from "./github-username";
+import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
 export interface ClassifiedAnswerSource {
@@ -248,6 +248,8 @@ function knownLiteralField(
   }
   const profileLink = /^profile\.([a-zA-Z]+)Url$/u.exec(source.id);
   if (profileLink) {
+    if (source.id === "profile.githubUrl" && fieldNamesAnotherPerson(control))
+      return false;
     if (source.id === "profile.githubUrl" && asksGithubUsername(control))
       return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
