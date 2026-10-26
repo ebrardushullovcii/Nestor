@@ -6,7 +6,7 @@ import {
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import { getApplicationStore } from "../services/job-finder/application-store";
-import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
+import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { runJobCommand } from "../services/job-commands";
 
 /**
@@ -33,7 +33,9 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
       limit: 1,
     }).rows[0];
     if (task?.id === id && task.source) {
-      await getEmbeddedBrowser().command({
+      await (
+        await loadEmbeddedBrowser()
+      ).command({
         type: "open",
         url: task.source.url,
       });
@@ -43,7 +45,7 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
     for (const application of getApplicationStore().needsYou.details(id)
       ?.applications ?? []) {
       if (await service.open(application.id)) {
-        await getEmbeddedBrowser().command({ type: "open" });
+        await (await loadEmbeddedBrowser()).command({ type: "open" });
         return true;
       }
     }
