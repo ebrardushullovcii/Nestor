@@ -1,3 +1,7 @@
+import {
+  clearProfileSetupJustFinished,
+  markProfileSetupJustFinished,
+} from "./profile-setup-finished";
 import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
 import { requestFirstSearch } from "@renderer/features/find-jobs/first-search";
 import type { JobSearchSettingsInput } from "@nestor/contracts";
@@ -170,25 +174,6 @@ export function setJobFinderStatusRoute(pathname: string | null): void {
  */
 export function noteJobFinderNavigation(pathname: string): void {
   jobFinderNavigationHint = pathname;
-}
-
-/**
- * Set while a just-finished guided setup is handing the user off to Find
- * jobs. The setup route consults it so its completed-state redirect targets
- * Find jobs instead of Profile for that one transition.
- */
-let profileSetupJustFinished = false;
-
-export function markProfileSetupJustFinished(): void {
-  profileSetupJustFinished = true;
-}
-
-export function clearProfileSetupJustFinished(): void {
-  profileSetupJustFinished = false;
-}
-
-export function isProfileSetupJustFinished(): boolean {
-  return profileSetupJustFinished;
 }
 
 export function clearJobFinderNavigationHint(): void {

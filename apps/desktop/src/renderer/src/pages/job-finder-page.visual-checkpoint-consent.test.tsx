@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetJobFinderOverlaysForTests } from "../features/job-finder/lib/job-finder-overlay-ownership";
-import { ApplyCopilotVisualCheckpointDialog } from "./job-finder-page";
+import { ApplyCopilotVisualCheckpointDialog } from "./job-finder-legacy-controller";
 
 afterEach(() => {
   cleanup();
@@ -196,9 +196,7 @@ describe("ApplyCopilotVisualCheckpointDialog consent hierarchy", () => {
         name: /Take temporary screenshots while it works/,
       }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onResolve).toHaveBeenCalledTimes(1);
     expect(onResolve).toHaveBeenCalledWith(true);

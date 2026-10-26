@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor,
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApplyCopilotVisualCheckpointDialog } from "./job-finder-page";
+import { ApplyCopilotVisualCheckpointDialog } from "./job-finder-legacy-controller";
 
 afterEach(cleanup);
 
@@ -32,8 +37,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     // Never a silent close: the reason lands in the dialog the person is
     // looking at.
@@ -43,8 +47,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
     expect(
       screen.getAllByRole("button", { name: "Close" }).length,
     ).toBeGreaterThan(0);
-    expect(
-      screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
 
   it("says so plainly when the start throws rather than claiming nothing", async () => {
@@ -56,8 +59,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     const refusal = await screen.findByRole("alert");
     expect(refusal.textContent).toMatch(/could not start this preparation/i);
     expect(refusal.textContent).toMatch(/nothing was sent/i);
@@ -73,8 +75,7 @@ describe("ApplyCopilotVisualCheckpointDialog", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(onResolve).toHaveBeenCalledWith(false);
     });

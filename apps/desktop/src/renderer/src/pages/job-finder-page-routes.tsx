@@ -1,6 +1,11 @@
-import { createElement, lazy, useEffect, useState } from "react";
-import type { ComponentType, ReactNode } from "react";
+import { useEffect } from "react";
+import type { ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
+import {
+  createSharedRouteLoader,
+  lazyScreen,
+  preloadWhenIdle,
+} from "@renderer/lib/lazy-screen";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
@@ -8,7 +13,7 @@ import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-fi
 import { Navigate, useLocation, useOutletContext } from "react-router-dom";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { requestLegacyWorkspace } from "@renderer/features/job-finder/lib/legacy-workspace-demand";
-import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
+import { isProfileSetupJustFinished } from "./profile-setup-finished";
 import {
   markGuidedSetupAutoOpenSpent,
   shouldAutoOpenGuidedSetup,
@@ -17,47 +22,9 @@ import type { JobFinderPageContext } from "./job-finder-page-context";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { HomeScreen } from "@renderer/features/home/home-screen";
 
-// Home and the store screens (Find jobs, Shortlisted, Applications, Needs
-// you) are part of the startup bundle so they mount on the first commit.
 // Screens that still read the old workspace (Profile, setup, Settings) wait
 // for it anyway, so their code is its own chunk, fetched once the window is
 // idle or on the first visit, whichever comes first.
-function createSharedRouteLoader<T>(load: () => Promise<T>) {
-  let promise: Promise<T> | null = null;
-  const loader = Object.assign(
-    () => {
-      promise ??= load().then((module) => {
-        loader.loaded = module;
-        return module;
-      });
-      return promise;
-    },
-    { loaded: null as T | null },
-  );
-  return loader;
-}
-
-/**
- * A lazy screen that renders at once when its code has already arrived (the
- * idle preload below). `React.lazy` suspends on its first render even then,
- * and React keeps a fallback it revealed for about 300 ms, so a preloaded
- * screen still opened ~340 ms after the click. The choice is made once per
- * mount, so a screen never swaps component type under its own state.
- */
-function lazyScreen<P extends object>(
-  loader: ReturnType<
-    typeof createSharedRouteLoader<{ default: ComponentType<P> }>
-  >,
-): ComponentType<P> {
-  const Lazy = lazy(loader) as unknown as ComponentType<P>;
-  return function LazyScreen(props: P) {
-    const [Screen] = useState<ComponentType<P>>(
-      () => loader.loaded?.default ?? Lazy,
-    );
-    return createElement(Screen, props);
-  };
-}
-
 const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/components/profile/setup/profile-setup-screen")
@@ -74,21 +41,11 @@ const loadSettingsScreen = createSharedRouteLoader(async () => ({
   ).SettingsScreen,
 }));
 
-// Every other screen's code is fetched once the window is idle, so the first
-// click on any of them renders at once instead of waiting on its chunk.
-if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
-  const preloadScreens = () => {
-    for (const load of [
-      loadProfileScreen,
-      loadSettingsScreen,
-      loadProfileSetupScreen,
-    ])
-      void load().catch(() => undefined);
-  };
-  if (typeof window.requestIdleCallback === "function")
-    window.requestIdleCallback(preloadScreens, { timeout: 4000 });
-  else window.setTimeout(preloadScreens, 2000);
-}
+preloadWhenIdle([
+  loadProfileScreen,
+  loadSettingsScreen,
+  loadProfileSetupScreen,
+]);
 
 const ProfileScreen = lazyScreen(loadProfileScreen);
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
