@@ -760,6 +760,8 @@ export async function runAgentApplicationPreparation(
     console.info(timingNote);
   }
 
+  if (toApplyAuthority(executionInput).mode === "autonomous_submit")
+    await input.session.drainIntermediateWrites?.();
   input.onPrepared?.({
     result,
     handoff: decideApplySubmissionHandoff({
@@ -772,7 +774,9 @@ export async function runAgentApplicationPreparation(
       result,
       siteLabel: input.siteLabel,
       preparedAt: now().toISOString(),
-      intermediateSaved: input.session.readIntermediateWriteCount() > 0,
+      intermediateSaved:
+        toApplyAuthority(executionInput).mode === "autonomous_submit" &&
+        input.session.readIntermediateWriteCount() > 0,
     }),
   });
 

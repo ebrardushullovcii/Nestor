@@ -1,8 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  installMutationResponseBodyObserver,
-  inspectPageMutationResponse,
-} from "./mutation-response-body";
+import { installMutationResponseBodyObserver } from "./mutation-response-body";
 import {
   classifyAttachmentUpload,
   type AttachmentUploadWindow,
@@ -217,6 +214,7 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     runNavigations: Set<string>;
     allowedIntermediateRequests: WeakSet<Request>;
     verifiedIntermediateWriteCount: number;
+    pendingMutationResponses: Set<Promise<void>>;
     intermediateMutationsAuthorized: boolean;
     attachmentUploadsAuthorized: boolean;
     attachmentUploadWindow: AttachmentUploadWindow | null;
@@ -234,7 +232,6 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     finalActionAllowedUntilMs: number;
     initScriptInstalled: boolean;
     serviceWorkerInitScriptInstalled: boolean;
-    responseListenerInstalled: boolean;
     webSocketListenerInstalled: boolean;
   }
 >();
@@ -246,6 +243,14 @@ export function readPrepareOnlyIntermediateWriteCount(page: Page): number {
   return (
     prepareOnlyNetworkGuardStates.get(page)?.verifiedIntermediateWriteCount ?? 0
   );
+}
+
+export async function drainPrepareOnlyIntermediateWrites(
+  page: Page,
+): Promise<void> {
+  const pending =
+    prepareOnlyNetworkGuardStates.get(page)?.pendingMutationResponses;
+  while (pending?.size) await Promise.all([...pending]);
 }
 
 interface AuthorizedFormActionWindow {
@@ -740,11 +745,24 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     }
     if ((input.bodyText?.length ?? 0) > 65_536) return false;
     const decode = (value: string): string => {
-      try {
-        return decodeURIComponent(value);
-      } catch {
-        return value;
+      let text = value;
+      for (let pass = 0; pass < 4; pass++) {
+        const next = text
+          .replace(/(?:%[\da-f]{2})+/giu, (part) => {
+            try {
+              return decodeURIComponent(part);
+            } catch {
+              return part;
+            }
+          })
+          .replace(/\\u([\da-f]{4})/giu, (_match: string, hex: string) =>
+            String.fromCharCode(Number.parseInt(hex, 16)),
+          )
+          .replace(/\\(["'\\])/gu, "$1");
+        if (next === text) break;
+        text = next;
       }
+      return text;
     };
     const signal =
       `${decode(parsedUrl.pathname)} ${decode(parsedUrl.search)} ${decode(input.bodyText ?? "")}`
@@ -754,6 +772,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     const intermediateActionSignal =
       /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
     if (
+      /\\u[\da-f]{4}|%[\da-f]{2}/iu.test(signal) ||
       finalActionSignal.test(signal) ||
       !intermediateActionSignal.test(signal)
     ) {
@@ -1551,6 +1570,7 @@ export async function ensurePrepareOnlyMutationGuard(
       runNavigations: new Set<string>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
+      pendingMutationResponses: new Set<Promise<void>>(),
       intermediateMutationsAuthorized,
       attachmentUploadsAuthorized,
       attachmentUploadWindow: null,
@@ -1562,7 +1582,6 @@ export async function ensurePrepareOnlyMutationGuard(
       finalActionAllowedUntilMs: 0,
       initScriptInstalled: false,
       serviceWorkerInitScriptInstalled: false,
-      responseListenerInstalled: false,
       webSocketListenerInstalled: false,
     };
     prepareOnlyNetworkGuardStates.set(page, networkGuardState);
@@ -1852,27 +1871,8 @@ export async function ensurePrepareOnlyMutationGuard(
     await page.addInitScript(installServiceWorkerRegisterGuardInPage);
     networkGuardState.serviceWorkerInitScriptInstalled = true;
   }
-  if (!networkGuardState.responseListenerInstalled) {
-    page.on("response", (response) => {
-      let request: Request | null = response.request();
-      while (
-        request &&
-        !networkGuardState.allowedIntermediateRequests.has(request)
-      )
-        request = request.redirectedFrom();
-      if (!request) return;
-      if (response.status() >= 300 && response.status() < 400) return;
-      networkGuardState.allowedIntermediateRequests.delete(request);
-      void inspectPageMutationResponse(page, response)
-        .then(({ accepted }) => {
-          if (accepted) networkGuardState.verifiedIntermediateWriteCount += 1;
-        })
-        .catch(() => {
-          /* An unreadable response cannot confirm a save. */
-        });
-    });
-    networkGuardState.responseListenerInstalled = true;
-  }
+  // Fill permits uploads only. Upload receipts belong to the attachment
+  // ledger and never count as step saves or authorize a saved-step disclosure.
   if (!networkGuardState.webSocketListenerInstalled) {
     page.on("websocket", (webSocket) => {
       networkGuardState.blockedAttempts.push({
@@ -2149,6 +2149,7 @@ export function recordPrepareOnlyRunInterruption(
       runNavigations: new Set<string>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
+      pendingMutationResponses: new Set<Promise<void>>(),
       intermediateMutationsAuthorized: false,
       attachmentUploadsAuthorized: false,
       attachmentUploadWindow: null,
@@ -2158,7 +2159,6 @@ export function recordPrepareOnlyRunInterruption(
       finalActionAllowedUntilMs: 0,
       initScriptInstalled: false,
       serviceWorkerInitScriptInstalled: false,
-      responseListenerInstalled: false,
       webSocketListenerInstalled: false,
     };
     prepareOnlyNetworkGuardStates.set(page, createdState);

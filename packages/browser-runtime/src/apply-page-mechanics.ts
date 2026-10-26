@@ -31,6 +31,7 @@ import {
   openPrepareOnlyAttachmentUploadWindow,
   registerPrepareOnlyPreparedValue,
   readPrepareOnlyIntermediateWriteCount,
+  drainPrepareOnlyIntermediateWrites,
   type ApplicationRunServiceWorkerSentinel,
   waitForPrepareOnlyAuthorizedFormAction,
 } from "./playwright-application-flow";
@@ -2042,6 +2043,7 @@ export function createPlaywrightApplyPageSession(input: {
     },
     readIntermediateWriteCount: () =>
       readPrepareOnlyIntermediateWriteCount(page),
+    drainIntermediateWrites: () => drainPrepareOnlyIntermediateWrites(page),
     checkServiceWorker: async (): Promise<ApplyServiceWorkerFinding | null> => {
       const finding = await input.sentinel?.check("form_preparation");
       if (!finding) {

@@ -1,0 +1,130 @@
+{
+  "cases": [
+    {
+      "name": "Mislabeled JSON refusal application/octet-stream",
+      "status": 200,
+      "type": "application/octet-stream",
+      "body": "{\"message\":\"Upload failed\",\"code\":\"E1\"}",
+      "judgment": "refused"
+    },
+    {
+      "name": "Mislabeled JSON refusal application/xml",
+      "status": 200,
+      "type": "application/xml",
+      "body": "{\"message\":\"Upload failed\",\"code\":\"E1\"}",
+      "judgment": "refused"
+    },
+    {
+      "name": "Mislabeled JSON refusal no content-type",
+      "status": 200,
+      "type": "",
+      "body": "{\"message\":\"Upload failed\",\"code\":\"E1\"}",
+      "judgment": "refused"
+    },
+    {
+      "name": "HTML error page",
+      "status": 200,
+      "type": "text/html",
+      "body": "<!doctype html><html><h1>Upload failed</h1></html>",
+      "judgment": "refused"
+    },
+    {
+      "name": "XML storage refusal",
+      "status": 200,
+      "type": "application/xml",
+      "body": "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Denied</Message></Error>",
+      "judgment": "refused"
+    },
+    {
+      "name": "XML storage acceptance",
+      "status": 201,
+      "type": "application/xml",
+      "body": "<?xml version=\"1.0\"?><PostResponse><Location>https://storage.example.test/file.pdf</Location><Key>uploads/file.pdf</Key></PostResponse>",
+      "judgment": "accepted"
+    },
+    {
+      "name": "S3 empty 204",
+      "status": 204,
+      "type": "",
+      "body": "",
+      "judgment": "accepted"
+    },
+    {
+      "name": "Opaque unreadable bytes",
+      "status": 200,
+      "type": "application/octet-stream",
+      "body": "\u0000\u0001opaque bytes",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "Unrecognized opaque answer",
+      "status": 200,
+      "type": "application/octet-stream",
+      "body": "opaque bytes",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "Unrecognized answer without type",
+      "status": 200,
+      "type": "",
+      "body": "opaque bytes",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "Malformed JSON",
+      "status": 200,
+      "type": "application/json",
+      "body": "{",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "HTML successful save",
+      "status": 200,
+      "type": "text/html",
+      "body": "<p>Saved without errors</p>",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "XML unknown wrapper",
+      "status": 200,
+      "type": "application/xml",
+      "body": "<UnknownResponse/>",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "Sign-in HTML is not a save receipt",
+      "status": 200,
+      "type": "text/html",
+      "body": "<form><h1>Sign in to continue</h1><input type=\"password\"></form>",
+      "judgment": "unconfirmed"
+    },
+    {
+      "name": "Negated upload success",
+      "status": 200,
+      "type": "text/plain",
+      "body": "Upload not successful",
+      "judgment": "refused"
+    },
+    {
+      "name": "Negated save",
+      "status": 200,
+      "type": "text/plain",
+      "body": "Your file was not saved",
+      "judgment": "refused"
+    },
+    {
+      "name": "Unsuccessful request",
+      "status": 200,
+      "type": "text/plain",
+      "body": "Request unsuccessful",
+      "judgment": "refused"
+    },
+    {
+      "name": "German refusal",
+      "status": 200,
+      "type": "text/plain",
+      "body": "Hochladen fehlgeschlagen",
+      "judgment": "refused"
+    }
+  ]
+}

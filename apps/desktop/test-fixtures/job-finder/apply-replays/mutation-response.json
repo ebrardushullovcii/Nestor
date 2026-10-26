@@ -52,25 +52,135 @@
     },
     {
       "reason": "Unable to upload"
-    }
+    },
+    {
+      "message": "Upload failed",
+      "code": "E1"
+    },
+    {
+      "code": "FILE_TOO_LARGE",
+      "message": "File too large"
+    },
+    {
+      "status": 422
+    },
+    {
+      "status": "422"
+    },
+    {
+      "response": {
+        "error": "Upload refused"
+      }
+    },
+    {
+      "payload": {
+        "error": "Upload refused"
+      }
+    },
+    {
+      "body": {
+        "error": "Upload refused"
+      }
+    },
+    {
+      "response": {
+        "payload": {
+          "body": {
+            "errors": [
+              {
+                "message": "Upload failed",
+                "code": "E1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "message": "Saved without errors, but upload failed"
+    },
+    {
+      "errorMessage": "Upload failed"
+    },
+    {
+      "data": {
+        "mutation": {
+          "errors": ["Upload failed"]
+        }
+      }
+    },
+    {
+      "attachment": {
+        "error": "Upload failed"
+      }
+    },
+    {
+      "upload": {
+        "success": false
+      }
+    },
+    {
+      "fieldErrors": {
+        "resume": "File too large"
+      }
+    },
+    {
+      "title": "Validation failed"
+    },
+    {
+      "valid": false
+    },
+    {
+      "saved": false
+    },
+    {
+      "accepted": false
+    },
+    {
+      "status": "denied"
+    },
+    {
+      "status": "validation_error"
+    },
+    false,
+    0
   ],
   "accepted": [
     {
       "success": true,
       "errors": [],
-      "error": null
+      "error": null,
+      "uploadId": "synthetic-upload-1"
     },
     {
-      "ok": true
+      "ok": true,
+      "uploadId": "synthetic-upload-1"
     },
     {
-      "uploaded": true
+      "uploaded": true,
+      "uploadId": "synthetic-upload-1"
     },
     {
-      "message": "Upload complete"
+      "message": "Upload complete",
+      "uploadId": "synthetic-upload-1"
     },
     {
-      "detail": "File accepted"
+      "detail": "File accepted",
+      "uploadId": "synthetic-upload-1"
+    },
+    {
+      "data": "Saved with 0 errors",
+      "uploadId": "synthetic-upload-1"
+    },
+    {
+      "errors": "none",
+      "uploadId": "synthetic-upload-1"
+    },
+    {
+      "status": 200,
+      "message": "Upload complete",
+      "code": "OK",
+      "uploadId": "synthetic-upload-1"
     }
   ],
   "plainText": [
@@ -92,11 +202,27 @@
     },
     {
       "text": "Upload complete",
-      "accepted": true
+      "accepted": false
     },
     {
       "text": "File accepted",
-      "accepted": true
+      "accepted": false
+    },
+    {
+      "text": "Saved without errors",
+      "accepted": false
+    },
+    {
+      "text": "No invalid fields remaining",
+      "accepted": false
+    },
+    {
+      "text": "Saved with 0 errors",
+      "accepted": false
+    },
+    {
+      "text": "No invalid fields remaining, but upload failed",
+      "accepted": false
     }
   ]
 }

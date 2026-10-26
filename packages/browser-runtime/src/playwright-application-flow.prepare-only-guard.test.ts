@@ -1,6 +1,7 @@
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
 import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
 import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
+import responseTypesReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response-types.json";
 import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
 import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
 import { inspectPageMutationResponse } from "./mutation-response-body";
@@ -25,6 +26,7 @@ import {
   openPrepareOnlyIntermediateMutationWindow,
   readServiceWorkerRegisterGuardInPage,
   readPrepareOnlyIntermediateWriteCount,
+  drainPrepareOnlyIntermediateWrites,
   registerPrepareOnlyPreparedValueInPage,
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
@@ -32,6 +34,49 @@ import {
   armPlaywrightApplicationFormAction,
   createPlaywrightApplyPageSession,
 } from "./apply-page-mechanics";
+
+// Transport proofs use the actual request permit recorded by the fence.
+
+async function postPermittedFile(
+  page: Page,
+  url: string,
+  transport: "fetch" | "xhr",
+) {
+  await ensurePrepareOnlyMutationGuard(
+    page,
+    false,
+    [new URL(page.url()).origin],
+    true,
+  );
+  const bytes = Buffer.from("%PDF-1.4 synthetic body replay");
+  await openPrepareOnlyAttachmentUploadWindow(page, {
+    name: "synthetic.pdf",
+    mimeType: "application/pdf",
+    bytes,
+  });
+  await page.evaluate(
+    async ({ url, transport, bytes }) => {
+      const body = new FormData();
+      body.append("key", "uploads/synthetic.pdf");
+      body.append(
+        "file",
+        new Blob([new Uint8Array(bytes)], { type: "application/pdf" }),
+        "synthetic.pdf",
+      );
+      if (transport === "fetch")
+        await (await fetch(url, { method: "POST", body })).text();
+      else
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", url);
+          xhr.onload = () => resolve();
+          xhr.onerror = () => reject(new Error("XHR failed"));
+          xhr.send(body);
+        });
+    },
+    { url, transport, bytes: [...bytes] },
+  );
+}
 
 interface FixtureHit {
   kind: "request" | "upgrade";
@@ -49,6 +94,10 @@ interface FixtureServer {
   registerScript: (path: string, js: string) => void;
   registerAttachment: (path: string, content: string) => void;
   registerJson: (path: string, value: unknown) => void;
+  registerResponse: (
+    path: string,
+    entry: { status: number; type: string; body: string },
+  ) => void;
   close: () => Promise<void>;
 }
 
@@ -58,6 +107,10 @@ function startFixtureServer(): Promise<FixtureServer> {
   const scriptRoutes = new Map<string, string>();
   const attachmentRoutes = new Map<string, string>();
   const jsonRoutes = new Map<string, unknown>();
+  const responseRoutes = new Map<
+    string,
+    { status: number; type: string; body: string }
+  >();
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -71,6 +124,15 @@ function startFixtureServer(): Promise<FixtureServer> {
         query: url.search,
         body: Buffer.concat(chunks).toString("utf8"),
       });
+      const custom = responseRoutes.get(url.pathname);
+      if (custom) {
+        response.writeHead(
+          custom.status,
+          custom.type ? { "content-type": custom.type } : {},
+        );
+        response.end(custom.body);
+        return;
+      }
       const html = htmlRoutes.get(url.pathname);
       if (jsonRoutes.has(url.pathname)) {
         response.writeHead(200, { "content-type": "application/json" });
@@ -123,6 +185,9 @@ function startFixtureServer(): Promise<FixtureServer> {
         hits,
         registerHtml: (path, html) => {
           htmlRoutes.set(path, html);
+        },
+        registerResponse: (path, entry) => {
+          responseRoutes.set(path, entry);
         },
         registerJson: (path, value) => {
           jsonRoutes.set(path, value);
@@ -219,7 +284,10 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
         url: storage.baseUrl + "/storage",
         resume: { key: "uploads/{timestamp}/{unique_id}/${filename}", fields },
       });
-      storage.registerJson("/storage", { uploaded: true });
+      storage.registerJson("/storage", {
+        uploaded: true,
+        uploadId: "synthetic-upload-1",
+      });
       site.registerHtml(
         "/real-shape",
         `<label>Name<input id="name"></label><label>Resume<input id="resume" type="file"></label><output id="result"></output><script>
@@ -283,6 +351,8 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
         accepted: true,
         body: { uploaded: true },
       });
+      await drainPrepareOnlyIntermediateWrites(page);
+      expect(readPrepareOnlyIntermediateWriteCount(page)).toBe(0);
       for (const path of realShapes.refusedPaths) {
         await openPrepareOnlyAttachmentUploadWindow(page, file);
         const forwarded = await page.evaluate(
@@ -391,10 +461,12 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
         );
         const observed = await response;
         Object.assign(observed, { text: () => new Promise<string>(() => {}) });
-        expect(await inspectPageMutationResponse(page, observed)).toEqual({
-          body: entry.body,
-          accepted: entry.accepted,
-        });
+        expect(await inspectPageMutationResponse(page, observed)).toMatchObject(
+          {
+            body: entry.body,
+            accepted: entry.accepted,
+          },
+        );
       }
     },
   );
@@ -760,42 +832,51 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       const { page } = await newGuardedPage();
       await page.goto(`${app.baseUrl}/response-body-replay`);
       await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
-      await openPrepareOnlyIntermediateMutationWindow(page);
       const cases = [
         ...responseReplay.refused.map((body) => ({ body, accepted: false })),
         ...responseReplay.accepted.map((body) => ({ body, accepted: true })),
       ];
       for (const [index, entry] of cases.entries()) {
-        const url = `${app.baseUrl}/api/save-body-${index}`;
-        app.registerJson(`/api/save-body-${index}`, entry.body);
+        const url = `${app.baseUrl}/storage/body-${index}`;
+        app.registerJson(`/storage/body-${index}`, entry.body);
         const response = page.waitForResponse(url);
-        await page.evaluate(
-          async ({ url, transport }) => {
-            const body = '{"fieldAnswers":{"name":"Synthetic Applicant"}}';
-            if (transport === "fetch")
-              await (await fetch(url, { method: "POST", body })).text();
-            else
-              await new Promise<void>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open("POST", url);
-                xhr.onload = () => resolve();
-                xhr.onerror = () => reject(new Error("XHR failed"));
-                xhr.send(body);
-              });
-          },
-          { url, transport },
-        );
+        await postPermittedFile(page, url, transport);
         const observed = await response;
         // Electron receives response but never resolves Playwright's body reader.
         Object.assign(observed, { text: () => new Promise<string>(() => {}) });
-        expect(await inspectPageMutationResponse(page, observed)).toEqual(
+        expect(await inspectPageMutationResponse(page, observed)).toMatchObject(
           entry,
         );
       }
     },
   );
 
-  test("a 2xx refusal never counts as a saved intermediate step", async () => {
+  test.each(["fetch", "xhr"] as const)(
+    "embedded-response %s replay inspects XML, HTML and opaque MIME bodies",
+    async (transport) => {
+      const site = await startTrackedServer();
+      site.registerHtml("/typed-response", "<p>Application form</p>");
+      const { page } = await newGuardedPage();
+      await page.goto(`${site.baseUrl}/typed-response`);
+      await ensurePrepareOnlyMutationGuard(page, true, [site.baseUrl]);
+      for (const [index, entry] of responseTypesReplay.cases.entries()) {
+        const path = `/storage/type-${index}`;
+        site.registerResponse(path, entry);
+        const observedPromise = page.waitForResponse(`${site.baseUrl}${path}`);
+        await postPermittedFile(page, `${site.baseUrl}${path}`, transport);
+        const observed = await observedPromise;
+        Object.assign(observed, { text: () => new Promise<string>(() => {}) });
+        expect(await inspectPageMutationResponse(page, observed)).toMatchObject(
+          {
+            judgment: entry.judgment,
+            accepted: entry.judgment === "accepted",
+          },
+        );
+      }
+    },
+  );
+
+  test("a response without a runtime permit and observed step proof never counts as saved", async () => {
     const app = await startTrackedServer();
     app.registerHtml("/response-replay", "<p>Application form</p>");
     for (const [index, body] of responseReplay.refused.entries())
@@ -820,9 +901,8 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
         })
       ).text();
     }, responseReplay.refused.length);
-    await expect
-      .poll(() => readPrepareOnlyIntermediateWriteCount(page))
-      .toBe(1);
+    await drainPrepareOnlyIntermediateWrites(page);
+    expect(readPrepareOnlyIntermediateWriteCount(page)).toBe(0);
     expect(app.hits.filter((hit) => hit.method === "POST")).toHaveLength(
       responseReplay.refused.length + 1,
     );

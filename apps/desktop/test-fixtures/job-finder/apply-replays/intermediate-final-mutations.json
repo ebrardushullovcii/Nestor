@@ -91,6 +91,42 @@
     {
       "path": "/api/apply;v=1",
       "body": "{\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"sent\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"applied\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"state\":\"final\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"phase\":\"final\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"finalStep\":true}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"action\":\"publish\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"\\u0073ubmitted\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"\\u0073tatus\":\"\\u0073ent\"}"
+    },
+    {
+      "path": "/api/save",
+      "body": "{\"fieldAnswers\":{},\"status\":\"\\\\u0073ubmitted\"}"
     }
   ],
   "allowed": [
@@ -109,6 +145,14 @@
     {
       "path": "/workday/api/save",
       "body": "{\"step\":2,\"final\":false,\"draft\":true,\"complete\":false,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/workday/api/save",
+      "body": "{\"step\":2,\"status\":\"complete\",\"final\":false,\"fieldAnswers\":{}}"
+    },
+    {
+      "path": "/workday/api/save",
+      "body": "{\"step\":2,\"status\":\"completed\",\"final\":false,\"fieldAnswers\":{}}"
     }
   ],
   "completionProbes": [
