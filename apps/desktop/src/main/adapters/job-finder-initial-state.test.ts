@@ -9,7 +9,7 @@ describe("createEmptyJobFinderRepositoryState fresh seed", () => {
   it("seeds no job sources so first-run setup asks for the sites the user uses", () => {
     const state = createEmptyJobFinderRepositoryState();
     const parsed = JobFinderRepositoryStateSchema.parse(state);
-    expect(parsed.searchPreferences).not.toHaveProperty("discovery");
+    expect(parsed.searchPreferences.discovery.targets).toEqual([]);
     expect(
       evaluateProfileSetupReadiness(parsed.profile, parsed.searchPreferences)
         .hasDiscoverySource,

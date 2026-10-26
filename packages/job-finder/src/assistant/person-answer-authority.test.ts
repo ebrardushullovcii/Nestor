@@ -181,7 +181,7 @@ describe("the person's answer authority", () => {
           } as unknown as AssistantHostPorts,
         },
       ),
-    ).rejects.toThrow("Invalid discriminator value");
+    ).rejects.toThrow("old answer bank is retired");
     expect((await workspaceService.getWorkspaceSnapshot()).profile).toEqual(
       before,
     );

@@ -1331,7 +1331,7 @@ describe("createPrimaryPageActions", () => {
     );
     await vi.waitFor(() => expect(persistedSetupStates).toHaveLength(3));
     expect(createJobSitesStore(setupStore).get(1)?.enabled).toBe(true);
-    expect(persistedSnapshot.searchPreferences).not.toHaveProperty("discovery");
+    expect(persistedSnapshot.searchPreferences.discovery.targets).toEqual([]);
     expect(persistedSetupStates.at(-1)).toMatchObject({
       status: "in_progress",
       currentStep: "targeting",

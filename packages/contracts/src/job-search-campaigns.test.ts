@@ -152,7 +152,10 @@ test("legacy plan selections do not derive sources from retired preference field
     searchPreferences: preferences,
     sourceTargetIds: [] as string[],
   };
-  expect(preferences).not.toHaveProperty("discovery");
+  expect(preferences.discovery.targets.map((row) => row.id)).toEqual([
+    "on",
+    "off",
+  ]);
   expect(resolveCampaignSourceTargetIds(plan)).toEqual([]);
   expect(
     resolveCampaignSourceTargetIds({

@@ -36,7 +36,7 @@ describe("workspace service demo retention", () => {
       targetRoles: ["Platform Engineer"],
     });
     expect(result.dashboard.sourceHealth).toEqual(first.dashboard.sourceHealth);
-    expect(result.searchPreferences).not.toHaveProperty("discovery");
+    expect(result.searchPreferences.discovery.targets).toEqual([]);
     expect(await repository.getCampaignState()).toEqual(campaigns);
     expect(jobSites.counts().enabled).toBe(2);
   });
