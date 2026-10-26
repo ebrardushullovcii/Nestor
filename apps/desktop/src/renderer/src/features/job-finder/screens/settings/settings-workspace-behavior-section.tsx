@@ -12,8 +12,6 @@ import {
 } from "./settings-section-save";
 
 interface SettingsWorkspaceBehaviorSectionProps {
-  /** Reports staged behavior edits so a stale shell save retry is retired. */
-  onSettingsDraftEdited?: () => void;
   onUpdateWorkspaceBehavior: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;
@@ -21,7 +19,6 @@ interface SettingsWorkspaceBehaviorSectionProps {
 }
 
 export function SettingsWorkspaceBehaviorSection({
-  onSettingsDraftEdited,
   onUpdateWorkspaceBehavior,
   settings,
 }: SettingsWorkspaceBehaviorSectionProps) {
@@ -67,7 +64,6 @@ export function SettingsWorkspaceBehaviorSection({
     setDraftDiscoveryOnly(next.discoveryOnly);
     setDraftKeepSessionAlive(next.keepSessionAlive);
     resetSectionSave();
-    onSettingsDraftEdited?.();
     if (
       next.discoveryOnly !== settings.discoveryOnly ||
       next.keepSessionAlive !== settings.keepSessionAlive

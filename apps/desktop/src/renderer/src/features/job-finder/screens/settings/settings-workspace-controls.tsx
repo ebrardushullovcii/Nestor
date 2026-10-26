@@ -9,17 +9,14 @@ import type { FailureDescription } from "../../lib/describe-failure";
 import { useModalFocusTrap } from "../../components/profile/use-modal-focus-trap";
 
 interface SettingsWorkspaceControlsProps {
-  isWorkspaceResetPending: boolean;
   onResetWorkspace: () => void | Promise<boolean | void>;
 }
 
 export function SettingsWorkspaceControls({
-  isWorkspaceResetPending,
   onResetWorkspace,
 }: SettingsWorkspaceControlsProps) {
-  const [resetPending, setResetPending] = useState(false);
+  const [pending, setResetPending] = useState(false);
   const [resetError, setResetError] = useState<FailureDescription | null>(null);
-  const pending = resetPending || isWorkspaceResetPending;
   const [showResetConfirmation, setShowResetConfirmation] = useState(false);
   const dialogTitleId = useId();
   const dialogDescriptionId = useId();

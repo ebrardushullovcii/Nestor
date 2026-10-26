@@ -10,7 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   CandidateExperienceSchema,
   type DesktopJobsBridge,
@@ -321,20 +321,7 @@ test("Settings saves Apply mode and appearance independently and follows other w
   const preferences = createPreferencesStore(store);
   render(
     <MemoryRouter>
-      <StoredSettingsScreen
-        availableResumeTemplates={[]}
-        browserSession={{
-          source: "target_site",
-          status: "unknown",
-          driver: "catalog_seed",
-          label: "Idle",
-          detail: null,
-          lastCheckedAt: "2026-01-01T00:00:00.000Z",
-        }}
-        isWorkspaceResetPending={false}
-        onResetWorkspace={() => {}}
-        onSettingsDraftEdited={() => {}}
-      />
+      <StoredSettingsScreen />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole("radio", { name: /Send for me/u }));
@@ -374,6 +361,25 @@ test("Settings saves Apply mode and appearance independently and follows other w
         .getAttribute("aria-pressed"),
     ).toBe("true"),
   );
+});
+
+test("Reset everything clears the workspace and opens guided setup", async () => {
+  const resetWorkspace = vi.fn(() => Promise.resolve());
+  Object.assign(window.nestor, { jobFinder: { resetWorkspace } });
+  render(
+    <MemoryRouter initialEntries={["/job-finder/settings"]}>
+      <Routes>
+        <Route element={<StoredSettingsScreen />} path="/job-finder/settings" />
+        <Route element={<p>Guided setup</p>} path="/job-finder/profile/setup" />
+      </Routes>
+    </MemoryRouter>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reset everything" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Reset workspace" }));
+  expect(await screen.findByText("Guided setup")).not.toBeNull();
+  expect(resetWorkspace).toHaveBeenCalledOnce();
 });
 
 test("edits typed during resume analysis are flushed when Profile unmounts", async () => {

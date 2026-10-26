@@ -34,10 +34,7 @@ describe("SettingsWorkspaceControls", () => {
 
     act(() => {
       root?.render(
-        <SettingsWorkspaceControls
-          isWorkspaceResetPending={false}
-          onResetWorkspace={onResetWorkspace}
-        />,
+        <SettingsWorkspaceControls onResetWorkspace={onResetWorkspace} />,
       );
     });
 

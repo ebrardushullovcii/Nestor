@@ -155,7 +155,6 @@ function toInput(slice: ApplyingWritingSlice): UpdateAiBehaviorInput {
 }
 
 export function SettingsApplyingWritingSection(props: {
-  onSettingsDraftEdited?: () => void;
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
     options?: { undo?: () => void },
@@ -172,7 +171,6 @@ export function SettingsApplyingWritingSection(props: {
       seed: seedSlice,
       toInput,
       onUpdateAiBehavior: props.onUpdateAiBehavior,
-      onSettingsDraftEdited: props.onSettingsDraftEdited,
       anchorId: "settings-application-authority",
       label: "Applying",
       order: 4,

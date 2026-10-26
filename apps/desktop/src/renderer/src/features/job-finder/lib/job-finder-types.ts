@@ -62,7 +62,6 @@ export interface JobFinderShellActions {
   checkBrowserSession: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   refreshWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   requestWorkspaceRefresh?: () => void;
-  resetWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   resetBrowser: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   runSourceDebug: (
     targetId: string,

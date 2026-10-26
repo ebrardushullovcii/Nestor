@@ -237,7 +237,6 @@ export const PENDING_ADOPTION = {
     "features/job-finder/components/profile/profile-import-suggestion-list.tsx",
     "features/job-finder/components/profile/profile-preferences-sections.tsx",
     "features/job-finder/components/profile/setup/profile-setup-step-sections.tsx",
-    "features/job-finder/screens/settings/settings-runtime-summary.tsx",
   ],
   underscoreDisplay: [
     "features/job-finder/components/profile/profile-timeline-repair-list.tsx",

@@ -92,12 +92,9 @@ export interface JobFinderPageContext {
    * fires — so the shell's exact-request save retry stays truthful.
    */
   onProfileSurfaceDraftEdited: () => void;
-  /** Reports staged settings edits so the shell save retry stays truthful. */
-  onSettingsDraftEdited: () => void;
   profileCopilotPendingContextKey: string | null;
   onAssessJobListing: (jobId: string) => Promise<void>;
   onRejectProfileCopilotPatchGroup: (patchGroupId: string) => void;
-  onResetWorkspace: () => void | Promise<boolean | void>;
   onResetBrowser: () => Promise<boolean>;
   onResumeProfileSetup: (step?: ProfileSetupStep) => void;
   onRunAgentDiscovery?: (searchRequest?: JobFinderSearchRequest) => void;

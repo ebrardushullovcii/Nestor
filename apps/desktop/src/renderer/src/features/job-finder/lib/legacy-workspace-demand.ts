@@ -3,14 +3,14 @@ import { useEffect, useSyncExternalStore } from "react";
 /**
  * Whether this window has asked for the old whole-workspace load. Launch and
  * the store screens never do: it starts when a screen that still reads the
- * old workspace opens (Profile, guided setup, Settings) or when the command
+ * old workspace opens (Profile and guided setup) or when the command
  * palette asks for it, and stays loaded after that.
  */
 let wanted = false;
 const listeners = new Set<() => void>();
 
 /** Screens that still read the old workspace until their own queries land. */
-const LEGACY_WORKSPACE_PATHS = ["/job-finder/profile", "/job-finder/settings"];
+const LEGACY_WORKSPACE_PATHS = ["/job-finder/profile"];
 
 export function needsLegacyWorkspace(pathname: string): boolean {
   return LEGACY_WORKSPACE_PATHS.some(

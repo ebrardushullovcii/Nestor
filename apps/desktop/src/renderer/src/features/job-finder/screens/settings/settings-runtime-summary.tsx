@@ -1,28 +1,52 @@
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import type {
-  BrowserSessionState,
+  DesktopBrowserState,
   JobFinderSettings,
 } from "@nestor/contracts";
 import { StatusBadge } from "../../components/status-badge";
-import { formatStatusLabel, getSessionTone } from "../../lib/job-finder-utils";
+import type { BadgeTone } from "../../lib/job-finder-types";
 
 interface SettingsRuntimeSummaryProps {
-  browserSession: BrowserSessionState;
+  /** The built-in browser; null until its first state arrives. */
+  browser: DesktopBrowserState | null;
   settings: JobFinderSettings;
 }
 
-function getBrowserLabel(driver: BrowserSessionState["driver"]): string {
-  switch (driver) {
-    case "embedded_browser_agent":
-      return "Built-in browser session";
-    case "chrome_profile_agent":
-      return "Connected Chrome session";
-    // Not started yet: the first search opens the browser, so this is a
-    // waiting state rather than the catalog-only build.
-    case "uninitialized":
-      return "Browser session not started";
+function describeBrowser(browser: DesktopBrowserState | null): {
+  status: string;
+  tone: BadgeTone;
+  detail: string;
+} {
+  switch (browser?.phase) {
+    case "ready":
+      return { status: "Ready", tone: "positive", detail: "Open and idle." };
+    case "working":
+      return {
+        status: "Working",
+        tone: "active",
+        detail: browser.activity ?? "Working on a search or an application.",
+      };
+    case "needs_you":
+      return {
+        status: "Needs you",
+        tone: "active",
+        detail: "A page is waiting for you in the browser.",
+      };
+    case "pausing":
+    case "paused":
+      return {
+        status: "Paused",
+        tone: "muted",
+        detail: "Browser work is paused until you resume it.",
+      };
     default:
-      return "Catalog search only";
+      // Closed, closing, or not read yet: the browser opens when a search or
+      // an application needs it.
+      return {
+        status: "Not open",
+        tone: "muted",
+        detail: "It opens when a search or an application needs it.",
+      };
   }
 }
 export function getApplySafeguardCopy(usesOriginalResume: boolean): {
@@ -43,9 +67,10 @@ export function getApplySafeguardCopy(usesOriginalResume: boolean): {
 }
 
 export function SettingsRuntimeSummary({
-  browserSession,
+  browser,
   settings,
 }: SettingsRuntimeSummaryProps) {
+  const browserStatus = describeBrowser(browser);
   const applySafeguardCopy = getApplySafeguardCopy(
     settings.resumeApplicationMode === "original_resume",
   );
@@ -72,15 +97,15 @@ export function SettingsRuntimeSummary({
           <span className="text-[10px] uppercase tracking-(--tracking-badge) text-muted-foreground">
             Browser
           </span>
-          <StatusBadge tone={getSessionTone(browserSession)}>
-            {formatStatusLabel(browserSession.status)}
+          <StatusBadge tone={browserStatus.tone}>
+            {browserStatus.status}
           </StatusBadge>
         </div>
         <strong className="text-(length:--text-body) font-semibold text-foreground">
-          {getBrowserLabel(browserSession.driver)}
+          Built-in browser
         </strong>
         <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-          {browserSession.detail?.trim() || browserSession.label}
+          {browserStatus.detail}
         </p>
         <p className="text-(length:--text-small) leading-5 text-foreground-soft">
           Browser session persistence is currently{" "}
