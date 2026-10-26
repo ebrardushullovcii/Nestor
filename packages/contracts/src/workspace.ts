@@ -1365,10 +1365,6 @@ const WorkspaceSnapshotCoreSchema = z.object({
   resumeResearchArtifacts: z
     .array(ResumeResearchArtifactSummarySchema)
     .default([]),
-  applyRuns: z.array(ApplyRunSummarySchema).default([]),
-  applyJobResults: z.array(ApplyJobResultSummarySchema).default([]),
-  applicationRecords: z.array(PersistedApplicationRecordSchema).default([]),
-  applicationAttempts: z.array(ApplicationAttemptSchema).default([]),
   userActionRequests: z.array(UserActionRequestSchema).default([]),
   userActionEvents: z.array(UserActionEventSchema).default([]),
   sourceInstructionArtifacts: z
@@ -1381,8 +1377,6 @@ const WorkspaceSnapshotCoreSchema = z.object({
     .default([]),
   profileCopilotMessages: z.array(ProfileCopilotMessageSchema).default([]),
   profileRevisions: z.array(ProfileRevisionSummarySchema).default([]),
-  selectedApplyRunId: NonEmptyStringSchema.nullable().default(null),
-  selectedApplicationRecordId: NonEmptyStringSchema.nullable(),
   settings: JobFinderSettingsSchema,
   campaigns: z.array(JobSearchCampaignSchema).min(1),
   activeCampaignId: NonEmptyStringSchema,
@@ -1409,8 +1403,6 @@ export type JobFinderWorkspaceSnapshot = z.infer<
 export const JobFinderRendererWorkspaceSnapshotSchema =
   JobFinderWorkspaceSnapshotSchema.extend({
     tailoredAssets: z.array(TailoredAssetSummarySchema).default([]),
-    applyJobResults: z.array(ApplyJobResultListRowSchema).default([]),
-    applicationAttempts: z.array(ApplicationAttemptListRowSchema).default([]),
     discoveryJobs: z.array(JobListRowSchema).default([]),
     companyJobs: z.array(JobListRowSchema).default([]),
   });
@@ -1568,8 +1560,6 @@ export const JobFinderWorkspaceDeltaSchema = z
     replaced: JobFinderWorkspaceDeltaReplacedSchema.optional(),
     selectedDiscoveryJobId: NonEmptyStringSchema.nullable(),
     selectedReviewJobId: NonEmptyStringSchema.nullable(),
-    selectedApplyRunId: NonEmptyStringSchema.nullable(),
-    selectedApplicationRecordId: NonEmptyStringSchema.nullable(),
     discoveryJobs: z
       .object({
         upserts: z.array(JobListRowSchema).default([]),
@@ -1586,30 +1576,6 @@ export const JobFinderWorkspaceDeltaSchema = z
     reviewQueue: z
       .object({
         upserts: z.array(ReviewQueueItemSchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
-    applyRuns: z
-      .object({
-        upserts: z.array(ApplyRunSummarySchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
-    applyJobResults: z
-      .object({
-        upserts: z.array(ApplyJobResultListRowSchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
-    applicationRecords: z
-      .object({
-        upserts: z.array(PersistedApplicationRecordSchema).default([]),
-        removedIds: WorkspaceDeltaRemovalIdsSchema,
-      })
-      .strict(),
-    applicationAttempts: z
-      .object({
-        upserts: z.array(ApplicationAttemptListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),

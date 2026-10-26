@@ -579,9 +579,6 @@ describe("contracts workspace snapshot schema", () => {
     expect(workspace.profile.experiences[0]?.workMode).toEqual(["hybrid"]);
     expect(workspace.discoveryJobs[0]?.workMode).toEqual(["remote"]);
     expect(workspace.reviewQueue[0]?.assetStatus).toBe("ready");
-    expect(workspace.applicationAttempts[0]?.state).toBe("submitted");
-    expect(workspace.applyRuns[0]?.state).toBe("paused_for_user_review");
-    expect(workspace.selectedApplyRunId).toBe("apply_run_1");
     expect(workspace.activeSourceDebugRun?.state).toBe("paused_manual");
     expect(workspace.sourceAccessPrompts[0]?.state).toBe(
       "prompt_login_required",

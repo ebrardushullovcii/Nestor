@@ -462,48 +462,6 @@ export function createEmptyApplyVisualState() {
   };
 }
 
-export function selectLatestApplyRunId(
-  applyRuns: readonly JobFinderWorkspaceSnapshot["applyRuns"][number][],
-) {
-  return (
-    applyRuns.reduce<JobFinderWorkspaceSnapshot["applyRuns"][number] | null>(
-      (latest, run) => {
-        if (!latest) {
-          return run;
-        }
-
-        const latestTimestamp = Date.parse(latest.updatedAt);
-        const nextTimestamp = Date.parse(run.updatedAt);
-
-        if (
-          Number.isFinite(nextTimestamp) &&
-          !Number.isFinite(latestTimestamp)
-        ) {
-          return run;
-        }
-
-        if (!Number.isFinite(nextTimestamp)) {
-          return latest;
-        }
-
-        if (nextTimestamp > latestTimestamp) {
-          return run;
-        }
-
-        if (
-          nextTimestamp === latestTimestamp &&
-          run.id.localeCompare(latest.id) > 0
-        ) {
-          return run;
-        }
-
-        return latest;
-      },
-      null,
-    )?.id ?? null
-  );
-}
-
 export function buildSingleJobAutoApplyArtifacts(input: {
   applicationRecordId: string;
   approvalId?: string | null;
