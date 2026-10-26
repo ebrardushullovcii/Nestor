@@ -191,7 +191,26 @@ export function NeedsYouScreen() {
   });
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
-  const selectedCount = countSelected(selection, list.total);
+  const shownIds = new Set(list.rows.map((row) => row.id));
+  const visibleSelection = {
+    ...selection,
+    ids: new Set([...selection.ids].filter((id) => shownIds.has(id))),
+  };
+  useEffect(() => {
+    if (list.loading) return;
+    const ids = new Set(list.rows.map((row) => row.id));
+    setSelection((current) => {
+      const valid = new Set([...current.ids].filter((id) => ids.has(id)));
+      return valid.size === current.ids.size
+        ? current
+        : { ...current, ids: valid };
+    });
+  }, [list.loading, list.rows, selection]);
+  const selectedCount = countSelected(visibleSelection, list.total);
+  const missing = useCallback((id: number) => {
+    if (pinned.current === id) pinned.current = null;
+    setActiveId((current) => (current === id ? null : current));
+  }, []);
   const active = list.rows.find((row) => row.id === activeId);
   const source = active && "source" in active ? active.source : undefined;
   useListKeys({
@@ -204,8 +223,8 @@ export function NeedsYouScreen() {
     loadMore: () => void list.loadMore(),
     filterSelector: "#needs-you-filter",
   });
-  const latest = useRef({ list, selection, activeId });
-  latest.current = { list, selection, activeId };
+  const latest = useRef({ list, selection: visibleSelection, activeId });
+  latest.current = { list, selection: visibleSelection, activeId };
   const resolved = useCallback(
     (id: number, message: string) => {
       const { list, selection } = latest.current;
@@ -260,7 +279,7 @@ export function NeedsYouScreen() {
             text,
             kind,
             focusId: activeId ?? undefined,
-            selectedIds: [...selection.ids],
+            selectedIds: [...visibleSelection.ids],
             all: selection.all,
           })}
         >
@@ -322,7 +341,7 @@ export function NeedsYouScreen() {
             loading={list.loading}
             hasMore={!editing && list.nextCursor !== null}
             onLoadMore={() => void list.loadMore()}
-            selection={selection}
+            selection={visibleSelection}
             selectedCount={selectedCount}
             onSelectAll={() => setSelection(selectAll())}
             onClearSelection={() => setSelection(NO_SELECTION)}
@@ -444,6 +463,7 @@ export function NeedsYouScreen() {
               key={`task:${activeId}`}
               id={activeId}
               onEditing={setEditing}
+              onMissing={missing}
               onResolved={resolved}
             />
           ) : (
@@ -451,6 +471,7 @@ export function NeedsYouScreen() {
               key={`answer:${activeId}`}
               id={activeId}
               onEditing={setEditing}
+              onMissing={missing}
               onSaved={(message) => {
                 showToast({ title: message });
                 void list.refresh();

@@ -24,6 +24,7 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import { NeedsYouScreen } from "./needs-you-screen";
 import { SourceNeedPane } from "./source-need-pane";
+import { waitForDisplayedDestination } from "../job-finder/assistant/navigation-display";
 
 it("opens a source's URL and retries its ID without dismissing the sign-in item", async () => {
   const command = vi.fn(() => Promise.resolve({}));
@@ -151,11 +152,108 @@ function show(route = "/job-finder/actions", nextRoute?: string) {
     <MemoryRouter initialEntries={[route]}>
       <ToastProvider>
         {nextRoute ? <Link to={nextRoute}>Test navigation request</Link> : null}
-        <NeedsYouScreen />
+        <main>
+          <NeedsYouScreen />
+        </main>
       </ToastProvider>
     </MemoryRouter>,
   );
 }
+
+it.each(["missing", "other tab", "outside filter"])(
+  "does not confirm a selected ID that is %s",
+  async (kind) => {
+    const first = ask(0);
+    let invalid = 999;
+    if (kind === "outside filter")
+      invalid = ask(
+        1,
+        "interviews",
+        "When are you available for interviews?",
+      ).id;
+    if (kind === "other tab") {
+      for (const key of ["format", "travel"])
+        applications.needsYou.remember({
+          key,
+          prompt: `Saved ${key}?`,
+          answer: "Yes",
+          input: "text",
+          options: [],
+          scope: { country: "", siteOrigin: "" },
+        });
+      invalid = applications.needsYou
+        .listAnswers()
+        .rows.find((row) => row.id !== first.id)!.id;
+    }
+    const view = { tab: "tasks", text: "notice", selectedIds: [invalid] };
+    const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`;
+    show(route);
+    const checkbox = await screen.findByRole("checkbox", {
+      name: `Select ${first.prompt}`,
+    });
+    await waitFor(() =>
+      expect(checkbox.getAttribute("aria-checked")).toBe("false"),
+    );
+    const state = JSON.parse(
+      document
+        .querySelector("[data-needs-list-state]")!
+        .getAttribute("data-needs-list-state")!,
+    ) as { selectedIds: number[] };
+    expect(state.selectedIds).toEqual([]);
+    expect(screen.queryByText("1 selected")).toBeNull();
+    expect(
+      await waitForDisplayedDestination(route, () => route, 0),
+    ).toMatchObject({ status: "blocked" });
+  },
+);
+
+it("does not subtract a stale exception from Select all or acknowledge it", async () => {
+  const task = ask(0);
+  const view = { tab: "tasks", all: true, selectedIds: [999] };
+  const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`;
+  show(route);
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("checkbox", { name: `Select ${task.prompt}` })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+});
+
+it.each(["tasks", "saved"] as const)(
+  "blocks a stale %s focus and returns to the normal first item",
+  async (tab) => {
+    const task = ask(0);
+    if (tab === "saved")
+      applications.needsYou.answer({
+        id: task.id,
+        answer: "Four weeks",
+        remember: true,
+      });
+    const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab, focusId: 999 }))}`;
+    show(route);
+    await screen.findByRole("textbox", { name: task.prompt });
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector("[data-needs-detail-id]")
+          ?.getAttribute("data-needs-detail-id"),
+      ).not.toBe("999"),
+    );
+    expect(
+      screen.queryByText("This item is no longer waiting for you."),
+    ).toBeNull();
+    expect(screen.queryByText("This answer has been forgotten.")).toBeNull();
+    expect(
+      await waitForDisplayedDestination(route, () => route, 0),
+    ).toMatchObject({ status: "blocked" });
+  },
+);
 
 it("opens and selects the requested filtered question instead of the first task", async () => {
   ask(0);

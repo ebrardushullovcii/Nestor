@@ -17,8 +17,11 @@ export function TaskPane(props: {
   id: number;
   onEditing: (editing: boolean) => void;
   onResolved: (id: number, message: string) => void;
+  onMissing?: (id: number) => void;
 }) {
   const { id, onEditing, onResolved } = props;
+  const onMissing = useRef(props.onMissing);
+  onMissing.current = props.onMissing;
   const [details, setDetails] = useState<NeedsYouDetails | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<NeedsYouDraft>({
@@ -41,6 +44,7 @@ export function TaskPane(props: {
       .run("get_need", { id })
       .then((value) => {
         if (!live.current) return;
+        if (!value) onMissing.current?.(id);
         setDetails(value);
         const restored = value?.draft ?? {
           answer: "",
