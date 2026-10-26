@@ -62,16 +62,15 @@ const HANDLE_LABEL = /^(?:your\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)$/iu;
 // "Enter your handle", "Username only"); "Your username will be shown
 // publicly" mentions one without asking for it.
 const ASKS_HANDLE =
-  /\b(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|what(?:\s+is|['’]s)\s+(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:user\s*name|handle))\b/iu;
+  /(?:^|[.!?;:(—–-]\s*)(?:please\s+)?(?:(?:enter|provide|type|add|share|give|include|fill\s+in|put|list)\s+(?:in\s+)?(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|what(?:\s+is|['’]s)\s+(?:your\s+|the\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)|(?:your\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:git\s?hub\s+)?(?:user\s*name|handle))\b/iu;
 // In a label, "GitHub profile" asks for the address too.
 const ADDRESS =
   /\b(?:url|link|address|website|https?|profile)\b|\b[a-z\d-]+\.com\b/iu;
-// "e.g. octocat" or "@octocat": an example handle, not an address.
-// Negated address wording is a handle request only if no positive address wording remains.
-const NOT_ADDRESS =
-  /\b(?:no|not|without|instead of|rather than)\s+(?:a\s+|an\s+|the\s+|your\s+)?(?:full\s+)?(?:profile\s+)?(?:url|link)s?\b/giu;
-const HANDLE_EXAMPLE =
-  /^(?:e\.?\s?g\.?,?:?\s*|example:?\s*)?@?[a-z\d][a-z\d-]{0,38}$/iu;
+// A complete handle-only instruction may say "username only, no URL".
+// Do not remove negation from arbitrary prose: "do not submit without a URL"
+// requests an address, and every other address mention still vetoes conversion.
+const HANDLE_ONLY_NO_ADDRESS =
+  /^(?:(?:your\s+)?(?:git\s?hub\s+)?(?:user\s*name|handle)\s*\(\s*)?(?:(?:git\s?hub\s+)?(?:user\s*name|handle)\s+only|just\s+(?:the|your)\s+(?:git\s?hub\s+)?(?:user\s*name|handle))\s*[,;:-]\s*(?:no\s+url|not\s+a\s+link|without\s+the\s+url)\s*[).!]*$/iu;
 
 export function fieldNamesAnotherPerson(
   control: Pick<
@@ -86,8 +85,8 @@ export function fieldNamesAnotherPerson(
 
 /**
  * Whether the field wants a GitHub handle rather than the profile address.
- * Its label, the help text beside it and its example placeholder decide; a
- * address wording anywhere vetoes conversion.
+ * Its label, help text and placeholder instructions decide. An address
+ * request anywhere vetoes conversion.
  */
 export function asksGithubUsername(
   control: Pick<
@@ -95,25 +94,26 @@ export function asksGithubUsername(
     "label" | "groupLabel" | "placeholder" | "hint"
   >,
 ): boolean {
-  const clean = (text: string | undefined) =>
-    (text ?? "").replace(NOT_ADDRESS, " ").trim();
-  const label = clean(`${control.groupLabel} ${control.label}`);
+  const clean = (text: string | undefined) => (text ?? "").trim();
+  const label = clean(control.label);
   const hint = clean(control.hint);
   const placeholder = clean(control.placeholder);
+  const instructions = [clean(control.groupLabel), label, hint, placeholder];
   if (fieldNamesAnotherPerson(control)) return false;
-  if (!GITHUB.test(label) && !GITHUB.test(hint)) return false;
-  if ([label, hint, placeholder].some((text) => ADDRESS.test(text)))
+  if (![clean(control.groupLabel), label, hint].some((text) => GITHUB.test(text)))
+    return false;
+  if (
+    instructions.some(
+      (text) => ADDRESS.test(text) && !HANDLE_ONLY_NO_ADDRESS.test(text),
+    )
+  )
     return false;
   if (
     HANDLE_LABEL.test(clean(control.label).replace(/[\s*:?]+$/gu, "")) ||
-    ASKS_HANDLE.test(label)
+    instructions.some((text) => ASKS_HANDLE.test(text))
   )
     return true;
-  // Help text such as "Please provide your GitHub username" decides it.
-  if (hint && ASKS_HANDLE.test(hint)) return true;
-  const example = clean(placeholder);
-  if (HANDLE_LABEL.test(example) || ASKS_HANDLE.test(example)) return true;
-  return HANDLE_EXAMPLE.test(example) && !GITHUB.test(example);
+  return HANDLE_LABEL.test(placeholder);
 }
 
 export function formatGithubAnswer(

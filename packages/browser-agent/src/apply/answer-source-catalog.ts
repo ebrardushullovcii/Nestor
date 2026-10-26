@@ -517,6 +517,7 @@ export function classifyAnswerPermission(input: {
     "are you legally authorized to work in ",
     "are you legally authorised to work in ",
     "are you legally eligible to work in ",
+    "are you eligible to work in ",
     "are you authorized to work in ",
     "are you authorised to work in ",
     "do you have the right to work in ",
@@ -703,6 +704,7 @@ export function classifyAnswerPermission(input: {
       (!(
         exactSaved &&
         tags.kind === "work_auth" &&
+        knownLegalQuestion &&
         /^(?:no|false)$/iu.test(input.answer)
       ) &&
         !permitConditionsFit(input.sources, target)) ||

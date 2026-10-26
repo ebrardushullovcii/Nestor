@@ -27,7 +27,7 @@
       "label": "GitHub",
       "placeholder": "e.g. octocat",
       "hint": "",
-      "expected": "synthetic-developer"
+      "expected": "https://github.com/synthetic-developer/"
     },
     {
       "label": "Github",
