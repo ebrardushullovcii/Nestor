@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
   AiBehaviorPreferenceSchema,
+  JOB_FINDER_SETTINGS_SECTIONS,
   writesResumesOnShortlist,
   type AiProfileAssistantBehavior,
   type JobFinderSettings,
@@ -36,7 +37,8 @@ import { SettingsSectionSaveControl } from "./settings-section-save-control";
  * retry a failed save.
  */
 
-export const SETTINGS_AI_BEHAVIOR_LABEL = "AI behavior";
+export const SETTINGS_AI_BEHAVIOR_LABEL =
+  JOB_FINDER_SETTINGS_SECTIONS["ai-behavior"].label;
 
 const initiativeOptions: readonly ChoiceCardOption<ProfileAssistantInitiative>[] =
   [

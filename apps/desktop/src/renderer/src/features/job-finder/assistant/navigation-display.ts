@@ -3,6 +3,7 @@ import {
   AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
   matchesAssistantListView,
+  matchesJobFinderNavigationSearch,
   type AssistantNavigationDisplay,
 } from "@nestor/contracts";
 
@@ -13,6 +14,25 @@ function shownElements(selector: string): Element[] {
         '[data-kept-route="hidden"], [hidden], [aria-hidden="true"]',
       ),
   );
+}
+
+function renderedPane(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  for (
+    let node: HTMLElement | null = element;
+    node;
+    node = node.parentElement
+  ) {
+    const style = getComputedStyle(node);
+    if (
+      node.hidden ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.contentVisibility === "hidden"
+    )
+      return false;
+  }
+  return true;
 }
 
 /** A route request is complete only after its content is mounted and uncovered. */
@@ -36,7 +56,15 @@ export async function waitForDisplayedDestination(
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
     const section =
-      actual.pathname === "/job-finder/profile" ? profileSection : null;
+      actual.pathname === "/job-finder/profile"
+        ? profileSection
+        : actual.pathname === "/job-finder/settings"
+          ? (shownElements(
+              'nav[aria-label="Settings sections"] a[aria-current="location"]',
+            )[0]
+              ?.getAttribute("href")
+              ?.slice(1) ?? null)
+          : null;
     const dialog = shownElements("[role]").find(
       (element) =>
         ["dialog", "alertdialog"].includes(
@@ -68,10 +96,12 @@ export async function waitForDisplayedDestination(
     }
     const matches =
       actual.pathname === expected.pathname &&
-      [...expected.searchParams].every(
-        ([key, value]) => actual.searchParams.get(key) === value,
-      );
-    const expectedSection = expected.searchParams.get("section");
+      (!expected.hash || actual.hash === expected.hash) &&
+      matchesJobFinderNavigationSearch(expected, actual);
+    const expectedSection =
+      expected.pathname === "/job-finder/settings"
+        ? expected.hash.slice(1) || null
+        : expected.searchParams.get("section");
     const contentMounted = expected.pathname.includes("/resume")
       ? shownElements("[data-resume-studio-content-area]").length > 0
       : expected.pathname === "/job-finder/profile"
@@ -93,7 +123,24 @@ export async function waitForDisplayedDestination(
       shownElements("main [data-job-detail-id]").some(
         (element) => element.getAttribute("data-job-detail-id") === jobId,
       );
+    const resumeMode = expected.searchParams.get("resumeMode");
+    const resumeModeDisplayed =
+      !resumeMode ||
+      shownElements("main [data-resume-mode]").some(
+        (element) =>
+          element.getAttribute("data-resume-mode") === resumeMode &&
+          (!jobId || element.getAttribute("data-job-detail-id") === jobId) &&
+          renderedPane(
+            element.querySelector(`[data-resume-pane="${resumeMode}"]`),
+          ) &&
+          !renderedPane(
+            element.querySelector(
+              `[data-resume-pane="${resumeMode === "edit" ? "read" : "edit"}"]`,
+            ),
+          ),
+      );
     let viewDisplayed = true;
+    let listPreferencesOnBoard = false;
     const trackerView = expected.pathname === "/job-finder/applications";
     const needsView = expected.pathname === "/job-finder/actions";
     const schema = needsView
@@ -115,10 +162,15 @@ export async function waitForDisplayedDestination(
         const state = shownElements(
           `main [${stateAttribute}]`,
         )[0]?.getAttribute(stateAttribute);
-        viewDisplayed = matchesAssistantListView(
-          schema.parse(JSON.parse(state ?? "null")),
-          requested,
-        );
+        const displayed = schema.parse(JSON.parse(state ?? "null"));
+        listPreferencesOnBoard =
+          trackerView &&
+          "layout" in displayed &&
+          displayed.layout === "board" &&
+          ("density" in requested || "columns" in requested);
+        viewDisplayed =
+          !listPreferencesOnBoard &&
+          matchesAssistantListView(displayed, requested);
         if (needsView) {
           const focusId = AssistantNeedsViewSchema.parse(requested).focusId;
           if (focusId !== undefined)
@@ -133,24 +185,27 @@ export async function waitForDisplayedDestination(
       }
     }
     display = {
-      displayedRoute: `${actual.pathname}${actual.search}`,
+      displayedRoute: `${actual.pathname}${actual.search}${actual.hash}`,
       section,
       overlay,
       status: "blocked",
       reason:
         overlay !== "none"
           ? "An overlay still covers the destination."
-          : needsView &&
-              view &&
-              !viewDisplayed &&
-              shownElements('main [data-needs-editing="true"]').length > 0
-            ? "Needs you has unsaved answer text. Save it before changing its view."
-            : "The requested page or section has not been displayed.",
+          : listPreferencesOnBoard
+            ? "Density and columns apply to the Applications list. The board does not display them."
+            : needsView &&
+                view &&
+                !viewDisplayed &&
+                shownElements('main [data-needs-editing="true"]').length > 0
+              ? "Needs you has unsaved answer text. Save it before changing its view."
+              : "The requested page or section has not been displayed.",
     };
     if (
       matches &&
       contentMounted &&
       jobDisplayed &&
+      resumeModeDisplayed &&
       viewDisplayed &&
       overlay === "none" &&
       (!expectedSection || section === expectedSection)

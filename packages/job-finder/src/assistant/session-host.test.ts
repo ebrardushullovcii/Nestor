@@ -1447,6 +1447,49 @@ describe("assistant session host", () => {
     }
   });
 
+  it("accepts a consumed resume-mode request only on the requested job route", async () => {
+    const { host, events } = setup();
+    const conversation = await host.createConversation();
+    const session = (
+      host as unknown as {
+        detachedSession(
+          id: string,
+          messageId: string | null,
+        ): AssistantTurnSession;
+      }
+    ).detachedSession(conversation.id, null);
+    for (const jobId of [7, 8]) {
+      const before = events.length;
+      const pending = session.openInApp(
+        "/job-finder/review-queue?jobId=7&resumeMode=edit",
+      );
+      await vi.waitFor(() =>
+        expect(
+          events
+            .slice(before)
+            .some((event) => event.payload.type === "open_route"),
+        ).toBe(true),
+      );
+      const event = events
+        .slice(before)
+        .find((event) => event.payload.type === "open_route")!;
+      if (event.payload.type !== "open_route")
+        throw new Error("Missing navigation");
+      host.acknowledgeNavigation({
+        conversationId: conversation.id,
+        navigationRequestId: event.payload.navigationRequestId!,
+        displayedRoute: `/job-finder/review-queue?jobId=${jobId}`,
+        section: null,
+        overlay: "none",
+        status: "displayed",
+        reason: null,
+      });
+      expect(await pending).toMatchObject({
+        status: jobId === 7 ? "displayed" : "blocked",
+      });
+    }
+  });
+
   it("keeps later browser steps on the opened retained application during the same turn", async () => {
     const { host, ports } = setup();
     const release = vi.fn(() => Promise.resolve());

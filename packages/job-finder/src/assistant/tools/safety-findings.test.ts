@@ -86,7 +86,6 @@ function world() {
   };
 }
 
-
 function page(url = "http://127.0.0.1:47950/brindle/jobs/50"): RawApplyPage {
   return {
     url,
@@ -295,7 +294,6 @@ describe("R3 assistant safety findings", () => {
       expect(inspectApplication).not.toHaveBeenCalled();
     }
   });
-
 
   it("R3-008 preserves job sites across separate preference changes", async () => {
     const ctx = world();
@@ -524,6 +522,39 @@ describe("R3 assistant safety findings", () => {
       openInAppTool.execute({ screen: "applications", needsView }, ctx),
     ).rejects.toThrow("requires screen needs_you");
     expect(ctx.openInApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens Settings anchors and resume modes only on their matching destinations", async () => {
+    expect(
+      openInAppTool.input.safeParse({
+        screen: "settings",
+        settingsSectoin: "application-authority",
+      }).success,
+    ).toBe(false);
+    for (const columns of [[], ["status", "status"]])
+      expect(
+        openInAppTool.input.safeParse({
+          screen: "applications",
+          applicationView: { columns },
+        }).success,
+      ).toBe(false);
+    const ctx = world();
+    await openInAppTool.execute(
+      { screen: "settings", settingsSection: "application-authority" },
+      ctx,
+    );
+    expect(ctx.openInApp).toHaveBeenLastCalledWith(
+      "/job-finder/settings#settings-application-authority",
+    );
+    await expect(
+      openInAppTool.execute(
+        { screen: "profile", settingsSection: "application-authority" },
+        ctx,
+      ),
+    ).rejects.toThrow("requires screen settings");
+    await expect(
+      openInAppTool.execute({ screen: "shortlisted", resumeMode: "edit" }, ctx),
+    ).rejects.toThrow("requires resume=true");
   });
 
   it("R3-126 changes letters and Ask before sending while preserving the resume approach", async () => {

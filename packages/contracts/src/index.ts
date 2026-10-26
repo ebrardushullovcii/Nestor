@@ -62,6 +62,7 @@ export * from "./match-assessment-input";
 export * from "./listing-salary-evidence";
 export * from "./saved-job-sightings";
 export * from "./assistant-job-view";
+export * from "./job-finder-navigation";
 export * from "./app-commands";
 export * from "./job-sites";
 

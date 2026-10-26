@@ -17,6 +17,7 @@ import {
   withStatusArgument,
 } from "@nestor/agent-runtime";
 import {
+  matchesJobFinderNavigationSearch,
   AssistantNavigationAcknowledgmentSchema,
   type AssistantNavigationAcknowledgment,
   type AssistantNavigationDisplay,
@@ -1687,11 +1688,12 @@ export class AssistantSessionHost {
             : null;
           const matches =
             actual?.pathname === expected.pathname &&
-            [...expected.searchParams].every(
-              ([key, value]) => actual.searchParams.get(key) === value,
-            );
+            (!expected.hash || actual.hash === expected.hash) &&
+            matchesJobFinderNavigationSearch(expected, actual);
           const section =
-            expected.searchParams.get("section") ??
+            (expected.pathname === "/job-finder/settings"
+              ? expected.hash.slice(1) || null
+              : expected.searchParams.get("section")) ??
             (expected.searchParams.get("view") === "tracker"
               ? "tracker"
               : null);

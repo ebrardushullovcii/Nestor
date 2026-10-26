@@ -42,6 +42,7 @@ export function ResumeEditor(props: {
 
   return (
     <div
+      data-resume-pane="edit"
       className={cn(
         "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1",
         props.className,

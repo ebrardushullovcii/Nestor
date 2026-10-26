@@ -154,6 +154,49 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
+  it("keeps list preferences for later without advertising them as rendered board columns", async () => {
+    const view = {
+      layout: "board",
+      density: "comfortable",
+      columns: ["status", "next"],
+    };
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/job-finder/applications?applications=${encodeURIComponent(JSON.stringify(view))}`,
+        ]}
+      >
+        <ToastProvider>
+          <ApplicationsScreen />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          document
+            .querySelector("[data-application-list-state]")!
+            .getAttribute("data-application-list-state")!,
+        ),
+      ).toMatchObject({ layout: "board" });
+      expect(
+        JSON.parse(window.localStorage.getItem("nestor.applications.view")!),
+      ).toEqual(view);
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "Board" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    const displayed: unknown = JSON.parse(
+      document
+        .querySelector("[data-application-list-state]")!
+        .getAttribute("data-application-list-state")!,
+    );
+    expect(displayed).not.toHaveProperty("density");
+    expect(displayed).not.toHaveProperty("columns");
+  });
+
   it("moves a sent application on, and Undo takes it back", async () => {
     const list = renderScreen();
     fireEvent.click(

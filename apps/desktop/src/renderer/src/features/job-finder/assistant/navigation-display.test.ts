@@ -6,6 +6,72 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+it("confirms Settings anchors from the active section, including repeated navigation", async () => {
+  const route = "/job-finder/settings#settings-application-authority";
+  document.body.innerHTML =
+    '<main><h1>Settings</h1><nav aria-label="Settings sections"><a aria-current="location" href="#settings-app-device">App</a></nav></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked", section: "settings-app-device" });
+  document
+    .querySelector("a")!
+    .setAttribute("href", "#settings-application-authority");
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({
+    status: "displayed",
+    section: "settings-application-authority",
+    displayedRoute: route,
+  });
+});
+
+it("confirms the actual resume read/edit mode for the requested job", async () => {
+  const route = "/job-finder/review-queue?jobId=7&resumeMode=edit";
+  document.body.innerHTML =
+    '<main><h1>Shortlisted</h1><section data-job-detail-id="7" data-resume-mode="read"><div data-resume-pane="edit" style="display:none"></div><div data-resume-pane="read"></div></section></main>';
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document.querySelector("section")!.setAttribute("data-resume-mode", "edit");
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({ status: "blocked" });
+  document.querySelector<HTMLElement>(
+    '[data-resume-pane="edit"]',
+  )!.style.display = "block";
+  document.querySelector<HTMLElement>(
+    '[data-resume-pane="read"]',
+  )!.style.display = "none";
+  expect(
+    await waitForDisplayedDestination(
+      route,
+      () => "/job-finder/review-queue?jobId=7",
+      0,
+    ),
+  ).toMatchObject({ status: "displayed" });
+});
+
+it("does not acknowledge list-only density or columns over a board, even if a state attribute echoes them", async () => {
+  const view = {
+    layout: "board",
+    density: "comfortable",
+    columns: ["status", "next"],
+  };
+  const route = `/job-finder/applications?applications=${encodeURIComponent(JSON.stringify(view))}`;
+  document.body.innerHTML =
+    "<main><h1>Applications</h1><div data-application-list-state></div></main>";
+  document
+    .querySelector("[data-application-list-state]")!
+    .setAttribute("data-application-list-state", JSON.stringify(view));
+  expect(
+    await waitForDisplayedDestination(route, () => route, 0),
+  ).toMatchObject({
+    status: "blocked",
+    reason:
+      "Density and columns apply to the Applications list. The board does not display them.",
+  });
+});
+
 it("explains when unsaved answer text blocks a Needs you view change", async () => {
   const route = `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify({ tab: "tasks" }))}`;
   document.body.innerHTML =

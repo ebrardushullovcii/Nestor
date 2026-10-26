@@ -5,6 +5,10 @@ import {
   AssistantJobViewSchema,
   AssistantNeedsViewSchema,
   AssistantTrackerViewSchema,
+  JOB_FINDER_SETTINGS_SECTION_IDS,
+  JobFinderSettingsSectionSchema,
+  RESUME_VIEW_MODES,
+  ResumeViewModeSchema,
   JobIdSchema,
   JobDetailSchema,
   NonEmptyStringSchema,
@@ -328,9 +332,17 @@ export const openInAppTool = defineTool({
       "Opens that stored job (its resume when resume is true).",
     ),
     applicationView: json.looseObject(
-      "Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true).",
+      "Applications filters, selection and saved view preferences: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true), layout (list/board), density (compact/comfortable), columns (status/since/applied/next/tags). Omitted preferences stay as they are.",
     ),
     resume: json.boolean(),
+    resumeMode: json.enumOf(
+      RESUME_VIEW_MODES,
+      "Read or edit the saved resume; requires resume=true and jobId.",
+    ),
+    settingsSection: json.enumOf(
+      JOB_FINDER_SETTINGS_SECTION_IDS,
+      "Settings section to show. application-defaults is Resume look; application-authority is Applying; workspace-behavior is Browser & saved jobs.",
+    ),
     needsView: json.looseObject(
       "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",
     ),
@@ -342,30 +354,44 @@ export const openInAppTool = defineTool({
       "Profile tab to show. Languages are in background.",
     ),
   }),
-  input: z.object({
-    screen: z
-      .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
-      .optional(),
-    jobId: JobIdSchema.optional(),
-    applicationView: AssistantTrackerViewSchema.optional(),
-    resume: z.boolean().optional(),
-    needsView: AssistantNeedsViewSchema.optional(),
-    view: AssistantJobViewSchema.optional(),
-    section: z
-      .enum([
-        "basics",
-        "experience",
-        "background",
-        "preferences",
-        "sources",
-        "files",
-      ])
-      .optional(),
-  }),
+  input: z
+    .object({
+      screen: z
+        .enum(Object.keys(APP_ROUTES) as [keyof typeof APP_ROUTES])
+        .optional(),
+      jobId: JobIdSchema.optional(),
+      applicationView: AssistantTrackerViewSchema.optional(),
+      resume: z.boolean().optional(),
+      resumeMode: ResumeViewModeSchema.optional(),
+      settingsSection: JobFinderSettingsSectionSchema.optional(),
+      needsView: AssistantNeedsViewSchema.optional(),
+      view: AssistantJobViewSchema.optional(),
+      section: z
+        .enum([
+          "basics",
+          "experience",
+          "background",
+          "preferences",
+          "sources",
+          "files",
+        ])
+        .optional(),
+    })
+    .strict(),
   label: () => "Opening it in the app",
   effect: "read",
   async execute(input, context) {
     const { session, ports } = context;
+    if (input.resumeMode && (!input.resume || !input.jobId))
+      throw new AssistantToolError(
+        "invalid_input",
+        "A resume mode requires resume=true and its jobId.",
+      );
+    if (input.settingsSection && input.screen !== "settings")
+      throw new AssistantToolError(
+        "invalid_input",
+        "A Settings section requires screen settings.",
+      );
     if (
       input.needsView &&
       (input.screen !== "needs_you" || input.jobId || input.resume)
@@ -531,6 +557,12 @@ export const openInAppTool = defineTool({
       destination.searchParams.set("jobs", JSON.stringify(view));
       route = `${destination.pathname}${destination.search}`;
     }
+    if (input.resumeMode) {
+      const destination = new URL(route, "https://nestor.local");
+      destination.searchParams.set("resumeMode", input.resumeMode);
+      route = `${destination.pathname}${destination.search}`;
+    }
+    if (input.settingsSection) route += `#settings-${input.settingsSection}`;
     const display = await session.openInApp(route);
     return {
       summary:

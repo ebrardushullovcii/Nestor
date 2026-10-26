@@ -33,7 +33,10 @@ import type {
   AssistantMentionCandidate,
   AssistantMessage,
 } from "@nestor/contracts";
-import { ASSISTANT_MESSAGE_MAX_CHARS } from "@nestor/contracts";
+import {
+  ASSISTANT_NAVIGATION_STATE,
+  ASSISTANT_MESSAGE_MAX_CHARS,
+} from "@nestor/contracts";
 
 import { cn } from "@renderer/lib/cn";
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
@@ -327,11 +330,11 @@ function AssistantSidebarPanel() {
   } = useAssistantConversation({
     onOpenRoute: async (route) => {
       assistant?.setNarrowView("page");
-      await navigate(route);
+      await navigate(route, { state: ASSISTANT_NAVIGATION_STATE });
       return waitForDisplayedDestination(
         route,
         () =>
-          `${displayedLocation.current.pathname}${displayedLocation.current.search}`,
+          `${displayedLocation.current.pathname}${displayedLocation.current.search}${displayedLocation.current.hash}`,
       );
     },
   });
