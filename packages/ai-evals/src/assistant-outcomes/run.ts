@@ -19,6 +19,8 @@ import {
 } from "./preference-cases";
 import { siteOutcomeCases } from "./site-cases";
 import { trackerOutcomeCases } from "./tracker-cases";
+import { applicationViewOutcomeCases } from "./application-view-cases";
+import { readOutcomeCases } from "./read-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -38,10 +40,12 @@ export function allBatches(
   return [
     ...navigationOutcomeCases(),
     ...shellOutcomeCases(),
+    ...readOutcomeCases(),
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
     ...preferenceOutcomeCases(),
     ...siteOutcomeCases(replicaOrigin),
+    ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
   ];
 }

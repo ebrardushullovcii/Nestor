@@ -118,6 +118,11 @@ export function siteOutcomeCases(replicaOrigin: string): BuiltAppBatch[] {
       (enabled): BuiltAppBatch => ({
         id: `sites-${enabled ? "enable" : "disable"}`,
         requires: [enabled ? "sites-disable" : "sites-edit"],
+        prepare: async (page) => {
+          const current = await a(page);
+          if (!current || current.enabled === enabled)
+            throw Error("The source must start in the opposite enabled state");
+        },
         request: `${enabled ? "Enable" : "Disable"} only the source ${changedUrl}.`,
         actions: [
           {
@@ -146,6 +151,10 @@ export function siteOutcomeCases(replicaOrigin: string): BuiltAppBatch[] {
     {
       id: "sites-disable-all",
       requires: ["sites-enable"],
+      prepare: async (page) => {
+        if (!(await a(page))?.enabled || !(await b(page))?.enabled)
+          throw Error("Both matching sources must start enabled");
+      },
       request: `Disable all job sources whose URL contains "outcome-source". Keep every other source enabled as before.`,
       actions: [
         {
@@ -166,6 +175,13 @@ export function siteOutcomeCases(replicaOrigin: string): BuiltAppBatch[] {
     {
       id: "sites-enable-selected",
       requires: ["sites-disable-all"],
+      prepare: async (page) => {
+        if (
+          (await a(page))?.enabled !== false ||
+          (await b(page))?.enabled !== false
+        )
+          throw Error("Both selected sources must start disabled");
+      },
       request: `Enable these two sources only: ${changedUrl} and ${urlB}.`,
       actions: [
         {
@@ -217,6 +233,12 @@ export function siteOutcomeCases(replicaOrigin: string): BuiltAppBatch[] {
     {
       id: "sites-undo",
       requires: ["sites-remove"],
+      prepare: async (page) => {
+        if (!removed || (await a(page)))
+          throw Error(
+            "Undo requires the previously existing source to be absent",
+          );
+      },
       request:
         "Undo only the source removal from the previous message. Restore that source exactly.",
       actions: [
@@ -238,6 +260,10 @@ export function siteOutcomeCases(replicaOrigin: string): BuiltAppBatch[] {
     {
       id: "sites-remove-selected",
       requires: ["sites-undo"],
+      prepare: async (page) => {
+        if (!(await a(page)) || !(await b(page)))
+          throw Error("Both selected sources must exist before removal");
+      },
       request: `Remove these two sources: ${changedUrl} and ${urlB}. Preserve all other sources and every saved job.`,
       actions: [
         {

@@ -7,7 +7,7 @@ import {
   type ProfileRecordCollection,
 } from "@nestor/contracts";
 import { equalOutcome } from "./outcome";
-import type { BuiltAppBatch } from "./built-app";
+import { currentRequestChanges, type BuiltAppBatch } from "./built-app";
 
 type AppWindow = { nestor: { jobs: DesktopJobsBridge } };
 
@@ -156,7 +156,7 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
       actions: (["fields", "lists"] as const).flatMap((kind) =>
         Object.entries(profileEdit[kind]).map(([key, expected]) => ({
           actionId: `profile.${kind === "fields" ? "field" : "list"}.${key}`,
-          observe: async (page) => {
+          observe: async (page, reply) => {
             const current = await page.evaluate(
               async ({ kind, key }) => {
                 const value = await (
@@ -167,6 +167,16 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
               { kind, key },
             );
             return [
+              equalOutcome(
+                "data",
+                "This write has its own Undo receipt",
+                "Current Assistant reply change card",
+                currentRequestChanges(reply).some(
+                  (part) =>
+                    part.target === "profile" && part.status === "applied",
+                ),
+                true,
+              ),
               equalOutcome(
                 "data",
                 `Saved ${key}`,
@@ -258,6 +268,7 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
     Object.keys(ProfileRecordSchemas) as ProfileRecordCollection[]
   ).flatMap((collection) => {
     const id = `outcome-${collection}`;
+    let removalReceiptId: string | undefined;
     // The later edit must change existing values, including the editor toggles.
     const edited = ProfileRecordSchemas[collection].parse({
       ...recordValues[collection],
@@ -302,7 +313,17 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
         actions: [
           {
             actionId: `profile.record.${collection}.add`,
-            observe: async (page) => [
+            observe: async (page, reply) => [
+              equalOutcome(
+                "data",
+                "Created record has an Undo receipt",
+                "Current Assistant reply change card",
+                currentRequestChanges(reply).some(
+                  (part) =>
+                    part.target === "profile" && part.status === "applied",
+                ),
+                true,
+              ),
               equalOutcome(
                 "data",
                 "Created record",
@@ -322,7 +343,17 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
           .filter(([key]) => key !== "id")
           .map(([key, expected]) => ({
             actionId: `profile.record.${collection}.field.${key}`,
-            observe: async (page) => [
+            observe: async (page, reply) => [
+              equalOutcome(
+                "data",
+                "Record edit has an Undo receipt",
+                "Current Assistant reply change card",
+                currentRequestChanges(reply).some(
+                  (part) =>
+                    part.target === "profile" && part.status === "applied",
+                ),
+                true,
+              ),
               equalOutcome(
                 "data",
                 `Saved ${key}`,
@@ -344,15 +375,28 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
         actions: [
           {
             actionId: `profile.record.${collection}.remove`,
-            observe: async (page) => [
-              equalOutcome(
-                "data",
-                "Record removed",
-                `jobs.get_profile_record ${collection}/${id}`,
-                await readRecord(page),
-                null,
-              ),
-            ],
+            observe: async (page, reply) => {
+              removalReceiptId = currentRequestChanges(reply).find(
+                (part) =>
+                  part.target === "profile" && part.status === "applied",
+              )?.receiptId;
+              return [
+                equalOutcome(
+                  "data",
+                  "Removal has its own Undo receipt",
+                  "Current Assistant reply change card",
+                  Boolean(removalReceiptId),
+                  true,
+                ),
+                equalOutcome(
+                  "data",
+                  "Record removed",
+                  `jobs.get_profile_record ${collection}/${id}`,
+                  await readRecord(page),
+                  null,
+                ),
+              ];
+            },
           },
         ],
       },
@@ -363,7 +407,21 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
         actions: [
           {
             actionId: `profile.record.${collection}.undo_remove`,
-            observe: async (page) => [
+            observe: async (page, reply) => [
+              equalOutcome(
+                "data",
+                "Original removal receipt is undone",
+                "Original Assistant change card status",
+                reply.messages
+                  .flatMap((message) => message.parts)
+                  .find(
+                    (part) =>
+                      part.type === "change" &&
+                      part.receiptId === removalReceiptId &&
+                      part.status === "undone",
+                  ) !== undefined,
+                true,
+              ),
               equalOutcome(
                 "data",
                 "Removed record restored exactly",

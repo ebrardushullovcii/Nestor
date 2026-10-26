@@ -33,3 +33,20 @@ export default async function journey(ctx) {
   });
 }
 if (process.argv[2] === "--list") await load((module) => module.list());
+if (process.argv[2] === "--merge") {
+  const server = await createServer({
+    root: packageRoot,
+    logLevel: "silent",
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  try {
+    const module = await server.ssrLoadModule(
+      "/src/assistant-outcomes/merge.ts",
+    );
+    const report = await module.merge(JSON.parse(process.argv[3]));
+    process.exitCode = report.passed ? 0 : 1;
+  } finally {
+    await server.close();
+  }
+}

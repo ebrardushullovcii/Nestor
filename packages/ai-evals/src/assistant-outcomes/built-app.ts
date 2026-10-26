@@ -43,6 +43,19 @@ export interface BuiltAppEnvironment {
   doctorPassed: true;
 }
 
+/** Earlier receipts in the same conversation cannot credit a later write. */
+export function currentRequestChanges(view: AssistantConversationView) {
+  const user = view.messages.findLastIndex(
+    (message) => message.role === "user" && message.origin === "sidebar",
+  );
+  if (user < 0) return [];
+  return view.messages
+    .slice(user + 1)
+    .flatMap((message) =>
+      message.parts.flatMap((part) => (part.type === "change" ? [part] : [])),
+    );
+}
+
 export async function chatInBuiltApp(
   page: Page,
   request: string,

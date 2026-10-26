@@ -16,12 +16,14 @@ Usage:
   pnpm --filter @nestor/ai-evals assistant-outcomes --list
   pnpm --filter @nestor/ai-evals assistant-outcomes --out <outside-repo-directory> [--build]
   pnpm --filter @nestor/ai-evals assistant-outcomes --case navigation --out <directory>
+  pnpm --filter @nestor/ai-evals assistant-outcomes --merge <assistant-observations.json> --merge <another.json> --out <directory>
 
 --list          Print the full action map, exclusions and implemented case IDs. No app starts.
 --case PREFIX   Run matching action IDs, plus their prerequisite batches. Repeatable.
 --out PATH      Result directory, outside the checkout. Defaults under ~/Projects/nestor-agent-work.
 --label NAME    Isolated instance label (default: assistant-outcomes-<timestamp>).
 --build         Build and stamp the desktop before running; otherwise require a matching build.
+--merge FILE    Combine short runs of the identical build without starting an app. Repeatable.
 
 The run launches its own verify-nestor instance, passes doctor, submits requests through
 the visible Assistant composer and reads resulting data, files and visible controls.
@@ -33,6 +35,7 @@ alone cannot pass. Blocked cases require the actual guard and unchanged protecte
 Unexercised actions remain failed (not_exercised) in the full denominator, even on a subset run.
 Chat-management exclusions remain listed with reasons. Scripted-model reachability is not
 an outcome result. Sends are restricted by verify-nestor to this run's loopback replicas.
+Merged results retain every attempt, including failures, and reject different build SHAs.
 
 Artifacts: assistant-outcomes.json, assistant-observations.json, conversations, screenshots,
 replica receipts and final databases. Exit 0 requires the entire non-excluded map to pass;
@@ -50,6 +53,7 @@ const { values } = parseArgs({
     out: { type: "string" },
     label: { type: "string" },
     build: { type: "boolean" },
+    merge: { type: "string", multiple: true },
   },
 });
 if (values.help) {
@@ -87,50 +91,63 @@ if (values.help) {
     const relative = path.relative(await realpath(root), resolved);
     if (!relative.startsWith(`..${path.sep}`) && relative !== "..")
       throw Error("Results must be outside the repository");
-    const env = {
-      ...process.env,
-      NESTOR_VERIFY_LABEL: label,
-      NESTOR_VERIFY_WORK: resolved,
-    };
-    const verify = path.join(
-      root,
-      ".claude/skills/verify-nestor/bin/lib/cli.mjs",
-    );
-    const command = (...args) => runNode([verify, ...args], env);
-    let launched = false;
-    try {
-      if (values.build && (await command("build")) !== 0)
-        throw Error("Desktop build failed");
-      launched = true; // down also cleans up a partially failed up.
-      if ((await command("up", "--ai", "live")) !== 0)
-        throw Error("Isolated app launch failed");
-      if ((await command("doctor")) !== 0)
-        throw Error("Doctor did not pass; refusing to drive");
-      const status = await command(
-        "drive",
-        "run",
+    if (values.merge?.length) {
+      if (values.case?.length || values.build)
+        throw Error("--merge cannot build or run cases");
+      process.exitCode = await runNode([
         journey,
-        JSON.stringify({ prefixes: values.case ?? [], label }),
+        "--merge",
+        JSON.stringify({
+          files: values.merge.map((file) => path.resolve(file)),
+          output: resolved,
+        }),
+      ]);
+    } else {
+      const env = {
+        ...process.env,
+        NESTOR_VERIFY_LABEL: label,
+        NESTOR_VERIFY_WORK: resolved,
+      };
+      const verify = path.join(
+        root,
+        ".claude/skills/verify-nestor/bin/lib/cli.mjs",
       );
-      process.exitCode = status;
-      await writeFile(
-        path.join(output, "run.json"),
-        JSON.stringify(
-          {
-            label,
-            evidence: path.join(output, label, "verify"),
-            exitCode: status,
-          },
-          null,
-          2,
-        ),
-      );
-    } catch (error) {
-      console.error(error.message);
-      process.exitCode = 2;
-    } finally {
-      if (launched && (await command("down", "--keep-data")) !== 0)
+      const command = (...args) => runNode([verify, ...args], env);
+      let launched = false;
+      try {
+        if (values.build && (await command("build")) !== 0)
+          throw Error("Desktop build failed");
+        launched = true; // down also cleans up a partially failed up.
+        if ((await command("up", "--ai", "live")) !== 0)
+          throw Error("Isolated app launch failed");
+        if ((await command("doctor")) !== 0)
+          throw Error("Doctor did not pass; refusing to drive");
+        const status = await command(
+          "drive",
+          "run",
+          journey,
+          JSON.stringify({ prefixes: values.case ?? [], label }),
+        );
+        process.exitCode = status;
+        await writeFile(
+          path.join(output, "run.json"),
+          JSON.stringify(
+            {
+              label,
+              evidence: path.join(output, label, "verify"),
+              exitCode: status,
+            },
+            null,
+            2,
+          ),
+        );
+      } catch (error) {
+        console.error(error.message);
         process.exitCode = 2;
+      } finally {
+        if (launched && (await command("down", "--keep-data")) !== 0)
+          process.exitCode = 2;
+      }
     }
   }
 }

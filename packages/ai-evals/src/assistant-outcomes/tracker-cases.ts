@@ -156,6 +156,15 @@ export function trackerOutcomeCases(): BuiltAppBatch[] {
     {
       id: "tracker-undo-status",
       requires: ["tracker-bulk-status"],
+      prepare: async (page) => {
+        if (
+          (await rows(page)).some((row) => row.status !== "assessment") ||
+          beforeBulk.every((row) => row.status === "assessment")
+        )
+          throw Error(
+            "Undo proof requires the bulk change to have actually happened",
+          );
+      },
       request:
         "Undo only the previous bulk Assessment status change. Restore each application to its own previous status.",
       actions: [
@@ -240,6 +249,15 @@ export function trackerOutcomeCases(): BuiltAppBatch[] {
       (done): BuiltAppBatch => ({
         id: `tracker-event-${done ? "done" : "open"}`,
         requires: [done ? "tracker-edit-event" : "tracker-event-done"],
+        prepare: async (page) => {
+          const current = (await events(page)).find(
+            (event) => event.title === "Outcome reminder revised",
+          );
+          if (!current || Boolean(current.doneAt) === done)
+            throw Error(
+              "The reminder must start in the opposite completion state",
+            );
+        },
         request: `${done ? "Mark" : "Reopen"} Outcome reminder revised on Application demo 1${done ? " as done" : " so it is pending again"}.`,
         actions: [
           {

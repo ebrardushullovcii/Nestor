@@ -130,6 +130,43 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     ["palette_search", "Search workspace"],
     ["palette_choose", "Choose a workspace search result"],
     ["palette_close", "Close workspace search"],
+    ["window_minimize", "Minimize the app window"],
+    ["window_maximize", "Maximize the app window"],
+    ["window_restore", "Restore the app window"],
+    ["window_close", "Close the app window, preserving unsaved work"],
+    ["dismiss_notice", "Dismiss an app notification or status notice"],
+  ]),
+  // The current setup screen has its own stepper and save/continue controls;
+  // editing the same facts in full Profile does not prove these controls.
+  ...actions(
+    "setup.open",
+    "Guided setup stepper",
+    navigate,
+    ["import", "essentials", "background", "targeting", "extras"].map(
+      (step) => [step, `Show guided setup ${step} step`] as const,
+    ),
+  ),
+  ...actions(
+    "setup",
+    "Guided setup",
+    ["edit_profile", "finish_profile_setup"],
+    [
+      ["skip_import", "Continue setup without importing a resume"],
+      ["save_step", "Save changes on the current setup step"],
+      ["continue_basics", "Save and go to Basics"],
+      ["continue_experience", "Save and continue to Work history"],
+      ["continue_targeting", "Save and continue to Job targets"],
+      ["continue_extras", "Save and continue to Extras"],
+      ["resume", "Resume guided setup from Profile"],
+      ["dismiss_reminder", "Hide the guided setup reminder for this session"],
+      ["full_profile", "Leave guided setup for full Profile"],
+    ],
+  ),
+  ...actions("profile", "Profile", control, [
+    ["refresh", "Retry a failed Profile read"],
+  ]),
+  ...actions("settings", "Settings", control, [
+    ["refresh", "Retry a failed Settings read"],
   ]),
   ...actions(
     "home",
