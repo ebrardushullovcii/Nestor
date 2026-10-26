@@ -18,6 +18,7 @@ import {
   ResolveSubmissionOutcomeInputSchema,
   ResolveSubmissionOutcomeResultSchema,
   SubmissionOutcomeRecordSchema,
+  type SubmissionOutcomeRecord,
   serializeApprovedApplicationAnswerSnapshotForDigest,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type CandidateReusableAnswer,
@@ -42,6 +43,7 @@ import {
 import type { JobFinderRepository } from "@nestor/db";
 import { readSavedApplicationAnswers } from "@nestor/db/applications";
 import { getJobStore } from "../job-store";
+import { getApplicationStore } from "./application-store";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { getJobFinderRepositoryForWorkspaceService } from "./create-workspace-service";
@@ -104,6 +106,21 @@ export interface CreateJobFinderApplicationAuthorityServiceOptions {
   now?: () => string;
   idFactory?: () => string;
   releaseApplicationPage?: (resultId: string) => void;
+  /**
+   * The store's own record of a send, by the outcome's application id: the
+   * receipt it saved and the form it sent from. Resolution is written back
+   * to the same row.
+   */
+  applicationSends?: {
+    read(applicationRecordId: string): {
+      receipt: SubmissionOutcomeRecord | null;
+      pageUrl: string | null;
+    } | null;
+    resolve(
+      applicationRecordId: string,
+      outcome: SubmissionOutcomeRecord,
+    ): void;
+  };
 }
 
 const APPROVED_ANSWERS_REQUIRED_MESSAGE =
@@ -729,22 +746,30 @@ export function createJobFinderApplicationAuthorityService(
           });
         }
 
-        const [result] = (
-          await repository.listApplyJobResults({
-            runId: uncertainOutcome.runId,
-            jobId: uncertainOutcome.jobId,
-            applicationRecordId: uncertainOutcome.applicationRecordId,
-          })
-        ).filter((candidate) => candidate.id === uncertainOutcome.resultId);
-        const receipt = result?.privacyReceipt ?? null;
+        // The store's application row is the send's own record: the receipt
+        // it kept must be this exact uncertain outcome, and its form says
+        // where the send went.
+        const sent = options.applicationSends?.read(
+          uncertainOutcome.applicationRecordId,
+        );
+        const receipt = sent?.receipt ?? null;
+        const destination = (() => {
+          try {
+            const url = sent?.pageUrl ? new URL(sent.pageUrl) : null;
+            return url ? { origin: url.origin, safePath: url.pathname } : null;
+          } catch {
+            return null;
+          }
+        })();
         const idempotency = await repository.getSubmissionIdempotencyRecord(
           uncertainOutcome.idempotencyKey,
         );
         if (
           uncertainOutcome.outcome !== "outcome_uncertain" ||
           receipt === null ||
-          receipt.lineage.resultId !== uncertainOutcome.resultId ||
-          receipt.submissionOutcome?.id !== uncertainOutcome.id
+          destination === null ||
+          receipt.resultId !== uncertainOutcome.resultId ||
+          receipt.id !== uncertainOutcome.id
         ) {
           return ResolveSubmissionOutcomeResultSchema.parse({
             status: "blocked",
@@ -771,7 +796,7 @@ export function createJobFinderApplicationAuthorityService(
               id: `evidence_${idFactory()}`,
               kind: "operator_confirmation",
               observedAt: verifiedAt,
-              destination: receipt.destination,
+              destination,
               artifactRefId: null,
               summary:
                 parsedInput.resolution === "submitted"
@@ -792,8 +817,13 @@ export function createJobFinderApplicationAuthorityService(
           expectedIdempotencyRevision: idempotency.revision,
           outcome,
         });
-        if (resolution.status === "recorded")
+        if (resolution.status === "recorded") {
+          options.applicationSends?.resolve(
+            uncertainOutcome.applicationRecordId,
+            resolution.outcome ?? outcome,
+          );
           options.releaseApplicationPage?.(uncertainOutcome.resultId);
+        }
         return ResolveSubmissionOutcomeResultSchema.parse({
           status: resolution.status,
           outcome: resolution.outcome,
@@ -806,6 +836,12 @@ export function createJobFinderApplicationAuthorityService(
   return service;
 }
 
+/** The store names each send's application `application_<row id>`. */
+function storeApplicationId(applicationRecordId: string): number | null {
+  const id = Number(/^application_(\d+)$/u.exec(applicationRecordId)?.[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 let defaultService: JobFinderApplicationAuthorityService | null = null;
 
 export function getJobFinderApplicationAuthorityService(): JobFinderApplicationAuthorityService {
@@ -813,6 +849,22 @@ export function getJobFinderApplicationAuthorityService(): JobFinderApplicationA
     readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),
     releaseApplicationPage: (resultId) =>
       getEmbeddedBrowser().releaseOwnedTabs(resultId, { finished: true }),
+    applicationSends: {
+      read: (applicationRecordId) => {
+        const id = storeApplicationId(applicationRecordId);
+        if (id === null) return null;
+        const applications = getApplicationStore();
+        return {
+          receipt: applications.getSubmissionReceipt(id),
+          pageUrl: applications.getWork(id)?.reviewCard?.pageUrl ?? null,
+        };
+      },
+      resolve: (applicationRecordId, outcome) => {
+        const id = storeApplicationId(applicationRecordId);
+        if (id !== null)
+          getApplicationStore().resolveUncertainSend(id, outcome);
+      },
+    },
     resolveRepository: async () => {
       const workspaceService = await getJobFinderWorkspaceService();
       const repository =
