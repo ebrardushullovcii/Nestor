@@ -648,7 +648,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             : (previous?.execution.pickerAttempts ?? []),
           applyUsageTotals: accumulateApplyUsage(
             previous?.execution,
-            result.agentTiming,
             usageRecorder.snapshot(),
           ),
           answerDependencies: answerDependencies.snapshot(),

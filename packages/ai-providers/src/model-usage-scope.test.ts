@@ -31,7 +31,9 @@ test("scope records transport retries, cached input and unknown token usage for 
     performModelRequest({
       ...request,
       fetchImpl: (_url, init) => {
-        expect(JSON.parse(String(init?.body))).toMatchObject({
+        expect(
+          JSON.parse(typeof init?.body === "string" ? init.body : "{}"),
+        ).toMatchObject({
           stream_options: { include_usage: true },
         });
         return Promise.resolve(

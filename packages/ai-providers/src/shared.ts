@@ -1,5 +1,6 @@
 import {
   type ModelTokenUsage,
+  type ModelRequestAttempt,
   AssetGenerationReasonSchema,
   ResumeLanguageTranslationSchema,
   JobRequirementAssessmentSchema,
@@ -768,9 +769,7 @@ export interface JobFinderAiClient {
 }
 
 export interface ChatWithToolsOptions {
-  onRequestAttempt?: (
-    event: import("@nestor/contracts").ModelRequestAttempt,
-  ) => void;
+  onRequestAttempt?: (event: ModelRequestAttempt) => void;
   /** Ask the provider to constrain the answer to valid JSON. */
   jsonOutput?: boolean;
   /** Used on routes with verified strict-schema support; other routes keep JSON mode. */

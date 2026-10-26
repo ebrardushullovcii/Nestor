@@ -26,12 +26,11 @@ function fromTiming(timing: ApplyAgentTiming | undefined): ModelUsageTotals {
     unreportedCalls: timing.tokenUsage?.unreportedCalls ?? calls,
   };
 }
-/** Retain earlier preparations and prefer the scope that also sees letters and provider retries. */
+/** Retain earlier preparations; this scope counts actual provider requests, including letters and retries. */
 export function accumulateApplyUsage(
   previous:
     | Pick<ApplyExecutionResult, "agentTiming" | "applyUsageTotals">
     | undefined,
-  timing: ApplyAgentTiming | undefined,
   observed: ModelUsageTotals,
 ): ApplicationApplyUsageTotals {
   const before =
@@ -39,7 +38,7 @@ export function accumulateApplyUsage(
     (previous
       ? { ...fromTiming(previous.agentTiming), preparationAttempts: 1 }
       : { ...empty(), preparationAttempts: 0 });
-  const current = observed.calls > 0 ? observed : fromTiming(timing);
+  const current = observed;
   return {
     calls: before.calls + current.calls,
     unreportedCalls: before.unreportedCalls + current.unreportedCalls,

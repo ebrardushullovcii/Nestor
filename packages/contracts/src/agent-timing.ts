@@ -1,3 +1,4 @@
+import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
 
 export const ModelTokenUsageSchema = z.object({
@@ -31,8 +32,8 @@ const ApplyAgentTimingRecordSchema = z.object({
   modelTurns: z.number().int().nonnegative(),
   auxiliaryModelMs: z.number().finite().nonnegative(),
   auxiliaryModelCalls: z.number().int().nonnegative(),
-  transportCalls: z.number().int().nonnegative().optional(),
-  transportRetries: z.number().int().nonnegative().optional(),
+  transportCalls: optionalStoredField(z.number().int().nonnegative(), 0),
+  transportRetries: optionalStoredField(z.number().int().nonnegative(), 0),
   tokenUsage: ModelTokenUsageSchema.extend({
     reportedCalls: z.number().int().nonnegative(),
     unreportedCalls: z.number().int().nonnegative(),

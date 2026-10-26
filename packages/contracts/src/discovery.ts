@@ -2325,7 +2325,10 @@ export const ApplyExecutionResultSchema = z.object({
     [],
   ),
   skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
-  applyUsageTotals: optionalStoredField(ApplicationApplyUsageTotalsSchema.nullable(), null),
+  applyUsageTotals: optionalStoredField(
+    ApplicationApplyUsageTotalsSchema.nullable(),
+    null,
+  ),
   questionContexts: optionalStoredField(
     z
       .array(

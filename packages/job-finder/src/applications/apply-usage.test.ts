@@ -1,6 +1,24 @@
 import { expect, test } from "vitest";
 import { ApplicationApplyUsageTotalsSchema } from "@nestor/contracts";
 import { accumulateApplyUsage } from "./apply-usage";
+
+test("a saved skip before the agent starts records zero model calls", () => {
+  expect(
+    accumulateApplyUsage(undefined, {
+      calls: 0,
+      unreportedCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+    }),
+  ).toMatchObject({
+    calls: 0,
+    unreportedCalls: 0,
+    inputTokens: 0,
+    preparationAttempts: 1,
+  });
+});
 test("a resumed fill keeps earlier calls and tokens, including a provider retry with unreported usage", () => {
   const before = ApplicationApplyUsageTotalsSchema.parse(
     JSON.parse(
@@ -15,7 +33,7 @@ test("a resumed fill keeps earlier calls and tokens, including a provider retry 
       }),
     ),
   );
-  const total = accumulateApplyUsage({ applyUsageTotals: before }, undefined, {
+  const total = accumulateApplyUsage({ applyUsageTotals: before }, {
     calls: 6,
     unreportedCalls: 1,
     inputTokens: 200,
