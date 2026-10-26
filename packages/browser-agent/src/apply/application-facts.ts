@@ -1,5 +1,6 @@
 import {
   normalizeFormQuestionPrompt,
+  preserveTechnologyTokens,
   type CandidateReusableAnswer,
 } from "@nestor/contracts";
 
@@ -381,11 +382,14 @@ export function savedAnswerForQuestion(
       : [candidate.groupLabel, candidate.label]
           .filter((part) => part.trim())
           .join(" — "));
-  const target = normalizeFormQuestionPrompt(prompt(control));
+  const target = normalizeFormQuestionPrompt(
+    preserveTechnologyTokens(prompt(control)),
+  );
   const matches = reusableAnswers.filter(
     (saved) =>
       !saved.needsConfirmation &&
-      normalizeFormQuestionPrompt(saved.question) === target,
+      normalizeFormQuestionPrompt(preserveTechnologyTokens(saved.question)) ===
+        target,
   );
   const local = matches.filter((saved) => saved.id.startsWith("application_"));
   const answers = local.length ? local : matches;
@@ -396,7 +400,9 @@ export function savedAnswerForQuestion(
       (candidate) =>
         candidate.visible &&
         !candidate.disabled &&
-        normalizeFormQuestionPrompt(prompt(candidate)) === target,
+        normalizeFormQuestionPrompt(
+          preserveTechnologyTokens(prompt(candidate)),
+        ) === target,
     );
     const groups = new Set(
       current.map((candidate) =>

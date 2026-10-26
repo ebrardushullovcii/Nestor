@@ -2152,7 +2152,39 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
-      if (parsed.finishWhenReady && !stopped && !leftAnswerForPerson) {
+      const finalPage = pageTools.state.observation;
+      const allObservedFieldsDone =
+        !!finalPage &&
+        finalPage.controls
+          .filter(
+            (control) =>
+              !control.disabled &&
+              !control.readOnly &&
+              (control.visible || control.kind === "file"),
+          )
+          .every(
+            (control) =>
+              control.answered ||
+              (!!control.choiceGroupKey &&
+                finalPage.controls.some(
+                  (sibling) =>
+                    sibling.choiceGroupKey === control.choiceGroupKey &&
+                    sibling.checked,
+                )),
+          );
+      const completedKnownPage =
+        !!classifyQuestions &&
+        wrote &&
+        allObservedFieldsDone &&
+        !!finalPage &&
+        pendingQuestions.size === 0 &&
+        pauses.length === 0 &&
+        checkFormReadiness(finalPage).ok;
+      if (
+        (parsed.finishWhenReady || completedKnownPage) &&
+        !stopped &&
+        !leftAnswerForPerson
+      ) {
         observationNeeded = false;
         return outcomeToLoop({
           kind: "finished",

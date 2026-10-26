@@ -659,18 +659,6 @@ async function decideAnswer(input: {
   const { deps, control } = input;
   const value = formatGithubAnswer(control, input.value);
   const config = deps.config;
-  if (asksListingDiscovery(questionPrompt(control))) {
-    const answer = listingDiscoveryAnswer(control, config.sources);
-    return answer
-      ? { kind: "use", answer }
-      : {
-          kind: "leave",
-          reason:
-            "The form does not offer the source where Nestor found this listing. Please choose your answer.",
-          suggestion: null,
-          permission: true,
-        };
-  }
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
@@ -691,6 +679,7 @@ async function decideAnswer(input: {
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,
+      approvedAttestations: config.authority.preApprovedAttestationKinds,
     });
     if (permission.kind === "needs_you")
       return {
@@ -736,7 +725,53 @@ async function decideAnswer(input: {
         },
       };
     }
+    // Writing permission never falls through the legacy literal shortcuts.
+    if (!deps.checkWrittenAnswer)
+      return {
+        kind: "leave",
+        reason: "This writing could not be checked against your sources.",
+        suggestion: null,
+        permission: true,
+      };
+    deps.onAnswerSource?.("checked");
+    const check = await deps
+      .checkWrittenAnswer(questionPrompt(control), value)
+      .catch(() => null);
+    if (!check?.supported)
+      return {
+        kind: "leave",
+        reason:
+          check?.reason ??
+          "This writing could not be checked against your sources.",
+        suggestion: null,
+        permission: true,
+      };
+    return {
+      kind: "use",
+      answer: {
+        value,
+        kind: control.questionKind,
+        sourceKind: "generated",
+        sourceId: `written.${control.ref}`,
+        provenanceLabel: "written for this application",
+        groundedIn: input.groundedIn?.length
+          ? [...input.groundedIn]
+          : [permission.source.id],
+      },
+    };
     // Only requested writing reaches the independent claim checker below.
+  }
+  if (asksListingDiscovery(questionPrompt(control))) {
+    const answer = listingDiscoveryAnswer(control, config.sources);
+    return answer
+      ? { kind: "use", answer }
+      : {
+          kind: "leave",
+          reason:
+            "The form does not offer the source where Nestor found this listing. Please choose your answer.",
+          suggestion: null,
+          permission: true,
+        };
   }
   // The reader binds an explicit answer to this application and exact question.
   const savedRecord = savedAnswerForQuestion(
@@ -2126,6 +2161,7 @@ export async function executeApplyProposal(
             config.sources.posting.location,
           ));
       if (
+        deps.classifyQuestions ||
         ownToggle ||
         ((control.kind === "radio" ||
           control.answerControlType === "multi_choice") &&

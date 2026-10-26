@@ -1,7 +1,8 @@
+import { preserveTechnologyTokens } from "@nestor/contracts";
 import type { AnswerEvidence } from "./answer-evidence";
 
 const normalize = (value: string) =>
-  value
+  preserveTechnologyTokens(value)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/\bjs\b/gu, "javascript")
@@ -28,6 +29,7 @@ const ordinaryCapitals = new Set(
 );
 
 function namesIn(text: string, personalHistory: boolean): string[] {
+  text = preserveTechnologyTokens(text);
   const names = [
     ...text.matchAll(/\b[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*)*\b/gu),
   ]
@@ -145,37 +147,39 @@ export function concreteClaimsSupported(
       /\b(?:led|worked|managed|built|delivered|earned|achieved|spent|graduated|founded|employed)\b|\bmy\s+(?:experience|work|career|time|tenure)\b/iu.test(
         clause,
       );
+    const roleSubject =
+      /^(?:(?:The|Your|This) )?(?:role|position|company|organisation|organization|team|posting|job)\b|^Owning the\b/iu.test(
+        clause.trim(),
+      );
+    const roleIntent =
+      /^(?:I|We) (?:would (?:welcome|like|love|appreciate)|am excited to|am interested in|want to (?:join|contribute|build|work))\b/iu.test(
+        clause.trim(),
+      ) &&
+      !/\b(?:I|we|my|our)\b/iu.test(clause.trim().replace(/^(?:I|We)\b/iu, ""));
+    const applicantClaim =
+      personalHistory ||
+      (!roleSubject && (!roleIntent || numbers(clause).length > 0));
     const quotes = evidence
-      .filter((entry) => !personalHistory || entry.source !== "posting")
+      .filter((entry) => !applicantClaim || entry.source !== "posting")
       .map((entry) => entry.quote);
     const content = contentWords(clause);
-    const claimQuotes =
-      personalHistory ||
-      (/\b(?:I|my|me|our|we)\b/u.test(clause) &&
-        !/^(?:I|We) would (?:welcome|like|love|appreciate)\b/u.test(
-          clause.trim(),
-        ))
-        ? quotes.filter((quote) =>
-            evidence.some(
-              (entry) => entry.source !== "posting" && entry.quote === quote,
-            ),
-          )
-        : quotes;
     if (
       content.length &&
-      !claimQuotes.some((quote) =>
-        content.every((word) => contains(quote, word)),
-      )
+      (applicantClaim
+        ? !quotes.some((quote) =>
+            content.every((word) => contains(quote, word)),
+          )
+        : content.some(
+            (word) => !quotes.some((quote) => contains(quote, word)),
+          ))
     )
       return false;
     const literalClaim =
-      personalHistory ||
-      (/\b(?:I|my|me|our|we)\b/u.test(clause) &&
-        !/^(?:I|We) would (?:welcome|like|love|appreciate)\b/u.test(
-          clause.trim(),
-        )) ||
-      numbers(clause).length > 0;
-    if (literalClaim && !claimQuotes.some((quote) => contains(quote, clause)))
+      applicantClaim &&
+      (personalHistory ||
+        /\b(?:I|my|me|our|we)\b/u.test(clause) ||
+        numbers(clause).length > 0);
+    if (literalClaim && !quotes.some((quote) => contains(quote, clause)))
       return false;
     const counts = numbers(clause);
     if (
@@ -225,7 +229,10 @@ export function concreteClaimsSupported(
 let countryNames:
   | Array<{ code: string; name: string; abbreviation: boolean }>
   | undefined;
+const countryReadCache = new Map<string, readonly string[]>();
 export function countriesIn(text: string): Set<string> {
+  const cached = countryReadCache.get(text);
+  if (cached) return new Set(cached);
   if (!countryNames) {
     countryNames = [];
     for (const locale of ["en", "de", "fr", "es", "pt"]) {
@@ -255,7 +262,7 @@ export function countriesIn(text: string): Set<string> {
       for (const name of names)
         countryNames.push({ code, name, abbreviation: name.length <= 3 });
   }
-  return new Set(
+  const result = new Set(
     countryNames
       .filter((entry) =>
         entry.abbreviation
@@ -264,6 +271,10 @@ export function countriesIn(text: string): Set<string> {
       )
       .map((entry) => entry.code),
   );
+  if (countryReadCache.size >= 256)
+    countryReadCache.delete(countryReadCache.keys().next().value ?? "");
+  countryReadCache.set(text, [...result]);
+  return result;
 }
 
 export function authorizationCountryMatches(
@@ -285,4 +296,16 @@ export function authorizationCountryMatches(
       .flatMap((entry) => [...countriesIn(entry.quote)]),
   );
   return [...wanted].every((country) => cited.has(country));
+}
+
+/** Exact country terms for a full-question allow list, including UK shorthand. */
+export function countryTerms(code: string): string[] {
+  countriesIn("");
+  return [
+    ...new Set(
+      (countryNames ?? [])
+        .filter((entry) => entry.code === code)
+        .map((entry) => entry.name),
+    ),
+  ];
 }

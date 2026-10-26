@@ -1,3 +1,4 @@
+import type { ApplicationAttestationKind } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
 import type { LLMClient } from "../agent/contracts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
@@ -17,6 +18,7 @@ export async function checkClassifiedApplicationAnswers(input: {
   client: LLMClient;
   sources: ApplyAnswerSources;
   payDisclosed: boolean;
+  approvedAttestations?: readonly ApplicationAttestationKind[];
   answers: readonly { question: string; answer: string }[];
   formContext: {
     pageText: string;
@@ -73,10 +75,15 @@ export async function checkClassifiedApplicationAnswers(input: {
           kind: "needs_you",
           reason: "The question is no longer present.",
         };
+      const reading = readings.get(answer.question);
       return classifyAnswerPermission({
-        control,
+        control: {
+          ...control,
+          attestationKind: reading?.declarationKind ?? control.attestationKind,
+        },
         controls,
-        tags: readings.get(answer.question)?.answerTags,
+        tags: reading?.answerTags,
+        approvedAttestations: input.approvedAttestations,
         sources: input.sources,
         answer: answer.answer,
         pageInstructions: input.formContext.pageText,

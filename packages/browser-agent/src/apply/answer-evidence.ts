@@ -1,3 +1,4 @@
+import { preserveTechnologyTokens } from "@nestor/contracts";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 /** Deterministic relevance checks. A positive model verdict cannot override these. */
 export interface AnswerEvidence {
@@ -7,7 +8,7 @@ export interface AnswerEvidence {
 }
 
 const normalize = (value: string) =>
-  value
+  preserveTechnologyTokens(value)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/\bjs\b/gu, "javascript")
@@ -19,7 +20,7 @@ const scalar = (value: string) =>
 const opinion =
   /\b(?:like[sd]?|love[sd]?|hate[sd]?|enjoy\w*|want\w*|wish\w*|proud|passion\w*|excited|interested|strengths?|strongest)\b/iu;
 const preference =
-  /\b(?:go[\s-]*to|best\s+(?:time|contact\s+time)|top\s+skill|prefer(?:ence|red|s)?|favou?rites?)\b/iu;
+  /\b(?:go[\s-]*to|best\s+(?:time|contact\s+time)|top\s+skill|prefer(?:ence|red|s)?|favou?rites?|of\s+choice)\b/iu;
 const motivation =
   /\b(?:why|what)\b.*\b(?:join|apply|work|company|us|role|position|attracts?|appeals?|interests?)\b|\b(?:cover|application|motivation)\s+letter\b|\b(?:motivation|motivates|interested in (?:this|the) (?:role|position))\b/iu;
 
@@ -224,6 +225,19 @@ export function evidenceFitsQuestion(input: {
   if (requiresSavedNationalityAnswer(question)) return exactSaved;
   if (requiresSavedOpinionAnswer(question, answer)) return exactSaved;
   if (exactSaved) return true;
+  // A numeric day count may be displayed with its source field's explicit unit.
+  const noticeDays = /^(\d+) days?$/iu.exec(answer.trim());
+  if (
+    noticeDays &&
+    /\bnotice period\b/iu.test(question) &&
+    evidence.some(
+      (entry) =>
+        entry.source === "applicant" &&
+        entry.path === "/workEligibility/Notice period in days" &&
+        entry.quote === noticeDays[1],
+    )
+  )
+    return true;
   const month = employmentMonthEvidence(question, answer, evidence);
   if (month !== null) return month;
   if (

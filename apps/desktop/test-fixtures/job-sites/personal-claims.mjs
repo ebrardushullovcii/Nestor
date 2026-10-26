@@ -14,7 +14,23 @@ export function handlePersonalClaims(req, res, url, { send }) {
     send(405, "This fixture is fill-only.");
     return true;
   }
-  if (url.pathname === "/personal-claims/apply/own-words") {
+  if (url.pathname === "/personal-claims/apply/answer-gate") {
+    send(
+      200,
+      `<!doctype html><title>Apply — Synthetic Workshop</title>
+      <h1>Engineer — Synthetic Workshop</h1><p>Please write your cover letter in your own words.</p>
+      <form><label>Full name<input name="name" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Resume<input name="resume" type="file" required></label>
+      <fieldset><legend>Application Questions</legend>
+      <label>Are you authorized to work in the UK?<select name="authorization" required><option value="">Choose</option><option>Yes</option><option>No</option></select></label>
+      <label>Are you authorized to work in the UK without any restrictions and without ever requiring sponsorship?<select name="compound" required><option value="">Choose</option><option>Yes</option><option>No</option></select></label>
+      <label><input type="checkbox" name="preference" required>Is Rust your favourite language?</label>
+      <label><input type="checkbox" name="citizenship" required>Do you hold British citizenship?</label>
+      </fieldset><label>Cover letter<textarea name="letter" required></textarea></label>
+      <button>Send application</button></form>`,
+    );
+  } else if (url.pathname === "/personal-claims/apply/own-words") {
     send(
       200,
       `<!doctype html><title>Apply — Example Workshop</title>

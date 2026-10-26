@@ -768,6 +768,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               client && form
                 ? await checkClassifiedApplicationAnswers({
                     client,
+                    approvedAttestations: AiBehaviorPreferenceSchema.parse(
+                      settings.aiBehavior ?? {},
+                    ).applying.preApprovedDeclarations,
                     formControls: buildApplyFormObservation(
                       form,
                       new Date().toISOString(),

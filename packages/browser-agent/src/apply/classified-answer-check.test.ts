@@ -214,7 +214,7 @@ test.each([
                         tags: [
                           {
                             index: 0,
-                            kind: "other",
+                            kind: "motivation",
                             country: null,
                             sourceId: "resume.text",
                           },
@@ -256,3 +256,55 @@ test.each([
     expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
+
+test("a preapproved routine declaration remains a sourced answer, while a gated question cannot borrow that approval", async () => {
+  const client: LLMClient = {
+    chatWithTools: vi.fn().mockResolvedValue({
+      toolCalls: [
+        {
+          id: "read",
+          type: "function",
+          function: {
+            name: "report_question_kinds",
+            arguments: JSON.stringify({
+              plainIndexes: [],
+              flagged: [
+                {
+                  index: 0,
+                  asksAboutPay: false,
+                  declarationKind: "truthfulness_certification",
+                },
+              ],
+              tags: [
+                { index: 0, kind: "other", country: null, sourceId: null },
+              ],
+            }),
+          },
+        },
+      ],
+    }),
+  };
+  const input = {
+    client,
+    sources,
+    payDisclosed: false,
+    approvedAttestations: ["truthfulness_certification" as const],
+    answers: [
+      { question: "I certify that the information is true", answer: "Yes" },
+    ],
+    formContext: { pageText: "", fields: [] },
+  };
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    true,
+  );
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
+        answers: [
+          { question: "Do you hold British citizenship?", answer: "Yes" },
+        ],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+});

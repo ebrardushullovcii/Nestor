@@ -7,15 +7,15 @@ import { buildApplyLetterDependencies } from "./agent-application-preparation";
 // quote is the supplied synthetic context; answer-grounding tests check verdicts.
 function supportedEvidence(messages: readonly { content?: string }[]) {
   const data = JSON.parse(String(messages[1]?.content ?? "{}")) as {
-    applicant: { name: { full: string } };
+    applicant: { summary: string; name: { full: string } };
   };
   return [
     {
       kind: "applicant_fact",
       claim: "Scripted supported letter",
       source: "applicant",
-      path: "/name/full",
-      quote: data.applicant.name.full,
+      path: "/summary",
+      quote: data.applicant.summary,
     },
   ];
 }
@@ -51,7 +51,7 @@ describe("application document writer context", () => {
                     },
                   ],
                 }
-              : { content: "Revised grounded letter." },
+              : { content: seed.profile.summary },
           );
         },
       },
@@ -161,7 +161,7 @@ test.each([true, false])(
                     },
                   ],
                 }
-              : { content: "A proposed letter with personal claims." },
+              : { content: seed.profile.summary },
           );
         },
       },
@@ -184,10 +184,7 @@ test.each([true, false])(
       preference: dependencies.preference,
       priorText: null,
     });
-    if (supported)
-      await expect(writing).resolves.toBe(
-        "A proposed letter with personal claims.",
-      );
+    if (supported) await expect(writing).resolves.toBe(seed.profile.summary);
     else
       await expect(writing).rejects.toThrow(
         "The rejected email and claimed editorial results are unsupported",
@@ -254,7 +251,7 @@ test("writer input uses application facts, excludes pay answers and trims the re
                   },
                 ],
               }
-            : { content: "Supported letter." },
+            : { content: seed.profile.summary },
         );
       },
     },

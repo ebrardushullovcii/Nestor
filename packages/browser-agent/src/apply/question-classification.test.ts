@@ -487,26 +487,28 @@ test("settled readings are offered only once every question has come back", asyn
   expect(classify.settled(controls("Rate"))).toBeUndefined();
 });
 
-test("typed readings bind page instructions and current sources into their cache", async () => {
+test("typed readings bind instructions while keeping meaning across a source refresh", async () => {
   const client = clientReplying([]);
-  vi.mocked(client.chatWithTools).mockImplementation(() => Promise.resolve(({
-    toolCalls: [
-      {
-        id: "tags",
-        type: "function",
-        function: {
-          name: "report_question_kinds",
-          arguments: JSON.stringify({
-            plainIndexes: [0],
-            flagged: [],
-            tags: [
-              { index: 0, kind: "own_words", country: null, sourceId: null },
-            ],
-          }),
+  vi.mocked(client.chatWithTools).mockImplementation(() =>
+    Promise.resolve({
+      toolCalls: [
+        {
+          id: "tags",
+          type: "function",
+          function: {
+            name: "report_question_kinds",
+            arguments: JSON.stringify({
+              plainIndexes: [0],
+              flagged: [],
+              tags: [
+                { index: 0, kind: "own_words", country: null, sourceId: null },
+              ],
+            }),
+          },
         },
-      },
-    ],
-  })));
+      ],
+    }),
+  );
   let value = "Saved text";
   const classify = createQuestionClassifier({
     client,
@@ -527,15 +529,15 @@ test("typed readings bind page instructions and current sources into their cache
   );
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   value = "Edited text";
-  expect(classify.settled(page, context)).toBeUndefined();
+  expect(classify.settled(page, context)).toBeDefined();
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   expect(
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
   ).toContain("Write this yourself");
   page[0].groupLabel = "Employment";
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 test("duplicate or malformed tags never become an answer permission", async () => {
   const client = clientReplying([]);

@@ -134,7 +134,13 @@ export async function checkWrittenApplicationAnswers(input: {
     });
     let index = 0;
     return input.answers.map((entry) => {
-      if (!asksListingDiscovery(entry.question)) return remaining[index++]!;
+      if (!asksListingDiscovery(entry.question))
+        return (
+          remaining[index++] ?? {
+            supported: false,
+            reason: "This answer was not checked.",
+          }
+        );
       const source = input.sources.listingDiscovery;
       const supported =
         !!source?.label.trim() &&

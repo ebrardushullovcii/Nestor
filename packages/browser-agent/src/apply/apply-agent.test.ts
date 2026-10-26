@@ -5507,7 +5507,7 @@ test("classification settles before starting a sourced writing check and before 
                   tags: [
                     {
                       index: 0,
-                      kind: "other",
+                      kind: "motivation",
                       country: null,
                       sourceId: "posting.description",
                     },
@@ -5598,7 +5598,7 @@ test("form turns and question reading are apply work; answer checks are fact che
                   tags: [
                     {
                       index: 0,
-                      kind: "other",
+                      kind: "motivation",
                       country: null,
                       sourceId: "posting.description",
                     },
