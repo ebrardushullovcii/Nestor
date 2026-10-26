@@ -55,6 +55,7 @@ export function applicationFacts(
 ) {
   const profile = sources.profile;
   return {
+    listingDiscovery: sources.listingDiscovery,
     name: {
       full: profile.fullName,
       first: profile.firstName,

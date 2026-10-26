@@ -10,6 +10,8 @@ import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
 import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
+import { asksListingDiscovery } from "./listing-discovery-answer";
+import { normalizeSignal } from "./control-classification";
 
 export interface WrittenAnswerCheck {
   supported: boolean;
@@ -49,7 +51,7 @@ function quoteMatches(value: unknown, quote: string, path: string): boolean {
 }
 
 const EVIDENCE_INSTRUCTIONS =
-  "For every supported answer, list evidence for ALL its claims: the claim, source (applicant, resume or posting), and an exact quote from that source. Give the exact source field as a JSON Pointer path and quote its value exactly. Short Yes, No and numeric answers need the path of their specific named fact or saved answer; they cannot be cited without that context. Applicant history, opinions, favourites, preferences and personal use must be explicitly established by applicant/resume evidence. A skill list does not establish a favourite product or personal opinion. Overall career length plus a listed skill does not establish that many years with that skill. An employer absent from a resume does not establish that the person never worked or consulted there; reject an unsupported No as well as an unsupported Yes. The posting may support role-specific motivation about the advertised work only; it never establishes applicant facts or opinions. General interests in the advertised work may be composed without inventing personal history; cite the role context as posting evidence. Do not choose an unknown preferred contact time or invent how the person heard about the job. Unsupported answers need the person's answer, without proposed invented wording. Missing or invalid evidence cannot authorize an answer.";
+  "For every supported answer, list evidence for ALL its claims: the claim, source (applicant, resume or posting), and an exact quote from that source. Give the exact scalar source field as a JSON Pointer path. For long text, quote only the shortest verbatim passage that establishes the claim; never repeat the whole resume or whole source field. For short Yes, No and numeric values, quote the complete scalar value and give the path of their specific named fact or saved answer; they cannot be cited without that context. Applicant history, opinions, favourites, preferences and personal use must be explicitly established by applicant/resume evidence. A skill list does not establish a favourite product or personal opinion. Overall career length plus a listed skill does not establish that many years with that skill. An employer absent from a resume does not establish that the person never worked or consulted there; reject an unsupported No as well as an unsupported Yes. The posting may support role-specific motivation about the advertised work only; it never establishes applicant facts or opinions. General interests in the advertised work may be composed without inventing personal history; cite the role context as posting evidence. Do not choose an unknown preferred contact time or invent how the person heard about the job. Unsupported answers need the person's answer, without proposed invented wording. Missing or invalid evidence cannot authorize an answer.";
 
 /** Longest chosen option that still counts as a value. */
 const SHORT_CHOICE_CHARS = 80;
@@ -123,6 +125,28 @@ export async function checkWrittenApplicationAnswers(input: {
   signal?: AbortSignal | undefined;
 }): Promise<WrittenAnswerCheck[]> {
   if (input.answers.length === 0) return [];
+  if (input.answers.some((entry) => asksListingDiscovery(entry.question))) {
+    const remaining = await checkWrittenApplicationAnswers({
+      ...input,
+      answers: input.answers.filter(
+        (entry) => !asksListingDiscovery(entry.question),
+      ),
+    });
+    let index = 0;
+    return input.answers.map((entry) => {
+      if (!asksListingDiscovery(entry.question)) return remaining[index++]!;
+      const source = input.sources.listingDiscovery;
+      const supported =
+        !!source?.label.trim() &&
+        normalizeSignal(entry.answer) === normalizeSignal(source.label);
+      return {
+        supported,
+        reason: supported
+          ? "This is the recorded source where Nestor found the listing."
+          : "The answer does not match where Nestor found this listing. Please choose your answer.",
+      };
+    });
+  }
   // Remove prohibited writing before constructing a model request. A lying
   // checker, an unavailable checker, and retries all get the same decision.
   const prohibited = input.answers.map((entry) =>
@@ -235,11 +259,21 @@ export async function checkWrittenApplicationAnswers(input: {
       },
     },
   ];
-  // One budget covers both attempts, leaving time for the guarded page
-  // writes and observation within the apply tool's deadline.
+  const answerChars = input.answers.reduce(
+    (total, entry) => total + entry.answer.length,
+    0,
+  );
+  const longWriting =
+    answerChars >= 1_200 ||
+    input.answers.some((entry) =>
+      /\b(?:cover|motivation|application) letter\b/iu.test(entry.question),
+    );
+  // A letter check and its one retry fit inside the document tool's five-minute
+  // deadline. A slow first attempt must leave a useful retry window.
+  const timeout = AbortSignal.timeout(longWriting ? 180_000 : 60_000);
   const signal = input.signal
-    ? AbortSignal.any([input.signal, AbortSignal.timeout(60_000)])
-    : AbortSignal.timeout(60_000);
+    ? AbortSignal.any([input.signal, timeout])
+    : timeout;
   const verdicts = new Map<number, WrittenAnswerCheck>();
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
@@ -261,15 +295,19 @@ export async function checkWrittenApplicationAnswers(input: {
           reasoningTask: input.shortValues === true ? "apply" : "claim_check",
           maxOutputTokens: Math.min(
             16_000,
-            (4_000 +
-              400 * input.answers.length +
-              Math.ceil(
-                input.answers.reduce(
-                  (total, entry) =>
-                    total + entry.question.length + entry.answer.length,
-                  0,
-                ) / 2,
-              )) *
+            Math.max(
+              longWriting ? 8_000 : 4_000,
+              4_000 +
+                400 * input.answers.length +
+                Math.ceil(
+                  (answerChars +
+                    input.answers.reduce(
+                      (total, entry) => total + entry.question.length,
+                      0,
+                    )) /
+                    2,
+                ),
+            ) *
               (attempt + 1),
           ),
         },

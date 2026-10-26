@@ -2,6 +2,68 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { LLMClient } from "../agent/contracts";
+import letterRetry from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/letter-check-retry.json";
+
+test("a slow incomplete letter check leaves time for its grounded retry", async () => {
+  vi.useFakeTimers();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  });
+  try {
+    let calls = 0;
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(
+      (_messages, _tools, options) =>
+        new Promise((resolve, reject) => {
+          const first = calls++ === 0;
+          const timer = setTimeout(
+            () =>
+              first
+                ? reject(new Error(letterRetry.firstError))
+                : resolve(checkedReply),
+            first ? letterRetry.firstAttemptMs : letterRetry.retryMs,
+          );
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new Error("Aborted"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const pending = checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      answers: [
+        {
+          question: letterRetry.question,
+          answer: letterRetry.answerSentence.repeat(letterRetry.repetitions),
+        },
+      ],
+    });
+    const result = expect(pending).resolves.toEqual([
+      { supported: true, reason: "Supported" },
+    ]);
+    await vi.advanceTimersByTimeAsync(
+      letterRetry.firstAttemptMs + letterRetry.retryMs,
+    );
+    await result;
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
+    expect(
+      chatWithTools.mock.calls[0][2]?.maxOutputTokens,
+    ).toBeGreaterThanOrEqual(8_000);
+    const prompt = JSON.stringify(chatWithTools.mock.calls[0][0]);
+    expect(prompt).toContain("shortest verbatim passage");
+  } finally {
+    timeout.mockRestore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
 
 test("passes current eligibility, No and limited-permit conditions to the independent check", async () => {
   const profile = CandidateProfileSchema.parse({

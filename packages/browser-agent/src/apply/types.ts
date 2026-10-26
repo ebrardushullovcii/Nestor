@@ -283,6 +283,7 @@ export interface ApplyAnswer {
 }
 
 export interface ApplyAnswerSources {
+  listingDiscovery?: { label: string; url: string };
   profile: CandidateProfile;
   preferences?: JobSearchPreferences | undefined;
   /** Plain text of the resume that goes with this application, when there is one. */

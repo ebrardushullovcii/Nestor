@@ -1,5 +1,9 @@
 import { questionClassificationKey } from "./question-classification";
 import {
+  asksListingDiscovery,
+  listingDiscoveryAnswer,
+} from "./listing-discovery-answer";
+import {
   nationalityQuestionIdentity,
   NATIONALITY_ANSWER_REASON,
 } from "./person-nationality";
@@ -642,6 +646,18 @@ async function decideAnswer(input: {
   const { deps, control } = input;
   const value = formatGithubAnswer(control, input.value);
   const config = deps.config;
+  if (asksListingDiscovery(questionPrompt(control))) {
+    const answer = listingDiscoveryAnswer(control, config.sources);
+    return answer
+      ? { kind: "use", answer }
+      : {
+          kind: "leave",
+          reason:
+            "The form does not offer the source where Nestor found this listing. Please choose your answer.",
+          suggestion: null,
+          permission: true,
+        };
+  }
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);

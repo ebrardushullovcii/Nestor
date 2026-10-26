@@ -7,6 +7,7 @@ import type { LLMClient } from "../agent/contracts";
 import { evidenceFitsQuestion } from "./answer-evidence";
 import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 import k1 from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/answer-evidence-k1.json";
+import discovery from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/listing-discovery.json";
 
 const sources = {
   profile: CandidateProfileSchema.parse({
@@ -34,37 +35,53 @@ const sources = {
   },
 };
 
-test.each(k1.cases)("K1 lying-checker replay: $name", async (entry) => {
-  const chatWithTools = vi
-    .fn<LLMClient["chatWithTools"]>()
-    .mockResolvedValue({
-      toolCalls: [
-        {
-          id: "lie",
-          type: "function",
-          function: {
-            name: "report_answer_checks",
-            arguments: JSON.stringify({
-              checks: [
-                {
-                  index: 0,
-                  supported: true,
-                  reason: "Supported",
-                  evidence: entry.evidence.map((evidence) => ({
-                    ...evidence,
-                    kind:
-                      evidence.source === "posting"
-                        ? "role_motivation"
-                        : "applicant_fact",
-                    claim: entry.answer,
-                  })),
-                },
-              ],
-            }),
-          },
-        },
-      ],
+test.each(["A friend referred me", discovery.label])(
+  "listing source is checked deterministically: %s",
+  async (answer) => {
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>();
+    const result = await checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources: {
+        ...sources,
+        listingDiscovery: { label: discovery.label, url: discovery.url },
+      },
+      payDisclosed: false,
+      answers: [{ question: discovery.question, answer }],
     });
+    expect(result[0]?.supported).toBe(answer === discovery.label);
+    expect(chatWithTools).not.toHaveBeenCalled();
+  },
+);
+
+test.each(k1.cases)("K1 lying-checker replay: $name", async (entry) => {
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+    toolCalls: [
+      {
+        id: "lie",
+        type: "function",
+        function: {
+          name: "report_answer_checks",
+          arguments: JSON.stringify({
+            checks: [
+              {
+                index: 0,
+                supported: true,
+                reason: "Supported",
+                evidence: entry.evidence.map((evidence) => ({
+                  ...evidence,
+                  kind:
+                    evidence.source === "posting"
+                      ? "role_motivation"
+                      : "applicant_fact",
+                  claim: entry.answer,
+                })),
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  });
   const result = await checkWrittenApplicationAnswers({
     client: { chatWithTools },
     sources: {
@@ -84,8 +101,10 @@ test.each(k1.cases)("K1 lying-checker replay: $name", async (entry) => {
   });
   expect(result[0]?.supported).toBe(entry.supported);
   for (const evidence of entry.evidence) {
-    if (evidence.source === "resume") expect(k1.resume).toContain(evidence.quote);
-    if (evidence.path === "/location/region") expect("Germany").toBe(evidence.quote);
+    if (evidence.source === "resume")
+      expect(k1.resume).toContain(evidence.quote);
+    if (evidence.path === "/location/region")
+      expect("Germany").toBe(evidence.quote);
   }
 });
 

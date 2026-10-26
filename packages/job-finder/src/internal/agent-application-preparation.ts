@@ -628,6 +628,9 @@ export async function runAgentApplicationPreparation(
     authority: activeAuthority,
     sources: {
       profile: executionInput.profile,
+      ...(executionInput.listingDiscovery
+        ? { listingDiscovery: executionInput.listingDiscovery }
+        : {}),
       preferences: input.searchPreferences,
       resumeText: executionInput.profile.baseResume.textContent,
       posting: {

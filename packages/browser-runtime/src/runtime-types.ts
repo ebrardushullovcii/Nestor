@@ -110,6 +110,8 @@ export interface ApplicationAttachmentArtifact {
 }
 
 export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
+  /** Recorded listing provenance; never inferred from the application host. */
+  listingDiscovery?: { label: string; url: string };
   /**
    * Opaque identity for the exact prepared browser page. Later submission
    * hands must present the same key; it carries no permission by itself.

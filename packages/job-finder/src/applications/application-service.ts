@@ -352,6 +352,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
       job: toResumeJob(job),
+      listingDiscovery: {
+        label: job.sourceLabel,
+        url:
+          [...job.sightings].sort((a, b) => a.seenAt.localeCompare(b.seenAt))[0]
+            ?.url ?? job.url,
+      },
       profile,
       settings,
       resumeArtifact: artifact,

@@ -1,4 +1,5 @@
 import { createApplyTiming } from "./apply-timing";
+import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
 import {
@@ -539,6 +540,7 @@ async function runMeasuredApplyAgent(
         return null; // The executor checks files and click-derived answers itself.
     }
     return answer !== null &&
+      !asksListingDiscovery(questionPrompt(control)) &&
       control.attestationKind === null &&
       !isCoverLetterControl(control) &&
       (savedAnswerForQuestion(

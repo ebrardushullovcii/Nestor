@@ -1,0 +1,8 @@
+{
+  "question": "Cover letter",
+  "answerSentence": "Supported long letter. ",
+  "repetitions": 100,
+  "firstAttemptMs": 55000,
+  "retryMs": 45000,
+  "firstError": "incomplete: max_output_tokens"
+}

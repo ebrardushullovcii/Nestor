@@ -17,6 +17,7 @@ import {
 } from "./policy-executor";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
+import discovery from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/listing-discovery.json";
 import { buildApplyFormObservation } from "./page-hands";
 import { runSubmitPreflight } from "./submit-preflight";
 import type {
@@ -179,6 +180,60 @@ function configFor(
 const now = () => new Date("2026-09-14T10:00:00.000Z");
 
 describe("apply policy executor", () => {
+  test.each(discovery.cases)(
+    "listing-source replay uses observed provenance, never a generated referral: $kind $options",
+    async (entry) => {
+      const source = rawPage({
+        controls: [
+          rawControl({
+            index: 0,
+            label: discovery.question,
+            tagName: entry.kind === "select" ? "select" : "input",
+            role: entry.kind === "combobox" ? "combobox" : "",
+            options: entry.options,
+            required: true,
+          }),
+        ],
+      });
+      const { config } = configFor(source);
+      config.sources.listingDiscovery = {
+        label: discovery.label,
+        url: discovery.url,
+      };
+      const checkWrittenAnswer = vi
+        .fn()
+        .mockResolvedValue({ supported: true, reason: "Lying checker" });
+      const chooseOption = vi.spyOn(config.hands, "chooseOption");
+      const proposal =
+        entry.kind === "text"
+          ? { tool: "type" as const, ref: "c0", text: "A friend referred me" }
+          : { tool: "select" as const, ref: "c0", option: "Referral" };
+      const result = await executeApplyProposal(
+        proposal,
+        observationOf(source).signature,
+        {
+          config,
+          now,
+          guardState: createApplyGuardState(),
+          checkWrittenAnswer,
+        },
+      );
+      expect(checkWrittenAnswer).not.toHaveBeenCalled();
+      if (entry.expected) {
+        expect(result).toMatchObject({
+          kind: "filled",
+          filled: {
+            answer: { value: entry.expected, sourceId: "listingDiscovery" },
+          },
+        });
+        if (entry.kind !== "text")
+          expect(chooseOption).toHaveBeenCalledWith("c0", entry.expected);
+      } else {
+        expect(result.kind).toBe("suggestion");
+        expect(chooseOption).not.toHaveBeenCalled();
+      }
+    },
+  );
   test.each(["prepare_only", "autonomous_submit"] as const)(
     "own-words replay: %s hands writing to the person before any checker or write",
     async (mode) => {
@@ -2519,7 +2574,7 @@ describe("questions keep to their own control", () => {
     expect(chooseOption).toHaveBeenCalledWith("c0", "United Kingdom +44");
   });
 
-  test("the person's saved choice goes in as their own answer", async () => {
+  test("recorded listing provenance overrides proposed and saved sourcing stories", async () => {
     const sourceQuestion =
       "How did you hear about this job? Select an option Job board Company website Referral Other";
     const page = rawPage({
@@ -2541,6 +2596,10 @@ describe("questions keep to their own control", () => {
       ],
     });
     const { config, hands } = configFor(page);
+    config.sources.listingDiscovery = {
+      label: "Job board",
+      url: "https://listing.example.test/42",
+    };
     config.sources.reusableAnswers = [
       {
         id: "saved_source",
@@ -2560,7 +2619,7 @@ describe("questions keep to their own control", () => {
       { config, now, guardState: createApplyGuardState() },
     );
     // Without a fact check, a choice that is not the saved one is not made.
-    expect(other.kind).toBe("suggestion");
+    expect(other.kind).toBe("filled");
 
     const outcome = await executeApplyProposal(
       { tool: "select", ref: "c0", option: "Job board" },
@@ -2569,12 +2628,12 @@ describe("questions keep to their own control", () => {
     );
 
     expect(outcome.kind).toBe("filled");
-    expect(chooseOption).toHaveBeenCalledTimes(1);
+    expect(chooseOption).toHaveBeenCalledTimes(2);
     expect(chooseOption).toHaveBeenCalledWith("c0", "Job board");
     if (outcome.kind === "filled") {
       expect(outcome.filled.answer).toMatchObject({
         value: "Job board",
-        sourceKind: "answer_library",
+        sourceKind: "posting",
       });
     }
   });
@@ -2614,7 +2673,7 @@ describe("questions keep to their own control", () => {
 
     expect(outcome.kind).toBe("suggestion");
     if (outcome.kind === "suggestion") {
-      expect(outcome.question?.suggestedAnswers[0]?.text).toBe("Job board");
+      expect(outcome.question?.suggestedAnswers).toEqual([]);
     }
     expect(chooseOption).not.toHaveBeenCalled();
   });
@@ -3088,15 +3147,15 @@ describe("the model's answers stand when the person's facts support them (ADR 00
     expect(outcome.note).toContain("That is not the applicant's email.");
   });
 
-  test("the model chooses an option nothing stored answers once the check supports it", async () => {
+  test("the model chooses a role-context option once the check supports it", async () => {
     const page = rawPage({
       controls: [
         rawControl({
           index: 0,
           tagName: "select",
-          label: "How did you hear about this job?",
+          label: "Which role family is this application for?",
           required: true,
-          options: ["LinkedIn", "A friend", "Other"],
+          options: ["Engineering", "Design", "Other"],
         }),
       ],
     });
