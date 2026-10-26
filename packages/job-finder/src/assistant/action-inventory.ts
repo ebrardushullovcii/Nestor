@@ -455,9 +455,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "action_get_startup_reset_recovery",
       "action_get_startup_database_recovery",
       "action_dismiss_startup_database_recovery_notice",
-      "action_export_personal_workspace",
-      "action_preview_personal_workspace_restore",
-      "action_confirm_personal_workspace_restore",
     ),
   },
   {

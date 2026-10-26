@@ -162,7 +162,6 @@ export interface JobFinderWorkspaceService {
     assetId: string;
     assetKind: CandidateAssetKind;
   }): Promise<number>;
-  withWorkspaceRestore(operation: () => Promise<void>): Promise<void>;
   resetWorkspace(
     seed: JobFinderRepositorySeed,
     options?: JobFinderWorkspaceResetOptions,

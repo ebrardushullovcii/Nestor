@@ -50,7 +50,6 @@ export * from "./live-assistant";
 export * from "./interview-chat";
 export * from "./startup-recovery";
 export * from "./agent-timing";
-export * from "./personal-workspace-export";
 export * from "./submission-confirmation";
 export * from "./resume-computation";
 export * from "./workspace-query";

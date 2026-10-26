@@ -167,31 +167,3 @@ describe("workspace reset safety", () => {
     expect(await repository.listProfileCopilotMessages()).toEqual([]);
   });
 });
-
-test("restore can read its safety snapshot while blocking profile and answer writes, then unlocks after failure", async () => {
-  const repository = createInMemoryJobFinderRepository(createSeed());
-  const service = createJobFinderWorkspaceService({
-    repository,
-    browserRuntime: createBrowserRuntime(),
-    aiClient: createAiClient(),
-    documentManager: createDocumentManager(),
-  });
-  const profile = await repository.getProfile();
-  await expect(
-    service.withWorkspaceRestore(async () => {
-      expect((await service.getWorkspaceSnapshot()).profile.id).toBe(
-        profile.id,
-      );
-      await expect(service.saveProfile(profile)).rejects.toThrow();
-      await expect(
-        service.saveUserActionAnswerDraft({
-          requestId: "blocked",
-          expectedRevision: 1,
-          draft: null,
-        }),
-      ).rejects.toThrow();
-      throw new Error("restore failure");
-    }),
-  ).rejects.toThrow("restore failure");
-  expect((await service.saveProfile(profile)).profile.id).toBe(profile.id);
-});

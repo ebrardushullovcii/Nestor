@@ -44,8 +44,6 @@ import { createAssistantBridge } from "./assistant";
 import { createJobsBridge } from "./jobs";
 import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
-  PersonalWorkspaceRestorePreview,
-  PersonalWorkspaceRestoreResult,
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportInput,
   ApplicationCrmFileExportResult,
@@ -1086,19 +1084,6 @@ const desktopApi = {
         "job-finder:snooze-grouped-decision",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
-    previewPersonalWorkspaceRestore: () =>
-      ipcRenderer.invoke(
-        "job-finder:preview-personal-workspace-restore",
-      ) as Promise<PersonalWorkspaceRestorePreview | null>,
-    confirmPersonalWorkspaceRestore: (input: { token: string }) =>
-      ipcRenderer.invoke(
-        "job-finder:confirm-personal-workspace-restore",
-        input,
-      ) as Promise<PersonalWorkspaceRestoreResult>,
-    exportPersonalWorkspace: () =>
-      ipcRenderer.invoke(
-        "job-finder:export-personal-workspace",
-      ) as Promise<ApplicationCrmFileExportResult>,
     exportDiagnostics: () =>
       ipcRenderer.invoke(
         "job-finder:export-diagnostics",

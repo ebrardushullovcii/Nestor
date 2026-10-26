@@ -1,17 +1,9 @@
-import {
-  ApplicationQuestionRecordSchema,
-  ApplicationAnswerRecordSchema,
-} from "@nestor/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   JobFinderPerformanceSnapshot,
   JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
-import {
-  buildJobFinderDiagnosticExport,
-  buildPersonalWorkspaceExport,
-  personalWorkspaceExportFileName,
-} from "./build-diagnostic-export";
+import { buildJobFinderDiagnosticExport } from "./build-diagnostic-export";
 
 const secretCorpus = [
   "hunter2-secret-password",
@@ -200,97 +192,6 @@ describe("buildJobFinderDiagnosticExport", () => {
       },
     ]);
   });
-});
-
-it("exports profile, saved jobs, drafts, history and original document bytes", async () => {
-  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const path = await import("node:path");
-  const directory = await mkdtemp(
-    path.join(tmpdir(), "nestor-personal-export-"),
-  );
-  try {
-    await writeFile(
-      path.join(directory, "synthetic-resume.txt"),
-      "Synthetic Example resume",
-    );
-    const workspace = {
-      profile: { fullName: "Synthetic Example" },
-      discoveryJobs: [{ id: "job" }],
-      resumeDrafts: [{ id: "draft" }],
-      applicationRecords: [{ id: "application" }],
-      browserSession: { status: "ready" },
-    } as unknown as JobFinderWorkspaceSnapshot;
-    const content = await buildPersonalWorkspaceExport({
-      workspace,
-      directories: [{ name: "resumes", directory }],
-    });
-    const exported = JSON.parse(content) as {
-      workspace: typeof workspace;
-      files: { path: string; content: string }[];
-      assistantHistory: unknown[];
-    };
-    expect(exported.workspace.profile).toEqual(workspace.profile);
-    expect(exported.workspace.discoveryJobs).toEqual(workspace.discoveryJobs);
-    expect(exported.workspace.resumeDrafts).toEqual(workspace.resumeDrafts);
-    expect(exported.workspace.applicationRecords).toEqual(
-      workspace.applicationRecords,
-    );
-    expect(exported.workspace).not.toHaveProperty("browserSession");
-    expect(exported.files[0]?.path).toBe("resumes/synthetic-resume.txt");
-    expect(Buffer.from(exported.files[0]!.content, "base64").toString()).toBe(
-      "Synthetic Example resume",
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-it("personal export includes application questions and answers and omits provider configuration", async () => {
-  const workspace = createWorkspace();
-  const questions = [
-    ApplicationQuestionRecordSchema.parse({
-      id: "question",
-      runId: "run",
-      jobId: "job",
-      prompt: "Availability?",
-      detectedAt: "2026-10-05T10:00:00Z",
-    }),
-  ];
-  const answers = [
-    ApplicationAnswerRecordSchema.parse({
-      id: "answer",
-      runId: "run",
-      jobId: "job",
-      questionId: "question",
-      text: "Monday",
-      createdAt: "2026-10-05T10:00:00Z",
-    }),
-  ];
-  const exported = JSON.parse(
-    await buildPersonalWorkspaceExport({
-      workspace,
-      applicationQuestions: questions,
-      applicationAnswers: answers,
-      directories: [],
-    }),
-  ) as {
-    applicationQuestions: typeof questions;
-    applicationAnswers: typeof answers;
-    workspace: Record<string, unknown>;
-  };
-  expect(exported.applicationQuestions).toEqual(questions);
-  expect(exported.applicationAnswers).toEqual(answers);
-  expect(exported.workspace).not.toHaveProperty("agentProvider");
-  expect(exported.workspace).not.toHaveProperty("visionProvider");
-});
-
-it("personal export filename uses the local calendar date", () => {
-  const date = new Date(2026, 9, 5, 1, 6);
-  vi.spyOn(date, "toISOString").mockReturnValue("2026-10-04T23:06:00.000Z");
-  expect(personalWorkspaceExportFileName(date)).toBe(
-    "nestor-workspace-2026-10-05.json",
-  );
 });
 
 it("exports waiting form memory without page contents", () => {

@@ -51,39 +51,6 @@ describe("assistant repository", () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
-  it("restores chats atomically and rolls back mismatched messages", async () => {
-    const repository = createAssistantRepository({ filePath: ":memory:" });
-    cleanups.push(() => repository.close());
-    await repository.upsertConversation(conversation("old", at(1)));
-    await repository.upsertMessage(message("old-message", "old", at(1)));
-    await expect(
-      repository.restoreHistory([
-        {
-          conversation: conversation("new", at(2)),
-          messages: [message("wrong", "another", at(2))],
-        },
-      ]),
-    ).rejects.toThrow("different chat");
-    expect(
-      (await repository.listConversations()).map((entry) => entry.id),
-    ).toEqual(["old"]);
-    expect((await repository.listMessages("old")).messages[0]?.id).toBe(
-      "old-message",
-    );
-    await repository.restoreHistory([
-      {
-        conversation: conversation("new", at(2)),
-        messages: [message("new-message", "new", at(2))],
-      },
-    ]);
-    expect(
-      (await repository.listConversations()).map((entry) => entry.id),
-    ).toEqual(["new"]);
-    expect((await repository.listMessages("new")).messages[0]?.id).toBe(
-      "new-message",
-    );
-  });
-
   it("orders conversations by latest message and messages by time", async () => {
     const repository = createAssistantRepository({ filePath: ":memory:" });
     cleanups.push(() => repository.close());
