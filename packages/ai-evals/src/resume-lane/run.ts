@@ -58,6 +58,7 @@ export interface ResumeLaneResult {
 
 export interface StretchCheckReport {
   traceAvailable: boolean;
+  checkerInvoked: boolean;
   sanctioned: Array<{
     text: string;
     stretches: ResumeStretch[];
@@ -144,6 +145,7 @@ export function stretchCheckReport(input: {
 }): StretchCheckReport {
   const report: StretchCheckReport = {
     traceAvailable: Boolean(input.captures?.length),
+    checkerInvoked: false,
     sanctioned: [],
     unflaggedListingLines: [],
   };
@@ -212,6 +214,7 @@ export function stretchCheckReport(input: {
       }
     }
   }
+  report.checkerInvoked = asked.size > 0;
   const final = new Set(draftLines(input.draft).map((line) => key(line.text)));
   for (const text of new Set([...checks.keys(), ...inferred.values()])) {
     const verdicts = checks.get(text) ?? [];
@@ -242,7 +245,8 @@ export function stretchCheckReport(input: {
         flagged,
         removed: !final.has(key(text)),
         checked: verdicts.length > 0,
-        missingBeforeCheck: !asked.has(text) && !final.has(key(text)),
+        missingBeforeCheck:
+          report.checkerInvoked && !asked.has(text) && !final.has(key(text)),
         unanswered: asked.has(text) && verdicts.length === 0,
         verdicts,
       });
@@ -406,6 +410,7 @@ export function scoreCase(
           })
         : {
             traceAvailable: Boolean(entry.captures?.length),
+            checkerInvoked: false,
             sanctioned: [],
             unflaggedListingLines: [],
           },
@@ -588,17 +593,17 @@ export function formatResumeLaneReport(
     "",
     `Median write time over the ${written.length} written resumes: ${median(written.map((row) => row.seconds)).toFixed(1)} s.`,
     "",
-    "Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer; the writer also checks generated lines with the model.",
+    "Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer. Main's Aggressive path uses number checks, without the model fact checker; the other written levels use that checker.",
     "",
     "## Stretch handling by case",
     "",
-    "| Case | Trace available | Sanctioned lines checked | Flagged | Removed/rewritten by checker | Missing before checker | No verdict | Unflagged listing-only lines |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Case | Trace available | Model checker invoked | Sanctioned lines checked | Flagged | Removed/rewritten by checker | Missing before checker | No verdict | Unflagged listing-only lines |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...results
       .filter((row) => row.level === "aggressive")
       .map(
         (row) =>
-          `| ${row.caseId} | ${row.stretchChecks.traceAvailable ? "yes" : "no"} | ${row.stretchChecks.sanctioned.filter((line) => line.checked).length} | ${row.stretchChecks.sanctioned.filter((line) => line.flagged).length} | ${row.stretchChecks.sanctioned.filter((line) => line.checked && line.removed).length} | ${row.stretchChecks.sanctioned.filter((line) => line.missingBeforeCheck).length} | ${row.stretchChecks.sanctioned.filter((line) => line.unanswered).length} | ${row.stretchChecks.unflaggedListingLines.length} |`,
+          `| ${row.caseId} | ${row.stretchChecks.traceAvailable ? "yes" : "no"} | ${row.stretchChecks.checkerInvoked ? "yes" : "no"} | ${row.stretchChecks.sanctioned.filter((line) => line.checked).length} | ${row.stretchChecks.sanctioned.filter((line) => line.flagged).length} | ${row.stretchChecks.sanctioned.filter((line) => line.checked && line.removed).length} | ${row.stretchChecks.sanctioned.filter((line) => line.missingBeforeCheck).length} | ${row.stretchChecks.sanctioned.filter((line) => line.unanswered).length} | ${row.stretchChecks.unflaggedListingLines.length} |`,
       ),
     "",
     "Confirmation chores and approval blockers require the built-app check; these counts do not assert approval behavior.",
@@ -614,11 +619,11 @@ export function formatResumeLaneReport(
       ),
       ...result.stretches.map(
         (stretch) =>
-          `stretch ${stretch.kind} "${stretch.value}" (${stretch.flagged ? "flagged" : "old recording: no per-line flag"}) in: ${stretch.line}`,
+          `stretch ${stretch.kind} "${stretch.value}" (${stretch.flagged ? "checker-flagged" : "no checker stretch verdict; see writer trace"}) in: ${stretch.line}`,
       ),
       ...result.stretchChecks.sanctioned.map(
         (line) =>
-          `checker ${!line.checked ? "did not see" : line.flagged ? "flagged" : "passed"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
+          `${result.stretchChecks.checkerInvoked ? `checker ${!line.checked ? "did not see" : line.flagged ? "flagged" : "passed"}` : "no model checker invoked"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
       ),
       ...result.flagsLeft.map((flag) => `flag left: ${flag}`),
     ];

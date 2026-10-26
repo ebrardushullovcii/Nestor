@@ -30,7 +30,8 @@ Per level it reports:
                    25% of words; Tailored edits more than Light; Aggressive edits at
                    least as much as Tailored and leads with the role
   stretch handling per case: sanctioned inferred lines the unchanged checker flags
-                   or removes; saved model traces permit an audit without more calls
+                   or removes, and whether it ran (main Aggressive: no model checker);
+                   saved model traces permit an audit without more calls
   flags left       problems the writer flagged and did not fix
   edit size, time (median per resume, and over all written resumes), model
   calls and tokens in/out

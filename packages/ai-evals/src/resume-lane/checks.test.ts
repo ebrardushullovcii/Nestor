@@ -411,6 +411,29 @@ it("measures inferred listing and years stretches removed or flagged by the unch
     company: "Datadog",
     yearsExperience: 5,
   });
+  // Released Aggressive intentionally never calls the model checker. Its
+  // inferred lines still count as stretches, not missed checker requests.
+  const writerOnly = stretchCheckReport({
+    draft: finalDraft,
+    captures: [writer],
+    source: SOURCE + " Five years of experience.",
+    listing: LISTING + " Requires 6 years of experience.",
+    title: "Frontend Engineer",
+    company: "Datadog",
+    yearsExperience: 5,
+  });
+  expect(writerOnly.traceAvailable).toBe(true);
+  expect(writerOnly.checkerInvoked).toBe(false);
+  expect(writerOnly.sanctioned).toHaveLength(2);
+  expect(
+    writerOnly.sanctioned.every(
+      (line) =>
+        !line.checked &&
+        !line.flagged &&
+        !line.missingBeforeCheck &&
+        !line.unanswered,
+    ),
+  ).toBe(true);
   // Duplicate events/retries must not duplicate findings or reuse another request's line ids.
   expect(
     stretchCheckReport({
@@ -449,6 +472,7 @@ it("measures inferred listing and years stretches removed or flagged by the unch
   });
   expect(retried.sanctioned.every((line) => !line.unanswered)).toBe(true);
   expect(result.traceAvailable).toBe(true);
+  expect(result.checkerInvoked).toBe(true);
   expect(
     result.sanctioned.map((line) => ({
       text: line.text,
