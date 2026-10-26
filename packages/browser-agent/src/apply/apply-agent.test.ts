@@ -150,6 +150,9 @@ function config(
         headline: "Platform engineer",
         summary: "Builds dependable internal tools.",
         currentLocation: "Manchester",
+        workEligibility: {
+          authorizedWorkCountries: ["United Kingdom", "Germany"],
+        },
         yearsExperience: 8,
         baseResume: {
           id: "resume_test",
@@ -185,6 +188,63 @@ function config(
  * The fact check's answer when a scripted model is asked to check answers:
  * every answer supported. It does not use up a scripted turn.
  */
+function flowEvidence(
+  applicant: Record<string, unknown>,
+  answer: { question: string; proposedAnswer: string },
+) {
+  const scalars: Array<{ path: string; value: string }> = [];
+  const visit = (value: unknown, path: string) => {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+      scalars.push({ path, value: String(value) });
+    else if (value && typeof value === "object")
+      for (const [key, item] of Object.entries(value))
+        visit(
+          item,
+          `${path}/${key.replace(/~/gu, "~0").replace(/\//gu, "~1")}`,
+        );
+  };
+  visit(applicant, "");
+  const saved = Array.isArray(applicant.savedAnswers)
+    ? applicant.savedAnswers
+    : [];
+  const savedIndex = saved.findIndex((entry: unknown) => {
+    const item = entry as { question?: string; answer?: string };
+    return (
+      item.question === answer.question && item.answer === answer.proposedAnswer
+    );
+  });
+  const field =
+    savedIndex >= 0
+      ? scalars.find(
+          (entry) => entry.path === `/savedAnswers/${savedIndex}/answer`,
+        )
+      : /authori[sz]ed/iu.test(answer.question) &&
+          answer.proposedAnswer === "Yes"
+        ? scalars.find((entry) =>
+            entry.path.startsWith(
+              "/workEligibility/Countries where you can work/",
+            ),
+          )
+        : (scalars.find((entry) =>
+            entry.value.includes(answer.proposedAnswer),
+          ) ?? scalars.find((entry) => entry.path === "/summary"));
+  return field
+    ? [
+        {
+          kind: "applicant_fact",
+          claim: answer.proposedAnswer,
+          source: "applicant",
+          path: field.path,
+          quote: field.value,
+        },
+      ]
+    : [];
+}
+
 function supportedChecks(
   messages: Parameters<LLMClient["chatWithTools"]>[0],
   definitions: Parameters<LLMClient["chatWithTools"]>[1],
@@ -192,7 +252,7 @@ function supportedChecks(
   if (definitions[0]?.function.name !== "report_answer_checks") return null;
   const asked = JSON.parse(String(messages[1]?.content ?? "{}")) as {
     applicant: Record<string, unknown>;
-    answers?: unknown[];
+    answers?: Array<{ question: string; proposedAnswer: string }>;
   };
   return Promise.resolve({
     toolCalls: [
@@ -202,21 +262,11 @@ function supportedChecks(
         function: {
           name: "report_answer_checks",
           arguments: JSON.stringify({
-            checks: (asked.answers ?? []).map((_, index) => ({
+            checks: (asked.answers ?? []).map((answer, index) => ({
               index,
               supported: true,
               reason: "Supported by the applicant facts.",
-              // This model stub supplies a verdict for flow tests, not a
-              // semantic fact check. Grounding tests exercise source evidence.
-              evidence: [
-                {
-                  kind: "applicant_fact",
-                  claim: "Scripted supported answer",
-                  source: "applicant",
-                  path: "",
-                  quote: JSON.stringify(asked.applicant),
-                },
-              ],
+              evidence: flowEvidence(asked.applicant, answer),
             })),
           }),
         },
@@ -1108,7 +1158,12 @@ describe("written answer fact check recovery", () => {
       }),
     };
     await expect(
-      checkWrittenApplicationAnswer({ ...input(), client }),
+      checkWrittenApplicationAnswer({
+        ...input(),
+        question: "What work is advertised?",
+        answer: "Owning the internal platform.",
+        client,
+      }),
     ).resolves.toEqual({
       supported: true,
       reason: "Only ordinary motivation.",
@@ -2990,7 +3045,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
   const source = page({
     controls: [
       text(0, "Full name"),
-      text(1, "Why do you want this role?"),
+      text(1, "Describe your platform experience"),
       {
         ...text(2, "Country"),
         tagName: "select",
@@ -3064,7 +3119,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
                   {
                     tool: "type",
                     ref: "c1",
-                    text: "I want to keep building dependable internal tools.",
+                    text: "I build dependable internal tools.",
                   },
                   { tool: "select", ref: "c2", option: "united kingdom" },
                 ],
@@ -3099,7 +3154,7 @@ test("fill_fields fills a page in one step with one fact check for the answers t
   expect(written.get("c2")).toBe("United Kingdom");
   expect(result.filled.map((entry) => entry.label)).toEqual([
     "Full name",
-    "Why do you want this role?",
+    "Describe your platform experience",
     "Country",
   ]);
   expect(result.outcome).toBe("prepared");
@@ -5348,7 +5403,9 @@ test("renumbered handles keep current answers and two equal-worded questions dis
 
 test("batch classification, answer checks and safety page read overlap before any write", async () => {
   const source = page({
-    controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
+    controls: [
+      { ...nameControl(), label: "Describe your platform work", value: "" },
+    ],
   });
   const input = config(source);
   input.modelQuestionClassification = true;
@@ -5838,7 +5895,12 @@ test.each([true, false])(
 test("stored facts fill while earlier written and eligibility answers wait for their check", async () => {
   const source = page({
     controls: [
-      { ...nameControl(), index: 0, label: "Why this role?", value: "" },
+      {
+        ...nameControl(),
+        index: 0,
+        label: "Describe your platform work",
+        value: "",
+      },
       {
         ...nameControl(),
         index: 1,
@@ -5904,7 +5966,7 @@ test("stored facts fill while earlier written and eligibility answers wait for t
                         {
                           tool: "type",
                           ref: "c0",
-                          text: "I enjoy building dependable platforms.",
+                          text: "I build dependable platforms.",
                         },
                         { tool: "type", ref: "c1", text: "Yes" },
                         {

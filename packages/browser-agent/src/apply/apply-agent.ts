@@ -68,6 +68,7 @@ import {
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
 import { createQuestionOccurrences } from "./question-occurrences";
+import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
 import {
   checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
@@ -362,6 +363,13 @@ async function runMeasuredApplyAgent(
           letters: {
             ...config.letters,
             provide: (request) => {
+              if (
+                !request.approvedText &&
+                requiresOwnWords(
+                  `${pageTools.state.observation?.ownWordsRequired ? "In your own words" : (pageTools.state.observation?.bodyTextExcerpt ?? "")}\n${request.prompt}`,
+                )
+              )
+                return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
               const key = JSON.stringify(request);
               let pending = letterRequests.get(key);
               if (!pending) {
@@ -390,7 +398,9 @@ async function runMeasuredApplyAgent(
     const observation = pageTools.state.observation;
     return observation
       ? {
-          pageText: observation.bodyTextExcerpt,
+          pageText: observation.ownWordsRequired
+            ? "In your own words"
+            : observation.bodyTextExcerpt,
           fields: observation.controls
             .filter(
               (control) =>

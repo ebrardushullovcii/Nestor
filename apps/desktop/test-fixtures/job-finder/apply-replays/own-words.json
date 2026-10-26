@@ -1,0 +1,13 @@
+{
+  "id": "own-words-writing-restriction",
+  "provenance": "Synthetic offline writing rules; no applicant data or captured employer content.",
+  "question": "Describe your approach to reliable software",
+  "proposed": "I build reliable services and enjoy debugging distributed systems.",
+  "rules": [
+    "Please answer in your own words.",
+    "Do not use AI to answer these questions.",
+    "AI-generated answers are not allowed.",
+    "AI generated responses are not permitted.",
+    "Don't use artificial intelligence for this application."
+  ]
+}

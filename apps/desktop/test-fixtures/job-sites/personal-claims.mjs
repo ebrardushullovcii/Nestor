@@ -1,3 +1,12 @@
+import { readFileSync } from "node:fs";
+
+const writing = JSON.parse(
+  readFileSync(
+    new URL("../job-finder/apply-replays/own-words.json", import.meta.url),
+    "utf8",
+  ),
+);
+
 // Facts the resume does not establish must be handed to the applicant.
 export function handlePersonalClaims(req, res, url, { send }) {
   if (!url.pathname.startsWith("/personal-claims/")) return false;
@@ -5,7 +14,19 @@ export function handlePersonalClaims(req, res, url, { send }) {
     send(405, "This fixture is fill-only.");
     return true;
   }
-  if (url.pathname === "/personal-claims/jobs/1")
+  if (url.pathname === "/personal-claims/apply/own-words") {
+    send(
+      200,
+      `<!doctype html><title>Apply — Example Workshop</title>
+      <h1>Service Engineer — Example Workshop</h1>
+      <p>${writing.rules[0]}</p><form>
+      <label>Full name <input name="name" required></label>
+      <label>Email <input name="email" type="email" required></label>
+      <label>Resume <input name="resume" type="file" required></label>
+      <label>${writing.question}<textarea name="writing" required></textarea></label>
+      <button>Send application</button></form>`,
+    );
+  } else if (url.pathname === "/personal-claims/jobs/1")
     send(
       200,
       '<h1>Service Engineer</h1><p>Example Workshop · Remote</p><a href="/personal-claims/apply/1">Apply</a>',

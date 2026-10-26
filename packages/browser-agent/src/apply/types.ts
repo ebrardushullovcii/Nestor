@@ -193,6 +193,8 @@ export interface ApplyFormObservation {
   step: ApplyStepPosition;
   /** A bounded excerpt of what the page says. `read_text` gets the rest. */
   bodyTextExcerpt: string;
+  /** Read from the full observed page before its model excerpt is shortened. */
+  ownWordsRequired?: boolean;
   headings: ApplyHeading[];
   controls: ApplyFormControl[];
   actions: ApplyFormAction[];

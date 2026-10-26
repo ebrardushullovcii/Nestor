@@ -13,6 +13,7 @@ import {
   toAnswerControlType,
 } from "./control-classification";
 import { detectApplyBlocker } from "./blockers";
+import { requiresOwnWords } from "./own-words";
 import type {
   ApplyControlKind,
   ApplyFormAction,
@@ -296,6 +297,7 @@ export function buildApplyFormObservation(
     title: raw.title,
     step: readStepPosition(raw.stepLabel, raw.bodyText),
     bodyTextExcerpt: raw.bodyText.slice(0, 6_000),
+    ownWordsRequired: requiresOwnWords(raw.bodyText),
     headings: raw.headings.map((heading) => ({
       level: heading.level,
       text: heading.text,

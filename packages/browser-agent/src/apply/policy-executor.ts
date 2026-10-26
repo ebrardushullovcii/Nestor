@@ -30,6 +30,7 @@ import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
 import { isShortValueAnswer } from "./written-answer-grounding";
+import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -632,6 +633,7 @@ async function decideAnswer(input: {
   value: string;
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
+  pageText: string;
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
   const value = formatGithubAnswer(control, input.value);
@@ -742,6 +744,14 @@ async function decideAnswer(input: {
     deps.onAnswerSource?.("stored_fact");
     return { kind: "use", answer: stored };
   }
+  if (requiresOwnWords(`${input.pageText}\n${questionPrompt(control)}`)) {
+    return {
+      kind: "leave",
+      reason: OWN_WORDS_REASON,
+      suggestion: null,
+      permission: true,
+    };
+  }
   if (!deps.checkWrittenAnswer) {
     return {
       kind: "leave",
@@ -832,16 +842,17 @@ function leaveUnansweredForPerson(input: {
     kind: "suggestion",
     answer: suggestion,
     note: `"${questionPrompt(control)}" needs the person's answer. ${reason} Leave it unchanged and carry on with the rest of the form.`,
-    question: control.required
-      ? buildPendingQuestion({
-          control,
-          jobId: config.application.jobId,
-          detectedAt: at,
-          suggestion,
-          siblings: observation.controls,
-          reason,
-        })
-      : null,
+    question:
+      control.required || input.reason === OWN_WORDS_REASON
+        ? buildPendingQuestion({
+            control,
+            jobId: config.application.jobId,
+            detectedAt: at,
+            suggestion,
+            siblings: observation.controls,
+            reason,
+          })
+        : null,
     controlRef: control.ref,
     observation,
   };
@@ -1781,6 +1792,9 @@ export async function executeApplyProposal(
       const decision = await decideAnswer({
         deps,
         control,
+        pageText: observation.ownWordsRequired
+          ? "In your own words"
+          : observation.bodyTextExcerpt,
         value: proposal.text,
         groundedIn: proposal.groundedIn,
         storedFactId: proposal.storedFactId,
@@ -1842,6 +1856,9 @@ export async function executeApplyProposal(
       const choice = await decideAnswer({
         deps,
         control,
+        pageText: observation.ownWordsRequired
+          ? "In your own words"
+          : observation.bodyTextExcerpt,
         value: matchOption(control.options, proposal.option) ?? proposal.option,
         storedFactId: proposal.storedFactId,
       });
@@ -1982,6 +1999,9 @@ export async function executeApplyProposal(
         const choice = await decideAnswer({
           deps,
           control,
+          pageText: observation.ownWordsRequired
+            ? "In your own words"
+            : observation.bodyTextExcerpt,
           value: proposedOption,
           storedFactId: proposal.storedFactId,
         });
@@ -2517,6 +2537,25 @@ async function provideApplicationLetter(
   const { config } = deps;
   const letters = config.letters;
   const approvedText = approvedApplicationLetter(config, control);
+  const observation = await config.hands.observe();
+  if (
+    !approvedText &&
+    requiresOwnWords(
+      `${observation.ownWordsRequired ? "In your own words" : observation.bodyTextExcerpt}\n${questionPrompt(control)}`,
+    )
+  ) {
+    return {
+      kind: "stop",
+      outcome: leaveUnansweredForPerson({
+        control,
+        observation,
+        config,
+        at: deps.now().toISOString(),
+        reason: OWN_WORDS_REASON,
+        suggestion: null,
+      }),
+    };
+  }
   if (!letters && approvedText && control.kind !== "file") {
     return {
       kind: "ok",

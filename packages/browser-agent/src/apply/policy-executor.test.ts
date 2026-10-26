@@ -16,6 +16,7 @@ import {
   pickerQuestionKey,
 } from "./policy-executor";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
+import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 import { buildApplyFormObservation } from "./page-hands";
 import { runSubmitPreflight } from "./submit-preflight";
 import type {
@@ -178,6 +179,122 @@ function configFor(
 const now = () => new Date("2026-09-14T10:00:00.000Z");
 
 describe("apply policy executor", () => {
+  test.each(["prepare_only", "autonomous_submit"] as const)(
+    "own-words replay: %s hands writing to the person before any checker or write",
+    async (mode) => {
+      for (const rule of ownWords.rules) {
+        const source = rawPage({
+          bodyText: "Page introduction. ".repeat(450) + rule,
+          controls: [
+            rawControl({
+              index: 0,
+              tagName: "textarea",
+              label: ownWords.question,
+              required: true,
+            }),
+          ],
+        });
+        const fillText = vi.fn();
+        const checkWrittenAnswer = vi.fn();
+        const { config } = configFor(source, {
+          authority: { mode },
+          hands: { fillText },
+        });
+        const result = await executeApplyProposal(
+          { tool: "type", ref: "c0", text: ownWords.proposed },
+          observationOf(source).signature,
+          {
+            config,
+            now,
+            guardState: createApplyGuardState(),
+            checkWrittenAnswer,
+          },
+        );
+        expect(result).toMatchObject({
+          kind: "suggestion",
+          question: { prompt: ownWords.question },
+        });
+        expect(fillText).not.toHaveBeenCalled();
+        expect(checkWrittenAnswer).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test("own-words replay: the person's saved wording is used unchanged", async () => {
+    const source = rawPage({
+      bodyText: ownWords.rules[0],
+      controls: [
+        rawControl({
+          index: 0,
+          tagName: "textarea",
+          label: ownWords.question,
+          required: true,
+        }),
+      ],
+    });
+    const { config } = configFor(source);
+    config.sources.reusableAnswers = [
+      {
+        id: "own-answer",
+        kind: "other",
+        label: ownWords.question,
+        question: ownWords.question,
+        answer: "My own answer.",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    const result = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: "My own answer." },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(result.kind).toBe("filled");
+    expect(source.controls[0].value).toBe("My own answer.");
+  });
+
+  test.each(["type", "upload"] as const)(
+    "own-words replay: %s never drafts a letter",
+    async (tool) => {
+      const source = rawPage({
+        bodyText: ownWords.rules[1],
+        controls: [
+          rawControl({
+            index: 0,
+            label: "Cover letter",
+            required: true,
+            ...(tool === "upload"
+              ? { inputType: "file" }
+              : { tagName: "textarea" }),
+          }),
+        ],
+      });
+      const { config } = configFor(source);
+      const provide = vi.fn();
+      config.letters = {
+        preference: {
+          tone: "plain_professional",
+          length: "short",
+          language: "en",
+          sample: null,
+        },
+        provide,
+      };
+      const result = await executeApplyProposal(
+        tool === "type"
+          ? { tool, ref: "c0", text: ownWords.proposed }
+          : { tool, ref: "c0", documentId: "letter" },
+        observationOf(source).signature,
+        { config, now, guardState: createApplyGuardState() },
+      );
+      expect(result).toMatchObject({
+        kind: "suggestion",
+        question: { prompt: "Cover letter" },
+      });
+      expect(provide).not.toHaveBeenCalled();
+    },
+  );
+
   test.each([false, true])(
     "does not write unsupported personal experience (required=%s)",
     async (required) => {

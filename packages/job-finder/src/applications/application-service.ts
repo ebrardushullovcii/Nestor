@@ -711,7 +711,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           const card = applications.getWork(row.id)?.reviewCard;
           const written =
             card?.answers.filter((answer) => answer.written) ?? [];
+          if (
+            card?.letter &&
+            !card.letter.groundedIn.includes(
+              "your letter for this application",
+            ) &&
+            !written.some((answer) => answer.answer === card.letter!.text)
+          )
+            written.push({
+              question: card.letter.fields?.[0] ?? "Cover letter",
+              answer: card.letter.text,
+              source: "Written for this application",
+              written: true,
+              groundedIn: card.letter.groundedIn,
+            });
           if (written.length) {
+            const form = await browser
+              .readApplicationPageBinding?.("target_site", identity.resultId)
+              .catch(() => null);
             const questions = written.map((answer) => ({
               prompt: answer.question,
               kind: inferQuestionKind({
@@ -742,7 +759,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 ),
               );
             const client = toApplyLlmClient(deps.aiClient);
-            const checks = client
+            const checks = client && form
               ? await checkWrittenApplicationAnswers({
                   client,
                   sources: {
@@ -758,6 +775,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     },
                   },
                   answers: written,
+                  formContext: {
+                    pageText: form?.bodyText ?? "",
+                    fields: [],
+                  },
                   payDisclosed:
                     settings.salaryDisclosure === "answer_from_profile",
                   signal,

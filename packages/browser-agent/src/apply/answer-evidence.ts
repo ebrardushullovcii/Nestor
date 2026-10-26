@@ -15,7 +15,8 @@ const normalize = (value: string) =>
     .trim();
 const scalar = (value: string) =>
   /^(?:yes|no|true|false|[-+]?\d+(?:[.,]\d+)?\+?%?)$/iu.test(value.trim());
-const opinion = /\b(?:favou?rites?|prefer(?:ence|red|s)?|like[sd]?)\b/iu;
+const opinion =
+  /\b(?:favou?rites?|prefer(?:ence|red|s)?|like[sd]?|love[sd]?|hate[sd]?|enjoy\w*|want\w*|wish\w*|proud|passion\w*|excited|interested|strengths?|strongest)\b|\bwhy\b.*\b(?:join|apply|work)\b/iu;
 
 function savedEvidence(
   entry: AnswerEvidence,
@@ -127,10 +128,12 @@ function quoteStatesSkillYears(
       "on",
     ]);
     const firstSubject = after.findIndex((word) => !connectors.has(word));
+    const subject = after[firstSubject];
     if (
       firstSubject >= 0 &&
       firstSubject <= 4 &&
-      claim.topics.includes(after[firstSubject]!) &&
+      subject !== undefined &&
+      claim.topics.includes(subject) &&
       claim.topics.every((topic) =>
         after.slice(firstSubject, firstSubject + 8).includes(topic),
       )

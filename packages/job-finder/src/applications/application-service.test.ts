@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
 import { createHash } from "node:crypto";
 import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/invented-personal-answers.json";
+import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -193,7 +194,9 @@ async function setup(
     reloadApplicationPageBinding: vi.fn<
       (source: string, key: string, applicationUrl?: string) => Promise<void>
     >(() => Promise.resolve()),
-    transferApplicationPageBinding: vi.fn(() => Promise.resolve(true)),
+    transferApplicationPageBinding: vi.fn<
+      (source: string, oldKey: string, nextKey: string) => Promise<boolean>
+    >(() => Promise.resolve(true)),
     handApplicationPageToPerson: vi.fn(() => Promise.resolve()),
     releaseApplicationPageBinding: vi.fn(() => Promise.resolve()),
     readApplicationPageWithPerson: vi.fn<
@@ -852,8 +855,13 @@ it("automatically carries every waiting page on after one site sign-in and MFA, 
     ],
   };
   preparation.blocker = null;
-  f.browser.transferApplicationPageBinding.mockRejectedValueOnce(
-    new Error("The exact prepared application page is no longer open."),
+  f.browser.transferApplicationPageBinding.mockImplementation(
+    (_source, _old, next) =>
+      next === key(first.id, 2)
+        ? Promise.reject(
+            new Error("The exact prepared application page is no longer open."),
+          )
+        : Promise.resolve(true),
   );
   pages.set(personKey, accessible);
   f.browser.reloadApplicationPageBinding.mockImplementation((_source, id) => {
@@ -952,10 +960,22 @@ function sendEnvelope(jobId: number, sha256: string) {
   });
 }
 
-it.each(replay.cases)(
+it.each([
+  ...replay.cases.map((entry) => ({ ...entry, rule: "" })),
+  ...ownWords.rules.map((rule) => ({
+    question: ownWords.question,
+    answer: ownWords.proposed,
+    evidence: [],
+    rule,
+  })),
+])(
   "sendPrepared re-grounds a Ready answer before arming: $question",
   async (entry) => {
     const f = await setup(1);
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      bodyText: entry.rule,
+    });
     f.seed.profile.yearsExperience = replay.applicant.yearsExperience;
     f.seed.profile.skills = replay.applicant.skills;
     f.seed.profile.workEligibility.requiresVisaSponsorship = false;
@@ -1011,7 +1031,7 @@ it.each(replay.cases)(
     const action = vi.fn();
     Object.assign(f.browser, { executeExactlyOneFinalAction: action });
     expect(await f.service.sendPrepared(row.id)).toBe(false);
-    expect(chatWithTools).toHaveBeenCalledOnce();
+    expect(chatWithTools).toHaveBeenCalledTimes(entry.rule ? 0 : 1);
     expect(action).not.toHaveBeenCalled();
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
     expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);

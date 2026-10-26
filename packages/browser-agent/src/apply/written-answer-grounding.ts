@@ -9,6 +9,7 @@ import {
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
+import { OWN_WORDS_REASON, requiresOwnWords } from "./own-words";
 
 export interface WrittenAnswerCheck {
   supported: boolean;
@@ -122,6 +123,24 @@ export async function checkWrittenApplicationAnswers(input: {
   signal?: AbortSignal | undefined;
 }): Promise<WrittenAnswerCheck[]> {
   if (input.answers.length === 0) return [];
+  // Remove prohibited writing before constructing a model request. A lying
+  // checker, an unavailable checker, and retries all get the same decision.
+  const prohibited = input.answers.map((entry) =>
+    requiresOwnWords(`${input.formContext?.pageText ?? ""}\n${entry.question}`),
+  );
+  if (prohibited.some(Boolean)) {
+    const allowed = await checkWrittenApplicationAnswers({
+      ...input,
+      answers: input.answers.filter((_entry, index) => !prohibited[index]),
+    });
+    let index = 0;
+    return prohibited.map((blocked) => {
+      if (blocked) return { supported: false, reason: OWN_WORDS_REASON };
+      const check = allowed[index++];
+      if (!check) throw new WrittenAnswerCheckUnavailableError();
+      return check;
+    });
+  }
   const applicant = plainAnswerCheckFacts(
     applicationFacts(input.sources, { payDisclosed: input.payDisclosed }),
   );

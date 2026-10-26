@@ -5,6 +5,7 @@ import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
 import type { LLMClient } from "../agent/contracts";
 import { evidenceFitsQuestion } from "./answer-evidence";
+import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 
 const sources = {
   profile: CandidateProfileSchema.parse({
@@ -31,6 +32,23 @@ const sources = {
     description: "Engineering workflow tools",
   },
 };
+
+test.each(ownWords.rules)(
+  "Apply replay: the site's writing rule requires the person without a checker call: %s",
+  async (rule) => {
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>();
+    const result = await checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      formContext: { pageText: rule, fields: [] },
+      answers: [{ question: ownWords.question, answer: ownWords.proposed }],
+    });
+    expect(result[0].supported).toBe(false);
+    expect(result[0].reason).toContain("your own words");
+    expect(chatWithTools).not.toHaveBeenCalled();
+  },
+);
 test("a lying supported checker cannot authorize any pass-11 invention", async () => {
   const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
     toolCalls: [
