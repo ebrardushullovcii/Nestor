@@ -191,6 +191,7 @@ function supportedChecks(
 ): ReturnType<LLMClient["chatWithTools"]> | null {
   if (definitions[0]?.function.name !== "report_answer_checks") return null;
   const asked = JSON.parse(String(messages[1]?.content ?? "{}")) as {
+    applicant: Record<string, unknown>;
     answers?: unknown[];
   };
   return Promise.resolve({
@@ -205,6 +206,17 @@ function supportedChecks(
               index,
               supported: true,
               reason: "Supported by the applicant facts.",
+              // This model stub supplies a verdict for flow tests, not a
+              // semantic fact check. Grounding tests exercise source evidence.
+              evidence: [
+                {
+                  kind: "applicant_fact",
+                  claim: "Scripted supported answer",
+                  source: "applicant",
+                  path: "",
+                  quote: JSON.stringify(asked.applicant),
+                },
+              ],
             })),
           }),
         },
@@ -1079,7 +1091,19 @@ describe("written answer fact check recovery", () => {
     const client: LLMClient = {
       chatWithTools: vi.fn().mockResolvedValue({
         toolCalls: [
-          call({ supported: true, reason: "Only ordinary motivation." }),
+          call({
+            supported: true,
+            reason: "Only ordinary motivation.",
+            evidence: [
+              {
+                kind: "role_motivation",
+                claim: "Interest in the work",
+                source: "posting",
+                path: "/description",
+                quote: "Own the internal platform.",
+              },
+            ],
+          }),
         ],
       }),
     };
@@ -3013,6 +3037,15 @@ test("fill_fields fills a page in one step with one fact check for the answers t
                     index,
                     supported: true,
                     reason: "Supported.",
+                    evidence: [
+                      {
+                        kind: "applicant_fact",
+                        claim: "Scripted supported answer",
+                        source: "resume",
+                        path: "",
+                        quote: "8 years of platform engineering",
+                      },
+                    ],
                   })),
                 }),
               },
