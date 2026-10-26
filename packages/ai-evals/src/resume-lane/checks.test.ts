@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EvalHttpCapture } from "../contracts";
 import { assessFacts, flagsLeft, inventedFacts, levelVerdicts } from "./checks";
-import { tokensUsed } from "./run";
+import { stretchCheckReport, tokensUsed } from "./run";
 
 const AT = "2026-10-26T00:00:00.000Z";
 const SOURCE = `CASEY ROWAN
@@ -257,4 +257,111 @@ it("counts tokens from chat completions and from the Responses API's completed e
       ),
     ]),
   ).toEqual({ prompt: 40, completion: 6 });
+});
+
+it("measures inferred listing and years stretches removed or flagged by the unchanged checker", () => {
+  const tech = "Built services with Kubernetes.";
+  const years = "Engineer with six years of experience.";
+  const unflagged = "Built services with Go.";
+  const finalDraft = draft([tech]);
+  const capture = (request: unknown, responseBody: string) =>
+    ({ requestBody: JSON.stringify(request), responseBody }) as EvalHttpCapture;
+  const writer = capture(
+    {},
+    "data: " +
+      JSON.stringify({
+        type: "response.completed",
+        response: {
+          output: [
+            {
+              type: "function_call",
+              name: "compose_resume_proposal",
+              arguments: JSON.stringify({
+                proposal: {
+                  experienceEntries: [
+                    {
+                      bullets: [
+                        { text: tech, inferred: true },
+                        { text: years, inferred: true },
+                      ],
+                    },
+                  ],
+                },
+              }),
+            },
+          ],
+        },
+      }) +
+      "\n\n",
+  );
+  const checker = capture(
+    {
+      messages: [
+        {
+          role: "user",
+          content: JSON.stringify({
+            claims: [
+              { id: "line_1", text: tech },
+              { id: "line_2", text: years },
+              { id: "line_3", text: unflagged },
+            ],
+          }),
+        },
+      ],
+    },
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              checks: [
+                { id: "line_1", verdict: "stretch", reason: "Listing tool." },
+                {
+                  id: "line_2",
+                  verdict: "unsupported",
+                  reason: "Rounded year.",
+                },
+                {
+                  id: "line_3",
+                  verdict: "unsupported",
+                  reason: "Unbacked tool.",
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    }),
+  );
+  const result = stretchCheckReport({
+    draft: finalDraft,
+    captures: [writer, checker],
+    source: SOURCE + " Five years of experience.",
+    listing: LISTING + " Requires 6 years of experience.",
+    title: "Frontend Engineer",
+    company: "Datadog",
+    yearsExperience: 5,
+  });
+  expect(result.traceAvailable).toBe(true);
+  expect(
+    result.sanctioned.map((line) => ({
+      text: line.text,
+      flagged: line.flagged,
+      removed: line.removed,
+    })),
+  ).toEqual([
+    { text: tech, flagged: true, removed: false },
+    { text: years, flagged: true, removed: true },
+  ]);
+  expect(result.unflaggedListingLines).toEqual([unflagged]);
+  expect(
+    stretchCheckReport({
+      draft: finalDraft,
+      source: SOURCE,
+      listing: LISTING,
+      title: "Frontend Engineer",
+      company: "Datadog",
+      yearsExperience: 5,
+    }).traceAvailable,
+  ).toBe(false);
 });

@@ -26,6 +26,7 @@ import {
   type InventedFact,
   type LevelShape,
   type ResumeStretch,
+  draftLines,
 } from "./checks";
 import { profileFromResumeText } from "./profile";
 
@@ -50,6 +51,191 @@ export interface ResumeLaneResult {
   promptTokens: number;
   completionTokens: number;
   draft: ResumeDraft | null;
+  captures?: readonly EvalHttpCapture[];
+  stretchChecks: StretchCheckReport;
+}
+
+export interface StretchCheckReport {
+  traceAvailable: boolean;
+  sanctioned: Array<{
+    text: string;
+    stretches: ResumeStretch[];
+    flagged: boolean;
+    removed: boolean;
+    verdicts: Array<{ verdict: string; reason: string }>;
+  }>;
+  /** Listing-only lines without a writer inferred flag or a model stretch verdict. */
+  unflaggedListingLines: string[];
+}
+
+type JsonObject = Record<string, unknown>;
+const object = (value: unknown): JsonObject | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+const json = (value: string): unknown => {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+/** Complete response objects from both JSON and streamed Responses/Chat APIs. */
+function responseObjects(body: string): JsonObject[] {
+  const payloads = body.trimStart().startsWith("{")
+    ? [body]
+    : body
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim());
+  return payloads.flatMap((payload) => {
+    const value = object(json(payload));
+    return value ? [object(value.response) ?? value] : [];
+  });
+}
+
+function responseContributions(capture: EvalHttpCapture): unknown[] {
+  const values: unknown[] = [];
+  for (const payload of responseObjects(capture.responseBody ?? "")) {
+    for (const raw of Array.isArray(payload.output) ? payload.output : []) {
+      const item = object(raw);
+      if (!item) continue;
+      if (item.type === "function_call" && typeof item.arguments === "string")
+        values.push(json(item.arguments));
+      for (const rawContent of Array.isArray(item.content)
+        ? item.content
+        : []) {
+        const content = object(rawContent);
+        if (typeof content?.text === "string") values.push(json(content.text));
+      }
+    }
+    for (const raw of Array.isArray(payload.choices) ? payload.choices : []) {
+      const message = object(object(raw)?.message);
+      if (!message) continue;
+      if (typeof message.content === "string")
+        values.push(json(message.content));
+      for (const rawCall of Array.isArray(message.tool_calls)
+        ? message.tool_calls
+        : []) {
+        const fn = object(object(rawCall)?.function);
+        if (typeof fn?.arguments === "string") values.push(json(fn.arguments));
+      }
+    }
+  }
+  return values;
+}
+
+/** Measure what the unchanged checker does to sanctioned Aggressive stretches. */
+export function stretchCheckReport(input: {
+  draft: ResumeDraft | null;
+  captures?: readonly EvalHttpCapture[];
+  source: string;
+  listing: string;
+  title: string;
+  company: string;
+  yearsExperience: number | null;
+}): StretchCheckReport {
+  const report: StretchCheckReport = {
+    traceAvailable: Boolean(input.captures?.length),
+    sanctioned: [],
+    unflaggedListingLines: [],
+  };
+  if (!input.draft || !input.captures?.length) return report;
+  const inferred = new Set<string>();
+  const key = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const walk = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const child of value) walk(child);
+      return;
+    }
+    const entry = object(value);
+    if (!entry) return;
+    if (entry.inferred === true && typeof entry.text === "string")
+      inferred.add(key(entry.text));
+    for (const child of Object.values(entry)) walk(child);
+  };
+  const checks = new Map<string, Array<{ verdict: string; reason: string }>>();
+  for (const capture of input.captures) {
+    const contributions = responseContributions(capture);
+    for (const contribution of contributions) walk(contribution);
+    const request = object(json(capture.requestBody));
+    const claims = new Map<string, string>();
+    const readClaims = (value: unknown) => {
+      const entry = object(value);
+      if (!entry || !Array.isArray(entry.claims)) return;
+      for (const raw of entry.claims) {
+        const claim = object(raw);
+        if (typeof claim?.id === "string" && typeof claim.text === "string")
+          claims.set(claim.id, claim.text);
+      }
+    };
+    for (const raw of Array.isArray(request?.messages)
+      ? request.messages
+      : Array.isArray(request?.input)
+        ? request.input
+        : []) {
+      const message = object(raw);
+      if (typeof message?.content === "string")
+        readClaims(json(message.content));
+      for (const rawContent of Array.isArray(message?.content)
+        ? message.content
+        : []) {
+        const content = object(rawContent);
+        if (typeof content?.text === "string") readClaims(json(content.text));
+      }
+    }
+    for (const contribution of contributions) {
+      const result = object(contribution);
+      if (!Array.isArray(result?.checks)) continue;
+      for (const raw of result.checks) {
+        const check = object(raw);
+        if (typeof check?.id !== "string" || typeof check.verdict !== "string")
+          continue;
+        const text = claims.get(check.id);
+        if (!text) continue;
+        const verdicts = checks.get(text) ?? [];
+        verdicts.push({
+          verdict: check.verdict,
+          reason: typeof check.reason === "string" ? check.reason : "",
+        });
+        checks.set(text, verdicts);
+      }
+    }
+  }
+  const final = new Set(draftLines(input.draft).map((line) => key(line.text)));
+  for (const [text, verdicts] of checks) {
+    const section = {
+      ...input.draft.sections[0]!,
+      id: "probe",
+      kind: "summary" as const,
+      label: "Summary",
+      included: true,
+      text,
+      bullets: [],
+      entries: [],
+    };
+    const stretches = assessFacts({
+      ...input,
+      level: "aggressive",
+      draft: { ...input.draft, sections: [section] },
+    }).stretches;
+    if (!stretches.length) continue;
+    const flagged = verdicts.some((check) => check.verdict !== "supported");
+    if (
+      inferred.has(key(text)) ||
+      verdicts.some((check) => check.verdict === "stretch")
+    )
+      report.sanctioned.push({
+        text,
+        stretches,
+        flagged,
+        removed: !final.has(key(text)),
+        verdicts,
+      });
+    else report.unflaggedListingLines.push(text);
+  }
+  return report;
 }
 
 /** Tokens from every model response in a capture (JSON or streamed). */
@@ -134,6 +320,7 @@ interface Written {
   modelCalls: number;
   promptTokens: number;
   completionTokens: number;
+  captures?: readonly EvalHttpCapture[];
 }
 
 /** Scores one case's drafts at every level; the same for a live run and a saved one. */
@@ -188,6 +375,23 @@ export function scoreCase(
     completionTokens: entry.completionTokens,
     inventedFacts: facts,
     stretches,
+    captures: entry.captures,
+    stretchChecks:
+      entry.level === "aggressive"
+        ? stretchCheckReport({
+            draft: entry.draft,
+            captures: entry.captures,
+            source,
+            listing: listing.description,
+            title: listing.title,
+            company: listing.company,
+            yearsExperience: profile.yearsExperience,
+          })
+        : {
+            traceAvailable: Boolean(entry.captures?.length),
+            sanctioned: [],
+            unflaggedListingLines: [],
+          },
     levelProblem: entry.error
       ? `failed: ${entry.error}`
       : (verdicts[entry.level] ?? null),
@@ -203,6 +407,7 @@ export function scoreCase(
 export async function runResumeLane(
   cases: readonly ResumeLaneCase[] = RESUME_LANE_CASES,
   onResult: (result: ResumeLaneResult) => void = () => undefined,
+  levels: readonly ResumeLevel[] = RESUME_LEVELS,
 ): Promise<ResumeLaneResult[]> {
   const aiClient = createJobFinderAiClientFromEnvironment();
   const results: ResumeLaneResult[] = [];
@@ -237,7 +442,7 @@ export async function runResumeLane(
     const job = store.getJob(jobId!)!;
     store.close();
     const written: Written[] = [];
-    for (const level of RESUME_LEVELS) {
+    for (const level of levels) {
       const started = performance.now();
       let draft: ResumeDraft | null = null;
       let error: string | null = null;
@@ -273,6 +478,7 @@ export async function runResumeLane(
         modelCalls: captures.length,
         promptTokens: tokens.prompt,
         completionTokens: tokens.completion,
+        captures,
       });
     }
     for (const result of scoreCase(evalCase, written)) {
@@ -367,6 +573,19 @@ export function formatResumeLaneReport(
     "",
     "Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer; the writer also checks generated lines with the model.",
     "",
+    "## Stretch handling by case",
+    "",
+    "| Case | Trace available | Sanctioned lines checked | Flagged | Removed/rewritten | Unflagged listing-only lines |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...results
+      .filter((row) => row.level === "aggressive")
+      .map(
+        (row) =>
+          `| ${row.caseId} | ${row.stretchChecks.traceAvailable ? "yes" : "no"} | ${row.stretchChecks.sanctioned.length} | ${row.stretchChecks.sanctioned.filter((line) => line.flagged).length} | ${row.stretchChecks.sanctioned.filter((line) => line.removed).length} | ${row.stretchChecks.unflaggedListingLines.length} |`,
+      ),
+    "",
+    "Confirmation chores and approval blockers require the built-app check; these counts do not assert approval behavior.",
+    "",
     "## Findings",
     "",
   );
@@ -379,6 +598,10 @@ export function formatResumeLaneReport(
       ...result.stretches.map(
         (stretch) =>
           `stretch ${stretch.kind} "${stretch.value}" (${stretch.flagged ? "flagged" : "old recording: no per-line flag"}) in: ${stretch.line}`,
+      ),
+      ...result.stretchChecks.sanctioned.map(
+        (line) =>
+          `checker ${line.flagged ? "flagged" : "passed"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
       ),
       ...result.flagsLeft.map((flag) => `flag left: ${flag}`),
     ];
