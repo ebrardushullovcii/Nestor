@@ -9,6 +9,23 @@ import {
   type FormQuestion,
 } from "./questions";
 
+test("a boolean handover keeps the form's observed choice order", () => {
+  const question: FormQuestion = {
+    prompt: "Employment restrictions?",
+    kind: "other",
+    answerControlType: "boolean",
+    answerOptions: ["No", "Yes"],
+  };
+  const job = { id: 1, location: "Remote" };
+  expect(describeFormQuestion(question, job)).toMatchObject({
+    input: "boolean",
+    options: ["No", "Yes"],
+  });
+  expect(
+    describeFormQuestion({ ...question, answerOptions: [] }, job).options,
+  ).toEqual([]);
+});
+
 test("the same question keeps its key across progress counters without discarding scope or group context", () => {
   const field: FormQuestion = {
     prompt: "Are you willing to relocate?",

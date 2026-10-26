@@ -14,7 +14,9 @@ export function AnswerField(props: {
   const { question, value, onChange, disabled } = props;
   if (question.input === "boolean" || question.input === "choice") {
     const options =
-      question.input === "boolean" ? ["Yes", "No"] : question.options;
+      question.input === "boolean" && question.options.length === 0
+        ? ["Yes", "No"]
+        : question.options;
     if (options.length > 8)
       return (
         <SearchableChoices key={question.prompt} {...props} options={options} />

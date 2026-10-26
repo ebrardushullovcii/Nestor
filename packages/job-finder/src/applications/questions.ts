@@ -99,7 +99,7 @@ export function describeFormQuestion(
   return {
     key: `question:${digest(`${normalize(question.prompt)}|${format}|${place}`)}`,
     input,
-    options: input === "choice" ? options : [],
+    options: input === "choice" || yesNo ? options : [],
     reusePrompt:
       input !== "file" &&
       !jobSpecific &&

@@ -1308,8 +1308,10 @@ async function readClosedComboboxOptions(
           childList: true,
           characterData: true,
         });
-        // A hard cleanup also covers a page move or a failed click.
-        setTimeout(() => observer.disconnect(), 1500);
+        // Cover the three bounded open actions and the 700 ms read. A
+        // background click can take nearly its whole 1.5 s timeout before
+        // the menu starts rendering. The finally below normally cleans up.
+        setTimeout(() => observer.disconnect(), 6000);
         return { element, initialOwned, initialMenus, changed, observer };
       });
       let options: string[] = [];

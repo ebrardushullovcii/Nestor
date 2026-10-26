@@ -49,3 +49,20 @@ test("short Yes/No lists keep their direct buttons", () => {
     screen.getAllByRole("button").map((button) => button.textContent),
   ).toEqual(["Yes", "No"]);
 });
+
+test("observed boolean choices retain the form's own order", () => {
+  render(
+    <AnswerField
+      question={{
+        prompt: "Restrictions?",
+        input: "boolean",
+        options: ["No", "Yes"],
+      }}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getAllByRole("button").map((button) => button.textContent),
+  ).toEqual(["No", "Yes"]);
+});

@@ -1,4 +1,4 @@
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Locator } from "playwright";
 import menuReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/handover-options.json";
 import githubReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
@@ -394,6 +394,36 @@ describe("reading the choices of lists the page draws itself", () => {
       await page.close();
     }
   });
+
+  test("a slow background click does not expire the menu observer before redraw", async () => {
+    const page = await browser.newPage();
+    const prototype = Object.getPrototypeOf(page.locator("input")) as Locator;
+    // Called below with the locator that received the click.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original = prototype.click;
+    const click = vi.spyOn(prototype, "click").mockImplementation(async function (this: Locator, options) {
+      await new Promise(resolve => setTimeout(resolve, 1450));
+      await original.call(this, options);
+    });
+    try {
+      await page.setContent(`<label for="one">First question</label><input id="one" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
+        <label for="two">Second question</label><input id="two" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
+        <div id="shared" role="listbox" hidden></div><script>
+          for(const id of ['one','two']) document.getElementById(id).onclick=()=>{
+            document.getElementById(id).setAttribute('aria-expanded','true');
+            const menu=document.getElementById('shared');menu.hidden=false;
+            setTimeout(()=>menu.innerHTML=(id==='one'?['First A','First B']:['Second A','Second B']).map(label=>'<div role="option">'+label+'</div>').join(''),80);
+          };
+          document.addEventListener('keydown',event=>{if(event.key==='Escape'){
+            document.querySelectorAll('input').forEach(input=>input.setAttribute('aria-expanded','false'));
+            document.getElementById('shared').hidden=true;
+          }});
+        </script>`);
+      const controls = (await readRawApplyPage(page)).controls;
+      expect(controls.find(control => control.id === "one")?.options).toEqual(["First A", "First B"]);
+      expect(controls.find(control => control.id === "two")?.options).toEqual(["Second A", "Second B"]);
+    } finally { click.mockRestore(); await page.close(); }
+  }, 15_000);
 
   test("each control gets its own choices, and keeps them on a second read", async () => {
     const page = await browser.newPage();
