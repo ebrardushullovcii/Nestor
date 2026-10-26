@@ -45,6 +45,11 @@ export function StoredProfileSetupScreen() {
   const { showToast } = useToast();
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Which part of the last step's save was refused, so its reason shows on
+  // the step rather than only on the import screen.
+  const [refused, setRefused] = useState<
+    "profile" | "settings" | "setup" | null
+  >(null);
 
   const profile = useMemo<CandidateProfile | null>(
     () =>
@@ -94,21 +99,30 @@ export function StoredProfileSetupScreen() {
     nextStep: ProfileSetupStep,
     options: SetupStepOptions & {
       resumeApplicationMode?: ResumeApplicationMode;
+      baseline?: { profile: CandidateProfile; goals: JobSearchPreferences };
     } = {},
   ) {
     const startedOnSetup = location.pathname === "/job-finder/profile/setup";
+    // Check the edits against what the draft was built on. After a held-back
+    // background change that is older than the store's newest values, and
+    // saving against those would overwrite the change.
+    const baseline = options.baseline ?? { profile: profile!, goals };
     setSaving(true);
+    setRefused(null);
     try {
       const edits = profileEdits({
         overview,
         records: records!,
         goals,
-        beforeProfile: profile!,
-        beforeGoals: goals,
+        beforeProfile: baseline.profile,
+        beforeGoals: baseline.goals,
         nextProfile,
         nextGoals,
       });
-      if (hasProfileEdits(edits) && !(await store.save(edits))) return;
+      if (hasProfileEdits(edits) && !(await store.save(edits))) {
+        setRefused("profile");
+        return;
+      }
       if (
         options.resumeApplicationMode &&
         options.resumeApplicationMode !==
@@ -116,8 +130,10 @@ export function StoredProfileSetupScreen() {
         !(await settings.updateApplicationDefaults({
           resumeApplicationMode: options.resumeApplicationMode,
         }))
-      )
+      ) {
+        setRefused("settings");
         return;
+      }
       const sites = await window.nestor.jobs.run("list_sites", { limit: 1 });
       const state = nextSetupState({
         current: setupState!,
@@ -134,6 +150,7 @@ export function StoredProfileSetupScreen() {
       const saved = await workflow.saveSetupState(state);
       if (!saved) {
         clearProfileSetupJustFinished();
+        setRefused("setup");
         return;
       }
       if (state.status !== "completed")
@@ -162,6 +179,15 @@ export function StoredProfileSetupScreen() {
           message: store.error ?? settings.error ?? workflow.message,
         }}
         importResumeGuardMessage={dirty ? IMPORT_GUARD : null}
+        saveError={
+          refused === "profile"
+            ? store.error
+            : refused === "settings"
+              ? settings.error
+              : refused === "setup"
+                ? workflow.message
+                : null
+        }
         isImportResumePending={workflow.isPending("import")}
         isProfileSetupPending={saving || workflow.isPending("setup")}
         isReviewItemPending={(id) => workflow.isPending(`review:${id}`)}
@@ -192,7 +218,10 @@ export function StoredProfileSetupScreen() {
         isAnalyzeProfilePending={workflow.isPending("analyze")}
         onCancelImportResume={() => workflow.cancelImportResume(true)}
         onProfileSurfaceDirtyChange={setDirty}
-        onProfileSurfaceDraftEdited={() => workflow.setMessage(null)}
+        onProfileSurfaceDraftEdited={() => {
+          workflow.setMessage(null);
+          setRefused(null);
+        }}
         onResumeSetup={(step) =>
           void resumeGuidedSetup(workflow, navigate, location.pathname, step)
         }

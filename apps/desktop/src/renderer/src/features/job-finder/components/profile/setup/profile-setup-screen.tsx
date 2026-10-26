@@ -156,8 +156,12 @@ export function ProfileSetupScreen(props: {
       resolvedReviewItems?: readonly ProfileSetupResolvedReviewItem[];
       resumeApplicationMode?: ResumeApplicationMode;
       stayOnCurrentStep?: boolean;
+      /** What the draft was built on; see `saveBaseline`. */
+      baseline?: { profile: CandidateProfile; goals: JobSearchPreferences };
     },
   ) => void;
+  /** Why the last step did not save, shown on the step. */
+  saveError?: string | null;
   profile: CandidateProfile;
   profileSetupState: ProfileSetupState;
   resumeApplicationMode?: ResumeApplicationMode;
@@ -202,6 +206,7 @@ export function ProfileSetupScreen(props: {
   const {
     backgroundArrays,
     markOwnSave,
+    saveBaseline,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
     draftAwareReviewItems,
@@ -269,7 +274,10 @@ export function ProfileSetupScreen(props: {
     onResumeSetup,
     onSaveSetupStep: (nextProfile, nextPreferences, nextStep, options) => {
       markOwnSave(nextProfile, nextPreferences);
-      onSaveSetupStep(nextProfile, nextPreferences, nextStep, options);
+      onSaveSetupStep(nextProfile, nextPreferences, nextStep, {
+        ...options,
+        baseline: saveBaseline(),
+      });
     },
     resumeApplicationMode: selectedResumeApplicationMode,
     preferencesFormValues: () => preferencesForm.getValues(),
@@ -483,7 +491,7 @@ export function ProfileSetupScreen(props: {
               });
             }}
             remainingBlockerLabels={remainingBlockerLabels}
-            validationMessage={validationMessage}
+            validationMessage={validationMessage ?? props.saveError ?? null}
           />
         )
       }
@@ -694,7 +702,7 @@ export function ProfileSetupScreen(props: {
                 preferencesForm={preferencesForm}
                 resumeApplicationMode={selectedResumeApplicationMode}
                 searchPreferences={searchPreferences}
-                validationMessage={validationMessage}
+                validationMessage={validationMessage ?? props.saveError ?? null}
               />
             </fieldset>
           </div>

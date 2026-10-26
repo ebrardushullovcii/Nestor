@@ -7,6 +7,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import { useState } from "react";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { getJobFinderWindowCloseConfirmation } from "@renderer/pages/job-finder-window-close-guard";
 import { ProfileLeaveGuard } from "./profile-leave-guard";
@@ -76,4 +77,36 @@ test("nothing unsaved never asks", async () => {
   const router = renderGuard(false);
   await act(() => router.navigate("/job-finder/home"));
   expect(screen.getByText("Elsewhere")).toBeTruthy();
+});
+
+test("a navigation asked about during a save goes on once the save ends", async () => {
+  Object.assign(window, {
+    nestor: { window: { setCloseGuardState: vi.fn(() => Promise.resolve()) } },
+  });
+  function Saving() {
+    const [saving, setSaving] = useState<string | null>("Profile");
+    return (
+      <>
+        <ProfileLeaveGuard dirty={false} saving={saving} />
+        <button type="button" onClick={() => setSaving(null)}>
+          Save done
+        </button>
+      </>
+    );
+  }
+  const router = createMemoryRouter(
+    [
+      { path: "/job-finder/profile", element: <Saving /> },
+      { path: "*", element: <p>Elsewhere</p> },
+    ],
+    { initialEntries: ["/job-finder/profile"] },
+  );
+  render(<RouterProvider router={router} />);
+  await act(() => router.navigate("/job-finder/home"));
+  expect(screen.getByRole("dialog").textContent).toContain(
+    "Profile is still saving",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save done" }));
+  expect(await screen.findByText("Elsewhere")).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

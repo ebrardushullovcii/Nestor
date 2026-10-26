@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import {
+  CandidateExperienceSchema,
   ProfileSetupStateSchema,
   type DesktopJobsBridge,
   type DesktopProfileWorkflowBridge,
@@ -176,4 +178,65 @@ test("a profile change setup never saw is not overwritten", async () => {
     "Changed elsewhere",
   );
   expect(state.profileSetupState.currentStep).toBe("essentials");
+});
+
+test("a held-back background change is not overwritten: no deleted record comes back, no delivered value is lost", async () => {
+  const profile = createProfileStore(store);
+  const record = (id: string, title: string) =>
+    CandidateExperienceSchema.parse({
+      id,
+      title,
+      companyName: "Synthetic Employer",
+      startDate: "2020-01",
+      workMode: [],
+    });
+  profile.records.upsert({
+    collection: "experiences",
+    record: record("work_a", "Analyst A"),
+  });
+  state = {
+    ...state,
+    profileSetupState: {
+      ...state.profileSetupState,
+      currentStep: "background",
+    },
+  };
+  renderSetup();
+  const title = await screen.findByDisplayValue("Analyst A");
+  fireEvent.change(title, { target: { value: "Edited A" } });
+  // Elsewhere, A is deleted, B added and the headline changed; setup hears
+  // of it, reads the store again, and holds the conflicting change back from
+  // its draft.
+  const reads = () =>
+    calls.filter((call) => call.name === "list_profile_records").length;
+  const readsBefore = reads();
+  act(() => {
+    profile.patch({ fields: { headline: "Delivered by the Assistant" } });
+    profile.records.remove("experiences", "work_a");
+    profile.records.upsert({
+      collection: "experiences",
+      record: record("work_b", "Analyst B"),
+    });
+    store.notify({ cause: "profile", stages: [], ids: null, searchId: null });
+  });
+  await waitFor(() => expect(reads()).toBeGreaterThan(readsBefore));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and continue to Job targets" }),
+  );
+  await waitFor(() =>
+    expect(calls.some((call) => call.name === "commit_profile_edits")).toBe(
+      true,
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(
+    profile.records
+      .list({ collection: "experiences", text: "", after: 0, limit: 10 })
+      .rows.map((row) => row.record.id),
+  ).toEqual(["work_b"]);
+  expect(profile.overview().fields.headline).toBe("Delivered by the Assistant");
+  // The refusal shows on the step, not only on the import screen.
+  expect(screen.getByRole("alert").textContent).not.toBe("");
+  expect(state.profileSetupState.currentStep).toBe("background");
 });

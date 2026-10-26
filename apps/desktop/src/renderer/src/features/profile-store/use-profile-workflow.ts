@@ -45,6 +45,8 @@ export function useProfileWorkflow(
   >([]);
   const live = useRef(true);
   const reads = useRef(0);
+  // An import waiting on its file picker, with no progress yet.
+  const importWaiting = useRef(false);
 
   const apply = useCallback((result: ProfileWorkflowResult) => {
     if (!live.current) return;
@@ -77,6 +79,10 @@ export function useProfileWorkflow(
       live.current = false;
       reads.current++;
       off();
+      // Leaving while the file picker is open cancels it, so the next import
+      // isn't refused as already running. An import already reading goes on.
+      if (importWaiting.current)
+        window.nestor.profileWorkflow.cancelImportResume();
     };
   }, [refresh]);
 
@@ -100,11 +106,12 @@ export function useProfileWorkflow(
     ): Promise<ProfileWorkflowResult | null> => {
       setPending((current) => new Set(current).add(key));
       try {
-        // A step that finishes reads its own fresh state; a read started
-        // before it must not land after it.
-        reads.current++;
         const result = await step();
+        // The step's answer is newer than any read started before it ended:
+        // those are dropped, and one read after it catches later changes.
+        reads.current++;
         apply(result);
+        void refresh();
         if (live.current)
           setMessage(describe.done ? describe.done(result) : result.message);
         return result;
@@ -123,7 +130,7 @@ export function useProfileWorkflow(
           });
       }
     },
-    [apply],
+    [apply, refresh],
   );
 
   const command = (input: ProfileWorkflowCommand) => () =>
@@ -143,14 +150,17 @@ export function useProfileWorkflow(
         "import",
         async () => {
           setImportProgress(null);
+          importWaiting.current = importOptions?.retryInterrupted !== true;
           try {
             return await window.nestor.profileWorkflow.importResume(
               (progress) => {
+                importWaiting.current = false;
                 if (live.current) setImportProgress(progress);
               },
               importOptions,
             );
           } finally {
+            importWaiting.current = false;
             if (live.current) setImportProgress(null);
           }
         },

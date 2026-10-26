@@ -62,14 +62,14 @@ export function ProfileLeaveGuard(props: {
       setAsking(null);
       return;
     }
-    // A save that finished while the navigation was parked leaves nothing
-    // to protect; let the navigation through instead of asking.
-    if (!current.current) {
+    // A save that finished while the navigation was parked, or while the
+    // dialog was up, leaves nothing to protect; let the navigation through.
+    if (!confirmation) {
       blocker.proceed();
       return;
     }
-    setAsking(current.current);
-  }, [blocker]);
+    setAsking(confirmation);
+  }, [blocker, confirmation]);
 
   return (
     <JobFinderUnsavedChangesDialog
