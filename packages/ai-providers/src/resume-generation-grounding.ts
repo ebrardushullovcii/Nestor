@@ -839,9 +839,9 @@ export function describeAggressiveResumeEditPolicy(
   }
   return [
     "This draft uses aggressive tailoring to help the resume clear screening for a first interview.",
-    "Keep it pushed toward the job in the listing's own vocabulary; the only stretch allowed is stating evidenced years of experience one year higher when the listing itself asks for that figure.",
-    "Never invent employers, dates, titles, credentials, seniority, leadership, outcomes, or a technology the saved evidence does not name, even when the listing asks for it.",
-    "State what you changed plainly and do not lecture.",
+    "Keep bounded stretches of saved evidence: you may state evidenced years of experience one year higher when the listing itself asks for that figure, and you may name any technology, library, framework, or tool the listing asks for — required or preferred, including technologies named only in qualifications — in both the prose and the skills section, whenever the saved evidence shows professional technical experience.",
+    "Never invent employers, dates, titles, credentials, seniority, leadership, or a technology absent from both the saved evidence and the job listing.",
+    "The candidate confirms every stretch before export; state what you changed plainly and do not lecture.",
   ].join(" ");
 }
 

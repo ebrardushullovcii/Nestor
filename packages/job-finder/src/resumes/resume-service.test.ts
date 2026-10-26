@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createResumeService, type ResumeServiceDeps } from "./resume-service";
+import { writeResume } from "./write-resume";
 
 function found(n: number): FoundJob {
   return {
@@ -97,6 +98,131 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it.each([
+    [
+      "aggressive",
+      "Product designer building Kubernetes platforms.",
+      "stretch",
+      true,
+    ],
+    [
+      "aggressive",
+      "Product designer with 8 years of experience.",
+      "stretch",
+      true,
+    ],
+    [
+      "light",
+      "Product designer building Kubernetes platforms.",
+      "stretch",
+      false,
+    ],
+    [
+      "aggressive",
+      "Led 400 people at an invented employer.",
+      "unsupported",
+      false,
+    ],
+  ] as const)(
+    "settles %s %s as %s without rejecting accepted stretches",
+    async (level, text, verdict, keep) => {
+      const seed = createSeed();
+      const base = createDeterministicJobFinderAiClient();
+      const checkResumeClaims = vi.fn<
+        NonNullable<typeof base.checkResumeClaims>
+      >((input) =>
+        Promise.resolve(
+          input.claims.map((claim) => ({
+            id: claim.id,
+            verdict: claim.text === text ? verdict : "supported",
+            reason:
+              claim.text === text
+                ? "Checked against saved evidence and the listing."
+                : "Saved fact.",
+            evidenceIds: [],
+            fix: null,
+          })),
+        ),
+      );
+      const aiClient = {
+        ...base,
+        createResumeDraft: async (
+          input: Parameters<typeof base.createResumeDraft>[0],
+        ) => ({
+          ...(await base.createResumeDraft(input)),
+          summary: text,
+        }),
+        checkResumeClaims,
+      };
+      const { store, id } = setup();
+      const draft = await writeResume(
+        {
+          aiClient,
+          documentManager: {
+            listResumeTemplates: () => [],
+            renderResumeArtifact: () =>
+              Promise.reject(new Error("No preview needed")),
+          },
+        },
+        { ...seed, job: store.getJob(id)!, level },
+      );
+      expect(checkResumeClaims).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tailoringStrength:
+            level === "aggressive" ? "aggressive" : "conservative",
+        }),
+      );
+      expect(
+        draft?.sections.find((section) => section.kind === "summary")?.text,
+      ).toBe(keep ? text : seed.profile.summary);
+    },
+  );
+
+  it("restores saved wording when the checker's repair still breaks a hard limit", async () => {
+    const seed = createSeed();
+    const base = createDeterministicJobFinderAiClient();
+    const text = "Managed 400 people at an invented employer.";
+    const repair = "Managed 399 people at an invented employer.";
+    const checkResumeClaims = vi.fn<NonNullable<typeof base.checkResumeClaims>>(
+      (input) =>
+        Promise.resolve(
+          input.claims.map((claim) => ({
+            id: claim.id,
+            verdict:
+              claim.text === text || claim.text === repair
+                ? "unsupported"
+                : "supported",
+            reason: "The evidence has no such team or employer.",
+            evidenceIds: [],
+            fix: claim.text === text ? repair : null,
+          })),
+        ),
+    );
+    const { store, id } = setup();
+    const draft = await writeResume(
+      {
+        aiClient: {
+          ...base,
+          checkResumeClaims,
+          createResumeDraft: async (input) => ({
+            ...(await base.createResumeDraft(input)),
+            summary: text,
+          }),
+        },
+        documentManager: {
+          listResumeTemplates: () => [],
+          renderResumeArtifact: () =>
+            Promise.reject(new Error("No preview needed")),
+        },
+      },
+      { ...seed, job: store.getJob(id)!, level: "aggressive" },
+    );
+    expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+    expect(
+      draft?.sections.find((section) => section.kind === "summary")?.text,
+    ).toBe(seed.profile.summary);
+  });
+
   it.each(["profile facts", "resume source"] as const)(
     "keeps revoked drafts queued through an empty Profile cutover, then wakes on %s",
     async (recovery) => {

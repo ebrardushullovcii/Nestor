@@ -40,7 +40,9 @@ async function exportResumePdf(
   const target = await chooseResumeExportPath(
     sender,
     buildResumeExportDefaultPath(
-      resume?.level === "original" ? "Resume" : "Tailored Resume",
+      resume?.level === "original"
+        ? "Resume"
+        : `${resume?.level === "light" ? "Light" : resume?.level === "aggressive" ? "Aggressive" : "Tailored"} Resume`,
       job.title,
       job.company,
     ),
