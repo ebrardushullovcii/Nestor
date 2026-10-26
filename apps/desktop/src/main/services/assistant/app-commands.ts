@@ -17,6 +17,7 @@ import {
   resumeResultData,
   needsYouCommandTools,
   guardProfileCommand,
+  profilePatchReceipts,
   type AssistantToolContext,
 } from "@nestor/job-finder";
 
@@ -87,6 +88,7 @@ async function siteChange<T extends SiteChange>(
 /** Add each screen's command catalog here as its store lands. */
 export function assistantAppCommands() {
   const resumeReceipts = resumeCommandReceipts(runResumeCommand);
+  const profilePatchReceiptsForCommands = profilePatchReceipts(runJobCommand);
   return [
     ...assistantApplicationCommands(),
     ...needsYouCommandTools(runNeedsYouCommand),
@@ -170,6 +172,7 @@ export function assistantAppCommands() {
               ? "profile"
               : "jobs",
         beforeRun: guardProfileCommand,
+        before: profilePatchReceiptsForCommands.before,
         replaces: {
           list_jobs: ["query_jobs", "show_jobs", "compare_jobs"],
           move_jobs: [
@@ -183,6 +186,7 @@ export function assistantAppCommands() {
           stop_search: ["cancel_search"],
         },
         results: {
+          ...profilePatchReceiptsForCommands.results,
           list_sites: (page) => ({
             summary: `${page.total} job sites match; ${page.enabledTotal} turned on in total.`,
             data: {

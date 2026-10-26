@@ -9,6 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import {
   CandidateExperienceSchema,
@@ -18,6 +19,7 @@ import {
   openJobStore,
   createProfileStore,
   createPreferencesStore,
+  createJobSitesStore,
   type JobStore,
 } from "@nestor/db/job-store";
 import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
@@ -29,6 +31,10 @@ let calls: { name: string; input: unknown }[];
 let pauseCommit: Promise<void> | null;
 beforeEach(() => {
   store = openJobStore(":memory:");
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
   calls = [];
   pauseCommit = null;
   const run = createJobCommandRunner({ store });
@@ -82,11 +88,19 @@ afterEach(() => {
   cleanup();
   store.close();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
-function profileScreen(section = "basics") {
+function profileScreen(
+  section = "basics",
+  analyzing = false,
+  feedback: ComponentProps<
+    typeof StoredProfileScreen
+  >["discoveryRunFeedback"] = null,
+) {
   render(
     <MemoryRouter initialEntries={[`/job-finder/profile?section=${section}`]}>
       <StoredProfileScreen
+        discoveryRunFeedback={feedback}
         actionState={{ message: null }}
         importResumeGuardMessage={null}
         latestResumeImportReviewCandidates={[]}
@@ -103,7 +117,7 @@ function profileScreen(section = "basics") {
           reviewItems: [],
         }}
         pendingActions={{
-          analyzeProfile: false,
+          analyzeProfile: analyzing,
           importResume: false,
           profileCopilotBusy: false,
           profileMutation: false,
@@ -298,4 +312,39 @@ test("Settings saves Apply mode and appearance independently and follows other w
         .getAttribute("aria-pressed"),
     ).toBe("true"),
   );
+});
+
+test("edits typed during resume analysis are flushed when Profile unmounts", async () => {
+  profileScreen("basics", true);
+  const headline = await screen.findByLabelText(/^Headline/u);
+  fireEvent.change(headline, { target: { value: "Kept during analysis" } });
+  cleanup();
+  await waitFor(() =>
+    expect(createProfileStore(store).overview().fields.headline).toBe(
+      "Kept during analysis",
+    ),
+  );
+});
+
+test("per-source feedback uses the current site row even after its label changed", async () => {
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://synthetic.test/jobs" });
+  const site = sites.list().rows[0]!;
+  sites.update({ id: site.id, label: "Renamed source" });
+  profileScreen("sources", false, {
+    status: "failed",
+    detail: "Read failed",
+    headline: "This site's read failed.",
+    recovery: null,
+    targetLabel: "Old source label",
+    targetId: String(site.id),
+  });
+  expect(await screen.findByText("This site's read failed.")).not.toBeNull();
+  expect(
+    calls.some(
+      (call) =>
+        call.name === "get_site" &&
+        JSON.stringify(call.input) === JSON.stringify({ id: site.id }),
+    ),
+  ).toBe(true);
 });

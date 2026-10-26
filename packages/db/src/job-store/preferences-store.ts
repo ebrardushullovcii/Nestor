@@ -1,3 +1,4 @@
+import { applySettingsResumeEffects } from "./profile-effects";
 import {
   GoalFieldsSchema,
   GoalListsSchema,
@@ -246,6 +247,11 @@ export function createPreferencesStore(store: JobStore) {
           ),
         });
         store.transaction(() => {
+          const before = settings.read([
+            "resumeApplicationMode",
+            "resumeFormat",
+            "fontPreset",
+          ]);
           let changed = settings.patch(
             Object.fromEntries(
               Object.entries(flatten(next, settingFields)).map(
@@ -266,6 +272,16 @@ export function createPreferencesStore(store: JobStore) {
             this.upsertStage(stage);
           readSettings();
           if (changed)
+            applySettingsResumeEffects(
+              store,
+              before,
+              settings.read([
+                "resumeApplicationMode",
+                "resumeFormat",
+                "fontPreset",
+              ]),
+            );
+          if (changed)
             store.notify({
               cause: "settings",
               stages: [],
@@ -277,11 +293,26 @@ export function createPreferencesStore(store: JobStore) {
       patch(input: PatchSettingsInput): SettingsValues {
         const patch = PatchSettingsInputSchema.parse(input);
         return store.transaction(() => {
+          const before = settings.read([
+            "resumeApplicationMode",
+            "resumeFormat",
+            "fontPreset",
+          ]);
           let changed = settings.patch(patch.fields, patch.expected);
           for (const [field, value] of Object.entries(patch.lists))
             if (value !== undefined)
               changed = items.patch("settings", "1", field, value) || changed;
           readSettings();
+          if (changed)
+            applySettingsResumeEffects(
+              store,
+              before,
+              settings.read([
+                "resumeApplicationMode",
+                "resumeFormat",
+                "fontPreset",
+              ]),
+            );
           if (changed)
             store.notify({
               cause: "settings",

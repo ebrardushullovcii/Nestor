@@ -441,7 +441,7 @@ export function ProfileScreen(props: {
           {
             id: "resume-update",
             tone: "info" as const,
-            text: "Editing is paused while your resume update finishes, so the import cannot overwrite a draft made at the same time.",
+            text: "Your resume update is running. Edits still save; newer changes are protected if they overlap the import.",
           },
         ]
       : []),
@@ -557,12 +557,44 @@ export function ProfileScreen(props: {
 
   // Per-source Search now outcomes are shown next to the source rows that
   // started them; all-source outcomes stay on the Find jobs screen.
-  const sourceRowFeedbackTargetId =
-    activeSection === "sources" && discoveryRunFeedback?.targetLabel
-      ? (searchPreferences.discovery.targets.find(
-          (target) => target.label === discoveryRunFeedback.targetLabel,
-        )?.id ?? null)
-      : null;
+  const [sourceRowFeedbackTargetId, setSourceRowFeedbackTargetId] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    let current = true;
+    setSourceRowFeedbackTargetId(null);
+    const label = discoveryRunFeedback?.targetLabel;
+    const id = Number(discoveryRunFeedback?.targetId);
+    if (activeSection === "sources" && window.nestor?.jobs?.run) {
+      if (Number.isSafeInteger(id) && id > 0) {
+        void window.nestor.jobs
+          .run("get_site", { id })
+          .then((site) => {
+            if (current && site) setSourceRowFeedbackTargetId(String(site.id));
+          })
+          .catch(() => undefined);
+      } else if (label) {
+        void window.nestor.jobs
+          .run("list_sites", { text: label, limit: 25 })
+          .then((page) => {
+            if (current)
+              setSourceRowFeedbackTargetId(
+                String(
+                  page.rows.find((row) => row.label === label)?.id ?? "",
+                ) || null,
+              );
+          })
+          .catch(() => undefined);
+      }
+    }
+    return () => {
+      current = false;
+    };
+  }, [
+    activeSection,
+    discoveryRunFeedback?.targetLabel,
+    discoveryRunFeedback?.targetId,
+  ]);
   const [dismissedSourceFeedbackKey, setDismissedSourceFeedbackKey] = useState<
     string | null
   >(null);
@@ -573,7 +605,8 @@ export function ProfileScreen(props: {
   const visibleSourceRowFeedback =
     activeSection === "sources" &&
     discoveryRunFeedback !== null &&
-    discoveryRunFeedback.targetLabel !== null &&
+    (discoveryRunFeedback.targetLabel !== null ||
+      discoveryRunFeedback.targetId != null) &&
     sourceRowFeedbackTargetId !== null &&
     sourceFeedbackKey !== dismissedSourceFeedbackKey
       ? discoveryRunFeedback
@@ -625,7 +658,7 @@ export function ProfileScreen(props: {
             goals: draftSearchPreferencesResult.payload,
           }
         : null,
-    blocked: hasBackgroundConflict || resumeAnalysisPending,
+    blocked: hasBackgroundConflict,
     save: ({ profile: nextProfile, goals }) => onSaveAll(nextProfile, goals),
   });
   const blockNavigation =
@@ -955,10 +988,7 @@ export function ProfileScreen(props: {
                     />
                   </div>
                 ) : null}
-                <fieldset
-                  className="m-0 min-w-0 border-0 p-0 disabled:opacity-80"
-                  disabled={resumeAnalysisPending}
-                >
+                <fieldset className="m-0 min-w-0 border-0 p-0 disabled:opacity-80">
                   {props.recordPaging}
                   {props.recordStatus ?? (
                     <ProfileActiveSectionContent
@@ -973,9 +1003,7 @@ export function ProfileScreen(props: {
                       discoveryRuns={discoveryRuns}
                       experienceArray={experienceArray}
                       isBrowserSessionPending={pendingActions.browserSession}
-                      isProfileMutationPending={
-                        pendingActions.profileMutation || resumeAnalysisPending
-                      }
+                      isProfileMutationPending={pendingActions.profileMutation}
                       isSourceDebugPending={pendingActions.sourceDebug}
                       isSourceInstructionPending={
                         pendingActions.sourceInstruction

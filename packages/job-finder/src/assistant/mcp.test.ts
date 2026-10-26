@@ -1,6 +1,7 @@
 import {
   openJobStore,
   createJobSitesStore,
+  createProfileStore,
   createSourceAccessStore,
 } from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
@@ -17,7 +18,9 @@ import { expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createJobCommandRunner } from "../job-commands";
+import { undoChangeEntries } from "./change-diff";
 import { assistantCommandTools } from "./command-tools";
+import { profilePatchReceipts } from "./profile-patch-receipts";
 import { guardProfileCommand } from "./profile-command-guard";
 import { connectAssistantMcp } from "./mcp";
 import { buildAssistantToolCatalog } from "./tools";
@@ -465,6 +468,7 @@ it("preserves command fields named status and complete through the chat wrapper 
 it("runs Profile and Settings field commands over MCP and protects unsaved Profile fields", async () => {
   const store = openJobStore(":memory:");
   const run = createJobCommandRunner({ store });
+  const receipts = profilePatchReceipts(run);
   const definitions = assistantCommandTools<
     typeof PROFILE_COMMANDS,
     ProfileCommandOutputs
@@ -474,8 +478,23 @@ it("runs Profile and Settings field commands over MCP and protects unsaved Profi
         ? "settings"
         : "profile",
     beforeRun: guardProfileCommand,
+    before: receipts.before,
+    results: receipts.results,
   });
   const ctx = context();
+  const recordChange = vi.fn<AssistantToolContext["session"]["recordChange"]>(
+    (input) =>
+      Promise.resolve({
+        receipt: AssistantChangeReceiptSchema.parse({
+          id: "receipt",
+          conversationId: "chat",
+          ...input,
+          createdAt: new Date().toISOString(),
+        }),
+        part: { type: "text", text: "Undo available" },
+      }),
+  );
+  ctx.session.recordChange = recordChange;
   Object.defineProperty(ctx.session, "context", {
     value: {
       editor: {
@@ -506,6 +525,29 @@ it("runs Profile and Settings field commands over MCP and protects unsaved Profi
       "UX Researcher",
     ]);
     expect((await run("get_settings", {})).appearanceTheme).toBe("dark");
+    expect(
+      recordChange.mock.calls[0]?.[0].entries.map((entry) => entry.path),
+    ).toEqual([
+      ["profile", "email"],
+      ["profile", "applicationIdentity", "preferredEmail"],
+    ]);
+    const restored = undoChangeEntries(
+      createProfileStore(store).read(),
+      recordChange.mock.calls[0]![0].entries.map((entry) => ({
+        ...entry,
+        path: entry.path.slice(1),
+      })),
+    );
+    expect(restored.conflicts).toEqual([]);
+    expect(restored.next.email).toBeNull();
+    expect(restored.next.applicationIdentity.preferredEmail).toBeNull();
+    expect(recordChange.mock.calls.at(-1)?.[0].entries).toMatchObject([
+      {
+        path: ["settings", "appearanceTheme"],
+        before: "system",
+        after: "dark",
+      },
+    ]);
     expect((await run("get_profile", {})).fields.headline).not.toBe(
       "Overwrite typing",
     );

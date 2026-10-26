@@ -64,7 +64,6 @@ import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-e
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { prepareWorkspaceWriter } from "../../setup/workspace-database-startup";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
-import { adoptPristineWorkspaceStarterSources } from "./pristine-starter-source-adoption";
 import {
   ensureJobFinderUserDataDirectory,
   getBrowserAgentProfileDirectory,
@@ -888,24 +887,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       repository: jobFinderRepository,
       performUserAction: performWatchedUserAction,
     });
-  }
-
-  // One-time lossless adoption for legacy pristine targetless workspaces.
-  // Runs through the canonical save path; a failure must never block startup,
-  // so it degrades to skipping adoption (the workspace stays as persisted).
-  try {
-    await adoptPristineWorkspaceStarterSources({
-      getCampaignState: () => jobFinderRepository.getCampaignState(),
-      getProfileSetupState: () => jobFinderRepository.getProfileSetupState(),
-      getSearchPreferences: () => jobFinderRepository.getSearchPreferences(),
-      saveSearchPreferences: (next) =>
-        workspaceService.saveSearchPreferences(next),
-    });
-  } catch (error) {
-    console.warn(
-      "Skipping pristine starter source adoption after an error:",
-      error,
-    );
   }
 
   return workspaceService;

@@ -1,13 +1,15 @@
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import {
   ApplicationRecordSchema,
   JobFinderIntelligenceSafeguardsSchema,
   type ApplicationRecord,
   type ApplicationStatus,
 } from "@nestor/contracts";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
   createCampaign,
+  ensureCampaignState,
   deriveCampaignProgress,
   deriveDashboardSummary,
 } from "./campaign-dashboard";
@@ -300,4 +302,29 @@ describe("a plan card uses the application ledger", () => {
 
     expect(progress.applicationsPrepared).toBe(5);
   });
+});
+
+test("reading old campaigns never reconciles today's row-store goals into them", async () => {
+  const seed = createSeed(),
+    repo = createInMemoryJobFinderRepository(seed);
+  const campaign = createCampaign({
+    id: "preserved",
+    name: "Preserved",
+    mode: "precision",
+    searchPreferences: seed.searchPreferences,
+    now: "2026-10-26T00:00:00.000Z",
+  });
+  const state = { activeCampaignId: campaign.id, campaigns: [campaign] };
+  await repo.saveCampaignState(state);
+  const persisted = await repo.getCampaignState();
+  const save = vi.spyOn(repo, "saveCampaignState");
+  const current = await repo.getSearchPreferences();
+  const result = await ensureCampaignState({
+    repository: repo,
+    searchPreferences: current,
+  });
+  expect(result).toEqual(persisted);
+  expect(save).not.toHaveBeenCalled();
+  expect(await repo.getCampaignState()).toEqual(persisted);
+  await repo.close?.();
 });

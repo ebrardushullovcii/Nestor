@@ -1,3 +1,4 @@
+import { invalidateProfileResumes } from "./profile-effects";
 import {
   ProfileRecordSchema,
   ProfileRecordQuerySchema,
@@ -174,6 +175,7 @@ export function createProfileRecords(store: JobStore) {
           store.sql(`UPDATE ${name} SET seq=-seq WHERE id=?`).run(row.id);
         for (const row of changed)
           store.sql(`UPDATE ${name} SET seq=? WHERE id=?`).run(row.seq, row.id);
+        invalidateProfileResumes(store);
         store.notify({ cause: "profile", ids: [], stages: [], searchId: null });
       });
     },
@@ -292,6 +294,7 @@ export function createProfileRecords(store: JobStore) {
               field,
               record[field] as string[],
             ) || changed;
+        if (changed) invalidateProfileResumes(store);
         if (changed)
           store.notify({
             cause: "profile",
@@ -311,6 +314,7 @@ export function createProfileRecords(store: JobStore) {
         store
           .sql("DELETE FROM profile_items WHERE scope=? AND owner=?")
           .run(kind, id);
+        invalidateProfileResumes(store);
         store.notify({ cause: "profile", stages: [], ids: [], searchId: null });
         return true;
       });

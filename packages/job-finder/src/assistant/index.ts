@@ -53,3 +53,4 @@ export {
 } from "./needs-you-commands";
 
 export type { AssistantWorkspaceCommands } from "./workspace-commands";
+export { profilePatchReceipts } from "./profile-patch-receipts";

@@ -1,4 +1,8 @@
 import {
+  invalidateProfileResumes,
+  followPrimaryContact,
+} from "./profile-effects";
+import {
   createFreshStartCandidateProfile,
   ProfileFieldsSchema,
   ProfileListsSchema,
@@ -271,10 +275,45 @@ export function createProfileStore(store: JobStore) {
     patch(input: PatchProfileInput): ProfileOverview {
       const patch = PatchProfileInputSchema.parse(input);
       return store.transaction(() => {
-        let changed = values.patch(patch.fields, patch.expected);
-        for (const [field, value] of Object.entries(patch.lists))
-          if (value !== undefined)
-            changed = items.patch("profile", "1", field, value) || changed;
+        const before = values.read([
+          "email",
+          "phone",
+          "applicationIdentity.preferredEmail",
+          "applicationIdentity.preferredPhone",
+        ]);
+        const nextFields = { ...patch.fields };
+        for (const [primary, preferred] of [
+          ["email", "applicationIdentity.preferredEmail"],
+          ["phone", "applicationIdentity.preferredPhone"],
+        ] as const) {
+          if (Object.hasOwn(nextFields, primary))
+            nextFields[preferred] = followPrimaryContact({
+              before: before[primary],
+              after: nextFields[primary],
+              preferred: before[preferred],
+              nextPreferred: Object.hasOwn(nextFields, preferred)
+                ? nextFields[preferred]
+                : before[preferred],
+              phone: primary === "phone",
+            }) as string | null;
+        }
+        const previousFields = values.read(Object.keys(nextFields));
+        let resumeChanged = Object.entries(nextFields).some(
+          ([key, value]) =>
+            value !== undefined &&
+            (value ?? null) !== (previousFields[key] ?? null) &&
+            !key.startsWith("workEligibility.") &&
+            !key.startsWith("applicationIdentity."),
+        );
+        let changed = values.patch(nextFields, patch.expected);
+        for (const [field, value] of Object.entries(patch.lists)) {
+          if (value === undefined) continue;
+          const touched = items.patch("profile", "1", field, value);
+          changed = touched || changed;
+          resumeChanged =
+            resumeChanged || (touched && !field.startsWith("workEligibility."));
+        }
+        if (resumeChanged) invalidateProfileResumes(store);
         if (changed)
           store.notify({
             cause: "profile",
@@ -304,6 +343,12 @@ export function createProfileStore(store: JobStore) {
           },
           sourceFields,
         );
+        const previous = source.read([
+          "sourceId",
+          "fileName",
+          "storagePath",
+          "textUpdatedAt",
+        ]);
         let changed = source.patch(
           Object.fromEntries(
             Object.entries(flat).map(([key, value]) => [key, value ?? null]),
@@ -315,6 +360,13 @@ export function createProfileStore(store: JobStore) {
           )
           .run(parsed.textContent).changes;
         changed = Boolean(bodyChanged) || changed;
+        if (
+          bodyChanged ||
+          Object.keys(previous).some(
+            (key) => previous[key] !== (flat[key] ?? null),
+          )
+        )
+          invalidateProfileResumes(store);
         changed =
           items.patch(
             "resume",

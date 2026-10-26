@@ -342,14 +342,7 @@ export function reconcileCampaignState(input: {
   });
 }
 
-const reconciledDisplayCampaigns = new WeakMap<
-  JobSearchCampaignCollection,
-  {
-    preferences: JobSearchPreferences;
-    jobIds: readonly string[];
-  }
->();
-
+/** Read-only while the campaign remnants are removed; current goals never rewrite old plans. */
 export async function ensureCampaignState(input: {
   repository: JobFinderRepository;
   searchPreferences: JobSearchPreferences;
@@ -360,50 +353,16 @@ export async function ensureCampaignState(input: {
   input.repository.readCampaignProjection
     ? input.repository.readCampaignProjection()
     : input.repository.getCampaignState());
-  const now = input.now ?? new Date().toISOString();
-  if (!existing) {
-    const campaign = createDefaultCampaign(
-      input.searchPreferences,
-      now,
-      await input.repository.listSavedJobIds(),
-    );
-    const created = JobSearchCampaignCollectionSchema.parse({
-      activeCampaignId: campaign.id,
-      campaigns: [campaign],
-    });
-    await input.repository.saveCampaignState(created);
-    return created;
-  }
-
-  // Every snapshot runs this, and only the ids matter: parsing every saved
-  // job here doubled the cost of each workspace refresh.
-  const jobIds = await input.repository.listSavedJobIds();
-  const previous = reconciledDisplayCampaigns.get(existing);
-  if (
-    input.borrowValidated &&
-    Object.isFrozen(existing) &&
-    previous?.preferences === input.searchPreferences &&
-    (previous.jobIds === jobIds || sameStringValues(previous.jobIds, jobIds))
-  )
-    return existing;
-  const reconciled = reconcileCampaignState({
-    state: existing,
-    savedJobs: jobIds.map((id) => ({
-      id,
-    })),
-    searchPreferences: input.searchPreferences,
-    now,
+  if (existing) return existing;
+  const campaign = createDefaultCampaign(
+    input.searchPreferences,
+    input.now ?? new Date().toISOString(),
+    await input.repository.listSavedJobIds(),
+  );
+  return JobSearchCampaignCollectionSchema.parse({
+    activeCampaignId: campaign.id,
+    campaigns: [campaign],
   });
-  if (!reconciled) {
-    if (input.borrowValidated && Object.isFrozen(existing))
-      reconciledDisplayCampaigns.set(existing, {
-        preferences: input.searchPreferences,
-        jobIds,
-      });
-    return existing;
-  }
-  await input.repository.saveCampaignState(reconciled);
-  return reconciled;
 }
 
 /**
