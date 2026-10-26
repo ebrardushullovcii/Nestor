@@ -169,24 +169,32 @@ export async function runBuiltAppOutcomes(options: {
     let reply: AssistantConversationView | undefined;
     let evidence: BuiltAppEvidence = { operations: [], receipts: [] };
     let turnError: string | undefined;
+    let phase: "prepare" | "composer" | "chat" | "evidence" = "prepare";
+    let cannotReachChat = false;
     try {
       await options.note(`Starting chat outcome batch: ${batch.id}`);
       await options.page.keyboard.press("Escape");
       await batch.prepare?.(options.page);
+      phase = "composer";
       const composer = options.page.locator("[data-assistant-composer]");
       if (!(await composer.isVisible()))
         await options.page
-          .getByRole("button", { name: "Assistant", exact: true })
+          .getByRole("button", {
+            name: /^Open the assistant(?: \(working\))?$/u,
+          })
           .click();
       await options.shot(`before-${batch.id}`);
+      phase = "chat";
       reply = await chatInBuiltApp(options.page, batch.request);
       await writeFile(
         path.join(options.evidenceDir, `${batch.id}-conversation.json`),
         `${JSON.stringify(reply, null, 2)}\n`,
       );
+      phase = "evidence";
       evidence = (await options.readEvidence?.(reply, batch.id)) ?? evidence;
     } catch (error) {
-      turnError = error instanceof Error ? error.message : String(error);
+      turnError = `${phase}: ${error instanceof Error ? error.message : String(error)}`;
+      cannotReachChat = phase === "composer" || options.page.isClosed();
     }
     for (const action of batch.actions) {
       let assertions: readonly OutcomeAssertion[] = [];
@@ -217,7 +225,12 @@ export async function runBuiltAppOutcomes(options: {
           operation.status === "committed" &&
           operation.resultSummary,
       );
-      if (gap && !judgeAction(observation).passed)
+      if (
+        gap &&
+        !observation.error &&
+        observation.assertions.length &&
+        !judgeAction(observation).passed
+      )
         observation.unsupportedReason = `The requested outcome was absent and the Assistant recorded a missing capability (${gap.id}): ${gap.resultSummary}`;
       observations.push(observation);
       const judged = judgeAction(observation);
@@ -231,6 +244,12 @@ export async function runBuiltAppOutcomes(options: {
         options.note(`Result screenshot unavailable: ${String(error)}`),
       );
     await persist();
+    if (cannotReachChat) {
+      await options.note(
+        "Stopped this run because its chat composer is unreachable; all remaining mapped actions stay unexercised failures.",
+      );
+      break;
+    }
   }
   await persist();
   return buildOutcomeReport(ACTION_INVENTORY, observations);
