@@ -479,15 +479,16 @@ it("rejects Assistant edits when a screen saved the same facts after the plannin
     results: receipts.results,
   });
   const ctx = context();
-  ctx.session.recordChange = async (input) => ({
-    receipt: AssistantChangeReceiptSchema.parse({
-      id: "receipt",
-      conversationId: "chat",
-      ...input,
-      createdAt: new Date().toISOString(),
-    }),
-    part: { type: "text", text: "Undo available" },
-  });
+  ctx.session.recordChange = (input) =>
+    Promise.resolve({
+      receipt: AssistantChangeReceiptSchema.parse({
+        id: "receipt",
+        conversationId: "chat",
+        ...input,
+        createdAt: new Date().toISOString(),
+      }),
+      part: { type: "text", text: "Undo available" },
+    });
   const mcp = await connectAssistantMcp(definitions, ctx);
   const call = (name: string, input: unknown) =>
     mcp.tools.find((tool) => tool.name === name)!.execute(input, ctx);

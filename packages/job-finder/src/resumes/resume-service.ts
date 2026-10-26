@@ -102,6 +102,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribe: (() => void) | null = null;
   let waitingForProfile = false;
+  let profileRevision = 0;
 
   const requireJob = (jobId: number) => {
     const job = store.getJob(jobId);
@@ -148,9 +149,10 @@ export function createResumeService(deps: ResumeServiceDeps) {
     const { signal } = controller;
     try {
       if (stopped || signal.aborted) return;
+      const readAtRevision = profileRevision;
       const inputs = await deps.readInputs();
       if (!hasResumeWriterEvidence(inputs.profile)) {
-        waitingForProfile = true;
+        if (readAtRevision === profileRevision) waitingForProfile = true;
         return;
       }
       const level = resumes.startWriting(
@@ -257,6 +259,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
       resumes.requeue();
       unsubscribe = store.onChange((change) => {
         if (change.cause === "profile") {
+          profileRevision++;
           waitingForProfile = false;
           pump();
           return;
