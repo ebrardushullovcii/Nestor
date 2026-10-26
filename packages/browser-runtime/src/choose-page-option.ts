@@ -144,11 +144,13 @@ async function readList(list: Locator): Promise<ListState | null> {
         element.querySelectorAll<HTMLElement>("[role='option']"),
       )
         .filter(drawn)
-        .map((option) =>
-          (option.getAttribute("aria-label") ?? option.innerText ?? "")
+        .map((option) => ({
+          text: (option.getAttribute("aria-label") ?? option.innerText ?? "")
             .replace(/\s+/gu, " ")
             .trim(),
-        );
+          disabled:
+            option.closest("[aria-disabled='true'], [disabled]") !== null,
+        }));
       return {
         visible: drawn(html) && getComputedStyle(html).visibility !== "hidden",
         // Skeleton rows, a spinner or a "Loading…" row: still fetching.
@@ -159,7 +161,7 @@ async function readList(list: Locator): Promise<ListState | null> {
               "[aria-busy='true'], [role='progressbar'], [class*='skeleton' i], [class*='spinner' i], [class*='loading' i]",
             ),
           ).some(drawn) ||
-          rows.some((text) => text === "" || loadingRow.test(text)),
+          rows.some(({ text }) => text === "" || loadingRow.test(text)),
         options: rows,
         // An empty list says so in its menu, which may wrap the listbox.
         menuText: (html.closest<HTMLElement>("[class*='menu' i]") ?? html)
@@ -168,11 +170,14 @@ async function readList(list: Locator): Promise<ListState | null> {
     }, LOADING_ROW.source)
     .catch(() => null);
   if (!read) return null;
+  const options = read.options
+    .filter(({ text, disabled }) => !disabled && !PLACEHOLDER.test(text))
+    .map(({ text }) => text);
   return {
     visible: read.visible,
     loading: read.loading,
-    options: read.options,
-    noResults: read.options.length === 0 && NO_RESULTS.test(read.menuText),
+    options,
+    noResults: options.length === 0 && NO_RESULTS.test(read.menuText),
   };
 }
 
@@ -189,6 +194,7 @@ async function readWholeList(
       const normalize = (value: string) =>
         value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
       const loadingRow = new RegExp(input.loadingSource, "iu");
+      const placeholder = new RegExp(input.placeholderSource, "iu");
       const wait = (ms: number) =>
         new Promise<void>((resolve) => setTimeout(resolve, ms));
       const scrollable = (node: Element | null): node is HTMLElement =>
@@ -205,6 +211,7 @@ async function readWholeList(
         ].find(scrollable) ??
         null;
       const seen = new Map<string, string>();
+      const choices = new Map<string, string>();
       const collect = (): string | null => {
         let found: string | null = null;
         for (const option of element.querySelectorAll<HTMLElement>(
@@ -217,6 +224,12 @@ async function readWholeList(
           if (!text || loadingRow.test(text)) continue;
           const key = normalize(text);
           if (!seen.has(key)) seen.set(key, text);
+          if (
+            placeholder.test(text) ||
+            option.closest("[aria-disabled='true'], [disabled]") !== null
+          )
+            continue;
+          if (!choices.has(key)) choices.set(key, text);
           if (key === input.wanted) found ??= text;
         }
         return found;
@@ -232,7 +245,7 @@ async function readWholeList(
             Number(option.getAttribute("aria-posinset") ?? 0) > seen.size,
         );
       const done = (complete: boolean, found: string | null) => ({
-        options: [...seen.values()],
+        options: [...choices.values()],
         complete: found !== null || (complete && !windowed()),
         found,
       });
@@ -272,6 +285,7 @@ async function readWholeList(
     {
       wanted,
       loadingSource: LOADING_ROW.source,
+      placeholderSource: PLACEHOLDER.source,
       maxSteps: 80,
       maxOptions: 1_500,
     },
@@ -453,7 +467,6 @@ async function chooseFromList(
       );
     }
   }
-  let searched: string[] | null = null;
   if (first.kind === "settled") {
     const read = await readWholeList(first.list, wanted);
     if (read.found)
@@ -469,9 +482,10 @@ async function chooseFromList(
     }
     if (!searchable) {
       await leave();
-      return missing(label, read.options);
+      return read.options.length > 0
+        ? missing(label, read.options)
+        : uncertain("The list had no selectable choices to confirm.");
     }
-    searched = read.options;
   } else if (first.kind === "unsettled" || !searchable) {
     await leave();
     return uncertain(
@@ -498,17 +512,9 @@ async function chooseFromList(
   await leave();
   // The rows a search left are not what the form offers: without the whole
   // list nothing proves the choice absent.
-  if (!whole?.complete)
+  if (!whole?.complete || whole.options.length === 0)
     return uncertain(
       "The full option list could not be read after the search, so its choices could not be confirmed.",
     );
-  const offered = [...(searched ?? [])];
-  for (const option of whole.options)
-    if (
-      !offered.some(
-        (seen) => normalizeOptionLabel(seen) === normalizeOptionLabel(option),
-      )
-    )
-      offered.push(option);
-  return missing(label, offered);
+  return missing(label, whole.options);
 }

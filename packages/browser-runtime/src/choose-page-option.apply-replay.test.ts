@@ -194,6 +194,55 @@ test("a list showing only a Loading… row is uncertain", async () => {
   });
 }, 15_000);
 
+test.each([
+  [
+    "disabled placeholder",
+    '<div role="option" aria-disabled="true">Select a country…</div>',
+  ],
+  ["enabled placeholder", '<div role="option">Select a country…</div>'],
+  [
+    "disabled choices",
+    '<div role="option" aria-disabled="true">Austria</div><button role="option" disabled>Croatia</button>',
+  ],
+])(
+  "custom lists without usable choices are uncertain: %s",
+  async (_name, rows) => {
+    await withPage(async (page) => {
+      await page.setContent(
+        `<label>Country<input role="combobox" readonly aria-controls="country-options"></label><div id="country-options" role="listbox">${rows}</div>`,
+      );
+      const result = await choosePageOption(
+        page,
+        page.getByRole("combobox"),
+        replay.missing,
+      );
+      expect(result.ok).toBe(false);
+      expect(result).not.toHaveProperty("reason");
+      expect(result).not.toHaveProperty("offeredOptions");
+    });
+  },
+  15_000,
+);
+
+test("custom handover excludes placeholder and disabled rows from real choices", async () => {
+  await withPage(async (page) => {
+    await page.setContent(`
+      <label>Country<input role="combobox" readonly aria-controls="country-options"></label>
+      <div id="country-options" role="listbox">
+        <div role="option" aria-disabled="true">Select a country…</div>
+        <div role="option">Austria</div>
+        <div role="option" aria-disabled="true">Croatia</div>
+      </div>`);
+    expect(
+      await choosePageOption(page, page.getByRole("combobox"), "Croatia"),
+    ).toMatchObject({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: ["Austria"],
+    });
+  });
+}, 15_000);
+
 /** A search box over a list, like the ones that showed "No results" in the real round. */
 const searchPicker = (
   options: readonly string[],
@@ -224,6 +273,22 @@ const searchPicker = (
   });
   draw(${JSON.stringify(initialQuery)});
 </script>`;
+
+test("a custom handover uses the full list order after a filtered search, including on retry", async () => {
+  await withPage(async (page) => {
+    const options = ["Austria", "Croatia", "CROATIA", "Cyprus"];
+    await page.setContent(searchPicker(options, 0));
+    const control = page.getByRole("combobox");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await choosePageOption(page, control, "Cro")).toMatchObject({
+        ok: false,
+        reason: "option_not_offered",
+        offeredOptions: ["Austria", "Croatia", "Cyprus"],
+      });
+      expect(await control.inputValue()).toBe("");
+    }
+  });
+}, 20_000);
 
 test("a search that finds nothing reports the form's real choices and leaves no typed search behind", async () => {
   await withPage(async (page) => {
