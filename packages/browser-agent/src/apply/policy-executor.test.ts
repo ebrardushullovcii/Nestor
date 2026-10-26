@@ -180,6 +180,48 @@ function configFor(
 const now = () => new Date("2026-09-14T10:00:00.000Z");
 
 describe("apply policy executor", () => {
+  test.each([
+    "What is your go-to tool?",
+    "What is your top skill?",
+    "What is your preferred tool?",
+    "What is your favourite tool?",
+    "What is your favorite tool?",
+    "What monitoring product do you love or hate, and why?",
+  ])(
+    "an exact skill fact cannot bypass an opinion handover: %s",
+    async (question) => {
+      const source = rawPage({
+        controls: [rawControl({ index: 0, label: question, required: false })],
+      });
+      const { config } = configFor(source);
+      config.sources.profile.skills = ["Playwright"];
+      const fill = vi.spyOn(config.hands, "fillText"),
+        checkWrittenAnswer = vi
+          .fn()
+          .mockResolvedValue({ supported: true, reason: "Supported" });
+      const outcome = await executeApplyProposal(
+        {
+          tool: "type",
+          ref: "c0",
+          text: "Playwright",
+          storedFactId: "profile.skills.0",
+        },
+        observationOf(source).signature,
+        {
+          config,
+          now,
+          guardState: createApplyGuardState(),
+          checkWrittenAnswer,
+        },
+      );
+      expect(outcome).toMatchObject({
+        kind: "suggestion",
+        question: { prompt: question },
+      });
+      expect(fill).not.toHaveBeenCalled();
+      expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    },
+  );
   test.each(discovery.cases)(
     "listing-source replay uses observed provenance, never a generated referral: $kind $options",
     async (entry) => {
@@ -1444,7 +1486,7 @@ describe("apply policy executor", () => {
     expect(chooseOption).not.toHaveBeenCalled();
   });
 
-  test("an optional preference stays empty without a person handoff", async () => {
+  test("an optional preference stays empty and asks for the person's answer", async () => {
     const page = rawPage({
       controls: [
         rawControl({
@@ -1468,7 +1510,10 @@ describe("apply policy executor", () => {
 
     expect(outcome.kind).toBe("suggestion");
     if (outcome.kind === "suggestion") {
-      expect(outcome.question).toBeNull();
+      expect(outcome.question).toMatchObject({
+        prompt: "Which office would you prefer?",
+        answerOptions: ["Leeds", "Bristol"],
+      });
       expect(outcome.note).toContain("carry on with the rest");
     }
     expect(chooseOption).not.toHaveBeenCalled();
@@ -4543,7 +4588,7 @@ describe("an unconfirmed short value is offered back to the person", () => {
       label: "Preferred start date",
       inputType: "date",
       value: "2026-11-20",
-      offered: true,
+      offered: false,
     },
     {
       label: "Why do you want this job?",

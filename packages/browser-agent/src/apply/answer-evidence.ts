@@ -23,6 +23,20 @@ const preference =
 const motivation =
   /\b(?:why|what)\b.*\b(?:join|apply|work|company|us|role|position|attracts?|appeals?|interests?)\b|\b(?:cover|application|motivation)\s+letter\b|\b(?:motivation|motivates|interested in (?:this|the) (?:role|position))\b/iu;
 
+export const OPINION_ANSWER_REASON =
+  "This question asks for your opinion or preference. Please supply your answer.";
+export function requiresSavedOpinionAnswer(
+  question: string,
+  answer: string,
+): boolean {
+  return (
+    preference.test(question) ||
+    preference.test(answer) ||
+    (!motivation.test(question) &&
+      (opinion.test(question) || opinion.test(answer)))
+  );
+}
+
 function savedEvidence(
   entry: AnswerEvidence,
   applicant: unknown,
@@ -208,13 +222,7 @@ export function evidenceFitsQuestion(input: {
     );
   });
   if (requiresSavedNationalityAnswer(question)) return exactSaved;
-  if (
-    preference.test(question) ||
-    preference.test(answer) ||
-    (!motivation.test(question) &&
-      (opinion.test(question) || opinion.test(answer)))
-  )
-    return exactSaved;
+  if (requiresSavedOpinionAnswer(question, answer)) return exactSaved;
   if (exactSaved) return true;
   const month = employmentMonthEvidence(question, answer, evidence);
   if (month !== null) return month;

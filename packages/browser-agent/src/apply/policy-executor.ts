@@ -1,5 +1,9 @@
 import { questionClassificationKey } from "./question-classification";
 import {
+  OPINION_ANSWER_REASON,
+  requiresSavedOpinionAnswer,
+} from "./answer-evidence";
+import {
   asksListingDiscovery,
   listingDiscoveryAnswer,
 } from "./listing-discovery-answer";
@@ -675,6 +679,14 @@ async function decideAnswer(input: {
     control,
     config.sources.reusableAnswers,
   );
+  if (!saved && requiresSavedOpinionAnswer(questionPrompt(control), value)) {
+    return {
+      kind: "leave",
+      reason: OPINION_ANSWER_REASON,
+      suggestion: null,
+      permission: true,
+    };
+  }
   const nationalityQuestion = nationalityQuestionIdentity(
     questionPrompt(control),
   );
@@ -881,6 +893,7 @@ function leaveUnansweredForPerson(input: {
     question:
       control.required ||
       input.reason === OWN_WORDS_REASON ||
+      input.reason === OPINION_ANSWER_REASON ||
       input.reason === NATIONALITY_ANSWER_REASON
         ? buildPendingQuestion({
             control,

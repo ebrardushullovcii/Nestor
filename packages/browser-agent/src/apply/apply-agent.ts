@@ -1,4 +1,5 @@
 import { createApplyTiming } from "./apply-timing";
+import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
@@ -540,6 +541,7 @@ async function runMeasuredApplyAgent(
         return null; // The executor checks files and click-derived answers itself.
     }
     return answer !== null &&
+      !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
       !asksListingDiscovery(questionPrompt(control)) &&
       control.attestationKind === null &&
       !isCoverLetterControl(control) &&

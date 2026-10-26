@@ -5639,13 +5639,13 @@ test.each([
     tasks: ["claim_check"],
   },
   {
-    label: "Preferred start date",
+    label: "Available start date",
     answer: "2026-11-20",
     tasks: ["apply"],
     unread: true,
   },
   {
-    label: "Preferred office",
+    label: "Workplace country",
     answer: "London",
     tasks: ["apply", "claim_check"],
     unread: true,
