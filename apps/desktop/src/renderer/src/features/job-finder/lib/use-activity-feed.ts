@@ -14,7 +14,10 @@ let pending: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 function read(): void {
-  void window.nestor.activity.feed().then(
+  // Hosts without the bridge (tests of other screens) have no Activity.
+  const activity = window.nestor?.activity;
+  if (!activity) return;
+  void activity.feed().then(
     (next) => {
       feed = next;
       for (const listener of listeners) listener();
