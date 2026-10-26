@@ -2,8 +2,21 @@ import { useEffect, useState } from "react";
 import { ProfileRecordSchema, type ProfileEditsDraft } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
+const labels: Record<string, string> = {
+  experiences: "Work history",
+  spokenLanguages: "Languages",
+  proofBank: "Evidence",
+  employmentTypes: "Hours",
+};
 const label = (key: string) =>
-  key.replaceAll(".", " · ").replace(/([a-z])([A-Z])/gu, "$1 $2");
+  labels[key] ??
+  key
+    .split(".")
+    .map((part) => {
+      const words = part.replace(/([a-z])([A-Z])/gu, "$1 $2").toLowerCase();
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    })
+    .join(" · ");
 const value = (item: unknown): string => {
   if (Array.isArray(item))
     return item

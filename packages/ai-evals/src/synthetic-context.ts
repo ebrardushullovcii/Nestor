@@ -138,7 +138,6 @@ export function createSyntheticSearchPreferences() {
     tailoringMode: "balanced",
     companyBlacklist: [],
     companyWhitelist: [],
-    discovery: { historyLimit: 5, targets: [] },
   });
 }
 
