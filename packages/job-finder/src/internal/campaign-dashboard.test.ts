@@ -314,7 +314,11 @@ test("reading old campaigns never reconciles today's row-store goals into them",
     searchPreferences: seed.searchPreferences,
     now: "2026-10-26T00:00:00.000Z",
   });
-  const state = { activeCampaignId: campaign.id, campaigns: [campaign] };
+  const state = {
+    notifications: [],
+    activeCampaignId: campaign.id,
+    campaigns: [campaign],
+  };
   await repo.saveCampaignState(state);
   const persisted = await repo.getCampaignState();
   const save = vi.spyOn(repo, "saveCampaignState");

@@ -1,3 +1,4 @@
+import { ensureCampaignState } from "./internal/campaign-dashboard";
 import { createTestJobSites } from "./source-debug.test-support";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { createInMemoryJobFinderRepository } from "@nestor/db";
@@ -71,9 +72,12 @@ async function configureAutomaticFailureThreshold(
   repository: Repository,
   pauseOnFailureRatePercent: number,
 ): Promise<string> {
-  // Builds the default campaign in the snapshot if the seed has none yet.
+  // This legacy campaign-specific fixture is seeded explicitly; reads never create it.
   await service.getWorkspaceSnapshot();
-  const campaignState = await repository.getCampaignState();
+  const campaignState = await ensureCampaignState({
+    repository,
+    searchPreferences: await repository.getSearchPreferences(),
+  });
   const activeCampaign = campaignState?.campaigns.find(
     (campaign) => campaign.id === campaignState.activeCampaignId,
   );
