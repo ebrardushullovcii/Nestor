@@ -17,6 +17,8 @@ import {
   preferenceOutcomeCases,
   checkPreferenceFixtures,
 } from "./preference-cases";
+import { siteOutcomeCases } from "./site-cases";
+import { trackerOutcomeCases } from "./tracker-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -29,7 +31,9 @@ interface VerifyContext {
   shot(name: string): Promise<unknown>;
   note(text: string): Promise<unknown>;
 }
-export function allBatches(): BuiltAppBatch[] {
+export function allBatches(
+  replicaOrigin = "http://127.0.0.1:1",
+): BuiltAppBatch[] {
   checkPreferenceFixtures();
   return [
     ...navigationOutcomeCases(),
@@ -37,6 +41,8 @@ export function allBatches(): BuiltAppBatch[] {
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
     ...preferenceOutcomeCases(),
+    ...siteOutcomeCases(replicaOrigin),
+    ...trackerOutcomeCases(),
   ];
 }
 
@@ -112,7 +118,10 @@ export async function run(
     throw Error(
       "Refusing to seed anything except an isolated verify-nestor data folder",
     );
-  const batches = selectBatches(allBatches(), options.prefixes ?? []);
+  const batches = selectBatches(
+    allBatches(ctx.sites.url),
+    options.prefixes ?? [],
+  );
   const state = JSON.parse(
     await readFile(
       path.join(
