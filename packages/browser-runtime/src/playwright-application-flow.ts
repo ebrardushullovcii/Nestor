@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { installMutationResponseBodyObserver } from "./mutation-response-body";
 import {
   classifyAttachmentUpload,
+  classifyUploadBind,
+  uploadHandlesIn,
   type AttachmentUploadWindow,
 } from "./application-attachment-upload-policy";
 import type { ApplyRequestPermit, ApplyUploadFile } from "@nestor/contracts";
@@ -12,6 +14,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type {
+  APIResponse,
   BrowserContext,
   Frame,
   Locator,
@@ -164,14 +167,16 @@ function requestFrameOrigin(request: Request): string | null {
  * redirects on its own: Playwright never routes a redirect hop, so each hop
  * is fetched here and only when `hopAllowed` lets that exact address and
  * method through. A navigation that redirected is handed to the browser as
- * one redirect to the checked final address. Returns false when a hop was
- * refused; nothing was sent there.
+ * one redirect to the checked final address. Returns the final answer, or
+ * null when a hop was refused; nothing was sent there.
  */
 async function forwardCheckingHops(
   route: Route,
   request: Request,
   hopAllowed: (url: string, method: string, body: string | null) => boolean,
-): Promise<boolean> {
+  /** Runs on the final answer before the page sees it. */
+  beforeAnswer?: (response: APIResponse) => Promise<void>,
+): Promise<APIResponse | null> {
   let url = request.url();
   let method = request.method();
   let postData: Buffer | undefined = request.postDataBuffer() ?? undefined;
@@ -192,16 +197,17 @@ async function forwardCheckingHops(
     });
     const status = response.status();
     if (status < 300 || status >= 400 || status === 304) {
+      await beforeAnswer?.(response);
       if (hop > 0 && request.isNavigationRequest())
         await route.fulfill({ status: 302, headers: { location: url } });
       else await route.fulfill({ response });
-      return true;
+      return response;
     }
     let next: string;
     try {
       next = new URL(response.headers()["location"] ?? "", url).href;
     } catch {
-      return false;
+      return null;
     }
     if (
       status === 303 ||
@@ -211,10 +217,59 @@ async function forwardCheckingHops(
       postData = undefined;
     }
     if (!hopAllowed(next, method, postData?.toString("utf8") ?? null))
-      return false;
+      return null;
     url = next;
   }
-  return false;
+  return null;
+}
+
+/**
+ * What one allowed upload leg's answer means for the next. A presign's
+ * answer names the handles a bind may carry back to the same endpoint; the
+ * storage taking the file opens room for that one bind.
+ */
+async function noteUploadLeg(
+  page: Page,
+  grant: AttachmentUploadWindow,
+  request: Request,
+  answer: APIResponse,
+): Promise<void> {
+  const ok = answer.status() >= 200 && answer.status() < 300;
+  if (!ok) return;
+  if (getPrepareOnlyRequestPermit(request)?.uploadLeg === "presign") {
+    const text = await answer.text().catch(() => "");
+    const url = new URL(request.url());
+    grant.presignEndpoint = `${url.origin}${url.pathname}`;
+    grant.handles = uploadHandlesIn(text.slice(0, 65_536), grant);
+  } else {
+    grant.bindsRemaining = 1;
+    grant.expiresAtMs = Math.max(grant.expiresAtMs, Date.now() + 15_000);
+  }
+  await shareUploadGrant(page, grant);
+}
+
+/** Gives every frame's guard the network's view of the upload window. */
+async function shareUploadGrant(
+  page: Page,
+  grant: AttachmentUploadWindow,
+): Promise<void> {
+  for (const frame of page.frames())
+    await frame
+      .evaluate((windowGrant) => {
+        const state = (window as unknown as Record<string, unknown>)[
+          "__nestorPrepareOnlyMutationGuardV1"
+        ] as
+          | { attachmentUploadWindow: AttachmentUploadWindow | null }
+          | undefined;
+        if (state?.attachmentUploadWindow)
+          state.attachmentUploadWindow = {
+            ...state.attachmentUploadWindow,
+            handles: windowGrant.handles ?? [],
+            bindsRemaining: windowGrant.bindsRemaining ?? 0,
+            expiresAtMs: windowGrant.expiresAtMs,
+          };
+      }, grant)
+      .catch(() => undefined);
 }
 
 export interface PrepareOnlyGuardSnapshot {
@@ -810,13 +865,29 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     if (
       !grant ||
       Date.now() > grant.expiresAtMs ||
-      grant.remainingRequests < 1 ||
       !["POST", "PUT"].includes(normalizeMethod(method))
     )
       return false;
+    // The one bind after the storage took the file: it names a handle the
+    // presign handed out. The network fence checks it exactly.
     if (
       typeof body === "string" &&
       body.length <= 16_384 &&
+      url &&
+      new URL(url).origin === grant.sourceOrigin &&
+      (grant.bindsRemaining ?? 0) > 0 &&
+      grant.handles?.some((handle) => body.includes(handle)) &&
+      !requestCarriesPreparedValue(url, body)
+    ) {
+      grant.bindsRemaining = 0;
+      return true;
+    }
+    if (grant.remainingRequests < 1) return false;
+    // A presign never takes the last allowance: that one is the file's.
+    if (
+      typeof body === "string" &&
+      body.length <= 16_384 &&
+      grant.remainingRequests >= 2 &&
       url &&
       new URL(url).origin === grant.sourceOrigin &&
       /upload|presign/iu.test(body)
@@ -1699,20 +1770,21 @@ export async function ensurePrepareOnlyMutationGuard(
       ) {
         let forwarded = false;
         try {
-          forwarded = await forwardCheckingHops(
-            route,
-            request,
-            (url, hopMethod, body) =>
-              classifyStrictFillRead({
-                method: hopMethod,
-                resourceType,
-                url,
-                bodyText: body,
-                preparedValues: [...networkGuardState!.preparedValues],
-                // A redirect of the run's own navigation is still the run's.
-                ...(navigation ? { navigation } : {}),
-              }).allowed,
-          );
+          forwarded =
+            (await forwardCheckingHops(
+              route,
+              request,
+              (url, hopMethod, body) =>
+                classifyStrictFillRead({
+                  method: hopMethod,
+                  resourceType,
+                  url,
+                  bodyText: body,
+                  preparedValues: [...networkGuardState!.preparedValues],
+                  // A redirect of the run's own navigation is still the run's.
+                  ...(navigation ? { navigation } : {}),
+                }).allowed,
+            )) !== null;
         } catch {
           await route.abort("failed").catch(() => undefined);
           return;
@@ -1725,6 +1797,43 @@ export async function ensurePrepareOnlyMutationGuard(
         resourceType === "fetch" || resourceType === "xhr"
           ? resourceType
           : "other";
+      const uploadGrant = networkGuardState!.attachmentUploadWindow;
+      if (
+        strictFill &&
+        resourceKind !== "other" &&
+        networkGuardState!.attachmentUploadsAuthorized &&
+        classifyUploadBind({
+          window: uploadGrant,
+          nowMs: Date.now(),
+          method,
+          url: request.url(),
+          contentType: request.headers()["content-type"] ?? "",
+          body: request.postData(),
+          preparedValues: [...networkGuardState!.preparedValues],
+        })
+      ) {
+        // The step that ties the file the storage just took to the form.
+        uploadGrant!.bindsRemaining = 0;
+        await shareUploadGrant(page, uploadGrant!);
+        networkGuardState!.allowedIntermediateRequests.add(request);
+        let bound = false;
+        try {
+          bound =
+            (await forwardCheckingHops(
+              route,
+              request,
+              (url) =>
+                uploadHopStaysOnEndpoint(request.url(), url, [
+                  ...networkGuardState!.preparedValues,
+                ]) !== null,
+            )) !== null;
+        } catch {
+          await route.abort("failed").catch(() => undefined);
+          return;
+        }
+        if (!bound) await denyRequest();
+        return;
+      }
       const attachment = await classifyAttachmentUpload({
         window:
           networkGuardState!.attachmentUploadsAuthorized &&
@@ -1764,21 +1873,23 @@ export async function ensurePrepareOnlyMutationGuard(
         } catch {
           // A listener's failure never changes what the fence lets out.
         }
-        let forwarded = false;
+        let answer: APIResponse | null = null;
         try {
-          forwarded = await forwardCheckingHops(
+          answer = await forwardCheckingHops(
             route,
             request,
             (url) =>
               uploadHopStaysOnEndpoint(request.url(), url, [
                 ...networkGuardState!.preparedValues,
               ]) !== null,
+            // The page may send the next leg the moment it hears this one.
+            (response) => noteUploadLeg(page, grant, request, response),
           );
         } catch {
           await route.abort("failed").catch(() => undefined);
           return;
         }
-        if (!forwarded) {
+        if (!answer) {
           // The upload reached its endpoint, which then pointed somewhere
           // else. That hop is never followed.
           prepareOnlyRequestPermits.delete(request);

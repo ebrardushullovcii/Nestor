@@ -2,8 +2,11 @@ import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays
 import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
+import ashbyBind from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/ashby-upload-bind.json";
 import {
   classifyAttachmentUpload,
+  classifyUploadBind,
+  uploadHandlesIn,
   type AttachmentUploadWindow,
 } from "./application-attachment-upload-policy";
 
@@ -327,4 +330,67 @@ test("a direct object upload must contain exactly the selected file, inside its 
       })
     ).allowed,
   ).toBe(false);
+});
+
+test("Ashby's bind: one, to the presign's endpoint, naming its handle, after storage took the file, with no answer", () => {
+  const endpoint = "https://apply.example.test/api/non-user-graphql";
+  const handles = uploadHandlesIn(
+    JSON.stringify({
+      data: {
+        fileUploadHandle: {
+          handle: ashbyBind.handle,
+          url: "https://storage.example.test/",
+        },
+      },
+    }),
+    grant,
+  );
+  expect(handles).toContain(ashbyBind.handle);
+  const stored = {
+    ...grant,
+    presignEndpoint: endpoint,
+    handles,
+    bindsRemaining: 1,
+  };
+  const bind = (
+    overrides: { path?: string; fileHandle?: string; url?: string } = {},
+    window: AttachmentUploadWindow = stored,
+  ) =>
+    classifyUploadBind({
+      window,
+      nowMs: 1000,
+      method: "POST",
+      url: overrides.url ?? `${endpoint}?op=ApiSetFormValueToFile`,
+      contentType: "application/json",
+      body: JSON.stringify({
+        operationName: "ApiSetFormValueToFile",
+        variables: {
+          organizationHostedJobsPageName: "synthetic",
+          formRenderIdentifier: ashbyBind.formRenderIdentifier,
+          path: overrides.path ?? ashbyBind.path,
+          fileHandle: overrides.fileHandle ?? ashbyBind.handle,
+          formDefinitionIdentifier: ashbyBind.formDefinitionIdentifier,
+        },
+        query: ashbyBind.bindQuery,
+      }),
+      preparedValues: ["Robin Ashford", "robin@example.test"],
+    });
+  expect(bind()).toBe(true);
+  // Before the storage took the file, or once the bind is spent.
+  expect(bind({}, { ...stored, bindsRemaining: 0 })).toBe(false);
+  expect(bind({ fileHandle: "c29tZS1vdGhlci1oYW5kbGUtMDAwMQ==" })).toBe(false);
+  expect(bind({ path: "Robin Ashford" })).toBe(false);
+  expect(
+    bind({
+      url: `${endpoint}?op=ApiSetFormValueToFile&n=robin%40example.test`,
+    }),
+  ).toBe(false);
+  expect(
+    bind({
+      url: "https://apply.example.test/api/other?op=ApiSetFormValueToFile",
+    }),
+  ).toBe(false);
+  expect(bind({ url: `${endpoint}?op=ApiSubmitApplicationFormAction` })).toBe(
+    false,
+  );
 });

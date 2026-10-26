@@ -1,0 +1,32 @@
+{
+  "id": "greenhouse-s3-post",
+  "provenance": "The shape of Greenhouse's presigned_fields answer and storage POST on its job boards (October 2026), read from a public job page's own presign GET and its client code. Field names, policy conditions and status codes are as observed; every value is synthetic.",
+  "fields": {
+    "x-amz-server-side-encryption": "AES256",
+    "success_action_status": "201",
+    "x-amz-credential": "EXAMPLEUPLOADKEY12345/20990101/local-test-1/s3/aws4_request",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256",
+    "x-amz-date": "20990101T000000Z",
+    "x-amz-signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "policy": {
+    "expiration": "2099-01-01T01:00:00Z",
+    "conditions": [
+      { "bucket": "synthetic-greenhouse-files" },
+      ["starts-with", "$utf8", ""],
+      ["starts-with", "$authenticity_token", ""],
+      ["starts-with", "$key", "uploads/"],
+      { "x-amz-server-side-encryption": "AES256" },
+      { "success_action_status": "201" },
+      ["content-length-range", 1, 104857600],
+      ["starts-with", "$Content-Type", ""],
+      {
+        "x-amz-credential": "EXAMPLEUPLOADKEY12345/20990101/local-test-1/s3/aws4_request"
+      },
+      { "x-amz-algorithm": "AWS4-HMAC-SHA256" },
+      { "x-amz-date": "20990101T000000Z" }
+    ]
+  },
+  "keyTemplate": "uploads/{timestamp}-{unique_id}/${filename}",
+  "receipt": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PostResponse><Location>STORAGE/uploads/1-abc/resume.pdf</Location><Bucket>synthetic-greenhouse-files</Bucket><Key>uploads/1-abc/resume.pdf</Key><ETag>\"synthetic\"</ETag></PostResponse>"
+}
