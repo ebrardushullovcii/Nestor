@@ -39,7 +39,11 @@ export interface AddedColumn {
 }
 
 /** Columns added to tables after their release, in the order they came. */
-export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [];
+export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
+  { table: "resume_changes", column: "before_stage_at", definition: "INTEGER" },
+  { table: "resume_changes", column: "after_stage_at", definition: "INTEGER" },
+  { table: "resume_changes", column: "after_move_id", definition: "INTEGER" },
+];
 
 const JOBS = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -200,7 +204,10 @@ CREATE TABLE IF NOT EXISTS resume_changes (
   job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   before_json TEXT NOT NULL,
   before_stage TEXT NOT NULL,
+    before_stage_at INTEGER,
   after_stage TEXT NOT NULL,
+    after_stage_at INTEGER,
+    after_move_id INTEGER,
   expected_updated_at INTEGER NOT NULL,
   undone_at INTEGER
 );

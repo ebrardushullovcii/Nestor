@@ -210,6 +210,47 @@ describe("resumes on the store", () => {
     expect(service.undoChange(id, edit.undoId!).draft).toEqual(before.draft);
   });
 
+  it.each([false, true])(
+    "keeps an edit unapproved after moving to Find jobs and shortlisting again (same clock: %s)",
+    async (sameClock) => {
+      const { store, service, id } = setup();
+      store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+      await vi.waitFor(() =>
+        expect(service.get(id).resume?.state).toBe("ready"),
+      );
+      const approved = await service.approve(id);
+      const edit = service.saveDraft(
+        id,
+        { ...approved.draft!, targetPageCount: 3 },
+        approved.updatedAt,
+      );
+      const clock = vi
+        .spyOn(Date, "now")
+        .mockReturnValue(
+          sameClock
+            ? Date.parse(edit.updatedAt)
+            : Date.parse(edit.updatedAt) + 1000,
+        );
+      try {
+        store.moveJobs({ selection: { ids: [id] }, to: "found" });
+        store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+        const beforeUndo = service.get(id);
+        expect(() => service.undoChange(id, edit.undoId!)).toThrow(
+          "changed since",
+        );
+        expect(service.get(id)).toEqual(beforeUndo);
+        expect(beforeUndo.job.stage).toBe("shortlisted");
+        expect(beforeUndo.resume).toMatchObject({
+          approvedAt: null,
+          pdfPath: null,
+          updatedAt: edit.updatedAt,
+        });
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it("does not approve a draft edited while its PDF is rendering", async () => {
     const { store, service, id, renderResumeArtifact } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });

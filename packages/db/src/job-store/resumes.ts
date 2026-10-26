@@ -33,6 +33,7 @@ type PreviousResume = {
   approvedAt: number | null;
   pdfPath: string | null;
 };
+type StageStamp = { stage: JobStage; stage_at: number };
 
 const iso = (ms: number | null) =>
   ms === null ? null : new Date(ms).toISOString();
@@ -123,12 +124,17 @@ export function createResumeStore(store: JobStore): ResumeStore {
     sql(
       `SELECT r.*, f.sha256 AS pdf_sha256 FROM resumes r LEFT JOIN resume_pdf_assets f ON f.job_id = r.job_id AND f.path = r.pdf_path AND f.approved_at = r.approved_at WHERE r.job_id = ?`,
     ).get(jobId) as ResumeRow | undefined;
-  const stageOf = (jobId: number) =>
+  const stageStamp = (jobId: number) =>
+    sql("SELECT stage, stage_at FROM jobs WHERE id = ?").get(jobId) as
+      | StageStamp
+      | undefined;
+  const stageOf = (jobId: number) => stageStamp(jobId)?.stage ?? null;
+  const moveMarker = (jobId: number) =>
     (
-      sql("SELECT stage FROM jobs WHERE id = ?").get(jobId) as
-        | { stage: JobStage }
-        | undefined
-    )?.stage ?? null;
+      sql("SELECT MAX(move_id) AS id FROM job_move_items WHERE job_id = ?").get(
+        jobId,
+      ) as { id: number | null }
+    ).id ?? 0;
   const changed = (jobId: number, stages: JobStage[] = ["shortlisted"]) =>
     store.notify({ cause: "resume", stages, ids: [jobId], searchId: null });
   const require = (jobId: number) => {
@@ -148,17 +154,21 @@ export function createResumeStore(store: JobStore): ResumeStore {
 
   const recordChange = (
     before: ResumeRow,
-    beforeStage: JobStage,
+    beforeStage: StageStamp,
   ): ResumeChangeResult => {
     const after = require(before.job_id);
     const undoId = randomUUID();
-    sql(`INSERT INTO resume_changes(id,job_id,before_json,before_stage,after_stage,expected_updated_at)
-      VALUES(?,?,?,?,?,?)`).run(
+    const afterStage = stageStamp(before.job_id)!;
+    sql(`INSERT INTO resume_changes(id,job_id,before_json,before_stage,before_stage_at,after_stage,after_stage_at,after_move_id,expected_updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(
       undoId,
       before.job_id,
       JSON.stringify(before),
-      beforeStage,
-      stageOf(before.job_id),
+      beforeStage.stage,
+      beforeStage.stage_at,
+      afterStage.stage,
+      afterStage.stage_at,
+      moveMarker(before.job_id),
       after.updated_at,
     );
     return { ...toStoredResume(after), undoId };
@@ -284,7 +294,7 @@ export function createResumeStore(store: JobStore): ResumeStore {
           );
         }
         const now = Math.max(Date.now(), row.updated_at + 1);
-        const beforeStage = stageOf(jobId)!;
+        const beforeStage = stageStamp(jobId)!;
         const stages = unapprove(jobId, now);
         sql(
           `UPDATE resumes SET draft_json = ?, updated_at = ?, approved_at = NULL, pdf_path = NULL, previous_json = NULL
@@ -304,7 +314,10 @@ export function createResumeStore(store: JobStore): ResumeStore {
           | {
               before_json: string;
               before_stage: JobStage;
+              before_stage_at: number | null;
               after_stage: JobStage;
+              after_stage_at: number | null;
+              after_move_id: number | null;
               expected_updated_at: number;
               undone_at: number | null;
             }
@@ -313,7 +326,9 @@ export function createResumeStore(store: JobStore): ResumeStore {
         if (change.undone_at !== null) return toStoredResume(row);
         if (
           row.updated_at !== change.expected_updated_at ||
-          stageOf(jobId) !== change.after_stage
+          stageOf(jobId) !== change.after_stage ||
+          stageStamp(jobId)?.stage_at !== change.after_stage_at ||
+          moveMarker(jobId) !== change.after_move_id
         )
           throw new ResumeChangedError(
             "This resume changed since that change. Later edits and job moves were kept.",
@@ -343,11 +358,16 @@ export function createResumeStore(store: JobStore): ResumeStore {
           changeId,
         );
         // Restoring an exact earlier version makes that version's own inverse current again.
-        sql(`UPDATE resume_changes SET expected_updated_at=?
-          WHERE job_id=? AND expected_updated_at=? AND undone_at IS NULL`).run(
+        sql(`UPDATE resume_changes SET expected_updated_at=?,after_stage_at=?
+          WHERE job_id=? AND expected_updated_at=? AND after_stage=? AND after_stage_at=?
+            AND after_move_id=? AND undone_at IS NULL`).run(
           now,
+          stageStamp(jobId)!.stage_at,
           jobId,
           before.updated_at,
+          change.before_stage,
+          change.before_stage_at,
+          change.after_move_id,
         );
         changed(jobId, [change.before_stage, change.after_stage]);
         return toStoredResume(require(jobId));
@@ -442,7 +462,7 @@ export function createResumeStore(store: JobStore): ResumeStore {
         }
         if (row.approved_at !== null)
           return { ...toStoredResume(row), undoId: null };
-        const beforeStage = stageOf(jobId)!;
+        const beforeStage = stageStamp(jobId)!;
         const now = Math.max(Date.now(), row.updated_at + 1);
         sql(
           `UPDATE resumes SET approved_at = ?, pdf_path = ?, previous_json = NULL, updated_at = ?

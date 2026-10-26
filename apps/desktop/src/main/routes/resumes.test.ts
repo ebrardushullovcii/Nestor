@@ -46,6 +46,7 @@ it("exports the saved resume through the same command from chat and Download PDF
     outputPath: "/chosen/resume.pdf",
   });
   expect(exportPdf).toHaveBeenCalledWith(12, "/chosen/resume.pdf");
+  expect(choose).toHaveBeenLastCalledWith(null, "/documents/resume.pdf");
 
   const handle = vi.fn<IpcMain["handle"]>();
   registerResumeRoutes({ handle } as Pick<IpcMain, "handle"> as IpcMain);
@@ -61,6 +62,10 @@ it("exports the saved resume through the same command from chat and Download PDF
     outputPath: "/chosen/resume.pdf",
   });
   expect(exportPdf).toHaveBeenCalledTimes(2);
+  expect(choose).toHaveBeenLastCalledWith(
+    event.sender,
+    "/documents/resume.pdf",
+  );
 });
 
 it("leaves the resume and file alone when the person cancels", async () => {
