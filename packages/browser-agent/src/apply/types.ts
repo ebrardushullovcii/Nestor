@@ -356,6 +356,8 @@ export interface ApplyLetterProvider {
   provide: (request: {
     /** The kind of application document being written. */
     purpose?: "cover_letter" | "motivation_letter" | "supporting_statement";
+    /** The actual field being answered; prompt below is drafting instructions. */
+    formControl?: { ref: string; question: string };
     prompt: string;
     groundedIn: string[];
     language: string | null;
