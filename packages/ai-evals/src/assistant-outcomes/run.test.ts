@@ -5,19 +5,19 @@ import type { BuiltAppBatch } from "./built-app";
 const add: BuiltAppBatch = {
   id: "add",
   request: "Add a record",
-  actions: [{ actionId: "record.add", observe: async () => [] }],
+  actions: [{ actionId: "record.add", observe: () => Promise.resolve([]) }],
 };
 const remove: BuiltAppBatch = {
   id: "remove",
   request: "Remove it",
   requires: ["add"],
-  actions: [{ actionId: "record.remove", observe: async () => [] }],
+  actions: [{ actionId: "record.remove", observe: () => Promise.resolve([]) }],
 };
 const undo: BuiltAppBatch = {
   id: "undo",
   request: "Undo removal",
   requires: ["remove"],
-  actions: [{ actionId: "record.undo", observe: async () => [] }],
+  actions: [{ actionId: "record.undo", observe: () => Promise.resolve([]) }],
 };
 
 test("a selected Undo run also exercises creation and removal, rather than inheriting fabricated state", () => {

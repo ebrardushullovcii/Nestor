@@ -25,8 +25,8 @@ Usage:
 
 The run launches its own verify-nestor instance, passes doctor, submits requests through
 the visible Assistant composer and reads resulting data, files and visible controls.
-It always closes only its own instance. Acquire the shared built-app slot before running;
-the CLI does not manage a machine-specific lock. --build is separate from that slot.
+It always closes only its own instance. Coordinate the build and built-app slot using
+the workspace's rules; the CLI does not manage a machine-specific lock.
 
 Each action is completed, correctly_blocked, unsupported or failed. A tool call or refusal
 alone cannot pass. Blocked cases require the actual guard and unchanged protected state.
