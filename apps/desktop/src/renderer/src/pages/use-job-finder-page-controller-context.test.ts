@@ -69,8 +69,6 @@ function buildContext(overrides: {
     saveState: { state: "idle", version: 0 },
     refreshResumeWorkspace: () => Promise.resolve(false),
     resumeAssistantRequestTokenRef: { current: 0 },
-    selectedApplicationAttempt: null,
-    selectedApplicationRecord: null,
     selectedDiscoveryJob: null,
     selectedReviewItem: null,
     selectedReviewJob: null,

@@ -821,9 +821,8 @@ export function createPrimaryPageActions(
         },
       );
     },
-    // Returns the run's settled outcome for the same reason as
-    // `onPerformUserAction`: a caller that reports the hand-off result in place
-    // needs the real answer, not a promise that was thrown away.
+    // Returns the run's settled outcome: a caller that reports the hand-off
+    // result in place needs the real answer, not a promise that was thrown away.
     onOpenBrowserSession: (
       input?: JobFinderOpenBrowserSessionInput,
       options?: JobFinderActionFailureReporting,
