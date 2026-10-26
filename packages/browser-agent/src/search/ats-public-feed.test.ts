@@ -150,3 +150,26 @@ test("a provider total larger than its repeated page remains incomplete", async 
   expect(inventory.requiresBrowser).toBe(true);
   expect(inventory.cards).toHaveLength(1);
 });
+
+test.each([
+  [
+    "https://synthetic.wd1.myworkdayjobs.com/Careers",
+    { total: 0, jobPostings: [] },
+  ],
+  [
+    "https://apply.workable.com/synthetic",
+    { name: "Synthetic Studio", jobs: [] },
+  ],
+])(
+  "a zero-read provider feed does not claim complete coverage: %s",
+  async (url, payload) => {
+    const inventory = await collectSource({
+      source: { id: "empty", label: "Empty board", url },
+      readPage: (url) =>
+        Promise.resolve({ finalUrl: url, html: JSON.stringify(payload) }),
+    });
+    expect(inventory.cards).toEqual([]);
+    expect(inventory.complete).toBe(false);
+    expect(inventory.notes.join(" ")).toContain("coverage incomplete");
+  },
+);

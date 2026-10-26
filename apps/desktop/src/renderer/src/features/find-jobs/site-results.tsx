@@ -21,6 +21,8 @@ const LABELS: Record<JobSearchSourceState["state"], string> = {
   stopped: "Stopped",
 };
 function failureReason(message: string | null): string {
+  if (/\btimed? out\b|\btimeout\b|\btook too long\b/iu.test(message ?? ""))
+    return "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.";
   if (/\bHTTP 404\b|\bpage not found\b/iu.test(message ?? ""))
     return "Page not found. Check the URL.";
   if (/\bHTTP 410\b/iu.test(message ?? ""))
