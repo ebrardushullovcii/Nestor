@@ -22,6 +22,7 @@ export function handlePersonalClaims(req, res, url, { send }) {
       <form><label>Full name<input name="name" required></label>
       <label>Email<input name="email" type="email" required></label>
       <label>Resume<input name="resume" type="file" required></label>
+      ${url.searchParams.has("notice-months") ? '<label>Notice period<input name="notice" placeholder="Months" required></label>' : ""}
       <fieldset><legend>Application Questions</legend>
       <label>Are you authorized to work in the UK?<select name="authorization" required><option value="">Choose</option><option>Yes</option><option>No</option></select></label>
       <label>Are you authorized to work in the UK without any restrictions and without ever requiring sponsorship?<select name="compound" required><option value="">Choose</option><option>Yes</option><option>No</option></select></label>

@@ -2,10 +2,10 @@
   "resume": "3 years of experience using TypeScript. I led a team of 4 at Example Workshop. I worked at Example Workshop. I have used TypeScript since 2023. Four contributors work at Example Workshop.",
   "cases": [
     {
-      "name": "ordinary motivation",
+      "name": "first-person motivation without applicant evidence",
       "question": "Why do you want to join Example Workshop?",
       "answer": "I am excited to build engineering workflow tools at Example Workshop.",
-      "supported": true,
+      "supported": false,
       "evidence": [
         {
           "source": "posting",

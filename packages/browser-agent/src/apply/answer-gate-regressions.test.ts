@@ -1064,6 +1064,12 @@ test("a remembered legal Yes is rechecked against the current job's permit condi
     });
   src.posting.description = "This role requires 40 hours per week.";
   expect(decide().kind).toBe("needs_you");
+  for (const hours of ["37.5", "20.5", "37,5", "about 15", "15 to 20", "1e1"]) {
+    src.posting.description = `This role requires ${hours} hours per week.`;
+    expect(decide().kind).toBe("needs_you");
+  }
+  src.posting.description = "This role requires 19.5 hours per week.";
+  expect(decide().kind).toBe("literal");
   src.posting.description = "This role requires 15 hours per week.";
   expect(decide().kind).toBe("literal");
   src.profile.workEligibility.limitedWorkPermissions[0].conditions =

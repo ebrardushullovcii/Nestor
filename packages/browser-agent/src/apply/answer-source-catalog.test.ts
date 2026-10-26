@@ -82,7 +82,11 @@ test.each([
   ["City", "profile.currentCity", "London"],
   ["Country of residence", "profile.currentCountry", "Germany"],
   ["Total years of experience", "profile.yearsExperience", "2"],
-  ["Notice period", "profile.workEligibility.noticePeriodDays", "30 days"],
+  [
+    "Notice period in days",
+    "profile.workEligibility.noticePeriodDays",
+    "30 days",
+  ],
   [
     "Are you willing to relocate?",
     "profile.workEligibility.willingToRelocate",
@@ -116,6 +120,22 @@ test.each([
         answer,
       ).kind,
     ).toBe("needs_you");
+  },
+);
+
+test.each(["Months", "Weeks", "", "Days or months"])(
+  "a stored day count cannot fill a notice field with unit %s",
+  (placeholder) => {
+    const sources = source();
+    sources.profile.workEligibility.noticePeriodDays = 30;
+    const field = { ...control("Notice period"), placeholder };
+    const tags = {
+      kind: "other",
+      country: null,
+      sourceId: "profile.workEligibility.noticePeriodDays",
+    } as const;
+    expect(decide(sources, field, tags, "30").kind).toBe("needs_you");
+    expect(decide(sources, field, tags, "30 days").kind).toBe("needs_you");
   },
 );
 

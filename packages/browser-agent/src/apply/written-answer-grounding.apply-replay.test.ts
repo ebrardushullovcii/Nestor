@@ -40,7 +40,7 @@ test.each([
   "I am drawn to engineering workflow tools at Example Workshop.",
   "I would like to build engineering workflow tools at Example Workshop.",
 ])(
-  "ordinary motivation stays available beside a scoped own-words letter: %s",
+  "a motivation prefix does not establish a first-person statement: %s",
   async (answer) => {
     const chatWithTools = vi
       .fn<LLMClient["chatWithTools"]>()
@@ -90,7 +90,7 @@ test.each([
       },
       answers: [{ question: "Why should we hire you?", answer }],
     });
-    expect(result[0]?.supported).toBe(true);
+    expect(result[0]?.supported).toBe(false);
     expect(chatWithTools).toHaveBeenCalledTimes(1);
   },
 );

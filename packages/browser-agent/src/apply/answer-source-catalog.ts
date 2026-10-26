@@ -316,12 +316,21 @@ function literalValueMatches(
   control: ApplyFormControl,
   answer: string,
 ): boolean {
-  if (source.value.trim() === answer.trim()) return true;
-  if (source.id === "profile.workEligibility.noticePeriodDays")
+  if (source.id === "profile.workEligibility.noticePeriodDays") {
+    const units = [
+      ...`${control.label} ${control.placeholder} ${control.options.join(" ")}`.matchAll(
+        /\b(days?|weeks?|months?|years?|hours?)\b/giu,
+      ),
+    ].map((match) => match[1]?.toLowerCase().replace(/s$/u, ""));
     return (
-      answer.trim() === `${source.value} days` ||
-      answer.trim() === `${source.value} day`
+      units.length > 0 &&
+      units.every((unit) => unit === "day") &&
+      (answer.trim() === source.value ||
+        answer.trim() === `${source.value} days` ||
+        answer.trim() === `${source.value} day`)
     );
+  }
+  if (source.value.trim() === answer.trim()) return true;
   const date =
     /^profile\.(experiences|education)\.[^.]+\.(startDate|endDate)$/u.exec(
       source.id,
@@ -381,14 +390,18 @@ function permitConditionsFit(
     // Only a complete, unqualified weekly-hours restriction can be compared
     // locally. Dates, term-time rules and other conditions need the person.
     const limit =
-      /^(?:up to |maximum |max |no more than )?(\d+) hours?(?: per week| weekly)$/u.exec(
-        normalizeFormQuestionPrompt(permission.conditions),
+      /^(?:up to |maximum |max |no more than )?(\d+(?:\.\d+)?) hours?(?: per week| weekly)$/iu.exec(
+        permission.conditions.trim(),
       );
-    const hours = [
-      ...(sources.posting.description ?? "").matchAll(
-        /\b(\d+)\s*hours?\s*(?:per\s+week|\/\s*week|weekly)\b/giu,
-      ),
-    ];
+    const hours = (sources.posting.description ?? "")
+      .split(/\n|;|(?<=[.!?])\s+/u)
+      .flatMap((sentence) => {
+        const match =
+          /^(?:(?:this|the) (?:role|job|position) requires |(?:working |weekly )?hours:\s*)?(\d+(?:\.\d+)?)\s+hours?\s*(?:per\s+week|\/\s*week|weekly)[.!]?$/iu.exec(
+            sentence.trim(),
+          );
+        return match ? [match] : [];
+      });
     return (
       !!limit && hours.length === 1 && Number(hours[0]?.[1]) <= Number(limit[1])
     );

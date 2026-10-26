@@ -3,6 +3,30 @@ import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { concreteClaimsSupported } from "./concrete-answer-claims";
+
+test("motivation cannot turn a posting requirement into an applicant fact", () => {
+  const quote = "Already holding a valid driving licence";
+  const answer = "I am excited about already holding a valid driving licence";
+  expect(
+    concreteClaimsSupported(answer, [
+      { source: "posting", path: "/description", quote },
+    ]),
+  ).toBe(false);
+  expect(
+    concreteClaimsSupported(answer, [
+      { source: "applicant", path: "/summary", quote: answer },
+    ]),
+  ).toBe(true);
+  expect(
+    concreteClaimsSupported("The role requires a valid driving licence", [
+      {
+        source: "posting",
+        path: "/description",
+        quote: "The role requires a valid driving licence",
+      },
+    ]),
+  ).toBe(true);
+});
 import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/typed-answer-permissions.json";
 
 const sources = {

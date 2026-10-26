@@ -151,14 +151,8 @@ export function concreteClaimsSupported(
       /^(?:(?:The|Your|This) )?(?:role|position|company|organisation|organization|team|posting|job|mission|product|work)\b|^Owning the\b/iu.test(
         clause.trim(),
       );
-    const roleIntent =
-      /^(?:I|We) (?:would (?:welcome|like|love|appreciate)|am (?:excited (?:to|about)|interested in|drawn to|motivated by)|hope to|look forward to|want to (?:join|contribute|build|work))\b/iu.test(
-        clause.trim(),
-      ) &&
-      !/\b(?:I|we|my|our)\b/iu.test(clause.trim().replace(/^(?:I|We)\b/iu, ""));
-    const applicantClaim =
-      personalHistory ||
-      (!roleSubject && (!roleIntent || numbers(clause).length > 0));
+    const personalVoice = /\b(?:I|my|me|our|we)\b/iu.test(clause);
+    const applicantClaim = personalHistory || personalVoice || !roleSubject;
     const quotes = evidence
       .filter((entry) => !applicantClaim || entry.source !== "posting")
       .map((entry) => entry.quote);
@@ -176,9 +170,7 @@ export function concreteClaimsSupported(
       return false;
     const literalClaim =
       applicantClaim &&
-      (personalHistory ||
-        /\b(?:I|my|me|our|we)\b/u.test(clause) ||
-        numbers(clause).length > 0);
+      (personalHistory || personalVoice || numbers(clause).length > 0);
     if (literalClaim && !quotes.some((quote) => contains(quote, clause)))
       return false;
     const counts = numbers(clause);

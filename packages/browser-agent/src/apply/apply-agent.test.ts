@@ -5548,7 +5548,7 @@ test("classification settles before starting a sourced writing check and before 
                         {
                           tool: "type",
                           ref: "c0",
-                          text: "I would welcome the opportunity to own the internal platform.",
+                          text: "The role is to own the internal platform.",
                         },
                       ],
                     }
