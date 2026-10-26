@@ -1,4 +1,5 @@
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/attachment-upload.json";
+import stepReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workday-step-saves.json";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApplyBlockedAttempt } from "@nestor/contracts";
@@ -403,6 +404,95 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
 
       expect(requestHitsFor(app.hits, "/autosave-post")).toHaveLength(0);
       expect(await getLatestBlockedPrepareOnlyAttempt(page)).toBeNull();
+    },
+  );
+
+  test(
+    "Workday replay: Fill saves non-final steps, reaches review, and refuses a submit disguised as a step",
+    { timeout: 60_000 },
+    async () => {
+      const app = await startTrackedServer();
+      app.registerHtml(
+        "/wizard",
+        `<form><label>Email<input name="email" value="${stepReplay.email}"></label><input name="resume" type="file"><button type="button" id="next">${stepReplay.nextLabel}</button><button type="button" id="final" hidden>${stepReplay.finalLabel}</button><button type="button" id="bad-label">${stepReplay.refusedStepLabel}</button><button type="button" id="bad-request">Continue</button></form><script>
+        let step=0;
+        const save=path=>fetch(path,{method:'POST',body:new FormData(document.querySelector('form'))}).catch(()=>null);
+        next.onclick=async()=>{const result=await save('${stepReplay.savePath}'); if(result?.ok && ++step===${stepReplay.steps}){next.hidden=true;document.getElementById('final').hidden=false;}};
+        document.getElementById('final').onclick=()=>save('${stepReplay.finalPath}');
+        document.getElementById('bad-label').onclick=()=>save('${stepReplay.savePath}');
+        document.getElementById('bad-request').onclick=()=>save('${stepReplay.refusedStepPath}');
+      </script>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/wizard`);
+      await ensurePrepareOnlyMutationGuard(page, true, []);
+      await registerPrepareOnlyPreparedValue(page, stepReplay.email);
+      for (let step = 0; step < stepReplay.steps; step++) {
+        await openPrepareOnlyIntermediateMutationWindow(page);
+        await page.locator("#next").click();
+        await expect
+          .poll(() => requestHitsFor(app.hits, stepReplay.savePath).length)
+          .toBe(step + 1);
+        await closePrepareOnlyIntermediateMutationWindow(page);
+      }
+      await expect.poll(() => page.locator("#final").isVisible()).toBe(true);
+      expect(requestHitsFor(app.hits, stepReplay.finalPath)).toHaveLength(0);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      await page.locator("#bad-label").click();
+      await page.locator("#bad-request").click();
+      await page.waitForTimeout(100);
+      expect(requestHitsFor(app.hits, stepReplay.savePath)).toHaveLength(
+        stepReplay.steps,
+      );
+      expect(requestHitsFor(app.hits, stepReplay.refusedStepPath)).toHaveLength(
+        0,
+      );
+      expect((await getLatestBlockedPrepareOnlyAttempt(page))?.kind).toBe(
+        "dom_submit",
+      );
+      await closePrepareOnlyIntermediateMutationWindow(page);
+    },
+  );
+
+  test(
+    "a form frame saves only to its own pinned origin, with an envelope still narrowing those frames",
+    { timeout: 60_000 },
+    async () => {
+      const parent = await startTrackedServer();
+      const child = await startTrackedServer();
+      child.registerHtml(
+        "/form",
+        '<input name="email" value="synthetic@example.test">',
+      );
+      parent.registerHtml(
+        "/frames",
+        `<iframe src="${child.baseUrl}/form"></iframe>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${parent.baseUrl}/frames`);
+      await ensurePrepareOnlyMutationGuard(page, true, []);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      const frame = page
+        .frames()
+        .find((frame) => frame.url() === `${child.baseUrl}/form`)!;
+      const save = (url: string) =>
+        frame.evaluate(async (url) => {
+          try {
+            return (
+              await fetch(url, { method: "POST", body: "answer=synthetic" })
+            ).ok;
+          } catch {
+            return false;
+          }
+        }, url);
+      expect(await save(`${child.baseUrl}/api/save`)).toBe(true);
+      expect(await save(`${parent.baseUrl}/api/save`)).toBe(false);
+      await closePrepareOnlyIntermediateMutationWindow(page);
+      await ensurePrepareOnlyMutationGuard(page, true, [parent.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      expect(await save(`${child.baseUrl}/api/save`)).toBe(false);
+      expect(requestHitsFor(child.hits, "/api/save")).toHaveLength(1);
+      expect(requestHitsFor(parent.hits, "/api/save")).toHaveLength(0);
     },
   );
 

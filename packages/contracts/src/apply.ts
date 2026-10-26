@@ -940,6 +940,8 @@ export const ApplicationReviewCardSchema = z
       .array(NonEmptyStringSchema.max(2_000))
       .max(500)
       .optional(),
+    /** The browser observed a successful non-final field or attachment save. */
+    intermediateSaved: z.boolean().optional(),
     attachments: z.array(ApplicationReviewAttachmentSchema).max(20).default([]),
     letter: z
       .object({

@@ -27,6 +27,7 @@ import {
   openPrepareOnlyIntermediateMutationWindow,
   openPrepareOnlyAttachmentUploadWindow,
   registerPrepareOnlyPreparedValue,
+  readPrepareOnlyIntermediateWriteCount,
   type ApplicationRunServiceWorkerSentinel,
   waitForPrepareOnlyAuthorizedFormAction,
 } from "./playwright-application-flow";
@@ -1854,7 +1855,6 @@ export function createPlaywrightApplyPageSession(input: {
 }): ApplyPageSession {
   const { page } = input;
   const mechanics = createPlaywrightApplyPageMechanics(page);
-  let intermediateWriteCount = 0;
   // Attempts already handed to the workflow layer. Each read hands out one
   // it has not seen, and the one that matters most first: the page trying to
   // open a tab or send the form is never hidden behind its own analytics.
@@ -1912,7 +1912,6 @@ export function createPlaywrightApplyPageSession(input: {
       registerPrepareOnlyPreparedValue(page, value),
     openIntermediateWriteWindow: async () => {
       await openPrepareOnlyIntermediateMutationWindow(page);
-      intermediateWriteCount += 1;
     },
     closeIntermediateWriteWindow: () =>
       closePrepareOnlyIntermediateMutationWindow(page),
@@ -1938,7 +1937,8 @@ export function createPlaywrightApplyPageSession(input: {
         await closePrepareOnlyAuthorizedFormActionWindow(page);
       }
     },
-    readIntermediateWriteCount: () => intermediateWriteCount,
+    readIntermediateWriteCount: () =>
+      readPrepareOnlyIntermediateWriteCount(page),
     checkServiceWorker: async (): Promise<ApplyServiceWorkerFinding | null> => {
       const finding = await input.sentinel?.check("form_preparation");
       if (!finding) {

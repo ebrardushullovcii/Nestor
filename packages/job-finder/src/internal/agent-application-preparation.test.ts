@@ -927,13 +927,16 @@ describe("each mode, end to end through the seam", () => {
 
   async function runInMode(
     mode: "prepare_only" | "confirm_before_submit" | "autonomous_submit",
+    savedWrites = 0,
   ) {
     const facts = executionInput();
     let handoff: ApplySubmissionHandoff | null = null;
+    let intermediateSaved = false;
     const clicks: string[] = [];
     const session = completableSession();
     const watched: ApplyPageSession = {
       ...session,
+      readIntermediateWriteCount: () => savedWrites,
       clickAction: (ref) => {
         clicks.push(ref);
         return session.clickAction(ref);
@@ -956,11 +959,16 @@ describe("each mode, end to end through the seam", () => {
       siteLabel: "the careers site",
       onPrepared: (outcome) => {
         handoff = outcome.handoff;
+        intermediateSaved = outcome.reviewCard.intermediateSaved === true;
       },
       now: () => new Date("2026-09-14T10:05:00.000Z"),
     });
 
-    return { handoff: handoff as ApplySubmissionHandoff | null, clicks };
+    return {
+      handoff: handoff as ApplySubmissionHandoff | null,
+      clicks,
+      intermediateSaved,
+    };
   }
 
   test("fill-in-only never becomes a send, and presses nothing", async () => {
@@ -976,6 +984,16 @@ describe("each mode, end to end through the seam", () => {
       expect(handoff.finalAction.actionLabel).toBe("Submit application");
     }
     expect(clicks).toHaveLength(0);
+  });
+
+  test("Fill's Ready card discloses observed step saves without authorizing final submit", async () => {
+    const result = await runInMode("confirm_before_submit", 3);
+    expect(result.handoff?.status).toBe("awaiting_your_review");
+    expect(result.intermediateSaved).toBe(true);
+    expect(result.clicks).toEqual([]);
+    expect((await runInMode("confirm_before_submit")).intermediateSaved).toBe(
+      false,
+    );
   });
 
   test("sending on its own hands over to the submission path, still pressing nothing here", async () => {

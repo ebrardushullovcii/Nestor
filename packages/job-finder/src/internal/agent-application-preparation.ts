@@ -529,7 +529,8 @@ export async function runAgentApplicationPreparation(
   ];
 
   // Install the fence before any field is touched. Attachment uploads have a
-  // separate file-bound grant; ordinary field persistence needs send authority.
+  // separate file-bound grant. Non-final field saves stay on the form frame's
+  // own origin; a saved envelope may narrow that permission.
   await input.session.installPrepareOnlyGuard({
     ...(executionInput.attachmentUploadsAuthorized === true
       ? { attachmentUploadsAuthorized: true }
@@ -756,6 +757,7 @@ export async function runAgentApplicationPreparation(
       result,
       siteLabel: input.siteLabel,
       preparedAt: now().toISOString(),
+      intermediateSaved: input.session.readIntermediateWriteCount() > 0,
     }),
   });
 
@@ -1174,6 +1176,7 @@ export function buildApplyReviewCard(input: {
   result: ApplyAgentResult;
   siteLabel: string;
   preparedAt: string;
+  intermediateSaved?: boolean;
 }): ApplicationReviewCard {
   const filled = input.result.reviewFilled ?? input.result.filled;
   const attached = input.result.reviewAttachments ?? input.result.attachments;
@@ -1206,6 +1209,7 @@ export function buildApplyReviewCard(input: {
   return ApplicationReviewCardSchema.parse({
     siteLabel: clamp(input.siteLabel, 240),
     pageUrl: input.result.finalUrl,
+    ...(input.intermediateSaved ? { intermediateSaved: true } : {}),
     ...(input.result.reviewObservedFieldKeys
       ? { observedFieldKeys: input.result.reviewObservedFieldKeys }
       : {}),
@@ -1430,6 +1434,9 @@ export function mergeApplyReviewCards(
   );
   return ApplicationReviewCardSchema.parse({
     ...current,
+    ...(previous.intermediateSaved || current.intermediateSaved
+      ? { intermediateSaved: true }
+      : {}),
     ...(retainEarlier && current.observedFieldKeys
       ? {
           observedFieldKeys: [...observedFieldKeys].slice(0, 500),

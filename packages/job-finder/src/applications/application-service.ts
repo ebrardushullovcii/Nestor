@@ -332,16 +332,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
       intermediateMutationsAuthorized:
-        sends && (!envelope || envelope.intermediateMutationsAuthorized),
+        !envelope || envelope.intermediateMutationsAuthorized,
       attachmentUploadsAuthorized: true,
-      intermediateMutationAllowedOrigins: [...allowedOrigins],
+      // No envelope: the browser pins each live form frame's own origin.
+      // An envelope, when present, continues to narrow those destinations.
+      intermediateMutationAllowedOrigins: envelope ? [...allowedOrigins] : [],
       recheckIntermediateMutationAuthority: async (
         observedOrigin,
         purpose = "answers",
       ) => {
         if (
           purpose === "answers" &&
-          (!sends || (envelope && !envelope.intermediateMutationsAuthorized))
+          envelope &&
+          !envelope.intermediateMutationsAuthorized
         )
           return false;
         if (
@@ -377,7 +380,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          (purpose === "attachment" || latestMode === "autonomous_submit") &&
           jobs.getJob(row.jobId)?.stage === "resume" &&
           resume?.approvedAt === approved.approvedAt &&
           resume.pdfPath === approved.pdfPath &&

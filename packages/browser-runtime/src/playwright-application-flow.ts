@@ -129,6 +129,15 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     webSocketListenerInstalled: boolean;
   }
 >();
+// Pins are captured from actual frames when a bounded field window opens.
+// A request can save only to its initiating frame's own pinned origin.
+const intermediateFrameOrigins = new WeakMap<Page, Map<Frame, string>>();
+
+export function readPrepareOnlyIntermediateWriteCount(page: Page): number {
+  return (
+    prepareOnlyNetworkGuardStates.get(page)?.verifiedIntermediateWriteCount ?? 0
+  );
+}
 
 interface AuthorizedFormActionWindow {
   method: string;
@@ -298,6 +307,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     attachmentUploadWindow: AttachmentUploadWindow | null;
     authorizedFormActionWindow: AuthorizedFormActionWindow | null;
     submitListenerInstalled: boolean;
+    finalControlListenerInstalled: boolean;
     /**
      * True only while Job Finder presses the one authorized send control.
      * The guard then lets the form's own submit and requests through.
@@ -331,6 +341,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     attachmentUploadWindow: null,
     authorizedFormActionWindow: null,
     submitListenerInstalled: false,
+    finalControlListenerInstalled: false,
     finalActionAllowed: false,
     formSubmitWrapper: null,
     formRequestSubmitWrapper: null,
@@ -731,6 +742,39 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       true,
     );
     state.submitListenerInstalled = true;
+  }
+  if (!state.finalControlListenerInstalled) {
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (state.finalActionAllowed || !state.preparedValues.length) return;
+        const control =
+          event.target instanceof Element
+            ? event.target.closest<HTMLElement>(
+                'button, input[type="button"], [role="button"]',
+              )
+            : null;
+        if (!control) return;
+        const form = (control as HTMLButtonElement).form;
+        if (form && authorizedSubmitter(form, control)) return;
+        const label =
+          control.getAttribute("aria-label") ||
+          (control instanceof HTMLInputElement
+            ? control.value
+            : control.textContent) ||
+          "";
+        if (!new RegExp(guardInput.finalActionSignal, "iu").test(label)) return;
+        recordBlockedAttempt(
+          "dom_submit",
+          "POST",
+          normalizeUrl(form?.action || window.location.href),
+        );
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true,
+    );
+    state.finalControlListenerInstalled = true;
   }
 
   if (HTMLFormElement.prototype.submit !== state.formSubmitWrapper) {
@@ -1504,6 +1548,14 @@ export async function ensurePrepareOnlyMutationGuard(
       // A Send-authorized, same-origin draft save can include the form's file
       // input too. It still needs the separate intermediate-mutation grant;
       // refusing the attachment-only exemption must never grant that authority.
+      let frameOrigin: string | undefined;
+      try {
+        const frame = request.frame();
+        const pinned = intermediateFrameOrigins.get(page)?.get(frame);
+        if (pinned === new URL(frame.url()).origin) frameOrigin = pinned;
+      } catch {
+        /* Worker and detached-frame writes have no field authority. */
+      }
       const decision = classifyIntermediateMutationRequest({
         authorized: networkGuardState!.intermediateMutationsAuthorized,
         bodyText: request.postData(),
@@ -1511,7 +1563,13 @@ export async function ensurePrepareOnlyMutationGuard(
         nowMs: Date.now(),
         resourceKind,
         url: request.url(),
-        window: networkGuardState!.intermediateMutationWindow,
+        window:
+          networkGuardState!.intermediateMutationWindow && frameOrigin
+            ? {
+                ...networkGuardState!.intermediateMutationWindow,
+                expectedOrigin: frameOrigin,
+              }
+            : null,
       });
       if (decision.allowed) {
         networkGuardState!.intermediateMutationWindow!.remainingRequests -= 1;
@@ -1622,15 +1680,35 @@ async function setPrepareOnlyIntermediateMutationWindow(
   networkGuardState.intermediateMutationWindow = mutationWindow
     ? { ...mutationWindow }
     : null;
+  const frameOrigins = new Map<Frame, string>();
+  intermediateFrameOrigins.set(page, frameOrigins);
   try {
     for (const frame of page.frames()) {
+      let origin: string | null = null;
+      try {
+        const url = new URL(frame.url());
+        if (
+          ["http:", "https:"].includes(url.protocol) &&
+          (!networkGuardState.intermediateMutationAllowedOrigins.length ||
+            networkGuardState.intermediateMutationAllowedOrigins.includes(
+              url.origin,
+            ))
+        )
+          origin = url.origin;
+      } catch {
+        /* A blank or detached frame has no origin authority. */
+      }
+      if (mutationWindow && origin) frameOrigins.set(frame, origin);
       await frame.evaluate(
         setPrepareOnlyIntermediateMutationWindowInPage,
-        mutationWindow,
+        mutationWindow && origin
+          ? { ...mutationWindow, expectedOrigin: origin }
+          : null,
       );
     }
   } catch (error) {
     networkGuardState.intermediateMutationWindow = null;
+    frameOrigins.clear();
     throw error;
   }
 }
@@ -1647,9 +1725,7 @@ export async function openPrepareOnlyIntermediateMutationWindow(
     );
   }
   const networkGuardState = prepareOnlyNetworkGuardStates.get(page);
-  // An empty origin list means "the origin the run is on right now": the
-  // window is still pinned to one origin for its short life, it just is not
-  // pinned ahead of time.
+  // Without an envelope list, pins come from the live form frames, never '*'.
   if (
     !networkGuardState?.intermediateMutationsAuthorized ||
     (networkGuardState.intermediateMutationAllowedOrigins.length > 0 &&
@@ -1697,7 +1773,10 @@ export async function openPrepareOnlyAttachmentUploadWindow(
   const guard = prepareOnlyNetworkGuardStates.get(page);
   const origin = new URL(page.url()).origin;
   if (!guard?.attachmentUploadsAuthorized) return; // Local selection stays local.
-  if (!guard.intermediateMutationAllowedOrigins.includes(origin))
+  if (
+    guard.intermediateMutationAllowedOrigins.length &&
+    !guard.intermediateMutationAllowedOrigins.includes(origin)
+  )
     throw new Error(
       "This application is not authorized to upload an attachment here.",
     );

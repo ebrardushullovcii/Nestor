@@ -267,11 +267,11 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   const recheck =
     f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
   expect(f.execute.mock.calls[0]![1]).toMatchObject({
-    intermediateMutationsAuthorized: false,
+    intermediateMutationsAuthorized: true,
     attachmentUploadsAuthorized: true,
-    intermediateMutationAllowedOrigins: ["https://replica.test"],
+    intermediateMutationAllowedOrigins: [],
   });
-  expect(await recheck("https://replica.test")).toBe(false);
+  expect(await recheck("https://replica.test")).toBe(true);
   expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.applications.needsYou.remember({
     key: "salary",
@@ -286,7 +286,7 @@ it("keeps filling while another form saves unrelated answers, but vetoes changed
   expect(await recheck("https://replica.test", "attachment")).toBe(false);
 });
 
-it("keeps Send for me's non-final saves pinned without a final envelope, and closes that permission when changed to Fill", async () => {
+it("keeps non-final saves frame-pinned without a final envelope in either mode", async () => {
   const f = await setup(1);
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
@@ -297,7 +297,7 @@ it("keeps Send for me's non-final saves pinned without a final envelope, and clo
   expect(input).toMatchObject({
     intermediateMutationsAuthorized: true,
     submitAuthorized: false,
-    intermediateMutationAllowedOrigins: ["https://replica.test"],
+    intermediateMutationAllowedOrigins: [],
   });
   expect(
     await input.recheckIntermediateMutationAuthority!(
@@ -317,7 +317,7 @@ it("keeps Send for me's non-final saves pinned without a final envelope, and clo
       "https://replica.test",
       "answers",
     ),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     await input.recheckIntermediateMutationAuthority!(
       "https://replica.test",
@@ -487,7 +487,7 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
   expect(f.execute.mock.calls[0]![1].resumeArtifact.filePath).toBe(f.imported);
   expect(
     f.execute.mock.calls[0]![1].intermediateMutationAllowedOrigins,
-  ).toEqual(["https://replica.test"]);
+  ).toEqual([]);
   expect(f.execute.mock.calls[0]![1].applyAllowedOrigins).toEqual([
     "https://replica.test",
   ]);

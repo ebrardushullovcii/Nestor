@@ -101,9 +101,9 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 - `submitAuthorized` is true only under an `autonomous_submit` envelope or the
   person's Send press under `confirm_before_submit`, after preflight;
   `prepare_only` never sends, and legacy flags do not acquire that meaning
-- intermediate answer saves require explicit send authority, a pinned origin
-  and recognizable non-final semantics. Fill in for me keeps answer persistence
-  blocked until the person takes over. Uploading the selected attachment uses
+- intermediate answer saves are allowed in either mode, pinned to the initiating
+  form frame’s own origin, with recognizable non-final semantics and any saved
+  envelope still narrowing permissions. Uploading the selected attachment uses
   a separate file-bound window; neither permission grants a final action
 - Browser Runtime keeps Playwright `Page` private and exposes optional typed
   application observation/exact-one-action hands only to main-process
