@@ -51,7 +51,7 @@ export interface ResumeLaneResult {
   promptTokens: number;
   completionTokens: number;
   draft: ResumeDraft | null;
-  captures?: readonly EvalHttpCapture[];
+  captures?: readonly EvalHttpCapture[] | undefined;
   stretchChecks: StretchCheckReport;
 }
 
@@ -129,7 +129,7 @@ function responseContributions(capture: EvalHttpCapture): unknown[] {
 /** Measure what the unchanged checker does to sanctioned Aggressive stretches. */
 export function stretchCheckReport(input: {
   draft: ResumeDraft | null;
-  captures?: readonly EvalHttpCapture[];
+  captures?: readonly EvalHttpCapture[] | undefined;
   source: string;
   listing: string;
   title: string;
@@ -320,7 +320,7 @@ interface Written {
   modelCalls: number;
   promptTokens: number;
   completionTokens: number;
-  captures?: readonly EvalHttpCapture[];
+  captures?: readonly EvalHttpCapture[] | undefined;
 }
 
 /** Scores one case's drafts at every level; the same for a live run and a saved one. */
