@@ -9,17 +9,32 @@ import {
   type ResumeLaneResult,
 } from "./run";
 
-/**
- * `pnpm --filter @nestor/ai-evals resume-lane -- --out <dir>`
- *
- * Writes each case at Original, Light, Tailored and Aggressive with the
- * model configured in `.env.local` (`NESTOR_AI_*`), the same writer the app
- * runs, and reports invented facts, whether each level behaves as named,
- * flags left after the self-fix, time and tokens. Options: `--case <id
- * prefix>` (repeatable), `--out <dir>` for the Markdown report and the
- * drafts as JSON, `--rescore <resume-lane.json>` to score a saved run again
- * without calling the model. Not part of CI: it calls the model.
- */
+const HELP = `Resume lane: the resume writer at every level on recorded listings.
+
+Usage: pnpm --filter @nestor/ai-evals resume-lane -- [options]
+
+Writes each case (a synthetic resume and a recorded job listing) at Original,
+Light, Tailored and Aggressive with the model in .env.local (NESTOR_AI_*),
+through the same writer the app runs. Calls the model; not part of CI.
+
+Per level it reports:
+  invented facts   numbers, employer/title/date lines, and listing tools or products
+                   the source resume does not have (0 is the bar)
+  as named         Original unchanged; Light keeps the headline and edits at most
+                   25% of words; Tailored edits more than Light; Aggressive edits at
+                   least as much as Tailored and leads with the role
+  flags left       problems the writer flagged and did not fix
+  edit size, time (median per resume, and over all written resumes), model
+  calls and tokens in/out
+
+Options:
+  --case <prefix>     only cases whose id starts with this (repeatable)
+  --out <dir>         also write resume-lane.md and the drafts as resume-lane.json;
+                      keep baselines outside the repository
+  --rescore <file>    score a saved resume-lane.json again without the model
+  --help              show this text
+`;
+
 export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
   const args = argv[0] === "--" ? argv.slice(1) : [...argv];
   const prefixes: string[] = [];
@@ -28,6 +43,10 @@ export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     const value = args[index + 1];
+    if (arg === "--help" || arg === "-h") {
+      console.log(HELP);
+      return;
+    }
     if (arg === "--case" && value) {
       prefixes.push(value);
       index += 1;
