@@ -28,7 +28,6 @@
     "ui:resume-import": "pnpm build && node ./scripts/capture-resume-import.mjs",
     "ui:profile-baseline": "pnpm build && node ./scripts/capture-profile-baseline.mjs --snapshot ./test-fixtures/job-finder/profile-baseline-workspace.json",
     "ui:profile-setup": "pnpm build && node ./scripts/capture-profile-setup.mjs",
-    "ui:applications-consent-states": "pnpm build && node ./scripts/capture-applications-consent-states.mjs",
     "ui:applications-queue-recovery": "pnpm build && node ./scripts/capture-applications-queue-recovery.mjs",
     "seed:job-finder-demo": "node ./scripts/seed-job-finder-demo-workspace.mjs",
     "ui:live-assistant": "pnpm build && node ./scripts/capture-live-assistant.mjs",
@@ -42,7 +41,6 @@
     "test:live-assistant-live-system-audio:built": "node ./scripts/test-live-assistant-live-system-audio.mjs",
     "test:job-finder-ats-matrix": "pnpm build && pnpm test:job-finder-complete-flow:built && pnpm test:job-finder-ashby-flow:built && pnpm test:job-finder-workday-flow:built",
     "ui:live-assistant-protection": "pnpm build && node ./scripts/capture-live-assistant-protection.mjs",
-    "ui:apply-queue-controls": "pnpm build && node ./scripts/capture-apply-queue-controls.mjs",
     "ui:original-cv-flow": "pnpm build && node ./scripts/capture-original-cv-flow.mjs",
     "ui:action-inbox": "pnpm build && node ./scripts/capture-action-inbox.mjs",
     "ui:action-inbox:built": "node ./scripts/capture-action-inbox.mjs"
