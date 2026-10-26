@@ -1,9 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
-import { ProfileCopilotMessageSchema, createFreshStartCandidateProfile } from "@nestor/contracts";
+import { ProfileCopilotMessageSchema } from "@nestor/contracts";
 import {
   ResumeDocumentBundleSchema,
   ResumeImportFieldCandidateSchema,
@@ -12,15 +9,8 @@ import {
 import { readFileSync } from "node:fs";
 import { openJobStore } from "./job-store";
 import { createProfileStore } from "./profile-store";
-import { createPreferencesStore } from "./preferences-store";
 import { createSavedAnswersStore } from "./applications";
 import { createProfileWorkspace } from "./profile-workspace";
-import { JOB_STORE_SCHEMA } from "./schema";
-import { PROFILE_SCHEMA } from "./profile-store";
-import { PREFERENCES_SCHEMA } from "./preferences-store";
-import { PROFILE_WORKFLOW_SCHEMA } from "./profile-workspace";
-import { PROFILE_EDIT_DRAFT_SCHEMA } from "./profile-edit-draft";
-import { PROFILE_IMPORT_SCHEMA } from "./profile-import-store";
 
 type Api = ReturnType<typeof createProfileWorkspace>["methods"];
 
@@ -39,7 +29,10 @@ async function snapshot(api: Api) {
 
 const stored = (name: string): unknown =>
   JSON.parse(
-    readFileSync(path.join(__dirname, "stored-json", `${name}.full.json`), "utf8"),
+    readFileSync(
+      path.join(__dirname, "stored-json", `${name}.full.json`),
+      "utf8",
+    ),
   );
 
 /** One import run with its document and a candidate, from the stored rows. */

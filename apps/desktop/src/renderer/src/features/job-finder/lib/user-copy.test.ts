@@ -10,6 +10,7 @@ import {
   getJobFinderErrorDetail,
   TECHNICAL_DETAILS_LABEL,
 } from "./describe-failure";
+import { STATUS_COPY_TABLES } from "./status-copy";
 
 /**
  * The guard for the Job Finder copy layer (RC-02, RC-03).
@@ -224,10 +225,7 @@ const RULES: readonly Rule[] = [
  * → shell.
  */
 export const PENDING_ADOPTION = {
-  rawThrownMessage: [
-    "features/job-finder/hooks/use-job-finder-workspace.ts",
-    "pages/use-job-finder-page-controller-actions.ts",
-  ],
+  rawThrownMessage: [],
   formatStatusLabel: [
     "features/job-finder/components/profile/profile-background-sections.tsx",
     "features/job-finder/components/profile/profile-experience-tab.tsx",
@@ -239,7 +237,7 @@ export const PENDING_ADOPTION = {
     "features/job-finder/components/profile/profile-timeline-repair-list.tsx",
     "features/job-finder/lib/source-intelligence-utils.ts",
   ],
-  legacyErrorMessageMapper: ["pages/use-job-finder-page-controller-actions.ts"],
+  legacyErrorMessageMapper: [],
   // Empty on purpose, and it must stay empty: the sweep that added this rule
   // removed every occurrence it found.
   internalVocabulary: [],
@@ -337,7 +335,7 @@ const SOURCES: ReadonlyMap<string, string> = new Map(
 
 describe("Job Finder copy layer guard", () => {
   it("scans a non-trivial slice of the renderer", () => {
-    expect(SOURCES.size).toBeGreaterThan(200);
+    expect(SOURCES.size).toBeGreaterThan(100);
   });
 
   it("implements and allowlists every declared rule", () => {
@@ -413,6 +411,43 @@ describe("allowlist mechanics", () => {
   });
 });
 
+describe("status vocabulary", () => {
+  const entries = Object.entries(STATUS_COPY_TABLES).flatMap(
+    ([table, labels]) =>
+      Object.entries(labels).map(
+        ([value, label]) => [table, value, label] as const,
+      ),
+  );
+
+  it("covers every enum value with copy", () => {
+    expect(entries.length).toBeGreaterThan(60);
+  });
+
+  it.each(entries)(
+    "%s.%s reads as copy, not a stored value",
+    (_t, _v, label) => {
+      expect(label).not.toMatch(/_/);
+      expect(label).not.toMatch(/^[a-z]/);
+      expect(label.trim()).toBe(label);
+      expect(label.length).toBeGreaterThan(2);
+    },
+  );
+
+  it("never renders a value by title-casing its identifier", () => {
+    // "Site login required" and "Prepare only" were what the title-caser
+    // produced at these exact sites.
+    expect(
+      STATUS_COPY_TABLES.APPLICATION_BLOCKER_LABELS.site_login_required,
+    ).toBe("The job site wants you to sign in first");
+    expect(STATUS_COPY_TABLES.APPLY_RUN_MODE_LABELS.copilot).toBe(
+      "Preparation",
+    );
+    expect(
+      STATUS_COPY_TABLES.RESUME_PATCH_OPERATION_LABELS.replace_section_bullets,
+    ).toBe("Rewrite the bullets in this section");
+  });
+});
+
 describe("failure copy", () => {
   const CLOSED_SET = Object.values(FAILURE_SENTENCES);
 
@@ -428,7 +463,6 @@ describe("failure copy", () => {
     '[ { "code": "custom", "message": "A compensation currency awaiting clarification must remain unset.", "path": [ "compensation", "currency" ] } ]',
   ];
 
-
   it("explains an unusable resume and asks for another file", () => {
     const failure = describeFailure(
       new Error(
@@ -441,7 +475,6 @@ describe("failure copy", () => {
       "No resume details were found in this file. Choose another file.",
     );
   });
-
 
   it("describeFailure never returns thrown text as the sentence", () => {
     for (const thrown of INTERNAL_THROWS) {

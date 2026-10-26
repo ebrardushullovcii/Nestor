@@ -1,4 +1,3 @@
-import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { SourceInstructionArtifactSchema } from "@nestor/contracts";
