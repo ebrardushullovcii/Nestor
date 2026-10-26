@@ -439,7 +439,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
       chatWithTools: (messages) => {
         duplicateRequests.push(
           (
-            JSON.parse(messages[1]!.content) as { listings: { id: number }[] }
+            JSON.parse(messages[1].content) as { listings: { id: number }[] }
           ).listings.map((row) => row.id),
         );
         return Promise.resolve({
@@ -456,7 +456,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   expect(duplicateRequests).toEqual([[1, 2], [1]]);
   expect(duplicates.map((fit) => fit.id)).toEqual([2, 1]);
   const requestSchema =
-    client.chatWithTools.mock.calls[0]![2]?.jsonSchema?.schema;
+    client.chatWithTools.mock.calls[0][2]?.jsonSchema?.schema;
   expect(requestSchema).toMatchObject({
     properties: {
       fits: { type: "array", items: { properties: { id: { enum: [1] } } } },
