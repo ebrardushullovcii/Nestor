@@ -111,7 +111,6 @@ import type { WorkspaceServiceContext } from "./workspace-service-context";
 import {
   resolveAdapterKind,
   getPreferredSessionAdapter,
-  invalidateChangedSourceGuidance,
   normalizeJobFinderSettings,
   normalizeResumeDraftTemplate,
   normalizeSearchPreferences,
@@ -853,49 +852,6 @@ export function createWorkspaceSnapshotProfileMethods(
       );
     }
     lastNoResponseAutomationRunAt = now;
-  }
-
-  async function syncActiveCampaignPreferences(
-    searchPreferences: JobSearchPreferences,
-  ): Promise<void> {
-    // The preferences/pointer rewrite is derived from a fresh collection read
-    // inside the campaign transition so a scheduled-run commit that lands
-    // first keeps its history, run facts, rules, and notifications.
-    await ctx.withCampaignTransition(async () => {
-      const campaignState = await ensureCampaignState({
-        repository: ctx.repository,
-        searchPreferences,
-      });
-      const now = new Date().toISOString();
-      await ctx.repository.saveCampaignState({
-        ...campaignState,
-        campaigns: campaignState.campaigns.map((campaign) => {
-          const liveTargets = searchPreferences.discovery.targets;
-          const campaignPreferences =
-            campaign.id === campaignState.activeCampaignId
-              ? {
-                  ...searchPreferences,
-                  discovery: {
-                    ...searchPreferences.discovery,
-                    targets: liveTargets,
-                  },
-                }
-              : {
-                  ...campaign.searchPreferences,
-                  discovery: {
-                    ...campaign.searchPreferences.discovery,
-                    targets: liveTargets,
-                  },
-                };
-          return {
-            ...campaign,
-            searchPreferences: campaignPreferences,
-            sourceTargetIds: campaign.sourceTargetIds,
-            updatedAt: now,
-          };
-        }),
-      });
-    });
   }
 
   async function recoverInterruptedApplyRunsOnLoad(): Promise<void> {
@@ -1848,8 +1804,7 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: campaignApplyRuns,
       userActionRequests: campaignUserActionRequests,
       discovery,
-      searchPreferences: setupContext.searchPreferences,
-      sourceAccessPrompts,
+      sourceHealth: ctx.jobSites?.healthCounts(),
     });
 
     const listableIntelligence = {
@@ -2102,7 +2057,7 @@ export function createWorkspaceSnapshotProfileMethods(
       discovery: {
         activeSourceDebugRun: discovery.activeSourceDebugRun,
       },
-      searchPreferences: bootstrapSearchPreferences,
+      sourceHealth: ctx.jobSites?.healthCounts(),
     });
 
     return JobFinderWorkspaceSnapshotSchema.parse({
@@ -2180,36 +2135,6 @@ export function createWorkspaceSnapshotProfileMethods(
       commitApplicationDefaultFields({ resumeApplicationMode }),
   });
 
-  async function preserveRemovedSourceLabels(
-    currentSearchPreferences: JobSearchPreferences,
-    nextSearchPreferences: JobSearchPreferences,
-  ): Promise<void> {
-    const removedSourceLabels = new Map(
-      currentSearchPreferences.discovery.targets
-        .filter(
-          (target) =>
-            !nextSearchPreferences.discovery.targets.some(
-              (next) => next.id === target.id,
-            ),
-        )
-        .map((target) => [target.id, target.label]),
-    );
-    if (removedSourceLabels.size > 0) {
-      const preserveLabels = (job: SavedJob): SavedJob => ({
-        ...job,
-        provenance: job.provenance.map((entry) =>
-          entry.sourceLabel || !removedSourceLabels.has(entry.targetId)
-            ? entry
-            : {
-                ...entry,
-                sourceLabel: removedSourceLabels.get(entry.targetId),
-              },
-        ),
-      });
-      await ctx.repository.commitSavedJobDelta({ update: preserveLabels });
-    }
-  }
-
   async function persistSearchPreferences(
     searchPreferences: JobSearchPreferences,
     options: { preserveAiBehaviorOwnedFields: boolean },
@@ -2233,24 +2158,12 @@ export function createWorkspaceSnapshotProfileMethods(
         ? {
             ...parsedSearchPreferences,
             tailoringMode: currentSearchPreferences.tailoringMode,
-            discovery: {
-              ...parsedSearchPreferences.discovery,
-              collectOnlyHardCriteriaMatches:
-                currentSearchPreferences.discovery
-                  .collectOnlyHardCriteriaMatches ?? false,
-            },
+            searchSelectivity: currentSearchPreferences.searchSelectivity,
           }
         : parsedSearchPreferences;
-    const nextSearchPreferences = invalidateChangedSourceGuidance(
-      currentSearchPreferences,
-      ownedFieldsPreservedSearchPreferences,
-    );
-    await preserveRemovedSourceLabels(
-      currentSearchPreferences,
-      nextSearchPreferences,
-    );
+    const nextSearchPreferences = ownedFieldsPreservedSearchPreferences;
     await ctx.repository.saveSearchPreferences(nextSearchPreferences);
-    await syncActiveCampaignPreferences(nextSearchPreferences);
+
     await deriveAndPersistProfileSetupState(ctx, {
       persistedState: currentProfileSetupState,
       profile: currentProfile,
@@ -2473,19 +2386,11 @@ export function createWorkspaceSnapshotProfileMethods(
       const parsedSearchPreferences = normalizeSearchPreferences(
         JobSearchPreferencesSchema.parse(searchPreferences),
       );
-      const nextSearchPreferences = invalidateChangedSourceGuidance(
-        currentSearchPreferences,
-        {
-          ...parsedSearchPreferences,
-          tailoringMode: currentSearchPreferences.tailoringMode,
-          discovery: {
-            ...parsedSearchPreferences.discovery,
-            collectOnlyHardCriteriaMatches:
-              currentSearchPreferences.discovery
-                .collectOnlyHardCriteriaMatches ?? false,
-          },
-        },
-      );
+      const nextSearchPreferences = {
+        ...parsedSearchPreferences,
+        tailoringMode: currentSearchPreferences.tailoringMode,
+        searchSelectivity: currentSearchPreferences.searchSelectivity,
+      };
       const nextProfileSetupState = resolvePendingReviewItemsAfterExplicitSave({
         currentProfile,
         currentSearchPreferences,
@@ -2496,10 +2401,6 @@ export function createWorkspaceSnapshotProfileMethods(
       });
 
       await nextTurn();
-      await preserveRemovedSourceLabels(
-        currentSearchPreferences,
-        nextSearchPreferences,
-      );
       if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
         await ctx.staleApprovedResumeDrafts(
           "Profile details changed after approval and the resume needs a fresh review.",
@@ -2513,7 +2414,7 @@ export function createWorkspaceSnapshotProfileMethods(
         );
       }
       await nextTurn();
-      await syncActiveCampaignPreferences(nextSearchPreferences);
+
       await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
@@ -2820,20 +2721,18 @@ export function createWorkspaceSnapshotProfileMethods(
         }),
       );
 
-      // Then the two search-preference fields this section owns. They go
-      // through the ordinary preferences save so the active plan's copy of
-      // the preferences (which a search actually reads) stays in step.
+      // Save only the goal fields owned by this section. Sites remain in their row store.
       const nextTailoringMode =
         resumeApproach !== undefined && resumeApproach !== "original_resume"
           ? resumeApproach
           : undefined;
-      const nextCollectOnlyHardCriteriaMatches =
+      const nextSearchSelectivity =
         parsedInput.aiBehavior === undefined
           ? undefined
-          : parsedInput.aiBehavior.jobSearch.selectivity === "best_matches";
+          : parsedInput.aiBehavior.jobSearch.selectivity;
       if (
         nextTailoringMode !== undefined ||
-        nextCollectOnlyHardCriteriaMatches !== undefined
+        nextSearchSelectivity !== undefined
       ) {
         const currentSearchPreferences = normalizeSearchPreferences(
           await ctx.repository.getSearchPreferences(),
@@ -2841,10 +2740,9 @@ export function createWorkspaceSnapshotProfileMethods(
         const changed =
           (nextTailoringMode !== undefined &&
             nextTailoringMode !== currentSearchPreferences.tailoringMode) ||
-          (nextCollectOnlyHardCriteriaMatches !== undefined &&
-            nextCollectOnlyHardCriteriaMatches !==
-              (currentSearchPreferences.discovery
-                .collectOnlyHardCriteriaMatches ?? false));
+          (nextSearchSelectivity !== undefined &&
+            nextSearchSelectivity !==
+              currentSearchPreferences.searchSelectivity);
         if (changed) {
           await persistSearchPreferences(
             {
@@ -2852,15 +2750,9 @@ export function createWorkspaceSnapshotProfileMethods(
               ...(nextTailoringMode !== undefined
                 ? { tailoringMode: nextTailoringMode }
                 : {}),
-              discovery: {
-                ...currentSearchPreferences.discovery,
-                ...(nextCollectOnlyHardCriteriaMatches !== undefined
-                  ? {
-                      collectOnlyHardCriteriaMatches:
-                        nextCollectOnlyHardCriteriaMatches,
-                    }
-                  : {}),
-              },
+              ...(nextSearchSelectivity !== undefined
+                ? { searchSelectivity: nextSearchSelectivity }
+                : {}),
             },
             { preserveAiBehaviorOwnedFields: false },
           );

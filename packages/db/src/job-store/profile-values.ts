@@ -150,9 +150,18 @@ export function createProfileItems(store: JobStore) {
       owner: string,
       field: string,
       values: readonly string[],
+      expected?: readonly string[],
     ): boolean {
       const previous = read(scope, owner, field),
         available = new Map<string, typeof previous>();
+      if (
+        expected &&
+        JSON.stringify(previous.map((row) => row.value)) !==
+          JSON.stringify(expected)
+      )
+        throw new Error(
+          `The saved ${field} changed while you were editing it. Reload this list and try again.`,
+        );
       for (const row of previous) {
         const same = available.get(row.value) ?? [];
         same.push(row);

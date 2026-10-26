@@ -11,6 +11,9 @@ import {
   type ProfileRecord,
   type ProfileRecordCollection,
   type ProfileOverview,
+  type CandidateProfile,
+  type JobSearchPreferences,
+  type ProfileEditBatch,
 } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
 import { Input } from "@renderer/components/ui/input";
@@ -20,6 +23,7 @@ import { Button } from "@renderer/components/ui/button";
 import { useStoredSettings } from "./use-stored-settings";
 import { useStoredProfile, useProfileRecordPage } from "./use-stored-profile";
 import { profileEdits } from "./profile-edits";
+import { RecoveredProfileDraft } from "./recovered-profile-draft";
 
 function expand(
   values: Record<string, unknown>,
@@ -62,6 +66,8 @@ type ProfilePorts = Omit<
   | "profile"
   | "searchPreferences"
   | "onSaveAll"
+  | "onPreserveEdits"
+  | "onDiscardEdits"
   | "onUpdateResumeApproach"
   | "resumeApplicationMode"
   | "recordPaging"
@@ -156,6 +162,58 @@ export function StoredProfileScreen(props: ProfilePorts) {
     () => (store.overview ? editorProfile(store.overview, records) : null),
     [store.overview, records],
   );
+  const keptDraft = useRef<{ key: string; id: string } | null>(null);
+  const same = (a: unknown, b: unknown) =>
+    JSON.stringify(a) === JSON.stringify(b);
+  function prepareEdits(
+    nextProfile: CandidateProfile,
+    nextGoals: JobSearchPreferences,
+    baseline?: { profile: CandidateProfile; goals: JobSearchPreferences },
+  ) {
+    const patch = profileEdits({
+      overview: store.overview!,
+      records,
+      goals: store.goals!,
+      nextProfile,
+      nextGoals,
+      ...(baseline
+        ? { beforeProfile: baseline.profile, beforeGoals: baseline.goals }
+        : {}),
+    });
+    for (const [scope, values] of [
+      ["profile", patch.profile],
+      ["goals", patch.goals],
+    ] as const) {
+      for (const [kind, expected] of [
+        ["fields", values?.expected],
+        ["lists", values?.expectedLists],
+      ] as const) {
+        if (!expected) continue;
+        for (const key of Object.keys(expected)) {
+          const previous = ownWrites.current.get(`${scope}.${kind}.${key}`);
+          if (
+            previous &&
+            same((expected as Record<string, unknown>)[key], previous.before)
+          )
+            Object.assign(expected, { [key]: previous.after });
+        }
+      }
+    }
+    for (const row of patch.expectedRecords) {
+      const previous = ownWrites.current.get(
+        `record.${row.collection}.${row.id}`,
+      );
+      if (previous && same(row.value, previous.before))
+        row.value = previous.after as typeof row.value;
+    }
+    return patch;
+  }
+  function draftFor(patch: ProfileEditBatch) {
+    const key = JSON.stringify(patch);
+    if (keptDraft.current?.key !== key)
+      keptDraft.current = { key, id: crypto.randomUUID() };
+    return { id: keptDraft.current.id, edits: patch };
+  }
   if (!profile || !store.goals || !store.overview)
     return (
       <LockedScreenLayout
@@ -248,6 +306,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
       {store.error || settings.error ? (
         <p role="alert">{store.error ?? settings.error}</p>
       ) : null}
+      <RecoveredProfileDraft onRestored={store.refresh} />
       <ProfileScreen
         {...props}
         onProfileSurfaceDraftEdited={onDraftEdited}
@@ -287,38 +346,47 @@ export function StoredProfileScreen(props: ProfilePorts) {
           }
           return ok;
         }}
-        onSaveAll={async (nextProfile, nextGoals) => {
-          const patch = profileEdits({
-            overview: store.overview!,
-            records,
-            goals: store.goals!,
-            nextProfile,
-            nextGoals,
-          });
-          // Rebase only this editor's preceding write when leaving during an autosave.
-          // A conflicting external write still fails the expected-value check.
-          for (const [key, previous] of ownWrites.current) {
-            const expected = patch.profile?.expected;
-            if (
-              expected &&
-              Object.hasOwn(expected, key) &&
-              JSON.stringify(expected[key as keyof typeof expected]) ===
-                JSON.stringify(previous.before)
-            ) {
-              Object.assign(expected, { [key]: previous.after });
-            }
-          }
-          const ok = await store.save(patch);
+        onPreserveEdits={async (nextProfile, nextGoals, baseline) => {
+          await window.nestor.jobs.run(
+            "put_profile_draft",
+            draftFor(prepareEdits(nextProfile, nextGoals, baseline)),
+          );
+        }}
+        onDiscardEdits={async () => {
+          if (keptDraft.current)
+            await window.nestor.jobs.run("clear_profile_draft", {
+              id: keptDraft.current.id,
+            });
+        }}
+        onSaveAll={async (nextProfile, nextGoals, _section, baseline) => {
+          const patch = prepareEdits(nextProfile, nextGoals, baseline);
+          const draft = draftFor(patch);
+          await window.nestor.jobs.run("put_profile_draft", draft);
+          const ok = await store.save({ ...patch, draftId: draft.id });
           if (ok) {
-            for (const [key, value] of Object.entries(
-              patch.profile?.fields ?? {},
-            )) {
-              const expected = patch.profile?.expected;
-              ownWrites.current.set(key, {
-                before: expected?.[key as keyof typeof expected],
-                after: value,
+            for (const [scope, values] of [
+              ["profile", patch.profile],
+              ["goals", patch.goals],
+            ] as const)
+              for (const [kind, changes, expected] of [
+                ["fields", values?.fields, values?.expected],
+                ["lists", values?.lists, values?.expectedLists],
+              ] as const)
+                for (const [key, value] of Object.entries(changes ?? {}))
+                  ownWrites.current.set(`${scope}.${kind}.${key}`, {
+                    before: expected?.[key as keyof typeof expected],
+                    after: value,
+                  });
+            for (const row of patch.expectedRecords)
+              ownWrites.current.set(`record.${row.collection}.${row.id}`, {
+                before: row.value,
+                after:
+                  patch.upsert.find(
+                    (value) =>
+                      value.collection === row.collection &&
+                      value.record.id === row.id,
+                  ) ?? null,
               });
-            }
             setSaved((previous) => {
               const key = (row: {
                 collection: ProfileRecordCollection;

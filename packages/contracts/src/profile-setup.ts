@@ -1,10 +1,7 @@
 import { z } from "zod";
 
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
-import {
-  isRunnableJobDiscoveryTarget,
-  type JobSearchPreferences,
-} from "./discovery";
+import { type JobSearchPreferences } from "./discovery";
 import { CandidateProfileSchema, type CandidateProfile } from "./profile";
 
 export const profileSetupStepValues = [
@@ -525,10 +522,7 @@ export function evaluateProfileSetupReadiness(
     hasMeaningfulStringList(profile.targetRoles) ||
     hasMeaningfulBackground,
   );
-  const hasDiscoverySource =
-    enabledSiteCount === undefined
-      ? searchPreferences.discovery.targets.some(isRunnableJobDiscoveryTarget)
-      : enabledSiteCount > 0;
+  const hasDiscoverySource = (enabledSiteCount ?? 0) > 0;
   const hasEligibilityPreferences = Boolean(
     hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) ||
     profile.workEligibility.requiresVisaSponsorship !== null ||

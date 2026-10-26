@@ -1,6 +1,7 @@
 import type { ResumeProfileExtraction } from "@nestor/ai-providers";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import type {
+  JobDiscoveryTarget,
   SavedJob,
   SavedJobDiscoveryProvenance,
   SourceDebugPhase,
@@ -87,8 +88,26 @@ export function toPhaseId(
   }
 }
 
-export function createSeed(): JobFinderRepositorySeed {
+export function createSeed(): JobFinderRepositorySeed & {
+  jobSites: JobDiscoveryTarget[];
+} {
   return {
+    jobSites: [
+      {
+        id: "1",
+        label: "Primary target",
+        startingUrl: "https://www.linkedin.com/jobs/search/",
+        enabled: true,
+        adapterKind: "auto",
+        customInstructions: null,
+        instructionStatus: "missing",
+        validatedInstructionId: null,
+        draftInstructionId: null,
+        lastDebugRunId: null,
+        lastVerifiedAt: null,
+        staleReason: null,
+      },
+    ],
     profile: {
       id: "candidate_1",
       firstName: "Alex",
@@ -264,25 +283,6 @@ export function createSeed(): JobFinderRepositorySeed {
       tailoringMode: "balanced",
       companyBlacklist: [],
       companyWhitelist: ["Signal Systems"],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "1",
-            label: "Primary target",
-            startingUrl: "https://www.linkedin.com/jobs/search/",
-            enabled: true,
-            adapterKind: "auto",
-            customInstructions: null,
-            instructionStatus: "missing",
-            validatedInstructionId: null,
-            draftInstructionId: null,
-            lastDebugRunId: null,
-            lastVerifiedAt: null,
-            staleReason: null,
-          },
-        ],
-      },
     },
     profileSetupState: {
       status: "completed",

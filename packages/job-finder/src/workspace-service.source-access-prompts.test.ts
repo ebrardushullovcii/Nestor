@@ -10,11 +10,11 @@ import {
 describe("createJobFinderWorkspaceService source access prompts", () => {
   test("derives a login-required source access prompt from a paused manual auth blocker", async () => {
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       lastDebugRunId: "source_debug_run_login_required",
@@ -100,11 +100,11 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
 
   test("derives a login-recommended prompt from auth-limited but job-bearing source evidence", async () => {
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       lastDebugRunId: "source_debug_run_login_recommended",
@@ -294,11 +294,11 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       runDiscovery: vi.fn(),
     };
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }
-    seed.searchPreferences.discovery.targets[0] = {
+    seed.jobSites[0] = {
       ...linkedinTarget,
       label: "LinkedIn",
       draftInstructionId: "instruction_targeted_open",
@@ -414,7 +414,7 @@ describe("createJobFinderWorkspaceService source access prompts", () => {
       getSessionState,
     };
     const seed = createSeed();
-    const linkedinTarget = seed.searchPreferences.discovery.targets[0];
+    const linkedinTarget = seed.jobSites[0];
     if (!linkedinTarget) {
       throw new Error("Expected the default LinkedIn target in the test seed.");
     }

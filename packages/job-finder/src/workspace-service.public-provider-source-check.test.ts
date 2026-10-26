@@ -15,7 +15,7 @@ afterEach(() => {
 describe("public provider source check", () => {
   test("validates a complete provider capability without launching the browser or waiting on AI", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets = [
+    seed.jobSites = [
       {
         id: "1",
         label: "Mercury Greenhouse",

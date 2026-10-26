@@ -7,9 +7,7 @@ export function createSourceDebugServiceHarness(
   options: Parameters<typeof createWorkspaceServiceHarness>[0] = {},
 ) {
   const seed = options.seed ?? createSeed();
-  const jobSites = createTestJobSites(
-    seed.searchPreferences?.discovery.targets ?? [],
-  );
+  const jobSites = createTestJobSites(seed.jobSites ?? []);
   return {
     ...createWorkspaceServiceHarness({ ...options, seed, jobSites }),
     jobSites,

@@ -325,6 +325,36 @@ export function buildCanonicalAwareProfilePayload(input: {
   );
 }
 
+/** A background edit to a dirty value needs a choice, never a last-write-wins save. */
+function conflictsWithDirtyEdit(
+  before: unknown,
+  incoming: unknown,
+  draft: unknown,
+  dirty: unknown,
+  ownSave?: unknown,
+): boolean {
+  if (dirty === true)
+    return (
+      JSON.stringify(before) !== JSON.stringify(incoming) &&
+      JSON.stringify(incoming) !== JSON.stringify(draft) &&
+      JSON.stringify(incoming) !== JSON.stringify(ownSave)
+    );
+  if (!dirty || typeof dirty !== "object") return false;
+  const value = (row: unknown, key: string) =>
+    row && typeof row === "object"
+      ? (row as Record<string, unknown>)[key]
+      : undefined;
+  return Object.entries(dirty).some(([key, child]) =>
+    conflictsWithDirtyEdit(
+      value(before, key),
+      value(incoming, key),
+      value(draft, key),
+      child,
+      value(ownSave, key),
+    ),
+  );
+}
+
 export function useProfileScreenForms(input: {
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   onDraftEdited?: () => void;
@@ -366,6 +396,16 @@ export function useProfileScreenForms(input: {
     },
     [],
   );
+  const pendingOwnSave = useRef<{
+    profile: CandidateProfile;
+    goals: JobSearchPreferences;
+  } | null>(null);
+  const expectOwnSave = (
+    profile: CandidateProfile,
+    goals: JobSearchPreferences,
+  ) => {
+    pendingOwnSave.current = { profile, goals };
+  };
   const latestProfileRef = useRef(input.profile);
   const latestSearchPreferencesRef = useRef(input.searchPreferences);
   // Taken once: the preferences carry every job source, and serializing them
@@ -593,7 +633,6 @@ export function useProfileScreenForms(input: {
     targetSalaryUsd,
     salaryCurrency,
     compensationInterval,
-    discoveryTargets,
     shiftPreference,
     minimumWeeklyHours,
     maximumWeeklyHours,
@@ -617,7 +656,6 @@ export function useProfileScreenForms(input: {
       "targetSalaryUsd",
       "salaryCurrency",
       "compensationInterval",
-      "discoveryTargets",
       "shiftPreference",
       "minimumWeeklyHours",
       "maximumWeeklyHours",
@@ -678,7 +716,6 @@ export function useProfileScreenForms(input: {
       minimumWeeklyHours,
       maximumWeeklyHours,
       currentSearchPreferencesBaseline,
-      discoveryTargets,
       employmentTypes,
       excludedLocations,
       jobFamilies,
@@ -831,7 +868,27 @@ export function useProfileScreenForms(input: {
       profileForm.formState.dirtyFields,
     );
 
-    if (mergeOutcome.status === "conflict") {
+    if (
+      mergeOutcome.status === "conflict" ||
+      conflictsWithDirtyEdit(
+        createProfileEditorValues(
+          latestProfileRef.current,
+          input.latestResumeImportReviewCandidates,
+        ),
+        createProfileEditorValues(
+          input.profile,
+          input.latestResumeImportReviewCandidates,
+        ),
+        draftValues,
+        profileForm.formState.dirtyFields,
+        pendingOwnSave.current
+          ? createProfileEditorValues(
+              pendingOwnSave.current.profile,
+              input.latestResumeImportReviewCandidates,
+            )
+          : undefined,
+      )
+    ) {
       // Atomic abort: keep every local value, keep the previous baseline for
       // stale-save protection, and leave dirty guards untouched. The surface
       // is marked conflicted so the discard-and-reload affordance appears and
@@ -963,7 +1020,18 @@ export function useProfileScreenForms(input: {
       preferencesForm.formState.dirtyFields,
     );
 
-    if (preferencesMergeOutcome.status === "conflict") {
+    if (
+      preferencesMergeOutcome.status === "conflict" ||
+      conflictsWithDirtyEdit(
+        createSearchPreferencesEditorValues(latestSearchPreferencesRef.current),
+        createSearchPreferencesEditorValues(input.searchPreferences),
+        draftPreferencesValues,
+        preferencesForm.formState.dirtyFields,
+        pendingOwnSave.current
+          ? createSearchPreferencesEditorValues(pendingOwnSave.current.goals)
+          : undefined,
+      )
+    ) {
       applyBackgroundConflictSurface("preferences", true);
       setBackgroundMergeNotice(backgroundConflictNoticeMessage);
       return;
@@ -1146,6 +1214,11 @@ export function useProfileScreenForms(input: {
     backgroundConflictSurfaces.profile;
 
   return {
+    expectOwnSave,
+    editBaseline: {
+      profile: currentProfileBaseline,
+      goals: currentSearchPreferencesBaseline,
+    },
     backgroundArrays,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,

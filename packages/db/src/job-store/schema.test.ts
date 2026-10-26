@@ -51,6 +51,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
     "id first_name last_name middle_name full_name preferred_display_name headline summary current_location current_city current_region current_country time_zone years_experience email secondary_email phone portfolio_url linkedin_url github_url personal_website_url work_eligibility_requires_visa_sponsorship work_eligibility_willing_to_relocate work_eligibility_willing_to_travel work_eligibility_remote_eligible work_eligibility_notice_period_days work_eligibility_available_start_date work_eligibility_security_clearance professional_summary_short_value_proposition professional_summary_full_summary professional_summary_leadership_summary professional_summary_domain_focus_summary narrative_professional_story narrative_next_chapter_summary narrative_career_transition_summary application_identity_preferred_email application_identity_preferred_phone",
   profile_certifications:
     "seq id name issuer issue_date expiry_date credential_url is_draft",
+  profile_edit_draft: "id token value",
   profile_education:
     "seq id school_name degree field_of_study location start_date end_date summary is_draft",
   profile_experiences:

@@ -1,4 +1,4 @@
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
+import { jobSiteTarget } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import {
   getAiProviderAccessFailure,
@@ -135,7 +135,6 @@ import {
 } from "./listing-detail-enrichment";
 import { jobNeedsFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentSession } from "./match-assessment-session";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import { createMatchAssessment, createMatchAssessmentAsync } from "./matching";
 import { readSavedJob } from "./read-saved-job";
@@ -624,27 +623,25 @@ export function createWorkspaceApplicationMethods(
       if (!options.force && !alreadyRead && !jobNeedsListingDetail(job)) {
         return;
       }
-      const [profile, profilePreferences, settings, campaignState] =
-        await Promise.all([
-          ctx.repository.getProfile(),
-          ctx.repository.getSearchPreferences(),
-          ctx.repository.getSettings(),
-          ctx.repository.getCampaignState(),
-        ]);
+      const [profile, profilePreferences, campaignState] = await Promise.all([
+        ctx.repository.getProfile(),
+        ctx.repository.getSearchPreferences(),
+        ctx.repository.getCampaignState(),
+      ]);
       const assessmentPlanId = campaignState?.activeCampaignId ?? null;
       const activePlan = campaignState?.campaigns.find(
         (plan) => plan.id === assessmentPlanId,
       );
       const searchPreferences = activePlan
-        ? searchPreferencesForCampaignRun(activePlan)
+        ? activePlan.searchPreferences
         : profilePreferences;
       const session = createMatchAssessmentSession({
         profile,
         // Scored with the same remote setting a search uses, so reading the
         // listing on shortlist does not flip the job's location verdict.
-        searchPreferences: withSavedJobSearchBehavior(
-          enrichSearchPreferencesFromProfile(searchPreferences, profile),
-          settings,
+        searchPreferences: enrichSearchPreferencesFromProfile(
+          searchPreferences,
+          profile,
         ),
         calculate: createMatchAssessment,
       });
@@ -664,10 +661,7 @@ export function createWorkspaceApplicationMethods(
         const assessed = await createMatchAssessmentAsync(
           ctx.aiClient,
           profile,
-          withSavedJobSearchBehavior(
-            enrichSearchPreferencesFromProfile(searchPreferences, profile),
-            settings,
-          ),
+          enrichSearchPreferencesFromProfile(searchPreferences, profile),
           job,
           signal,
           // Shortlisting asked for the job, not for this read.
@@ -705,10 +699,7 @@ export function createWorkspaceApplicationMethods(
             const assessed = await createMatchAssessmentAsync(
               ctx.aiClient,
               profile,
-              withSavedJobSearchBehavior(
-                enrichSearchPreferencesFromProfile(searchPreferences, profile),
-                settings,
-              ),
+              enrichSearchPreferencesFromProfile(searchPreferences, profile),
               posting,
               signal,
               // Only "Judge fit" waits on this read.
@@ -1766,10 +1757,11 @@ export function createWorkspaceApplicationMethods(
             job.provenance[job.provenance.length - 1]?.targetId ??
             job.provenance[0]?.targetId ??
             null;
-          const provenanceTarget = provenanceTargetId
-            ? (searchPreferences.discovery.targets.find(
-                (target) => target.id === provenanceTargetId,
-              ) ?? null)
+          const provenanceSite = provenanceTargetId
+            ? ctx.jobSites?.get(Number(provenanceTargetId))
+            : null;
+          const provenanceTarget = provenanceSite
+            ? jobSiteTarget(provenanceSite)
             : null;
           const activeInstruction = provenanceTarget
             ? resolveActiveSourceInstructionArtifact(

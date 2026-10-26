@@ -50,8 +50,7 @@ export function buildJobFinderDiagnosticExport(input: {
       profileSetupStatus: input.workspace.profileSetupState.status,
       browserStatus: input.workspace.browserSession.status,
       counts: {
-        configuredSources:
-          input.workspace.searchPreferences.discovery.targets.length,
+        configuredSources: input.workspace.siteCounts.all,
         visibleJobs: input.workspace.discoveryJobs.length,
         shortlistedJobs: input.workspace.reviewQueue.length,
         applications: input.workspace.applicationRecords.length,

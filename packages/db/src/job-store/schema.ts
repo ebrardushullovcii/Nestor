@@ -1,3 +1,4 @@
+import { PROFILE_EDIT_DRAFT_SCHEMA } from "./profile-edit-draft";
 import { PROFILE_IMPORT_SCHEMA } from "./profile-import-store";
 import { SEARCH_SOURCES_SCHEMA } from "./search-sources";
 import { SOURCE_ACCESS_SCHEMA } from "./source-access";
@@ -238,5 +239,6 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   PROFILE_SCHEMA,
   PREFERENCES_SCHEMA,
   PROFILE_WORKFLOW_SCHEMA,
+  PROFILE_EDIT_DRAFT_SCHEMA,
   PROFILE_IMPORT_SCHEMA,
 ];

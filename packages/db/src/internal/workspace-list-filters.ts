@@ -1,8 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import {
-  workModeValues,
-  type JobDiscoveryTarget,
-} from "@nestor/contracts";
+import { workModeValues } from "@nestor/contracts";
 import {
   getDiscoverySourceLabels,
   type SourceAttribution,
@@ -24,9 +21,6 @@ const activityLabels: Record<string, string> = {
 };
 
 export function createWorkspaceListFilters(db: DatabaseSync) {
-  let generation = "";
-  let targets: Array<Pick<JobDiscoveryTarget, "id" | "label">> = [];
-  let targetKey = "";
   const labels = new Map<string, string>();
   db.function("workspace_sources", (value) => {
     const text = typeof value === "string" ? value : "[]";
@@ -34,7 +28,7 @@ export function createWorkspaceListFilters(db: DatabaseSync) {
     if (found === undefined) {
       const resolved = getDiscoverySourceLabels(
         JSON.parse(text) as SourceAttribution[],
-        targets,
+        [],
       );
       found = JSON.stringify(
         resolved.length ? resolved : ["Source unavailable"],
@@ -79,31 +73,7 @@ export function createWorkspaceListFilters(db: DatabaseSync) {
     },
   );
   return (version: string) => {
-    if (generation === version) return;
-    const normalized = !!db
-      .prepare("SELECT 1 FROM schema_migrations WHERE version=27")
-      .get();
-    targets = normalized
-      ? db
-          .prepare(
-            `SELECT json_extract(j.value,'$.id') AS id,json_extract(j.value,'$.label') AS label
-        FROM singleton_state s JOIN search_preference_sources p ON p.preference_id=json_extract(s.value,'$.preferenceId')
-        JOIN job_sources j ON j.id=p.source_version_id WHERE s.key='search_preferences' ORDER BY p.position`,
-          )
-          .all()
-          .map((row) => ({ id: String(row.id), label: String(row.label) }))
-      : db
-          .prepare(
-            `SELECT json_extract(t.value,'$.id') AS id,json_extract(t.value,'$.label') AS label
-        FROM singleton_state s,json_each(s.value,'$.discovery.targets') t WHERE s.key='search_preferences'`,
-          )
-          .all()
-          .map((row) => ({ id: String(row.id), label: String(row.label) }));
-    const nextKey = JSON.stringify(targets);
-    if (targetKey !== nextKey || labels.size > 32768) {
-      labels.clear();
-      targetKey = nextKey;
-    }
-    generation = version;
+    void version;
+    if (labels.size > 32768) labels.clear();
   };
 }

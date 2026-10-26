@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
-import { ProfileCopilotMessageSchema } from "@nestor/contracts";
+import { ProfileCopilotMessageSchema, createFreshStartCandidateProfile } from "@nestor/contracts";
 import { createFileJobFinderRepository } from "../file-repository";
 import { createSeed } from "../test-fixtures";
 import { createResumeImportArtifactsFixture } from "../file-repository.test-support";
@@ -16,6 +16,7 @@ import { JOB_STORE_SCHEMA } from "./schema";
 import { PROFILE_SCHEMA } from "./profile-store";
 import { PREFERENCES_SCHEMA } from "./preferences-store";
 import { PROFILE_WORKFLOW_SCHEMA } from "./profile-workspace";
+import { PROFILE_EDIT_DRAFT_SCHEMA } from "./profile-edit-draft";
 import { PROFILE_IMPORT_SCHEMA } from "./profile-import-store";
 
 test("Profile tables add to an existing job store without copying old Profile or Settings", async () => {
@@ -26,6 +27,7 @@ test("Profile tables add to an existing job store without copying old Profile or
     legacyPath = path.join(directory, "workspace.sqlite");
   const before = new DatabaseSync(filePath);
   const newTables = new Set([
+    PROFILE_EDIT_DRAFT_SCHEMA,
     PROFILE_SCHEMA,
     PREFERENCES_SCHEMA,
     PROFILE_WORKFLOW_SCHEMA,
@@ -36,6 +38,7 @@ test("Profile tables add to an existing job store without copying old Profile or
   before.exec(`INSERT INTO jobs(id,stage,stage_at,title,company,location,found_at,seen_at,source_label,url)
     VALUES(7,'shortlisted',1,'Saved Engineer','Synthetic Employer','Berlin',1,1,'My board','https://synthetic.test/jobs/7');
     INSERT INTO job_details(job_id,description) VALUES(7,'Full saved listing');
+    INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path) VALUES(7,'tailored','ready',1,1,'C:/synthetic/approved.pdf');
     CREATE TABLE retained_sentinel(value TEXT); INSERT INTO retained_sentinel VALUES('existing store');`);
   before.close();
   const old = new DatabaseSync(legacyPath);
@@ -48,7 +51,7 @@ test("Profile tables add to an existing job store without copying old Profile or
     .run("settings", "old unread settings");
   old.close();
   const store = openJobStore(filePath);
-  const seed = createSeed();
+  const seed = {...createSeed(),profile:createFreshStartCandidateProfile()};
   const repository = await createFileJobFinderRepository({
     filePath: legacyPath,
     store,
@@ -60,6 +63,9 @@ test("Profile tables add to an existing job store without copying old Profile or
       description: "Full saved listing",
       stage: "shortlisted",
     });
+    expect(
+      store.sql("SELECT approved_at,state FROM resumes WHERE job_id=7").get(),
+    ).toMatchObject({ approved_at: null, state: "queued" });
     expect(store.sql("SELECT value FROM retained_sentinel").get()?.value).toBe(
       "existing store",
     );

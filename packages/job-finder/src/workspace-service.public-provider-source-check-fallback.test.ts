@@ -16,7 +16,7 @@ afterEach(() => {
 describe("public provider source check fallback", () => {
   test("runs complete browser coverage when the provider API is unavailable", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets = [
+    seed.jobSites = [
       {
         id: "1",
         label: "Public provider fallback",

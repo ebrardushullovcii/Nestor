@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from "react";
 export function useProfileAutosave<T>(input: {
   value: T | null;
   blocked: boolean;
+  preserve?: ((value: T) => Promise<void>) | undefined;
   save: (value: T) => Promise<boolean | void> | void;
 }) {
   const latest = useRef(input),
     mounted = useRef(true),
     pending = useRef(false),
-    attempted = useRef<string | null>(null);
+    attempted = useRef<string | null>(null),
+    succeeded = useRef<string | null>(null);
   latest.current = input;
   const [completed, setCompleted] = useState(0),
     [error, setError] = useState<string | null>(null);
@@ -17,7 +19,20 @@ export function useProfileAutosave<T>(input: {
   const flush = useRef<() => void>(() => {});
   flush.current = () => {
     const current = latest.current;
-    if (pending.current || current.blocked || current.value === null) return;
+    if (
+      current.value === null ||
+      JSON.stringify(current.value) === succeeded.current
+    )
+      return;
+    void current.preserve?.(current.value).catch((reason: unknown) => {
+      if (mounted.current)
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not keep your unsaved changes.",
+        );
+    });
+    if (pending.current || current.blocked) return;
     const fingerprint = JSON.stringify(current.value);
     if (fingerprint === attempted.current) return;
     attempted.current = fingerprint;
@@ -26,6 +41,7 @@ export function useProfileAutosave<T>(input: {
     void Promise.resolve()
       .then(() => current.save(current.value!))
       .then((ok) => {
+        if (ok !== false) succeeded.current = fingerprint;
         if (ok === false && mounted.current)
           setError("Your latest changes could not be saved.");
       })
@@ -43,6 +59,17 @@ export function useProfileAutosave<T>(input: {
         else flush.current();
       });
   };
+  useEffect(() => {
+    if (input.value === null) return;
+    void input.preserve?.(input.value).catch((reason: unknown) => {
+      if (mounted.current)
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not keep your unsaved changes.",
+        );
+    });
+  }, [key]);
   useEffect(() => {
     if (key === null || input.blocked) return;
     const timer = setTimeout(() => flush.current(), 350);

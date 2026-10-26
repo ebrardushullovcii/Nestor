@@ -213,7 +213,16 @@ export function createPreferencesStore(store: JobStore) {
           let changed = goals.patch(patch.fields, patch.expected);
           for (const [field, value] of Object.entries(patch.lists))
             if (value !== undefined)
-              changed = items.patch("goals", "1", field, value) || changed;
+              changed =
+                items.patch(
+                  "goals",
+                  "1",
+                  field,
+                  value,
+                  patch.expectedLists?.[
+                    field as keyof typeof patch.expectedLists
+                  ],
+                ) || changed;
           readGoals();
           if (changed)
             store.notify({
@@ -301,7 +310,16 @@ export function createPreferencesStore(store: JobStore) {
           let changed = settings.patch(patch.fields, patch.expected);
           for (const [field, value] of Object.entries(patch.lists))
             if (value !== undefined)
-              changed = items.patch("settings", "1", field, value) || changed;
+              changed =
+                items.patch(
+                  "settings",
+                  "1",
+                  field,
+                  value,
+                  patch.expectedLists?.[
+                    field as keyof typeof patch.expectedLists
+                  ],
+                ) || changed;
           readSettings();
           if (changed)
             applySettingsResumeEffects(

@@ -285,7 +285,7 @@ function setupReadiness(snapshot: AssistantPersonalState) {
   const readiness = evaluateProfileSetupReadiness(
     snapshot.profile,
     snapshot.searchPreferences,
-    snapshot.siteCounts.enabled,
+    snapshot.enabledSiteCount,
   );
   readiness.hasDiscoverySource = snapshot.enabledSiteCount > 0;
   const blockers = getProfileSetupReadinessBlockers(readiness);
@@ -892,11 +892,7 @@ export const editProfileTool = defineTool({
   async execute(input, context) {
     const { service, session, ports } = context;
     const snapshot = await ports.readPersonalState();
-    const operations = parseOperations(
-      input.operations,
-      snapshot.profile,
-      snapshot.searchPreferences,
-    );
+    const operations = parseOperations(input.operations, snapshot.profile);
 
     const editor = session.context?.editor;
     if (editor?.editor === "profile" && editor.dirtyFields.length > 0) {

@@ -1,3 +1,4 @@
+import { invalidateProfileResumes } from "./profile-effects";
 import { createProfileImportStore } from "./profile-import-store";
 import {
   CandidateProfileSchema,
@@ -177,6 +178,7 @@ export function createProfileWorkspace(
   store.transaction(() => {
     if (profile.created) {
       profile.replace(seed.profile);
+      invalidateProfileResumes(store);
       imports.reset(seed);
     }
     if (preferences.goals.created)

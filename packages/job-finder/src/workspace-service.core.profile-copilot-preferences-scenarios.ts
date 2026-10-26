@@ -179,10 +179,6 @@ describe("createJobFinderWorkspaceService – profile copilot preferences and ex
           ...createSeed().searchPreferences,
           workModes: ["hybrid"],
           targetSalaryUsd: null,
-          discovery: {
-            historyLimit: 5,
-            targets: [],
-          },
         },
       },
     });

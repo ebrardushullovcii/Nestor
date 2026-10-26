@@ -1,3 +1,4 @@
+import { getJobStore } from "../job-store";
 import { existsSync } from "node:fs";
 import {
   JOB_COMMANDS,
@@ -59,18 +60,11 @@ export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"]
     await prepareWorkspaceScreenReads();
     const initial = createEmptyJobFinderRepositoryState();
     const file = getJobFinderWorkspaceFilePath();
-    const personal = existsSync(file)
-      ? readPersonalWorkspaceState(file, initial)
-      : {
-          profile: initial.profile,
-          searchPreferences: initial.searchPreferences,
-          settings: initial.settings,
-          profileSetupState: initial.profileSetupState,
-          activityControl: initial.activityControl,
-          latestResumeImportRun: null,
-          latestResumeImportReviewCandidates: [],
-          latestResumeImportBundle: null,
-        };
+    const personal = readPersonalWorkspaceState(
+      existsSync(file) ? file : null,
+      initial,
+      getJobStore(),
+    );
     const sites = await runJobCommand("list_sites", {
       filter: "enabled",
       limit: 1,

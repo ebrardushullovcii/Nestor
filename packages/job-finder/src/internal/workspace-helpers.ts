@@ -1,6 +1,5 @@
 import type { JobSitesStore } from "@nestor/db/job-store";
 import {
-  JobDiscoveryTargetSchema,
   jobSiteTarget,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
@@ -28,10 +27,6 @@ import { uniqueStrings } from "./shared";
 import { markValidatedSearchPreferences } from "./validated-search-preferences";
 import {
   DEFAULT_MAX_TARGET_ROLES,
-  GENERIC_DEFAULT_TARGET_LABEL,
-  LEGACY_DEFAULT_TARGET_ID,
-  LEGACY_DEFAULT_TARGET_LABEL,
-  LEGACY_DEFAULT_TARGET_STARTING_URL,
   PROFILE_PLACEHOLDER_HEADLINE,
   PROFILE_PLACEHOLDER_LOCATION,
   SOURCE_DEBUG_APP_SCHEMA_VERSION,
@@ -98,92 +93,15 @@ export function resolveAdapterKind(target: JobDiscoveryTarget): JobSource {
   return "target_site";
 }
 
-export function normalizeDiscoveryTarget(
-  target: JobDiscoveryTarget,
-): JobDiscoveryTarget {
-  const isLegacyDefaultTarget =
-    target.id === LEGACY_DEFAULT_TARGET_ID &&
-    target.label === LEGACY_DEFAULT_TARGET_LABEL &&
-    target.startingUrl === LEGACY_DEFAULT_TARGET_STARTING_URL;
-
-  return JobDiscoveryTargetSchema.parse({
-    ...target,
-    adapterKind: "auto",
-    label: isLegacyDefaultTarget ? GENERIC_DEFAULT_TARGET_LABEL : target.label,
-  });
-}
-
-// Every workspace read normalizes the same stored preferences, which hold
-// hundreds of sources; validating each of them twice per refresh cost more
-// than the rest of the preference work. The last result is reused while the
-// input is unchanged, and each caller still gets its own copy.
-let lastNormalizedSearchPreferences: {
-  key: string;
-  value: JobSearchPreferences;
-} | null = null;
-
+/** Validate the small goal record; sites have their own row store. */
 export function normalizeSearchPreferences(
   searchPreferences: JobSearchPreferences,
 ): JobSearchPreferences {
-  const key = JSON.stringify(searchPreferences);
-  if (lastNormalizedSearchPreferences?.key === key) {
-    return markValidatedSearchPreferences(
-      structuredClone(lastNormalizedSearchPreferences.value),
-    );
-  }
-  const value = JobSearchPreferencesSchema.parse({
-    ...searchPreferences,
-    discovery: {
-      ...searchPreferences.discovery,
-      targets: searchPreferences.discovery.targets.map((target) =>
-        normalizeDiscoveryTarget(target),
-      ),
-    },
-  });
-  lastNormalizedSearchPreferences = { key, value: structuredClone(value) };
-  return markValidatedSearchPreferences(value);
-}
-
-export const SOURCE_URL_CHANGED_STALE_REASON =
-  "Starting page URL changed. Check this source again before reusing saved guidance.";
-
-export function invalidateChangedSourceGuidance(
-  currentSearchPreferences: JobSearchPreferences,
-  nextSearchPreferences: JobSearchPreferences,
-): JobSearchPreferences {
-  const currentTargetsById = new Map(
-    currentSearchPreferences.discovery.targets.map((target) => [
-      target.id,
-      target,
-    ]),
+  return markValidatedSearchPreferences(
+    JobSearchPreferencesSchema.parse(searchPreferences),
   );
-
-  return JobSearchPreferencesSchema.parse({
-    ...nextSearchPreferences,
-    discovery: {
-      ...nextSearchPreferences.discovery,
-      targets: nextSearchPreferences.discovery.targets.map((target) => {
-        const currentTarget = currentTargetsById.get(target.id);
-        if (
-          !currentTarget ||
-          currentTarget.startingUrl.trim() === target.startingUrl.trim()
-        ) {
-          return target;
-        }
-
-        return {
-          ...target,
-          instructionStatus: "missing",
-          validatedInstructionId: null,
-          draftInstructionId: null,
-          lastDebugRunId: null,
-          lastVerifiedAt: null,
-          staleReason: SOURCE_URL_CHANGED_STALE_REASON,
-        };
-      }),
-    },
-  });
 }
+
 export function normalizeJobFinderSettings(
   settings: JobFinderSettings,
   availableResumeTemplates: readonly ResumeTemplateDefinition[],

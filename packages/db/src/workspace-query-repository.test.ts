@@ -300,15 +300,10 @@ describe("independent workspace queries", () => {
   });
   test("exposes actual row facts, search labels, source filters and pool facet counts", async () => {
     const { writer, reader } = await fixture();
-    const preferences = await writer.getSearchPreferences();
     const target = JobDiscoveryTargetSchema.parse({
       id: "query-source",
       label: "Historical label",
       startingUrl: "https://example.test/jobs",
-    });
-    await writer.saveSearchPreferences({
-      ...preferences,
-      discovery: { ...preferences.discovery, targets: [target] },
     });
     const job = assessedJob({
       id: "labeled",

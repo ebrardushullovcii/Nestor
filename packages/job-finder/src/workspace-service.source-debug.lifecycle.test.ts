@@ -119,9 +119,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -256,9 +254,7 @@ describe("createJobFinderWorkspaceService", () => {
       ],
     };
     const repository = createInMemoryJobFinderRepository(sourceSeedForSites);
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,

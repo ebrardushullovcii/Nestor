@@ -113,25 +113,6 @@ export function createSeed(): JobFinderRepositorySeed {
       tailoringMode: "balanced" as const,
       companyBlacklist: [],
       companyWhitelist: [],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "target_primary",
-            label: "Primary target",
-            startingUrl: "https://jobs.example.com/search",
-            enabled: true,
-            adapterKind: "auto" as const,
-            customInstructions: null,
-            instructionStatus: "missing" as const,
-            validatedInstructionId: null,
-            draftInstructionId: null,
-            lastDebugRunId: null,
-            lastVerifiedAt: null,
-            staleReason: null,
-          },
-        ],
-      },
     },
     profileSetupState: {
       status: "completed" as const,

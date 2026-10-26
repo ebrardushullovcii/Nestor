@@ -7,8 +7,6 @@ import type {
   SavedJob,
 } from "@nestor/contracts";
 
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   createFitVerdictFingerprint,
   createMatchAssessmentContextFingerprint,
@@ -34,17 +32,14 @@ export function buildLegacyVerdictFingerprintMap(input: {
   const goals = [
     input.searchPreferences,
     ...(input.campaignState?.campaigns ?? []).map(
-      searchPreferencesForCampaignRun,
+      (campaign) => campaign.searchPreferences,
     ),
   ];
   const map = new Map<string, string>();
   for (const raw of goals) {
     for (const preferences of [
       raw,
-      withSavedJobSearchBehavior(
-        enrichSearchPreferencesFromProfile(raw, input.profile),
-        input.settings,
-      ),
+      enrichSearchPreferencesFromProfile(raw, input.profile),
     ]) {
       const context = createMatchAssessmentContextFingerprint(
         input.profile,

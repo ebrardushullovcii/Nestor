@@ -229,16 +229,12 @@ describe("scoped settings updates against transaction-current state", () => {
       ...staleProfileDraft,
       locations: ["Vienna, Austria"],
       tailoringMode: "aggressive",
-      discovery: {
-        ...staleProfileDraft.discovery,
-        collectOnlyHardCriteriaMatches: true,
-      },
     });
 
     const persisted = await base.getSearchPreferences();
     expect(persisted.locations).toEqual(["Vienna, Austria"]);
     expect(persisted.tailoringMode).toBe("conservative");
-    expect(persisted.discovery.collectOnlyHardCriteriaMatches).toBe(false);
+    expect(persisted.searchSelectivity).toBe("wide_net");
   });
 
   test("application defaults keep theme and CRM untouched", async () => {

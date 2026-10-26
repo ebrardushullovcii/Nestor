@@ -98,9 +98,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -224,9 +222,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -318,9 +314,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -474,9 +468,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -593,9 +585,7 @@ describe("createJobFinderWorkspaceService", () => {
         },
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,
@@ -616,8 +606,8 @@ describe("createJobFinderWorkspaceService", () => {
 
   test("clears prior learned instructions for the target before a fresh source-debug run", async () => {
     const seed = createSeed();
-    seed.searchPreferences.discovery.targets[0] = {
-      ...seed.searchPreferences.discovery.targets[0]!,
+    seed.jobSites[0] = {
+      ...seed.jobSites[0]!,
       instructionStatus: "validated",
       validatedInstructionId: "instruction_old_validated",
       draftInstructionId: "instruction_old_draft",
@@ -716,9 +706,7 @@ describe("createJobFinderWorkspaceService", () => {
         debugFindingsByPhase: createStrongSourceDebugFindingsByPhase(),
       },
     );
-    const jobSites = createTestJobSites(
-      sourceSeedForSites.searchPreferences.discovery.targets,
-    );
+    const jobSites = createTestJobSites(createSeed().jobSites);
     const workspaceService = createJobFinderWorkspaceService({
       jobSites,
       repository,

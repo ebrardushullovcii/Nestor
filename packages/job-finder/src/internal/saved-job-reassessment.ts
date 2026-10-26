@@ -1,6 +1,5 @@
 import type { MatchAssessment, SavedJob } from "@nestor/contracts";
 
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import { createMatchAssessmentSession } from "./match-assessment-session";
 import { createMatchAssessment } from "./matching";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
@@ -60,23 +59,18 @@ export async function reassessSavedJobs(
     Partial<Pick<WorkspaceServiceContext, "isWorkspaceClosing">>,
 ): Promise<boolean> {
   const closing = () => ctx.isWorkspaceClosing?.() === true;
-  const [profile, searchPreferences, settings, campaignState] =
-    await Promise.all([
-      ctx.repository.getProfile(),
-      ctx.repository.getSearchPreferences(),
-      ctx.repository.getSettings(),
-      ctx.repository.getCampaignState(),
-    ]);
+  const [profile, searchPreferences, campaignState] = await Promise.all([
+    ctx.repository.getProfile(),
+    ctx.repository.getSearchPreferences(),
+    ctx.repository.getCampaignState(),
+  ]);
   const activeCampaignId = await ctx.getActiveCampaignId();
   const activeCampaign = campaignState?.campaigns.find(
     (campaign) => campaign.id === activeCampaignId,
   );
-  const preferences = withSavedJobSearchBehavior(
-    enrichSearchPreferencesFromProfile(
-      activeCampaign?.searchPreferences ?? searchPreferences,
-      profile,
-    ),
-    settings,
+  const preferences = enrichSearchPreferencesFromProfile(
+    activeCampaign?.searchPreferences ?? searchPreferences,
+    profile,
   );
   const session = createMatchAssessmentSession({
     profile,

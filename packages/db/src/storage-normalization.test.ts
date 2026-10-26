@@ -351,19 +351,9 @@ test("forward migrations retain resume text, source evidence, independent plans 
   let repoClosed = false;
   cleanups.push(() => (repoClosed ? Promise.resolve() : repo.close()));
   const seed = createSeed();
-  const sourceA = {
-    ...seed.searchPreferences.discovery.targets[0]!,
-    id: "site_a",
-  };
-  const sourceB = { ...sourceA, id: "site_b", label: "Second source" };
-  // Schema-parsed, like every write the app makes (and so in its key order).
-  const prefs = contracts.JobSearchPreferencesSchema.parse({
-    ...seed.searchPreferences,
-    discovery: {
-      ...seed.searchPreferences.discovery,
-      targets: [sourceA, sourceB],
-    },
-  });
+  const prefs = contracts.JobSearchPreferencesSchema.parse(
+    seed.searchPreferences,
+  );
   await repo.saveSearchPreferences(prefs);
   const campaign = JobSearchCampaignSchema.parse({
     id: "plan_1",

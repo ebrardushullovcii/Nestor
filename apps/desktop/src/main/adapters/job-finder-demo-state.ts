@@ -340,10 +340,6 @@ export function createResumeWorkspaceDemoState(): JobFinderRepositoryState {
       minimumSalaryUsd: 170000,
       salaryCurrency: "USD",
       companyWhitelist: ["Signal Systems"],
-      discovery: {
-        historyLimit: 5,
-        targets: [demoDiscoveryTarget],
-      },
     },
     savedJobs: [
       {
@@ -1219,14 +1215,6 @@ export function createAgentOwnedBrowserDriveState(input: {
     ...base,
     searchPreferences: {
       ...base.searchPreferences,
-      discovery: {
-        ...base.searchPreferences.discovery,
-        runJobBudget: 2,
-        targets: base.searchPreferences.discovery.targets.map((target) => ({
-          ...target,
-          startingUrl: input.sourceUrl,
-        })),
-      },
     },
     savedJobs: [
       ...base.savedJobs.map((job) =>

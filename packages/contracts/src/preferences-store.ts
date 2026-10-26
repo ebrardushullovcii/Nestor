@@ -26,7 +26,6 @@ export const GoalFieldsSchema = z
       employmentTypes: true,
       companyBlacklist: true,
       companyWhitelist: true,
-      discovery: true,
       compensation: true,
       weeklyHours: true,
     }).shape,
@@ -65,6 +64,7 @@ export const PatchGoalsInputSchema = GoalValuesSchema.extend({
   fields: GoalFieldsSchema.default({}),
   lists: GoalListsSchema.default({}),
   expected: GoalFieldsSchema.optional(),
+  expectedLists: GoalListsSchema.optional(),
 }).strict();
 export type PatchGoalsInput = z.input<typeof PatchGoalsInputSchema>;
 
@@ -115,5 +115,6 @@ export const PatchSettingsInputSchema = SettingsValuesSchema.extend({
   fields: SettingsFieldsSchema.default({}),
   lists: SettingsListsSchema.default({}),
   expected: SettingsFieldsSchema.optional(),
+  expectedLists: SettingsListsSchema.optional(),
 }).strict();
 export type PatchSettingsInput = z.input<typeof PatchSettingsInputSchema>;

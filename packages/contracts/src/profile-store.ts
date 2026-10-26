@@ -125,6 +125,7 @@ export const PatchProfileInputSchema = z
     fields: ProfileFieldsSchema.default({}),
     lists: ProfileListsSchema.default({}),
     expected: ProfileFieldsSchema.optional(),
+    expectedLists: ProfileListsSchema.optional(),
   })
   .strict();
 export type PatchProfileInput = z.input<typeof PatchProfileInputSchema>;

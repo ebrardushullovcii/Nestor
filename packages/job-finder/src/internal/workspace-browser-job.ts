@@ -1,7 +1,10 @@
-import { type AddBrowserJobResult } from "@nestor/contracts";
+import { jobSiteTarget, type AddBrowserJobResult } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import { createMatchAssessmentAsync } from "./matching";
-import { listingPageText, listingPageLinks } from "@nestor/browser-agent/listing-detail-extraction";
+import {
+  listingPageText,
+  listingPageLinks,
+} from "@nestor/browser-agent/listing-detail-extraction";
 import { saveJobsFromPage } from "./workspace-assistant-page-jobs";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
@@ -42,7 +45,7 @@ export async function addJobFromBrowserPage(
     ctx.repository.getCampaignState(),
   ]);
   const activeId = await ctx.getActiveCampaignId();
-  const source = preferences.discovery.targets
+  const source = (ctx.jobSites?.enabled().map(jobSiteTarget) ?? [])
     .filter((source) => {
       const start = new URL(source.startingUrl);
       return (

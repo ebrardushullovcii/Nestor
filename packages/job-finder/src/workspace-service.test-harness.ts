@@ -1,3 +1,4 @@
+import type { JobDiscoveryTarget } from "@nestor/contracts";
 import {
   createSavedAnswersStore,
   readSavedApplicationAnswers,
@@ -33,12 +34,13 @@ export const workspaceHarnessInputs = new WeakMap<
   {
     repository: ReturnType<typeof createInMemoryJobFinderRepository>;
     documentManager: ReturnType<typeof createDocumentManager>;
+    jobSites: JobSitesStore;
   }
 >();
 
 export function createWorkspaceServiceHarness(
   options: {
-    seed?: JobFinderRepositorySeed;
+    seed?: JobFinderRepositorySeed & { jobSites?: JobDiscoveryTarget[] };
     jobSites?: JobSitesStore;
     browserRuntime?: BrowserSessionRuntime;
     aiClient?: JobFinderAiClient;
@@ -59,8 +61,7 @@ export function createWorkspaceServiceHarness(
   const store = createTestJobStore();
   const repository = createInMemoryJobFinderRepository(seed, { store });
   const jobSites =
-    options.jobSites ??
-    createTestJobSites(seed.searchPreferences.discovery.targets, store);
+    options.jobSites ?? createTestJobSites(seed.jobSites ?? [], store);
   const browserRuntime = options.browserRuntime ?? createBrowserRuntime();
   const aiClient = options.aiClient ?? createAiClient();
   const documentManager = options.documentManager ?? createDocumentManager();
@@ -95,7 +96,11 @@ export function createWorkspaceServiceHarness(
       : {}),
   });
 
-  workspaceHarnessInputs.set(workspaceService, { repository, documentManager });
+  workspaceHarnessInputs.set(workspaceService, {
+    repository,
+    documentManager,
+    jobSites,
+  });
   return {
     readSavedAnswerRows: () =>
       createSavedAnswersStore(store)

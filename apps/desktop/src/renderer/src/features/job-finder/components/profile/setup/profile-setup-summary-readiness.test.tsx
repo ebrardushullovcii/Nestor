@@ -46,7 +46,6 @@ function buildSearchPreferences(
     tailoringMode: "balanced",
     companyBlacklist: [],
     companyWhitelist: [],
-    discovery: { historyLimit: 5, targets: [] },
     ...overrides,
   });
 }
@@ -55,10 +54,12 @@ describe("guided setup readiness, stated once", () => {
   function buildReadinessLine(input: {
     draftProfile: Parameters<typeof evaluateProfileSetupReadiness>[0];
     draftSearchPreferences: JobSearchPreferences;
+    enabledSiteCount?: number;
   }) {
     const readiness = evaluateProfileSetupReadiness(
       input.draftProfile,
       input.draftSearchPreferences,
+      input.enabledSiteCount ?? 0,
     );
     const presentation = buildProfileSetupReadinessPresentation({
       readiness,
@@ -133,28 +134,9 @@ describe("guided setup readiness, stated once", () => {
     const searchPreferencesWithoutWorkMode = buildSearchPreferences({
       targetRoles: ["Principal Designer"],
       locations: ["Remote"],
-      discovery: {
-        historyLimit: 5,
-        targets: [
-          {
-            id: "source_1",
-            label: "Signal Systems careers",
-            startingUrl: "https://signal.example/careers",
-            enabled: true,
-            adapterKind: "auto",
-            customInstructions: null,
-            instructionStatus: "missing",
-            validatedInstructionId: null,
-            draftInstructionId: null,
-            lastDebugRunId: null,
-            lastVerifiedAt: null,
-            staleReason: null,
-          },
-        ],
-      },
     });
 
-    const blocked = buildReadinessLine({
+    const blocked = buildReadinessLine({enabledSiteCount:1,
       draftProfile: profile,
       draftSearchPreferences: searchPreferencesWithoutWorkMode,
     });
@@ -165,7 +147,7 @@ describe("guided setup readiness, stated once", () => {
 
     // The two eligibility answers are: without them the first application
     // stopped on "Are you authorized to work here?".
-    const withoutEligibility = buildReadinessLine({
+    const withoutEligibility = buildReadinessLine({enabledSiteCount:1,
       draftProfile: CandidateProfileSchema.parse({
         ...profile,
         workEligibility: {
@@ -179,7 +161,7 @@ describe("guided setup readiness, stated once", () => {
     expect(withoutEligibility.text).toBe(
       "Still needed to finish: Say where you can work and whether you need visa sponsorship.",
     );
-    const ready = buildReadinessLine({
+    const ready = buildReadinessLine({enabledSiteCount:1,
       draftProfile: profile,
       draftSearchPreferences: {
         ...searchPreferencesWithoutWorkMode,
@@ -221,7 +203,6 @@ describe("guided setup readiness, stated once", () => {
       targetRoles: ["Customer support specialist"],
       locations: ["Prishtina, Kosovo"],
       workModes: [],
-      discovery: { historyLimit: 5, targets: [] },
     });
 
     const { presentation, text } = buildReadinessLine({

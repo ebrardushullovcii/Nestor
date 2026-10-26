@@ -831,7 +831,6 @@ async function expectPostResetState(
       expected: JobSearchPreferencesSchema.parse({
         ...resetSeed.searchPreferences,
         weeklyHours: { minimum: null, maximum: null },
-        discovery: { ...resetSeed.searchPreferences.discovery, targets: [] },
       }),
     },
     {

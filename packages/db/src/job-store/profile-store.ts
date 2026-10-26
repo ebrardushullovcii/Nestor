@@ -306,7 +306,13 @@ export function createProfileStore(store: JobStore) {
         let changed = values.patch(nextFields, patch.expected);
         for (const [field, value] of Object.entries(patch.lists)) {
           if (value === undefined) continue;
-          const touched = items.patch("profile", "1", field, value);
+          const touched = items.patch(
+            "profile",
+            "1",
+            field,
+            value,
+            patch.expectedLists?.[field as keyof typeof patch.expectedLists],
+          );
           changed = touched || changed;
           resumeChanged =
             resumeChanged || (touched && !field.startsWith("workEligibility."));

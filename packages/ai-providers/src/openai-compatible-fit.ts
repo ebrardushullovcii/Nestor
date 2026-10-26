@@ -285,8 +285,6 @@ function compactGoals(preferences: JobSearchPreferences) {
       "Currency confirmed":
         preferences.compensation.currencyStatus === "explicit" ? "Yes" : "No",
     },
-    "Remote work can be outside preferred places":
-      preferences.discovery.remoteCountsAsAnyLocation !== false ? "Yes" : "No",
   };
 }
 

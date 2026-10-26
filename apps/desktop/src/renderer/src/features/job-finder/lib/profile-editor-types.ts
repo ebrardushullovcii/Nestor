@@ -2,7 +2,6 @@ import type { JobSearchPreferences } from "@nestor/contracts";
 import type {
   BooleanSelectValue,
   CertificationFormEntry,
-  DiscoveryTargetEditorValue,
   EducationFormEntry,
   ExperienceFormEntry,
   LanguageFormEntry,
@@ -92,7 +91,6 @@ export interface ProfileEditorValues {
 export interface SearchPreferencesEditorValues {
   companyBlacklist: string;
   companyWhitelist: string;
-  collectOnlyHardCriteriaMatches: boolean;
   employmentTypes: string;
   shiftPreference: "day" | "night" | "any";
   minimumWeeklyHours: string;
@@ -108,7 +106,6 @@ export interface SearchPreferencesEditorValues {
   tailoringMode: JobSearchPreferences["tailoringMode"];
   targetCompanyStages: string;
   targetIndustries: string;
-  discoveryTargets: DiscoveryTargetEditorValue[];
   targetRoles: string;
   targetSalaryUsd: string;
   workModes: JobSearchPreferences["workModes"];

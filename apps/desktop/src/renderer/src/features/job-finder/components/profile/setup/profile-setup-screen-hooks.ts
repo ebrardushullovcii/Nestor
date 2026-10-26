@@ -563,8 +563,6 @@ export function useProfileSetupForms(input: {
     targetSalaryUsd,
     salaryCurrency,
     compensationInterval,
-    collectOnlyHardCriteriaMatches,
-    discoveryTargets,
   ] = useWatch({
     control: preferencesForm.control,
     name: [
@@ -584,8 +582,6 @@ export function useProfileSetupForms(input: {
       "targetSalaryUsd",
       "salaryCurrency",
       "compensationInterval",
-      "collectOnlyHardCriteriaMatches",
-      "discoveryTargets",
     ],
   });
   const draftProfileResult = useMemo(
@@ -618,11 +614,9 @@ export function useProfileSetupForms(input: {
       ),
     [
       companyBlacklist,
-      collectOnlyHardCriteriaMatches,
       companyWhitelist,
       compensationInterval,
       currentSearchPreferencesBaseline,
-      discoveryTargets,
       employmentTypes,
       excludedLocations,
       jobFamilies,

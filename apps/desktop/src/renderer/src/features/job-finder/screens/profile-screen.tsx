@@ -27,7 +27,6 @@ import {
   describeResumeIdentityOwnershipChoice,
   useResumeSourceNameForProfile,
 } from "@nestor/job-finder/resume-identity";
-import { buildComparableValueFingerprint } from "../lib/profile-editor-review-candidates";
 import { LockedScreenLayout } from "../components/locked-screen-layout";
 import { ProfileActiveSectionContent } from "../components/profile/profile-active-section-content";
 import { DiscoveryRunFeedbackCallout } from "./discovery/discovery-run-feedback-callout";
@@ -76,11 +75,6 @@ import {
   flattenDirtyFields,
   profileFieldForEditorPath,
 } from "../assistant/assistant-context-capture";
-
-const unsavedProfileSourceActionMessage =
-  "Your goal changes are saving. Try this source check again once they finish.";
-const unsavedProfileSourceSignInMessage =
-  "This site is still saving. Try opening its sign-in session again in a moment.";
 
 function parseProfileSection(value: string | null): ProfileSection | null {
   switch (value) {
@@ -154,10 +148,19 @@ export function ProfileScreen(props: {
     targetId: string,
     artifact: EditableSourceInstructionArtifact,
   ) => void;
+  onDiscardEdits?: (() => Promise<void>) | undefined;
+  onPreserveEdits?:
+    | ((
+        profile: CandidateProfile,
+        goals: JobSearchPreferences,
+        baseline: { profile: CandidateProfile; goals: JobSearchPreferences },
+      ) => Promise<void>)
+    | undefined;
   onSaveAll: (
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
     savedSection?: "sources",
+    baseline?: { profile: CandidateProfile; goals: JobSearchPreferences },
   ) => Promise<boolean | void> | void;
   onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
@@ -225,6 +228,8 @@ export function ProfileScreen(props: {
   const [importSuggestionFocusRequest, setImportSuggestionFocusRequest] =
     useState(0);
   const {
+    editBaseline,
+    expectOwnSave,
     backgroundArrays,
     backgroundMergeNotice,
     discardEditsAndReloadCanonical,
@@ -491,69 +496,9 @@ export function ProfileScreen(props: {
     copilotSection,
   );
 
-  const savedTargetsById = new Map(
-    searchPreferences.discovery.targets.map((target) => [target.id, target]),
-  );
-  const draftTargets = preferencesForm.watch("discoveryTargets");
-  // Asked only when a source action is pressed: fingerprinting the saved and
-  // draft preferences (every source included) on each render cost about 20 ms
-  // per Profile render.
-  const hasUnsavedSearchPreferenceChanges = () =>
-    preferencesForm.formState.isDirty ||
-    buildComparableValueFingerprint(searchPreferences) !==
-      buildComparableValueFingerprint(
-        draftSearchPreferencesResult.payload ?? searchPreferences,
-      );
   const identityChoiceProfile =
     buildProfilePayload(profile, profileForm.getValues()).payload ??
     overviewProfile;
-
-  function hasUnsavedSourceRowChanges(targetId: string) {
-    const savedTarget = savedTargetsById.get(targetId);
-    const draftTarget = draftTargets.find((target) => target.id === targetId);
-
-    if (!savedTarget || !draftTarget) {
-      return false;
-    }
-
-    return (
-      buildComparableValueFingerprint(savedTarget) !==
-      buildComparableValueFingerprint({ ...draftTarget })
-    );
-  }
-
-  function handleSignInForTarget(targetId: string) {
-    if (hasUnsavedSourceRowChanges(targetId)) {
-      setValidationMessage(unsavedProfileSourceSignInMessage);
-      return;
-    }
-
-    setValidationMessage(null);
-    onOpenBrowserSessionForTarget(targetId);
-  }
-
-  function handleRunDiscoveryForTarget(targetId: string) {
-    if (hasUnsavedSearchPreferenceChanges()) {
-      setValidationMessage(unsavedProfileSourceActionMessage);
-      return;
-    }
-
-    setValidationMessage(null);
-    onRunDiscoveryForTarget?.(targetId);
-  }
-
-  function handleRunSourceDebug(
-    targetId: string,
-    options?: { readabilityTimeoutMs?: number },
-  ) {
-    if (hasUnsavedSearchPreferenceChanges()) {
-      setValidationMessage(unsavedProfileSourceActionMessage);
-      return;
-    }
-
-    setValidationMessage(null);
-    onRunSourceDebug(targetId, options);
-  }
 
   // Per-source Search now outcomes are shown next to the source rows that
   // started them; all-source outcomes stay on the Find jobs screen.
@@ -656,10 +601,18 @@ export function ProfileScreen(props: {
         ? {
             profile: draftProfileResult.payload,
             goals: draftSearchPreferencesResult.payload,
+            baseline: editBaseline,
           }
         : null,
     blocked: hasBackgroundConflict,
-    save: ({ profile: nextProfile, goals }) => onSaveAll(nextProfile, goals),
+    preserve: props.onPreserveEdits
+      ? ({ profile, goals, baseline }) =>
+          props.onPreserveEdits!(profile, goals, baseline)
+      : undefined,
+    save: ({ profile: nextProfile, goals, baseline }) => {
+      expectOwnSave(nextProfile, goals);
+      return onSaveAll(nextProfile, goals, undefined, baseline);
+    },
   });
   const blockNavigation =
     hasBackgroundConflict ||
@@ -749,7 +702,10 @@ export function ProfileScreen(props: {
             <span>{backgroundMergeNotice}</span>
             {hasBackgroundConflict ? (
               <Button
-                onClick={discardEditsAndReloadCanonical}
+                onClick={() => {
+                  discardEditsAndReloadCanonical();
+                  void props.onDiscardEdits?.();
+                }}
                 size="compact"
                 type="button"
                 variant="outline"
@@ -970,7 +926,9 @@ export function ProfileScreen(props: {
                         setDismissedSourceFeedbackKey(sourceFeedbackKey)
                       }
                       onOpenBrowserSession={() => {
-                        handleSignInForTarget(sourceRowFeedbackTargetId);
+                        onOpenBrowserSessionForTarget(
+                          sourceRowFeedbackTargetId,
+                        );
                       }}
                     />
                   </div>
@@ -1013,14 +971,15 @@ export function ProfileScreen(props: {
                       }
                       isTargetDiscoveryPending={pendingActions.targetDiscovery}
                       onGetSourceDebugRunDetails={onGetSourceDebugRunDetails}
-                      onOpenBrowserSessionForTarget={handleSignInForTarget}
+                      onOpenBrowserSessionForTarget={
+                        onOpenBrowserSessionForTarget
+                      }
                       {...(onRunDiscoveryForTarget
                         ? {
-                            onRunDiscoveryForTarget:
-                              handleRunDiscoveryForTarget,
+                            onRunDiscoveryForTarget: onRunDiscoveryForTarget,
                           }
                         : {})}
-                      onRunSourceDebug={handleRunSourceDebug}
+                      onRunSourceDebug={onRunSourceDebug}
                       onSaveSourceInstructionArtifact={
                         onSaveSourceInstructionArtifact
                       }

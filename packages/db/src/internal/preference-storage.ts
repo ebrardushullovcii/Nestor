@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import {
   JobSearchCampaignSchema,
+  JobSearchPreferencesSchema,
   type JobSearchPreferences,
   type JobSearchCampaignCollection,
   type JobSearchCampaign,
@@ -27,30 +28,11 @@ function transaction<T>(db: DatabaseSync, run: () => T): T {
   }
 }
 function preference(db: DatabaseSync, value: JobSearchPreferences): string {
-  const { targets, ...discovery } = value.discovery;
-  const body = { ...value, discovery };
-  const sources = targets.map((target) => ({
-    id: digest(target),
-    sourceId: target.id,
-    target,
-  }));
-  const id = digest({ body, sources: sources.map((source) => source.id) });
-  if (db.prepare("SELECT 1 FROM search_preference_sets WHERE id = ?").get(id))
-    return id;
-  db.prepare("INSERT INTO search_preference_sets VALUES (?, ?)").run(
+  const id = digest(value);
+  db.prepare("INSERT OR IGNORE INTO search_preference_sets VALUES (?, ?)").run(
     id,
-    JSON.stringify(body),
+    JSON.stringify(value),
   );
-  const putSource = db.prepare(
-    "INSERT OR IGNORE INTO job_sources(id, source_id, value) VALUES (?, ?, ?)",
-  );
-  const link = db.prepare(
-    "INSERT INTO search_preference_sources VALUES (?, ?, ?, ?)",
-  );
-  sources.forEach((source, position) => {
-    putSource.run(source.id, source.sourceId, JSON.stringify(source.target));
-    link.run(id, source.sourceId, source.id, position);
-  });
   return id;
 }
 function readPreference(db: DatabaseSync, id: string): JobSearchPreferences {
@@ -58,25 +40,7 @@ function readPreference(db: DatabaseSync, id: string): JobSearchPreferences {
     .prepare("SELECT value FROM search_preference_sets WHERE id = ?")
     .get(id);
   if (!stored) throw new Error("Search preferences are missing.");
-  // Stored without its sources (they are rows of their own).
-  const body = JSON.parse(String(stored.value)) as Omit<
-    JobSearchPreferences,
-    "discovery"
-  > & { discovery: Omit<JobSearchPreferences["discovery"], "targets"> };
-  const targets = db
-    .prepare(
-      "SELECT s.value FROM search_preference_sources p JOIN job_sources s ON s.id = p.source_version_id WHERE p.preference_id = ? ORDER BY p.position",
-    )
-    .all(id)
-    .map(
-      (row) =>
-        JSON.parse(
-          String(row.value),
-        ) as JobSearchPreferences["discovery"]["targets"][number],
-    );
-  // Back in the written order (targets is the schema's first discovery key):
-  // callers compare preferences as JSON, and a moved key read as a change.
-  return { ...body, discovery: { targets, ...body.discovery } };
+  return JobSearchPreferencesSchema.parse(JSON.parse(String(stored.value)));
 }
 
 // Plans are written schema-parsed, so in the schema's key order. The parts kept

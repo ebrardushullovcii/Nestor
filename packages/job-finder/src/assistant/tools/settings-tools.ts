@@ -34,7 +34,7 @@ const SETTINGS_LABELS: Record<string, string> = {
     "Collapse the side menu while the assistant is open",
   writeResumesOnShortlist: "Write resumes when I shortlist",
   tailoringMode: "Resume level",
-  discovery: "Search selectivity",
+  searchSelectivity: "Search selectivity",
 };
 
 /**
@@ -59,17 +59,17 @@ async function recordSettingsChange(
     ...diffValues(
       {
         tailoringMode: before.searchPreferences.tailoringMode,
-        discovery:
-          before.searchPreferences.discovery.collectOnlyHardCriteriaMatches,
+        searchSelectivity: before.searchPreferences.searchSelectivity,
       },
       {
         tailoringMode: after.searchPreferences.tailoringMode,
-        discovery:
-          after.searchPreferences.discovery.collectOnlyHardCriteriaMatches,
+        searchSelectivity: after.searchPreferences.searchSelectivity,
       },
       { labelFor },
     )
-      .filter((entry) => entry.path[0] === "tailoringMode")
+      .filter((entry) =>
+        ["tailoringMode", "searchSelectivity"].includes(entry.path[0] ?? ""),
+      )
       .map((entry) => ({
         ...entry,
         path: ["search_preferences", ...entry.path],

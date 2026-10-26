@@ -1,13 +1,9 @@
-import type {
-  JobSearchCampaignMode,
-  SourceAccessPrompt,
-} from "@nestor/contracts";
+import type { JobSearchCampaignMode } from "@nestor/contracts";
 import {
   getDefaultCampaignConfiguration,
   JobFinderDashboardSummarySchema,
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignSchema,
-  resolveCampaignSourceTargetIds,
   type ApplicationRecord,
   type ApplyJobResult,
   type ApplyRun,
@@ -25,15 +21,10 @@ import {
 import type { JobFinderRepository } from "@nestor/db";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
 import {
-  deriveEnabledSourceHealthCounts,
-  deriveSourceHealthSignals,
-} from "../source-health";
-import {
   getApplicationCrmData,
   isApplicationAwaitingUserApproval,
   projectApplicationCrmDashboard,
 } from "./application-crm";
-import { parseSearchPreferencesOnce } from "./validated-search-preferences";
 
 const FINAL_ACTION_STATES = new Set([
   "resolved",
@@ -121,8 +112,6 @@ function latestSightingTime(job: Pick<SavedJob, "provenance">): number {
   return latest;
 }
 
-const ADOPTION_HISTORY_ID = "campaign_history_default_created";
-
 function createDefaultCampaign(
   searchPreferences: JobSearchPreferences,
   now: string,
@@ -140,9 +129,7 @@ function createDefaultCampaign(
     createdAt: now,
     updatedAt: now,
     searchPreferences,
-    sourceTargetIds: searchPreferences.discovery.targets
-      .filter((target) => target.enabled)
-      .map((target) => target.id),
+    sourceTargetIds: [],
     jobIds,
     minimumFitScore: null,
     ...getDefaultCampaignConfiguration("precision"),
@@ -160,189 +147,6 @@ function createDefaultCampaign(
   });
 }
 
-function hasCommittedDiscoveryRun(campaign: JobSearchCampaign): boolean {
-  return campaign.history.some((entry) => entry.kind === "discovery_run");
-}
-
-/**
- * True for campaigns produced by adoption (`createDefaultCampaign`). Only
- * adoption-lineage campaigns may be reconciled: user-created campaigns start
- * deliberately empty, so backfilling them would fabricate retention and break
- * the honest zero-sample funnel contract.
- */
-function isAdoptionLineageCampaign(campaign: JobSearchCampaign): boolean {
-  return campaign.history.some((entry) => entry.id === ADOPTION_HISTORY_ID);
-}
-
-const RETENTION_RECONCILED_HISTORY_ID = "campaign_history_retention_reconciled";
-const RETENTION_RECONCILED_SUMMARY =
-  "Reconciled retention with the current workspace.";
-
-/**
- * Records one reconciliation in the plan's history without repeating itself.
- *
- * Reconciliation is housekeeping, not something the person did: several places
- * ask for it while one workspace publishes, and each one used to prepend its
- * own line. The card showed six identical "Reconciled retention" entries in a
- * row, timestamped out of order, burying the run the person was looking for.
- * A reconciliation that follows a reconciliation moves the existing line's
- * time instead of adding another, and history stays newest first.
- */
-function recordRetentionReconciliation(
-  campaignId: string,
-  history: JobSearchCampaign["history"],
-  occurredAt: string,
-): JobSearchCampaign["history"] {
-  const sorted = [...history].sort((left, right) =>
-    left.occurredAt === right.occurredAt
-      ? 0
-      : left.occurredAt < right.occurredAt
-        ? 1
-        : -1,
-  );
-  const olderEntries =
-    sorted[0]?.id === RETENTION_RECONCILED_HISTORY_ID
-      ? sorted.slice(1)
-      : sorted;
-
-  return [
-    {
-      id: RETENTION_RECONCILED_HISTORY_ID,
-      campaignId,
-      kind: "updated" as const,
-      occurredAt,
-      summary: RETENTION_RECONCILED_SUMMARY,
-      discoveryRunId: null,
-    },
-    ...olderEntries,
-  ].slice(0, 100);
-}
-
-function sameStringValues(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
-}
-
-/**
- * Migration-style repair for adoption-lineage campaigns (the default campaign
- * created for pre-campaign workspaces) that predate their first committed
- * discovery run. Such a campaign has never made an explicit retention decision
- * (`jobIds` is only written by adoption and run commits), so stale or empty
- * retention must not gate saved jobs out of the queues. Re-derives retention
- * and targeting from current workspace data exactly like adoption does, and
- * leaves every campaign that already committed a run — including ones that
- * deliberately retained zero jobs — untouched. Returns `null` when nothing
- * changed.
- */
-export function reconcileCampaignState(input: {
-  state: JobSearchCampaignCollection;
-  savedJobs: readonly Pick<SavedJob, "id">[];
-  searchPreferences: JobSearchPreferences;
-  now: string;
-}): JobSearchCampaignCollection | null {
-  const savedJobIds = input.savedJobs.map((job) => job.id);
-  const searchPreferences = parseSearchPreferencesOnce(input.searchPreferences);
-  const serializedSearchPreferences = JSON.stringify(searchPreferences);
-  const enabledSourceTargetIds = searchPreferences.discovery.targets
-    .filter((target) => target.enabled)
-    .map((target) => target.id);
-  const availableSourceTargetIds = new Set(
-    searchPreferences.discovery.targets.map((target) => target.id),
-  );
-  let changed = false;
-  const campaigns = input.state.campaigns.map((campaign) => {
-    // Old default plans follow Profile until the person edits the plan.
-    const untouchedDefault =
-      isAdoptionLineageCampaign(campaign) &&
-      !campaign.history.some(
-        (entry) =>
-          entry.kind === "updated" &&
-          entry.id !== RETENTION_RECONCILED_HISTORY_ID,
-      );
-    const sourceSelectionMode =
-      campaign.sourceSelectionMode ??
-      (untouchedDefault || campaign.sourceTargetIds.length === 0
-        ? "profile"
-        : "selected");
-    const sourceTargetIds =
-      sourceSelectionMode === "profile"
-        ? enabledSourceTargetIds
-        : campaign.sourceTargetIds.filter((id) =>
-            availableSourceTargetIds.has(id),
-          );
-    const livePreferences = {
-      ...campaign.searchPreferences,
-      discovery: {
-        ...campaign.searchPreferences.discovery,
-        targets: searchPreferences.discovery.targets,
-      },
-    };
-    const sourcesChanged =
-      !sameStringValues(sourceTargetIds, campaign.sourceTargetIds) ||
-      JSON.stringify(livePreferences) !==
-        JSON.stringify(campaign.searchPreferences);
-    // Removing the last explicitly chosen source must not turn an old plan
-    // into Profile inheritance on the next snapshot.
-    const persistedSourceSelectionMode =
-      campaign.sourceSelectionMode ??
-      (untouchedDefault || sourcesChanged ? sourceSelectionMode : undefined);
-    if (
-      campaign.sourceSelectionMode !== persistedSourceSelectionMode ||
-      sourcesChanged
-    ) {
-      changed = true;
-      campaign = JobSearchCampaignSchema.parse({
-        ...campaign,
-        sourceSelectionMode: persistedSourceSelectionMode,
-        sourceTargetIds,
-        searchPreferences: livePreferences,
-      });
-    }
-    if (campaign.id !== input.state.activeCampaignId) return campaign;
-    if (campaign.status !== "active" && campaign.status !== "paused") {
-      return campaign;
-    }
-    if (!isAdoptionLineageCampaign(campaign)) return campaign;
-    if (hasCommittedDiscoveryRun(campaign)) return campaign;
-
-    // Only the untouched adoption record predates an explicit per-plan source
-    // choice. Once a plan has been edited, preserve its own include list and
-    // merely discard source ids that no longer exist in Profile.
-    const unchanged =
-      sameStringValues(savedJobIds, campaign.jobIds) &&
-      sameStringValues(sourceTargetIds, campaign.sourceTargetIds) &&
-      serializedSearchPreferences ===
-        JSON.stringify(campaign.searchPreferences);
-    if (unchanged) return campaign;
-
-    changed = true;
-    return JobSearchCampaignSchema.parse({
-      ...campaign,
-      jobIds: [...savedJobIds],
-      sourceTargetIds,
-      searchPreferences,
-      updatedAt: input.now,
-      history: recordRetentionReconciliation(
-        campaign.id,
-        campaign.history,
-        input.now,
-      ),
-    });
-  });
-
-  if (!changed) return null;
-  return JobSearchCampaignCollectionSchema.parse({
-    ...input.state,
-    campaigns,
-  });
-}
-
-/** Read-only while the campaign remnants are removed; current goals never rewrite old plans. */
 export async function ensureCampaignState(input: {
   repository: JobFinderRepository;
   searchPreferences: JobSearchPreferences;
@@ -370,40 +174,6 @@ export async function ensureCampaignState(input: {
  * which sources are searched, not each source's Profile "Include in search"
  * switch. A scheduled run used to search sources the plan had left out. A
  * plan that has never chosen sources follows Profile, as its editor says.
- */
-export function searchPreferencesForCampaignRun(
-  campaign: Pick<
-    JobSearchCampaign,
-    "searchPreferences" | "sourceTargetIds" | "sourceSelectionMode"
-  >,
-): JobSearchCampaign["searchPreferences"] {
-  const selected = new Set(resolveCampaignSourceTargetIds(campaign));
-  return {
-    ...campaign.searchPreferences,
-    discovery: {
-      ...campaign.searchPreferences.discovery,
-      targets: campaign.searchPreferences.discovery.targets.map((target) => ({
-        ...target,
-        enabled: selected.has(target.id),
-      })),
-    },
-  };
-}
-
-/**
- * Truthful outstanding-work count derived from exact apply-job results
- * instead of run-level `pendingJobs` counters, which terminal runs keep
- * forever after an interruption. An `awaiting_review` row always counts:
- * even when its parent run died, the prepared application still waits on a
- * user decision or recovery. Transient rows (planned, question_capture,
- * filling, submitting) count only while their parent run sits in a genuinely
- * active or resumable attention state; under a terminal run they are history,
- * not queue — this is what keeps stale interrupted-run counters from
- * inflating the queue. Terminal outcome rows never count: submitted work is
- * done, skipped/failed rows are exits, and blocked rows are deliberately
- * excluded too — a blocked application does need the user, but it is
- * surfaced as needs-you action work rather than queued preparation, so
- * counting it here would double-report the same blocker.
  */
 function deriveRemainingApplyQueueSize(input: {
   applyRuns: readonly ApplyRun[];
@@ -489,11 +259,7 @@ export function deriveDashboardSummary(input: {
    */
   groupedDecisions?: readonly GroupedManualAnswerDecision[];
   discovery: Pick<JobFinderDiscoveryState, "activeSourceDebugRun">;
-  searchPreferences: JobSearchPreferences;
-  sourceAccessPrompts?: readonly Pick<
-    SourceAccessPrompt,
-    "targetId" | "state"
-  >[];
+  sourceHealth?: JobFinderDashboardSummary["sourceHealth"] | undefined;
 }): JobFinderDashboardSummary {
   const now = new Date(input.generatedAt);
   const nowMs = now.getTime();
@@ -517,20 +283,12 @@ export function deriveDashboardSummary(input: {
     records: input.applicationRecords,
     now: input.generatedAt,
   });
-  const enabledTargets = input.searchPreferences.discovery.targets.filter(
-    (target) => target.enabled,
-  );
-  // One shared signal derivation for every surface that reports source
-  // health, so Home and Profile can never classify the same source
-  // differently (see `deriveSourceHealthSignals`).
-  const sourceHealth = deriveEnabledSourceHealthCounts(
-    enabledTargets,
-    deriveSourceHealthSignals({
-      activeRun: null,
-      recentRuns: [],
-      sourceAccessPrompts: input.sourceAccessPrompts ?? [],
-    }),
-  );
+  const sourceHealth = input.sourceHealth ?? {
+    healthy: 0,
+    needsAttention: 0,
+    running: 0,
+    total: 0,
+  };
   const jobsFoundToday = input.savedJobs.filter(
     (job) => latestSightingTime(job) >= today,
   ).length;
@@ -628,9 +386,7 @@ export function createCampaign(input: {
     createdAt: input.now,
     updatedAt: input.now,
     searchPreferences: input.searchPreferences,
-    sourceTargetIds: input.searchPreferences.discovery.targets
-      .filter((target) => target.enabled)
-      .map((target) => target.id),
+    sourceTargetIds: [],
     jobIds: [],
     minimumFitScore: null,
     ...getDefaultCampaignConfiguration(input.mode),

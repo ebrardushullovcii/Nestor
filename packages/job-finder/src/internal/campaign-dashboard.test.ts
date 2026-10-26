@@ -57,7 +57,6 @@ describe("dashboard summary recommendations", () => {
         applyRuns: [],
         userActionRequests: [],
         discovery: seed.discovery,
-        searchPreferences: seed.searchPreferences,
       });
 
       expect(summary.needsYouCount).toBe(paused ? 1 : 0);
@@ -127,7 +126,6 @@ describe("dashboard applied-day metrics follow local calendar days", () => {
       applyRuns: [],
       userActionRequests: [],
       discovery: seed.discovery,
-      searchPreferences: seed.searchPreferences,
     });
 
     // Local-midnight-inclusive today count; yesterday's 23:59 stays outside.
@@ -179,7 +177,6 @@ describe("ready-for-approval notification resolves once preparation begins", () 
       applyRuns: [],
       userActionRequests: [],
       discovery: seed.discovery,
-      searchPreferences: seed.searchPreferences,
     });
   }
 
@@ -248,7 +245,6 @@ describe("ready-for-approval notification resolves once preparation begins", () 
       applyRuns: [],
       userActionRequests: [],
       discovery: seed.discovery,
-      searchPreferences: seed.searchPreferences,
     });
 
     expect(summary.applicationsReadyForApproval).toBe(0);

@@ -7,7 +7,6 @@ import {
   assessJobPostingDetailQuality,
   buildDiscoveryCardOnlyEvidenceWarning,
   DISCOVERY_LIVE_ACTIVITY_EVENT_LIMIT,
-  DISCOVERY_RUN_JOB_BUDGET_MAX,
   DiscoveryActivityEventSchema,
   DiscoveryJobViewSchema,
   DiscoveryLedgerEntrySchema,
@@ -17,7 +16,6 @@ import {
   DiscoveryTargetExecutionSchema,
   DiscoveryTimingSummarySchema,
   isCardOnlyDiscoveryEvidence,
-  JobDiscoveryPreferencesSchema,
   SavedJobDiscoveryProvenanceSchema,
   JobPostingSchema,
   MatchAssessmentSchema,
@@ -632,29 +630,6 @@ describe("discovery contracts", () => {
     });
   });
 
-  test("keeps the discovery run budget optional and hard-capped", () => {
-    const preferences = JobDiscoveryPreferencesSchema.parse({});
-
-    expect(preferences.runJobBudget).toBeUndefined();
-    expect(
-      JobDiscoveryPreferencesSchema.parse({ runJobBudget: null }).runJobBudget,
-    ).toBeNull();
-    expect(
-      JobDiscoveryPreferencesSchema.parse({
-        runJobBudget: DISCOVERY_RUN_JOB_BUDGET_MAX,
-      }).runJobBudget,
-    ).toBe(DISCOVERY_RUN_JOB_BUDGET_MAX);
-
-    expect(() =>
-      JobDiscoveryPreferencesSchema.parse({
-        runJobBudget: DISCOVERY_RUN_JOB_BUDGET_MAX + 1,
-      }),
-    ).toThrow();
-    expect(() =>
-      JobDiscoveryPreferencesSchema.parse({ runJobBudget: 0 }),
-    ).toThrow();
-  });
-
   test("classifies retained card-only evidence and leaves mixed or empty runs alone", () => {
     const cardOnlyPosting = JobPostingSchema.parse({
       ...postingInput,
@@ -760,7 +735,11 @@ describe("applyCompensationPreferenceChange", () => {
   test("clearing the currency puts it back to awaiting clarification", () => {
     expect(
       applyCompensationPreferenceChange(
-        { ...awaitingClarification, currency: "EUR", currencyStatus: "explicit" },
+        {
+          ...awaitingClarification,
+          currency: "EUR",
+          currencyStatus: "explicit",
+        },
         { currency: null },
       ).currencyStatus,
     ).toBe("needs_clarification");
@@ -777,7 +756,11 @@ describe("applyCompensationPreferenceChange", () => {
   test("an inherited currency survives a change that keeps it", () => {
     expect(
       applyCompensationPreferenceChange(
-        { ...awaitingClarification, currency: "USD", currencyStatus: "inherited" },
+        {
+          ...awaitingClarification,
+          currency: "USD",
+          currencyStatus: "inherited",
+        },
         { maximum: 90_000 },
       ).currencyStatus,
     ).toBe("inherited");

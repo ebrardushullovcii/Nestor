@@ -182,7 +182,7 @@ describe("contracts base schemas", () => {
 
     expect(preferences.companyBlacklist).toEqual([]);
     expect(preferences.workModes).toEqual([]);
-    expect(preferences.discovery.collectOnlyHardCriteriaMatches).toBe(false);
+    expect(preferences).not.toHaveProperty("discovery");
   });
 
   test("migrates legacy annual USD preferences and preserves typed monthly ranges", () => {
@@ -260,33 +260,6 @@ describe("contracts base schemas", () => {
       "Maintained CI pipelines",
       "Cross-functional leadership",
     ]);
-  });
-
-  test("parses discovery targets with optional custom instructions", () => {
-    const preferences = JobSearchPreferencesSchema.parse({
-      approvalMode: "review_before_submit",
-      tailoringMode: "balanced",
-      minimumSalaryUsd: null,
-      discovery: {
-        targets: [
-          {
-            id: "target_1",
-            label: "Primary target",
-            startingUrl: "https://jobs.example.com/search",
-            enabled: true,
-            adapterKind: "auto",
-            customInstructions:
-              "Open the job cards from the homepage list before extracting details.",
-          },
-        ],
-      },
-    });
-
-    expect(preferences.discovery.targets[0]?.customInstructions).toBe(
-      "Open the job cards from the homepage list before extracting details.",
-    );
-    expect(preferences.discovery.targets[0]?.instructionStatus).toBe("missing");
-    expect(preferences.discovery.targets[0]?.validatedInstructionId).toBeNull();
   });
 
   test("rejects malformed link metadata and url fields", () => {

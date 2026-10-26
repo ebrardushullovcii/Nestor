@@ -6,34 +6,12 @@ import {
   MAX_APPLICATION_EVENT_HISTORY,
   buildInstructionGuidance,
   enrichSearchPreferencesFromProfile,
-  invalidateChangedSourceGuidance,
   mergeEvents,
 } from "./workspace-helpers";
 import {
   createSeed,
   createSourceInstructionArtifact,
 } from "../workspace-service.test-fixtures";
-
-function createPreferencesWithValidatedSource(startingUrl: string) {
-  const preferences = createSeed().searchPreferences;
-  preferences.discovery.targets = [
-    {
-      id: "target_company",
-      label: "Company careers",
-      startingUrl,
-      enabled: true,
-      adapterKind: "auto",
-      customInstructions: null,
-      instructionStatus: "validated",
-      validatedInstructionId: "instruction_validated",
-      draftInstructionId: "instruction_draft",
-      lastDebugRunId: "debug_run",
-      lastVerifiedAt: "2026-07-31T10:00:00.000Z",
-      staleReason: null,
-    },
-  ];
-  return preferences;
-}
 
 describe("workspace profile-inferred search intent", () => {
   test("uses saved experience titles when explicit target roles are empty", () => {
@@ -72,47 +50,6 @@ describe("workspace profile-inferred search intent", () => {
     expect(
       enrichSearchPreferencesFromProfile(preferences, profile).locations,
     ).toEqual([]);
-  });
-});
-
-describe("workspace source guidance invalidation", () => {
-  test("clears guidance references when a saved source URL changes", () => {
-    const current = createPreferencesWithValidatedSource(
-      "https://example.com/jobs",
-    );
-    const next = createPreferencesWithValidatedSource(
-      "https://other.example/jobs",
-    );
-
-    expect(
-      invalidateChangedSourceGuidance(current, next).discovery.targets[0],
-    ).toMatchObject({
-      startingUrl: "https://other.example/jobs",
-      instructionStatus: "missing",
-      validatedInstructionId: null,
-      draftInstructionId: null,
-      lastDebugRunId: null,
-      lastVerifiedAt: null,
-      staleReason:
-        "Starting page URL changed. Check this source again before reusing saved guidance.",
-    });
-  });
-
-  test("preserves verified guidance when the source URL is unchanged", () => {
-    const current = createPreferencesWithValidatedSource(
-      "https://example.com/jobs",
-    );
-    const next = createPreferencesWithValidatedSource(
-      "https://example.com/jobs",
-    );
-
-    expect(
-      invalidateChangedSourceGuidance(current, next).discovery.targets[0],
-    ).toMatchObject({
-      instructionStatus: "validated",
-      validatedInstructionId: "instruction_validated",
-      lastDebugRunId: "debug_run",
-    });
   });
 });
 

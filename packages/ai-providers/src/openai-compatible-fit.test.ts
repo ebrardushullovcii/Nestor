@@ -834,13 +834,6 @@ test("a full fit request keeps current evidence and goals while excluding saved 
   profile.summary = "Full saved candidate fact. ".repeat(100);
   profile.baseResume.textContent = "Full imported resume fact. ".repeat(300);
   const preferences = createPreferences();
-  const source = preferences.discovery.targets[0]!;
-  preferences.discovery.targets = Array.from({ length: 897 }, (_, index) => ({
-    ...source,
-    id: `source_${index}`,
-    customInstructions: `SEARCH_CATALOG_ONLY_${index}`,
-  }));
-  preferences.discovery.remoteCountsAsAnyLocation = false;
   preferences.locations = ["Kosovo"];
   const job = {
     ...createJobPosting(),
@@ -919,9 +912,7 @@ test("a full fit request keeps current evidence and goals while excluding saved 
       job.minimumQualifications,
     );
     expect(payload.searchPreferences["Preferred places"]).toEqual(["Kosovo"]);
-    expect(
-      payload.searchPreferences["Remote work can be outside preferred places"],
-    ).toBe("No");
+    expect(payload.searchPreferences).not.toHaveProperty("discovery");
     expect(JSON.stringify(payload)).not.toMatch(
       /SEARCH_CATALOG_ONLY|SOURCE_DIAGNOSTICS_ONLY|OLD_ASSESSMENT_ONLY|OLD_SOURCE_HISTORY_ONLY/,
     );

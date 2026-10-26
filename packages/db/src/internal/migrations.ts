@@ -692,9 +692,7 @@ export function runMigrations(
       createdAt: now,
       updatedAt: now,
       searchPreferences,
-      sourceTargetIds: searchPreferences.discovery.targets
-        .filter((target) => target.enabled)
-        .map((target) => target.id),
+      sourceTargetIds: [],
       jobIds: (
         database
           .prepare("SELECT id FROM saved_jobs ORDER BY id")

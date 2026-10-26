@@ -266,25 +266,6 @@ export function createPreferences(): JobSearchPreferences {
     tailoringMode: "balanced" as const,
     companyBlacklist: [],
     companyWhitelist: [],
-    discovery: {
-      historyLimit: 5,
-      targets: [
-        {
-          id: "target_primary",
-          label: "Primary target",
-          startingUrl: "https://www.linkedin.com/jobs/search/",
-          enabled: true,
-          adapterKind: "auto",
-          customInstructions: null,
-          instructionStatus: "missing",
-          validatedInstructionId: null,
-          draftInstructionId: null,
-          lastDebugRunId: null,
-          lastVerifiedAt: null,
-          staleReason: null,
-        },
-      ],
-    },
   };
 }
 

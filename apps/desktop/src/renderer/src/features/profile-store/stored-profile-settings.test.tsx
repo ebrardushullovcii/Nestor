@@ -231,6 +231,63 @@ test("typing during an autosave keeps the latest work-history edit and input foc
   expect(createProfileStore(store).overview().counts.experiences).toBe(30);
 });
 
+test("a competing Assistant record edit is kept; the blocked draft survives leaving and can be recovered", async () => {
+  let release: (() => void) | undefined;
+  pauseCommit = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  profileScreen("experience");
+  await screen.findByText("1–25 of 30");
+  fireEvent.change((await screen.findAllByLabelText(/^Title$/u))[0]!, {
+    target: { value: "My kept title" },
+  });
+  await waitFor(() =>
+    expect(calls.some((call) => call.name === "commit_profile_edits")).toBe(
+      true,
+    ),
+  );
+  const profile = createProfileStore(store);
+  const original = profile.records.get("experiences", "work-0");
+  if (!original || original.collection !== "experiences")
+    throw Error("Missing fixture");
+  act(() => {
+    profile.records.upsert({
+      ...original,
+      record: { ...original.record, title: "Assistant's current title" },
+    });
+  });
+  await act(() => Promise.resolve().then(() => release!()));
+  await screen.findByText(/saved experiences record changed while/u);
+  expect(profile.records.get("experiences", "work-0")?.record).toMatchObject({
+    title: "Assistant's current title",
+  });
+  cleanup();
+  const kept = await window.nestor.jobs.run("get_profile_draft", {});
+  expect(kept?.edits.upsert).toHaveLength(1);
+  expect(kept?.edits.upsert[0]?.record).toMatchObject({
+    id: "work-0",
+    title: "My kept title",
+  });
+  pauseCommit = null;
+  profileScreen("experience");
+  await screen.findByText(
+    "Your unsaved edits were kept. Review them before replacing the current saved values.",
+  );
+  fireEvent.click(screen.getByText("Review kept changes"));
+  expect(screen.getByText(/My kept title/u)).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Restore my edits" }));
+  await waitFor(() =>
+    expect(profile.records.get("experiences", "work-0")?.record).toMatchObject({
+      title: "My kept title",
+    }),
+  );
+  expect(await window.nestor.jobs.run("get_profile_draft", {})).toBeNull();
+  expect(profile.overview().counts.experiences).toBe(30);
+  expect(profile.records.get("experiences", "work-1")?.record).toMatchObject({
+    title: "Analyst 1",
+  });
+});
+
 test("Profile autosaves later edits to shifts and weekly hours", async () => {
   profileScreen("preferences");
   const shifts = await screen.findByLabelText("Shifts"),

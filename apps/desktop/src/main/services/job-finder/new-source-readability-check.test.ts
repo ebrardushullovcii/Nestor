@@ -1,42 +1,9 @@
-import { JobSearchPreferencesSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  listNewEnabledSourceIds,
-  runBoundedNewSourceReadabilityCheck,
-} from "./new-source-readability-check";
+import { runBoundedNewSourceReadabilityCheck } from "./new-source-readability-check";
 
 describe("new source readability check", () => {
   afterEach(() => vi.useRealTimers());
-
-  it("checks only newly added enabled sources", () => {
-    const target = (id: string, enabled = true) => ({
-      id,
-      label: id,
-      startingUrl: `https://${id}.example/jobs`,
-      enabled,
-      adapterKind: "auto" as const,
-      instructionStatus: "missing" as const,
-      lastVerifiedAt: null,
-      staleReason: null,
-    });
-    const before = JobSearchPreferencesSchema.parse({
-      minimumSalaryUsd: null,
-      approvalMode: "draft_only",
-      tailoringMode: "balanced",
-      discovery: { targets: [target("existing")] },
-    });
-    const after = JobSearchPreferencesSchema.parse({
-      minimumSalaryUsd: null,
-      approvalMode: "draft_only",
-      tailoringMode: "balanced",
-      discovery: {
-        targets: [target("existing"), target("new"), target("disabled", false)],
-      },
-    });
-
-    expect(listNewEnabledSourceIds(before, after)).toEqual(["new"]);
-  });
 
   it("aborts the add-time check after its bounded timeout", async () => {
     vi.useFakeTimers();

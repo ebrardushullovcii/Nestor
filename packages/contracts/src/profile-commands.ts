@@ -23,6 +23,18 @@ export const CommitProfileEditsInputSchema = z
     goals: PatchGoalsInputSchema.optional(),
     upsert: z.array(ProfileRecordSchema).max(500).default([]),
     remove: z.array(RemoveProfileRecordInputSchema).max(500).default([]),
+    expectedRecords: z
+      .array(
+        RemoveProfileRecordInputSchema.extend({
+          value: ProfileRecordSchema.nullable(),
+        }),
+      )
+      .max(500)
+      .default([]),
+    expectedWorkPermissions:
+      CandidateWorkEligibilitySchema.shape.limitedWorkPermissions,
+    draftId: z.string().min(1).max(100).optional(),
+    requireCurrentDraft: z.boolean().optional(),
     resumeIdentityChoice: z.enum(["profile_name", "resume_name"]).optional(),
     workPermissions:
       CandidateWorkEligibilitySchema.shape.limitedWorkPermissions,
@@ -36,7 +48,32 @@ export interface ProfileEditResult {
   profile: ProfileOverview;
   goals: JobSearchPreferences;
 }
+export const ProfileEditsDraftSchema = z
+  .object({
+    id: z.string().min(1).max(100),
+    edits: CommitProfileEditsInputSchema,
+  })
+  .strict();
+export type ProfileEditsDraft = z.output<typeof ProfileEditsDraftSchema>;
 export const PROFILE_COMMANDS = {
+  get_profile_draft: {
+    effect: "read",
+    description:
+      "Reads recoverable unsaved Profile edits, including changes kept during an import conflict.",
+    input: z.object({}).strict(),
+  },
+  put_profile_draft: {
+    effect: "local_write",
+    description:
+      "Keeps only unsaved Profile changes for recovery without applying them to the person's facts.",
+    input: ProfileEditsDraftSchema,
+  },
+  clear_profile_draft: {
+    effect: "local_write",
+    description:
+      "Discards only the specified recovered Profile edit, preserving newer typing.",
+    input: z.object({ id: z.string().min(1).max(100) }).strict(),
+  },
   commit_profile_edits: {
     effect: "local_write",
     description:
@@ -120,6 +157,9 @@ export const PROFILE_COMMANDS = {
 } as const satisfies Record<string, AppCommandDefinition>;
 export type ProfileCommandName = keyof typeof PROFILE_COMMANDS;
 export interface ProfileCommandOutputs {
+  get_profile_draft: ProfileEditsDraft | null;
+  put_profile_draft: { saved: true };
+  clear_profile_draft: { removed: boolean };
   commit_profile_edits: ProfileEditResult;
   set_resume_approach: {
     settings: JobFinderSettings;

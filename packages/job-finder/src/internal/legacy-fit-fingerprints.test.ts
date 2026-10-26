@@ -9,7 +9,6 @@ import {
 
 import { createSeed } from "../workspace-service.test-support";
 import { fitPostingFingerprint, jobNeedsFitJudgment } from "./fit-judgment";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   buildLegacyVerdictFingerprintMap,
   rebindJobLegacyVerdicts,
@@ -26,10 +25,7 @@ type Seed = ReturnType<typeof createSeed>;
 
 /** The goals a search and the backlog judge give the model. */
 function judgingGoals(seed: Seed, profile: CandidateProfile) {
-  return withSavedJobSearchBehavior(
-    enrichSearchPreferencesFromProfile(seed.searchPreferences, profile),
-    seed.settings,
-  );
+  return enrichSearchPreferencesFromProfile(seed.searchPreferences, profile);
 }
 
 /** A verdict as an earlier build stored it: stamped with the whole-input fingerprint. */

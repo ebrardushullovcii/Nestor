@@ -15,7 +15,7 @@ import {
 
 function createSeed() {
   const seed = createBaseSeed();
-  seed.searchPreferences.discovery.targets[0]!.id = "1";
+  seed.jobSites[0]!.id = "1";
   return seed;
 }
 
@@ -31,9 +31,7 @@ function createService(
   browserRuntime: BrowserSessionRuntime = createBrowserRuntime(),
 ): WorkspaceService {
   return createJobFinderWorkspaceService({
-    jobSites: createTestJobSites(
-      createSeed().searchPreferences.discovery.targets,
-    ),
+    jobSites: createTestJobSites(createSeed().jobSites),
     repository,
     browserRuntime,
     aiClient: createAiClient(),

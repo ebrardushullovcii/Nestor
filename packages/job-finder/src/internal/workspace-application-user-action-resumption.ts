@@ -1,3 +1,4 @@
+import { jobSiteTarget } from "@nestor/contracts";
 import { releaseFinishedApplicationPages } from "./application-page-lifecycle";
 import { mergeApplyReviewCards } from "./agent-application-preparation";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
@@ -1136,19 +1137,13 @@ export function createApplicationUserActionResumer(
       return;
     }
 
-    const [
-      profile,
-      settings,
-      searchPreferences,
-      instructionArtifacts,
-      debugAttempts,
-    ] = await Promise.all([
-      ctx.repository.getProfile(),
-      ctx.repository.getSettings(),
-      ctx.repository.getSearchPreferences(),
-      ctx.repository.listSourceInstructionArtifacts(),
-      ctx.repository.listSourceDebugAttempts(),
-    ]);
+    const [profile, settings, instructionArtifacts, debugAttempts] =
+      await Promise.all([
+        ctx.repository.getProfile(),
+        ctx.repository.getSettings(),
+        ctx.repository.listSourceInstructionArtifacts(),
+        ctx.repository.listSourceDebugAttempts(),
+      ]);
     const [answerRecords, questionRecords] = await Promise.all([
       ctx.repository.listApplicationAnswerRecords({
         jobId: scope.jobId,
@@ -1173,10 +1168,11 @@ export function createApplicationUserActionResumer(
       job.provenance.at(-1)?.targetId ??
       job.provenance[0]?.targetId ??
       null;
-    const provenanceTarget = provenanceTargetId
-      ? (searchPreferences.discovery.targets.find(
-          (target) => target.id === provenanceTargetId,
-        ) ?? null)
+    const provenanceSite = provenanceTargetId
+      ? ctx.jobSites?.get(Number(provenanceTargetId))
+      : null;
+    const provenanceTarget = provenanceSite
+      ? jobSiteTarget(provenanceSite)
       : null;
     const activeInstruction = provenanceTarget
       ? resolveActiveSourceInstructionArtifact(

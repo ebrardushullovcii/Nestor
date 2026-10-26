@@ -10,6 +10,7 @@ import type {
 } from "@nestor/contracts";
 import {
   createProfileStore,
+  createProfileEditDraftStore,
   createPreferencesStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -24,10 +25,36 @@ export function createProfileCommandHandlers(
   store: JobStore,
 ): ProfileCommandHandlers {
   const profile = createProfileStore(store),
-    preferences = createPreferencesStore(store);
+    preferences = createPreferencesStore(store),
+    drafts = createProfileEditDraftStore(store);
   return {
+    get_profile_draft: () => drafts.read(),
+    put_profile_draft: (input) => drafts.put(input),
+    clear_profile_draft: ({ id }) => drafts.clear(id),
     commit_profile_edits: (input) =>
       store.transaction(() => {
+        if (
+          input.requireCurrentDraft &&
+          (!input.draftId || drafts.read()?.id !== input.draftId)
+        )
+          throw new Error(
+            "Newer edits replaced this draft. Reopen Profile to review your latest kept edits.",
+          );
+        for (const expected of input.expectedRecords) {
+          const current = profile.records.get(expected.collection, expected.id);
+          if (JSON.stringify(current) !== JSON.stringify(expected.value))
+            throw new Error(
+              `The saved ${expected.collection} record changed while you were editing it. Reload this record and try again.`,
+            );
+        }
+        if (
+          input.expectedWorkPermissions &&
+          JSON.stringify(profile.overview().limitedWorkPermissions) !==
+            JSON.stringify(input.expectedWorkPermissions)
+        )
+          throw new Error(
+            "Your saved work permissions changed while you were editing them. Reload and try again.",
+          );
         if (input.profile) profile.patch(input.profile);
         if (input.goals) preferences.goals.patch(input.goals);
         for (const row of input.upsert) profile.records.upsert(row);
@@ -56,6 +83,7 @@ export function createProfileCommandHandlers(
             profile.setResumeSource(current.baseResume, null);
           }
         }
+        if (input.draftId) drafts.clear(input.draftId);
         return { profile: profile.overview(), goals: preferences.goals.read() };
       }),
     set_resume_approach: ({ approach }) =>

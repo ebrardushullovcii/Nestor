@@ -14,7 +14,6 @@ import {
   type TailoringMode,
   type WorkHistoryReviewSuggestion,
 } from "@nestor/contracts";
-import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { readPlanAssessment } from "./plan-assessment";
 import { fnv1a32 } from "@nestor/core";
 import {
@@ -1003,7 +1002,7 @@ export async function buildResumeWorkspace(
     (plan) => plan.id === planId,
   );
   const searchPreferences = activePlan
-    ? searchPreferencesForCampaignRun(activePlan)
+    ? activePlan.searchPreferences
     : profilePreferences;
   const job = readPlanAssessment(initialJob, planId);
   // The listing's full read runs when the person asks for it (Read and

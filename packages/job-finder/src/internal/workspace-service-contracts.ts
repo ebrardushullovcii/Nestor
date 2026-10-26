@@ -172,8 +172,8 @@ export interface JobFinderWorkspaceService {
    * preference and cover-letter preference into settings, and the resume
    * approach into both `settings.resumeApplicationMode` and
    * `searchPreferences.tailoringMode`. The search selectivity also drives
-   * `searchPreferences.discovery.collectOnlyHardCriteriaMatches`, so search
-   * preferences go through the ordinary save path (active plan kept in sync).
+   * `searchPreferences.searchSelectivity`, so search
+   * preferences go through the ordinary goal-store save path.
    */
   updateAiBehavior(
     input: UpdateAiBehaviorInput,
