@@ -97,6 +97,8 @@ async function approvedResume() {
     profileSetupState: initial.profileSetupState,
     activityControl: initial.activityControl,
     latestResumeImportRun: null,
+    latestResumeImportReviewCandidates: [],
+    latestResumeImportBundle: null,
     resumeImportActive: false,
     enabledSiteCount: 0,
     availableResumeTemplates: [],
