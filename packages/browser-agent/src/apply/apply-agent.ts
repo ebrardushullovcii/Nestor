@@ -39,6 +39,8 @@ import {
   guardStop,
   fileFieldHoldsOtherFile,
   questionPrompt,
+  pickerFieldKey,
+  MAX_PICKER_ATTEMPTS,
   type ApplyExecutionOutcome,
 } from "./policy-executor";
 import {
@@ -333,6 +335,9 @@ async function runMeasuredApplyAgent(
     observe: async () => {
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
+      for (const control of observation.controls)
+        if (guardState.pickerFailures.has(pickerFieldKey(observation, control)))
+          control.answered = false;
       return observation;
     },
   };
@@ -2328,6 +2333,29 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
+    beforeModelTurn: async () => {
+      const current = pageTools.state.observation;
+      const exhausted = current?.controls.some(
+        (control) =>
+          (guardState.pickerFailures.get(pickerFieldKey(current, control)) ??
+            0) >= MAX_PICKER_ATTEMPTS,
+      );
+      if (
+        !current ||
+        !exhausted ||
+        !pendingQuestions.size ||
+        unresolvedRequiredControls(current).some(
+          (control) => !pendingQuestions.has(pendingQuestionKey(control)),
+        )
+      )
+        return null;
+      return {
+        reason: collectedQuestionsPause()!.summary,
+        needsPerson: true,
+        stuck: false,
+        data: {},
+      };
+    },
     afterToolBatch: async () => {
       if (!observationNeeded) return null;
       observationNeeded = false;

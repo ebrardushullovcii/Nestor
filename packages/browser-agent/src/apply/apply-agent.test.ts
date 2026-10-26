@@ -1,3 +1,4 @@
+import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import { describe, expect, test, vi } from "vitest";
@@ -6368,4 +6369,39 @@ test("repeated-step replay pauses at the second entry, including after resumptio
   expect(answered.filled).toHaveLength(1);
   expect(source.controls[0].value).toBe(repeatedStep.secondAnswer);
   expect(answered.outcome).toBe("prepared");
+});
+
+test("picker replay: two attempts end in Needs you with offered options, even when search text remains", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: pickerReplay.question,
+        role: "combobox",
+        value: "",
+        options: [],
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.profile.currentCountry = pickerReplay.primary;
+  const chooseOption = vi.fn(async (_ref: string, option: string) => {
+    source.controls[0].value = option;
+    source.controls[0].options = pickerReplay.options;
+    return { ok: false as const, error: "No matching option" };
+  });
+  input.hands.chooseOption = chooseOption;
+  const model = repeatingModel("select", {
+    ref: "c0",
+    option: pickerReplay.primary,
+  });
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("paused");
+  expect(result.readyToSend).toBeNull();
+  expect(result.modelTurns).toBe(2);
+  expect(chooseOption).toHaveBeenCalledTimes(1);
+  const questions = result.pauses.flatMap(
+    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+  );
+  expect(questions[0].answerOptions).toEqual(pickerReplay.options);
 });

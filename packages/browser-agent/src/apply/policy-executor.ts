@@ -14,6 +14,7 @@ import {
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
 import { matchOption } from "./option-match";
+import { formatGithubAnswer } from "./github-username";
 import type { ApplyQuestionClassification } from "./question-classification";
 import {
   buildCoverLetterRequest,
@@ -140,6 +141,7 @@ export interface ApplyExecutorDeps {
 }
 
 export interface ApplyGuardState {
+  pickerFailures: Map<string, number>;
   acknowledged: Set<string>;
   hasWritten: boolean;
   lastFieldLabel: string | null;
@@ -159,6 +161,7 @@ export interface ApplyGuardState {
 
 export function createApplyGuardState(): ApplyGuardState {
   return {
+    pickerFailures: new Map(),
     acknowledged: new Set<string>(),
     hasWritten: false,
     lastFieldLabel: null,
@@ -168,6 +171,55 @@ export function createApplyGuardState(): ApplyGuardState {
     lastBlockedSave: null,
     approvedOrigins: new Map(),
     lastOnSiteUrl: null,
+  };
+}
+
+export const MAX_PICKER_ATTEMPTS = 2;
+export function pickerFieldKey(
+  page: ApplyFormObservation,
+  control: ApplyFormControl,
+): string {
+  return JSON.stringify([
+    page.url,
+    page.step.index ?? page.step.label,
+    questionPrompt(control),
+  ]);
+}
+function pickerHandover(
+  deps: ApplyExecutorDeps,
+  observation: ApplyFormObservation,
+  control: ApplyFormControl,
+  detail: string,
+  at: string,
+): ApplyExecutionOutcome {
+  const key = pickerFieldKey(observation, control);
+  const count = Math.min(
+    MAX_PICKER_ATTEMPTS,
+    (deps.guardState.pickerFailures.get(key) ?? 0) + 1,
+  );
+  deps.guardState.pickerFailures.set(key, count);
+  control.answered = false;
+  const reason =
+    count >= MAX_PICKER_ATTEMPTS
+      ? `This picker could not select an offered option after ${MAX_PICKER_ATTEMPTS} tries. Choose from the form's options or open the form yourself. ${detail}`
+      : `The form did not offer that choice. Use a fallback only if the person saved a rule for this question; otherwise leave it for them. ${detail}`;
+  return {
+    kind: "suggestion",
+    answer: null,
+    controlRef: control.ref,
+    observation,
+    note: reason,
+    question: {
+      ...buildPendingQuestion({
+        control,
+        jobId: deps.config.application.jobId,
+        detectedAt: at,
+        suggestion: null,
+        siblings: observation.controls,
+        reason,
+      }),
+      answerOptions: [...control.options],
+    },
   };
 }
 
@@ -452,7 +504,7 @@ function savedSuggestion(
   config: ApplyAgentConfig,
 ): ApplyAnswer | null {
   const saved = savedAnswerForQuestion(control, config.sources.reusableAnswers);
-  let value = saved?.answer ?? "";
+  let value = formatGithubAnswer(control, saved?.answer ?? "");
   if (saved && control.answerControlType === "multi_choice") {
     try {
       const selected: unknown = JSON.parse(saved.answer);
@@ -525,7 +577,8 @@ async function decideAnswer(input: {
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
 }): Promise<AnswerDecision> {
-  const { deps, control, value } = input;
+  const { deps, control } = input;
+  const value = formatGithubAnswer(control, input.value);
   const config = deps.config;
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
@@ -1294,6 +1347,29 @@ export async function executeApplyProposal(
     };
   }
 
+  if (
+    (proposal.tool === "click" ||
+      proposal.tool === "type" ||
+      proposal.tool === "select") &&
+    "ref" in proposal
+  ) {
+    const control = findControl(observation, proposal.ref);
+    if (
+      control &&
+      (control.kind === "select" || control.kind === "combobox") &&
+      (deps.guardState.pickerFailures.get(
+        pickerFieldKey(observation, control),
+      ) ?? 0) >= MAX_PICKER_ATTEMPTS
+    )
+      return pickerHandover(
+        deps,
+        observation,
+        control,
+        "No further automatic attempts will be made on this picker.",
+        at,
+      );
+  }
+
   // Security checks stay with the person. A continuation after the person
   // solved one used to tick the box again, which unticked their answer.
   if (
@@ -1515,6 +1591,19 @@ export async function executeApplyProposal(
         };
       }
       const control = await withModelQuestionKinds(deps, observation, found);
+      if (control.kind === "combobox" || control.kind === "select")
+        return executeApplyProposal(
+          {
+            tool: "select",
+            ref: control.ref,
+            option: proposal.text,
+            ...(proposal.storedFactId
+              ? { storedFactId: proposal.storedFactId }
+              : {}),
+          },
+          seenSignature,
+          deps,
+        );
       if (!control.visible || control.disabled || control.readOnly) {
         return {
           kind: "refused",
@@ -1699,6 +1788,26 @@ export async function executeApplyProposal(
         };
       }
       const control = await withModelQuestionKinds(deps, observation, found);
+      const key = pickerFieldKey(observation, control);
+      if ((deps.guardState.pickerFailures.get(key) ?? 0) >= MAX_PICKER_ATTEMPTS)
+        return pickerHandover(
+          deps,
+          observation,
+          control,
+          "No further automatic attempts will be made on this picker.",
+          at,
+        );
+      if (
+        control.options.length &&
+        !matchOption(control.options, proposal.option)
+      )
+        return pickerHandover(
+          deps,
+          observation,
+          control,
+          `Offered: ${control.options.join(", ")}.`,
+          at,
+        );
       const choice = await decideAnswer({
         deps,
         control,
@@ -1712,20 +1821,29 @@ export async function executeApplyProposal(
         control.options.length > 0
           ? matchOption(control.options, choice.answer.value)
           : choice.answer.value;
-      if (!option) {
-        return {
-          kind: "refused",
-          reason: `"${proposal.option}" is not one of the choices for "${questionPrompt(control)}": ${control.options.slice(0, 12).join(", ")}.`,
+      if (!option)
+        return pickerHandover(
+          deps,
           observation,
-        };
-      }
+          control,
+          `Offered: ${control.options.join(", ")}.`,
+          at,
+        );
       const write = await writeUnderGuard(deps, {
         declaredValue: option,
         write: () => config.hands.chooseOption(control.ref, option),
       });
       if (!write.ok) {
-        return { kind: "refused", reason: write.error, observation };
+        const after = await config.hands.observe();
+        return pickerHandover(
+          deps,
+          after,
+          findControl(after, control.ref) ?? control,
+          write.error,
+          at,
+        );
       }
+      deps.guardState.pickerFailures.delete(key);
       afterWrite(deps, questionPrompt(control));
       const stop = await guardStop(deps, observation.url);
       if (stop) {

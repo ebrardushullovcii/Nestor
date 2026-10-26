@@ -1,0 +1,23 @@
+{
+  "id": "github-username-format",
+  "provenance": "Synthetic profile URL and field formats.",
+  "url": "https://github.com/synthetic-developer/",
+  "username": "synthetic-developer",
+  "fields": [
+    {
+      "label": "GitHub username",
+      "placeholder": "",
+      "expected": "synthetic-developer"
+    },
+    {
+      "label": "GitHub",
+      "placeholder": "Your username",
+      "expected": "synthetic-developer"
+    },
+    {
+      "label": "GitHub URL",
+      "placeholder": "https://github.com/you",
+      "expected": "https://github.com/synthetic-developer/"
+    }
+  ]
+}
