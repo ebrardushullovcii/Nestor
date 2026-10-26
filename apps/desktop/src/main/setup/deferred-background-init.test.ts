@@ -147,6 +147,38 @@ describe("deferred background initialization", () => {
     expect(controller.isQuitTeardownStarted()).toBe(false);
   });
 
+  test("a window opened after the first one closed early starts the run", async () => {
+    vi.useFakeTimers();
+    const { options, counts } = createOptions();
+    const controller = createDeferredBackgroundInitController(options);
+
+    // macOS: the first window closes before its screen shows, then the dock
+    // opens a new one.
+    controller.cancelScheduled();
+    controller.schedule();
+    await vi.runAllTimersAsync();
+    expect(counts.jobFinderServices).toBe(0);
+
+    controller.rearm();
+    controller.schedule();
+    await vi.runAllTimersAsync();
+    expect(counts.jobFinderServices).toBe(1);
+  });
+
+  test("a new window never repeats a finished run", async () => {
+    vi.useFakeTimers();
+    const { options, counts } = createOptions();
+    const controller = createDeferredBackgroundInitController(options);
+
+    controller.schedule();
+    await vi.runAllTimersAsync();
+    controller.cancelScheduled();
+    controller.rearm();
+    controller.schedule();
+    await vi.runAllTimersAsync();
+    expect(counts.jobFinderServices).toBe(1);
+  });
+
   test("stops an in-flight chain between steps once quit begins", async () => {
     vi.useFakeTimers();
     const { options, counts } = createOptions();

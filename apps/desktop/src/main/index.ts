@@ -123,6 +123,26 @@ let disposeInterviewSessionControls = () => {};
 /** How long after the page loads background services start at the latest. */
 const FIRST_SCREEN_FALLBACK_MS = 2_500;
 
+/**
+ * Starts background services for a main window: once its first screen is
+ * usable, or shortly after its page loads if it never says so (a window that
+ * opens on another screen). Closing it before then cancels the start; a
+ * window opened later (macOS, from the dock) arms it again.
+ */
+function armBackgroundServices(window: BrowserWindow): void {
+  deferredBackgroundInit.rearm();
+  window.webContents.once("did-finish-load", () => {
+    setTimeout(
+      () => deferredBackgroundInit.schedule(),
+      FIRST_SCREEN_FALLBACK_MS,
+    );
+  });
+  window.on("closed", () => {
+    deferredBackgroundInit.cancelScheduled();
+    closeInterviewOverlayWindows();
+  });
+}
+
 const deferredBackgroundInit = createDeferredBackgroundInitController({
   // Counted from the window's page load, not its creation; see below.
   scheduleDelayMs: 150,
@@ -295,27 +315,18 @@ void app
     }
     recordStartupDiagnostic("main window created");
     // Background services share main's thread with the first screen, so
-    // they start once it is usable, or shortly after the page loads if it
-    // never says so (a window that opens on another screen).
-    ipcMain.once("system:first-screen-shown", () =>
+    // they start once it is usable (whichever window says so first).
+    ipcMain.on("system:first-screen-shown", () =>
       deferredBackgroundInit.schedule(),
     );
-    mainWindow.webContents.once("did-finish-load", () => {
-      setTimeout(
-        () => deferredBackgroundInit.schedule(),
-        FIRST_SCREEN_FALLBACK_MS,
-      );
-    });
-    mainWindow.on("closed", () => {
-      deferredBackgroundInit.cancelScheduled();
-      closeInterviewOverlayWindows();
-    });
+    armBackgroundServices(mainWindow);
 
     configureInterviewMediaPermissions();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createMainWindowSafely();
+        const window = createMainWindowSafely();
+        if (window) armBackgroundServices(window);
       }
     });
   })

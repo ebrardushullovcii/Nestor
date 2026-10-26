@@ -60,6 +60,12 @@ export interface DeferredBackgroundInitController {
 
   /** Cancel a pending schedule without latching quit (last window closed). */
   cancelScheduled(): void;
+  /**
+   * A new main window (macOS reopens one from the dock after the last
+   * closed): undo a window-close cancel if the deferred run never happened,
+   * so this window can schedule it.
+   */
+  rearm(): void;
 
   isQuitTeardownStarted(): boolean;
 }
@@ -76,8 +82,8 @@ export function createDeferredBackgroundInitController(
   // The deferred run is a one-shot: `scheduledOnce` blocks duplicate
   // schedules, `deferredRunCompleted` records that the timer actually fired
   // (so an aborted quit never re-runs finished initialization), and
-  // `cancelledByWindowClose` permanently suppresses resurrection of a run
-  // whose schedule was torn down with the last window.
+  // `cancelledByWindowClose` suppresses resurrection of a run whose schedule
+  // was torn down with the last window, until a new window re-arms it.
   let scheduledOnce = false;
   let deferredRunCompleted = false;
   let cancelledByWindowClose = false;
@@ -228,6 +234,13 @@ export function createDeferredBackgroundInitController(
       cancelledByWindowClose = true;
       scheduledOnce = true;
       cancelTimer();
+    },
+
+    rearm() {
+      if (deferredRunCompleted || quitTeardownStarted || timerId !== null)
+        return;
+      cancelledByWindowClose = false;
+      scheduledOnce = false;
     },
 
     isQuitTeardownStarted: () => quitTeardownStarted,

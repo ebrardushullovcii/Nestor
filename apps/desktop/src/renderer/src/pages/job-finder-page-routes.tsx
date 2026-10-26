@@ -1,4 +1,4 @@
-import { createElement, lazy, useState } from "react";
+import { createElement, lazy, useEffect, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { Button } from "@renderer/components/ui/button";
@@ -7,6 +7,7 @@ import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { Navigate, useLocation, useOutletContext } from "react-router-dom";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
+import { requestLegacyWorkspace } from "@renderer/features/job-finder/lib/legacy-workspace-demand";
 import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
 import {
   markGuidedSetupAutoOpenSpent,
@@ -63,8 +64,9 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
   ).ProfileSetupScreen,
 }));
 const loadProfileScreen = createSharedRouteLoader(async () => ({
-  default: (await import("@renderer/features/job-finder/screens/profile-screen"))
-    .ProfileScreen,
+  default: (
+    await import("@renderer/features/job-finder/screens/profile-screen")
+  ).ProfileScreen,
 }));
 const loadSettingsScreen = createSharedRouteLoader(async () => ({
   default: (
@@ -367,8 +369,13 @@ export function JobFinderHomeRoute() {
   // launch read until a screen that needs that workspace has loaded it.
   const context = useOutletContext<JobFinderPageContext | null>();
   const launched = useLaunchReads().context;
-  // Null setup state means no workspace yet: a first launch, so setup opens.
-  const setupKnown = Boolean(context) || launched !== null;
+  // No workspace yet is a first launch, so setup opens. A workspace the launch
+  // read could not read leaves setup unknown until the old workspace loads.
+  const unreadable = !context && launched?.workspace === "unreadable";
+  useEffect(() => {
+    if (unreadable) requestLegacyWorkspace();
+  }, [unreadable]);
+  const setupKnown = Boolean(context) || (launched !== null && !unreadable);
   const setupState =
     context?.workspace.profileSetupState ?? launched?.profileSetupState ?? null;
   // A workspace that has not started setup opens guided setup directly; Home

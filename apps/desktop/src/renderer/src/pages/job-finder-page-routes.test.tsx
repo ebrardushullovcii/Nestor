@@ -1,8 +1,62 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
-import { selectCampaignApplicationsScope } from "./job-finder-page-routes";
+import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  JobFinderRendererWorkspaceSnapshot,
+  LaunchContext,
+} from "@nestor/contracts";
+import {
+  JobFinderHomeRoute,
+  selectCampaignApplicationsScope,
+} from "./job-finder-page-routes";
+
+const launch = vi.hoisted(() => ({
+  context: null as LaunchContext | null,
+  requestLegacyWorkspace: vi.fn(),
+}));
+vi.mock("@renderer/features/job-finder/lib/launch-reads", () => ({
+  useLaunchReads: () => ({ context: launch.context }),
+}));
+vi.mock("@renderer/features/job-finder/lib/legacy-workspace-demand", () => ({
+  requestLegacyWorkspace: launch.requestLegacyWorkspace,
+}));
+vi.mock("@renderer/features/home/home-screen", () => ({
+  HomeScreen: () => <p>Home</p>,
+}));
+
+afterEach(cleanup);
+
+function renderHome(context: LaunchContext) {
+  launch.context = context;
+  render(
+    <MemoryRouter initialEntries={["/job-finder"]}>
+      <Routes>
+        <Route path="/job-finder" element={<JobFinderHomeRoute />} />
+        <Route path="/job-finder/profile/setup" element={<p>Setup</p>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+// The redirect is spent once taken, so the case that never redirects runs first.
+describe("JobFinderHomeRoute", () => {
+  it("waits for the old workspace when the launch read could not read it", () => {
+    renderHome({
+      workspace: "unreadable",
+      settings: null,
+      profileSetupState: null,
+    });
+    expect(screen.getByText("Home")).toBeTruthy();
+    expect(launch.requestLegacyWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("opens guided setup on a first launch", () => {
+    renderHome({ workspace: "none", settings: null, profileSetupState: null });
+    expect(screen.getByText("Setup")).toBeTruthy();
+  });
+});
 
 describe("selectCampaignApplicationsScope", () => {
   it("shows saved applications across plans when all plans are requested", () => {
