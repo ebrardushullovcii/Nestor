@@ -4,7 +4,10 @@ import type { JobStore } from "./job-store";
 import { JOB_STORE_SCHEMA } from "./schema";
 import { createProfileStore } from "./profile-store";
 import { createPreferencesStore } from "./preferences-store";
-import { createActivityControlStore } from "./activity-control";
+import {
+  RESET_IN_PROGRESS_PAUSE,
+  createActivityControlStore,
+} from "./activity-control";
 
 /**
  * Reset everything: drops every table and makes it again, as in a new file,
@@ -37,13 +40,10 @@ export function resetJobStore(store: JobStore): void {
       // Recreate only fresh defaults; reset never restores retired values.
       createProfileStore(store);
       createPreferencesStore(store);
-      // Reset leaves work running, and the old workspace file is not asked
-      // again for a pause.
-      createActivityControlStore(store).save({
-        paused: false,
-        pausedAt: null,
-        reason: null,
-      });
+      // Work stays paused until the whole reset finishes; its caller lowers
+      // the pause last. The row also means the old workspace file is never
+      // asked for a pause again.
+      createActivityControlStore(store).save(RESET_IN_PROGRESS_PAUSE);
     });
   } finally {
     db.exec("PRAGMA foreign_keys = ON");

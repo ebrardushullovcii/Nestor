@@ -25,7 +25,7 @@ afterEach(() => {
   failWrite.next = false;
 });
 
-test("a reset that fails part way leaves work paused; a finished one lowers it", async () => {
+test("a repository reset holds the pause, failed or finished; it never lowers it", async () => {
   const fixture = await createTempRepository("nestor-reset-pause-");
   const repository = await fixture.createRepository();
   const readPause = () => {
@@ -49,7 +49,7 @@ test("a reset that fails part way leaves work paused; a finished one lowers it",
       ) as string,
     });
     await repository.reset(createSeed());
-    expect(readPause().paused).toBe(false);
+    expect(readPause().paused).toBe(true);
   } finally {
     await repository.close();
     await fixture.cleanup();

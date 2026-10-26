@@ -146,10 +146,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
+const snapshotParse = vi.hoisted(() => ({ fail: false }));
 vi.mock("@nestor/contracts", async (importOriginal) => ({
   ...(await importOriginal<typeof ContractsModule>()),
   JobFinderWorkspaceSnapshotSchema: {
-    parse: (value: unknown) => value,
+    parse: (value: unknown) => {
+      if (snapshotParse.fail) {
+        snapshotParse.fail = false;
+        throw new Error("The workspace snapshot could not be read.");
+      }
+      return value;
+    },
   },
 }));
 
@@ -380,6 +387,68 @@ test("browser reset for restore keeps the global pause without latching a person
     mockClearPersonPause.mock.invocationCallOrder[0]!,
   );
   expect(mockResetWorkspace).not.toHaveBeenCalled();
+});
+
+/** Whether anything lowered the pause; saves of a held pause don't count. */
+const pauseLowered = () =>
+  mockSavePause.mock.calls.some(
+    ([control]) => (control as { paused: boolean }).paused === false,
+  );
+
+describe("the pause through a reset", () => {
+  test.each([
+    [
+      "the workspace reset",
+      () => mockResetWorkspace.mockRejectedValueOnce(new Error("locked")),
+    ],
+    [
+      "the job-store clear",
+      () =>
+        mockResetJobStore.mockImplementationOnce(() => {
+          throw new Error("locked");
+        }),
+    ],
+    [
+      "the Assistant's store",
+      () => mockResetAssistantStore.mockRejectedValueOnce(new Error("locked")),
+    ],
+    [
+      "the snapshot",
+      () => {
+        snapshotParse.fail = true;
+      },
+    ],
+  ])("a failure in %s leaves work paused", async (_stage, inject) => {
+    inject();
+    await expect(resetJobFinderWorkspace()).rejects.toThrow();
+    expect(pauseLowered()).toBe(false);
+  });
+
+  test("a finished reset lowers the pause as its very last step", async () => {
+    await resetJobFinderWorkspace();
+    const saves = mockSavePause.mock.calls.map(
+      ([control]) => (control as { paused: boolean }).paused,
+    );
+    expect(saves.at(-1)).toBe(false);
+    expect(saves.slice(0, -1)).not.toContain(false);
+    const lowered = mockSavePause.mock.invocationCallOrder.at(-1)!;
+    for (const step of [mockResetJobStore, mockResetAssistantStore, mockRm])
+      expect(Math.max(...step.mock.invocationCallOrder)).toBeLessThan(lowered);
+  });
+
+  test("startup recovery lowers the pause only once it has finished", async () => {
+    mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
+    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
+    mockResetAssistantStore.mockRejectedValueOnce(new Error("locked"));
+    await expect(
+      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+    ).rejects.toThrow();
+    expect(pauseLowered()).toBe(false);
+
+    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
+    await recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() });
+    expect(pauseLowered()).toBe(true);
+  });
 });
 
 describe("resetJobFinderWorkspace", () => {

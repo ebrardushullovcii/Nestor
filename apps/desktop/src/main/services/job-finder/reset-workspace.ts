@@ -12,6 +12,7 @@ import {
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JobFinderRepository } from "@nestor/db";
+import type { JobFinderActivityControl } from "@nestor/contracts";
 import {
   RESET_IN_PROGRESS_PAUSE,
   createActivityControlStore,
@@ -782,13 +783,15 @@ async function recoverPendingJobFinderWorkspaceResetOutcome(
 
   await removeResetIntentMarker();
   await removeResetTrashDirectory(intent.token);
+  lowerPauseAfterReset();
 
   return { status: "completed", token: intent.token };
 }
 
 /**
- * Clears the job store, which also lowers the pause. A store that could not
- * be cleared keeps its queue, so work stays paused until a reset finishes.
+ * Clears the job store. It stays paused either way: a store that could not
+ * be cleared keeps its queue, and a cleared one waits for the rest of the
+ * reset to finish.
  */
 function clearJobStoreOrHoldPause(): void {
   const store = getJobStore();
@@ -952,6 +955,22 @@ export async function resetJobFinderWorkspace() {
     );
   }
   await completeJobFinderWorkspaceReset(completedIntent);
+  const parsed = JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  // The very last step: every earlier failure leaves work paused.
+  lowerPauseAfterReset();
+  return parsed;
+}
 
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+/**
+ * Lowers the pause a reset held, once the whole reset has finished. Only the
+ * callers that run a reset end to end call this.
+ */
+export function lowerPauseAfterReset(
+  control: JobFinderActivityControl = {
+    paused: false,
+    pausedAt: null,
+    reason: null,
+  },
+): void {
+  createActivityControlStore(getJobStore()).save(control);
 }

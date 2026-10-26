@@ -912,8 +912,8 @@ export async function createFileJobFinderRepository(
       const nextState = JobFinderRepositoryStateSchema.parse(
         cloneValue(nextSeed),
       );
-      // Work stays paused while the reset runs; a reset that stops part way
-      // leaves it paused.
+      // Work stays paused through the reset, and after it: only the whole
+      // reset's caller lowers the pause, as its last step.
       activityControl.save(RESET_IN_PROGRESS_PAUSE);
       await stopBackups();
       try {
@@ -957,10 +957,10 @@ export async function createFileJobFinderRepository(
         await secureDatabaseFile(options.filePath);
         await removeWorkspaceDatabaseBackups(options.filePath);
         await removeWorkspaceRecoveryArtifacts(options.filePath);
-        profileStore.transaction(() => {
-          siteInstructions.replace(nextState.sourceInstructionArtifacts);
+        siteInstructions.replace(nextState.sourceInstructionArtifacts);
+        // A seed may bring its own pause, never a lower one.
+        if (nextState.activityControl.paused)
           activityControl.save(nextState.activityControl);
-        });
       } finally {
         stopBackups = startBackups();
       }

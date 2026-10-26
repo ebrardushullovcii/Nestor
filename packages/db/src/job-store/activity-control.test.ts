@@ -74,6 +74,10 @@ test.each([
   ["no paused field", "raw:{}"],
   ["text that isn't JSON", "raw:paused"],
   ["a JSON array", "raw:[false]"],
+  ["duplicate keys", 'raw:{"paused":true,"paused":false}'],
+  ["duplicate keys, false first", 'raw:{"paused":false,"paused":true}'],
+  ["an escaped key", 'raw:{"pa\\u0075sed":false}'],
+  ["a nested second key", 'raw:{"paused":false,"x":{"paused":true}}'],
 ])("an old pause of %s carries over as paused", (_name, value) => {
   writeOldPause(value);
   carryOverOldPause(store, oldFile);
@@ -102,12 +106,18 @@ test("an old file that can't be read leaves work paused, with a reason", () => {
   });
 });
 
-test("Reset everything leaves work running, whatever the old file says", () => {
-  writeOldPause(true);
-  carryOverOldPause(store, oldFile);
-  resetJobStore(store);
+test("clearing the store keeps work paused, and never asks the old file again", () => {
+  writeOldPause(false);
   carryOverOldPause(store, oldFile);
   expect(paused()).toBe(false);
+  resetJobStore(store);
+  // Held until the whole reset's caller lowers it.
+  expect(createActivityControlStore(store).read()).toMatchObject({
+    paused: true,
+    reason: expect.stringContaining("Reset everything didn't finish") as string,
+  });
+  carryOverOldPause(store, oldFile);
+  expect(paused()).toBe(true);
 });
 
 test("only a clean `paused: false` ever reads as running (generated values)", () => {

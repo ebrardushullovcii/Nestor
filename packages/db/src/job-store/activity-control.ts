@@ -55,7 +55,10 @@ export function createActivityControlStore(store: JobStore) {
 const UNREADABLE_OLD_PAUSE =
   "Nestor couldn't read whether background work was paused before this update. Resume it when you're ready.";
 
-/** Kept while a reset runs; only a finished reset lowers it. */
+/**
+ * Kept while a reset runs. Neither the repository reset nor the job-store
+ * clear lowers it; the whole reset's caller does, as its very last step.
+ */
 export const RESET_IN_PROGRESS_PAUSE: JobFinderActivityControl = {
   paused: true,
   pausedAt: null,
@@ -65,7 +68,8 @@ export const RESET_IN_PROGRESS_PAUSE: JobFinderActivityControl = {
 
 /**
  * What the old workspace file says about the pause. Only a stored value that
- * is a JSON object with `paused` exactly `false` means work ran; every other
+ * is a JSON object naming `paused` once, exactly `false`, means work ran;
+ * every other
  * value (no row, `true`, `"true"`, `1`, `null`, a missing field, text that
  * isn't JSON, a missing table, a file that won't open) is read as paused.
  */
@@ -83,6 +87,14 @@ export function readOldPause(
       .prepare("SELECT value FROM singleton_state WHERE key='activity_control'")
       .get();
     if (!row || typeof row.value !== "string") return "unreadable";
+    // JSON.parse keeps the last of duplicate keys and decodes escaped ones,
+    // so {"paused":true,"paused":false} would read as running. The text must
+    // name `paused` exactly once, with no escapes, before the value counts.
+    if (
+      row.value.includes("\\") ||
+      (row.value.match(/"paused"\s*:/gu) ?? []).length !== 1
+    )
+      return "unreadable";
     const value: unknown = JSON.parse(row.value);
     if (typeof value !== "object" || value === null || Array.isArray(value))
       return "unreadable";
