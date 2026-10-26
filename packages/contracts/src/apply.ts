@@ -941,7 +941,7 @@ export const ApplicationReviewCardSchema = z
       .max(500)
       .optional(),
     /** The browser observed a successful non-final field or attachment save. */
-    intermediateSaved: z.boolean().optional(),
+    intermediateSaved: optionalStoredField(z.boolean(), false),
     attachments: z.array(ApplicationReviewAttachmentSchema).max(20).default([]),
     letter: z
       .object({
@@ -1109,3 +1109,4 @@ export const ApplyRunDetailsSchema = z.object({
   reviewCard: ApplicationReviewCardSchema.nullable().default(null),
 });
 export type ApplyRunDetails = z.infer<typeof ApplyRunDetailsSchema>;
+import { optionalStoredField } from "./stored-json";
