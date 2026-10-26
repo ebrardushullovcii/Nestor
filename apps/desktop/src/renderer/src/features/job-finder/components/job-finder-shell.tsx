@@ -48,7 +48,6 @@ import {
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/cn";
 import type { JobFinderScreen } from "../lib/job-finder-types";
-import { JobFinderSaveStatus } from "./job-finder-save-status";
 import {
   JOB_FINDER_GLOBAL_SEARCH_LABEL,
   JobFinderGlobalSearchDialog,

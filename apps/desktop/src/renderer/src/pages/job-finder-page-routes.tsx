@@ -3,8 +3,6 @@ import {
   lazyScreen,
   preloadWhenIdle,
 } from "@renderer/lib/lazy-screen";
-import { Button } from "@renderer/components/ui/button";
-import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { Navigate } from "react-router-dom";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
