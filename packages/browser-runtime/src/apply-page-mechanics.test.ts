@@ -320,12 +320,12 @@ describe("reading the choices of lists the page draws itself", () => {
       const data=${JSON.stringify({ entry, countries: menuReplay.countryOptions, restrictions: menuReplay.restrictionOptions })};
       const menu=document.getElementById('shared');
       for(const id of ['country','restrictions']) { const input=document.getElementById(id);
-        input.onclick=()=>{input.setAttribute('aria-expanded','true');menu.hidden=false;
+        input.onclick=()=>{input.setAttribute('aria-controls','shared');input.setAttribute('aria-expanded','true');menu.hidden=false;
           if(id==='restrictions' && !data.entry.settles) return;
           setTimeout(()=>{menu.innerHTML=(id==='country'?data.countries:data.restrictions).map(x=>'<div role="option">'+x+'</div>').join('');},data.entry.delayMs);
         };
       }
-      document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('input').forEach(x=>x.setAttribute('aria-expanded','false'));menu.hidden=true;}});
+      document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('input[aria-expanded=true]').forEach(x=>{x.setAttribute('aria-expanded','false');if(data.entry.releaseOwner)x.removeAttribute('aria-controls');});menu.hidden=true;}});
       </script>`);
         for (let read = 0; read < 2; read++) {
           const snapshot = await readRawApplyPage(page);

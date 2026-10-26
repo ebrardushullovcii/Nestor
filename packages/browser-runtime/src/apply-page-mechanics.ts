@@ -1198,6 +1198,7 @@ const MAX_OPENED_COMBOBOXES = 16;
  * control still finds its own choices and a new page starts fresh.
  */
 const comboboxOptionMemo = new WeakMap<Page, Map<string, string[]>>();
+const comboboxMenuOwners = new WeakMap<Page, Map<string, string>>();
 
 /**
  * What makes one list that list, on this page and on the next read.
@@ -1246,6 +1247,11 @@ async function readClosedComboboxOptions(
     comboboxOptionMemo.set(page, memo);
   }
 
+  let knownMenuOwners = comboboxMenuOwners.get(page);
+  if (!knownMenuOwners) {
+    knownMenuOwners = new Map();
+    comboboxMenuOwners.set(page, knownMenuOwners);
+  }
   const optionsByIndex = new Map<number, string[]>();
   const toOpen: RawApplyControl[] = [];
   for (const control of closed) {
@@ -1312,67 +1318,83 @@ async function readClosedComboboxOptions(
           .catch(() => undefined);
         if ((await locator.getAttribute("aria-expanded")) !== "true")
           await locator.click({ timeout: 1500 });
-        options = await menuRead.evaluate(async (state) => {
-          const started = Date.now(),
-            deadline = started + 700;
-          let last = "",
-            stableAt = started;
-          while (Date.now() < deadline) {
-            const ids = (
-              state.element.getAttribute("aria-controls") ??
-              state.element.getAttribute("aria-owns") ??
-              ""
-            )
-              .split(/\s+/u)
-              .filter(Boolean);
-            const menu =
-              ids.length === 1 ? document.getElementById(ids[0]!) : null;
-            const owners =
-              ids.length === 1
-                ? Array.from(
-                    document.querySelectorAll("[aria-controls],[aria-owns]"),
-                  ).filter((candidate) =>
-                    (
-                      candidate.getAttribute("aria-controls") ??
-                      candidate.getAttribute("aria-owns") ??
-                      ""
+        const owner = comboboxMemoKey(url, control);
+        const observed = await menuRead.evaluate(
+          async (state, context) => {
+            const started = Date.now(),
+              deadline = started + 700;
+            let last = "",
+              menuId = "",
+              stableAt = started;
+            while (Date.now() < deadline) {
+              const ids = (
+                state.element.getAttribute("aria-controls") ??
+                state.element.getAttribute("aria-owns") ??
+                ""
+              )
+                .split(/\s+/u)
+                .filter(Boolean);
+              const menu =
+                ids.length === 1 ? document.getElementById(ids[0]!) : null;
+              menuId = menu?.id ?? "";
+              const previousOwner = context.owners[`${context.url}|${menuId}`];
+              const owners =
+                ids.length === 1
+                  ? Array.from(
+                      document.querySelectorAll("[aria-controls],[aria-owns]"),
+                    ).filter((candidate) =>
+                      (
+                        candidate.getAttribute("aria-controls") ??
+                        candidate.getAttribute("aria-owns") ??
+                        ""
+                      )
+                        .split(/\s+/u)
+                        .includes(ids[0]!),
                     )
-                      .split(/\s+/u)
-                      .includes(ids[0]!),
-                  )
-                : [];
-            const fresh =
-              menu &&
-              (state.changed.has(menu) ||
-                !state.initialMenus.has(menu) ||
-                (menu === state.initialOwned && owners.length === 1));
-            const choices =
-              state.element.getAttribute("aria-expanded") === "true" &&
-              menu &&
-              fresh
-                ? Array.from(menu.querySelectorAll("[role='option']"))
-                    .filter(
-                      (option) =>
-                        option.getAttribute("aria-disabled") !== "true",
-                    )
-                    .map((option) => (option as HTMLElement).innerText.trim())
-                    .filter(Boolean)
-                : [];
-            const signature = JSON.stringify(choices);
-            if (signature !== last) {
-              last = signature;
-              stableAt = Date.now();
+                  : [];
+              const fresh =
+                menu &&
+                (state.changed.has(menu) ||
+                  !state.initialMenus.has(menu) ||
+                  (menu === state.initialOwned &&
+                    owners.length === 1 &&
+                    (!previousOwner || previousOwner === context.owner)));
+              const choices =
+                state.element.getAttribute("aria-expanded") === "true" &&
+                menu &&
+                fresh
+                  ? Array.from(menu.querySelectorAll("[role='option']"))
+                      .filter(
+                        (option) =>
+                          option.getAttribute("aria-disabled") !== "true",
+                      )
+                      .map((option) => (option as HTMLElement).innerText.trim())
+                      .filter(Boolean)
+                  : [];
+              const signature = JSON.stringify(choices);
+              if (signature !== last) {
+                last = signature;
+                stableAt = Date.now();
+              }
+              if (
+                choices.length &&
+                Date.now() - stableAt >= 120 &&
+                Date.now() - started >= 200
+              )
+                return { options: choices, menuId };
+              await new Promise((resolve) => setTimeout(resolve, 25));
             }
-            if (
-              choices.length &&
-              Date.now() - stableAt >= 120 &&
-              Date.now() - started >= 200
-            )
-              return choices;
-            await new Promise((resolve) => setTimeout(resolve, 25));
-          }
-          return [];
-        });
+            return { options: [], menuId };
+          },
+          {
+            owners: Object.fromEntries(knownMenuOwners),
+            owner,
+            url: page.url(),
+          },
+        );
+        options = observed.options;
+        if (options.length && observed.menuId)
+          knownMenuOwners.set(`${page.url()}|${observed.menuId}`, owner);
       } finally {
         await menuRead
           .evaluate((state) => state.observer.disconnect())

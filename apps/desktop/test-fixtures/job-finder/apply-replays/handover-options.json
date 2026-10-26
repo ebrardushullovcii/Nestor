@@ -12,6 +12,12 @@
       "name": "shared portal never redraws",
       "delayMs": 0,
       "settles": false
+    },
+    {
+      "name": "previous owner releases its shared menu before a slow redraw",
+      "delayMs": 450,
+      "settles": true,
+      "releaseOwner": true
     }
   ],
   "longListSize": 250
