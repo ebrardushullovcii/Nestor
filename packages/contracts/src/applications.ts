@@ -156,7 +156,7 @@ export const NeedsYouTaskSchema = z.object({
   options: z.array(z.string()),
   openedAt: IsoDateTimeSchema,
   source: SourceAccessReferenceSchema.optional(),
-  blockedUrl: z.string().url().optional(),
+  blockedUrl: optionalStoredField(z.string().url().nullable(), null),
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 
