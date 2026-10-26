@@ -3,7 +3,7 @@ import { resumeClaimContentHash } from "@nestor/job-finder/resumes";
 import { describe, expect, it } from "vitest";
 
 import type { EvalHttpCapture } from "../contracts";
-import { flagsLeft, inventedFacts, levelVerdicts } from "./checks";
+import { assessFacts, flagsLeft, inventedFacts, levelVerdicts } from "./checks";
 import { tokensUsed } from "./run";
 
 const AT = "2026-10-26T00:00:00.000Z";
@@ -78,6 +78,113 @@ describe("resume lane checks", () => {
     expect(found.map((fact) => `${fact.kind}:${fact.value}`)).toEqual([
       "number:40",
       "name:Kubernetes",
+    ]);
+  });
+
+  it("reports listing technologies as Aggressive stretches, and rejects an absent technology", () => {
+    const input = {
+      draft: draft([
+        "Built services with Kubernetes.",
+        "Built services with MongoDB.",
+      ]),
+      source: SOURCE,
+      listing: LISTING,
+      title: "Frontend Engineer",
+      company: "Datadog",
+      yearsExperience: 5,
+      level: "aggressive" as const,
+    };
+    const result = assessFacts(input);
+    expect(result.stretches.map((fact) => fact.value)).toEqual(["Kubernetes"]);
+    expect(result.invented.map((fact) => fact.value)).toEqual(["MongoDB"]);
+    expect(
+      inventedFacts({ ...input, level: "tailored" }).map((fact) => fact.value),
+    ).toContain("Kubernetes");
+  });
+
+  it("only rounds evidenced years one higher to a figure the listing asks for, never counts or percentages", () => {
+    const input = {
+      draft: draft([
+        "Engineer with six years of experience serving 6 teams and improving throughput 6%.",
+      ]),
+      source: SOURCE + "\nFive years of experience.",
+      listing: LISTING + " Requires 6 years of experience.",
+      title: "Frontend Engineer",
+      company: "Datadog",
+      yearsExperience: 5,
+      level: "aggressive" as const,
+    };
+    expect(assessFacts(input).stretches.map((fact) => fact.value)).toEqual([
+      "6",
+    ]);
+    expect(assessFacts(input).invented.map((fact) => fact.value)).toEqual([
+      "6",
+      "6%",
+    ]);
+    expect(assessFacts({ ...input, listing: LISTING }).stretches).toEqual([]);
+    expect(
+      assessFacts({
+        ...input,
+        draft: draft(["Engineer with seven years of experience."]),
+      }).invented.map((fact) => fact.value),
+    ).toEqual(["7"]);
+  });
+
+  it("detects changed record identities and unbacked leadership and reviewed hiring-domain transfer", () => {
+    const value = draft(["Managed clinical patient systems."]);
+    const entry = value.sections[0]!.entries[0]!;
+    entry.title = "Engineering Director";
+    entry.subtitle = "Invented Employer";
+    entry.dateRange = "Apr 2020 � Present";
+    const result = assessFacts({
+      draft: value,
+      source:
+        "Individual contributor.\n" +
+        SOURCE.replace("Led architecture", "Built architecture"),
+      listing: "Build clinical patient systems.",
+      title: "Frontend Engineer",
+      company: "Health Systems",
+      yearsExperience: 5,
+      level: "aggressive",
+      hiringDomainTerms: ["clinical patient"],
+    });
+    expect(result.invented.map((fact) => fact.kind)).toContain("entry");
+    expect(result.invented.map((fact) => fact.kind)).toContain("leadership");
+    expect(result.invented.map((fact) => fact.kind)).toContain("domain");
+    expect(result.invented.map((fact) => fact.value)).toContain(
+      "engineering director",
+    );
+    expect(result.invented.map((fact) => fact.value)).toContain(
+      "invented employer",
+    );
+  });
+
+  it("keeps a model-flagged stretch separate and ignores lowercase words that resemble listing names", () => {
+    const text = "Built a self-serve workflow.";
+    const value = draft([text]);
+    value.claimChecks = [
+      {
+        contentHash: resumeClaimContentHash(text),
+        verdict: "stretch",
+        reason: "Plausible detail.",
+        evidenceIds: [],
+        fix: null,
+        evidenceKey: null,
+        checkedAt: AT,
+      },
+    ];
+    const result = assessFacts({
+      draft: value,
+      source: SOURCE,
+      listing: "Build systems. Serve customers.",
+      title: "Frontend Engineer",
+      company: "Example",
+      yearsExperience: 5,
+      level: "aggressive",
+    });
+    expect(result.invented).toEqual([]);
+    expect(result.stretches).toEqual([
+      { kind: "model", value: "Plausible detail.", line: text, flagged: true },
     ]);
   });
 

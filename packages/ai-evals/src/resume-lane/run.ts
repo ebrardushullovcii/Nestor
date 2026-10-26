@@ -20,11 +20,12 @@ import {
 import {
   LIGHT_MAX_EDIT,
   flagsLeft,
-  inventedFacts,
+  assessFacts,
   levelShape,
   levelVerdicts,
   type InventedFact,
   type LevelShape,
+  type ResumeStretch,
 } from "./checks";
 import { profileFromResumeText } from "./profile";
 
@@ -40,6 +41,7 @@ export interface ResumeLaneResult {
   level: ResumeLevel;
   error: string | null;
   inventedFacts: InventedFact[];
+  stretches: ResumeStretch[];
   levelProblem: string | null;
   flagsLeft: string[];
   shape: LevelShape;
@@ -141,23 +143,25 @@ export function scoreCase(
 ): ResumeLaneResult[] {
   const { listing, source, profile } = caseInputs(evalCase);
   const scored = written.map((entry) => {
-    const facts = entry.draft
-      ? inventedFacts({
+    const assessment = entry.draft
+      ? assessFacts({
           draft: entry.draft,
+          level: entry.level,
           source,
           listing: listing.description,
           title: listing.title,
           company: listing.company,
           yearsExperience: profile.yearsExperience,
         })
-      : [];
+      : { invented: [], stretches: [] };
+    const facts = assessment.invented;
     const shape = levelShape({
       draft: entry.draft,
       source,
       listing: listing.description,
       title: listing.title,
     });
-    return { entry, facts, shape };
+    return { entry, facts, stretches: assessment.stretches, shape };
   });
   const verdicts = levelVerdicts(
     Object.fromEntries(
@@ -173,7 +177,7 @@ export function scoreCase(
     profile.headline ?? "",
     listing.title,
   );
-  return scored.map(({ entry, facts, shape }) => ({
+  return scored.map(({ entry, facts, stretches, shape }) => ({
     caseId: evalCase.id,
     level: entry.level,
     draft: entry.draft,
@@ -183,6 +187,7 @@ export function scoreCase(
     promptTokens: entry.promptTokens,
     completionTokens: entry.completionTokens,
     inventedFacts: facts,
+    stretches,
     levelProblem: entry.error
       ? `failed: ${entry.error}`
       : (verdicts[entry.level] ?? null),
@@ -344,21 +349,23 @@ export function formatResumeLaneReport(
     "",
     `As named: 0 invented facts at every level, and Original unchanged; Light keeps the headline and edits at most ${pct(LIGHT_MAX_EDIT)} of words; Tailored edits more than Light; Aggressive edits at least as much as Tailored and leads with the role.`,
     "",
-    "| Level | Resumes | Invented facts | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Level | Resumes | Invented facts | Stretches | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const level of RESUME_LEVELS) {
     const rows = results.filter((result) => result.level === level);
     const mid = (pick: (row: ResumeLaneResult) => number) =>
       median(rows.map(pick));
     lines.push(
-      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
+      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.reduce((sum, row) => sum + row.stretches.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
     );
   }
   const written = results.filter((row) => row.level !== "original");
   lines.push(
     "",
     `Median write time over the ${written.length} written resumes: ${median(written.map((row) => row.seconds)).toFixed(1)} s.`,
+    "",
+    "Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer; the writer also checks generated lines with the model.",
     "",
     "## Findings",
     "",
@@ -368,6 +375,10 @@ export function formatResumeLaneReport(
       ...(result.levelProblem ? [result.levelProblem] : []),
       ...result.inventedFacts.map(
         (fact) => `invented ${fact.kind} "${fact.value}" in: ${fact.line}`,
+      ),
+      ...result.stretches.map(
+        (stretch) =>
+          `stretch ${stretch.kind} "${stretch.value}" (${stretch.flagged ? "flagged" : "old recording: no per-line flag"}) in: ${stretch.line}`,
       ),
       ...result.flagsLeft.map((flag) => `flag left: ${flag}`),
     ];

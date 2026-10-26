@@ -101,64 +101,165 @@ export function listingNames(listing: string, title = ""): Set<string> {
 }
 
 export interface InventedFact {
-  kind: "number" | "entry" | "name";
+  kind: "number" | "entry" | "name" | "leadership" | "domain";
   value: string;
   line: string;
 }
 
-/**
- * Claims in the draft that the source resume does not have: numbers, an
- * employer, title or date line it never had, and tools or products the
- * listing names that the person never mentioned. The headline (Aggressive
- * leads with the role applied for) and the listing's company name are not
- * claims; the years of experience the profile computed are evidence.
- */
-export function inventedFacts(input: {
+export interface ResumeStretch {
+  kind: "listing_technology" | "years" | "model";
+  value: string;
+  line: string;
+  /** Old recordings did not keep per-line verdicts; do not claim they did. */
+  flagged: boolean;
+}
+
+type FactInputs = {
   draft: ResumeDraft;
   source: string;
   listing: string;
   title: string;
   company: string;
   yearsExperience: number | null;
-}): InventedFact[] {
+  level?: ResumeLevel;
+  /** Reviewed domain phrases for a case, when the hiring domain differs. */
+  hiringDomainTerms?: readonly string[];
+};
+
+const includesWords = (text: string, value: string) =>
+  ` ${fold(text)} `.includes(` ${fold(value)} `);
+const withNumberWords = (text: string) =>
+  text.replace(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)\b/giu,
+    (word) => NUMBER_WORDS[word.toLowerCase()] ?? word,
+  );
+
+/**
+ * Offline probes for the hard limits, separate from Aggressive's stretches.
+ * Entry identity and numeric literals are mechanical checks; named-technology,
+ * leadership and reviewed domain probes are signals, not a semantic fact judge.
+ * The writer's model checks and a read of the saved drafts cover meaning.
+ */
+export function assessFacts(input: FactInputs): {
+  invented: InventedFact[];
+  stretches: ResumeStretch[];
+} {
   const source = fold(input.source);
   const sourceNumbers = new Set([
-    ...numbersIn(input.source),
-    ...Object.entries(NUMBER_WORDS)
-      .filter(([word]) => new RegExp(`\b${word}\b`, "iu").test(input.source))
-      .map(([, digit]) => digit),
-    ...(input.yearsExperience ? [String(input.yearsExperience)] : []),
+    ...numbersIn(withNumberWords(input.source)),
+    ...(input.yearsExperience === null ? [] : [String(input.yearsExperience)]),
   ]);
-  const names = [...listingNames(input.listing, input.title)].filter(
-    (name) =>
-      !` ${source} `.includes(` ${fold(name)} `) &&
-      !fold(input.company).includes(fold(name)),
+  const sourceYears = [
+    ...withNumberWords(input.source).matchAll(/\b(\d+)\s+years?\b/giu),
+  ].map((m) => Number(m[1]));
+  if (input.yearsExperience !== null) sourceYears.push(input.yearsExperience);
+  const listingYears = new Set(
+    [
+      ...withNumberWords(input.listing).matchAll(/\b(\d+)\s*\+?\s+years?\b/giu),
+    ].map((m) => Number(m[1])),
   );
-  const found: InventedFact[] = [];
+  const listedNames = listingNames(input.listing, input.title);
+  const invented: InventedFact[] = [];
+  const stretches: ResumeStretch[] = [];
+  const checks = new Map(
+    (input.draft.claimChecks ?? []).map((check) => [check.contentHash, check]),
+  );
+  const seen = new Set<string>();
   for (const line of draftLines(input.draft)) {
     if (line.where === "headline") continue;
-    for (const value of numbersIn(line.text))
-      if (!sourceNumbers.has(value))
-        found.push({ kind: "number", value, line: line.text });
+    const check = checks.get(resumeClaimContentHash(line.text));
+    const flagged = check?.verdict === "stretch";
+    const normalized = withNumberWords(line.text);
+    for (const match of normalized.matchAll(new RegExp(NUMBER.source, "gu"))) {
+      const value = match[0].replace(/,/gu, "");
+      if (sourceNumbers.has(value)) continue;
+      const inYears = /^\s+years?\b/iu.test(
+        normalized.slice(match.index + match[0].length),
+      );
+      const rounded =
+        input.level === "aggressive" &&
+        inYears &&
+        listingYears.has(Number(value)) &&
+        sourceYears.some((years) => Number(value) === years + 1);
+      if (rounded)
+        stretches.push({ kind: "years", value, line: line.text, flagged });
+      else invented.push({ kind: "number", value, line: line.text });
+    }
     if (line.where === "entry") {
       const parts = line.text
-        .split(/\s*[-–—|,]\s*/u)
+        .split(/\s*[-��|,]\s*/u)
         .map(fold)
         .filter(Boolean);
       for (const part of parts)
         if (!source.includes(part) && !/^(present|current)$/u.test(part))
-          found.push({ kind: "entry", value: part, line: line.text });
+          invented.push({ kind: "entry", value: part, line: line.text });
+      continue;
     }
-    // A tool keeps its capitals in prose; "self-serve" is not "Serve".
-    const tokens = new Set(line.text.split(/[^A-Za-z0-9+#]+/u));
-    for (const name of names)
+    const names = new Set([
+      ...listedNames,
+      ...listingNames(line.text, input.title),
+    ]);
+    if (line.where === "skills" && /^[A-Z][A-Za-z0-9+#./ -]*$/u.test(line.text))
+      names.add(line.text);
+    for (const name of names) {
       if (
-        tokens.has(name) ||
-        (line.where === "skills" && fold(line.text) === fold(name))
+        [...names].some(
+          (other) =>
+            other !== name &&
+            includesWords(other, name) &&
+            includesWords(line.text, other),
+        )
       )
-        found.push({ kind: "name", value: name, line: line.text });
+        continue;
+      if (
+        (!line.text.split(/[^A-Za-z0-9+#]+/u).includes(name) &&
+          !(line.where === "skills" && fold(line.text) === fold(name))) ||
+        includesWords(input.source, name) ||
+        includesWords(input.title, name)
+      )
+        continue;
+      // Company names in prose are checked as domain transfer, not technologies.
+      if (includesWords(input.company, name)) continue;
+      const key = `${line.text}|${fold(name)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (input.level === "aggressive" && includesWords(input.listing, name))
+        stretches.push({
+          kind: "listing_technology",
+          value: name,
+          line: line.text,
+          flagged,
+        });
+      else invented.push({ kind: "name", value: name, line: line.text });
+    }
+    if (
+      /\b(led|managed|supervised|mentored|leadership)\b/iu.test(line.text) &&
+      !/\b(led|lead|managed|manage|supervised|mentored|coach|trained|leadership)\b/iu.test(
+        input.source,
+      )
+    )
+      invented.push({ kind: "leadership", value: line.text, line: line.text });
+    if (line.where === "bullet" || line.where === "text")
+      for (const term of input.hiringDomainTerms ?? [])
+        if (
+          includesWords(line.text, term) &&
+          !includesWords(input.source, term)
+        )
+          invented.push({ kind: "domain", value: term, line: line.text });
+    if (flagged && !stretches.some((stretch) => stretch.line === line.text))
+      stretches.push({
+        kind: "model",
+        value: check.reason,
+        line: line.text,
+        flagged: true,
+      });
   }
-  return found;
+  return { invented, stretches };
+}
+
+/** Kept for callers that only need hard-limit findings. */
+export function inventedFacts(input: FactInputs): InventedFact[] {
+  return assessFacts(input).invented;
 }
 
 const STOP = new Set(

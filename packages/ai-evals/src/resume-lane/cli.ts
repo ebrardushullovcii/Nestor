@@ -18,8 +18,11 @@ Light, Tailored and Aggressive with the model in .env.local (NESTOR_AI_*),
 through the same writer the app runs. Calls the model; not part of CI.
 
 Per level it reports:
-  invented facts   numbers, employer/title/date lines, and listing tools or products
-                   the source resume does not have (0 is the bar)
+  invented facts   hard limits: employers, titles, dates, degrees, credentials,
+                   certifications, team size/leadership, unevidenced numbers,
+                   technologies absent from evidence AND listing, hiring-domain bleed
+  stretches        Aggressive listing technologies and listed years rounded up by
+                   one are separate (ADR 0018/0041/0051); choosing the level accepts them
   as named         Original unchanged; Light keeps the headline and edits at most
                    25% of words; Tailored edits more than Light; Aggressive edits at
                    least as much as Tailored and leads with the role
@@ -79,7 +82,7 @@ export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
   console.log(`Writing ${cases.length} cases at 4 levels on ${model}.`);
   const results = await runResumeLane(cases, (result) => {
     console.log(
-      `${result.caseId} ${result.level}: ${result.error ? `failed (${result.error})` : `${result.inventedFacts.length} invented, ${result.levelProblem ?? "as named"}, ${result.flagsLeft.length} flags, ${result.seconds.toFixed(1)}s`}`,
+      `${result.caseId} ${result.level}: ${result.error ? `failed (${result.error})` : `${result.inventedFacts.length} invented, ${result.stretches.length} stretches, ${result.levelProblem ?? "as named"}, ${result.flagsLeft.length} flags, ${result.seconds.toFixed(1)}s`}`,
     );
   });
   const report = formatResumeLaneReport(model, results);
