@@ -1,5 +1,3 @@
-import { refreshApprovedApplicationLetter } from "./approved-application-letter";
-import { createReturnToShortlistMethods } from "./application-return-to-shortlist";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -43,7 +41,6 @@ import {
 } from "./apply-submission-handoff";
 import {
   notSentAfterError,
-  notSentAttempt,
   recordPreparedApplicationNotSent,
   sendPreparedApplicationIfAllowed,
 } from "./apply-submission-run-step";
@@ -52,15 +49,10 @@ import {
   ApplyJobResultSchema,
   ApplyRecoveryContextSchema,
   ApplyRunSchema,
-  ApplySubmitApprovalSchema,
-  ApplicationConsentRequestSchema,
   ApplicationAttemptConsentDecisionSchema,
   ApplicationAttemptQuestionSchema,
   ApplicationAttemptSchema,
-  ApplicationArtifactRefSchema,
-  ApplicationQuestionRecordSchema,
   ApplicationRecordSchema,
-  ApplicationReplayCheckpointSchema,
   ApplicationResumeArtifactSchema,
   JobFinderInterviewFollowUpInputSchema,
   isResumeTemplateApplyEligible,
@@ -81,12 +73,9 @@ import { selectApplicationSighting } from "./listing-sightings";
 import { isApprovedTailoredResumeReadyForApply } from "./matching-review-queue";
 import {
   buildApplyCopilotArtifacts,
-  buildSingleJobAutoApplyArtifacts,
-  buildMissingResumeCopilotArtifacts,
   mapExecutionResultToApplyBlockerReason,
   mapExecutionResultToApplyJobState,
   mapExecutionResultToApplyRunState,
-  reconcileApplyRunAfterConfirmedSubmission,
   summarizeApplyJobResultStates,
 } from "./workspace-apply-run-support";
 import {
@@ -101,9 +90,7 @@ import {
 import {
   buildInstructionGuidance,
   mergeEvents,
-  nextJobStatusFromAttempt,
   resolveActiveSourceInstructionArtifact,
-  toApplicationEvents,
 } from "./workspace-helpers";
 import { createUniqueId, uniqueStrings } from "./shared";
 import {
@@ -116,9 +103,7 @@ import {
 } from "./campaign-apply-stop-rules";
 import {
   deriveRecoveredApplyRunCounters,
-  describeUnstartedBatchReason,
   isInterruptedApplyJobState,
-  selectReusableBatchApproval,
 } from "./workspace-apply-run-recovery";
 import { assertResumeProfileRevisionCurrent } from "./workspace-application-resume-support";
 import { createApplicationUserActionResumer } from "./workspace-application-user-action-resumption";
@@ -127,12 +112,10 @@ import {
   handApplicationPageToPersonForAccessStep,
   persistApplicationUserAction,
   retireCancelledApplicationUserActions,
-  terminalizeApplicationAfterPreparedPageLost,
 } from "./workspace-application-user-action";
 import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { resolvePrepareOnlyIntermediateMutationAuthority } from "./prepare-only-intermediate-mutation-authority";
 import {
-  resolveApplicationRecordForJob,
   withApplicationRecordTransition,
 } from "./application-crm";
 import type {
@@ -883,363 +866,15 @@ export function createWorkspaceApplicationMethods(
   // awaits to keep the check atomic against concurrent approvals.
   const activeStagedApplyJobClaims = new Map<string, string>();
 
-  function claimDirectApplyExecution(
-    jobId: string,
-    applicationRecordId: string,
-  ): DirectApplyExecutionClaim {
-    if (activeDirectApplyClaims.has(applicationRecordId)) {
-      throw new Error(
-        "This application is already being prepared. Wait for it to finish before starting it again.",
-      );
-    }
 
-    const claim = {
-      jobId,
-      applicationRecordId,
-      runId: createUniqueId("apply_run"),
-      resultId: createUniqueId("apply_result"),
-      controller: new AbortController(),
-    } satisfies DirectApplyExecutionClaim;
-    activeDirectApplyClaims.set(applicationRecordId, claim);
-    ctx.activeApplyRunAbortControllers.set(claim.runId, claim.controller);
-    return claim;
-  }
 
-  function releaseDirectApplyExecution(claim: DirectApplyExecutionClaim): void {
-    if (activeDirectApplyClaims.get(claim.applicationRecordId) === claim) {
-      activeDirectApplyClaims.delete(claim.applicationRecordId);
-    }
-    if (
-      ctx.activeApplyRunAbortControllers.get(claim.runId) === claim.controller
-    ) {
-      ctx.activeApplyRunAbortControllers.delete(claim.runId);
-    }
-    ctx.activeApplyRunPromises.delete(claim.runId);
-  }
 
-  async function requireApplyActivityEnabled(): Promise<void> {
-    // Preparing an application is an explicit click; it resumes paused
-    // background work rather than failing with "press Resume on Home first".
-    await ctx.resumeActivityForExplicitStart();
-  }
 
-  async function assertDirectApplyExecutionCanContinue(
-    claim: DirectApplyExecutionClaim,
-  ): Promise<void> {
-    if (claim.controller.signal.aborted) {
-      throw new DOMException(
-        "Application preparation was aborted.",
-        "AbortError",
-      );
-    }
-    await requireApplyActivityEnabled();
-    if (claim.controller.signal.aborted) {
-      throw new DOMException(
-        "Application preparation was aborted.",
-        "AbortError",
-      );
-    }
-  }
 
-  async function assertNoOtherRunningApplyForJob(
-    claim: DirectApplyExecutionClaim,
-  ): Promise<void> {
-    const [runs, results] = await Promise.all([
-      ctx.repository.listApplyRuns(),
-      ctx.repository.listApplyJobResults({ jobId: claim.jobId }),
-    ]);
-    const runningRun = runs.find((run) => {
-      if (
-        run.id === claim.runId ||
-        run.state !== "running" ||
-        !run.jobIds.includes(claim.jobId)
-      ) {
-        return false;
-      }
-      const runResults = results.filter((result) => result.runId === run.id);
-      return (
-        runResults.length === 0 ||
-        runResults.some(
-          (result) =>
-            ["planned", "question_capture", "filling", "submitting"].includes(
-              result.state,
-            ) &&
-            (result.applicationRecordId === null ||
-              result.applicationRecordId === claim.applicationRecordId),
-        )
-      );
-    });
-    if (!runningRun) {
-      return;
-    }
 
-    // A run is only really going while this process is still working on it.
-    // One that was left marked running — the app closed, or the last attempt
-    // died without recording anything — is finished here and now, so pressing
-    // Prepare again starts rather than being refused by a ghost.
-    // Only a copilot run is judged this way: it is the one this process drives
-    // itself, so a missing promise really does mean nothing is working on it.
-    // A queued or staged run is driven elsewhere and is left alone.
-    if (
-      runningRun.mode === "copilot" &&
-      !ctx.activeApplyRunPromises.has(runningRun.id)
-    ) {
-      await markStaleApplyRunFailed(runningRun);
-      return;
-    }
 
-    throw new Error(
-      "This application is already being prepared. Wait for it to finish before starting it again.",
-    );
-  }
 
-  /**
-   * Closes a run nothing is working on any more.
-   *
-   * It says what is true — the attempt ended without finishing — rather than
-   * leaving a record that claims to be running forever and a button that
-   * refuses every press after it.
-   */
-  async function markStaleApplyRunFailed(
-    run: ReturnType<typeof ApplyRunSchema.parse>,
-  ): Promise<void> {
-    const completedAt = new Date().toISOString();
-    const detail =
-      "The earlier attempt ended without recording a result, so Job Finder closed it. Nothing was sent. You can start this application again.";
-    await ctx.repository.upsertApplyRun(
-      ApplyRunSchema.parse({
-        ...run,
-        state: "failed",
-        updatedAt: completedAt,
-        completedAt,
-        summary: "Apply copilot preparation did not finish.",
-        detail,
-        pendingJobs: 0,
-        failedJobs: Math.max(1, run.failedJobs),
-      }),
-    );
-    const staleResults = (
-      await ctx.repository.listApplyJobResults({ runId: run.id })
-    ).filter(
-      (result) =>
-        !["submitted", "skipped", "blocked", "failed", "cancelled"].includes(
-          result.state,
-        ),
-    );
-    await Promise.all(
-      staleResults.map((result) =>
-        ctx.repository.upsertApplyJobResult(
-          ApplyJobResultSchema.parse({
-            ...result,
-            state: "failed",
-            updatedAt: completedAt,
-            completedAt,
-            summary: "Application preparation did not finish.",
-            detail,
-          }),
-        ),
-      ),
-    );
-  }
 
-  async function persistDirectApplyRunStart(input: {
-    claim: DirectApplyExecutionClaim;
-    job: ReturnType<typeof SavedJobSchema.parse>;
-    campaignId: string | null;
-    startedAt: string;
-  }): Promise<void> {
-    const run = ApplyRunSchema.parse({
-      id: input.claim.runId,
-      campaignId: input.campaignId,
-      mode: "copilot",
-      state: "running",
-      jobIds: [input.job.id],
-      currentJobId: input.job.id,
-      submitApprovalId: null,
-      createdAt: input.startedAt,
-      updatedAt: input.startedAt,
-      completedAt: null,
-      summary: "Job Finder is filling in this application.",
-      detail:
-        "You can pause or close the app while this runs. Whether it sends the application is the mode you chose in Settings.",
-      totalJobs: 1,
-      pendingJobs: 1,
-      submittedJobs: 0,
-      skippedJobs: 0,
-      blockedJobs: 0,
-      failedJobs: 0,
-    });
-    const result = ApplyJobResultSchema.parse({
-      id: input.claim.resultId,
-      runId: input.claim.runId,
-      jobId: input.job.id,
-      applicationRecordId: input.claim.applicationRecordId,
-      queuePosition: 0,
-      state: "planned",
-      summary: "Apply copilot preparation is starting.",
-      detail:
-        "The browser application flow has not reached a review checkpoint yet.",
-      startedAt: input.startedAt,
-      updatedAt: input.startedAt,
-      completedAt: null,
-      applicationPreparationStartedAt: null,
-      applicationPreparationStartedLocalDate: null,
-      blockerReason: null,
-      blockerSummary: null,
-      pendingConsentRequestCount: 0,
-      artifactCount: 0,
-      latestCheckpointId: null,
-    });
-    await Promise.all([
-      ctx.repository.upsertApplyRun(run),
-      ctx.repository.upsertApplyJobResult(result),
-    ]);
-  }
-
-  async function markDirectApplyRunFailed(
-    claim: DirectApplyExecutionClaim,
-    error: unknown,
-  ): Promise<void> {
-    if (claim.controller.signal.aborted) {
-      // Pause and shutdown own the cancellation transition. Their callers
-      // either cancel this durable run or recover it as failed after waiting.
-      return;
-    }
-    // Activity pause owns the cancellation transition. A direct flow can
-    // observe the persisted pause between its final guard and this failure
-    // handler, before the pause caller reaches the controller abort loop.
-    const activityControl = await ctx.repository.getActivityControl();
-    if (
-      activityControl.paused &&
-      activityControl.pauseBehavior !== "finish_current"
-    ) {
-      return;
-    }
-    const latestRun = (await ctx.repository.listApplyRuns()).find(
-      (run) => run.id === claim.runId,
-    );
-    if (!latestRun || latestRun.state !== "running") {
-      return;
-    }
-    const completedAt = new Date().toISOString();
-    const detail =
-      error instanceof Error
-        ? error.message
-        : "The direct application preparation flow failed before review.";
-    const handedToPerson = isBrowserHandedToPersonError(error);
-    const failedRun = ApplyRunSchema.parse({
-      ...latestRun,
-      state: "failed",
-      updatedAt: completedAt,
-      completedAt,
-      summary: handedToPerson
-        ? "Stopped because you took over the browser."
-        : "Apply copilot preparation failed.",
-      detail: `${detail} No final submit action was taken; the run can be restarted after the failure is reviewed.`,
-      pendingJobs: 0,
-      failedJobs: Math.max(1, latestRun.failedJobs),
-    });
-    const latestResult = (await ctx.repository.listApplyJobResults()).find(
-      (result) => result.id === claim.resultId,
-    );
-    const failedResult =
-      latestResult &&
-      !["submitted", "skipped", "blocked", "failed", "cancelled"].includes(
-        latestResult.state,
-      )
-        ? ApplyJobResultSchema.parse({
-            ...latestResult,
-            state: "failed",
-            updatedAt: completedAt,
-            completedAt,
-            summary: handedToPerson
-              ? PERSON_TOOK_OVER_SUMMARY
-              : "Application preparation failed.",
-            detail: `${detail} No final submit action was taken.`,
-          })
-        : null;
-
-    await Promise.all([
-      ctx.repository.upsertApplyRun(failedRun),
-      ...(failedResult
-        ? [ctx.repository.upsertApplyJobResult(failedResult)]
-        : []),
-    ]);
-  }
-
-  /**
-   * The last word on a run that ended badly.
-   *
-   * Used only when the ordinary failure path could not write its own record:
-   * whatever else is wrong, the run must not be left claiming to be running.
-   */
-  async function forceApplyRunFailed(
-    claim: DirectApplyExecutionClaim,
-  ): Promise<void> {
-    const latestRun = (await ctx.repository.listApplyRuns()).find(
-      (run) => run.id === claim.runId,
-    );
-    if (!latestRun || latestRun.state !== "running") {
-      return;
-    }
-    const completedAt = new Date().toISOString();
-    await ctx.repository.upsertApplyRun(
-      ApplyRunSchema.parse({
-        ...latestRun,
-        state: "failed",
-        updatedAt: completedAt,
-        completedAt,
-        summary: "Apply copilot preparation failed.",
-        detail:
-          "Job Finder stopped working on this application and could not say why. Nothing was sent. You can start it again.",
-        pendingJobs: 0,
-        failedJobs: Math.max(1, latestRun.failedJobs),
-      }),
-    );
-  }
-
-  function trackDirectApplyExecution<T>(
-    claim: DirectApplyExecutionClaim,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    const operationPromise = operation()
-      .catch(async (error: unknown) => {
-        // Whatever this was, it is written down before anything else happens.
-        // A failure nobody can see is how a run ends up marked running for
-        // ever with a button that refuses every press after it.
-        console.error(
-          "[apply]",
-          error instanceof Error ? (error.stack ?? error.message) : error,
-        );
-        try {
-          await markDirectApplyRunFailed(claim, error);
-        } catch (markError) {
-          console.error(
-            "[apply] could not record the failure",
-            markError instanceof Error
-              ? (markError.stack ?? markError.message)
-              : markError,
-          );
-          await forceApplyRunFailed(claim).catch(() => undefined);
-        }
-        throw error;
-      })
-      .finally(async () => {
-        try {
-          await releaseFinishedApplicationPages({ ...ctx, runId: claim.runId });
-        } finally {
-          releaseDirectApplyExecution(claim);
-        }
-      });
-    ctx.activeApplyRunPromises.set(
-      claim.runId,
-      operationPromise.then(
-        () => undefined,
-        () => undefined,
-      ),
-    );
-    return operationPromise;
-  }
 
   async function withApplyRunTransition<T>(
     runId: string,
@@ -1265,12 +900,6 @@ export function createWorkspaceApplicationMethods(
     }
   }
 
-  function createApplyAbortedError(): Error {
-    return new DOMException(
-      "The apply run was cancelled before its results were saved.",
-      "AbortError",
-    );
-  }
 
   // Lock ordering: run, CRM, consent, and request transitions are acquired
   // first; this per-job application-record tail is only ever acquired inside
@@ -1297,22 +926,6 @@ export function createWorkspaceApplicationMethods(
     );
   }
 
-  async function assertDirectApplyTerminalTransitionIsOpen(
-    claim: DirectApplyExecutionClaim,
-  ): Promise<void> {
-    const latestRun = (await ctx.repository.listApplyRuns()).find(
-      (entry) => entry.id === claim.runId,
-    );
-    const activityControl = await ctx.repository.getActivityControl();
-    if (
-      claim.controller.signal.aborted ||
-      (activityControl.paused &&
-        activityControl.pauseBehavior !== "finish_current") ||
-      latestRun?.state !== "running"
-    ) {
-      throw createApplyAbortedError();
-    }
-  }
 
   const resumeDraftTransitionTails = new Map<string, Promise<void>>();
 
@@ -1341,30 +954,7 @@ export function createWorkspaceApplicationMethods(
   // Assistant edits queue on the same per-job transition tail.
   ctx.withResumeDraftTransition = withResumeDraftTransition;
 
-  const consentResolutionTails = new Map<string, Promise<void>>();
 
-  async function withConsentResolution<T>(
-    requestId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    const previous = consentResolutionTails.get(requestId) ?? Promise.resolve();
-    let releaseCurrent!: () => void;
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve;
-    });
-    const tail = previous.catch(() => undefined).then(() => current);
-    consentResolutionTails.set(requestId, tail);
-
-    await previous.catch(() => undefined);
-    try {
-      return await operation();
-    } finally {
-      releaseCurrent();
-      if (consentResolutionTails.get(requestId) === tail) {
-        consentResolutionTails.delete(requestId);
-      }
-    }
-  }
 
   function validateApplyTemplate(input: {
     templateId: string;
@@ -1765,34 +1355,6 @@ export function createWorkspaceApplicationMethods(
     );
   }
 
-  function mergeMissingResumeApplicationRecord(input: {
-    applicationRecord: ReturnType<typeof ApplicationRecordSchema.parse>;
-    existingRecord: ReturnType<typeof ApplicationRecordSchema.parse> | null;
-  }) {
-    if (!input.existingRecord) {
-      return input.applicationRecord;
-    }
-
-    return ApplicationRecordSchema.parse({
-      ...input.existingRecord,
-      ...input.applicationRecord,
-      id: input.existingRecord.id,
-      status: input.existingRecord.status,
-      lastAttemptState:
-        input.applicationRecord.latestBlocker?.code === "missing_resume"
-          ? input.existingRecord.lastAttemptState
-          : input.applicationRecord.lastAttemptState,
-      questionSummary: input.applicationRecord.questionSummary,
-      latestBlocker: input.applicationRecord.latestBlocker,
-      consentSummary: input.applicationRecord.consentSummary,
-      replaySummary: input.applicationRecord.replaySummary,
-      crm: input.existingRecord.crm,
-      events: mergeEvents(
-        input.existingRecord.events,
-        input.applicationRecord.events,
-      ),
-    });
-  }
 
   function buildApplyVisualExecutionOptions(input: {
     enabled: boolean;
@@ -3153,39 +2715,6 @@ export function createWorkspaceApplicationMethods(
     }
   }
 
-  /**
-   * A new attempt for a job replaces an older one-job run that was only
-   * waiting on the person for that job: its hand-off is superseded, so left
-   * paused it read as a safety pause that could never carry on.
-   */
-  async function closeReplacedSingleJobRuns(
-    jobId: string,
-    newRunId: string,
-  ): Promise<void> {
-    const replaced = (await ctx.repository.listApplyRuns()).filter(
-      (run) =>
-        run.id !== newRunId &&
-        run.mode !== "queue_auto" &&
-        run.jobIds.length === 1 &&
-        run.jobIds[0] === jobId &&
-        (run.state === "paused_for_user_review" ||
-          run.state === "paused_for_consent"),
-    );
-    const at = new Date().toISOString();
-    for (const run of replaced) {
-      await ctx.repository.upsertApplyRun(
-        ApplyRunSchema.parse({
-          ...run,
-          state: "cancelled",
-          updatedAt: at,
-          completedAt: at,
-          summary: "Replaced by a newer attempt for this job.",
-          detail:
-            "A later attempt for this application took over; nothing more happens on this one.",
-        }),
-      );
-    }
-  }
 
   /**
    * The person stepped into or paused the browser. Every later job would
@@ -3312,65 +2841,6 @@ export function createWorkspaceApplicationMethods(
     );
   }
 
-  /**
-   * Closes a staged batch that never began. The run row is written before
-   * execution starts, so a refusal in between would otherwise leave a paused
-   * run nobody owns; the paused card would keep offering the same button and
-   * every press would leave another one behind. The run and its untouched
-   * planned rows end with one plain sentence saying why nothing was opened.
-   */
-  async function closeUnstartedBatchRun(
-    runId: string,
-    error: unknown,
-  ): Promise<void> {
-    const reason = describeUnstartedBatchReason(
-      error instanceof Error ? error.message : null,
-    );
-    const now = new Date().toISOString();
-    const [runs, results] = await Promise.all([
-      ctx.repository.listApplyRuns({ id: runId }),
-      ctx.repository.listApplyJobResults({ runId }),
-    ]);
-    const run = runs[0] ?? null;
-    if (!run || run.state !== "paused_for_user_review") {
-      return;
-    }
-    const untouched = results.filter(
-      (result) =>
-        result.state === "planned" && !result.applicationPreparationStartedAt,
-    );
-    await Promise.all(
-      untouched.map((result) =>
-        ctx.repository.upsertApplyJobResult(
-          ApplyJobResultSchema.parse({
-            ...result,
-            state: "skipped",
-            updatedAt: now,
-            completedAt: now,
-            summary: "Not started.",
-            detail: reason,
-          }),
-        ),
-      ),
-    );
-    const nextResults = results.map((result) =>
-      untouched.some((candidate) => candidate.id === result.id)
-        ? { ...result, state: "skipped" as const }
-        : result,
-    );
-    await ctx.repository.upsertApplyRun(
-      ApplyRunSchema.parse({
-        ...run,
-        state: "failed",
-        updatedAt: now,
-        completedAt: now,
-        summary: reason,
-        detail:
-          "Nothing was opened, filled or submitted for these jobs. Your approval for this batch is still on record, so you can try again without approving again.",
-        ...deriveRecoveredApplyRunCounters(nextResults, now),
-      }),
-    );
-  }
 
   async function executeSafeApplyRun(
     input: {

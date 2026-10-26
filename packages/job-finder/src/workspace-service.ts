@@ -4,12 +4,9 @@ import type {
   OpenBrowserSessionOptions,
 } from "@nestor/browser-runtime";
 import type {
-  ApplicationAutomationMode,
   ApplyJobResult,
-  ApplyRun,
   JobFinderDiscoveryState,
   JobFinderWorkspaceSnapshot,
-  JobSearchCampaign,
   JobSearchPreferences,
   JobSource,
   SavedJob,
@@ -17,32 +14,23 @@ import type {
   SourceDebugRunRecord,
 } from "@nestor/contracts";
 import {
-  ACTIVITY_PAUSED_MESSAGE,
-  ApplicationRecordSchema,
   JobFinderActivityControlSchema,
   jobSourceValues,
   SavedJobSchema,
   SetJobFinderActivityControlInputSchema,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
-import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   localDateKey,
-  MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
 } from "./internal/application-preparation-capacity";
-import {
-  ensureCampaignState,
-} from "./internal/campaign-dashboard";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
-import { buildDiscoveryJobs } from "./internal/matching-review-queue";
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
 import {
   buildStaleResumeDraft,
   hasResumeAffectingJobChange,
 } from "./internal/resume-workspace-staleness";
-import { uniqueStrings } from "./internal/shared";
 import { createWorkspaceApplicationMethods } from "./internal/workspace-application-methods";
 import {
   isSafelyParkedApplyQueue,
@@ -75,7 +63,6 @@ import { createWorkspaceSourceDebugMethods } from "./internal/workspace-source-d
 import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
   createWorkspaceUserActionMethods,
-  isWorkspaceActivityPaused,
 } from "./internal/workspace-user-action-methods";
 
 const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
@@ -758,23 +745,6 @@ export function createJobFinderWorkspaceService(
     }
   }
 
-  async function resumeVerifyingUserActionsAfterCommit(): Promise<void> {
-    // A grouped apply commits verifying request transitions after an earlier
-    // snapshot may already have completed a recovery run, so the cached
-    // recovery promise must not suppress this fresh resume. Concurrent
-    // callers share this single in-flight recovery run, and a crash between
-    // the grouped commit and this resume still recovers on the next restart
-    // because the recovery promise is only ever held in memory.
-    const recovery = userActionMethods.resumeVerifyingUserActions();
-    userActionRecoveryPromise = recovery;
-    try {
-      await recovery;
-    } finally {
-      if (userActionRecoveryPromise === recovery) {
-        userActionRecoveryPromise = null;
-      }
-    }
-  }
 
   async function readDisplayProjection() {
     return (
@@ -851,136 +821,11 @@ export function createJobFinderWorkspaceService(
     await onExplicitUserStart?.();
   }
 
-  /**
-   * Application work is the exception: the global pause is the person's brake
-   * on anything that fills in or sends a form, so a row's Try again or an
-   * Apply press refuses instead of quietly lifting it. Continue on Home (or in
-   * the header) is the one way back.
-   */
-  async function requireApplicationActivityNotPaused(): Promise<void> {
-    if (await isWorkspaceActivityPaused(repository)) {
-      throw new Error(ACTIVITY_PAUSED_MESSAGE);
-    }
-    await onExplicitUserStart?.();
-  }
 
-  async function resolvePreparationCampaign(
-    run: ApplyRun | null,
-  ): Promise<JobSearchCampaign | null> {
-    let state = await repository.getCampaignState();
-    if (!state) {
-      // Same serialized missing-state bootstrap as scoped discovery: re-read
-      // under one campaign transition and create only if still absent.
-      state = await context.withCampaignTransition(async () => {
-        const latestState = await repository.getCampaignState();
-        if (latestState) return latestState;
-        return ensureCampaignState({
-          repository,
-          searchPreferences: await repository.getSearchPreferences(),
-        });
-      });
-    }
-    if (run?.campaignId) {
-      const capturedCampaign = state.campaigns.find(
-        (candidate) => candidate.id === run.campaignId,
-      );
-      if (!capturedCampaign) {
-        throw new Error(
-          "The campaign captured by this apply run is no longer available. Restage the run from a current campaign before continuing.",
-        );
-      }
-      return capturedCampaign;
-    }
-    return (
-      state.campaigns.find(
-        (candidate) => candidate.id === state.activeCampaignId,
-      ) ?? null
-    );
-  }
 
-  function assertCampaignPreparationScope(
-    campaign: JobSearchCampaign,
-    jobIds: readonly string[],
-  ): void {
-    const uniqueJobIds = uniqueStrings(jobIds);
-    const unscopedJobId = uniqueJobIds.find(
-      (jobId) => !campaign.jobIds.includes(jobId),
-    );
-    if (unscopedJobId) {
-      throw new Error(
-        "That job is not retained in the active campaign. Select its campaign before preparing an application.",
-      );
-    }
-  }
 
-  async function requireEmployerApplicationCapacity(
-    jobIds: readonly string[],
-    run: ApplyRun | null = null,
-  ): Promise<void> {
-    const scopedJobIds = run?.jobIds ?? jobIds;
-    if (
-      uniqueStrings(scopedJobIds).length > MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN
-    ) {
-      throw new Error(
-        `Employer-application runs are limited to ${MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN} unique jobs.`,
-      );
-    }
-    const campaign = await resolvePreparationCampaign(run);
-    if (campaign) {
-      assertCampaignPreparationScope(campaign, scopedJobIds);
-    }
-  }
 
-  /**
-   * The one gate sequence every application preparation entry point shares:
-   * global activity, campaign lineage scope, fixed global capacity, and
-   * safeguard blockers. Entry points must delegate here instead of assembling
-   * their own subset so no route can skip a gate the others enforce.
-   */
-  async function requireApplicationPreparationGuards(
-    jobIds: readonly string[],
-    run: ApplyRun | null = null,
-  ): Promise<void> {
-    await requireApplicationActivityNotPaused();
-    await requireEmployerApplicationCapacity(jobIds, run);
-  }
 
-  async function withApplicationPreparationReservation<T>(
-    resolveScope: () =>
-      | {
-          jobIds: readonly string[];
-          run: ApplyRun | null;
-        }
-      | Promise<{
-          jobIds: readonly string[];
-          run: ApplyRun | null;
-        }>,
-    operation: (token: ApplicationPreparationCapacityToken) => Promise<T>,
-  ): Promise<T> {
-    const token = await withPreparationCapacityTransition(
-      repository,
-      async (capacityState) => {
-        const scope = await resolveScope();
-        const localDate = localDateKey(new Date());
-        await requireApplicationPreparationGuards(scope.jobIds, scope.run);
-        const created = {
-          localDate,
-          remainingJobs: uniqueStrings(scope.jobIds).length,
-          jobIds: uniqueStrings(scope.jobIds),
-        } satisfies ApplicationPreparationCapacityToken;
-        capacityState.tokens.add(created);
-        return created;
-      },
-    );
-
-    try {
-      return await operation(token);
-    } finally {
-      await withPreparationCapacityTransition(repository, (state) => {
-        state.tokens.delete(token);
-      });
-    }
-  }
 
   async function markApplicationPreparationStarted(
     input: { resultId: string; runId: string; jobId: string },
@@ -1020,54 +865,7 @@ export function createJobFinderWorkspaceService(
     });
   }
 
-  async function resolveApplicationStartRecordId(
-    jobId: string,
-    applicationRecordId?: string | null,
-  ): Promise<string | undefined> {
-    if (applicationRecordId !== null) {
-      return applicationRecordId;
-    }
 
-    const job = (await repository.listSavedJobs()).find(
-      (entry) => entry.id === jobId,
-    );
-    if (!job) {
-      throw new Error(
-        `Unable to create an application record for unknown job '${jobId}'.`,
-      );
-    }
-
-    const now = new Date().toISOString();
-    const record = ApplicationRecordSchema.parse({
-      id: `application_${randomUUID()}`,
-      jobId,
-      title: job.title,
-      company: job.company,
-      status: job.status,
-      lastActionLabel: "New application record created for safe preparation.",
-      nextActionLabel: "Prepare the application when you are ready.",
-      lastUpdatedAt: now,
-    });
-    await repository.upsertApplicationRecord(record);
-    return record.id;
-  }
-
-  /**
-   * Guards approving (and therefore executing) an existing staged or paused
-   * run with exactly the gates a fresh preparation start faces. Only jobs
-   * that have not begun yet count as new consumption; jobs already prepared
-   * inside this run lineage are already reflected in today's quota through
-   * their result rows.
-   */
-  async function listPendingApplyRunJobIds(run: ApplyRun): Promise<string[]> {
-    const results = await repository.listApplyJobResults({ runId: run.id });
-    return uniqueStrings(run.jobIds).filter((jobId) => {
-      const result = results.find((candidate) => candidate.jobId === jobId);
-      return (
-        result?.state === "planned" && !result.applicationPreparationStartedAt
-      );
-    });
-  }
 
   async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,
