@@ -14,7 +14,7 @@ test("Settings remote policy reaches the legacy model context and both cache fin
   const on = withSettingsFitBehavior(seed.searchPreferences, seed.settings);
   const off = withSettingsFitBehavior(seed.searchPreferences, {
     aiBehavior: {
-      ...seed.settings.aiBehavior,
+      ...AiBehaviorPreferenceSchema.parse(seed.settings.aiBehavior ?? {}),
       jobSearch: {
         selectivity: "best_matches",
         remoteCountsAsAnyLocation: false,
@@ -87,7 +87,7 @@ test("explicit search selectivity and the Settings default reach hard-criteria c
       { ...seed.searchPreferences, searchSelectivity: undefined },
       {
         aiBehavior: {
-          ...seed.settings.aiBehavior,
+          ...AiBehaviorPreferenceSchema.parse(seed.settings.aiBehavior ?? {}),
           jobSearch: {
             selectivity: "wide_net",
             remoteCountsAsAnyLocation: true,
