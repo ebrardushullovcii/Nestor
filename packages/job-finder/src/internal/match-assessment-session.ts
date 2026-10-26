@@ -98,8 +98,10 @@ export function createMatchAssessmentContextFingerprint(
         discovery: {
           remoteCountsAsAnyLocation:
             searchPreferences.discovery.remoteCountsAsAnyLocation !== false,
-          collectOnlyHardCriteriaMatches:
-            searchPreferences.discovery.collectOnlyHardCriteriaMatches ?? false,
+          ...(searchPreferences.discovery.collectOnlyHardCriteriaMatches ===
+          true
+            ? { collectOnlyHardCriteriaMatches: true }
+            : {}),
         },
       },
     },

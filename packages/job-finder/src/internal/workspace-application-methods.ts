@@ -1,7 +1,6 @@
 import { readWorkspaceApplicationAnswers } from "./workspace-application-answer-execution";
 import { withSettingsFitBehavior } from "./fit-search-behavior";
 import { jobSiteTarget } from "@nestor/contracts";
-import { withPlanAssessment } from "./plan-assessment";
 import {
   getAiProviderAccessFailure,
   isAiServiceBusy,
@@ -623,14 +622,11 @@ export function createWorkspaceApplicationMethods(
       if (!options.force && !alreadyRead && !jobNeedsListingDetail(job)) {
         return;
       }
-      const [profile, profilePreferences, campaignState, settings] =
-        await Promise.all([
-          ctx.repository.getProfile(),
-          ctx.repository.getSearchPreferences(),
-          ctx.repository.getCampaignState(),
-          ctx.repository.getSettings(),
-        ]);
-      const assessmentPlanId = campaignState?.activeCampaignId ?? null;
+      const [profile, profilePreferences, settings] = await Promise.all([
+        ctx.repository.getProfile(),
+        ctx.repository.getSearchPreferences(),
+        ctx.repository.getSettings(),
+      ]);
       const searchPreferences = enrichSearchPreferencesFromProfile(
         withSettingsFitBehavior(profilePreferences, settings),
         profile,
@@ -670,7 +666,7 @@ export function createWorkspaceApplicationMethods(
           updateJobIds: [jobId],
           update: (current) =>
             current.id === jobId && current.description === job.description
-              ? withPlanAssessment(current, assessmentPlanId, matchAssessment)
+              ? { ...current, matchAssessment }
               : current,
         });
         return;
@@ -744,14 +740,7 @@ export function createWorkspaceApplicationMethods(
               detailQuality: next.detailQuality,
               listingDetailFetch: next.listingDetailFetch,
               listingDetailCapture: next.listingDetailCapture,
-              planAssessments: withPlanAssessment(
-                current,
-                assessmentPlanId,
-                next.matchAssessment,
-              ).planAssessments,
-              matchAssessment: assessmentPlanId
-                ? current.matchAssessment
-                : next.matchAssessment,
+              matchAssessment: next.matchAssessment,
             }
           : current;
       if (!listingReadCurrent(generation)) return;

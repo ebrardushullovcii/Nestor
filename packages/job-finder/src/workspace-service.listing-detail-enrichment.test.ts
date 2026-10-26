@@ -148,6 +148,10 @@ test("Judge fit reads the current Settings policy and cannot reuse an opposite-p
     (row) => row.id === job.id,
   )!.matchAssessment;
   expect(off.score).toBe(82);
+  expect(
+    (await repository.listSavedJobs()).find((row) => row.id === job.id)
+      ?.planAssessments ?? {},
+  ).toEqual(job.planAssessments ?? {});
   expect(off.judgment?.preferences).toBe("conflict");
   expect(off.judgment?.contextFingerprint).not.toBe(
     on.judgment?.contextFingerprint,

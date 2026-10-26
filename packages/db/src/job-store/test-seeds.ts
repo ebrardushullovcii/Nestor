@@ -1,4 +1,5 @@
 import type { JobStore } from "./job-store";
+import { createProfileStore } from "./profile-store";
 
 /** Synthetic preconditions for the isolated desktop test API; no application is sent. */
 export function seedTrackerDemo(store: JobStore, ids: number[]) {
@@ -26,6 +27,8 @@ export function seedTrackerDemo(store: JobStore, ids: number[]) {
  * isolated desktop test API.
  */
 export function approveOriginalResumesForTests(store: JobStore, ids: number[]) {
+  // These are fresh approvals, made after the one-time retired-facts guard.
+  createProfileStore(store);
   store.transaction(() => {
     const now = Date.now();
     for (const id of ids)

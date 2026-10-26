@@ -1,5 +1,6 @@
 import { jobSiteTarget, type AddBrowserJobResult } from "@nestor/contracts";
-import { withPlanAssessment } from "./plan-assessment";
+import { withSettingsFitBehavior } from "./fit-search-behavior";
+import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import { createMatchAssessmentAsync } from "./matching";
 import {
   listingPageText,
@@ -39,12 +40,11 @@ export async function addJobFromBrowserPage(
   });
   const jobId = saved.savedJobIds[0];
   if (!jobId) throw new Error("This job could not be saved. Try again.");
-  const [profile, preferences, campaignState] = await Promise.all([
+  const [profile, preferences, settings] = await Promise.all([
     ctx.repository.getProfile(),
     ctx.repository.getSearchPreferences(),
-    ctx.repository.getCampaignState(),
+    ctx.repository.getSettings(),
   ]);
-  const activeId = await ctx.getActiveCampaignId();
   const source = (ctx.jobSites?.enabled().map(jobSiteTarget) ?? [])
     .filter((source) => {
       const start = new URL(source.startingUrl);
@@ -80,21 +80,15 @@ export async function addJobFromBrowserPage(
       const matchAssessment = await createMatchAssessmentAsync(
         ctx.aiClient,
         profile,
-        campaignState?.campaigns.find(
-          (plan) => plan.id === campaignState.activeCampaignId,
-        )?.searchPreferences ?? preferences,
+        enrichSearchPreferencesFromProfile(
+          withSettingsFitBehavior(preferences, settings),
+          profile,
+        ),
         posting,
       );
       await ctx.repository.commitSavedJobDelta({
         updateJobIds: [jobId],
-        update: (job) =>
-          job.id === jobId
-            ? withPlanAssessment(
-                job,
-                campaignState?.activeCampaignId ?? null,
-                matchAssessment,
-              )
-            : job,
+        update: (job) => (job.id === jobId ? { ...job, matchAssessment } : job),
       });
     } catch {
       /* Leave the saved job unjudged when the model is unavailable. */
@@ -106,8 +100,6 @@ export async function addJobFromBrowserPage(
     jobId,
     title: posting.title,
     company: posting.company,
-    planName:
-      campaignState?.campaigns.find((plan) => plan.id === activeId)?.name ??
-      null,
+    planName: null,
   };
 }
