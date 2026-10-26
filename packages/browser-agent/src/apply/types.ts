@@ -17,6 +17,7 @@ import type {
   CandidateAssetKind,
   CandidateReusableAnswer,
   JobSearchPreferences,
+  RawApplyUpload,
 } from "@nestor/contracts";
 
 /**
@@ -77,6 +78,8 @@ export interface ApplyFormControl {
   selectedOptionLabel: string;
   invalid: boolean;
   validationMessage: string;
+  /** What a file input's own field shows about its upload, when the page said. */
+  upload?: RawApplyUpload;
   /** What the question is about, so an answer can be sourced for it. */
   questionKind: ApplicationQuestionKind;
   /** Model reading bound to the observed instructions and current source catalog. */
@@ -515,6 +518,14 @@ export interface ApplyAgentConfig {
       | "repeatedAtDifferentStep"
     >[],
   ) => Promise<readonly CandidateReusableAnswer[]>;
+  /**
+   * The file fields the person said are attached on the page they held, for
+   * this attempt only. Settles page and field text about those uploads; a
+   * server refusal still counts.
+   */
+  uploadsConfirmedByPerson?: readonly string[];
+  /** How long an upload may stay in progress before the person gets it. */
+  uploadWaitMs?: number;
   /** The guard and worker checks for this page. Absent only in tests. */
   safety?: ApplySafetyHooks;
   /** Writes and renders the letter this application sends, when it needs one. */

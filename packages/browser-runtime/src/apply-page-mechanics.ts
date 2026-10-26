@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { choosePageOption } from "./choose-page-option";
 import type {
   ApplyBlockedAttempt,
@@ -12,12 +13,18 @@ import type {
   ApplyWriteResult,
   RawApplyAction,
   RawApplyControl,
+  RawApplyUpload,
   RawApplyLink,
   RawApplyPage,
 } from "@nestor/contracts";
 import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { readPageLinkedText } from "./page-linked-text";
+import {
+  rememberAttachedFile,
+  watchAttachmentUploads,
+  withAttachmentUploadOutcomes,
+} from "./attachment-upload-ledger";
 
 import {
   closePrepareOnlyAuthorizedFormActionWindow,
@@ -77,11 +84,12 @@ async function settlePage(page: Page, timeout = 4_000): Promise<void> {
 }
 
 export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+  watchAttachmentUploads(page);
   await settlePage(page);
   try {
-    return await includeChildFrameContent(
+    return withAttachmentUploadOutcomes(
       page,
-      await readRawApplyPageOnce(page),
+      await includeChildFrameContent(page, await readRawApplyPageOnce(page)),
     );
   } catch (error) {
     if (!isPageReplacedError(error)) {
@@ -94,9 +102,9 @@ export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
   // read that: a second failure is genuinely the page's, and is said plainly.
   await settlePage(page, 8_000);
   try {
-    return await includeChildFrameContent(
+    return withAttachmentUploadOutcomes(
       page,
-      await readRawApplyPageOnce(page),
+      await includeChildFrameContent(page, await readRawApplyPageOnce(page)),
     );
   } catch (error) {
     throw new Error(describeBrowserError(error, "The page could not be read."));
@@ -216,6 +224,61 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             return `${prefix}r${rootIndex}${
               form ? `form${forms.indexOf(form)}` : "root"
             }`;
+          };
+          // What a file input's own field shows about its upload: the site's
+          // message for it, the chip with the chosen name, or the browser's
+          // own widget. Help text further away is never read as a failure.
+          const readUpload = (input: HTMLInputElement): RawApplyUpload => {
+            const rendered = (node: Element | null): node is HTMLElement =>
+              node instanceof HTMLElement && node.getClientRects().length > 0;
+            const described = ["aria-describedby", "aria-errormessage"]
+              .flatMap((name) => (input.getAttribute(name) ?? "").split(/\s+/u))
+              .filter(Boolean)
+              .map((id) => document.getElementById(id))
+              .filter(rendered)
+              .map((node) => node.innerText.trim())
+              .filter(Boolean)
+              .join("\n");
+            let box: HTMLElement | null = null;
+            for (
+              let node = input.parentElement, depth = 0;
+              node && depth < 6;
+              node = node.parentElement, depth += 1
+            ) {
+              const other = Array.from(
+                node.querySelectorAll("input, textarea, select"),
+              ).some(
+                (field) =>
+                  field !== input &&
+                  !(
+                    field instanceof HTMLInputElement && field.type === "hidden"
+                  ),
+              );
+              if (other) break;
+              box = node;
+            }
+            const style = window.getComputedStyle(input);
+            const rect = input.getBoundingClientRect();
+            return {
+              described: described.slice(0, 500),
+              nearby: (box?.innerText ?? "")
+                .replace(/[ \t]+/gu, " ")
+                .replace(/\s*\n\s*/gu, "\n")
+                .trim()
+                .slice(0, 600),
+              shown:
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                Number(style.opacity) > 0.1 &&
+                rect.width >= 40 &&
+                rect.height >= 10,
+              ...(input.files?.[0]
+                ? {
+                    fileName: input.files[0].name,
+                    fileSize: input.files[0].size,
+                  }
+                : {}),
+            };
           };
           return elements.map((element, index) => {
             const html = element as HTMLElement;
@@ -363,6 +426,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 select?.selectedOptions.item(0)?.label.trim() ??
                 element.getAttribute("aria-valuetext")?.trim() ??
                 "",
+              ...(input?.type === "file" ? { upload: readUpload(input) } : {}),
             };
           });
         }, `f${frameIndex}`),
@@ -713,6 +777,56 @@ export function collectApplyDocumentSnapshot(
       return `r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
     };
 
+    // What a file input's own field shows about its upload: the site's
+    // message for it, the chip with the chosen name, or the browser's
+    // own widget. Help text further away is never read as a failure.
+    const readUpload = (input: HTMLInputElement): RawApplyUpload => {
+      const rendered = (node: Element | null): node is HTMLElement =>
+        node instanceof HTMLElement && node.getClientRects().length > 0;
+      const described = ["aria-describedby", "aria-errormessage"]
+        .flatMap((name) => (input.getAttribute(name) ?? "").split(/\s+/u))
+        .filter(Boolean)
+        .map((id) => document.getElementById(id))
+        .filter(rendered)
+        .map((node) => node.innerText.trim())
+        .filter(Boolean)
+        .join("\n");
+      let box: HTMLElement | null = null;
+      for (
+        let node = input.parentElement, depth = 0;
+        node && depth < 6;
+        node = node.parentElement, depth += 1
+      ) {
+        const other = Array.from(
+          node.querySelectorAll("input, textarea, select"),
+        ).some(
+          (field) =>
+            field !== input &&
+            !(field instanceof HTMLInputElement && field.type === "hidden"),
+        );
+        if (other) break;
+        box = node;
+      }
+      const style = window.getComputedStyle(input);
+      const rect = input.getBoundingClientRect();
+      return {
+        described: described.slice(0, 500),
+        nearby: (box?.innerText ?? "")
+          .replace(/[ \t]+/gu, " ")
+          .replace(/\s*\n\s*/gu, "\n")
+          .trim()
+          .slice(0, 600),
+        shown:
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity) > 0.1 &&
+          rect.width >= 40 &&
+          rect.height >= 10,
+        ...(input.files?.[0]
+          ? { fileName: input.files[0].name, fileSize: input.files[0].size }
+          : {}),
+      };
+    };
     return elements.map((element, index) => {
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
@@ -804,6 +918,7 @@ export function collectApplyDocumentSnapshot(
           select?.selectedOptions.item(0)?.label.trim() ??
           element.getAttribute("aria-valuetext")?.trim() ??
           "",
+        ...(input?.type === "file" ? { upload: readUpload(input) } : {}),
       };
     });
   })(matching(selectors.controls));
@@ -1442,6 +1557,8 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
 export function createPlaywrightApplyPageMechanics(
   page: Page,
 ): ApplyRawPageHands {
+  // Before any file is attached, so the request that carries it is seen.
+  watchAttachmentUploads(page);
   return {
     readPage: () => readRawApplyPage(page),
     readLinkedText: () => readPageLinkedText(page),
@@ -1636,6 +1753,18 @@ export function createPlaywrightApplyPageMechanics(
           },
           { timeout: 15_000 },
         );
+        rememberAttachedFile(page, ref, {
+          field: await locator
+            .evaluate((element) =>
+              element instanceof HTMLInputElement
+                ? element.name || element.id || null
+                : null,
+            )
+            .catch(() => null),
+          name: file.name,
+          size: file.bytes.byteLength,
+          sha256: createHash("sha256").update(file.bytes).digest("hex"),
+        });
         return { ok: true, observedValue: file.name };
       } catch (error) {
         return {

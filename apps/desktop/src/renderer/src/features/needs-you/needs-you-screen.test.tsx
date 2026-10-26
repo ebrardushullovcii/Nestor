@@ -130,7 +130,7 @@ function ask(
   index: number,
   key = "notice",
   prompt = "What is your notice period?",
-  input: "text" | "boolean" = "text",
+  input: "text" | "boolean" | "file" = "text",
 ) {
   const row = claimed[index]!;
   const result = applications.needsYou.request({
@@ -432,6 +432,80 @@ it("keeps unsaved typing when a new chat navigation requests another question", 
   expect(
     screen.getByRole("searchbox", { name: "Filter Needs you" }),
   ).toHaveProperty("value", "");
+});
+
+it("opens a failed-upload form from its file task without resolving or answering it", async () => {
+  const task = ask(0, "upload-repair", "Resume — upload failed", "file");
+  const openApplication = vi.fn(() => Promise.resolve(true));
+  Object.assign(window.nestor, { jobFinder: { openApplication } });
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Open application",
+    }),
+  );
+  await waitFor(() =>
+    expect(openApplication).toHaveBeenCalledWith({ id: claimed[0]!.id }),
+  );
+  // A refused upload belongs to this one application: nothing offers to
+  // save it for other forms.
+  expect(screen.queryByText("Save this answer for next time")).toBeNull();
+  expect(
+    screen.getByText(
+      "This is for this application only. Nothing is saved for other forms.",
+    ),
+  ).toBeTruthy();
+  expect(applications.needsYou.details(task.id)?.task.id).toBe(task.id);
+  expect(applications.getApplication(claimed[0]!.id)?.state).toBe("needs_you");
+});
+
+it("hands Fill's Next to the person: open the form, press it, and continue", async () => {
+  const task = ask(
+    0,
+    "step_handover",
+    'Press "Save and continue" on the site, then continue',
+  );
+  const openApplication = vi.fn(() => Promise.resolve(true));
+  Object.assign(window.nestor, { jobFinder: { openApplication } });
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Open application" }),
+  );
+  await waitFor(() =>
+    expect(openApplication).toHaveBeenCalledWith({ id: claimed[0]!.id }),
+  );
+  // Nothing to type and nothing to save for other forms.
+  expect(screen.queryByText("Save this answer for next time")).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "I pressed it, continue" }),
+  );
+  await waitFor(() =>
+    expect(applications.getApplication(claimed[0]!.id)?.state).toBe("queued"),
+  );
+  expect(
+    applications.needsYou.fieldAnswer(claimed[0]!.id, "step_handover")?.answer,
+  ).toBe("Pressed on the site");
+  // The item is done; the run picks the form up where the person left it.
+  expect(applications.needsYou.details(task.id)).toBeNull();
+});
+
+it("lets the person say a failed upload is attached on the site, which continues the form", async () => {
+  const task = ask(0, "upload-repair", "Resume — upload failed", "file");
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "It's attached on the site" }),
+  );
+  await waitFor(() =>
+    expect(applications.needsYou.details(task.id)).toMatchObject({
+      task: { id: task.id },
+    }),
+  );
+  await waitFor(() =>
+    expect(applications.getApplication(claimed[0]!.id)?.state).toBe("queued"),
+  );
+  expect(
+    applications.needsYou.fieldAnswer(claimed[0]!.id, "upload-repair")?.answer,
+  ).toBe("Attached on the site");
 });
 
 it("keeps the editor on its task when new work arrives, and one remembered answer releases both applications", async () => {

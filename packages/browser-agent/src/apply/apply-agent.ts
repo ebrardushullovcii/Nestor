@@ -71,9 +71,12 @@ import {
 } from "./application-facts";
 import {
   checkFormReadiness,
+  fileUploadProblems,
   hasRemainingApplicationStep,
   runSubmitPreflight,
   unresolvedRequiredControls,
+  UPLOAD_REPAIR_QUESTION_ID,
+  type FileUploadProblem,
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
 import { createQuestionOccurrences } from "./question-occurrences";
@@ -647,6 +650,110 @@ async function runMeasuredApplyAgent(
     control.choiceGroupKey
       ? `${control.kind}:${control.choiceGroupKey}`
       : control.ref;
+  // Every file this run has seen held in a field, across the form's steps.
+  // A refusal on step one stays a refusal when the run reaches the last step:
+  // readiness reads only the current page, so this is what keeps it.
+  const uploadWaitMs = config.uploadWaitMs ?? 60_000;
+  const confirmedFields = new Set(config.uploadsConfirmedByPerson ?? []);
+  const uploadOptions = {
+    confirmedByPerson: (control: ApplyFormObservation["controls"][number]) =>
+      confirmedFields.has(questionPrompt(control)),
+  };
+  const uploadLedger = new Map<
+    string,
+    {
+      label: string;
+      control: ApplyFormObservation["controls"][number];
+      fileName: string;
+      state: FileUploadProblem["state"] | "accepted";
+      since: number;
+    }
+  >();
+  const recordUpload = (
+    fieldKey: string,
+    control: ApplyFormObservation["controls"][number],
+    page: ApplyFormObservation,
+    observed: FileUploadProblem["state"] | "accepted",
+  ): void => {
+    const earlier = uploadLedger.get(fieldKey);
+    const at = now().getTime();
+    if (!control.answered && observed !== "accepted") {
+      // The widget emptied its input, and the server refused the file Nestor
+      // gave it, has not answered yet, or Nestor's fence held it back.
+      const since = earlier?.state === observed ? earlier.since : at;
+      uploadLedger.set(fieldKey, {
+        label: questionPrompt(control),
+        control,
+        fileName: earlier?.fileName ?? "",
+        state:
+          observed === "uploading" && at - since >= uploadWaitMs
+            ? "unconfirmed"
+            : observed,
+        since,
+      });
+      return;
+    }
+    if (!control.answered) {
+      if (!earlier) return;
+      // The widget took the file and emptied its input, and the storage's
+      // receipt for the file Nestor gave it says it arrived.
+      if (control.upload?.network === "accepted") {
+        uploadLedger.set(fieldKey, {
+          ...earlier,
+          control,
+          state: "accepted",
+          since: earlier.state === "accepted" ? earlier.since : at,
+        });
+        return;
+      }
+      // The file this field held is gone. Some widgets clear the input once
+      // the upload lands and show a chip instead; anything else lost it, and
+      // a resume Apply attached is required even on an optional field.
+      const name = earlier.fileName.toLowerCase();
+      const shown =
+        name.length > 0 &&
+        `${control.upload?.nearby ?? ""}\n${page.bodyTextExcerpt}`
+          .toLowerCase()
+          .includes(name);
+      if (!(shown && earlier.state === "accepted"))
+        uploadLedger.set(fieldKey, {
+          ...earlier,
+          control,
+          state: "rejected",
+          since: at,
+        });
+      return;
+    }
+    const fileName = control.value.split(/[\\/]/u).at(-1) ?? control.value;
+    // An upload that never finishes is handed over, not waited on forever.
+    const waitedOut =
+      observed === "uploading" &&
+      earlier?.fileName === fileName &&
+      (earlier.state === "unconfirmed" ||
+        (earlier.state === "uploading" && at - earlier.since >= uploadWaitMs));
+    const state = waitedOut ? "unconfirmed" : observed;
+    uploadLedger.set(fieldKey, {
+      label: questionPrompt(control),
+      control,
+      fileName,
+      state,
+      since:
+        earlier && earlier.fileName === fileName && earlier.state === observed
+          ? earlier.since
+          : at,
+    });
+  };
+  const uploadsStillUploading = () =>
+    [...uploadLedger.values()].some((entry) => entry.state === "uploading");
+
+  // A chosen file the site refused is already the person's one upload item.
+  const repairsUpload = (control: ApplyFormObservation["controls"][number]) =>
+    control.kind === "file" &&
+    pendingQuestions.has(UPLOAD_REPAIR_QUESTION_ID) &&
+    [...uploadLedger.values()].some(
+      (entry) =>
+        entry.state !== "accepted" && entry.label === questionPrompt(control),
+    );
 
   await config.onProgress?.({
     step: 0,
@@ -706,6 +813,10 @@ async function runMeasuredApplyAgent(
   const syncObservation = (next: ApplyFormObservation): void => {
     questionOccurrences.observe(next);
     pageTools.state.observation = next;
+    const uploadProblems = fileUploadProblems(next, uploadOptions);
+    const unsettledUploads = new Set(
+      uploadProblems.map((problem) => problem.control.ref),
+    );
     // Classify the page's questions now, while the model reads the page, so
     // the first answer does not wait for it. Writes await the same result.
     void classifyQuestions?.(
@@ -778,15 +889,34 @@ async function runMeasuredApplyAgent(
         );
       reviewObservedFieldKeys.add(fieldKey);
       if (control.kind === "file") {
-        if (control.answered) {
-          const fileName =
-            control.value.split(/[\\/]/u).at(-1) ?? control.value;
+        // Without the step label: a field that stays in the page while later
+        // steps show is the same field on every step.
+        recordUpload(
+          `${next.url?.split(/[?#]/u)[0] ?? ""}|${questionKey}|${label}`,
+          control,
+          next,
+          uploadProblems.find((problem) => problem.control.ref === control.ref)
+            ?.state ?? "accepted",
+        );
+        // Some widgets (Greenhouse) empty the input once they have the file;
+        // the storage's receipt for it still makes it attached.
+        const uploadAccepted = control.upload?.network === "accepted";
+        if (
+          (control.answered || uploadAccepted) &&
+          !unsettledUploads.has(control.ref)
+        ) {
+          const shownName = control.answered
+            ? (control.value.split(/[\\/]/u).at(-1) ?? control.value)
+            : null;
           const recorded = [...attachments]
             .reverse()
             .find(
               (entry) =>
-                entry.controlLabel === label && entry.fileName === fileName,
+                entry.controlLabel === label &&
+                (shownName === null || entry.fileName === shownName),
             );
+          const fileName =
+            shownName ?? recorded?.fileName ?? control.upload?.fileName ?? "";
           observedAttachments.set(fieldKey, {
             ...(recorded ?? {
               documentId: `observed.${control.ref}`,
@@ -854,6 +984,30 @@ async function runMeasuredApplyAgent(
       if (control.answered)
         pendingQuestions.delete(pendingQuestionKey(control));
     }
+    // However many files the site refused, on this step or an earlier one,
+    // the person gets one item for this application. It goes only once each
+    // of those files is seen accepted.
+    const repairs = [...uploadLedger.values()].filter(
+      (entry) => entry.state === "rejected" || entry.state === "unconfirmed",
+    );
+    const [firstRepair] = repairs;
+    if (firstRepair) {
+      const labels = [...new Set(repairs.map((entry) => entry.label))];
+      const failed = repairs.some((entry) => entry.state === "rejected");
+      pendingQuestions.set(UPLOAD_REPAIR_QUESTION_ID, {
+        ...buildPendingQuestion({
+          control: firstRepair.control,
+          jobId: config.application.jobId,
+          detectedAt: now().toISOString(),
+          suggestion: null,
+        }),
+        id: UPLOAD_REPAIR_QUESTION_ID,
+        prompt: `${labels.join(", ")} — ${failed ? "upload failed" : "upload not confirmed"}`,
+        note: failed
+          ? "The site did not accept this upload. Open the application to repair it; your other answers are kept."
+          : "The site has not shown this file as attached. Open the application to check it; your other answers are kept.",
+      });
+    } else pendingQuestions.delete(UPLOAD_REPAIR_QUESTION_ID);
     if (next.url && !pageTools.state.visitedUrls.includes(next.url)) {
       pageTools.state.visitedUrls.push(next.url);
     }
@@ -1033,7 +1187,7 @@ async function runMeasuredApplyAgent(
           }
           for (const control of unresolvedRequiredControls(observation)) {
             const key = pendingQuestionKey(control);
-            if (pendingQuestions.has(key)) continue;
+            if (pendingQuestions.has(key) || repairsUpload(control)) continue;
             pendingQuestions.set(
               key,
               buildPendingQuestion({
@@ -1079,6 +1233,23 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        // An upload still on its way gets a bounded wait before the run
+        // decides; one that never finishes becomes the person's upload item.
+        syncObservation(observation);
+        const uploadWaitStarted = Date.now();
+        while (uploadsStillUploading() && !config.signal?.aborted) {
+          if (Date.now() - uploadWaitStarted >= uploadWaitMs) {
+            for (const entry of uploadLedger.values())
+              if (entry.state === "uploading") entry.state = "unconfirmed";
+            syncObservation(observation);
+            break;
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(2_000, uploadWaitMs)),
+          );
+          observation = await pageTools.observe();
+          syncObservation(observation);
+        }
         const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
@@ -1103,7 +1274,7 @@ async function runMeasuredApplyAgent(
           // reminders cannot make these questions answerable.
           for (const control of unresolvedRequiredControls(observation)) {
             const key = pendingQuestionKey(control);
-            if (pendingQuestions.has(key)) continue;
+            if (pendingQuestions.has(key) || repairsUpload(control)) continue;
             pendingQuestions.set(
               key,
               buildPendingQuestion({
@@ -1227,7 +1398,11 @@ async function runMeasuredApplyAgent(
         if (unansweredRequired.length > 0) {
           const actionable: string[] = [];
           for (const control of unansweredRequired) {
-            if (pendingQuestions.has(pendingQuestionKey(control))) continue;
+            if (
+              pendingQuestions.has(pendingQuestionKey(control)) ||
+              repairsUpload(control)
+            )
+              continue;
             if (outcome.stuck && control.kind !== "file") {
               if (stuckFinishNudged) {
                 pendingQuestions.set(
@@ -1345,7 +1520,7 @@ async function runMeasuredApplyAgent(
           stillEmpty.length > 0
             ? `${outcome.reason.trim()} Still empty on the form: ${stillEmpty.join(", ")}.`
             : outcome.reason;
-        const readiness = checkFormReadiness(observation);
+        const readiness = checkFormReadiness(observation, uploadOptions);
         if (
           readiness.ok &&
           config.hands.checkAction &&
@@ -1369,7 +1544,11 @@ async function runMeasuredApplyAgent(
             if (reading?.required) control.required = true;
           }
           syncObservation(after);
-          if (!reachable.ok || pageChanged || !checkFormReadiness(after).ok) {
+          if (
+            !reachable.ok ||
+            pageChanged ||
+            !checkFormReadiness(after, uploadOptions).ok
+          ) {
             return {
               kind: "ok",
               progress: false,
@@ -1411,6 +1590,7 @@ async function runMeasuredApplyAgent(
             observation,
             proposedActionRef: finalAction.ref,
             authority: config.authority,
+            uploads: uploadOptions,
           });
           if (preflight.ok) {
             readyToSend = {
@@ -2516,6 +2696,7 @@ async function runMeasuredApplyAgent(
               if (!fillMayOpen(config, seen?.url ?? null, href)) {
                 const pause = pressOnSitePause(
                   link?.label ? `"${link.label}"` : href || "that link",
+                  now(),
                 );
                 pauses.push(pause);
                 note(pause.summary);
@@ -2618,7 +2799,7 @@ async function runMeasuredApplyAgent(
         pendingQuestions.size > 0 ||
         (current !== null &&
           filled.length + attachments.length > 0 &&
-          checkFormReadiness(current).ok);
+          checkFormReadiness(current, uploadOptions).ok);
       return done
         ? outcomeToLoop({
             kind: "finished",

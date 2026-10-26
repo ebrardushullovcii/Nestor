@@ -101,6 +101,23 @@ function isNetworkLayerPageOwnedRead(
   });
 }
 
+/** Told of each upload permit the moment the fence issues it, per page. */
+const prepareOnlyPermitListeners = new WeakMap<
+  Page,
+  (request: Request, permit: ApplyRequestPermit) => void
+>();
+
+/**
+ * Hears every upload permit on this page as it is issued, before the request
+ * goes out, so a carrier is known even if no answer ever comes.
+ */
+export function onPrepareOnlyUploadPermit(
+  page: Page,
+  listener: (request: Request, permit: ApplyRequestPermit) => void,
+): void {
+  prepareOnlyPermitListeners.set(page, listener);
+}
+
 /** Why the fence let each upload through; see `getPrepareOnlyRequestPermit`. */
 const prepareOnlyRequestPermits = new WeakMap<Request, ApplyRequestPermit>();
 
@@ -1739,6 +1756,14 @@ export async function ensurePrepareOnlyMutationGuard(
           },
           uploadLeg: attachment.containsFile ? "file" : "presign",
         });
+        try {
+          prepareOnlyPermitListeners.get(page)?.(
+            request,
+            prepareOnlyRequestPermits.get(request)!,
+          );
+        } catch {
+          // A listener's failure never changes what the fence lets out.
+        }
         let forwarded = false;
         try {
           forwarded = await forwardCheckingHops(

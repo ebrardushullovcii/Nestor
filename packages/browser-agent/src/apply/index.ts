@@ -49,13 +49,18 @@ export {
   buildPendingQuestion,
   createApplyGuardState,
   executeApplyProposal,
+  questionPrompt,
   type ApplyGuardState,
   type ApplyExecutionOutcome,
   type ApplyExecutorDeps,
 } from "./policy-executor";
 export {
+  fileUploadProblems,
   runSubmitPreflight,
+  STEP_HANDOVER_QUESTION_ID,
+  UPLOAD_REPAIR_QUESTION_ID,
   type ApplySubmitPreflightResult,
+  type FileUploadProblem,
 } from "./submit-preflight";
 export {
   completeTaskLocalSignIn,

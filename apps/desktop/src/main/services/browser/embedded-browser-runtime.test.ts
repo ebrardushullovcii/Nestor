@@ -502,6 +502,7 @@ test("reads the exact native person-owned application even when CDP released its
   const page = {
     bodyText: "Application received",
     loading: false,
+    controls: [],
   } as unknown as NonNullable<
     Awaited<
       ReturnType<
@@ -526,6 +527,59 @@ test("reads the exact native person-owned application even when CDP released its
   ).toBe(page);
   expect(readApplicationPageWithPerson).toHaveBeenCalledWith("result_waiting");
   expect(fallback).not.toHaveBeenCalled();
+});
+
+test("ties the server's word on each file to the same control, and leaves an untied file unconfirmed", async () => {
+  const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
+  // Two nameless file inputs: id and name alone would cross them.
+  const fileControl = (index: number, label: string, network?: string) => ({
+    index,
+    inputType: "file",
+    id: "",
+    name: "",
+    label,
+    upload: {
+      described: "",
+      nearby: label,
+      shown: false,
+      ...(network ? { network } : {}),
+    },
+  });
+  type PageRead = NonNullable<
+    Awaited<
+      ReturnType<
+        NonNullable<BrowserSessionRuntime["readApplicationPageWithPerson"]>
+      >
+    >
+  >;
+  const page = {
+    bodyText: "Apply",
+    loading: false,
+    controls: [fileControl(0, "Resume"), fileControl(1, "Cover letter")],
+  } as unknown as PageRead;
+  const heard = {
+    ...page,
+    controls: [
+      fileControl(0, "Resume", "rejected"),
+      fileControl(1, "Cover letter", "accepted"),
+    ],
+  } as unknown as PageRead;
+  const binding = vi.fn<
+    NonNullable<BrowserSessionRuntime["readApplicationPageBinding"]>
+  >(() => Promise.resolve(heard));
+  const wrapped = withEmbeddedBrowserActivity(
+    { ...base, readApplicationPageBinding: binding },
+    {
+      readApplicationPageWithPerson: vi.fn(() => Promise.resolve(page)),
+    } as unknown as EmbeddedBrowser,
+  );
+  const networks = async () =>
+    (
+      await wrapped.readApplicationPageWithPerson!("target_site", "result_a")
+    )?.controls.map((control) => control.upload?.network);
+  expect(await networks()).toEqual(["rejected", "accepted"]);
+  binding.mockRejectedValueOnce(new Error("The page is gone."));
+  expect(await networks()).toEqual(["unconfirmed", "unconfirmed"]);
 });
 
 test("does not send a prepared form while its exact tab is lent for editing", async () => {
