@@ -1,4 +1,5 @@
 import {
+  carryOverOldPause,
   openJobStore,
   resetJobStore,
   type JobStore,
@@ -7,6 +8,7 @@ import { app } from "electron";
 import path from "node:path";
 
 import { resolveDesktopUserDataDirectory } from "../setup/user-data-directory";
+import { getJobFinderWorkspaceFilePath } from "./job-finder/paths";
 import {
   readPendingResetIntentSync,
   recordStartupResetRecoveryFact,
@@ -27,14 +29,14 @@ export function getJobStore(): JobStore {
   // rest. A marker that can't be read clears nothing: the person is told the
   // reset didn't finish and can start it again.
   const pending = readPendingResetIntentSync();
-  if (pending.status === "readable") {
-    try {
-      resetJobStore(opened);
-    } catch (error) {
-      // Not kept: the next use tries again, and the marker stays.
-      opened.close();
-      throw error;
-    }
+  try {
+    if (pending.status === "readable") resetJobStore(opened);
+    // Once per store: a pause set before this update stays set.
+    carryOverOldPause(opened, getJobFinderWorkspaceFilePath());
+  } catch (error) {
+    // Not kept: the next use tries again, and a reset marker stays.
+    opened.close();
+    throw error;
   }
   store = opened;
   if (pending.status === "unreadable")
