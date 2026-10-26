@@ -9,7 +9,7 @@
       "label": "GitHub username",
       "placeholder": "Username only, no URL",
       "hint": "",
-      "expected": "https://github.com/synthetic-developer/"
+      "expected": "synthetic-developer"
     },
     {
       "label": "GitHub username",

@@ -41,6 +41,16 @@ test.each([
   },
   { answer: "I would like to join your team.", evidence: [], supported: true },
   {
+    answer: "I’m excited about the opportunity to contribute to your team.",
+    evidence: [],
+    supported: true,
+  },
+  {
+    answer: "I would welcome the chance to work with your team.",
+    evidence: [],
+    supported: true,
+  },
+  {
     answer: "The role involves building engineering workflow tools.",
     evidence: [posting("Engineering workflow tools.")],
     supported: true,

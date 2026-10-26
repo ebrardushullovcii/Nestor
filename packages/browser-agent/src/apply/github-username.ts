@@ -95,7 +95,8 @@ export function asksGithubUsername(
     "label" | "groupLabel" | "placeholder" | "hint"
   >,
 ): boolean {
-  const clean = (text: string | undefined) => (text ?? "").replace(NOT_ADDRESS, " ").trim();
+  const clean = (text: string | undefined) =>
+    (text ?? "").replace(NOT_ADDRESS, " ").trim();
   const label = clean(`${control.groupLabel} ${control.label}`);
   const hint = clean(control.hint);
   const placeholder = clean(control.placeholder);

@@ -137,8 +137,31 @@ function contentWords(text: string): string[] {
 
 /** Complete statements of intent only: no qualifications, history or named facts. */
 export function isPlainMotivationIntent(text: string): boolean {
-  return /^I (?:am (?:excited|interested|motivated) (?:about|in|by) (?:this|the) (?:opportunity|role|position)|am excited to (?:help|contribute)|(?:would like|hope|want) to (?:help|contribute|join your team)|would welcome the opportunity to (?:help|contribute))[.!]?$/iu.test(
-    text.trim(),
+  const normalized = text
+    .trim()
+    .replace(/^I['’]m\b/iu, "I am")
+    .replace(/^I['’]d\b/iu, "I would");
+  const intent =
+    /^I (?:am (?:excited|interested|motivated) (?:about|in|by|to)|(?:would like|hope|want) to|would welcome) (.+)$/iu.exec(
+      normalized,
+    );
+  if (!intent) return false;
+  // Only connective words about future participation. No personal qualities,
+  // possession, qualifications, named entities, numbers or history fit here.
+  const words = new Set(
+    "a an the this that your opportunity chance role position team company work working join joining contribute contributing contribution help helping to in at on about with for and".split(
+      " ",
+    ),
+  );
+  const remainder = intent[1]
+    .replace(/[.,!]/gu, " ")
+    .toLowerCase()
+    .trim()
+    .split(/\s+/u);
+  return (
+    remainder.length > 0 &&
+    remainder.length <= 40 &&
+    remainder.every((word) => words.has(word))
   );
 }
 
