@@ -28,8 +28,6 @@ import {
   ApplicationRecordSchema,
   ApplicationQuestionRecordSchema,
   ApplicationReplayCheckpointSchema,
-  ApplicationAuthorityEnvelopeSchema,
-  ApprovedApplicationAnswerSnapshotSchema,
   ApplyQueueSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
@@ -40,14 +38,8 @@ import {
   SourceDebugEvidenceRefSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
-  SubmissionArmedMarkerSchema,
-  SubmissionExecutionGrantSchema,
-  SubmissionIdempotencyRecordSchema,
-  SubmissionOutcomeRecordSchema,
-  SubmissionPreflightRecordSchema,
   TailoredAssetSchema,
   type SavedJob,
-  type JobFinderRepositoryState,
   readPreparedDiscoveryFingerprints,
 } from "@nestor/contracts";
 import { createHash, randomUUID } from "node:crypto";
@@ -58,8 +50,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { createFileRepositoryResumeMethods } from "./file-repository-resume-methods";
 import { createFileRepositoryUserActionMethods } from "./file-repository-user-action-methods";
 import { createFileRepositoryGroupedManualAnswerMethods } from "./file-repository-grouped-manual-answer-methods";
-import { createApplicationAnswerSnapshotRepositoryMethods } from "./application-answer-snapshot-repository";
-import { createApplicationAuthorityRepositoryMethods } from "./application-authority-repository";
 import {
   APPLY_COLLECTION_ORDER_BY_SQL,
   APPLY_INDEXED_COLLECTION_CONFIGS,
@@ -69,7 +59,6 @@ import {
 } from "./apply-collection-support";
 import {
   createFileRepositoryContext,
-  INDEXED_COLLECTION_CONFIGS,
   runImmediateTransaction,
   scheduleWalCheckpoints,
   syncApprovedResumeExportsForJob,
@@ -114,7 +103,6 @@ import {
   replaceCollection,
   saveSingletonValue,
   stateTableNames,
-  upsertIndexedCollectionValue,
   writeState,
 } from "./internal/state";
 
@@ -443,17 +431,6 @@ export async function createFileJobFinderRepository(
     });
   }
 
-  /**
-   * Empty-collection base for the narrow authority reader below. The seed's
-   * singletons only satisfy the state schema's required fields; the authority
-   * and answer-snapshot repositories never read them.
-   */
-  const authorityStateBase = JobFinderRepositoryStateSchema.parse({
-    profile: normalizedSeed.profile,
-    searchPreferences: normalizedSeed.searchPreferences,
-    settings: normalizedSeed.settings,
-  });
-
   const startBackups = () =>
     automaticBackup.inBackground
       ? scheduleWorkspaceDatabaseBackups({
@@ -467,120 +444,6 @@ export async function createFileJobFinderRepository(
         })
       : async () => {};
   let stopBackups = startBackups();
-
-  /**
-   * The authority and answer-snapshot repositories only touch their own
-   * collections plus the apply result and application record an outcome
-   * reconciles. Reading the whole workspace (saved jobs, resume revisions,
-   * discovery history, source-debug evidence, ...) on every list call and
-   * again inside every BEGIN IMMEDIATE authority write costs more than the
-   * collections being read, so this reader loads exactly that subset with the
-   * same schemas and orderings readState uses.
-   */
-  function readApplicationAuthorityState(): JobFinderRepositoryState {
-    return {
-      ...cloneValue(authorityStateBase),
-      applyJobResults: listCollectionValues(
-        database,
-        "apply_job_results",
-        ApplyJobResultSchema,
-        { orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.apply_job_results },
-      ),
-      applicationRecords: listValues(
-        database,
-        "application_records",
-        ApplicationRecordSchema,
-      ),
-      applicationAnswerSnapshots: listCollectionValues(
-        database,
-        "application_answer_snapshots",
-        ApprovedApplicationAnswerSnapshotSchema,
-        { orderBySql: "profile_id ASC, revision DESC, id ASC" },
-      ),
-      applicationAuthorityEnvelopes: listCollectionValues(
-        database,
-        "application_authority_envelopes",
-        ApplicationAuthorityEnvelopeSchema,
-        { orderBySql: "revision DESC, id ASC" },
-      ),
-      submissionPreflights: listCollectionValues(
-        database,
-        "submission_preflights",
-        SubmissionPreflightRecordSchema,
-        { orderBySql: "created_at ASC, id ASC" },
-      ),
-      submissionExecutionGrants: listCollectionValues(
-        database,
-        "submission_execution_grants",
-        SubmissionExecutionGrantSchema,
-        { orderBySql: "granted_at DESC, id ASC" },
-      ),
-      submissionIdempotencyRecords: listCollectionValues(
-        database,
-        "submission_idempotency_records",
-        SubmissionIdempotencyRecordSchema,
-        { orderBySql: "updated_at DESC, id ASC" },
-      ),
-      submissionArmedMarkers: listCollectionValues(
-        database,
-        "submission_armed_markers",
-        SubmissionArmedMarkerSchema,
-        { orderBySql: "armed_at ASC, id ASC" },
-      ),
-      submissionOutcomeRecords: listCollectionValues(
-        database,
-        "submission_outcome_records",
-        SubmissionOutcomeRecordSchema,
-        { orderBySql: "attempted_at ASC, id ASC" },
-      ),
-    };
-  }
-
-  function serializeById(
-    values: readonly { id: string }[],
-  ): Map<string, string> {
-    return new Map(values.map((value) => [value.id, JSON.stringify(value)]));
-  }
-
-  /**
-   * One authority collection's persistence plan for a single mutation. Rows
-   * that did not change are never rewritten, so a mutation touching one grant
-   * no longer rebuilds the whole authority subtree.
-   */
-  interface AuthorityCollectionWrite {
-    readonly tableName: string;
-    readonly previous: ReadonlyMap<string, string>;
-    readonly values: readonly { id: string }[];
-    readonly write: (value: { id: string }) => void;
-  }
-
-  /**
-   * Deletes removed rows child-first and writes changed rows parent-first so
-   * the foreign keys declared on the submission tables hold at every statement
-   * under PRAGMA foreign_keys = ON. `writes` must be ordered parent to child.
-   */
-  function persistAuthorityCollections(
-    writes: readonly AuthorityCollectionWrite[],
-  ): void {
-    for (const collection of [...writes].reverse()) {
-      const nextIds = new Set(collection.values.map((value) => value.id));
-      for (const id of collection.previous.keys()) {
-        if (!nextIds.has(id)) {
-          database
-            .prepare(`DELETE FROM ${collection.tableName} WHERE id = ?`)
-            .run(id);
-        }
-      }
-    }
-
-    for (const collection of writes) {
-      for (const value of collection.values) {
-        if (collection.previous.get(value.id) !== JSON.stringify(value)) {
-          collection.write(value);
-        }
-      }
-    }
-  }
 
   const profileStore =
     options.store ?? openJobStore(`${options.filePath}.jobs.sqlite`);
@@ -602,291 +465,12 @@ export async function createFileJobFinderRepository(
       sourceInstructionArtifacts: siteInstructions.list(),
     }),
     ...profileWorkspace.methods,
-    ...createApplicationAnswerSnapshotRepositoryMethods({
-      read: () => readApplicationAuthorityState(),
-      mutate: (operation) =>
-        runImmediateTransaction(database, () => {
-          const state = readApplicationAuthorityState();
-          const previousSnapshots = new Map(
-            (state.applicationAnswerSnapshots ?? []).map((snapshot) => [
-              snapshot.id,
-              JSON.stringify(snapshot),
-            ]),
-          );
-          const result = operation(state);
-          const nextSnapshots = new Map(
-            (state.applicationAnswerSnapshots ?? []).map((snapshot) => [
-              snapshot.id,
-              JSON.stringify(snapshot),
-            ]),
-          );
-          for (const snapshotId of previousSnapshots.keys()) {
-            if (!nextSnapshots.has(snapshotId)) {
-              throw new Error(
-                "Approved application answer snapshots are append-only; deletion is not permitted.",
-              );
-            }
-          }
-          for (const snapshot of state.applicationAnswerSnapshots ?? []) {
-            const previous = previousSnapshots.get(snapshot.id);
-            if (previous !== undefined) {
-              if (previous !== nextSnapshots.get(snapshot.id)) {
-                throw new Error(
-                  "Approved application answer snapshots are immutable; updates are not permitted.",
-                );
-              }
-              continue;
-            }
-            upsertIndexedCollectionValue(
-              database,
-              "application_answer_snapshots",
-              snapshot,
-              INDEXED_COLLECTION_CONFIGS.application_answer_snapshots,
-            );
-          }
-          return result;
-        }),
-    }),
-    ...createApplicationAuthorityRepositoryMethods({
-      read: () => readApplicationAuthorityState(),
-      mutate: (operation) =>
-        runImmediateTransaction(database, () => {
-          const state = readApplicationAuthorityState();
-          const previousApplyJobResults = serializeById(state.applyJobResults);
-          const previousApplicationRecords = serializeById(
-            state.applicationRecords,
-          );
-          const previousApplicationAnswerSnapshots = serializeById(
-            state.applicationAnswerSnapshots ?? [],
-          );
-          const previousAuthorityEnvelopes = serializeById(
-            state.applicationAuthorityEnvelopes,
-          );
-          const previousSubmissionPreflights = serializeById(
-            state.submissionPreflights,
-          );
-          const previousSubmissionExecutionGrants = serializeById(
-            state.submissionExecutionGrants,
-          );
-          const previousSubmissionIdempotencyRecords = serializeById(
-            state.submissionIdempotencyRecords,
-          );
-          const previousSubmissionArmedMarkers = serializeById(
-            state.submissionArmedMarkers,
-          );
-          const previousSubmissionOutcomeRecords = serializeById(
-            state.submissionOutcomeRecords,
-          );
-          const result = operation(state);
-          const nextApplicationAnswerSnapshots = serializeById(
-            state.applicationAnswerSnapshots ?? [],
-          );
-          for (const snapshotId of previousApplicationAnswerSnapshots.keys()) {
-            if (!nextApplicationAnswerSnapshots.has(snapshotId)) {
-              throw new Error(
-                "Approved application answer snapshots are append-only; deletion is not permitted.",
-              );
-            }
-          }
-          for (const value of state.applicationAnswerSnapshots ?? []) {
-            const previous = previousApplicationAnswerSnapshots.get(value.id);
-            if (previous !== undefined) {
-              if (previous !== nextApplicationAnswerSnapshots.get(value.id)) {
-                throw new Error(
-                  "Approved application answer snapshots are immutable; updates are not permitted.",
-                );
-              }
-              continue;
-            }
-            upsertIndexedCollectionValue(
-              database,
-              "application_answer_snapshots",
-              value,
-              INDEXED_COLLECTION_CONFIGS.application_answer_snapshots,
-            );
-          }
-          // Rotation revokes the current envelope and installs its
-          // replacement in the same transaction. The partial unique index
-          // allows exactly one active envelope, so the row leaving the active
-          // status must be written before the row entering it.
-          const orderedAuthorityEnvelopes = [
-            ...state.applicationAuthorityEnvelopes.filter(
-              (value) => value.status !== "active",
-            ),
-            ...state.applicationAuthorityEnvelopes.filter(
-              (value) => value.status === "active",
-            ),
-          ];
-          // Persist only the authority rows this mutation actually changed,
-          // ordered parent to child. The surrounding BEGIN IMMEDIATE
-          // transaction keeps the lifecycle atomic; all table names are fixed
-          // repository constants.
-          persistAuthorityCollections([
-            {
-              tableName: stateTableNames.application_authority_envelopes,
-              previous: previousAuthorityEnvelopes,
-              values: orderedAuthorityEnvelopes,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "application_authority_envelopes",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.application_authority_envelopes,
-                ),
-            },
-            {
-              tableName: stateTableNames.submission_preflights,
-              previous: previousSubmissionPreflights,
-              values: state.submissionPreflights,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "submission_preflights",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.submission_preflights,
-                ),
-            },
-            {
-              tableName: stateTableNames.submission_execution_grants,
-              previous: previousSubmissionExecutionGrants,
-              values: state.submissionExecutionGrants,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "submission_execution_grants",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.submission_execution_grants,
-                ),
-            },
-            {
-              tableName: stateTableNames.submission_idempotency_records,
-              previous: previousSubmissionIdempotencyRecords,
-              values: state.submissionIdempotencyRecords,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "submission_idempotency_records",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.submission_idempotency_records,
-                ),
-            },
-            {
-              tableName: stateTableNames.submission_armed_markers,
-              previous: previousSubmissionArmedMarkers,
-              values: state.submissionArmedMarkers,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "submission_armed_markers",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.submission_armed_markers,
-                ),
-            },
-            {
-              tableName: stateTableNames.submission_outcome_records,
-              previous: previousSubmissionOutcomeRecords,
-              values: state.submissionOutcomeRecords,
-              write: (value) =>
-                upsertIndexedCollectionValue(
-                  database,
-                  "submission_outcome_records",
-                  value,
-                  INDEXED_COLLECTION_CONFIGS.submission_outcome_records,
-                ),
-            },
-          ]);
-          // Outcome reconciliation may update the receipt nested in an
-          // ApplyJobResult. Persist only changed parent rows in this same
-          // transaction so authority state can never commit without its
-          // matching receipt, while unrelated apply history is untouched.
-          const nextApplyJobResults = serializeById(state.applyJobResults);
-          for (const resultId of previousApplyJobResults.keys()) {
-            if (!nextApplyJobResults.has(resultId)) {
-              database
-                .prepare(
-                  `DELETE FROM ${stateTableNames.apply_job_results} WHERE id = ?`,
-                )
-                .run(resultId);
-            }
-          }
-          for (const value of state.applyJobResults) {
-            if (
-              previousApplyJobResults.get(value.id) !==
-              nextApplyJobResults.get(value.id)
-            ) {
-              upsertIndexedCollectionValue(
-                database,
-                "apply_job_results",
-                value,
-                APPLY_INDEXED_COLLECTION_CONFIGS.apply_job_results,
-              );
-            }
-          }
-          // Outcome reconciliation may also update the exact application
-          // record projection. Persist only changed rows in this same
-          // transaction so the result receipt, outcome, idempotency state,
-          // and Applications truth can never diverge after a crash.
-          const nextApplicationRecords = serializeById(
-            state.applicationRecords,
-          );
-          for (const applicationRecordId of previousApplicationRecords.keys()) {
-            if (!nextApplicationRecords.has(applicationRecordId)) {
-              database
-                .prepare(
-                  `DELETE FROM ${stateTableNames.application_records} WHERE id = ?`,
-                )
-                .run(applicationRecordId);
-            }
-          }
-          for (const value of state.applicationRecords) {
-            if (
-              previousApplicationRecords.get(value.id) !==
-              nextApplicationRecords.get(value.id)
-            ) {
-              context.writePersistedValue("application_records", value);
-            }
-          }
-          return result;
-        }),
-    }),
     ...createFileRepositoryResumeMethods(
       context,
       approvalFolder.schedule,
       approvalFolder.foldApprovalChanges,
       profileStore,
     ),
-    // These reads need only authority envelopes, not the application/result
-    // bodies loaded by the transaction store for preflight/outcome mutations.
-    listApplicationAuthorityEnvelopes(filter) {
-      return Promise.resolve(
-        listValues(
-          database,
-          "application_authority_envelopes",
-          ApplicationAuthorityEnvelopeSchema,
-        )
-          .filter(
-            (value) =>
-              (filter?.id === undefined || value.id === filter.id) &&
-              (filter?.status === undefined || value.status === filter.status),
-          )
-          .sort((left, right) => left.id.localeCompare(right.id)),
-      );
-    },
-    getApplicationAuthorityEnvelope(id) {
-      return Promise.resolve(
-        listCollectionValues(
-          database,
-          "application_authority_envelopes",
-          ApplicationAuthorityEnvelopeSchema,
-          {
-            whereSql: "id = ?",
-            params: [id],
-            orderBySql: "id",
-            limit: 1,
-          },
-        )[0] ?? null,
-      );
-    },
     ...createFileRepositoryUserActionMethods(context),
     ...createFileRepositoryGroupedManualAnswerMethods(context),
     exportState: () =>

@@ -16,17 +16,15 @@ import {
   type SubmissionObservationIdentity,
   type SubmissionPreflightRecord,
 } from "@nestor/contracts";
-import type {
-  JobFinderRepository,
-  SubmissionPreflightCommitResult,
-} from "@nestor/db";
+import type { SubmissionPreflightCommitResult } from "@nestor/db";
+import type { SendGuards } from "@nestor/db/job-store";
 
 /**
  * The repository surface deliberately stops at preflight persistence. No
  * grant, arm, browser, or final-action method is available to this module.
  */
 export type SubmissionPreflightCoordinatorRepository = Pick<
-  JobFinderRepository,
+  SendGuards,
   "commitSubmissionPreflight"
 >;
 

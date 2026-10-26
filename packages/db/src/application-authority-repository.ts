@@ -15,7 +15,6 @@ import {
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationAuthorityEnvelope,
   type SubmissionArmedMarker,
-  type JobFinderRepositoryState,
   type SubmissionExecutionGrant,
   type SubmissionIdempotencyRecord,
   type SubmissionOutcomeRecord,
@@ -25,15 +24,15 @@ import { createHash } from "node:crypto";
 
 import type {
   ApplicationAuthorityRepository,
+  SendGuardState,
   SubmissionAttemptArmBlockReason,
   SubmissionAttemptArmResult,
   SubmissionOutcomeResolutionResult,
 } from "./application-authority-repository-types";
-import { cloneValue } from "./internal/state";
 
-interface ApplicationAuthorityStateStore {
-  read(): JobFinderRepositoryState;
-  mutate<T>(operation: (state: JobFinderRepositoryState) => T): T;
+export interface SendGuardStateStore {
+  read(): SendGuardState;
+  mutate<T>(operation: (state: SendGuardState) => T): T;
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -251,7 +250,7 @@ function matchesIdempotencyLineage(
 }
 
 function hasAuthoritySubmissionLifecycle(
-  state: JobFinderRepositoryState,
+  state: SendGuardState,
   authorityEnvelopeId: string,
 ): boolean {
   return (
@@ -274,7 +273,7 @@ function hasAuthoritySubmissionLifecycle(
 }
 
 function findActiveAuthorityConflict(
-  state: JobFinderRepositoryState,
+  state: SendGuardState,
   exceptId: string | null = null,
 ): ApplicationAuthorityEnvelope | null {
   return (
@@ -291,7 +290,7 @@ function findActiveAuthorityConflict(
  * capabilities and match the standalone envelope revocation semantics.
  */
 function revokeAuthorityChildren(
-  state: JobFinderRepositoryState,
+  state: SendGuardState,
   authorityEnvelopeId: string,
   revokedAt: string,
 ): void {
@@ -345,7 +344,7 @@ function parseAuthorityReplacementInput(input: {
   }
   const revokedAt = IsoDateTimeSchema.parse(input.revokedAt);
   const replacement = ApplicationAuthorityEnvelopeSchema.parse(
-    cloneValue(input.replacement),
+    structuredClone(input.replacement),
   );
   if (replacement.id === currentId) {
     throw new Error(
@@ -406,12 +405,12 @@ function sortById<T extends { id: string }>(values: readonly T[]): T[] {
 }
 
 export function createApplicationAuthorityRepositoryMethods(
-  store: ApplicationAuthorityStateStore,
+  store: SendGuardStateStore,
 ): ApplicationAuthorityRepository {
   return {
     async listApplicationAuthorityEnvelopes(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -426,7 +425,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async getApplicationAuthorityEnvelope(id) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store
           .read()
           .applicationAuthorityEnvelopes.find((value) => value.id === id) ??
@@ -436,9 +435,9 @@ export function createApplicationAuthorityRepositoryMethods(
     async commitApplicationAuthorityEnvelope(input) {
       await Promise.resolve();
       const envelope = ApplicationAuthorityEnvelopeSchema.parse(
-        cloneValue(input.envelope),
+        structuredClone(input.envelope),
       );
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const current =
             state.applicationAuthorityEnvelopes.find(
@@ -496,7 +495,7 @@ export function createApplicationAuthorityRepositoryMethods(
     async replaceApplicationAuthorityEnvelope(input) {
       await Promise.resolve();
       const parsedInput = parseAuthorityReplacementInput(input);
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const current =
             state.applicationAuthorityEnvelopes.find(
@@ -553,7 +552,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async revokeApplicationAuthorityEnvelope(input) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const current =
             state.applicationAuthorityEnvelopes.find(
@@ -583,7 +582,7 @@ export function createApplicationAuthorityRepositoryMethods(
 
     async listSubmissionPreflightRecords(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -606,7 +605,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async getSubmissionPreflightRecord(id) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store.read().submissionPreflights.find((value) => value.id === id) ??
           null,
       );
@@ -614,9 +613,9 @@ export function createApplicationAuthorityRepositoryMethods(
     async commitSubmissionPreflight(input) {
       await Promise.resolve();
       const preflight = SubmissionPreflightRecordSchema.parse(
-        cloneValue(input),
+        structuredClone(input),
       );
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const current =
             state.submissionPreflights.find(
@@ -672,7 +671,7 @@ export function createApplicationAuthorityRepositoryMethods(
 
     async listSubmissionExecutionGrants(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -691,7 +690,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async getSubmissionExecutionGrant(id) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store
           .read()
           .submissionExecutionGrants.find((value) => value.id === id) ?? null,
@@ -699,8 +698,8 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async commitSubmissionExecutionGrant(input) {
       await Promise.resolve();
-      const grant = SubmissionExecutionGrantSchema.parse(cloneValue(input));
-      return cloneValue(
+      const grant = SubmissionExecutionGrantSchema.parse(structuredClone(input));
+      return structuredClone(
         store.mutate((state) => {
           const preflight = state.submissionPreflights.find(
             (value) => value.id === grant.preflightId,
@@ -727,7 +726,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async revokeSubmissionExecutionGrant(input) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const current =
             state.submissionExecutionGrants.find(
@@ -774,7 +773,7 @@ export function createApplicationAuthorityRepositoryMethods(
 
     async listSubmissionIdempotencyRecords(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -793,7 +792,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async getSubmissionIdempotencyRecord(idempotencyKey) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store
           .read()
           .submissionIdempotencyRecords.find(
@@ -804,10 +803,10 @@ export function createApplicationAuthorityRepositoryMethods(
     async authorizeAndArmSubmissionAttempt(input) {
       await Promise.resolve();
       const preflight = SubmissionPreflightRecordSchema.parse(
-        cloneValue(input.preflight),
+        structuredClone(input.preflight),
       );
       const marker = SubmissionArmedMarkerSchema.parse(
-        cloneValue(input.marker),
+        structuredClone(input.marker),
       );
       if (
         (input.mode !== "confirm_before_submit" &&
@@ -819,7 +818,7 @@ export function createApplicationAuthorityRepositoryMethods(
         return armFailure("blocked", "invalid_input", null);
       }
 
-      return cloneValue(
+      return structuredClone(
         store.mutate((state): SubmissionAttemptArmResult => {
           const authority =
             state.applicationAuthorityEnvelopes.find(
@@ -1104,7 +1103,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async listSubmissionArmedMarkers(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -1122,7 +1121,7 @@ export function createApplicationAuthorityRepositoryMethods(
 
     async listSubmissionOutcomeRecords(options) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         sortById(
           store
             .read()
@@ -1147,7 +1146,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async getSubmissionOutcomeRecord(id) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store
           .read()
           .submissionOutcomeRecords.find((value) => value.id === id) ?? null,
@@ -1156,9 +1155,9 @@ export function createApplicationAuthorityRepositoryMethods(
     async commitSubmissionOutcome(input) {
       await Promise.resolve();
       const outcome = SubmissionOutcomeRecordSchema.parse(
-        cloneValue(input.outcome),
+        structuredClone(input.outcome),
       );
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const existing =
             state.submissionOutcomeRecords.find(
@@ -1228,9 +1227,9 @@ export function createApplicationAuthorityRepositoryMethods(
     async resolveSubmissionOutcome(input) {
       await Promise.resolve();
       const resolution = SubmissionOutcomeResolutionInputSchema.parse(
-        cloneValue(input),
+        structuredClone(input),
       );
-      return cloneValue(
+      return structuredClone(
         store.mutate((state): SubmissionOutcomeResolutionResult => {
           const idempotency =
             state.submissionIdempotencyRecords.find(
@@ -1333,7 +1332,7 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async recoverArmedSubmissionAttempts(input) {
       await Promise.resolve();
-      return cloneValue(
+      return structuredClone(
         store.mutate((state) => {
           const armed = state.submissionIdempotencyRecords.filter(
             (value) => value.status === "armed",

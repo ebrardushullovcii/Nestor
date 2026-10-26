@@ -1,0 +1,12 @@
+{
+  "id": "id-sample",
+  "idempotencyKey": "idempotencyKey-sample",
+  "preflightId": "preflightId-sample",
+  "authorityEnvelopeId": "authorityEnvelopeId-sample",
+  "authorityRevision": 1,
+  "runId": "runId-sample",
+  "jobId": "jobId-sample",
+  "resultId": "resultId-sample",
+  "applicationRecordId": "applicationRecordId-sample",
+  "armedAt": "2026-10-26T09:00:00.000Z"
+}

@@ -321,6 +321,17 @@ export function createProfileWorkspace(
   };
 }
 
+/** The saved profile and the revision a change to it is checked against. */
+export function readProfileWithRevision(store: JobStore) {
+  return store.transaction(() => ({
+    profile: CandidateProfileSchema.parse(createProfileStore(store).read()),
+    revision: Number(
+      store.sql("SELECT version FROM profile_revision WHERE id=1").get()!
+        .version,
+    ),
+  }));
+}
+
 export function readProfileSetupState(store: JobStore) {
   const row = store.sql("SELECT * FROM profile_setup WHERE id=1").get();
   return ProfileSetupStateSchema.parse(

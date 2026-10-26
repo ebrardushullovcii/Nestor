@@ -9,11 +9,12 @@ import {
   ApplicationAuthorityEnvelopeSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
 } from "@nestor/contracts";
-import { createFileJobFinderRepository } from "@nestor/db";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   approveOriginalResumesForTests,
+  createSendGuards,
   openJobStore,
+  type SendGuards,
   type JobStore,
 } from "@nestor/db/job-store";
 import {
@@ -26,8 +27,6 @@ import {
 } from "@nestor/job-finder/application-submission-runtime-main";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { afterEach, describe, expect, test } from "vitest";
-
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 
 const NOW = "2026-08-27T10:00:00.000Z";
 const EXPIRES_AT = "2026-08-27T11:00:00.000Z";
@@ -157,9 +156,7 @@ describe("desktop main application submission composition", () => {
     let jobs: JobStore | null = null;
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
-    let repository: Awaited<
-      ReturnType<typeof createFileJobFinderRepository>
-    > | null = null;
+    let repository: SendGuards | null = null;
 
     try {
       browser = await chromium.launch({ headless: true });
@@ -172,11 +169,8 @@ describe("desktop main application submission composition", () => {
         throw new Error("The local fixture did not expose an HTTP origin");
       }
 
-      repository = await createFileJobFinderRepository({
-        filePath: path.join(temporaryDirectory, "job-finder-state.sqlite"),
-        seed: createEmptyJobFinderRepositoryState(),
-      });
       jobs = openJobStore(":memory:");
+      repository = createSendGuards(jobs);
       const [jobId] = jobs.saveFoundJobs({
         searchId: null,
         jobs: [
@@ -316,7 +310,6 @@ describe("desktop main application submission composition", () => {
       await context?.close().catch(() => undefined);
       await browser?.close().catch(() => undefined);
       jobs?.close();
-      await repository?.close().catch(() => undefined);
       await fixture.close().catch(() => undefined);
     }
   }, 120_000);

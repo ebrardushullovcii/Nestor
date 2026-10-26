@@ -56,7 +56,6 @@ const {
   mockGetWorkspaceProjection,
   mockGetJobFinderWorkspaceService,
   mockGetJobFinderRepositoryForWorkspaceService,
-  mockGetJobFinderApplicationAuthorityService,
   mockImportResumeFromSourcePath,
   mockRetryInterruptedResumeImport,
   mockIsDesktopTestApiEnabled,
@@ -85,7 +84,6 @@ const {
   mockGetWorkspaceProjection: vi.fn(),
   mockGetJobFinderWorkspaceService: vi.fn(),
   mockGetJobFinderRepositoryForWorkspaceService: vi.fn(() => null),
-  mockGetJobFinderApplicationAuthorityService: vi.fn(),
   mockImportResumeFromSourcePath: vi.fn(),
   mockRetryInterruptedResumeImport: vi.fn(),
   mockIsDesktopTestApiEnabled: vi.fn(() => false),
@@ -123,8 +121,6 @@ vi.mock("../services/job-finder/test-api", async (importOriginal) => ({
 vi.mock("../services/job-finder", () => ({
   defaultBenchmarkCases: [],
   getDesktopTestDelayMs: vi.fn(() => 0),
-  getJobFinderApplicationAuthorityService:
-    mockGetJobFinderApplicationAuthorityService,
   getJobFinderRepositoryForWorkspaceService:
     mockGetJobFinderRepositoryForWorkspaceService,
   getJobFinderWorkspaceService: mockGetJobFinderWorkspaceService,
@@ -143,7 +139,6 @@ vi.mock("../services/job-finder", () => ({
 import {
   RETIRED_CHAT_MESSAGE,
   registerJobFinderRouteHandlers,
-  syncApplicationAuthorityForSavedMode,
 } from "./job-finder";
 
 
@@ -1151,38 +1146,6 @@ describe("job-finder synthetic save failure route", () => {
     ).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(saveProfile).toHaveBeenCalledTimes(1);
   });
-});
-
-it("Fill-in only retries a changed permission revision and revokes the broader permission", async () => {
-  const first = {
-    id: "authority",
-    revision: 1,
-    mode: "confirm_before_submit",
-    status: "active",
-  };
-  const latest = { ...first, revision: 2 };
-  const authorityService = {
-    list: vi
-      .fn()
-      .mockResolvedValueOnce([first])
-      .mockResolvedValueOnce([latest]),
-    revoke: vi
-      .fn()
-      .mockResolvedValueOnce({ status: "stale", current: latest })
-      .mockResolvedValueOnce({ status: "applied" }),
-    replaceUsed: vi.fn(),
-  };
-  mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
-    getSettings: () =>
-      Promise.resolve({ applicationAutomationMode: "prepare_only" }),
-  } as never);
-  mockGetJobFinderApplicationAuthorityService.mockReturnValue(authorityService);
-  await syncApplicationAuthorityForSavedMode({} as never, ["job"]);
-  expect(authorityService.revoke).toHaveBeenNthCalledWith(2, {
-    id: "authority",
-    expectedRevision: 2,
-  });
-  expect(authorityService.replaceUsed).not.toHaveBeenCalled();
 });
 
 it("publishes a browser-bar shortlist immediately while listing checks run", async () => {

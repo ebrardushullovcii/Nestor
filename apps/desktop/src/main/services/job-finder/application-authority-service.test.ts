@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createInMemoryJobFinderRepository } from "@nestor/db";
 import {
   createSavedAnswersStore,
   readSavedApplicationAnswers,
 } from "@nestor/db/applications";
-import { openJobStore } from "@nestor/db/job-store";
+import {
+  createProfileStore,
+  createSendGuards,
+  openJobStore,
+  readProfileWithRevision,
+} from "@nestor/db/job-store";
 import {
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
@@ -13,15 +17,29 @@ import {
   type ApplicationAuthorityEnvelopeMutationResult,
   type ApprovedApplicationAnswerSnapshot,
   type CreateApplicationAuthorityEnvelopeInput,
+  type CandidateProfile,
 } from "@nestor/contracts";
 
-import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createJobFinderApplicationAuthorityService } from "./application-authority-service";
 
 const memories: ReturnType<typeof openJobStore>[] = [];
 afterEach(() => {
   for (const store of memories.splice(0)) store.close();
 });
+/** The send records and saved profile of one fresh store. */
+function records() {
+  const store = openJobStore(":memory:");
+  memories.push(store);
+  const profiles = createProfileStore(store);
+  return {
+    ...createSendGuards(store),
+    getProfileWithRevision: () =>
+      Promise.resolve(readProfileWithRevision(store)),
+    getProfile: () => Promise.resolve(readProfileWithRevision(store).profile),
+    saveProfile: (profile: CandidateProfile) =>
+      Promise.resolve(profiles.replace(profile)),
+  };
+}
 function makeService(
   options: Parameters<typeof createJobFinderApplicationAuthorityService>[0],
 ) {
@@ -76,9 +94,7 @@ function expectApplied(result: ApplicationAuthorityEnvelopeMutationResult) {
 
 describe("Job Finder application authority service", () => {
   it("atomically replaces one grant after it has been used", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     let nextId = 0;
     const service = makeService({
       repository,
@@ -121,9 +137,7 @@ describe("Job Finder application authority service", () => {
   it.each(["confirm_before_submit", "autonomous_submit"] as const)(
     "approves an empty answer bank and creates the first %s permission",
     async (mode) => {
-      const repository = createInMemoryJobFinderRepository(
-        createEmptyJobFinderRepositoryState(),
-      );
+      const repository = records();
       const service = makeService({
         repository,
         now: () => NOW,
@@ -171,9 +185,7 @@ describe("Job Finder application authority service", () => {
   );
 
   it("creates, reads, revision-updates, and revokes one prepare-only envelope", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const service = makeService({
       repository,
       now: () => NOW,
@@ -229,9 +241,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("fails closed without approved answers, on duplicate active authority, and on legacy fields", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const service = makeService({
       repository,
       now: () => NOW,
@@ -265,9 +275,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("stamps bounded autosave policy from fresh approved answers and rejects answer drift", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const service = makeService({
       repository,
       now: () => NOW,
@@ -341,9 +349,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("lets a person choose to send applications, and records exactly what they approved", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const service = makeService({
       repository,
       now: () => NOW,
@@ -395,9 +401,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("keeps repository CAS results typed at the service boundary", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const service = makeService({
       repository,
       now: () => NOW,
@@ -412,9 +416,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("derives a redacted readiness summary and approves only the main-derived snapshot", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     let approvedSnapshot: ApprovedApplicationAnswerSnapshot | null = null;
     Object.assign(repository, {
       getLatestApplicationAnswerSnapshot: () =>
@@ -466,9 +468,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("reports an empty answer bank without throwing, while optional kinds stay optional", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     Object.assign(repository, {
       getLatestApplicationAnswerSnapshot: () => Promise.resolve(null),
     });
@@ -504,9 +504,7 @@ describe("Job Finder application authority service", () => {
   });
 
   it("main derives external evidence and CAS revision for operator verification", async () => {
-    const repository = createInMemoryJobFinderRepository(
-      createEmptyJobFinderRepositoryState(),
-    );
+    const repository = records();
     const uncertainOutcome = SubmissionOutcomeRecordSchema.parse({
       id: "outcome_uncertain",
       preflightId: "preflight_1",

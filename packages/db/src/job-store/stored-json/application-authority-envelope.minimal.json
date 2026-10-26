@@ -1,0 +1,20 @@
+{
+  "id": "id-sample",
+  "mode": "prepare_only",
+  "status": "active",
+  "revision": 1,
+  "scope": {
+    "campaignId": null,
+    "jobIds": []
+  },
+  "maxApplicationsPerRun": 1,
+  "intermediateMutationsAuthorized": false,
+  "accountCreationAuthorized": false,
+  "allowedResumeSha256": [],
+  "allowedOrigins": [
+    "https://jobs.example.test"
+  ],
+  "createdAt": "2026-10-26T09:00:00.000Z",
+  "expiresAt": null,
+  "revokedAt": null
+}

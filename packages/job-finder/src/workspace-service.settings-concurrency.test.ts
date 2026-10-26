@@ -459,7 +459,6 @@ test("pay choice saves through the real workspace service without sending permis
     expect((await repository.getSettings()).salaryDisclosure).toBe(
       "answer_from_profile",
     );
-    expect(await repository.listApplicationAuthorityEnvelopes({})).toEqual([]);
   }
   await service.updateApplicationDefaults({
     salaryDisclosure: "pause_for_user",

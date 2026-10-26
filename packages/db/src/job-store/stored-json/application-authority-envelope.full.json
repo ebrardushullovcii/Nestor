@@ -1,0 +1,54 @@
+{
+  "id": "id-sample",
+  "mode": "autonomous_submit",
+  "status": "revoked",
+  "revision": 2,
+  "scope": {
+    "campaignId": "campaignId-sample",
+    "jobIds": [
+      "jobId-sample"
+    ]
+  },
+  "maxApplicationsPerRun": 1,
+  "intermediateMutationsAuthorized": true,
+  "accountCreationAuthorized": false,
+  "allowedResumeSha256": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "allowedOrigins": [
+    "https://jobs.example.test"
+  ],
+  "createdAt": "2026-10-26T09:00:00.000Z",
+  "expiresAt": "2026-10-26T10:00:00.000Z",
+  "revokedAt": "2026-10-26T10:00:00.000Z",
+  "decisionPolicy": {
+    "version": 1,
+    "revision": 1,
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "answerPolicy": {
+      "approvedAnswerSnapshot": {
+        "revision": 1,
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "unknownRequiredQuestion": "pause_for_user",
+      "unknownEligibility": "pause_for_user",
+      "unknownLegalRequirement": "pause_for_user",
+      "preApprovedAttestationKinds": [
+        "background_check_consent"
+      ],
+      "salaryDisclosure": "answer_from_profile"
+    },
+    "stopConditions": {
+      "unavailableCredentials": "pause_for_user",
+      "loginRequired": "pause_for_user",
+      "mfaRequired": "pause_for_user",
+      "captcha": "pause_for_user",
+      "antiBot": "pause_for_user",
+      "accountCreation": "pause_for_user",
+      "staleObservation": "pause_for_user",
+      "ambiguousFinalControl": "pause_for_user",
+      "originDrift": "pause_for_user",
+      "outcomeUncertain": "stop_no_retry"
+    }
+  }
+}

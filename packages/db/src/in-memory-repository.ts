@@ -66,8 +66,6 @@ import {
   toDiscoveryDisplayProjection,
   toDiscoveryBootstrapProjection,
 } from "./internal/discovery-display-projection";
-import { createApplicationAnswerSnapshotRepositoryMethods } from "./application-answer-snapshot-repository";
-import { createApplicationAuthorityRepositoryMethods } from "./application-authority-repository";
 import {
   areSameApplicationAnswerRecords,
   areSameApplicationQuestionRecords,
@@ -180,28 +178,6 @@ export function createInMemoryJobFinderRepository(
   }
 
   return {
-    ...createApplicationAnswerSnapshotRepositoryMethods({
-      read: () => state,
-      mutate: (operation) => {
-        const draft = JobFinderRepositoryStateSchema.parse(
-          cloneValue({ ...state, ...profileWorkspace.state() }),
-        );
-        const result = operation(draft);
-        Object.assign(state, draft);
-        return result;
-      },
-    }),
-    ...createApplicationAuthorityRepositoryMethods({
-      read: () => state,
-      mutate: (operation) => {
-        const draft = JobFinderRepositoryStateSchema.parse(
-          cloneValue({ ...state, ...profileWorkspace.state() }),
-        );
-        const result = operation(draft);
-        Object.assign(state, draft);
-        return result;
-      },
-    }),
     close() {
       if (!options.store) profileStore.close();
       return Promise.resolve();

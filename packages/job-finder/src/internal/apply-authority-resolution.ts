@@ -1,4 +1,3 @@
-import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import { randomUUID } from "node:crypto";
 
 import type { ApplyAuthority } from "@nestor/browser-agent";
@@ -7,7 +6,7 @@ import {
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
 } from "@nestor/contracts";
-import type { JobFinderRepository } from "@nestor/db";
+import type { SendGuards } from "@nestor/db/job-store";
 
 import {
   recordApplicationAuthoritySuccessor,
@@ -176,66 +175,12 @@ export function resolveApplyAuthority(
 }
 
 /**
- * Reads the saved permission that applies to this job, if there is one.
- *
- * More than one active permission is treated as none: an ambiguous answer to
- * "may this be sent?" is a no.
- */
-export async function resolveApplyAuthorityForJob(input: {
-  repository: {
-    getSettings?: Parameters<
-      typeof readSalaryDisclosurePreference
-    >[0]["getSettings"];
-    listApplicationAuthorityEnvelopes: (filter: {
-      status?: "active";
-    }) => Promise<readonly ApplicationAuthorityEnvelope[]>;
-  };
-  job: { id: string; campaignId?: string | null };
-  resumeSha256: string | null | undefined;
-  applicationUrl: string;
-  now: string;
-}): Promise<
-  ApplyAuthorityResolution & { envelope: ApplicationAuthorityEnvelope | null }
-> {
-  const { getSettings } = input.repository;
-  const salaryDisclosure = getSettings
-    ? await readSalaryDisclosurePreference({ getSettings: () => getSettings.call(input.repository) })
-    : "pause_for_user";
-  let active: readonly ApplicationAuthorityEnvelope[] = [];
-  try {
-    active = await input.repository.listApplicationAuthorityEnvelopes({
-      status: "active",
-    });
-  } catch {
-    return {
-      authority: { ...PREPARE_ONLY_AUTHORITY, salaryDisclosure },
-      narrowedBecause: null,
-      envelope: null,
-    };
-  }
-
-  const envelope = active.length === 1 ? (active[0] ?? null) : null;
-  const resolution = resolveApplyAuthority({
-    salaryDisclosure,
-    envelope,
-    job: input.job,
-    resumeSha256: input.resumeSha256,
-    applicationUrl: input.applicationUrl,
-    now: input.now,
-  });
-  return {
-    ...resolution,
-    envelope: resolution.authority.mode === "prepare_only" ? null : envelope,
-  };
-}
-
-/**
  * Adds one independently reviewed ATS origin to the active task permission.
  * The CAS update happens before a final-submit preflight can use the origin.
  */
 export async function authorizeReviewedApplicationOrigin(input: {
   repository: Pick<
-    JobFinderRepository,
+    SendGuards,
     | "getApplicationAuthorityEnvelope"
     | "commitApplicationAuthorityEnvelope"
     | "replaceApplicationAuthorityEnvelope"

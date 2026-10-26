@@ -13,7 +13,11 @@ import {
 import { getJobStore } from "./job-store";
 import { registerServiceStopper } from "./service-stoppers";
 import { getApplicationStore } from "./job-finder/application-store";
-import { createJobFinderApplicationAuthorityService } from "./job-finder/application-authority-service";
+import {
+  createJobFinderApplicationAuthorityService,
+  readAuthorityRecords,
+} from "./job-finder/application-authority-service";
+import { getSendGuards } from "./send-guards";
 import { getCandidateAssetLibrary } from "./job-finder/candidate-asset-library-instance";
 
 let service: ApplicationService | null = null;
@@ -31,7 +35,12 @@ export async function startApplicationService(
   service?.stop();
   const { repository } = deps;
   const applications = getApplicationStore();
-  const authority = createJobFinderApplicationAuthorityService({ repository });
+  // One guards object: every send and permission change queues on it.
+  const guards = getSendGuards();
+  const records = readAuthorityRecords(guards);
+  const authority = createJobFinderApplicationAuthorityService({
+    repository: records,
+  });
   const instructionMode: NonNullable<
     ApplicationServiceDeps["instructionMode"]
   > = async (input) => {
@@ -43,10 +52,10 @@ export async function startApplicationService(
   const authorizeSending: ApplicationServiceDeps["authorizeSending"] = async (
     input,
   ) =>
-    withApplicationAuthorityGate(repository, input.signal, async () => {
+    withApplicationAuthorityGate(guards, input.signal, async () => {
       for (let retry = 0; retry < 5; retry += 1) {
         input.signal.throwIfAborted();
-        const { revision } = await repository.getProfileWithRevision();
+        const { revision } = await records.getProfileWithRevision();
         const approval = await authority.approveCurrentAnswers({
           expectedProfileRevision: revision,
           confirmedCurrentAnswers: true,
@@ -154,7 +163,7 @@ export async function startApplicationService(
               const replaced = await authority.replaceUsed(update);
               if (replaced.status === "applied") {
                 recordApplicationAuthoritySuccessor(
-                  repository,
+                  guards,
                   active.id,
                   replaced.envelope.id,
                 );
@@ -176,7 +185,7 @@ export async function startApplicationService(
     ...deps,
     jobs: getJobStore(),
     applications,
-    authorityRepository: repository,
+    authorityRepository: guards,
     candidateAssets: getCandidateAssetLibrary(),
     readInputs: async () => {
       const [profile, settings, searchPreferences, sourceInstructionArtifacts] =

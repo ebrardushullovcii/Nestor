@@ -1,4 +1,4 @@
-import type { JobFinderRepository } from "@nestor/db";
+import type { SendGuards } from "@nestor/db/job-store";
 import { SubmissionExecutionGrantSchema } from "@nestor/contracts";
 import {
   SubmissionArmedMarkerSchema,
@@ -27,11 +27,11 @@ import {
 
 /**
  * The authority methods required by this synthetic slice. Keeping this
- * narrower than JobFinderRepository makes it impossible for the executor to
+ * narrower than the send guards makes it impossible for the executor to
  * reach unrelated workspace state and documents the persistence boundary.
  */
 export type SyntheticSubmissionAuthorityRepository = Pick<
-  JobFinderRepository,
+  SendGuards,
   | "commitSubmissionPreflight"
   | "getApplicationAuthorityEnvelope"
   | "getSubmissionPreflightRecord"

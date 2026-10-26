@@ -79,8 +79,6 @@ import type {
   WorkspaceRecoverySqliteErrorCode,
   WorkspaceRecoveryValidationOverrides,
 } from "./file-repository-recovery";
-import type { ApplicationAuthorityRepository } from "./application-authority-repository-types";
-import type { ApplicationAnswerSnapshotRepository } from "./application-answer-snapshot-repository-types";
 
 export type JobFinderRepositorySeed = JobFinderRepositoryState;
 
@@ -166,8 +164,7 @@ export type ApplicationRecordBatchCommitResult =
       recordIds: readonly string[];
     };
 
-export interface JobFinderRepository
-  extends ApplicationAuthorityRepository, ApplicationAnswerSnapshotRepository {
+export interface JobFinderRepository {
   /** Optional for custom repositories; ordinary reads remain caller-owned. */
   readDisplayCollections?(): Promise<JobFinderDisplayCollections>;
   /** One complete document for a selected preview; no workspace-wide body read. */
