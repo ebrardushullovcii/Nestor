@@ -10,13 +10,16 @@ import {
 } from "./policy-executor";
 import type { ApplyAgentConfig, ApplyFormObservation } from "./types";
 
-function page(index: number): ApplyFormObservation {
+function page(
+  index: number,
+  shape: (typeof replay.stepShapes)[number],
+): ApplyFormObservation {
   return buildApplyFormObservation(
     {
       url: "https://replica.test/repeated-employment",
       title: "Apply",
       bodyText: `Step ${index} of 2`,
-      stepLabel: `Step ${index} of 2`,
+      stepLabel: shape.labels[index - 1] ?? null,
       loading: false,
       actions: [],
       links: [],
@@ -33,7 +36,7 @@ function page(index: number): ApplyFormObservation {
           id: "start",
           name: "start",
           label: replay.question,
-          groupLabel: replay.section,
+          groupLabel: `Step ${index} of 2 — ${replay.section}`,
           placeholder: "",
           autocomplete: "",
           required: true,
@@ -54,11 +57,16 @@ function page(index: number): ApplyFormObservation {
   );
 }
 
-test.each([false, true])(
-  "Apply replay: a repeated section asks instead of reusing the first date (resume=%s)",
-  async (resume) => {
+test.each(
+  replay.stepShapes.flatMap((shape) =>
+    [false, true].map((resume) => ({ shape, resume, shapeName: shape.name })),
+  ),
+)(
+  "Apply replay: repeated section asks instead of reusing the first date (shape=$shapeName resume=$resume)",
+  async ({ resume, shape }) => {
     let occurrences = createQuestionOccurrences();
-    const first = page(1);
+    const first = page(1, shape);
+    expect(first.step.index).toBe(shape.name === "step-name-label" ? null : 1);
     occurrences.observe(first);
     if (resume)
       occurrences = createQuestionOccurrences(
@@ -66,7 +74,7 @@ test.each([false, true])(
           typeof occurrences.snapshot
         >,
       );
-    const second = page(2);
+    const second = page(2, shape);
     occurrences.observe(second);
     const fillText = vi.fn(),
       checkWrittenAnswer = vi.fn(() =>
@@ -135,9 +143,9 @@ test.each([false, true])(
     });
     expect(fillText).not.toHaveBeenCalled();
     expect(checkWrittenAnswer).not.toHaveBeenCalled();
-    expect(questionPrompt(second.controls[0])).toContain("step 2");
+    expect(questionPrompt(second.controls[0])).toContain(shape.expectedSecond);
     // A retained form keeps the same context on its next read.
     occurrences.observe(second);
-    expect(questionPrompt(second.controls[0])).toContain("step 2");
+    expect(questionPrompt(second.controls[0])).toContain(shape.expectedSecond);
   },
 );

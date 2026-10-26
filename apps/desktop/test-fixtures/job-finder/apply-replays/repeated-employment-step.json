@@ -4,5 +4,18 @@
   "section": "Employment history",
   "question": "Start date",
   "firstAnswer": "2021-03",
-  "secondAnswer": "2023-07"
+  "secondAnswer": "2023-07",
+  "stepShapes": [
+    {
+      "name": "numbered",
+      "labels": ["Step 1 of 2", "Step 2 of 2"],
+      "expectedSecond": "step 2"
+    },
+    { "name": "empty-label", "labels": ["", ""], "expectedSecond": "step 2" },
+    {
+      "name": "step-name-label",
+      "labels": ["Earlier employment", "Later employment"],
+      "expectedSecond": "Later employment"
+    }
+  ]
 }

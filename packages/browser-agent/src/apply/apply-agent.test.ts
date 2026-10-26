@@ -2353,7 +2353,7 @@ describe("shared navigation and Apply safety stay in one state", () => {
   });
 
   test("navigate then type uses the page the model just saw and reviews the move once", async () => {
-    let current = page();
+    let current = page({ controls: [] });
     let reviews = 0;
     const base = hands(current);
     const dynamicHands: ApplyPageHands = {
@@ -6023,7 +6023,7 @@ test("the same question and value are checked only once across batch and single-
   expect(fill).not.toHaveBeenCalled();
 });
 
-test("an eligibility check is not reused for a different application page", async () => {
+test("the same eligibility question on another page asks before a second answer check", async () => {
   const source = page({
     controls: [
       {
@@ -6041,7 +6041,7 @@ test("an eligibility check is not reused for a different application page", asyn
   };
   let checks = 0;
   let turns = 0;
-  await runApplyAgent(input, {
+  const result = await runApplyAgent(input, {
     chatWithTools: (_messages, definitions) => {
       if (definitions[0]?.function.name === "report_answer_checks") {
         checks += 1;
@@ -6098,7 +6098,15 @@ test("an eligibility check is not reused for a different application page", asyn
       });
     },
   });
-  expect(checks).toBe(2);
+  expect(checks).toBe(1);
+  expect(result.outcome).toBe("paused");
+  expect(
+    result.pauses
+      .flatMap(
+        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+      )
+      .some((question) => question.repeatedAtDifferentStep),
+  ).toBe(true);
 });
 
 test("a letter that needs review joins the other questions while the run fills the rest", async () => {

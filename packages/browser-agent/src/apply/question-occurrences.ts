@@ -14,10 +14,9 @@ export function createQuestionOccurrences(
   );
   return {
     observe(page: ApplyFormObservation) {
-      if (page.step.index === null) return;
       const step = JSON.stringify([
-        page.url?.split("?")[0],
-        page.step.index ?? page.step.label,
+        page.url?.split(/[?#]/u)[0],
+        page.step.index ?? (page.step.label?.trim() || null),
       ]);
       for (const control of page.controls) {
         if (

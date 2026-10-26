@@ -75,27 +75,28 @@ export function readStepPosition(
   stepLabel: string | null,
   bodyText: string,
 ): ApplyStepPosition {
-  const haystack = stepLabel ?? bodyText.slice(0, 4_000);
+  const label = stepLabel?.trim() || null;
+  const haystack = label ?? bodyText.slice(0, 4_000);
   const numbered =
     /\b(?:step|page|section)\s+(\d{1,2})\s*(?:of|\/|from)\s*(\d{1,2})\b/iu.exec(
       haystack,
     );
   if (numbered?.[1] && numbered[2]) {
     return {
-      label: stepLabel,
+      label,
       index: Number.parseInt(numbered[1], 10),
       total: Number.parseInt(numbered[2], 10),
     };
   }
   const bare = /\b(\d{1,2})\s*\/\s*(\d{1,2})\b/u.exec(haystack);
-  if (stepLabel && bare?.[1] && bare[2]) {
+  if (label && bare?.[1] && bare[2]) {
     return {
-      label: stepLabel,
+      label,
       index: Number.parseInt(bare[1], 10),
       total: Number.parseInt(bare[2], 10),
     };
   }
-  return { label: stepLabel, index: null, total: null };
+  return { label, index: null, total: null };
 }
 
 /** What a link opens, judged only by its own address. */
