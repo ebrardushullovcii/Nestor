@@ -66,5 +66,5 @@ export async function loadCorpus(directory: string) {
     if (!card || card.title !== listing.title)
       throw new Error(`Missing or changed card: ${listing.url}`);
   }
-  return { manifest, boards, digest: digest(raw) };
+  return { manifest, boards, digest: digest(JSON.stringify(manifest)) };
 }

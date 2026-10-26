@@ -86,4 +86,25 @@ describe("manual search relevance eval measurements", () => {
     expect(reader.reads).toHaveLength(1);
     expect(reader.missing).toEqual(["https://example.com/new"]);
   });
+  it("matches recorded read-only feed queries regardless of JSON property order", async () => {
+    const reader = recordedReader({
+      source: { id: "public", label: "Public", url: "https://example.com" },
+      cards: [],
+      responses: [
+        {
+          url: "https://example.com/jobs",
+          finalUrl: "https://example.com/jobs",
+          method: "POST",
+          status: 200,
+          capturedAt: "2026-10-26T00:00:00Z",
+          body: { offset: 0, facets: {} },
+          html: '{"jobs":[]}',
+        },
+      ],
+    });
+    const options = { rendered: false, jsonQuery: { facets: {}, offset: 0 } };
+    await expect(
+      reader.readPage("https://example.com/jobs", options),
+    ).resolves.toMatchObject({ html: '{"jobs":[]}' });
+  });
 });

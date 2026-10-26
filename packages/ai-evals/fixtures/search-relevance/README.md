@@ -12,13 +12,18 @@ pnpm search:eval --live --tape .tmp/new-search-tape.json --out .tmp/new-search-r
 
 The default command replays the committed model tape with all network access
 disabled. It still executes production collection, screening, full-text reading
-and fit. A changed prompt, input or model route cannot reuse an old answer: a
-missing exact request hash fails the run. Replay tokens describe the original
-provider usage; fresh calls and replay wall time are reported separately.
+and fit under the **recorded model route**. A changed prompt or input cannot
+reuse an old answer: a missing exact request hash fails the run. Replay ignores
+current provider environment settings and reports historical tokens, not the
+cost of a newly configured model. Use an explicit new `--live` recording to
+evaluate routing changes. Fresh calls and replay wall time are separate.
 
 `--live` uses the configured `NESTOR_AI_*` provider, recorded job pages only,
-and at most 40 logical model calls. It refuses to overwrite a tape. Each completed
-turn is saved immediately so an interrupted baseline is not silently lost.
+with a default budget of 40 logical calls per tape (`--max-calls`, maximum 100).
+It refuses an existing tape unless `--resume` is explicit. Resume requires the
+same model route and replays every completed judgment; it only calls AI for
+missing requests. Each completed turn is saved atomically so an interrupted
+baseline is not silently lost.
 Do not run it in a loop. The two personas together are one baseline run.
 
 The labelled cohort is a bounded, deliberately stratified sample, not a claim
@@ -62,3 +67,7 @@ and Workable card snapshots come from public inventories, with their public
 detail HTML/JSON/Markdown saved alongside. They remain scoreable even if current
 collection fails; that failure lowers end-to-end recall. Workable Markdown is
 the provider-published full description, not a summary.
+
+The committed tape and full baseline report use gzip to keep the fixture diff
+small. The CLI reads either JSON or JSON.gz and writes readable JSON reports by
+default. See [today's baseline](baseline-2026-10-26.md) for targets, costs and misses.

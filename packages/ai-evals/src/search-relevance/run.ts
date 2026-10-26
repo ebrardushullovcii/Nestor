@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { isDeepStrictEqual } from "node:util";
 import {
   collectSource,
   screenCards,
@@ -27,6 +28,7 @@ export interface ModelTape {
   corpusDigest: string;
   route: Record<string, string>;
   turns: ModelTurn[];
+  runs?: Array<{ durationMs: number; freshCalls: number }>;
 }
 const zeroUsage = (): ModelTokenUsage => ({
   inputTokens: 0,
@@ -66,8 +68,7 @@ export function recordedReader(board: RecordedBoard) {
         (page) =>
           normalize(page.url) === normalize(url) &&
           page.method === (body === undefined ? "GET" : "POST") &&
-          (body === undefined ||
-            JSON.stringify(body) === JSON.stringify(page.body)),
+          (body === undefined || isDeepStrictEqual(body, page.body)),
       );
       if (!page) {
         missing.push(url);
@@ -134,6 +135,7 @@ export async function runSearchRelevance(input: {
     errors: string[] = [];
   let freshCalls = 0,
     replayedCalls = 0;
+  const initialTurns = input.tape.turns.length;
   const coverage = [];
   const collectedUrls = new Set<string>();
   for (const board of input.boards) {
@@ -183,9 +185,11 @@ export async function runSearchRelevance(input: {
         chatWithTools: async (...args) => {
           const key = turnKey(args, input.tape.route),
             stage = args[2]?.reasoningTask ?? "unknown";
-          let turn: ModelTurn | undefined;
-          if (input.live) {
-            if (freshCalls >= (input.maxCalls ?? 40)) {
+          let turn = input.tape.turns.find((entry) => entry.key === key);
+          if (turn) {
+            replayedCalls++;
+          } else if (input.live) {
+            if (initialTurns + freshCalls >= (input.maxCalls ?? 40)) {
               errors.push("Live model call budget exceeded.");
               throw new Error(errors.at(-1));
             }
@@ -204,9 +208,6 @@ export async function runSearchRelevance(input: {
             };
             input.tape.turns.push(turn);
             await input.onTurn?.();
-          } else {
-            turn = input.tape.turns.find((entry) => entry.key === key);
-            replayedCalls++;
           }
           if (!turn) {
             errors.push(
@@ -323,7 +324,11 @@ export async function runSearchRelevance(input: {
         screened: screened.related.length,
         read: jobs.length,
         scored: fits.length,
-        durationMs: performance.now() - boardStart,
+        executionDurationMs: performance.now() - boardStart,
+        recordedModelDurationMs: Object.values(stages).reduce(
+          (sum, stage) => sum + stage.durationMs,
+          0,
+        ),
         usage,
         stages,
         rows,
@@ -350,7 +355,11 @@ export async function runSearchRelevance(input: {
     personas.push({
       persona: persona.id,
       description: persona.description,
-      durationMs: performance.now() - personaStart,
+      executionDurationMs: performance.now() - personaStart,
+      recordedModelDurationMs: boards.reduce(
+        (sum, board) => sum + board.recordedModelDurationMs,
+        0,
+      ),
       ...grade,
       endToEnd,
       top10: ranked.slice(0, 10),
