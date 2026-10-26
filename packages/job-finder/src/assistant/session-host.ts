@@ -2257,10 +2257,7 @@ export class AssistantSessionHost {
               true,
             );
           const payload = item.payload as { actionId?: string };
-          if (
-            payload.actionId === "reset-workspace" ||
-            payload.actionId === "confirm-personal-workspace-restore"
-          ) {
+          if (payload.actionId === "reset-workspace") {
             afterConfirmation = work;
           } else {
             const result = await work();

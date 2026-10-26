@@ -170,12 +170,6 @@ export interface AssistantRepository {
   ): Promise<void>;
 
   /** Removes everything; used by workspace reset. */
-  restoreHistory(
-    history: readonly {
-      conversation: AssistantConversation;
-      messages: readonly AssistantMessage[];
-    }[],
-  ): Promise<void>;
   reset(): Promise<void>;
   close(): Promise<void>;
 }
@@ -874,48 +868,6 @@ export function createAssistantRepository(
       });
     },
 
-    async restoreHistory(history) {
-      const parsed = history.map((entry) => ({
-        conversation: AssistantConversationSchema.parse(entry.conversation),
-        messages: entry.messages.map((message) =>
-          AssistantMessageSchema.parse(message),
-        ),
-      }));
-      transaction(() => {
-        database.exec(
-          "DELETE FROM assistant_records; DELETE FROM assistant_events; DELETE FROM assistant_pending; DELETE FROM assistant_transcript; DELETE FROM assistant_meta;",
-        );
-        for (const entry of parsed) {
-          const conversation = entry.conversation;
-          putRecord({
-            kind: "conversation",
-            id: conversation.id,
-            conversationId: conversation.id,
-            sortKey: conversation.lastMessageAt ?? conversation.updatedAt,
-            status: conversation.status,
-            lookup: conversation.jobId,
-            data: conversation,
-          });
-          for (const message of entry.messages) {
-            if (message.conversationId !== conversation.id)
-              throw new Error(
-                "A restored message belongs to a different chat.",
-              );
-            putRecord({
-              kind: "message",
-              id: message.id,
-              conversationId: conversation.id,
-              sortKey: `${message.createdAt}|${message.id}`,
-              status: message.role,
-              lookup: message.clientMessageId
-                ? `client:${message.clientMessageId}`
-                : null,
-              data: message,
-            });
-          }
-        }
-      });
-    },
     async reset() {
       transaction(() => {
         database.exec(`DELETE FROM assistant_records`);

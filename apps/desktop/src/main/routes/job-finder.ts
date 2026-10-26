@@ -1,4 +1,4 @@
-import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-exports";
+import { buildDiagnosticsFileExport } from "../services/job-finder/workspace-file-exports";
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
 import {
   JOB_FINDER_ACTIONS,
@@ -15,17 +15,7 @@ import {
 import { getApplicationPageAccessForWorkspaceService } from "../services/job-finder/create-workspace-service";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { resetJobFinderBrowser } from "../services/job-finder/reset-workspace";
-import { readFile, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import {
-  parsePersonalWorkspaceExport,
-  restorePersonalWorkspace,
-} from "../services/job-finder/personal-workspace-restore";
-import {
-  getJobFinderDocumentsDirectory,
-  getCandidateAssetsDirectory,
-  getApplicationDocumentsDirectory,
-} from "../services/job-finder/paths";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { access } from "node:fs/promises";
 import { app, BrowserWindow, clipboard, dialog, shell } from "electron";
@@ -36,10 +26,6 @@ import type {
   SaveDialogOptions,
 } from "electron";
 import {
-  type PersonalWorkspaceExport,
-  PersonalWorkspaceRestorePreviewSchema,
-  ConfirmPersonalWorkspaceRestoreSchema,
-  PersonalWorkspaceRestoreResultSchema,
   ApplicationCrmExportInputSchema,
   ApplicationCrmFileExportResultSchema,
   ApplicationCrmSettingsSchema,
@@ -100,10 +86,6 @@ import {
   withApplicationAuthorityGate,
 } from "@nestor/job-finder";
 
-import {
-  buildPersonalWorkspaceExport,
-  personalWorkspaceExportFileName,
-} from "../services/job-finder/build-diagnostic-export";
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
@@ -525,7 +507,6 @@ function parseSourceReadabilityTimeout(payload: unknown): number | null {
     : null;
 }
 
-
 function sanitizeFileNameSegment(value: string): string {
   return value
     .replace(/[<>:"/\\|?*]/g, " ")
@@ -610,119 +591,6 @@ function rendererSnapshotResponse(
 export const RETIRED_CHAT_MESSAGE =
   "The old Profile and Resume chats are retired. Use the assistant in the side chat; old conversations stay readable there.";
 
-const pendingWorkspaceRestores = new Map<
-  number | "assistant",
-  { token: string; backup: PersonalWorkspaceExport }
->();
-let workspaceRestorePending = false;
-export async function previewWorkspaceRestore(
-  event: IpcMainInvokeEvent | null = null,
-) {
-  const browserWindow = event
-    ? BrowserWindow.fromWebContents(event.sender)
-    : null;
-  const picker: OpenDialogOptions = {
-    title: "Restore from a workspace export",
-    properties: ["openFile"],
-    filters: [{ name: "Nestor workspace export", extensions: ["json"] }],
-  };
-  const picked = browserWindow
-    ? await dialog.showOpenDialog(browserWindow, picker)
-    : await dialog.showOpenDialog(picker);
-  pendingWorkspaceRestores.delete(event?.sender.id ?? "assistant");
-  if (picked.canceled || !picked.filePaths[0]) return null;
-  const backup = parsePersonalWorkspaceExport(
-    await readFile(picked.filePaths[0], "utf8"),
-  );
-  const token = randomUUID();
-  pendingWorkspaceRestores.set(event?.sender.id ?? "assistant", {
-    token,
-    backup,
-  });
-  return PersonalWorkspaceRestorePreviewSchema.parse({
-    token,
-    profileName: backup.repositoryState.profile.fullName ?? "Your profile",
-    exportedAt: backup.exportedAt,
-    jobs: backup.repositoryState.savedJobs.length,
-    applications: backup.repositoryState.applicationRecords.length,
-    answers:
-      backup.repositoryState.applicationAnswerRecords.length +
-      backup.repositoryState.profile.answerBank.customAnswers.length,
-    documents: backup.files.length,
-    chats: backup.assistantHistory.length,
-  });
-}
-
-export async function confirmWorkspaceRestore(
-  payload: unknown,
-  event: IpcMainInvokeEvent | null = null,
-) {
-  const { token } = ConfirmPersonalWorkspaceRestoreSchema.parse(payload);
-  const prepared = pendingWorkspaceRestores.get(
-    event?.sender.id ?? "assistant",
-  );
-  if (!prepared || prepared.token !== token)
-    throw new Error("Choose the export again before restoring.");
-  if (workspaceRestorePending)
-    throw new Error(
-      "A workspace restore is already running. Wait for it to finish.",
-    );
-  workspaceRestorePending = true;
-  const safetyExportPath = path.join(
-    app.getPath("documents"),
-    `nestor-before-restore-${Date.now()}-${randomUUID()}.json`,
-  );
-  try {
-    const service = await getJobFinderWorkspaceService();
-    const repository = getJobFinderRepositoryForWorkspaceService(service);
-    if (!repository)
-      throw new Error(
-        "Your workspace could not be restored. Nothing was changed.",
-      );
-    const {
-      exportAssistantHistory,
-      restoreAssistantHistory,
-      stopAssistantForWorkspaceRestore,
-    } = await import("../services/assistant/assistant-service");
-    await service.withWorkspaceRestore(async () => {
-      await stopAssistantForWorkspaceRestore();
-      await restorePersonalWorkspace({
-        backup: prepared.backup,
-        repository,
-        roots: new Map([
-          ["resumes", getJobFinderDocumentsDirectory()],
-          ["attachments", getCandidateAssetsDirectory()],
-          ["application-documents", getApplicationDocumentsDirectory()],
-        ]),
-        safetyExportPath,
-        buildSafetyExport: async () =>
-          buildPersonalWorkspaceExport({
-            workspace: await service.getWorkspaceSnapshot(),
-            repositoryState: await repository.exportState(),
-            assistantHistory: await exportAssistantHistory(),
-            applicationQuestions:
-              await repository.listApplicationQuestionRecords(),
-            applicationAnswers: await repository.listApplicationAnswerRecords(),
-          }),
-        beforeReplace: async () => {
-          await resetJobFinderBrowser();
-        },
-        readChats: exportAssistantHistory,
-        restoreChats: restoreAssistantHistory,
-      });
-    });
-    pendingWorkspaceRestores.delete(event?.sender.id ?? "assistant");
-    await service.setActivityControl({
-      paused: true,
-      reason: "Workspace restored. Resume activity when you are ready.",
-    });
-    publishJobFinderWorkspaceUpdate();
-    return PersonalWorkspaceRestoreResultSchema.parse({ safetyExportPath });
-  } finally {
-    workspaceRestorePending = false;
-  }
-}
-
 export function registerJobFinderRouteHandlers(
   ipcMain: IpcMain,
   options: { includeBootstrapRoutes?: boolean } = {},
@@ -776,7 +644,6 @@ export function registerJobFinderRouteHandlers(
       );
     },
   );
-
 
   /**
    * Registers one protected save channel. The only behavior it adds is the
@@ -1214,8 +1081,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-
-
   ipcMain.handle("job-finder:test-load-apply-queue-demo", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
@@ -1411,7 +1276,6 @@ export function registerJobFinderRouteHandlers(
     };
   });
 
-
   ipcMain.handle(
     "job-finder:test-import-resume-from-path",
     async (_event, payload: unknown) => {
@@ -1455,7 +1319,6 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(event.sender, snapshot);
     },
   );
-
 
   ipcMain.handle(
     "job-finder:run-source-debug",
@@ -1702,52 +1565,9 @@ export function registerJobFinderRouteHandlers(
       });
     },
   );
-  ipcMain.handle("job-finder:preview-personal-workspace-restore", (event) =>
-    previewWorkspaceRestore(event),
-  );
-  ipcMain.handle(
-    "job-finder:confirm-personal-workspace-restore",
-    (event, payload: unknown) => confirmWorkspaceRestore(payload, event),
-  );
-
-  ipcMain.handle("job-finder:export-personal-workspace", async (event) => {
-    const service = await getJobFinderWorkspaceService();
-    const browserWindow = BrowserWindow.fromWebContents(event.sender);
-    const options: SaveDialogOptions = {
-      title: "Export personal workspace",
-      defaultPath: path.join(
-        app.getPath("documents"),
-        personalWorkspaceExportFileName(),
-      ),
-      filters: [{ name: "JSON", extensions: ["json"] }],
-      properties: ["createDirectory", "showOverwriteConfirmation"],
-    };
-    const result = browserWindow
-      ? await dialog.showSaveDialog(browserWindow, options)
-      : await dialog.showSaveDialog(options);
-    if (result.canceled || !result.filePath)
-      return ApplicationCrmFileExportResultSchema.parse({
-        status: "cancelled",
-        exportedCount: 0,
-        filePath: null,
-      });
-    const exported = await buildWorkspaceFileExport(service, "workspace");
-    const filePath = result.filePath.toLowerCase().endsWith(".json")
-      ? result.filePath
-      : `${result.filePath}.json`;
-    await writeFile(filePath, exported.content, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    return ApplicationCrmFileExportResultSchema.parse({
-      status: "saved",
-      exportedCount: exported.exportedCount,
-      filePath,
-    });
-  });
   ipcMain.handle("job-finder:export-diagnostics", async (event) => {
     const service = await getJobFinderWorkspaceService();
-    const diagnostic = await buildWorkspaceFileExport(service, "diagnostics");
+    const diagnostic = await buildDiagnosticsFileExport(service);
     if (isDesktopTestApiEnabled()) {
       return JobFinderDiagnosticExportResultSchema.parse({
         status: "cancelled",
@@ -1774,8 +1594,6 @@ export function registerJobFinderRouteHandlers(
     await writeFile(outputPath, diagnostic.content, "utf8");
     return JobFinderDiagnosticExportResultSchema.parse({ status: "saved" });
   });
-
-
 
   // Shows a file the app itself wrote in the operating system's file manager.
   // The export already named the path; without this the person had to find it
@@ -1807,12 +1625,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-
-
-
-
-
-
   ipcMain.handle(
     "job-finder:start-auto-apply-run",
     async (event, payload: unknown) => {
@@ -1832,7 +1644,6 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(event.sender, snapshot);
     },
   );
-
 
   ipcMain.handle(
     "job-finder:approve-apply-run",
@@ -1867,7 +1678,6 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(event.sender, snapshot);
     },
   );
-
 
   ipcMain.handle(
     "job-finder:revoke-apply-run-approval",

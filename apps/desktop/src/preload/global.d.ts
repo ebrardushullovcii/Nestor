@@ -119,8 +119,6 @@ import type {
   ListApplicationAuthorityEnvelopesInput,
   ListApplicationAuthorityEnvelopesResult,
   ListApplicationDocumentsInput,
-  PersonalWorkspaceRestorePreview,
-  PersonalWorkspaceRestoreResult,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
@@ -457,11 +455,6 @@ declare global {
         snoozeGroupedDecision: (
           input: SnoozeGroupedDecisionInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
-        previewPersonalWorkspaceRestore: () => Promise<PersonalWorkspaceRestorePreview | null>;
-        confirmPersonalWorkspaceRestore: (input: {
-          token: string;
-        }) => Promise<PersonalWorkspaceRestoreResult>;
-        exportPersonalWorkspace: () => Promise<ApplicationCrmFileExportResult>;
         exportDiagnostics: () => Promise<JobFinderDiagnosticExportResult>;
         getPerformanceSnapshot: () => Promise<JobFinderPerformanceSnapshot>;
         exportApplicationPacket: (

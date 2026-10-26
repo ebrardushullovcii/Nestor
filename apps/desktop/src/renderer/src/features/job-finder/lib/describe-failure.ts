@@ -339,58 +339,6 @@ export function splitBlockedAttemptNote(value: string | null | undefined): {
   return { message, technicalDetails: match[1].trim() };
 }
 
-/** Restore errors use a closed set of recovery instructions, never thrown copy. */
-export function describeWorkspaceRestoreFailure(
-  error: unknown,
-): FailureDescription {
-  const failure = describeFailure(error, {
-    action: "restore your workspace",
-    unknownSentence: "Choose the export again and try once more.",
-  });
-  const detail = failure.technicalDetails ?? "";
-  const sentences: readonly [string, string][] = [
-    [
-      "version Nestor cannot restore",
-      "This export uses a version Nestor cannot restore. Your workspace was kept.",
-    ],
-    [
-      "older export does not contain",
-      "This older export does not contain the full workspace needed to restore it. Make a new export from the original workspace. Your current workspace was kept.",
-    ],
-    [
-      "not a Nestor workspace export",
-      "This file is not a Nestor workspace export. Choose an export made in Settings.",
-    ],
-    [
-      "incomplete or damaged",
-      "This export is incomplete or damaged. Your workspace was kept.",
-    ],
-    [
-      "unsafe or damaged document",
-      "This export contains an unsafe or damaged document. Your workspace was kept.",
-    ],
-    [
-      "conflicting",
-      "This export contains conflicting information. Your workspace was kept. Choose another export.",
-    ],
-    [
-      "missing a document folder",
-      "This export is missing documents needed to restore it. Your workspace was kept.",
-    ],
-    [
-      "could not fully undo",
-      "Restore stopped and could not fully undo the changes. Restore the safety export saved in Documents.",
-    ],
-    [
-      "current work to finish",
-      "Wait for Job Finder's current work to finish or stop it before restoring. Your workspace was kept.",
-    ],
-    ["Choose the export again", "Choose the export again before restoring."],
-  ];
-  const sentence = sentences.find(([match]) => detail.includes(match))?.[1];
-  return sentence ? { ...failure, sentence, userMessage: sentence } : failure;
-}
-
 // These are service-authored recovery messages, not provider or transport text.
 const LISTING_READ_MESSAGES = new Set([
   "The listing could not be read from this page. Open the listing and try again.",

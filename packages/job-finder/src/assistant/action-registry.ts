@@ -183,27 +183,6 @@ export const JOB_FINDER_ACTIONS = {
     "confirm",
     "Delete the local profile, jobs, resumes, application history, chats and browser session. This cannot be undone.",
   ),
-  "preview-personal-workspace-restore": desktopAction(
-    "preview-personal-workspace-restore",
-    empty,
-    "files",
-    "local",
-    "Choose a workspace export and preview what restoring it would replace.",
-  ),
-  "confirm-personal-workspace-restore": desktopAction(
-    "confirm-personal-workspace-restore",
-    C.ConfirmPersonalWorkspaceRestoreSchema,
-    "files",
-    "confirm",
-    "Replace this workspace with the chosen export, keeping a safety export first.",
-  ),
-  "export-personal-workspace": desktopAction(
-    "export-personal-workspace",
-    empty,
-    "files",
-    "local",
-    "Save the complete local workspace, documents and chats to a private export file.",
-  ),
   "export-diagnostics": desktopAction(
     "export-diagnostics",
     empty,

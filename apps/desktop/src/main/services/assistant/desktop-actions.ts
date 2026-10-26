@@ -5,11 +5,7 @@ import { app, clipboard, shell } from "electron";
 
 import { executeCandidateAssetAction } from "../../routes/candidate-assets";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
-import {
-  previewWorkspaceRestore,
-  confirmWorkspaceRestore,
-} from "../../routes/job-finder";
-import { buildWorkspaceFileExport } from "../job-finder/workspace-file-exports";
+import { buildDiagnosticsFileExport } from "../job-finder/workspace-file-exports";
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
 import { writeExportFile } from "./write-export-file";
@@ -57,10 +53,6 @@ export async function executeDesktopJobFinderAction(
     };
   }
   if (actionId === "reset-workspace") return resetJobFinderWorkspace();
-  if (actionId === "preview-personal-workspace-restore")
-    return previewWorkspaceRestore();
-  if (actionId === "confirm-personal-workspace-restore")
-    return confirmWorkspaceRestore(input);
   if (actionId === "write-clipboard-text") {
     await clipboard.writeText(
       C.WriteClipboardTextInputSchema.parse(input).text,
@@ -92,17 +84,11 @@ export async function executeDesktopJobFinderAction(
   }
   if (actionId === "get-performance-snapshot")
     return (await collectJobFinderPerformanceSnapshot({ service })).performance;
-  if (
-    actionId === "export-personal-workspace" ||
-    actionId === "export-diagnostics"
-  ) {
+  if (actionId === "export-diagnostics") {
     const directory = isDesktopTestApiEnabled()
       ? path.join(getJobFinderUserDataDirectory(), "exports")
       : app.getPath("downloads");
-    const file = await buildWorkspaceFileExport(
-      service,
-      actionId === "export-diagnostics" ? "diagnostics" : "workspace",
-    );
+    const file = await buildDiagnosticsFileExport(service);
     return { filePath: await writeExportFile({ directory, ...file }) };
   }
   throw new Error("Unknown registered desktop action.");

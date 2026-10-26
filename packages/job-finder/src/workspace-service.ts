@@ -1294,22 +1294,6 @@ export function createJobFinderWorkspaceService(
         ),
       ),
     resetWorkspace,
-    async withWorkspaceRestore(operation) {
-      if (
-        workspaceResetInProgress ||
-        activeWorkspaceOperationLabels().length > 0
-      )
-        throw new Error(
-          "Wait for Job Finder's current work to finish or stop it before restoring. Your workspace was kept.",
-        );
-      workspaceResetInProgress = true;
-      invalidateListingReads();
-      try {
-        await operation();
-      } finally {
-        workspaceResetInProgress = false;
-      }
-    },
     runResumeImport: (input) =>
       trackWorkspaceOperation("resume import", () =>
         snapshotProfileMethods.runResumeImport(input),

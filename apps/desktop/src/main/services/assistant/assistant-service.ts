@@ -1,4 +1,4 @@
-import type { ApplicationAutomationMode, AssistantMessage } from "@nestor/contracts";
+import type { ApplicationAutomationMode } from "@nestor/contracts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -170,55 +170,4 @@ export async function resetAssistantStore(): Promise<void> {
       payload: { type: "conversation_deleted" },
     });
   }
-}
-
-/** Reads saved chats for a personal workspace export without starting a turn. */
-export async function exportAssistantHistory() {
-  const filePath = path.join(
-    getJobFinderUserDataDirectory(),
-    "assistant.sqlite",
-  );
-  if (!repository && !existsSync(filePath)) return [];
-  const store = repository ?? createAssistantRepository({ filePath });
-  const ownsStore = store !== repository;
-  try {
-    const conversations = await store.listConversations();
-    const history = [];
-    for (const conversation of conversations) {
-      const messages: AssistantMessage[] = [];
-      let beforeMessageId: string | null = null;
-      for (;;) {
-        const page = await store.listMessages(conversation.id, {
-          beforeMessageId,
-          limit: 400,
-        });
-        messages.unshift(...page.messages);
-        if (!page.hasOlder || !page.messages.length) break;
-        beforeMessageId = page.messages[0]!.id;
-      }
-      history.push({ conversation, messages });
-    }
-    return history;
-  } finally {
-    if (ownsStore) await store.close();
-  }
-}
-
-/** Stop the current turn before replacing saved chat history. */
-export async function restoreAssistantHistory(
-  history: Awaited<ReturnType<typeof exportAssistantHistory>>,
-): Promise<void> {
-  const current = hostPromise;
-  hostPromise = null;
-  if (current) await (await current).shutdown();
-  repository ??= createAssistantRepository({
-    filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite"),
-  });
-  await repository.restoreHistory(history);
-}
-
-export async function stopAssistantForWorkspaceRestore(): Promise<void> {
-  const current = hostPromise;
-  hostPromise = null;
-  if (current) await (await current).shutdown();
 }

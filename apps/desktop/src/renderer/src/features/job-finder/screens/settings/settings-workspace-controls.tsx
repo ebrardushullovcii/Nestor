@@ -1,11 +1,8 @@
-import type { PersonalWorkspaceRestorePreview } from "@nestor/contracts";
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useToast } from "@renderer/components/ui/toast";
 import { Button } from "@renderer/components/ui/button";
 import {
   describeFailure,
-  describeWorkspaceRestoreFailure,
   TECHNICAL_DETAILS_LABEL,
 } from "../../lib/describe-failure";
 import type { FailureDescription } from "../../lib/describe-failure";
@@ -20,73 +17,9 @@ export function SettingsWorkspaceControls({
   isWorkspaceResetPending,
   onResetWorkspace,
 }: SettingsWorkspaceControlsProps) {
-  const { showToast } = useToast();
   const [resetPending, setResetPending] = useState(false);
   const [resetError, setResetError] = useState<FailureDescription | null>(null);
-  const [restorePreview, setRestorePreview] =
-    useState<PersonalWorkspaceRestorePreview | null>(null);
-  const [restorePending, setRestorePending] = useState(false);
-  const [restoreError, setRestoreError] = useState<FailureDescription | null>(
-    null,
-  );
-  const restoreDialogRef = useRef<HTMLDivElement | null>(null);
-  useModalFocusTrap(restorePreview !== null, restoreDialogRef, () => {
-    if (!restorePending) setRestorePreview(null);
-  });
-  async function pickRestore() {
-    setRestorePending(true);
-    setRestoreError(null);
-    try {
-      setRestorePreview(
-        await window.nestor.jobFinder.previewPersonalWorkspaceRestore(),
-      );
-    } catch (error) {
-      setRestoreError(describeWorkspaceRestoreFailure(error));
-    } finally {
-      setRestorePending(false);
-    }
-  }
-  async function confirmRestore() {
-    if (!restorePreview) return;
-    setRestorePending(true);
-    setRestoreError(null);
-    try {
-      const result =
-        await window.nestor.jobFinder.confirmPersonalWorkspaceRestore({
-          token: restorePreview.token,
-        });
-      setRestorePreview(null);
-      showToast({
-        title: "Workspace restored",
-        description: `Your previous workspace was saved to ${result.safetyExportPath}. Activity is paused until you resume it.`,
-      });
-    } catch (error) {
-      setRestoreError(describeWorkspaceRestoreFailure(error));
-    } finally {
-      setRestorePending(false);
-    }
-  }
-  const pending = resetPending || restorePending || isWorkspaceResetPending;
-  const [exportPending, setExportPending] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  async function exportWorkspace() {
-    setExportPending(true);
-    setExportError(null);
-    try {
-      const result = await window.nestor.jobFinder.exportPersonalWorkspace();
-      if (result.status === "saved")
-        showToast({
-          title: "Workspace exported",
-          description: `Saved to ${result.filePath}. Keep the file somewhere private.`,
-        });
-    } catch {
-      setExportError(
-        "Your workspace could not be exported. Nothing was deleted. Try again.",
-      );
-    } finally {
-      setExportPending(false);
-    }
-  }
+  const pending = resetPending || isWorkspaceResetPending;
   const [showResetConfirmation, setShowResetConfirmation] = useState(false);
   const dialogTitleId = useId();
   const dialogDescriptionId = useId();
@@ -136,49 +69,8 @@ export function SettingsWorkspaceControls({
           </p>
         </div>
         <div className="grid justify-items-start gap-2">
-          <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            Export your personal workspace first to keep a copy of your profile,
-            saved jobs, resumes, drafts, application history, answers and chats.
-            Browser sign-ins and AI credentials are excluded.
-          </p>
           <Button
-            pending={exportPending}
             disabled={pending}
-            onClick={() => void exportWorkspace()}
-            type="button"
-            variant="secondary"
-          >
-            Export personal workspace
-          </Button>
-          <Button
-            pending={restorePending}
-            disabled={exportPending || pending}
-            onClick={() => void pickRestore()}
-            type="button"
-            variant="secondary"
-          >
-            Restore from an export
-          </Button>
-          {restoreError && !restorePreview ? (
-            <div role="alert" className="text-sm text-destructive">
-              {restoreError.userMessage}
-              {restoreError.technicalDetails ? (
-                <details>
-                  <summary>{TECHNICAL_DETAILS_LABEL}</summary>
-                  <pre className="whitespace-pre-wrap break-words text-xs">
-                    {restoreError.technicalDetails}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
-          ) : null}
-          {exportError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {exportError}
-            </p>
-          ) : null}
-          <Button
-            disabled={exportPending || pending}
             variant="destructive"
             pending={pending}
             onClick={() => setShowResetConfirmation(true)}
@@ -188,75 +80,6 @@ export function SettingsWorkspaceControls({
           </Button>
         </div>
       </section>
-
-      {restorePreview
-        ? createPortal(
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div
-                ref={restoreDialogRef}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="restore-workspace-title"
-                className="grid w-full max-w-lg gap-4 rounded-(--radius-field) border border-border bg-background p-6"
-              >
-                <h2
-                  id="restore-workspace-title"
-                  className="text-xl font-semibold"
-                >
-                  Restore this workspace?
-                </h2>
-                <p className="text-sm">
-                  {restorePreview.profileName} · exported{" "}
-                  {new Date(restorePreview.exportedAt).toLocaleDateString()}
-                </p>
-                <p className="text-sm">
-                  {restorePreview.jobs} jobs, {restorePreview.applications}{" "}
-                  applications, {restorePreview.answers} answers,{" "}
-                  {restorePreview.documents} documents and{" "}
-                  {restorePreview.chats}{" "}
-                  {restorePreview.chats === 1 ? "chat" : "chats"}.
-                </p>
-                <p className="text-sm">
-                  This replaces your current workspace. Nestor first saves a
-                  safety export of it in Documents. Activity stays paused after
-                  restore. Browser sign-ins and AI credentials are not restored.
-                </p>
-                {restoreError ? (
-                  <div role="alert" className="text-sm text-destructive">
-                    {restoreError.userMessage}
-                    {restoreError.technicalDetails ? (
-                      <details>
-                        <summary>{TECHNICAL_DETAILS_LABEL}</summary>
-                        <pre className="whitespace-pre-wrap break-words text-xs">
-                          {restoreError.technicalDetails}
-                        </pre>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={restorePending}
-                    onClick={() => setRestorePreview(null)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    pending={restorePending}
-                    disabled={restorePending}
-                    onClick={() => void confirmRestore()}
-                  >
-                    Restore workspace
-                  </Button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
 
       {showResetConfirmation
         ? createPortal(
@@ -319,11 +142,6 @@ export function SettingsWorkspaceControls({
                     ) : null}
                   </div>
                 ) : null}
-                {exportError ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    {exportError}
-                  </p>
-                ) : null}
                 <div className="flex flex-wrap justify-end gap-3">
                   <Button
                     disabled={pending}
@@ -334,15 +152,7 @@ export function SettingsWorkspaceControls({
                     Cancel
                   </Button>
                   <Button
-                    pending={exportPending}
                     disabled={pending}
-                    onClick={() => void exportWorkspace()}
-                    variant="secondary"
-                  >
-                    Export first
-                  </Button>
-                  <Button
-                    disabled={exportPending || pending}
                     pending={pending}
                     onClick={() => void confirmReset()}
                     type="button"
