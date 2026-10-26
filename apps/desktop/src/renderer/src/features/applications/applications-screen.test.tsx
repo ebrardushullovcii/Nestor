@@ -154,6 +154,42 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
+  it("applies and persists the Assistant's layout, density and columns", async () => {
+    const view = {
+      layout: "board",
+      density: "comfortable",
+      columns: ["status", "next"],
+    };
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/job-finder/applications?applications=${encodeURIComponent(JSON.stringify(view))}`,
+        ]}
+      >
+        <ToastProvider>
+          <ApplicationsScreen />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          document
+            .querySelector("[data-application-list-state]")!
+            .getAttribute("data-application-list-state")!,
+        ),
+      ).toMatchObject(view);
+      expect(
+        JSON.parse(window.localStorage.getItem("nestor.applications.view")!),
+      ).toEqual(view);
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "Board", exact: true })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
   it("moves a sent application on, and Undo takes it back", async () => {
     const list = renderScreen();
     fireEvent.click(

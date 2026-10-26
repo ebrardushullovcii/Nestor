@@ -317,6 +317,16 @@ const APP_ROUTES = {
   settings: "/job-finder/settings",
 } as const;
 
+const SETTINGS_SECTIONS = [
+  "app-device",
+  "ai-behavior",
+  "application-defaults",
+  "application-authority",
+  "workspace-behavior",
+  "diagnostics",
+  "danger-zone",
+] as const;
+
 export const openInAppTool = defineTool({
   name: "open_in_app",
   group: "workspace",
@@ -328,9 +338,17 @@ export const openInAppTool = defineTool({
       "Opens that stored job (its resume when resume is true).",
     ),
     applicationView: json.looseObject(
-      "Applications filter and selection: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true).",
+      "Applications filters, selection and saved view preferences: statuses, text, tag, due, quietForDays, sort (recent/applied/next), selectedIds (up to 50), all (selectedIds are exceptions when true), layout (list/board), density (compact/comfortable), columns (status/since/applied/next/tags). Omitted preferences stay as they are.",
     ),
     resume: json.boolean(),
+    resumeMode: json.enumOf(
+      ["read", "edit"],
+      "Read or edit the saved resume; requires resume=true and jobId.",
+    ),
+    settingsSection: json.enumOf(
+      SETTINGS_SECTIONS,
+      "Settings section to show. application-defaults is Resume look; application-authority is Applying; workspace-behavior is Browser & saved jobs.",
+    ),
     needsView: json.looseObject(
       "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",
     ),
@@ -349,6 +367,8 @@ export const openInAppTool = defineTool({
     jobId: JobIdSchema.optional(),
     applicationView: AssistantTrackerViewSchema.optional(),
     resume: z.boolean().optional(),
+    resumeMode: z.enum(["read", "edit"]).optional(),
+    settingsSection: z.enum(SETTINGS_SECTIONS).optional(),
     needsView: AssistantNeedsViewSchema.optional(),
     view: AssistantJobViewSchema.optional(),
     section: z
@@ -366,6 +386,16 @@ export const openInAppTool = defineTool({
   effect: "read",
   async execute(input, context) {
     const { session, ports } = context;
+    if (input.resumeMode && (!input.resume || !input.jobId))
+      throw new AssistantToolError(
+        "invalid_input",
+        "A resume mode requires resume=true and its jobId.",
+      );
+    if (input.settingsSection && input.screen !== "settings")
+      throw new AssistantToolError(
+        "invalid_input",
+        "A Settings section requires screen settings.",
+      );
     if (
       input.needsView &&
       (input.screen !== "needs_you" || input.jobId || input.resume)
@@ -531,6 +561,12 @@ export const openInAppTool = defineTool({
       destination.searchParams.set("jobs", JSON.stringify(view));
       route = `${destination.pathname}${destination.search}`;
     }
+    if (input.resumeMode) {
+      const destination = new URL(route, "https://nestor.local");
+      destination.searchParams.set("resumeMode", input.resumeMode);
+      route = `${destination.pathname}${destination.search}`;
+    }
+    if (input.settingsSection) route += `#settings-${input.settingsSection}`;
     const display = await session.openInApp(route);
     return {
       summary:

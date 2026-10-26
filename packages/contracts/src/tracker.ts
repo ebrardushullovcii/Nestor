@@ -71,6 +71,12 @@ export type TrackerFilterInput = z.input<typeof TrackerFilterSchema>;
 export const AssistantTrackerViewSchema = TrackerFilterSchema.partial()
   .extend({
     sort: TrackerSortSchema.optional(),
+    layout: z.enum(["list", "board"]).optional(),
+    density: z.enum(["compact", "comfortable"]).optional(),
+    columns: z
+      .array(z.enum(["status", "since", "applied", "next", "tags"]))
+      .max(5)
+      .optional(),
     selectedIds: z.array(JobIdSchema).max(50).optional(),
     all: z.boolean().optional(),
   })

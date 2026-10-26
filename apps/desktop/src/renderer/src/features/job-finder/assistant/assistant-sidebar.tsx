@@ -331,7 +331,7 @@ function AssistantSidebarPanel() {
       return waitForDisplayedDestination(
         route,
         () =>
-          `${displayedLocation.current.pathname}${displayedLocation.current.search}`,
+          `${displayedLocation.current.pathname}${displayedLocation.current.search}${displayedLocation.current.hash}`,
       );
     },
   });

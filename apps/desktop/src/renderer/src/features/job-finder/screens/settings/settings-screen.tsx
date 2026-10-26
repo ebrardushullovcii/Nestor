@@ -246,7 +246,7 @@ export function SettingsScreen(props: {
     if (owningSection && focusSettingsSection(targetId)) {
       setActiveSectionId(owningSection.id);
     }
-  }, [location.hash]);
+  }, [location.hash, location.key]);
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") {

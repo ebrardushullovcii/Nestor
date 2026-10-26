@@ -36,7 +36,15 @@ export async function waitForDisplayedDestination(
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
     const section =
-      actual.pathname === "/job-finder/profile" ? profileSection : null;
+      actual.pathname === "/job-finder/profile"
+        ? profileSection
+        : actual.pathname === "/job-finder/settings"
+          ? (shownElements(
+              'nav[aria-label="Settings sections"] a[aria-current="location"]',
+            )[0]
+              ?.getAttribute("href")
+              ?.slice(1) ?? null)
+          : null;
     const dialog = shownElements("[role]").find(
       (element) =>
         ["dialog", "alertdialog"].includes(
@@ -68,10 +76,14 @@ export async function waitForDisplayedDestination(
     }
     const matches =
       actual.pathname === expected.pathname &&
+      (!expected.hash || actual.hash === expected.hash) &&
       [...expected.searchParams].every(
         ([key, value]) => actual.searchParams.get(key) === value,
       );
-    const expectedSection = expected.searchParams.get("section");
+    const expectedSection =
+      expected.pathname === "/job-finder/settings"
+        ? expected.hash.slice(1) || null
+        : expected.searchParams.get("section");
     const contentMounted = expected.pathname.includes("/resume")
       ? shownElements("[data-resume-studio-content-area]").length > 0
       : expected.pathname === "/job-finder/profile"
@@ -92,6 +104,14 @@ export async function waitForDisplayedDestination(
       !jobId ||
       shownElements("main [data-job-detail-id]").some(
         (element) => element.getAttribute("data-job-detail-id") === jobId,
+      );
+    const resumeMode = expected.searchParams.get("resumeMode");
+    const resumeModeDisplayed =
+      !resumeMode ||
+      shownElements("main [data-resume-mode]").some(
+        (element) =>
+          element.getAttribute("data-resume-mode") === resumeMode &&
+          (!jobId || element.getAttribute("data-job-detail-id") === jobId),
       );
     let viewDisplayed = true;
     const trackerView = expected.pathname === "/job-finder/applications";
@@ -133,7 +153,7 @@ export async function waitForDisplayedDestination(
       }
     }
     display = {
-      displayedRoute: `${actual.pathname}${actual.search}`,
+      displayedRoute: `${actual.pathname}${actual.search}${actual.hash}`,
       section,
       overlay,
       status: "blocked",
@@ -151,6 +171,7 @@ export async function waitForDisplayedDestination(
       matches &&
       contentMounted &&
       jobDisplayed &&
+      resumeModeDisplayed &&
       viewDisplayed &&
       overlay === "none" &&
       (!expectedSection || section === expectedSection)

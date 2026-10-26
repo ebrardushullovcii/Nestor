@@ -1,6 +1,7 @@
 import type { ResumeLevel, StoredResume } from "@nestor/contracts";
 import { Download, ExternalLink, RotateCcw, Undo2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
@@ -32,6 +33,13 @@ export function ResumePane(props: {
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"read" | "edit">("read");
+  const [searchParams] = useSearchParams();
+  const { key: navigationKey } = useLocation();
+  const requestedMode = searchParams.get("resumeMode");
+  useEffect(() => {
+    if (requestedMode === "read" || requestedMode === "edit")
+      setMode(requestedMode);
+  }, [requestedMode, navigationKey]);
 
   if (!job) {
     return (
@@ -123,6 +131,7 @@ export function ResumePane(props: {
     <section
       aria-label={`Resume for ${job.title}`}
       data-job-detail-id={job.id}
+      data-resume-mode={draft ? mode : undefined}
       className="flex min-h-0 min-w-0 flex-col gap-3"
       id={LIST_DETAIL_REGION_ID}
     >

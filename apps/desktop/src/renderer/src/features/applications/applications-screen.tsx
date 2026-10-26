@@ -189,7 +189,7 @@ export function ApplicationsScreen() {
 
   useAssistantTrackerView(searchParams.get("applications"), {
     requestId: navigationKey,
-    current: query,
+    current: { ...query, ...prefs },
     setSelection,
     applyView(view) {
       setFilter((current) => {
@@ -206,7 +206,11 @@ export function ApplicationsScreen() {
         };
         return matchesAssistantListView(current, next) ? current : next;
       });
-      setPrefs((current) => ({ ...current, layout: "list" }));
+      setPrefs((current) => ({
+        layout: view.layout ?? current.layout,
+        density: view.density ?? current.density,
+        columns: view.columns ?? current.columns,
+      }));
     },
   });
 
@@ -478,6 +482,7 @@ export function ApplicationsScreen() {
         <ListDetailLayout
           applicationState={{
             ...query,
+            ...prefs,
             selectedIds: [...selection.ids],
             all: selection.all,
           }}
@@ -495,6 +500,7 @@ export function ApplicationsScreen() {
         <ListDetailLayout
           applicationState={{
             ...query,
+            ...prefs,
             selectedIds: [...selection.ids],
             all: selection.all,
           }}
