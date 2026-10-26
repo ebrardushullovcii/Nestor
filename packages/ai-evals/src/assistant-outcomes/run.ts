@@ -6,7 +6,10 @@ import type {
   DesktopJobsBridge,
   DesktopProfileWorkflowBridge,
 } from "@nestor/contracts";
-import { AssistantOperationSchema } from "@nestor/contracts";
+import {
+  AssistantOperationSchema,
+  AssistantChangeReceiptSchema,
+} from "@nestor/contracts";
 import { ACTION_INVENTORY } from "./inventory";
 import { runBuiltAppOutcomes, type BuiltAppBatch } from "./built-app";
 import { navigationOutcomeCases, shellOutcomeCases } from "./view-cases";
@@ -280,7 +283,7 @@ export async function run(
     batches,
     shot: (name) => ctx.shot(name),
     note: (text) => ctx.note(text),
-    readOperations: (reply, batchId) => {
+    readEvidence: (reply, batchId) => {
       const userIndex = reply.messages.findLastIndex(
         (message) => message.role === "user" && message.origin === "sidebar",
       );
@@ -292,25 +295,36 @@ export async function run(
         throw Error("No current chat turn id for operation evidence");
       const rows = ctx.db("assistant_records", {
         limit: 2_000,
-        pattern: turnId,
+        pattern: reply.conversation.id,
         name: `${batchId}-operations`,
       });
-      return Promise.resolve(
-        rows.flatMap((row) => {
-          if (
-            !row ||
-            typeof row !== "object" ||
-            !("kind" in row) ||
-            row.kind !== "operation" ||
-            !("data" in row)
-          )
-            return [];
-          const parsed = AssistantOperationSchema.safeParse(row.data);
-          return parsed.success && parsed.data.turnId === turnId
-            ? [parsed.data]
-            : [];
-        }),
-      );
+      const operations = rows.flatMap((row) => {
+        if (
+          !row ||
+          typeof row !== "object" ||
+          !("kind" in row) ||
+          row.kind !== "operation" ||
+          !("data" in row)
+        )
+          return [];
+        const parsed = AssistantOperationSchema.safeParse(row.data);
+        return parsed.success && parsed.data.turnId === turnId
+          ? [parsed.data]
+          : [];
+      });
+      const receipts = rows.flatMap((row) => {
+        if (
+          !row ||
+          typeof row !== "object" ||
+          !("kind" in row) ||
+          row.kind !== "receipt" ||
+          !("data" in row)
+        )
+          return [];
+        const parsed = AssistantChangeReceiptSchema.safeParse(row.data);
+        return parsed.success ? [parsed.data] : [];
+      });
+      return Promise.resolve({ operations, receipts });
     },
   });
   const lines = [

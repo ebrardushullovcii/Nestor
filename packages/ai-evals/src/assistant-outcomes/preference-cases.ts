@@ -8,7 +8,7 @@ import {
   PatchSettingsInputSchema,
   type DesktopJobsBridge,
 } from "@nestor/contracts";
-import { currentRequestChanges, type BuiltAppBatch } from "./built-app";
+import { currentUndoReceipt, type BuiltAppBatch } from "./built-app";
 import { equalOutcome } from "./outcome";
 
 type AppWindow = { nestor: { jobs: DesktopJobsBridge } };
@@ -209,7 +209,7 @@ export function preferenceOutcomeCases(): BuiltAppBatch[] {
     actions: (["fields", "lists"] as const).flatMap((kind) =>
       Object.entries(group.expected[kind]).map(([key, expected]) => ({
         actionId: `${kind === "fields" ? group.fieldPrefix : group.listPrefix}.${key}`,
-        observe: async (page, reply) => {
+        observe: async (page, reply, evidence) => {
           const value: unknown =
             group.read === "get_profile_goals"
               ? await page.evaluate(() =>
@@ -229,11 +229,12 @@ export function preferenceOutcomeCases(): BuiltAppBatch[] {
               "data",
               "This preference write has its own Undo receipt",
               "Current Assistant reply change card",
-              currentRequestChanges(reply).some(
-                (part) =>
-                  part.target ===
-                    (group.id === "goals" ? "profile" : "settings") &&
-                  part.status === "applied",
+              Boolean(
+                currentUndoReceipt(
+                  reply,
+                  evidence,
+                  group.id === "goals" ? "profile" : "settings",
+                ),
               ),
               true,
             ),

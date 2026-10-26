@@ -7,7 +7,7 @@ import {
   type ProfileRecordCollection,
 } from "@nestor/contracts";
 import { equalOutcome } from "./outcome";
-import { currentRequestChanges, type BuiltAppBatch } from "./built-app";
+import { currentUndoReceipt, type BuiltAppBatch } from "./built-app";
 
 type AppWindow = { nestor: { jobs: DesktopJobsBridge } };
 
@@ -156,7 +156,7 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
       actions: (["fields", "lists"] as const).flatMap((kind) =>
         Object.entries(profileEdit[kind]).map(([key, expected]) => ({
           actionId: `profile.${kind === "fields" ? "field" : "list"}.${key}`,
-          observe: async (page, reply) => {
+          observe: async (page, reply, evidence) => {
             const current = await page.evaluate(
               async ({ kind, key }) => {
                 const value = await (
@@ -171,10 +171,7 @@ export function profileFieldOutcomeCases(): BuiltAppBatch[] {
                 "data",
                 "This write has its own Undo receipt",
                 "Current Assistant reply change card",
-                currentRequestChanges(reply).some(
-                  (part) =>
-                    part.target === "profile" && part.status === "applied",
-                ),
+                Boolean(currentUndoReceipt(reply, evidence, "profile")),
                 true,
               ),
               equalOutcome(
@@ -313,15 +310,12 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
         actions: [
           {
             actionId: `profile.record.${collection}.add`,
-            observe: async (page, reply) => [
+            observe: async (page, reply, evidence) => [
               equalOutcome(
                 "data",
                 "Created record has an Undo receipt",
                 "Current Assistant reply change card",
-                currentRequestChanges(reply).some(
-                  (part) =>
-                    part.target === "profile" && part.status === "applied",
-                ),
+                Boolean(currentUndoReceipt(reply, evidence, "profile")),
                 true,
               ),
               equalOutcome(
@@ -343,15 +337,12 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
           .filter(([key]) => key !== "id")
           .map(([key, expected]) => ({
             actionId: `profile.record.${collection}.field.${key}`,
-            observe: async (page, reply) => [
+            observe: async (page, reply, evidence) => [
               equalOutcome(
                 "data",
                 "Record edit has an Undo receipt",
                 "Current Assistant reply change card",
-                currentRequestChanges(reply).some(
-                  (part) =>
-                    part.target === "profile" && part.status === "applied",
-                ),
+                Boolean(currentUndoReceipt(reply, evidence, "profile")),
                 true,
               ),
               equalOutcome(
@@ -375,11 +366,12 @@ export function profileRecordOutcomeCases(): BuiltAppBatch[] {
         actions: [
           {
             actionId: `profile.record.${collection}.remove`,
-            observe: async (page, reply) => {
-              removalReceiptId = currentRequestChanges(reply).find(
-                (part) =>
-                  part.target === "profile" && part.status === "applied",
-              )?.receiptId;
+            observe: async (page, reply, evidence) => {
+              removalReceiptId = currentUndoReceipt(
+                reply,
+                evidence,
+                "profile",
+              )?.id;
               return [
                 equalOutcome(
                   "data",

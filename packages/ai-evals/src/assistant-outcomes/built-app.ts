@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   AssistantConversationView,
   AssistantOperation,
+  AssistantChangeReceipt,
   DesktopAssistantBridge,
 } from "@nestor/contracts";
 import type { Page } from "playwright";
@@ -15,6 +16,10 @@ import {
 } from "./outcome";
 
 type AppWindow = Window & { nestor: { assistant: DesktopAssistantBridge } };
+export interface BuiltAppEvidence {
+  operations: readonly AssistantOperation[];
+  receipts: readonly AssistantChangeReceipt[];
+}
 export interface BuiltAppAction {
   actionId: string;
   expected?: "completed" | "correctly_blocked";
@@ -23,7 +28,7 @@ export interface BuiltAppAction {
   observe(
     page: Page,
     reply: AssistantConversationView,
-    context: { operations: readonly AssistantOperation[] },
+    context: BuiltAppEvidence,
   ): Promise<readonly OutcomeAssertion[]>;
 }
 export interface BuiltAppBatch {
@@ -58,6 +63,24 @@ export function currentRequestChanges(
     .flatMap((message) =>
       message.parts.flatMap((part) => (part.type === "change" ? [part] : [])),
     );
+}
+
+export function currentUndoReceipt(
+  reply: AssistantConversationView,
+  evidence: BuiltAppEvidence,
+  target: "profile" | "settings",
+) {
+  const ids = new Set(
+    currentRequestChanges(reply).map((part) => part.receiptId),
+  );
+  return evidence.receipts.find(
+    (receipt) =>
+      ids.has(receipt.id) &&
+      receipt.status === "applied" &&
+      (receipt.target === target ||
+        (receipt.target === "app_command" &&
+          receipt.undoCommand?.name === "undo_profile_change")),
+  );
 }
 
 export async function chatInBuiltApp(
@@ -112,10 +135,10 @@ export async function runBuiltAppOutcomes(options: {
   prior?: readonly ObservedAction[];
   shot(name: string): Promise<unknown>;
   note(text: string): Promise<unknown>;
-  readOperations?(
+  readEvidence?(
     reply: AssistantConversationView,
     batchId: string,
-  ): Promise<AssistantOperation[]>;
+  ): Promise<BuiltAppEvidence>;
 }) {
   const observations: ObservedAction[] = [...(options.prior ?? [])];
   // Validate all IDs before asking chat to change any app state.
@@ -144,7 +167,7 @@ export async function runBuiltAppOutcomes(options: {
   await persist();
   for (const batch of options.batches) {
     let reply: AssistantConversationView | undefined;
-    let operations: AssistantOperation[] = [];
+    let evidence: BuiltAppEvidence = { operations: [], receipts: [] };
     let turnError: string | undefined;
     try {
       await options.note(`Starting chat outcome batch: ${batch.id}`);
@@ -161,7 +184,7 @@ export async function runBuiltAppOutcomes(options: {
         path.join(options.evidenceDir, `${batch.id}-conversation.json`),
         `${JSON.stringify(reply, null, 2)}\n`,
       );
-      operations = (await options.readOperations?.(reply, batch.id)) ?? [];
+      evidence = (await options.readEvidence?.(reply, batch.id)) ?? evidence;
     } catch (error) {
       turnError = error instanceof Error ? error.message : String(error);
     }
@@ -171,7 +194,7 @@ export async function runBuiltAppOutcomes(options: {
       if (reply) {
         try {
           assertions = await action.observe(options.page, reply, {
-            operations,
+            ...evidence,
           });
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);
@@ -188,7 +211,7 @@ export async function runBuiltAppOutcomes(options: {
           : {}),
         ...(error ? { error } : {}),
       };
-      const gap = operations.find(
+      const gap = evidence.operations.find(
         (operation) =>
           operation.toolName === "report_missing_capability" &&
           operation.status === "committed" &&
