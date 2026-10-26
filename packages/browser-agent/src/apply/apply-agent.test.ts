@@ -1387,7 +1387,7 @@ test.each([false, true])(
     };
     const result = await runApplyAgent(testConfig, model);
     expect(checks).toBe(1);
-    expect(writerTurn).toBe(2);
+    expect(writerTurn).toBe(required ? 1 : 2);
     expect(fillText).not.toHaveBeenCalled();
     expect(result.outcome).toBe(required ? "paused" : "prepared");
     expect(
@@ -3754,7 +3754,7 @@ describe("apply readiness regressions", () => {
     });
   });
 
-  test("a later wizard step drops the older handoff even when it reuses the ref", async () => {
+  test("a refused required declaration waits for its answer before another wizard step", async () => {
     const source = page({
       controls: [
         {
@@ -3789,7 +3789,8 @@ describe("apply readiness regressions", () => {
       result.pauses
         .flatMap((pause) => pause.questions ?? [])
         .map((question) => question.prompt),
-    ).toEqual(["Are you willing to relocate?"]);
+    ).toEqual(["I consent to a background check"]);
+    expect(input.hands.clickElement).not.toHaveBeenCalled();
   });
 
   test("missing candidate facts remain a resumable handoff after the model reports stuck", async () => {
@@ -6699,6 +6700,45 @@ test("an explicit stored-fact reference with a changed value still gets checked"
   expect(result.outcome).toBe("paused");
 });
 
+test("a refused source question is handed over once while the rest of the batch fills", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: "How did you hear about this job?",
+        groupLabel: "My Information",
+        tagName: "select",
+        value: "",
+        options: ["Referral"],
+      },
+      { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
+    ],
+  });
+  const input = config(source);
+  input.sources.listingDiscovery = {
+    label: "Local job board",
+    url: "https://listing.example.test/board/",
+  };
+  const choose = vi.spyOn(input.hands, "chooseOption"),
+    fill = vi.spyOn(input.hands, "fillText");
+  const result = await runApplyAgent(
+    input,
+    repeatingModel("fill_fields", {
+      fields: [
+        { tool: "select", ref: "c0", option: "Referral" },
+        { tool: "type", ref: "c1", text: "Robin Ashford" },
+      ],
+    }),
+  );
+  expect(result.outcome).toBe("paused");
+  expect(result.modelTurns).toBeLessThanOrEqual(2);
+  expect(choose).not.toHaveBeenCalled();
+  expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
+  const questions = result.pauses.flatMap((pause) => pause.questions ?? []);
+  expect(questions).toHaveLength(1);
+  expect(questions[0].answerOptions).toEqual(["Referral"]);
+});
+
 test("the same question and value are checked only once across batch and single-field retries", async () => {
   const source = page({
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
@@ -6764,7 +6804,7 @@ test("the same question and value are checked only once across batch and single-
   expect(fill).not.toHaveBeenCalled();
 });
 
-test("the same eligibility question on another page asks before a second answer check", async () => {
+test("an unsupported eligibility answer waits once instead of navigating to another form", async () => {
   const source = page({
     controls: [
       {
@@ -6846,8 +6886,10 @@ test("the same eligibility question on another page asks before a second answer 
       .flatMap(
         (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
       )
-      .some((question) => question.repeatedAtDifferentStep),
-  ).toBe(true);
+      .map((question) => question.prompt),
+  ).toEqual(["Are you authorized to work here?"]);
+  expect(source.url).toBe("https://apply.example.test/form");
+  expect(turns).toBe(1);
 });
 
 test("a letter that needs review joins the other questions while the run fills the rest", async () => {

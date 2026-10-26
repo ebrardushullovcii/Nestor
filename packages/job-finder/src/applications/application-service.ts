@@ -141,6 +141,21 @@ export const applicationIdentity = (id: number, attempt: number) => ({
 /** Store rows own admission and progress; the existing engine owns the form and send guards. */
 export function createApplicationService(deps: ApplicationServiceDeps) {
   const { jobs, applications, browser } = deps;
+  const listingDiscovery = (job: JobDetail) => {
+    const first = [...job.sightings].sort((a, b) =>
+      a.seenAt.localeCompare(b.seenAt),
+    )[0];
+    const siteId = Number(first?.sourceId);
+    const source =
+      Number.isSafeInteger(siteId) && siteId > 0
+        ? createJobSitesStore(jobs).get(siteId)
+        : null;
+    return {
+      label: first?.sourceLabel ?? job.sourceLabel,
+      // A job URL can be the employer's page even when discovery was on a board.
+      url: source?.url ?? first?.url ?? job.url,
+    };
+  };
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
@@ -417,12 +432,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
       job: toResumeJob(job),
-      listingDiscovery: {
-        label: job.sourceLabel,
-        url:
-          [...job.sightings].sort((a, b) => a.seenAt.localeCompare(b.seenAt))[0]
-            ?.url ?? job.url,
-      },
+      listingDiscovery: listingDiscovery(job),
       profile,
       settings,
       resumeArtifact: artifact,
@@ -674,6 +684,21 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             earlier.status === "detected" &&
             describeFormQuestion(earlier, job).key === known.key,
         ) ?? false;
+      const currentAnswer = applications.needsYou
+        .answersForQuestions(
+          row.id,
+          [{ ...known, prompt: question.prompt }],
+          origin,
+        )
+        .find((answer) => answer.key === known.key)?.answer;
+      const alreadyRead =
+        currentAnswer != null &&
+        answerDependencies
+          .snapshot()
+          .form.some(
+            (answer) =>
+              answer.key === known.key && answer.answer === currentAnswer,
+          );
       const requested = applications.needsYou.request(
         {
           applicationId: row.id,
@@ -692,6 +717,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         {
           reuseAnswers:
             !repeated &&
+            !alreadyRead &&
             question.id !== UPLOAD_REPAIR_QUESTION_ID &&
             question.id !== STEP_HANDOVER_QUESTION_ID,
         },
@@ -865,13 +891,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       new Date().toISOString(),
                     ).controls,
                     sources: {
-                      listingDiscovery: {
-                        label: job.sourceLabel,
-                        url:
-                          [...job.sightings].sort((a, b) =>
-                            a.seenAt.localeCompare(b.seenAt),
-                          )[0]?.url ?? job.url,
-                      },
+                      listingDiscovery: listingDiscovery(job),
                       profile,
                       resumeText: profile.baseResume.textContent,
                       reusableAnswers: saved,

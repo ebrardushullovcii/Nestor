@@ -662,8 +662,15 @@ async function decideAnswer(input: {
   controls: readonly ApplyFormControl[];
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
-  const value = formatGithubAnswer(control, input.value);
   const config = deps.config;
+  // The recorded discovery source chooses the answer, not a generated guess or
+  // an incompatible remembered referral. The normal permission gate still runs.
+  const discovery =
+    (!deps.classifyQuestions || control.answerTags?.kind === "other") &&
+    asksListingDiscovery(questionPrompt(control))
+      ? listingDiscoveryAnswer(control, config.sources)
+      : null;
+  const value = formatGithubAnswer(control, discovery?.value ?? input.value);
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
@@ -723,9 +730,14 @@ async function decideAnswer(input: {
           sourceKind:
             permission.source.purpose === "saved"
               ? "answer_library"
-              : "profile",
+              : permission.source.purpose === "listing"
+                ? "posting"
+                : "profile",
           sourceId: permission.source.id,
-          provenanceLabel: "your matching saved answer or profile fact",
+          provenanceLabel:
+            permission.source.purpose === "listing"
+              ? "where Nestor found this listing"
+              : "your matching saved answer or profile fact",
           groundedIn: [permission.source.id],
         },
       };

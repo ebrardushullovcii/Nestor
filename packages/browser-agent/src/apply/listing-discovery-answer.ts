@@ -13,7 +13,29 @@ export function asksListingDiscovery(question: string): boolean {
   );
 }
 
-/** Use the recorded source, or an explicit Other option, without inventing a referral. */
+function sourceCategory(
+  label: string,
+  url: string,
+): "board" | "company" | null {
+  // Read the source's recorded description, never an employer/provider allow-list.
+  if (/\bjob[ -]?boards?\b/iu.test(label)) return "board";
+  if (
+    /\b(?:company (?:website|careers?)|careers? (?:page|site|website))\b/iu.test(
+      label,
+    )
+  )
+    return "company";
+  try {
+    const path = new URL(url).pathname;
+    if (/(?:^|\/)boards?(?:\/|$)/iu.test(path)) return "board";
+    if (/(?:^|\/)careers?(?:\/|$)/iu.test(path)) return "company";
+  } catch {
+    /* Old rows may not have a source URL. */
+  }
+  return null;
+}
+
+/** Map recorded provenance onto this form's categories without inventing a referral. */
 export function listingDiscoveryAnswer(
   control: ApplyFormControl,
   sources: ApplyAnswerSources,
@@ -22,6 +44,7 @@ export function listingDiscoveryAnswer(
   if (!source?.label.trim()) return null;
   let value = source.label.trim();
   if (control.options.length) {
+    const category = sourceCategory(source.label, source.url);
     let host = "";
     try {
       host = new URL(source.url).hostname.replace(/^www\./u, "");
@@ -33,6 +56,16 @@ export function listingDiscoveryAnswer(
         [source.label, host].some(
           (name) => !!name && normalizeSignal(name) === normalizeSignal(option),
         ),
+      ) ??
+      control.options.find((option) =>
+        category === "board"
+          ? /^(?:an? |online )?job[ -]?board(?: website)?$/iu.test(
+              option.trim(),
+            )
+          : category === "company" &&
+            /^(?:(?:the |your )?company website|(?:company )?careers? (?:page|site|website))$/iu.test(
+              option.trim(),
+            ),
       ) ??
       control.options.find((option) =>
         /^(?:other|other source)$/iu.test(option.trim()),

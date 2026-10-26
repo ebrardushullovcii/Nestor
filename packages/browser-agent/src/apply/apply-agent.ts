@@ -345,6 +345,7 @@ async function runMeasuredApplyAgent(
   const timeline: { at: string; text: string }[] = [];
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
+  const heldAnswerKeys = new Set<string>();
   // A run that stops for the person (a check only they can pass) is first
   // asked once to fill the fields it already knows, so the person is left
   // only the part the agent could not do.
@@ -510,6 +511,24 @@ async function runMeasuredApplyAgent(
     const next = JSON.stringify(answers);
     if (next !== currentReusableAnswers) {
       answerChecks.clear();
+      // Only a changed answer for this question releases its earlier refusal.
+      for (const [key, pending] of pendingQuestions) {
+        const controls = pageTools.state.observation?.controls ?? [];
+        const control = controls.find(
+          (entry) => questionPrompt(entry) === pending.prompt,
+        );
+        if (!control) continue;
+        const previous = savedAnswerForQuestion(
+          control,
+          runConfig.sources.reusableAnswers,
+          controls,
+        );
+        const updated = savedAnswerForQuestion(control, answers, controls);
+        if (updated && updated.answer !== previous?.answer) {
+          pendingQuestions.delete(key);
+          heldAnswerKeys.delete(key);
+        }
+      }
       runConfig.sources.reusableAnswers = answers;
       currentReusableAnswers = next;
     }
@@ -1023,7 +1042,16 @@ async function runMeasuredApplyAgent(
   let modelObservation: ApplyFormObservation | null = null;
   let observationNeeded = false;
   const renderObservation = (observation: ApplyFormObservation): string => {
-    const text = describeObservationUpdate(observation, modelObservation);
+    const waiting = observation.controls.filter(
+      (control) =>
+        heldAnswerKeys.has(pendingQuestionKey(control)) &&
+        pendingQuestions.has(pendingQuestionKey(control)),
+    );
+    const text =
+      describeObservationUpdate(observation, modelObservation) +
+      (waiting.length
+        ? `\nAlready waiting for the person; do not retry these fields: ${waiting.map((control) => `${control.ref} (${questionPrompt(control)})`).join("; ")}. Fill the remaining fields, then finish with needsPerson: true.`
+        : "");
     // Observations may be mutated by classification; retain an independent snapshot.
     modelObservation = structuredClone(observation);
     timingRecord.setObservationChars(text.length);
@@ -1133,6 +1161,11 @@ async function runMeasuredApplyAgent(
             control ? pendingQuestionKey(control) : outcome.controlRef,
             outcome.question,
           );
+          if (
+            control &&
+            !guardState.openPickers.has(pickerQuestionKey(control))
+          )
+            heldAnswerKeys.add(pendingQuestionKey(control));
         }
         return { kind: "ok", stopBatch: true, content: outcome.note };
       case "refused":
@@ -1688,6 +1721,29 @@ async function runMeasuredApplyAgent(
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
     await refreshReusableAnswers();
+    const current = pageTools.state.observation;
+    const control =
+      "ref" in proposal
+        ? current?.controls.find((entry) => entry.ref === proposal.ref)
+        : undefined;
+    const pending =
+      control && heldAnswerKeys.has(pendingQuestionKey(control))
+        ? pendingQuestions.get(pendingQuestionKey(control))
+        : undefined;
+    if (
+      current &&
+      control &&
+      pending &&
+      ["type", "select", "set_checkbox"].includes(proposal.tool)
+    )
+      return {
+        kind: "suggestion",
+        answer: null,
+        controlRef: control.ref,
+        question: pending,
+        note: "This question is already waiting for the person's answer. Continue with other fields; do not retry it.",
+        observation: current,
+      };
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =
@@ -2755,11 +2811,13 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
-    // A required picker out of attempts is the person's; once every other
-    // required gap is theirs too, another model call cannot change that.
-    // An optional one is left blank and does not hold the run.
+    // Once every remaining field is held for the person, another model turn
+    // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: () => {
       const current = pageTools.state.observation;
+      const answerHeld = [...heldAnswerKeys].some((key) =>
+        pendingQuestions.has(key),
+      );
       const exhausted = current?.controls.some(
         (control) =>
           control.required &&
@@ -2768,10 +2826,23 @@ async function runMeasuredApplyAgent(
       );
       if (
         !current ||
-        !exhausted ||
+        (!answerHeld && !exhausted) ||
         !pendingQuestions.size ||
-        unresolvedRequiredControls(current).some(
-          (control) => !pendingQuestions.has(pendingQuestionKey(control)),
+        (answerHeld
+          ? current.controls.filter(
+              (control) =>
+                control.required ||
+                !["checkbox", "radio", "file"].includes(control.kind),
+            )
+          : unresolvedRequiredControls(current)
+        ).some(
+          (control) =>
+            control.visible &&
+            !control.disabled &&
+            !control.readOnly &&
+            !holdsAnswer(control) &&
+            control.kind !== "other" &&
+            !pendingQuestions.has(pendingQuestionKey(control)),
         )
       )
         return null;
