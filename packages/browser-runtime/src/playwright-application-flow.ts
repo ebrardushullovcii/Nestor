@@ -1501,10 +1501,9 @@ export async function ensurePrepareOnlyMutationGuard(
         await route.continue();
         return;
       }
-      if (attachment.containsFile) {
-        await denyRequest();
-        return;
-      }
+      // A Send-authorized, same-origin draft save can include the form's file
+      // input too. It still needs the separate intermediate-mutation grant;
+      // refusing the attachment-only exemption must never grant that authority.
       const decision = classifyIntermediateMutationRequest({
         authorized: networkGuardState!.intermediateMutationsAuthorized,
         bodyText: request.postData(),

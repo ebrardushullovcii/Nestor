@@ -407,6 +407,54 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
   );
 
   test(
+    "multipart draft saves require Send authority and stay pinned to the form origin",
+    { timeout: 60_000 },
+    async () => {
+      const app = await startTrackedServer();
+      const other = await startTrackedServer();
+      app.registerHtml(
+        "/multipart-draft",
+        `<form><input name="email" value="synthetic@example.test"><input name="resume" type="file"></form>`,
+      );
+      const { page } = await newGuardedPage();
+      await page.goto(`${app.baseUrl}/multipart-draft`);
+      await page.locator('[name="resume"]').setInputFiles({
+        name: "resume.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF synthetic"),
+      });
+      const post = (url: string) =>
+        page.evaluate(async (url) => {
+          try {
+            return (
+              await fetch(url, {
+                method: "POST",
+                body: new FormData(document.querySelector("form")!),
+              })
+            ).ok;
+          } catch {
+            return false;
+          }
+        }, url);
+      await ensurePrepareOnlyMutationGuard(page, false, [app.baseUrl]);
+      await expect(
+        openPrepareOnlyIntermediateMutationWindow(page),
+      ).rejects.toThrow(/authority/u);
+      expect(await post(`${app.baseUrl}/api/save`)).toBe(false);
+      await ensurePrepareOnlyMutationGuard(page, true, [app.baseUrl]);
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      await post(`${app.baseUrl}/api/save`);
+      expect(requestHitsFor(app.hits, "/api/save")).toHaveLength(1);
+      await post(`${other.baseUrl}/api/save`);
+      await post(`${app.baseUrl}/api/create-application/upload`);
+      expect(requestHitsFor(other.hits, "/api/save")).toHaveLength(0);
+      expect(
+        requestHitsFor(app.hits, "/api/create-application/upload"),
+      ).toHaveLength(0);
+    },
+  );
+
+  test(
     "allows one bounded same-origin autosave but still blocks final-submit traffic",
     { timeout: 60_000 },
     async () => {
