@@ -83,7 +83,25 @@ export function resumeCommandReceipts(
       const entries =
         action === "edit"
           ? diffValues(before?.draft ?? null, value.draft, {
-              labelFor: (path) => `Resume ${path.join(" ")}`,
+              labelFor: (path) => {
+                const ids = path
+                  .filter((part) => part.startsWith("#id:"))
+                  .map((part) => part.slice(4));
+                const section = before?.draft?.sections.find(
+                  (row) => row.id === ids[0],
+                );
+                const entry = section?.entries.find((row) => row.id === ids[1]);
+                const field =
+                  path.at(-1)?.replace(/([a-z])([A-Z])/gu, "$1 $2") ??
+                  "content";
+                return (
+                  section
+                    ? [section.label, entry?.title, field]
+                        .filter(Boolean)
+                        .join(" › ")
+                    : `Resume ${field}`
+                ).slice(0, 160);
+              },
             })
           : [];
       if (action === "approve" || before?.approvedAt !== value.approvedAt)
