@@ -166,6 +166,34 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               .forEach((control) => control.remove());
             return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
           };
+          const hintFor = (element: Element, label: string): string => {
+            // Help text beside the field, such as "Please provide your GitHub
+            // username": what the field's own block says besides its label.
+            const described = (element.getAttribute("aria-describedby") ?? "")
+              .split(/\s+/u)
+              .filter(Boolean)
+              .map((id) => labelText(document.getElementById(id)))
+              .join(" ")
+              .trim();
+            let block: Element | null = null;
+            for (
+              let ancestor = element.parentElement, depth = 0;
+              ancestor && depth < 4;
+              ancestor = ancestor.parentElement, depth += 1
+            ) {
+              if (
+                ancestor.querySelectorAll(
+                  "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']",
+                ).length > 1
+              )
+                break;
+              block = ancestor;
+            }
+            const hint =
+              described ||
+              labelText(block).replace(label, "").replace(/\s+/gu, " ").trim();
+            return hint.length <= 300 ? hint : "";
+          };
           const roots = Array.from(
             new Set(elements.map((element) => element.getRootNode())),
           );
@@ -268,6 +296,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               name: input?.name ?? textarea?.name ?? select?.name ?? "",
               scopeKey: scopeKeyFor(element),
               label,
+              hint: hintFor(element, label),
               groupLabel: legend ?? "",
               placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
               autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
@@ -554,6 +583,34 @@ export function collectApplyDocumentSnapshot(
         .forEach((control) => control.remove());
       return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
     };
+    const hintFor = (element: Element, label: string): string => {
+      // Help text beside the field, such as "Please provide your GitHub
+      // username": what the field's own block says besides its label.
+      const described = (element.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/u)
+        .filter(Boolean)
+        .map((id) => labelText(document.getElementById(id)))
+        .join(" ")
+        .trim();
+      let block: Element | null = null;
+      for (
+        let ancestor = element.parentElement, depth = 0;
+        ancestor && depth < 4;
+        ancestor = ancestor.parentElement, depth += 1
+      ) {
+        if (
+          ancestor.querySelectorAll(
+            "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']",
+          ).length > 1
+        )
+          break;
+        block = ancestor;
+      }
+      const hint =
+        described ||
+        labelText(block).replace(label, "").replace(/\s+/gu, " ").trim();
+      return hint.length <= 300 ? hint : "";
+    };
     const isVisible = (element: HTMLElement): boolean => {
       if (element.getAttribute("aria-hidden") === "true") {
         return false;
@@ -680,6 +737,7 @@ export function collectApplyDocumentSnapshot(
         name: input?.name ?? textarea?.name ?? select?.name ?? "",
         scopeKey: scopeKeyFor(element),
         label: directLabel(element),
+        hint: hintFor(element, directLabel(element)),
         groupLabel: groupLabel(element),
         placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
         autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",

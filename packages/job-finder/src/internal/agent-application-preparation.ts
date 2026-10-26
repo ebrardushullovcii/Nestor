@@ -87,6 +87,9 @@ export interface AgentApplicationPreparationInput {
   initialQuestionContexts?: Parameters<
     typeof runApplyAgent
   >[0]["initialQuestionContexts"];
+  initialPickerAttempts?: Parameters<
+    typeof runApplyAgent
+  >[0]["initialPickerAttempts"];
   startedAt: string;
   /** What the person would call this site. */
   siteLabel: string;
@@ -615,6 +618,9 @@ export async function runAgentApplicationPreparation(
     ...(input.initialQuestionContexts
       ? { initialQuestionContexts: input.initialQuestionContexts }
       : {}),
+    ...(input.initialPickerAttempts
+      ? { initialPickerAttempts: input.initialPickerAttempts }
+      : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
     accountCreationAuthorized:
@@ -802,6 +808,7 @@ export async function runAgentApplicationPreparation(
     ...prepared,
     agentTiming: result.timing,
     questionContexts: result.questionContexts,
+    pickerAttempts: result.pickerAttempts,
   };
 }
 
@@ -892,6 +899,7 @@ export function createApplyFormPreparer(input: {
   onProgress?: AgentApplicationPreparationInput["onProgress"];
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
+  initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
   return async ({ session, currentUrl, startedAt, signal, onProgress }) => {
@@ -949,6 +957,9 @@ export function createApplyFormPreparer(input: {
         : {}),
       ...(input.initialQuestionContexts
         ? { initialQuestionContexts: input.initialQuestionContexts }
+        : {}),
+      ...(input.initialPickerAttempts
+        ? { initialPickerAttempts: input.initialPickerAttempts }
         : {}),
       startedAt,
       siteLabel: input.siteLabel,

@@ -1,4 +1,4 @@
-import type { ApplyAgentTiming } from "@nestor/contracts";
+import type { ApplyAgentTiming, ApplyPickerAttempt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
   ApplyBlockedAttempt,
@@ -56,6 +56,8 @@ export interface ApplyFormControl {
   };
   acceptedTypes?: string[];
   label: string;
+  /** Help text beside the field, such as the format it asks for. */
+  hint?: string;
   groupLabel: string;
   /** A repeated question whose section did not distinguish two form steps. */
   repeatedQuestion?: { prompt: string; step: string };
@@ -411,6 +413,8 @@ export type ApplyAgentOutcome =
 
 export interface ApplyAgentResult {
   questionContexts?: Array<{ prompt: string; step: string }>;
+  /** Choices pickers on this application refused, for the next run. */
+  pickerAttempts?: ApplyPickerAttempt[];
   timing?: ApplyAgentTiming;
   outcome: ApplyAgentOutcome;
   /** One plain sentence about how the run ended. Shown to the person as-is. */
@@ -477,6 +481,8 @@ export type ApplyProposal =
 
 export interface ApplyAgentConfig {
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
+  /** What earlier runs of this application learned about its pickers. */
+  initialPickerAttempts?: readonly ApplyPickerAttempt[];
   hands: ApplyPageHands;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about

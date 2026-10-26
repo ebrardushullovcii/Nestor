@@ -1,3 +1,5 @@
+import githubReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
+import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
 import {
@@ -10,6 +12,8 @@ import {
   buildPendingQuestion,
   createApplyGuardState,
   executeApplyProposal,
+  pickerExhausted,
+  pickerQuestionKey,
 } from "./policy-executor";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 import { buildApplyFormObservation } from "./page-hands";
@@ -4406,5 +4410,279 @@ describe("an unconfirmed short value is offered back to the person", () => {
     );
     if (offered) expect(suggested).toEqual([value]);
     else expect(suggested ?? []).not.toContain(value);
+  });
+});
+
+test.each(githubReplay.fields)(
+  "GitHub replay: $label gets the field's requested format",
+  async (field) => {
+    const source = rawPage({
+      controls: [
+        rawControl({
+          index: 0,
+          label: field.label,
+          placeholder: field.placeholder,
+          hint: field.hint,
+          required: true,
+        }),
+      ],
+    });
+    const { config } = configFor(source);
+    config.sources.profile.githubUrl = githubReplay.url;
+    const result = await executeApplyProposal(
+      {
+        tool: "type",
+        ref: "c0",
+        text: githubReplay.url,
+        storedFactId: "profile.githubUrl",
+      },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(result.kind).toBe("filled");
+    expect(source.controls[0].value).toBe(field.expected);
+  },
+);
+
+test("GitHub replay: a repository address gives its owner to a username field", async () => {
+  const source = rawPage({
+    controls: [
+      rawControl({ index: 0, label: "GitHub username", required: true }),
+    ],
+  });
+  const { config } = configFor(source);
+  config.sources.profile.githubUrl = githubReplay.repositoryUrl;
+  const result = await executeApplyProposal(
+    {
+      tool: "type",
+      ref: "c0",
+      text: githubReplay.repositoryUrl,
+      storedFactId: "profile.githubUrl",
+    },
+    observationOf(source).signature,
+    { config, now, guardState: createApplyGuardState() },
+  );
+  expect(result.kind).toBe("filled");
+  expect(source.controls[0].value).toBe(githubReplay.username);
+});
+
+test("GitHub replay: the username fact is no answer to a field that wants the address", async () => {
+  const source = rawPage({
+    controls: [rawControl({ index: 0, label: "GitHub URL", required: true })],
+  });
+  const { config, hands } = configFor(source);
+  config.sources.profile.githubUrl = githubReplay.url;
+  const fillText = vi.spyOn(hands, "fillText");
+  const result = await executeApplyProposal(
+    {
+      tool: "type",
+      ref: "c0",
+      text: githubReplay.username,
+      storedFactId: "profile.githubUrl#username",
+    },
+    observationOf(source).signature,
+    { config, now, guardState: createApplyGuardState() },
+  );
+  expect(result.kind).not.toBe("filled");
+  expect(fillText).not.toHaveBeenCalled();
+});
+
+describe("picker replay: refused choices", () => {
+  const picker = (overrides: Partial<RawApplyControl> = {}) =>
+    rawPage({
+      controls: [
+        rawControl({
+          index: 0,
+          role: "combobox",
+          inputType: "combobox",
+          label: pickerReplay.question,
+          options: [...pickerReplay.snapshotOptions],
+          required: true,
+          ...overrides,
+        }),
+      ],
+    });
+  const refusing = () =>
+    vi.fn((_ref: string, option: string) =>
+      Promise.resolve({
+        ok: false as const,
+        reason: "option_not_offered" as const,
+        offeredOptions: [...pickerReplay.options],
+        error: `The list did not offer "${option}".`,
+      }),
+    );
+  const savedCountry = (answer: string) => ({
+    id: "saved_country",
+    kind: "other" as const,
+    label: pickerReplay.question,
+    question: pickerReplay.question,
+    answer,
+    roleFamilies: [],
+    proofEntryIds: [],
+  });
+
+  test("a choice past the list read with the page still goes to the picker", async () => {
+    const readList = Array.from(
+      { length: pickerReplay.readListSize },
+      (_, index) => `Region ${String(index).padStart(3, "0")}`,
+    );
+    const source = picker({ options: readList });
+    const { config, hands } = configFor(source);
+    config.sources.profile.currentCountry = pickerReplay.beyondReadList;
+    const chooseOption = vi.spyOn(hands, "chooseOption");
+    const outcome = await executeApplyProposal(
+      {
+        tool: "select",
+        ref: "c0",
+        option: pickerReplay.beyondReadList,
+        storedFactId: "profile.currentCountry",
+      },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(chooseOption).toHaveBeenCalledWith(
+      "c0",
+      pickerReplay.beyondReadList,
+    );
+    expect(outcome.kind).toBe("filled");
+  });
+
+  test("the handover lists the form's own choices and a refused choice is not tried again", async () => {
+    const source = picker();
+    const chooseOption = refusing();
+    const { config } = configFor(source, { hands: { chooseOption } });
+    config.sources.profile.currentCountry = pickerReplay.primary;
+    const guardState = createApplyGuardState();
+    const propose = () =>
+      executeApplyProposal(
+        {
+          tool: "select",
+          ref: "c0",
+          option: pickerReplay.primary,
+          storedFactId: "profile.currentCountry",
+        },
+        observationOf(source).signature,
+        { config, now, guardState },
+      );
+    const first = await propose();
+    expect(first.kind).toBe("suggestion");
+    if (first.kind === "suggestion")
+      expect(first.question?.answerOptions).toEqual(pickerReplay.options);
+    const second = await propose();
+    expect(second.kind).toBe("suggestion");
+    expect(chooseOption).toHaveBeenCalledTimes(1);
+    const control = observationOf(source).controls[0];
+    expect(pickerExhausted(guardState, control)).toBe(true);
+    expect(guardState.pickerAttempts.get(pickerQuestionKey(control))).toEqual({
+      question: pickerQuestionKey(control),
+      tried: [pickerReplay.primary.toLowerCase()],
+      offeredOptions: pickerReplay.options,
+    });
+  });
+
+  test("refusals from earlier runs hold: after two, only the person's answer is tried", async () => {
+    const source = picker();
+    const { config, hands } = configFor(source);
+    const control = observationOf(source).controls[0];
+    const earlier = [
+      {
+        question: pickerQuestionKey(control),
+        tried: ["unlisted territory", "another territory"],
+        offeredOptions: [...pickerReplay.options],
+      },
+    ];
+    const chooseOption = vi.spyOn(hands, "chooseOption");
+    const invent = (guardState: ReturnType<typeof createApplyGuardState>) =>
+      executeApplyProposal(
+        { tool: "select", ref: "c0", option: pickerReplay.options[1] },
+        observationOf(source).signature,
+        {
+          config,
+          now,
+          guardState,
+          checkWrittenAnswer: () =>
+            Promise.resolve({ supported: true, reason: "Plausible." }),
+        },
+      );
+    // Without that history the same checked choice would be tried.
+    expect((await invent(createApplyGuardState())).kind).toBe("filled");
+    expect(chooseOption).toHaveBeenCalledTimes(1);
+    chooseOption.mockClear();
+    expect((await invent(createApplyGuardState(earlier))).kind).toBe(
+      "suggestion",
+    );
+    expect(chooseOption).not.toHaveBeenCalled();
+
+    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
+    const answered = await executeApplyProposal(
+      { tool: "select", ref: "c0", option: pickerReplay.options[0] },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState(earlier) },
+    );
+    expect(answered.kind).toBe("filled");
+    expect(chooseOption).toHaveBeenCalledWith("c0", pickerReplay.options[0]);
+  });
+
+  test("a later success keeps the refused choice on record", async () => {
+    const source = picker();
+    const chooseOption = vi.fn((_ref: string, option: string) =>
+      Promise.resolve(
+        option === pickerReplay.primary
+          ? {
+              ok: false as const,
+              reason: "option_not_offered" as const,
+              offeredOptions: [...pickerReplay.options],
+              error: "Not offered.",
+            }
+          : { ok: true as const, observedValue: option },
+      ),
+    );
+    const { config } = configFor(source, { hands: { chooseOption } });
+    config.sources.profile.currentCountry = pickerReplay.primary;
+    const guardState = createApplyGuardState();
+    const deps = { config, now, guardState };
+    const signature = observationOf(source).signature;
+    await executeApplyProposal(
+      {
+        tool: "select",
+        ref: "c0",
+        option: pickerReplay.primary,
+        storedFactId: "profile.currentCountry",
+      },
+      signature,
+      deps,
+    );
+    config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
+    const chosen = await executeApplyProposal(
+      { tool: "select", ref: "c0", option: pickerReplay.options[0] },
+      signature,
+      deps,
+    );
+    expect(chosen.kind).toBe("filled");
+    const control = observationOf(source).controls[0];
+    expect(
+      guardState.pickerAttempts.get(pickerQuestionKey(control))?.tried,
+    ).toEqual([pickerReplay.primary.toLowerCase()]);
+    expect(guardState.openPickers.has(pickerQuestionKey(control))).toBe(false);
+  });
+
+  test("an optional picker that refuses its choice is left blank, not asked about", async () => {
+    const source = picker({ required: false });
+    const { config } = configFor(source, {
+      hands: { chooseOption: refusing() },
+    });
+    config.sources.profile.currentCountry = pickerReplay.primary;
+    const outcome = await executeApplyProposal(
+      {
+        tool: "select",
+        ref: "c0",
+        option: pickerReplay.primary,
+        storedFactId: "profile.currentCountry",
+      },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(outcome.kind).toBe("refused");
+    expect(outcome).not.toHaveProperty("question");
   });
 });

@@ -466,6 +466,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           ...(previous?.execution.questionContexts
             ? { initialQuestionContexts: previous.execution.questionContexts }
             : {}),
+          ...(previous?.execution.pickerAttempts?.length
+            ? { initialPickerAttempts: previous.execution.pickerAttempts }
+            : {}),
           executionInput: facts,
           applicationRecordId: identity.applicationRecordId,
           searchPreferences,
@@ -535,6 +538,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         resumeArtifact: artifact,
         execution: {
           ...result,
+          // A run that never reached the form still keeps what earlier runs
+          // learned about its pickers.
+          pickerAttempts: result.pickerAttempts?.length
+            ? result.pickerAttempts
+            : (previous?.execution.pickerAttempts ?? []),
           answerDependencies: answerDependencies.snapshot(),
         },
         reviewCard: review,

@@ -2304,7 +2304,19 @@ export type ApplyExecutionModelUse = z.infer<
   typeof ApplyExecutionModelUseSchema
 >;
 
+/** Choices a picker on this application refused, kept so a rerun does not retry them. */
+export const ApplyPickerAttemptSchema = z.object({
+  question: z.string().min(1).max(2000),
+  tried: z.array(z.string().max(300)).max(20),
+  offeredOptions: z.array(z.string().max(300)).max(500),
+});
+export type ApplyPickerAttempt = z.infer<typeof ApplyPickerAttemptSchema>;
+
 export const ApplyExecutionResultSchema = z.object({
+  pickerAttempts: optionalStoredField(
+    z.array(ApplyPickerAttemptSchema).max(200),
+    [],
+  ),
   questionContexts: optionalStoredField(
     z
       .array(

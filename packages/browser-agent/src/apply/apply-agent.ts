@@ -39,6 +39,8 @@ import {
   guardStop,
   fileFieldHoldsOtherFile,
   questionPrompt,
+  pickerExhausted,
+  pickerQuestionKey,
   type ApplyExecutionOutcome,
 } from "./policy-executor";
 import {
@@ -323,7 +325,7 @@ async function runMeasuredApplyAgent(
   // asked once to fill the fields it already knows, so the person is left
   // only the part the agent could not do.
   let stuckFinishNudged = false;
-  const guardState = createApplyGuardState();
+  const guardState = createApplyGuardState(config.initialPickerAttempts);
   const questionOccurrences = createQuestionOccurrences(
     config.initialQuestionContexts,
   );
@@ -333,6 +335,10 @@ async function runMeasuredApplyAgent(
     observe: async () => {
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
+      // A search left in a picker whose choice failed is not an answer.
+      for (const control of observation.controls)
+        if (guardState.openPickers.has(pickerQuestionKey(control)))
+          control.answered = false;
       return observation;
     },
   };
@@ -2328,6 +2334,33 @@ async function runMeasuredApplyAgent(
     // Delta observations depend on earlier page facts until compaction refreshes them.
     staleToolResultChars: null,
     onToolTiming: timingRecord.onToolTiming,
+    // A required picker out of attempts is the person's; once every other
+    // required gap is theirs too, another model call cannot change that.
+    // An optional one is left blank and does not hold the run.
+    beforeModelTurn: () => {
+      const current = pageTools.state.observation;
+      const exhausted = current?.controls.some(
+        (control) =>
+          control.required &&
+          !control.answered &&
+          pickerExhausted(guardState, control),
+      );
+      if (
+        !current ||
+        !exhausted ||
+        !pendingQuestions.size ||
+        unresolvedRequiredControls(current).some(
+          (control) => !pendingQuestions.has(pendingQuestionKey(control)),
+        )
+      )
+        return null;
+      return {
+        reason: collectedQuestionsPause()!.summary,
+        needsPerson: true,
+        stuck: false,
+        data: {},
+      };
+    },
     afterToolBatch: async () => {
       if (!observationNeeded) return null;
       observationNeeded = false;
@@ -2508,5 +2541,6 @@ async function runMeasuredApplyAgent(
     timing: agentTiming,
     readyToSend,
     questionContexts: questionOccurrences.snapshot(),
+    pickerAttempts: [...guardState.pickerAttempts.values()],
   };
 }

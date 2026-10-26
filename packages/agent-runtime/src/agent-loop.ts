@@ -187,6 +187,8 @@ export interface AgentLoopOptions {
   parallelToolCalls?: boolean;
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
+  /** Finish from the host's verified state before spending another model call. */
+  beforeModelTurn?: () => AgentLoopFinish | null | Promise<AgentLoopFinish | null>;
   /**
    * A reply with words and no tool call. The host may take it as a step of
    * its own (most often the model reporting that it is done) instead of the
@@ -487,6 +489,11 @@ export async function runAgentLoop(
       );
     }
 
+    const hostedFinish = await options.beforeModelTurn?.();
+    if (hostedFinish)
+      return result("finished", endSentence(hostedFinish.reason), {
+        finish: hostedFinish,
+      });
     const stepsWithoutProgress = steps - lastProgressStep;
     if (
       stallWarningStep === null &&

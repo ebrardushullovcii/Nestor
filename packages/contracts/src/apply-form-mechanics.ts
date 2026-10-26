@@ -29,6 +29,8 @@ export interface RawApplyControl {
   /** Transient identity of the containing form/root within this page read. */
   scopeKey?: string;
   label: string;
+  /** Help text beside the field, besides its label. */
+  hint?: string;
   groupLabel: string;
   placeholder: string;
   autocomplete: string;

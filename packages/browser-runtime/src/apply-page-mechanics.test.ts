@@ -1,4 +1,5 @@
 import { chromium, type Browser } from "playwright";
+import githubReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import {
@@ -224,6 +225,32 @@ describe("reading the choices of lists the page draws itself", () => {
     )) {
       expect(control.label).toBe("Email me updates");
     }
+    await page.close();
+  });
+
+  test("GitHub replay: each field keeps the help text beside it, in pages and frames", async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `${githubReplay.linearPage}<iframe id="embedded"></iframe>`,
+    );
+    await page
+      .locator("#embedded")
+      .contentFrame()
+      .locator("body")
+      .evaluate((body, html) => {
+        body.innerHTML = html;
+      }, githubReplay.linearPage);
+    const observation = await readRawApplyPage(page);
+    const github = observation.controls.filter((item) => item.id === "gh");
+    const linkedin = observation.controls.filter((item) => item.id === "li");
+    expect(github).toHaveLength(2);
+    expect(linkedin).toHaveLength(2);
+    for (const control of github)
+      expect(control.hint).toBe(githubReplay.fields[4]!.hint);
+    for (const control of linkedin)
+      expect(control.hint).toBe(
+        "Please provide the link to your LinkedIn profile.",
+      );
     await page.close();
   });
 
