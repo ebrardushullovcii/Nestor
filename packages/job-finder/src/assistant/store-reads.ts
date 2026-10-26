@@ -19,7 +19,11 @@ import type {
 } from "@nestor/contracts";
 import type { z } from "zod";
 
-type Commands = typeof JOB_COMMANDS & typeof RESUME_COMMANDS & typeof APPLICATION_COMMANDS & typeof NEEDS_YOU_COMMANDS & typeof TRACKER_COMMANDS;
+type Commands = typeof JOB_COMMANDS &
+  typeof RESUME_COMMANDS &
+  typeof APPLICATION_COMMANDS &
+  typeof NEEDS_YOU_COMMANDS &
+  typeof TRACKER_COMMANDS;
 export type AssistantReadCommand = {
   [K in keyof Commands]: Commands[K]["effect"] extends "read" ? K : never;
 }[keyof Commands];
@@ -28,9 +32,14 @@ type Outputs = JobCommandOutputs &
   ApplicationCommandOutputs &
   NeedsYouCommandOutputs &
   TrackerCommandOutputs;
-export type AssistantReadInput<K extends AssistantReadCommand> = z.input<Commands[K]["input"]>;
+export type AssistantReadInput<K extends AssistantReadCommand> = z.input<
+  Commands[K]["input"]
+>;
 export type AssistantReadOutput<K extends AssistantReadCommand> = Outputs[K];
-export type RunAssistantReadCommand = <K extends AssistantReadCommand>(name: K, input: AssistantReadInput<K>) => Promise<AssistantReadOutput<K>>;
+export type RunAssistantReadCommand = <K extends AssistantReadCommand>(
+  name: K,
+  input: AssistantReadInput<K>,
+) => Promise<AssistantReadOutput<K>>;
 
 /** Person-sized singleton rows; never contains job, application or site lists. */
 export interface AssistantPersonalState {

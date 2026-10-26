@@ -13,11 +13,8 @@ import {
 import { createAssistantRepository } from "@nestor/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  createSeed} from "../workspace-service.test-support";
-import {
-  createWorkspaceServiceHarness,
-} from "../workspace-service.test-support";
+import type { createSeed } from "../workspace-service.test-support";
+import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import { createScriptedAssistantModelHandle } from "./model-handle";
 import type { AssistantHostPorts } from "./ports";
 import type { AssistantTurnSession } from "./tool-kit";
@@ -892,7 +889,10 @@ describe("assistant session host", () => {
       ),
     );
     const priorRead = ports.readCommand;
-    ports.readCommand = ((name, input) => name === "get_need" ? readNeed() : priorRead(name, input)) as AssistantHostPorts["readCommand"];
+    ports.readCommand = ((name, input) =>
+      name === "get_need"
+        ? readNeed()
+        : priorRead(name, input)) as AssistantHostPorts["readCommand"];
     await repository.upsertMessage(
       AssistantMessageSchema.parse({
         id: "message_question",

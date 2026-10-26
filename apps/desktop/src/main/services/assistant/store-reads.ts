@@ -29,9 +29,19 @@ import { getJobFinderWorkspaceFilePath } from "../job-finder/paths";
 import { isDesktopResumeImportActive } from "../job-finder/import-resume";
 import { listLocalResumeTemplates } from "../../../shared/job-finder-resume-renderer";
 
-const catalog = { ...JOB_COMMANDS, ...RESUME_COMMANDS, ...APPLICATION_COMMANDS, ...NEEDS_YOU_COMMANDS, ...TRACKER_COMMANDS };
-export async function runAssistantReadCommand<K extends AssistantReadCommand>(name: K, input: AssistantReadInput<K>): Promise<AssistantReadOutput<K>> {
-  if (!Object.hasOwn(catalog, name) || catalog[name].effect !== "read") throw new Error("Not a read command.");
+const catalog = {
+  ...JOB_COMMANDS,
+  ...RESUME_COMMANDS,
+  ...APPLICATION_COMMANDS,
+  ...NEEDS_YOU_COMMANDS,
+  ...TRACKER_COMMANDS,
+};
+export async function runAssistantReadCommand<K extends AssistantReadCommand>(
+  name: K,
+  input: AssistantReadInput<K>,
+): Promise<AssistantReadOutput<K>> {
+  if (!Object.hasOwn(catalog, name) || catalog[name].effect !== "read")
+    throw new Error("Not a read command.");
   const value = Object.hasOwn(JOB_COMMANDS, name)
     ? await runJobCommand(name as JobCommandName, input)
     : Object.hasOwn(RESUME_COMMANDS, name)

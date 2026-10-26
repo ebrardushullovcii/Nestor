@@ -1,7 +1,7 @@
-
 import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
+import { assistantTestReads } from "../store-reads.test-support";
 import type { AssistantHostPorts } from "../ports";
 import type { AssistantTurnSession } from "../tool-kit";
 import {
@@ -9,9 +9,11 @@ import {
   updateWorkspaceBehaviorTool,
 } from "./settings-tools";
 
-const ports = {
-  publishWorkspaceUpdate: () => undefined,
-} as unknown as AssistantHostPorts;
+const portsFor = (service: object) =>
+  ({
+    ...assistantTestReads(service),
+    publishWorkspaceUpdate: () => undefined,
+  }) as unknown as AssistantHostPorts;
 
 describe("settings and application standing the assistant reports", () => {
   it("switches the app to dark mode itself", async () => {
@@ -26,7 +28,7 @@ describe("settings and application standing the assistant reports", () => {
     } as unknown as AssistantTurnSession;
     const result = await setAppearanceTool.execute(
       { theme: "dark" },
-      { service: workspaceService, session, ports },
+      { service: workspaceService, session, ports: portsFor(workspaceService) },
     );
     expect(result.summary).toBe("Appearance is now dark.");
     expect(
@@ -54,7 +56,7 @@ describe("settings and application standing the assistant reports", () => {
       updateWorkspaceBehaviorTool.input.parse({
         collapseSideMenuWithAssistant: false,
       }),
-      { service: workspaceService, session, ports },
+      { service: workspaceService, session, ports: portsFor(workspaceService) },
     );
     const settings = (await workspaceService.getWorkspaceSnapshot()).settings;
     expect(settings.collapseSideMenuWithAssistant).toBe(false);

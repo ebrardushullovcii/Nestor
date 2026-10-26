@@ -4,6 +4,7 @@ import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { editProfileTool } from "./tools/profile-tools";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import type { AssistantTurnSession } from "./tool-kit";
+import { assistantTestReads } from "./store-reads.test-support";
 import type { AssistantHostPorts } from "./ports";
 
 function message(
@@ -175,6 +176,7 @@ describe("the person's answer authority", () => {
           service: workspaceService,
           session,
           ports: {
+            ...assistantTestReads(workspaceService),
             publishWorkspaceUpdate: vi.fn(),
           } as unknown as AssistantHostPorts,
         },

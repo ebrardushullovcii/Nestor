@@ -608,8 +608,12 @@ export class AssistantSessionHost {
     try {
       if (run.kind === "discovery") {
         await this.ports.executeAction?.("stop-search", {});
-      } else if (["apply_batch", "apply_run", "apply_queue"].includes(run.kind)) {
-        await this.ports.executeAction?.("stop-application", { id: Number(run.id) });
+      } else if (
+        ["apply_batch", "apply_run", "apply_queue"].includes(run.kind)
+      ) {
+        await this.ports.executeAction?.("stop-application", {
+          id: Number(run.id),
+        });
       } else if (run.kind === "source_check") {
         await this.service.cancelSourceDebug(run.id);
       }
@@ -786,7 +790,6 @@ export class AssistantSessionHost {
         assembleMessages: async (turnMessages) => {
           const current = await this.readPersonalState();
           const currentContext = buildContextBlock({
-
             context: live.sourceMessage?.context ?? null,
             resultSets: live.sourceMessage
               ? await this.resultSetsFor(live.sourceMessage)
@@ -961,7 +964,6 @@ export class AssistantSessionHost {
     this.answeredElsewhere.delete(conversationId);
     const block = [
       buildContextBlock({
-
         context: live.sourceMessage?.context ?? null,
         resultSets,
         snapshot,
@@ -1004,7 +1006,6 @@ export class AssistantSessionHost {
         const resultSets = await this.resultSetsFor(message);
         const snapshot = await this.readPersonalState();
         const block = buildContextBlock({
-
           context: message.context,
           resultSets,
           snapshot,

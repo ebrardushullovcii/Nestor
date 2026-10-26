@@ -83,7 +83,10 @@ export async function runJobCommand<K extends JobCommandName>(
   name: K,
   input: unknown,
 ) {
-  if (name === "move_jobs" && JOB_COMMANDS.move_jobs.input.parse(input).to === "shortlisted") {
+  if (
+    name === "move_jobs" &&
+    JOB_COMMANDS.move_jobs.input.parse(input).to === "shortlisted"
+  ) {
     const { getJobFinderWorkspaceService } = await import("./job-finder");
     await getJobFinderWorkspaceService();
   }

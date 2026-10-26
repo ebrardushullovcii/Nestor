@@ -73,7 +73,11 @@ function makeReads(service: object) {
       return applications.forJobs(
         (input as { jobIds: number[] }).jobIds,
       ) as never;
-    if (name === "get_need" || name === "needs_you_counts" || name === "application_needs")
+    if (
+      name === "get_need" ||
+      name === "needs_you_counts" ||
+      name === "application_needs"
+    )
       return (await needs(name, input)) as never;
     return (await jobs(name as Parameters<typeof jobs>[0], input)) as never;
   };
