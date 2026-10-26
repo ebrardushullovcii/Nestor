@@ -3,8 +3,9 @@ import { afterAll, beforeEach, expect, it, vi } from "vitest";
 import { openJobStore } from "@nestor/db/job-store";
 import { RESUMES_EXPORT_PDF_CHANNEL } from "@nestor/contracts";
 
-const { get, exportPdf, choose, start } = vi.hoisted(() => ({
+const { get, exportPdf, choose, start, defaultPath } = vi.hoisted(() => ({
   start: vi.fn(() => Promise.resolve()),
+  defaultPath: vi.fn(() => "/documents/resume.pdf"),
   get: vi.fn(() => ({
     job: { title: "Designer", company: "Example" },
     resume: { level: "light" },
@@ -21,7 +22,7 @@ vi.mock("../services/resumes", () => ({
 }));
 vi.mock("./resume-export-path", () => ({
   chooseResumeExportPath: choose,
-  buildResumeExportDefaultPath: () => "/documents/resume.pdf",
+  buildResumeExportDefaultPath: defaultPath,
 }));
 
 import { registerResumeRoutes, runResumeCommand } from "./resumes";
@@ -93,3 +94,21 @@ it("reports a failed export instead of claiming a file was saved", async () => {
     runResumeCommand("export_resume_pdf", { jobId: 12 }),
   ).rejects.toThrow("Disk full");
 });
+
+it.each(["original", "light", "tailored", "aggressive"])(
+  "names a %s PDF after its saved level",
+  async (level) => {
+    get.mockReturnValueOnce({
+      job: { title: "Designer", company: "Example" },
+      resume: { level },
+    });
+    await runResumeCommand("export_resume_pdf", { jobId: 12 });
+    expect(defaultPath).toHaveBeenLastCalledWith(
+      level === "original"
+        ? "Resume"
+        : `${level[0]!.toUpperCase()}${level.slice(1)} Resume`,
+      "Designer",
+      "Example",
+    );
+  },
+);

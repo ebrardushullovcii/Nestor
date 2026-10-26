@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createResumeService, type ResumeServiceDeps } from "./resume-service";
+import { writeResume } from "./write-resume";
 
 function found(n: number): FoundJob {
   return {
@@ -97,6 +98,53 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it.each([
+    ["Product designer using Kubernetes for the listed platform work.", true],
+    ["Product designer with 8 years of experience.", true],
+    ["Product designer who improved throughput by 999999 percent.", false],
+  ] as const)(
+    "keeps main's Aggressive number-only path for %s",
+    async (text, keep) => {
+      const seed = createSeed();
+      const profile = { ...seed.profile, yearsExperience: 7 };
+      const base = createDeterministicJobFinderAiClient();
+      const checkResumeClaims = vi.fn<
+        NonNullable<typeof base.checkResumeClaims>
+      >(() =>
+        Promise.reject(new Error("Aggressive must not call the model checker")),
+      );
+      const { store, id } = setup();
+      const job = {
+        ...store.getJob(id)!,
+        description:
+          "The job asks for Kubernetes and 8 years of experience. " +
+          store.getJob(id)!.description,
+      };
+      const draft = await writeResume(
+        {
+          aiClient: {
+            ...base,
+            checkResumeClaims,
+            createResumeDraft: async (input) => ({
+              ...(await base.createResumeDraft(input)),
+              summary: text,
+            }),
+          },
+          documentManager: {
+            listResumeTemplates: () => [],
+            renderResumeArtifact: () =>
+              Promise.reject(new Error("No preview needed")),
+          },
+        },
+        { ...seed, profile, job, level: "aggressive" },
+      );
+      expect(checkResumeClaims).not.toHaveBeenCalled();
+      expect(
+        draft?.sections.find((section) => section.kind === "summary")?.text,
+      ).toBe(keep ? text : profile.summary);
+    },
+  );
+
   it.each(["profile facts", "resume source"] as const)(
     "keeps revoked drafts queued through an empty Profile cutover, then wakes on %s",
     async (recovery) => {

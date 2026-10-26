@@ -22,6 +22,24 @@ const input = {
 };
 
 describe("resume claim checks", () => {
+  test("keeps main's listing and requirement payload bounds", () => {
+    const description =
+      "Published job context. ".repeat(200) + "Preferred: Kubernetes and Go.";
+    const requirements = Array.from(
+      { length: 35 },
+      (_, index) =>
+        `${index}: ${"Complete published requirement. ".repeat(12)} Kubernetes`,
+    );
+    const payload = buildResumeClaimCheckPayload({
+      ...input,
+      job: { ...input.job, description, requirements },
+    });
+    expect(payload.job.description).toBe(description.slice(0, 2000));
+    expect(payload.job.requirements).toEqual(
+      requirements.slice(0, 30).map((line) => line.slice(0, 240)),
+    );
+  });
+
   test("the evidence keeps checks on one routing session across jobs and client restarts", async () => {
     const sessions: Array<string | null> = [];
     const fetchMock = vi
