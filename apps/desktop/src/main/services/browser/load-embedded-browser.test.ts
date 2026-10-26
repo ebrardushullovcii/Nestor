@@ -22,6 +22,6 @@ test("retries a failed load, and attaches the app window once it loads", async (
   await expect(loadEmbeddedBrowser()).rejects.toThrow();
 
   vi.resetModules();
-  const browser = await loadEmbeddedBrowser();
-  expect(browser.attachWindow).toHaveBeenCalledWith(window);
+  await loadEmbeddedBrowser();
+  expect(attachWindow).toHaveBeenCalledWith(window);
 });
