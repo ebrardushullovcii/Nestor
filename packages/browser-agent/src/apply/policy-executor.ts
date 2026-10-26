@@ -156,6 +156,7 @@ export interface ApplyExecutorDeps {
   checkWrittenAnswer?: (
     question: string,
     answer: string,
+    evidencePolicy?: "factual_summary",
   ) => Promise<{
     supported: boolean;
     reason: string;
@@ -756,9 +757,15 @@ async function decideAnswer(input: {
         permission: true,
       };
     deps.onAnswerSource?.("checked");
-    const check = await deps
-      .checkWrittenAnswer(questionPrompt(control), value)
-      .catch(() => null);
+    const check = await (
+      permission.evidencePolicy
+        ? deps.checkWrittenAnswer(
+            questionPrompt(control),
+            value,
+            permission.evidencePolicy,
+          )
+        : deps.checkWrittenAnswer(questionPrompt(control), value)
+    ).catch(() => null);
     if (!check?.supported)
       return {
         kind: "leave",

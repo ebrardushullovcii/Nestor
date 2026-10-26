@@ -534,18 +534,24 @@ async function runMeasuredApplyAgent(
       currentReusableAnswers = next;
     }
   };
-  const answerCheckKey = (question: string, answer: string) =>
+  const answerCheckKey = (
+    question: string,
+    answer: string,
+    evidencePolicy?: "factual_summary",
+  ) =>
     JSON.stringify([
       pageTools.state.observation?.url,
       pageTools.state.observation?.step,
       question,
       answer,
+      evidencePolicy ?? null,
     ]);
   const checkOne = (
     question: string,
     answer: string,
+    evidencePolicy?: "factual_summary",
   ): Promise<WrittenAnswerCheck> => {
-    const key = answerCheckKey(question, answer);
+    const key = answerCheckKey(question, answer, evidencePolicy);
     const cached = answerChecks.get(key);
     if (cached) return cached;
     const result = checkWrittenApplicationAnswer({
@@ -555,6 +561,7 @@ async function runMeasuredApplyAgent(
       formContext: currentFormContext(),
       question,
       answer,
+      ...(evidencePolicy ? { evidencePolicy } : {}),
       signal: config.signal,
     });
     answerChecks.set(key, result);
@@ -569,6 +576,7 @@ async function runMeasuredApplyAgent(
     question: string;
     answer: string;
     control: ApplyFormObservation["controls"][number];
+    evidencePolicy?: "factual_summary";
   } | null => {
     const control = observation.controls.find(
       (candidate) => candidate.ref === proposal.ref,
@@ -619,6 +627,7 @@ async function runMeasuredApplyAgent(
       case "click":
         return null; // The executor checks files and click-derived answers itself.
     }
+    let evidencePolicy: "factual_summary" | undefined;
     if (answer !== null && classifyQuestions) {
       const readings = classifyQuestions.settled(
         observation.controls,
@@ -640,6 +649,7 @@ async function runMeasuredApplyAgent(
         pageInstructions: formWritingInstructions(observation),
       });
       if (permission.kind !== "writing") return null;
+      evidencePolicy = permission.evidencePolicy;
     }
     return answer !== null &&
       !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
@@ -658,7 +668,12 @@ async function runMeasuredApplyAgent(
         storedFactId:
           "storedFactId" in proposal ? proposal.storedFactId : undefined,
       })
-      ? { question: questionPrompt(control), answer, control }
+      ? {
+          question: questionPrompt(control),
+          answer,
+          control,
+          ...(evidencePolicy ? { evidencePolicy } : {}),
+        }
       : null;
   };
   let requiredEmptyNudged = false;
@@ -1792,6 +1807,7 @@ async function runMeasuredApplyAgent(
     checkWrittenAnswer: (
       question: string,
       answer: string,
+      evidencePolicy?: "factual_summary",
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
@@ -2066,8 +2082,23 @@ async function runMeasuredApplyAgent(
           steps.flatMap((step) => {
             const check = fillFieldCheck(step, observation);
             return check &&
-              !answerChecks.has(answerCheckKey(check.question, check.answer))
-              ? [[answerCheckKey(check.question, check.answer), check] as const]
+              !answerChecks.has(
+                answerCheckKey(
+                  check.question,
+                  check.answer,
+                  check.evidencePolicy,
+                ),
+              )
+              ? [
+                  [
+                    answerCheckKey(
+                      check.question,
+                      check.answer,
+                      check.evidencePolicy,
+                    ),
+                    check,
+                  ] as const,
+                ]
               : [];
           }),
         ).values(),
@@ -2135,7 +2166,7 @@ async function runMeasuredApplyAgent(
       );
       toCheck.forEach((entry, index) => {
         answerChecks.set(
-          answerCheckKey(entry.question, entry.answer),
+          answerCheckKey(entry.question, entry.answer, entry.evidencePolicy),
           verdicts.then(
             (results) =>
               results[index] ?? {

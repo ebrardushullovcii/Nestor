@@ -20,6 +20,10 @@ import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+import {
+  asksForSpecificStory,
+  factualSummaryIsSourced,
+} from "./factual-summary";
 
 export interface ClassifiedAnswerSource {
   id: string;
@@ -453,7 +457,11 @@ function permitConditionsFit(
 
 export type ClassifiedAnswerDecision =
   | { kind: "literal"; source: ClassifiedAnswerSource }
-  | { kind: "writing"; source: ClassifiedAnswerSource | null }
+  | {
+      kind: "writing";
+      source: ClassifiedAnswerSource | null;
+      evidencePolicy?: "factual_summary";
+    }
   | { kind: "needs_you"; reason: string };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
 export function classifyAnswerPermission(input: {
@@ -634,6 +642,7 @@ export function classifyAnswerPermission(input: {
     !source &&
     tags.kind === "motivation" &&
     isPlainMotivationIntent(input.answer) &&
+    !asksForSpecificStory(`${input.control.groupLabel} ${input.control.label}`) &&
     !requiresOwnWords(input.control.label) &&
     !ownWordsAppliesToQuestion(
       `${input.control.groupLabel}\n${input.pageInstructions}`,
@@ -686,6 +695,10 @@ export function classifyAnswerPermission(input: {
         input.control.label,
       )) ||
     requiresSavedNationalityAnswer(input.control.label) ||
+    (["motivation", "factual_summary"].includes(tags.kind) &&
+      asksForSpecificStory(
+        `${input.control.groupLabel} ${input.control.label}`,
+      )) ||
     requiresSavedOpinionAnswer(input.control.label, input.answer);
   if (gated)
     return exactSaved
@@ -803,7 +816,16 @@ export function classifyAnswerPermission(input: {
           source.id,
         )))
   )
-    return { kind: "writing", source };
+    return factualSummaryIsSourced(
+      input.answer,
+      catalog
+        .filter((row) => row.purpose === "profile" || row.id === "resume.text")
+        .map((row) => row.value),
+    )
+      ? { kind: "writing", source, evidencePolicy: "factual_summary" }
+      : deny(
+          "This summary must use complete statements from your resume or Profile, without joining separate facts into a new claim.",
+        );
   return deny(
     "This value is not a verbatim answer from a known-safe matching source.",
   );

@@ -115,7 +115,7 @@ test.each([
         pageInstructions,
       });
     };
-    expect(permission().kind).toBe("writing");
+    expect(permission().kind).toBe(supported ? "writing" : "needs_you");
     expect(permission(null).kind).toBe("needs_you");
     expect(permission("posting.description").kind).toBe("needs_you");
     expect(permission("profile.fullName").kind).toBe("needs_you");
@@ -182,7 +182,9 @@ test.each([
       client,
       sources: inputSources,
       payDisclosed: false,
-      answers: [{ question: control.label, answer }],
+      answers: [
+        { question: control.label, answer, evidencePolicy: "factual_summary" },
+      ],
     });
     expect(checked[0]?.supported).toBe(supported);
   },
