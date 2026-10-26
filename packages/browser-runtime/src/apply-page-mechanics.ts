@@ -1198,6 +1198,7 @@ const MAX_OPENED_COMBOBOXES = 16;
  * control still finds its own choices and a new page starts fresh.
  */
 const comboboxOptionMemo = new WeakMap<Page, Map<string, string[]>>();
+const comboboxMenuOwners = new WeakMap<Page, Map<string, string>>();
 
 /**
  * What makes one list that list, on this page and on the next read.
@@ -1230,7 +1231,6 @@ async function readClosedComboboxOptions(
       !control.disabled &&
       control.tagName !== "select" &&
       (control.role === "combobox" || control.inputType === "combobox") &&
-      control.options.length === 0 &&
       // A list that already shows a choice has been answered; opening it
       // tells the person nothing and costs them a second of their run.
       control.selectedOptionLabel.trim().length === 0,
@@ -1239,17 +1239,25 @@ async function readClosedComboboxOptions(
     return [...controls];
   }
 
-  const url = page.url();
+  // A previous choice can change the choices another menu offers.
+  const url = `${page.url()}|${JSON.stringify(controls.filter((control) => control.tagName === "select" || control.role === "combobox" || control.inputType === "combobox").map((control) => [control.scopeKey, control.id, control.name, control.value, control.selectedOptionLabel]))}`;
+  const keyFor = (control: RawApplyControl) =>
+    `${comboboxMemoKey(url, control)}|${JSON.stringify([control.scopeKey, control.index, control.id, control.name])}`;
   let memo = comboboxOptionMemo.get(page);
   if (!memo) {
     memo = new Map<string, string[]>();
     comboboxOptionMemo.set(page, memo);
   }
 
+  let knownMenuOwners = comboboxMenuOwners.get(page);
+  if (!knownMenuOwners) {
+    knownMenuOwners = new Map();
+    comboboxMenuOwners.set(page, knownMenuOwners);
+  }
   const optionsByIndex = new Map<number, string[]>();
   const toOpen: RawApplyControl[] = [];
   for (const control of closed) {
-    const remembered = memo.get(comboboxMemoKey(url, control));
+    const remembered = memo.get(keyFor(control));
     if (remembered) {
       if (remembered.length > 0) {
         optionsByIndex.set(control.index, remembered);
@@ -1269,65 +1277,142 @@ async function readClosedComboboxOptions(
       await locator
         .scrollIntoViewIfNeeded({ timeout: 1_500 })
         .catch(() => undefined);
-      // Focus and a down arrow, the way a person opens one of these with the
-      // keyboard. A click depends on the window being the one in front, which
-      // it is not when the browser is doing this beside the app; the keyboard
-      // does not care. The click stays as the fallback.
-      await locator.focus({ timeout: 1_500 }).catch(() => undefined);
-      await locator
-        .press("ArrowDown", { timeout: 1_500 })
-        .catch(() => undefined);
-      if ((await locator.getAttribute("aria-expanded")) !== "true") {
-        await locator.click({ timeout: 1_500 });
-      }
-      // Only the list this control owns. Every open flyout on the page has
-      // options in the DOM, and the nearest ones are not necessarily these.
-      // Give the list the moment it needs to render its choices.
-      await locator
-        .evaluate(
-          (element) =>
-            new Promise<void>((resolve) => {
-              const deadline = Date.now() + 600;
-              const check = (): void => {
-                if (
-                  element.getAttribute("aria-expanded") === "true" ||
-                  Date.now() > deadline
-                ) {
-                  resolve();
-                  return;
-                }
-                setTimeout(check, 50);
-              };
-              check();
-            }),
-        )
-        .catch(() => undefined);
-      const options = await locator.evaluate((element) => {
-        // Only the list this control opened, proved by the control saying it
-        // is expanded and naming the list as its own. Falling back to the
-        // nearest container is how one question ends up showing another
-        // question's answers.
-        if (element.getAttribute("aria-expanded") !== "true") {
-          return [] as string[];
-        }
-        const owned =
-          element.getAttribute("aria-controls") ??
-          element.getAttribute("aria-owns");
-        const listbox = owned ? document.getElementById(owned) : null;
-        if (!listbox) return [] as string[];
-        return Array.from(listbox.querySelectorAll("[role='option']"))
-          .map((option) => (option as HTMLElement).innerText.trim())
-          .filter((text) => text.length > 0)
-          .slice(0, 200);
+      const menuRead = await locator.evaluateHandle((element) => {
+        const ownedMenu = () => {
+          const ids = (
+            element.getAttribute("aria-controls") ??
+            element.getAttribute("aria-owns") ??
+            ""
+          )
+            .split(/\s+/u)
+            .filter(Boolean);
+          return ids.length === 1 ? document.getElementById(ids[0]!) : null;
+        };
+        const initialOwned = ownedMenu();
+        const initialMenus = new Set(
+          document.querySelectorAll("[role='listbox']"),
+        );
+        const changed = new Set<Element>();
+        const observer = new MutationObserver((records) => {
+          for (const record of records) {
+            const target =
+              record.target instanceof Element
+                ? record.target
+                : record.target.parentElement;
+            const menu = target?.closest("[role='listbox']");
+            if (menu) changed.add(menu);
+          }
+        });
+        observer.observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+        // Cover the three bounded open actions and the 700 ms read. A
+        // background click can take nearly its whole 1.5 s timeout before
+        // the menu starts rendering. The finally below normally cleans up.
+        setTimeout(() => observer.disconnect(), 6000);
+        return { element, initialOwned, initialMenus, changed, observer };
       });
-      memo.set(comboboxMemoKey(url, control), options);
+      let options: string[] = [];
+      try {
+        await locator.focus({ timeout: 1500 }).catch(() => undefined);
+        await locator
+          .press("ArrowDown", { timeout: 1500 })
+          .catch(() => undefined);
+        if ((await locator.getAttribute("aria-expanded")) !== "true")
+          await locator.click({ timeout: 1500 });
+        const owner = keyFor(control);
+        const observed = await menuRead.evaluate(
+          async (state, context) => {
+            const started = Date.now(),
+              deadline = started + 700;
+            let last = "",
+              menuId = "",
+              stableAt = started;
+            while (Date.now() < deadline) {
+              const ids = (
+                state.element.getAttribute("aria-controls") ??
+                state.element.getAttribute("aria-owns") ??
+                ""
+              )
+                .split(/\s+/u)
+                .filter(Boolean);
+              const menu =
+                ids.length === 1 ? document.getElementById(ids[0]!) : null;
+              menuId = menu?.id ?? "";
+              const previousOwner = context.owners[`${context.url}|${menuId}`];
+              const owners =
+                ids.length === 1
+                  ? Array.from(
+                      document.querySelectorAll("[aria-controls],[aria-owns]"),
+                    ).filter((candidate) =>
+                      (
+                        candidate.getAttribute("aria-controls") ??
+                        candidate.getAttribute("aria-owns") ??
+                        ""
+                      )
+                        .split(/\s+/u)
+                        .includes(ids[0]!),
+                    )
+                  : [];
+              const fresh =
+                menu &&
+                (state.changed.has(menu) ||
+                  !state.initialMenus.has(menu) ||
+                  (menu === state.initialOwned &&
+                    owners.length === 1 &&
+                    (!previousOwner || previousOwner === context.owner)));
+              const choices =
+                state.element.getAttribute("aria-expanded") === "true" &&
+                menu &&
+                fresh
+                  ? Array.from(menu.querySelectorAll("[role='option']"))
+                      .filter(
+                        (option) =>
+                          option.getAttribute("aria-disabled") !== "true",
+                      )
+                      .map((option) => (option as HTMLElement).innerText.trim())
+                      .filter(Boolean)
+                  : [];
+              const signature = JSON.stringify(choices);
+              if (signature !== last) {
+                last = signature;
+                stableAt = Date.now();
+              }
+              if (
+                choices.length &&
+                Date.now() - stableAt >= 120 &&
+                Date.now() - started >= 200
+              )
+                return { options: choices, menuId };
+              await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            return { options: [], menuId };
+          },
+          {
+            owners: Object.fromEntries(knownMenuOwners),
+            owner,
+            url: page.url(),
+          },
+        );
+        options = observed.options;
+        if (options.length && observed.menuId)
+          knownMenuOwners.set(`${page.url()}|${observed.menuId}`, owner);
+      } finally {
+        await menuRead
+          .evaluate((state) => state.observer.disconnect())
+          .catch(() => undefined);
+        await menuRead.dispose();
+      }
+      memo.set(keyFor(control), options);
       if (options.length > 0) {
         optionsByIndex.set(control.index, options);
       }
     } catch {
       // Remembered as "nothing to offer" so the next read does not pay for
       // the same list again.
-      memo.set(comboboxMemoKey(url, control), []);
+      memo.set(keyFor(control), []);
       // A list that will not open tells us nothing; the question still goes
       // to the person, just without its choices.
     }
@@ -1336,7 +1421,10 @@ async function readClosedComboboxOptions(
 
   return controls.map((control) => {
     const options = optionsByIndex.get(control.index);
-    return options ? { ...control, options } : control;
+    // Raw DOM text from a reused, closed portal is not evidence for this question.
+    return closed.includes(control)
+      ? { ...control, options: options ?? [] }
+      : control;
   });
 }
 

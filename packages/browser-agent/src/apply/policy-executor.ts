@@ -459,9 +459,7 @@ export function buildPendingQuestion(input: {
     isRequired: control.required,
     detectedAt: input.detectedAt,
     // A list's blank first choice is not an answer anyone could give.
-    answerOptions: answerOptions
-      .filter((option) => option.trim().length > 0)
-      .slice(0, 40),
+    answerOptions: answerOptions.filter((option) => option.trim().length > 0),
     suggestedAnswers: suggestion
       ? [
           {

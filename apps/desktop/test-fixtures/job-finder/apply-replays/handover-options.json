@@ -1,0 +1,67 @@
+{
+  "countryOptions": [
+    "Afghanistan",
+    "Albania",
+    "Algeria",
+    "Andorra",
+    "Angola",
+    "Argentina",
+    "Armenia",
+    "Australia",
+    "Austria",
+    "Azerbaijan",
+    "Bahamas",
+    "Bahrain",
+    "Bangladesh",
+    "Barbados",
+    "Belgium",
+    "Belize",
+    "Benin",
+    "Bhutan",
+    "Bolivia",
+    "Botswana",
+    "Brazil",
+    "Brunei",
+    "Bulgaria",
+    "Burkina Faso",
+    "Burundi",
+    "Cambodia",
+    "Cameroon",
+    "Canada",
+    "Cape Verde",
+    "Chad",
+    "Chile",
+    "China",
+    "Colombia",
+    "Comoros",
+    "Costa Rica",
+    "Croatia",
+    "Cuba",
+    "Cyprus",
+    "Czechia",
+    "Denmark"
+  ],
+  "restrictionOptions": ["Yes", "No"],
+  "restrictionPrompt": "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?",
+  "previousEmploymentPrompt": "Have you previously worked at or consulted for Example Workshop?",
+  "previousEmploymentOptions": ["No", "Yes"],
+  "cases": [
+    {
+      "name": "shared portal redraws after expansion",
+      "delayMs": 80,
+      "settles": true
+    },
+    {
+      "name": "shared portal never redraws",
+      "delayMs": 0,
+      "settles": false
+    },
+    {
+      "name": "previous owner releases its shared menu before a slow redraw",
+      "delayMs": 450,
+      "settles": true,
+      "releaseOwner": true
+    }
+  ],
+  "longListSize": 250
+}
