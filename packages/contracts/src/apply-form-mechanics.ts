@@ -330,6 +330,8 @@ export interface ApplyPageSession extends ApplyRawPageHands {
   clickAuthorizedFormAction: (ref: string) => Promise<ApplyWriteResult>;
   /** How many intermediate writes the guard has let through so far. */
   readIntermediateWriteCount: () => number;
+  /** Finish response checks already in flight before reading the disclosure count. */
+  drainIntermediateWrites?: () => Promise<void>;
   /**
    * Rechecks whether a service worker can influence this origin. Called
    * before any click that advances the form.

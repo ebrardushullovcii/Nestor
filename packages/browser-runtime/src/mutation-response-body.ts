@@ -1,3 +1,4 @@
+import { getPrepareOnlyRequestPermit } from "./playwright-application-flow";
 import type { Page, Request as PageRequest, Response } from "playwright";
 import { inspectMutationResponse } from "./mutation-response";
 
@@ -68,37 +69,31 @@ export function installMutationResponseBodyObserver(): void {
     const response = await fetch(resource, init);
     if (entry) {
       entry.status = response.status;
-      const type = response.headers.get("content-type") ?? "";
-      if (/json|^text\//iu.test(type)) {
-        const copy = response.clone();
-        void (async () => {
-          const reader = copy.body?.getReader();
-          if (!reader) {
-            entry.text = "";
-            return;
-          }
-          const decoder = new TextDecoder();
-          let text = "",
-            bytes = 0;
-          try {
-            while (true) {
-              const chunk = await reader.read();
-              if (chunk.done) {
-                entry.text = text + decoder.decode();
-                return;
-              }
-              bytes += chunk.value.byteLength;
-              if (bytes > 64_000) {
-                await reader.cancel();
-                return;
-              }
-              text += decoder.decode(chunk.value, { stream: true });
+      const copy = response.clone();
+      void (async () => {
+        const reader = copy.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let text = "",
+          bytes = 0;
+        try {
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              entry.text = text + decoder.decode();
+              return;
             }
-          } catch {
-            /* An unreadable body stays unconfirmed. */
+            bytes += chunk.value.byteLength;
+            if (bytes > 64_000) {
+              await reader.cancel();
+              return;
+            }
+            text += decoder.decode(chunk.value, { stream: true });
           }
-        })();
-      }
+        } catch {
+          /* An unreadable body stays unconfirmed. */
+        }
+      })();
     }
     return response;
   };
@@ -188,6 +183,7 @@ export async function inspectPageMutationResponse(
     requestTokens.set(response, token);
   }
   const request = response.request();
+  const permit = getPrepareOnlyRequestPermit(request);
   const fallback = async (): Promise<string> => {
     const bodyKeys = await requestBodyKeys(request);
     if (!bodyKeys.length) throw Error("Opaque request body");
@@ -228,9 +224,14 @@ export async function inspectPageMutationResponse(
     }
     throw Error("No unique readable response body");
   };
-  return inspectMutationResponse({
-    status: () => response.status(),
-    headers: () => response.headers(),
-    text: () => Promise.any([response.text(), fallback()]),
-  });
+  return inspectMutationResponse(
+    {
+      status: () => response.status(),
+      headers: () => response.headers(),
+      text: () => Promise.any([response.text(), fallback()]),
+      url: () => response.url(),
+      request: () => response.request(),
+    },
+    permit ? { permit } : undefined,
+  );
 }
