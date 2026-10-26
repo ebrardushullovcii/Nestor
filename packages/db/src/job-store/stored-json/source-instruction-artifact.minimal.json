@@ -1,0 +1,12 @@
+{
+  "id": "synthetic",
+  "targetId": "synthetic",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "updatedAt": "2026-10-26T00:00:00.000Z",
+  "basedOnRunId": "synthetic",
+  "versionInfo": {
+    "promptProfileVersion": "synthetic",
+    "toolsetVersion": "synthetic",
+    "adapterVersion": "synthetic"
+  }
+}

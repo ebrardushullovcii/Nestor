@@ -15,6 +15,7 @@ import { JOB_STORE_ADDED_COLUMNS } from "./schema";
  * new table adds its line here in the same change; a line never changes.
  */
 const RELEASED_COLUMNS: Record<string, string> = {
+  activity_control: "id paused paused_at reason pause_behavior",
   application_details:
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",
   application_instructions: "application_id conversation_id mode",
@@ -90,6 +91,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   searches:
     "id state settings_json started_at finished_at sources_total sources_done found added merged scored error",
   seen_listing_cards: "url role_goals_key card_fingerprint verdict",
+  site_instructions: "id target_id updated_at value",
   source_needs_you: "source_id task_id requested_url",
   tracker:
     "job_id status status_at status_change_id applied_at next_at next_title",

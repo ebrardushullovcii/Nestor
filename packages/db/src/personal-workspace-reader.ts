@@ -1,7 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
 import {
   CandidateProfileSchema,
-  JobFinderActivityControlSchema,
   ResumeImportRunSchema,
   ResumeImportFieldCandidateSchema,
   ResumeDocumentBundleSchema,
@@ -12,29 +10,15 @@ import {
   createProfileWorkspace,
   readProfileSetupState,
 } from "./job-store/profile-workspace";
-import { getSingletonValue } from "./internal/state";
+import { createActivityControlStore } from "./job-store/activity-control";
 
 /** Personal row-store reads never load job/application collections or old Profile values. */
 export function readPersonalWorkspaceState(
-  activityFile: string | null,
   initial: JobFinderRepositorySeed,
   store: JobStore,
 ) {
   const personal = createProfileWorkspace(store, initial);
-  let activityControl = initial.activityControl;
-  if (activityFile) {
-    const database = new DatabaseSync(activityFile, { readOnly: true });
-    try {
-      activityControl =
-        getSingletonValue(
-          database,
-          "activity_control",
-          JobFinderActivityControlSchema,
-        ) ?? activityControl;
-    } finally {
-      database.close();
-    }
-  }
+  const activityControl = createActivityControlStore(store).read();
   return store.transaction(() => {
     // Read the newest import of any file, including a failed replacement file.
     const run = store

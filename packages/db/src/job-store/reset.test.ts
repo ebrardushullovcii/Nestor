@@ -17,6 +17,10 @@ import {
   seedTrackerDemo,
   type JobStore,
 } from "./job-store";
+import {
+  RESET_IN_PROGRESS_PAUSE,
+  createActivityControlStore,
+} from "./activity-control";
 
 function found(n: number): FoundJob {
   return {
@@ -88,6 +92,8 @@ describe("resetJobStore", () => {
     stores.push(fresh);
     createProfileStore(fresh);
     createPreferencesStore(fresh);
+    // A cleared store holds the pause until the whole reset lowers it.
+    createActivityControlStore(fresh).save(RESET_IN_PROGRESS_PAUSE);
     const { file, store } = openFile();
 
     const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);

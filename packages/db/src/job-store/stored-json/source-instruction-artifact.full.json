@@ -1,0 +1,91 @@
+{
+  "id": "synthetic",
+  "targetId": "synthetic",
+  "status": "validated",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "updatedAt": "2026-10-26T00:00:00.000Z",
+  "acceptedAt": "2026-10-26T00:00:00.000Z",
+  "basedOnRunId": "synthetic",
+  "basedOnAttemptIds": ["synthetic"],
+  "notes": "synthetic",
+  "navigationGuidance": ["synthetic"],
+  "searchGuidance": ["synthetic"],
+  "detailGuidance": ["synthetic"],
+  "applyGuidance": ["synthetic"],
+  "warnings": ["synthetic"],
+  "intelligence": {
+    "provider": {
+      "key": "greenhouse",
+      "label": "synthetic",
+      "confidence": 0.5,
+      "apiAvailability": "available",
+      "publicApiUrlTemplate": "synthetic",
+      "boardToken": "synthetic",
+      "boardSlug": "synthetic",
+      "providerIdentifier": "synthetic"
+    },
+    "collection": {
+      "preferredMethod": "listing_route",
+      "rankedMethods": ["listing_route"],
+      "startingRoutes": [
+        {
+          "url": "https://example.test/jobs",
+          "label": "synthetic",
+          "kind": "listing",
+          "confidence": 0.5
+        }
+      ],
+      "searchRouteTemplates": [
+        {
+          "url": "https://example.test/search",
+          "label": "synthetic",
+          "kind": "search",
+          "confidence": 0.5
+        }
+      ],
+      "detailRoutePatterns": [
+        { "pattern": "/jobs/*", "label": "synthetic", "confidence": 0.5 }
+      ],
+      "listingMarkers": ["synthetic"]
+    },
+    "apply": {
+      "applyPath": "easy_apply",
+      "authMarkers": ["synthetic"],
+      "consentMarkers": ["synthetic"],
+      "questionSurfaceHints": ["synthetic"],
+      "resumeUploadHints": ["synthetic"]
+    },
+    "reliability": {
+      "selectorFingerprints": ["synthetic"],
+      "stableControlNames": ["synthetic"],
+      "failureFingerprints": ["synthetic"],
+      "verifiedAt": "2026-10-26T00:00:00.000Z",
+      "freshnessNotes": ["synthetic"]
+    },
+    "overrides": {
+      "forceMethod": "listing_route",
+      "deniedRoutePatterns": ["synthetic"],
+      "extraStartingRoutes": ["https://example.test/more"]
+    }
+  },
+  "versionInfo": {
+    "promptProfileVersion": "synthetic",
+    "toolsetVersion": "synthetic",
+    "adapterVersion": "synthetic",
+    "appSchemaVersion": "synthetic"
+  },
+  "verification": {
+    "id": "synthetic",
+    "replayRunId": "synthetic",
+    "verifiedAt": "2026-10-26T00:00:00.000Z",
+    "outcome": "passed",
+    "proofSummary": "synthetic",
+    "reason": "synthetic",
+    "versionInfo": {
+      "promptProfileVersion": "synthetic",
+      "toolsetVersion": "synthetic",
+      "adapterVersion": "synthetic",
+      "appSchemaVersion": "synthetic"
+    }
+  }
+}

@@ -11,7 +11,6 @@ import {
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   SourceDebugWorkerAttemptSchema,
-  SourceInstructionArtifactSchema,
   TailoredAssetSchema,
   UserActionEventSchema,
   UserActionRequestSchema,
@@ -233,11 +232,6 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
       ApplicationAttemptSchema,
       "id ASC",
     ),
-    sourceInstructionArtifacts: collection(
-      "source_instruction_artifacts",
-      SourceInstructionArtifactSchema,
-      "id ASC",
-    ),
     sourceDebugAttempts: collection(
       "source_debug_attempts",
       SourceDebugWorkerAttemptSchema,
@@ -275,7 +269,10 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
   };
   const projectResumeApprovals = createResumeApprovalProjection(database);
   const projectTailoredFiles = createTailoredAssetFileProjection(database);
-  const read = (): Promise<JobFinderDisplayCollections> => {
+  // The job store supplies site instructions; see the file repository.
+  const read = (): Promise<
+    Omit<JobFinderDisplayCollections, "sourceInstructionArtifacts">
+  > => {
     try {
       return Promise.resolve({
         tailoredAssets: projectTailoredFiles(readers.tailoredAssets()),
@@ -286,7 +283,6 @@ export function createDisplayCollectionsReader(database: DatabaseSync) {
         applyJobResults: readers.applyJobResults(),
         applicationRecords: readers.applicationRecords(),
         applicationAttempts: readers.applicationAttempts(),
-        sourceInstructionArtifacts: readers.sourceInstructionArtifacts(),
         sourceDebugAttempts: readers.sourceDebugAttempts(),
         profileCopilotMessages: readers.profileCopilotMessages(),
         profileRevisions: readers.profileRevisions(),

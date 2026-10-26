@@ -30,11 +30,7 @@ it("reads current personal rows without parsing job or application collections",
     } finally {
       database.close();
     }
-    const personal = readPersonalWorkspaceState(
-      fixture.filePath,
-      createSeed(),
-      store,
-    );
+    const personal = readPersonalWorkspaceState(createSeed(), store);
     expect(personal.profile.currentLocation).toBe("Lisbon");
     expect(personal).not.toHaveProperty("savedJobs");
     expect(personal).not.toHaveProperty("applicationRecords");
@@ -76,7 +72,6 @@ it("starts the new Profile and Settings empty instead of copying the retired sin
     }
     const seed = createSeed();
     const personal = readPersonalWorkspaceState(
-      fixture.filePath,
       {
         ...seed,
         profile: createFreshStartCandidateProfile(),
@@ -116,11 +111,7 @@ it("reports the newest import, even when it read a different file than the saved
     await repository.upsertResumeImportRun(
       run("new_failed", "resume_new_file", "2026-10-02T09:00:00.000Z"),
     );
-    const personal = readPersonalWorkspaceState(
-      fixture.filePath,
-      createSeed(),
-      store,
-    );
+    const personal = readPersonalWorkspaceState(createSeed(), store);
     expect(personal.latestResumeImportRun).toMatchObject({
       id: "new_failed",
       status: "failed",

@@ -403,6 +403,10 @@ export function openJobStore(filePath: string): JobStore {
 export type { JobSearches } from "./searches";
 
 export { resetJobStore } from "./reset";
+export {
+  RESET_IN_PROGRESS_PAUSE,
+  createActivityControlStore,
+} from "./activity-control";
 export { approveOriginalResumesForTests, seedTrackerDemo } from "./test-seeds";
 
 export { createProfileEditDraftStore } from "./profile-edit-draft";

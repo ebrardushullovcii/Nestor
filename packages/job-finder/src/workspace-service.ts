@@ -787,10 +787,13 @@ export function createJobFinderWorkspaceService(
    * "press Resume on Home first" was a dead end in the Profile footer.
    * Scheduled runs never come through here; they keep obeying the pause.
    */
+  /**
+   * A person starting browser work. It refuses while work is paused: only an
+   * explicit Resume, or the last step of a finished reset, lowers a pause.
+   */
   async function requireActivityEnabled(): Promise<void> {
-    if ((await repository.getActivityControl()).paused) {
-      await commitActivityControl({ paused: false });
-    }
+    if ((await repository.getActivityControl()).paused)
+      throw new Error("Background work is paused. Resume it, then try again.");
     await onExplicitUserStart?.();
   }
 

@@ -11,6 +11,7 @@ import {
   JOB_FINDER_DEMO_SOURCE_RESUME_CONTENT,
 } from "../../adapters/job-finder-demo-resume-files";
 import { getJobFinderWorkspaceService } from "./workspace-service";
+import { lowerPauseAfterReset } from "./reset-workspace";
 
 async function writeDemoFile(
   filePath: string | null | undefined,
@@ -44,9 +45,13 @@ export async function loadApplyQueueDemoState() {
     state.resumeExportArtifacts.map((artifact) => artifact.filePath),
   );
   const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-  const snapshot = await jobFinderWorkspaceService.resetWorkspace(state);
-
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  await jobFinderWorkspaceService.resetWorkspace(state);
+  // A reset holds the pause until its caller lowers it; a demo state brings
+  // its own.
+  lowerPauseAfterReset(state.activityControl);
+  return JobFinderWorkspaceSnapshotSchema.parse(
+    await jobFinderWorkspaceService.getWorkspaceSnapshot(),
+  );
 }
 
 export async function loadWorkHistoryReviewDriveState() {
@@ -56,9 +61,13 @@ export async function loadWorkHistoryReviewDriveState() {
     state.resumeExportArtifacts.map((artifact) => artifact.filePath),
   );
   const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-  const snapshot = await jobFinderWorkspaceService.resetWorkspace(state);
-
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  await jobFinderWorkspaceService.resetWorkspace(state);
+  // A reset holds the pause until its caller lowers it; a demo state brings
+  // its own.
+  lowerPauseAfterReset(state.activityControl);
+  return JobFinderWorkspaceSnapshotSchema.parse(
+    await jobFinderWorkspaceService.getWorkspaceSnapshot(),
+  );
 }
 
 export async function loadAgentOwnedBrowserDriveState(input: {
@@ -79,6 +88,9 @@ export async function loadAgentOwnedBrowserDriveState(input: {
     state.resumeExportArtifacts.map((artifact) => artifact.filePath),
   );
   const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-  const snapshot = await jobFinderWorkspaceService.resetWorkspace(state);
-  return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+  await jobFinderWorkspaceService.resetWorkspace(state);
+  lowerPauseAfterReset(state.activityControl);
+  return JobFinderWorkspaceSnapshotSchema.parse(
+    await jobFinderWorkspaceService.getWorkspaceSnapshot(),
+  );
 }
