@@ -197,6 +197,32 @@ it("freezes all approved jobs across pages, respects exclusions and keeps later 
   }
 });
 
+it("Assistant Apply all keeps a skipped job skipped; naming the job brings it back", async () => {
+  const ids = add(2);
+  applications.applyJobs({ selection: { ids: [ids[0]!] } });
+  const work = applications.claimNext()!;
+  expect(
+    applications.skip(
+      work.id,
+      work.attempt,
+      "Neither saved option is offered.",
+    ),
+  ).toBe(true);
+  const { ctx } = context(ids);
+  const everything = { filter: { stage: "resume" as const }, except: [] };
+  await record(ctx, everything);
+  const tool = assistantApplicationCommands().find(
+    (t) => t.name === "apply_to_jobs",
+  )!;
+  // The Assistant expands the filter into ids; that is still Apply all.
+  await tool.execute({ selection: everything }, ctx);
+  expect(applications.getApplication(work.id)?.state).toBe("skipped");
+  expect(applications.forJobs([ids[1]!])[0]?.state).toBe("queued");
+  await record(ctx, { ids: [ids[0]!] });
+  await tool.execute({ selection: { ids: [ids[0]!] } }, ctx);
+  expect(applications.getApplication(work.id)?.state).toBe("queued");
+});
+
 it("uses one/selected ids, refuses unapproved jobs and never upgrades or duplicates existing Fill work", async () => {
   const ids = add(3);
   const { ctx } = context(ids);

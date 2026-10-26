@@ -1,35 +1,35 @@
 {
-  "provenance": "Synthetic shapes of the owner's country rule (\"if it has that do albania if not skip\") and the L1 review's cases: a fallback listed under a local-language variant, a near-name that must not count, a State picker grouped under the saved question. No applicant data.",
+  "provenance": "Synthetic shapes of the owner's country rule (\"if it has that do albania if not skip\") and the L1 review's cases: a fallback listed under its own-language name (Albania (Shqipëri)), which counts, while any other bracketed qualifier does not, a near-name that must not count, a State picker grouped under the saved question. No applicant data.",
   "question": "Country of residence",
-  "primary": "Primary territory",
-  "fallback": "Fallback region",
+  "primary": "Kosovo",
+  "fallback": "Albania",
   "whenNeitherOffered": "skip_application",
   "cases": [
     {
       "name": "primary offered",
-      "options": ["Primary territory", "Fallback region"],
-      "chosen": ["Primary territory"],
-      "expected": "Primary territory"
+      "options": ["Kosovo", "Albania"],
+      "chosen": ["Kosovo"],
+      "expected": "Kosovo"
     },
     {
       "name": "only the fallback offered",
-      "options": ["Fallback region", "Other region"],
-      "chosen": ["Primary territory", "Fallback region"],
-      "expected": "Fallback region"
+      "options": ["Albania", "Serbia"],
+      "chosen": ["Kosovo", "Albania"],
+      "expected": "Albania"
     },
     {
       "name": "the fallback under its local name",
-      "options": ["Fallback region (Local name)", "Other region"],
-      "chosen": ["Primary territory", "Fallback region (Local name)"],
-      "expected": "Fallback region (Local name)"
+      "options": ["Albania (Shqipëri)", "Serbia"],
+      "chosen": ["Kosovo", "Albania (Shqipëri)"],
+      "expected": "Albania (Shqipëri)"
     },
     {
       "name": "neither offered",
-      "options": ["Other region"],
-      "chosen": ["Primary territory", "Fallback region"],
+      "options": ["Serbia"],
+      "chosen": ["Kosovo", "Albania"],
       "expected": null
     }
   ],
-  "nearName": "Primary territory Outlying Islands",
+  "nearName": "Kosovo and Metohija",
   "groupedQuestion": { "groupLabel": "Country of residence", "label": "State" }
 }

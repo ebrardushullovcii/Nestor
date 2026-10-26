@@ -7700,6 +7700,70 @@ describe("saved picker fallback replay", () => {
     },
   );
 
+  test.each([
+    {
+      name: "the same name in its own language is that choice",
+      primary: "Albania",
+      options: ["Albania (Shqipëri)", "Kosovo"],
+      filled: "Albania (Shqipëri)",
+    },
+    {
+      name: "a narrower place in brackets is not, and goes to the person",
+      primary: "China",
+      options: ["China (Hong Kong SAR)", "Japan"],
+      filled: null,
+    },
+  ])("$name", async ({ primary, options, filled }) => {
+    const source = picker(options);
+    const input = config(source);
+    input.sources.reusableAnswers = [
+      savedRule({
+        answer: primary,
+        optionFallback: { ...rule, primary, fallback: "Elsewhere" },
+      }),
+    ];
+    input.hands.chooseOption = list(source, options);
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+    if (filled) expect(source.controls[0].value).toBe(filled);
+    else {
+      expect(source.controls[0].value).toBe("");
+      expect(
+        result.pauses.flatMap((pause) => pause.questions ?? [])[0]?.prompt,
+      ).toBe(fallbackReplay.question);
+    }
+  });
+
+  test("a choice refused while missing, then listed after the other refusal, is never skipped", async () => {
+    const source = picker([]);
+    const input = config(source);
+    input.sources.reusableAnswers = [
+      savedRule({
+        answer: "Kosovo",
+        optionFallback: { ...rule, primary: "Kosovo", fallback: "Albania" },
+      }),
+    ];
+    // The list loads in stages: without Kosovo first, with it a moment later.
+    let calls = 0;
+    input.hands.chooseOption = vi.fn((_ref: string, value: string) => {
+      calls += 1;
+      return Promise.resolve({
+        ok: false as const,
+        error: `The list did not offer "${value}".`,
+        reason: "option_not_offered" as const,
+        offeredOptions: calls === 1 ? ["Serbia"] : ["Kosovo", "Serbia"],
+      });
+    });
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
+    );
+    expect(result.skipReason).toBeUndefined();
+  });
+
   test("a native list is asked too, never skipped from the page read alone", async () => {
     const source = picker(["Other region"], {
       tagName: "select",

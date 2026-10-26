@@ -16,7 +16,15 @@ import {
 } from "./application-authority";
 
 export const ApplyJobsInputSchema = z
-  .object({ selection: JobSelectionSchema })
+  .object({
+    selection: JobSelectionSchema,
+    /**
+     * The ids stand for a bulk choice ("Apply all", a filter the Assistant
+     * expanded), not jobs the person named: a job a saved rule skipped
+     * stays skipped.
+     */
+    bulk: z.boolean().optional(),
+  })
   .strict();
 export type ApplyJobsInput = z.input<typeof ApplyJobsInputSchema>;
 

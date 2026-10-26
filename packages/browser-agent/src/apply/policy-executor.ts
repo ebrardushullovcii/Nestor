@@ -394,10 +394,9 @@ async function applyPickerRule(input: {
   const key = pickerQuestionKey(control);
   const offered = () =>
     deps.guardState.pickerAttempts.get(key)?.offeredOptions ?? [];
-  // A skip rests only on what the list said in this run: choices it refused
-  // here, with the list it showed instead. Refusals remembered from an
-  // earlier run only stop a retry, and send the question to the person.
-  const refusedNow = new Set<string>();
+  // A skip rests only on what the list said in this run: the latest list it
+  // showed instead of a refused choice. Refusals remembered from an earlier
+  // run only stop a retry, and send the question to the person.
   let listedNow: readonly string[] = [];
   for (const [position, wanted] of [rule.primary, rule.fallback].entries()) {
     // Each of the person's two answers is checked like any answer to this
@@ -479,22 +478,14 @@ async function applyPickerRule(input: {
           at,
         );
       }
-      if (write.offeredOptions?.length) {
-        refusedNow.add(normalizeSignal(option));
-        listedNow = write.offeredOptions;
-      }
+      if (write.offeredOptions?.length) listedNow = write.offeredOptions;
     }
   }
-  const absent = (wanted: string) => {
-    if (!listedNow.length) return false;
-    const match = strictOptionMatch(listedNow, wanted);
-    return (
-      match.kind !== "ambiguous" &&
-      refusedNow.has(
-        normalizeSignal(match.kind === "match" ? match.value : wanted),
-      )
-    );
-  };
+  // Judged on the latest list the picker settled on, for both choices: a
+  // choice refused earlier may be listed now.
+  const absent = (wanted: string) =>
+    listedNow.length > 0 &&
+    strictOptionMatch(listedNow, wanted).kind === "none";
   if (absent(rule.primary) && absent(rule.fallback))
     return {
       kind: "skipped",

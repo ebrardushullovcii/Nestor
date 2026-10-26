@@ -150,7 +150,7 @@ export function createApplicationStore(store: JobStore) {
       instruction?: { conversationId: string; mode: ApplicationAutomationMode },
     ): ApplyJobsResult {
       const mode = ApplicationApplyModeSchema.parse(requestedMode);
-      const { selection } = ApplyJobsInputSchema.parse(input);
+      const { selection, bulk } = ApplyJobsInputSchema.parse(input);
       if (!("ids" in selection) && selection.filter.stage !== "resume") {
         throw new Error("Apply requires the Approved filter.");
       }
@@ -183,8 +183,8 @@ export function createApplicationStore(store: JobStore) {
         const approved = count(approvedWhere);
         const now = Date.now();
         // A job the person picked by name is their own intent: it comes
-        // back even after a saved rule skipped it. Apply all never undoes a
-        // skip.
+        // back even after a saved rule skipped it. Apply all, or ids that
+        // only stand for a filter, never undo a skip.
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
            SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
@@ -194,7 +194,7 @@ export function createApplicationStore(store: JobStore) {
            WHERE applications.state IN ('stopped', 'failed')
              AND (applications.disposition IS NULL OR ? = 1)
              AND applications.submitted_at IS NULL RETURNING id`,
-        ).all(mode, now, now, ...params, selected ? 1 : 0) as {
+        ).all(mode, now, now, ...params, selected && !bulk ? 1 : 0) as {
           id: number;
         }[];
         for (const { id } of result) {

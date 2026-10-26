@@ -8,8 +8,121 @@ import { isAnswerFromThisApplication } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
 import type { ApplyAgentConfig, ApplyFormControl } from "./types";
 
-// "Name (Local name)" and "Name [XK]" are the same choice as "Name".
-const qualifier = /\s*[([][^)\]]*[)\]]\s*/gu;
+// "Name (Local name)" and "Name [XK]": a name followed by bracketed words.
+const qualifier = /\s*[([]([^)\]]*)[)\]]\s*/gu;
+
+const spelling = (value: string) =>
+  value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+// Languages whose names for a place count as the same choice, by script and
+// region, so "Albania (Shqipëri)" and "Japan (日本)" are Albania and Japan.
+const VARIANT_LANGUAGES = [
+  "sq",
+  "de",
+  "fr",
+  "es",
+  "it",
+  "pt",
+  "nl",
+  "pl",
+  "sv",
+  "nb",
+  "da",
+  "fi",
+  "cs",
+  "sk",
+  "sl",
+  "hr",
+  "sr",
+  "bs",
+  "mk",
+  "bg",
+  "ro",
+  "hu",
+  "el",
+  "tr",
+  "ru",
+  "uk",
+  "be",
+  "lt",
+  "lv",
+  "et",
+  "ga",
+  "cy",
+  "is",
+  "mt",
+  "ar",
+  "he",
+  "fa",
+  "hi",
+  "bn",
+  "ur",
+  "zh",
+  "ja",
+  "ko",
+  "th",
+  "vi",
+  "id",
+  "ms",
+  "fil",
+  "sw",
+  "am",
+  "ka",
+  "hy",
+  "az",
+  "kk",
+  "uz",
+  "mn",
+  "ne",
+  "si",
+  "ta",
+  "km",
+  "lo",
+  "my",
+  "ca",
+  "eu",
+  "gl",
+  "lb",
+];
+
+let regionNames: Map<string, Set<string>> | null = null;
+
+/**
+ * Every spelling of a place the run accepts as the same choice: its name in
+ * the languages above and its own region code. Built once from the
+ * platform's region names.
+ */
+function placeSpellings(name: string): Set<string> | null {
+  if (!regionNames) {
+    regionNames = new Map();
+    const english = new Intl.DisplayNames(["en"], { type: "region" });
+    const local = VARIANT_LANGUAGES.map(
+      (language) => new Intl.DisplayNames([language], { type: "region" }),
+    );
+    for (let first = 65; first <= 90; first++)
+      for (let second = 65; second <= 90; second++) {
+        const code = String.fromCharCode(first, second);
+        let label: string | undefined;
+        try {
+          label = english.of(code);
+        } catch {
+          continue;
+        }
+        if (!label || label === code || /unknown/iu.test(label)) continue;
+        const spellings = new Set([spelling(code)]);
+        for (const names of local) {
+          const named = names.of(code);
+          if (named && named !== code) spellings.add(spelling(named));
+        }
+        regionNames.set(spelling(label), spellings);
+      }
+  }
+  return regionNames.get(spelling(name)) ?? null;
+}
 
 /**
  * Where a saved choice sits in a list, spelling only. A choice that matches
@@ -34,9 +147,22 @@ export function strictOptionMatch(
   ];
   const exact = options.find((option) => normalizeSignal(option) === wanted);
   if (exact) return { kind: "match", value: exact };
-  const qualified = options.filter(
-    (option) => normalizeSignal(option.replace(qualifier, " ")) === wanted,
-  );
+  // A qualifier counts only when it is the same name in another language or
+  // script, or the place's own code; "China (Hong Kong SAR)" is a different
+  // choice from "China", and is handed over.
+  const variants = placeSpellings(desired);
+  const qualified = options.filter((option) => {
+    if (normalizeSignal(option.replace(qualifier, " ")) !== wanted)
+      return false;
+    const qualifiers = [...option.matchAll(qualifier)].map((match) =>
+      spelling(match[1] ?? ""),
+    );
+    return (
+      qualifiers.length > 0 &&
+      variants !== null &&
+      qualifiers.every((entry) => variants.has(entry))
+    );
+  });
   const [only] = qualified;
   if (qualified.length === 1 && only) return { kind: "match", value: only };
   const near = options.filter((option) => {
