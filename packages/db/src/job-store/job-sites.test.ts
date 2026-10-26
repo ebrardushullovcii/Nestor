@@ -114,3 +114,23 @@ test("each site edit has its own persisted Undo, with later edits and reused URL
     store.close();
   }
 });
+
+test("bulk add preserves commas inside an address and still separates explicit URL lists", () => {
+  const store = openJobStore(":memory:");
+  try {
+    const sites = createJobSitesStore(store),
+      url =
+        "https://jobs.example.test/search/engineer,3,8?places=Berlin,London";
+    const result = sites.add({
+      text:
+        url +
+        ", https://other.example.test/jobs\nhttps://third.example.test/jobs",
+    });
+    expect(result).toMatchObject({ added: 3, invalid: [] });
+    expect(sites.list().rows.map((row) => row.url)).toContain(url);
+    expect(sites.add({ text: url }).duplicateUrls).toEqual([url]);
+    expect(sites.list().counts.all).toBe(3);
+  } finally {
+    store.close();
+  }
+});

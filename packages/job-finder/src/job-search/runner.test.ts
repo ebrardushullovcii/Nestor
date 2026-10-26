@@ -557,3 +557,21 @@ test.each(["mixed", "sign-in only", "one failed", "one readable"])(
       expect(status.progress).toMatchObject({ failed: 0, needsYou: 2 });
   },
 );
+
+test("a source timeout explains retry without creating a sign-in ticket", async () => {
+  const { runner, engine, store } = setup();
+  engine.collectSource.mockRejectedValue(
+    Object.assign(new Error("The operation was aborted due to timeout"), {
+      name: "TimeoutError",
+    }),
+  );
+  await runner.start({});
+  const status = await finished(runner);
+  expect(status.search?.state).toBe("failed");
+  expect(status.progress).toMatchObject({ failed: 2, needsYou: 0 });
+  for (const row of createSearchSourcesStore(store).list({}).rows)
+    expect(row.message).toContain("Open it to check it loads, then retry");
+  expect(store.sql("SELECT count(*) AS n FROM source_needs_you").get()?.n).toBe(
+    0,
+  );
+});
