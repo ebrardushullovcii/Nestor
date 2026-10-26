@@ -1128,6 +1128,8 @@ export async function undoReceipt(
           conflicts.push(...receipt.fieldLabels);
       } else undone.push(...receipt.fieldLabels);
     } catch (error) {
+      if (error instanceof AssistantToolError && error.kind === "conflict")
+        return { receipt, message: error.message };
       if (error instanceof Error && /changed since/iu.test(error.message))
         conflicts.push(...receipt.fieldLabels);
       else throw error;
