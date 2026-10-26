@@ -1556,9 +1556,39 @@ export async function ensurePrepareOnlyMutationGuard(
       } catch {
         /* Worker and detached-frame writes have no field authority. */
       }
+      // Inspect multipart fields, not PDF bytes. The text budget and final
+      // signals still cover every string field, including late fields.
+      let intermediateBody = request.postData();
+      if (
+        /\bmultipart\/form-data\b/iu.test(
+          request.headers()["content-type"] ?? "",
+        )
+      ) {
+        try {
+          const body = request.postDataBuffer();
+          if (!body || body.byteLength > 25 * 1024 * 1024)
+            throw new Error("Oversize draft save");
+          const form = await new Request("http://localhost/", {
+            method: "POST",
+            headers: { "content-type": request.headers()["content-type"]! },
+            body: new Uint8Array(body),
+          }).formData();
+          intermediateBody = JSON.stringify(
+            [...form].map(([key, value]) => [
+              key,
+              typeof value === "string"
+                ? value
+                : { name: value.name, size: value.size, type: value.type },
+            ]),
+          );
+        } catch {
+          await denyRequest();
+          return;
+        }
+      }
       const decision = classifyIntermediateMutationRequest({
         authorized: networkGuardState!.intermediateMutationsAuthorized,
-        bodyText: request.postData(),
+        bodyText: intermediateBody,
         method,
         nowMs: Date.now(),
         resourceKind,

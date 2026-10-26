@@ -511,7 +511,10 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       await page.locator('[name="resume"]').setInputFiles({
         name: "resume.pdf",
         mimeType: "application/pdf",
-        buffer: Buffer.from("%PDF synthetic"),
+        buffer: Buffer.concat([
+          Buffer.from("%PDF synthetic"),
+          Buffer.alloc(128_000),
+        ]),
       });
       const post = (url: string) =>
         page.evaluate(async (url) => {
