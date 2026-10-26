@@ -138,23 +138,27 @@ async function readList(list: Locator): Promise<ListState | null> {
     .evaluate((element, loadingSource) => {
       const loadingRow = new RegExp(loadingSource, "iu");
       const html = element as HTMLElement;
+      // A search hides the rows it filters out; only drawn rows are offered.
+      const drawn = (node: Element) => node.getClientRects().length > 0;
       const rows = Array.from(
         element.querySelectorAll<HTMLElement>("[role='option']"),
-      ).map((option) =>
-        (option.getAttribute("aria-label") ?? option.innerText ?? "")
-          .replace(/\s+/gu, " ")
-          .trim(),
-      );
+      )
+        .filter(drawn)
+        .map((option) =>
+          (option.getAttribute("aria-label") ?? option.innerText ?? "")
+            .replace(/\s+/gu, " ")
+            .trim(),
+        );
       return {
-        visible:
-          html.getClientRects().length > 0 &&
-          getComputedStyle(html).visibility !== "hidden",
+        visible: drawn(html) && getComputedStyle(html).visibility !== "hidden",
         // Skeleton rows, a spinner or a "Loading…" row: still fetching.
         loading:
           element.getAttribute("aria-busy") === "true" ||
-          element.querySelector(
-            "[aria-busy='true'], [role='progressbar'], [class*='skeleton' i], [class*='spinner' i], [class*='loading' i]",
-          ) !== null ||
+          Array.from(
+            element.querySelectorAll(
+              "[aria-busy='true'], [role='progressbar'], [class*='skeleton' i], [class*='spinner' i], [class*='loading' i]",
+            ),
+          ).some(drawn) ||
           rows.some((text) => text === "" || loadingRow.test(text)),
         options: rows,
         // An empty list says so in its menu, which may wrap the listbox.
@@ -206,6 +210,7 @@ async function readWholeList(
         for (const option of element.querySelectorAll<HTMLElement>(
           "[role='option']",
         )) {
+          if (option.getClientRects().length === 0) continue;
           const text = (option.getAttribute("aria-label") ?? option.innerText)
             .replace(/\s+/gu, " ")
             .trim();
@@ -313,7 +318,8 @@ async function clickRow(list: Locator, text: string): Promise<string> {
 /**
  * Waits for the list to show the choice or finish drawing without it. After a
  * search, rows that do not answer it may be the previous results still on
- * screen, so they count as settled only once the whole budget has passed.
+ * screen, so they count as settled only once the whole budget has passed; a
+ * search that leaves the list open and empty for that long is "empty".
  */
 async function settle(
   scope: Frame | Page,
@@ -324,6 +330,7 @@ async function settle(
 ): Promise<
   | { kind: "found"; list: Locator; text: string }
   | { kind: "settled"; list: Locator; state: ListState }
+  | { kind: "empty" }
   | { kind: "unbound" }
   | { kind: "unsettled" }
 > {
@@ -362,6 +369,15 @@ async function settle(
         (answersSearch || Date.now() >= deadline)
       )
         return { kind: "settled", list, state };
+      if (
+        searched &&
+        state.visible &&
+        !busy &&
+        state.options.length === 0 &&
+        Date.now() - stableSince >= STABLE_MS &&
+        Date.now() >= deadline
+      )
+        return { kind: "empty" };
     }
     if (Date.now() >= deadline)
       return bound ? { kind: "unsettled" } : { kind: "unbound" };
@@ -427,30 +443,34 @@ async function chooseFromList(
       );
     }
   }
-  if (first.kind === "unsettled") {
+  let searched: string[] | null = null;
+  if (first.kind === "settled") {
+    const read = await readWholeList(first.list, wanted);
+    if (read.found)
+      return {
+        ok: true,
+        observedValue: await clickRow(first.list, read.found),
+      };
+    if (!read.complete) {
+      await leave();
+      return uncertain(
+        "The option list was too long to read to its end, so its choices could not be confirmed.",
+      );
+    }
+    if (!searchable) {
+      await leave();
+      return missing(label, read.options);
+    }
+    searched = read.options;
+  } else if (first.kind === "unsettled" || !searchable) {
     await leave();
     return uncertain(
       "The option list did not finish loading, so its choices could not be confirmed.",
     );
   }
-  const searched = await readWholeList(first.list, wanted);
-  if (searched.found)
-    return {
-      ok: true,
-      observedValue: await clickRow(first.list, searched.found),
-    };
-  if (!searched.complete) {
-    await leave();
-    return uncertain(
-      "The option list was too long to read to its end, so its choices could not be confirmed.",
-    );
-  }
-  if (!searchable) {
-    await leave();
-    return missing(label, searched.options);
-  }
-  // What a search left shows the choice is absent, not what the form offers.
-  // Clear it and read the list the form actually has.
+  // What a search left shows the choice is absent, not what the form offers;
+  // a search that found nothing shows only that. Clear it and read the list
+  // the form actually has, to its end.
   await locator.fill("", { timeout: 2_000 }).catch(() => undefined);
   const listed = await settle(scope, locator, wanted, 3_000, false);
   if (listed.kind === "found")
@@ -459,16 +479,20 @@ async function chooseFromList(
       observedValue: await clickRow(listed.list, listed.text),
     };
   const whole =
-    listed.kind === "settled"
-      ? await readWholeList(listed.list, wanted)
-      : { options: [], found: null };
-  if (whole.found && listed.kind === "settled")
+    listed.kind === "settled" ? await readWholeList(listed.list, wanted) : null;
+  if (whole?.found && listed.kind === "settled")
     return {
       ok: true,
       observedValue: await clickRow(listed.list, whole.found),
     };
   await leave();
-  const offered = [...searched.options];
+  if (!whole?.complete)
+    return searched
+      ? missing(label, searched)
+      : uncertain(
+          "The search found nothing and the full list could not be read, so its choices could not be confirmed.",
+        );
+  const offered = [...(searched ?? [])];
   for (const option of whole.options)
     if (
       !offered.some(

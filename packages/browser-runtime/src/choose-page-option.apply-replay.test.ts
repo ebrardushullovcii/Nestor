@@ -241,6 +241,46 @@ test("a search that finds nothing reports the form's real choices and leaves no 
   });
 }, 20_000);
 
+test("a search that hides every row, with no message, is checked against the full list", async () => {
+  // The replica sites' own country picker: rows are hidden, not removed, and
+  // a spinner sits in the list undrawn.
+  await withPage(async (page) => {
+    await page.setContent(`
+      <label for="country-search">Country</label>
+      <input id="country-search" role="combobox" aria-controls="country-options">
+      <ul id="country-options" role="listbox" hidden>
+        <li class="spinner" style="display:none"></li>
+        ${replay.offered.map((option) => `<li role="option" data-value="${option}">${option}</li>`).join("")}
+      </ul>
+      <script>
+        const input = document.getElementById("country-search");
+        const list = document.getElementById("country-options");
+        const rows = [...list.querySelectorAll("[role=option]")];
+        const filter = () => {
+          rows.forEach((row) => (row.hidden = !row.dataset.value.toLowerCase().includes(input.value.toLowerCase())));
+          list.hidden = false;
+        };
+        input.addEventListener("focus", filter);
+        input.addEventListener("input", filter);
+        rows.forEach((row) => row.addEventListener("click", () => { input.value = row.dataset.value; list.hidden = true; }));
+      </script>`);
+    const control = page.getByRole("combobox");
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject(
+      {
+        ok: false,
+        reason: "option_not_offered",
+        offeredOptions: replay.offered,
+      },
+    );
+    expect(await control.inputValue()).toBe("");
+    expect(await choosePageOption(page, control, replay.offered[1]!)).toEqual({
+      ok: true,
+      observedValue: replay.offered[1],
+    });
+    expect(await control.inputValue()).toBe(replay.offered[1]);
+  });
+}, 30_000);
+
 test("rows left over from before a search are not read as its answer", async () => {
   await withPage(async (page) => {
     await page.setContent(
