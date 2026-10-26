@@ -72,3 +72,30 @@ test("an unfinished empty list is uncertain, not proof that an option does not e
     await page.close();
   }
 }, 15_000);
+
+test("a picker in a frame reports only that frame's choices despite matching list ids", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(
+      `<div id="country-options" role="listbox"><div role="option" onclick="document.body.dataset.wrongChoice='yes'">${replay.missing}</div></div><iframe></iframe>`,
+    );
+    const frame = page.frames().find((entry) => entry !== page.mainFrame())!;
+    await frame.setContent(
+      `<label>Country<input role="combobox" aria-controls="country-options"></label><div id="country-options" role="listbox">${replay.offered.map((option) => `<div role="option" onclick="document.querySelector('input').value=this.textContent">${option}</div>`).join("")}</div>`,
+    );
+    const control = frame.getByRole("combobox");
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: replay.offered,
+    });
+    expect(await page.locator("body").getAttribute("data-wrong-choice")).toBeNull();
+    expect(await choosePageOption(page, control, replay.offered[0]!)).toEqual({
+      ok: true,
+      observedValue: replay.offered[0],
+    });
+    expect(await control.inputValue()).toBe(replay.offered[0]);
+  } finally {
+    await page.close();
+  }
+}, 15_000);
