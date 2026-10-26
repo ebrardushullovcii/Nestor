@@ -671,7 +671,11 @@ function AssistantSidebarPanel() {
   }, [findIndex, findMatches]);
 
   const actions: AssistantPartActions = {
-    onUndo: undo,
+    onUndo: async (receiptId) =>
+      undo(
+        receiptId,
+        await assistant?.captureContext({ mentions: [], attachments: [] }),
+      ),
     onResolveProposal: resolveProposal,
     onAnswer: (questionId, answer) => {
       if (!assistant) return;

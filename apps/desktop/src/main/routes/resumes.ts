@@ -10,7 +10,7 @@ import {
   type ResumePreviewResult,
 } from "@nestor/contracts";
 import type { RunResumeCommand } from "@nestor/job-finder/resumes";
-import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import type { IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 
 import {
   buildResumeExportDefaultPath,
@@ -34,10 +34,11 @@ let runner: RunResumeCommand | null = null;
 async function exportResumePdf(
   service: Awaited<ReturnType<typeof resumeService>>,
   jobId: number,
+  sender: WebContents | null = null,
 ): Promise<ResumePdfExportResult> {
   const { job, resume } = service.get(jobId);
   const target = await chooseResumeExportPath(
-    null,
+    sender,
     buildResumeExportDefaultPath(
       resume?.level === "original" ? "Resume" : "Tailored Resume",
       job.title,
@@ -48,23 +49,29 @@ async function exportResumePdf(
   return { outputPath: await service.exportPdf(jobId, target) };
 }
 
+async function createRunner(sender: WebContents | null = null) {
+  const { createResumeCommandRunner, createResumeCommandReads } =
+    await import("@nestor/job-finder/resumes");
+  return createResumeCommandRunner(
+    resumeService,
+    () =>
+      Promise.resolve(
+        createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
+      ),
+    (service, jobId) => exportResumePdf(service, jobId, sender),
+  );
+}
+
 /** The same commands the Shortlisted screen uses; the Assistant calls this. */
 export async function runResumeCommand<K extends ResumeCommandName>(
   name: K,
   input: unknown,
+  sender: WebContents | null = null,
 ) {
-  if (!runner) {
-    const { createResumeCommandRunner, createResumeCommandReads } =
-      await import("@nestor/job-finder/resumes");
-    runner ??= createResumeCommandRunner(
-      resumeService,
-      () =>
-        Promise.resolve(
-          createResumeCommandReads(getJobStore(), listLocalResumeTemplates),
-        ),
-      exportResumePdf,
-    );
-  }
+  // Bind the initiating window per export; concurrent windows must not share a sender.
+  if (sender && name === "export_resume_pdf")
+    return (await createRunner(sender))(name, input);
+  runner ??= await createRunner();
   return runner(name, input);
 }
 
@@ -79,7 +86,11 @@ export function registerResumeRoutes(ipcMain: IpcMain): void {
       name?: unknown;
       input?: unknown;
     };
-    return runResumeCommand(String(name) as ResumeCommandName, input);
+    return runResumeCommand(
+      String(name) as ResumeCommandName,
+      input,
+      event.sender,
+    );
   });
 
   // The live preview renders every few keystrokes; a newer render for the
@@ -109,7 +120,7 @@ export function registerResumeRoutes(ipcMain: IpcMain): void {
     RESUMES_EXPORT_PDF_CHANNEL,
     async (event, payload: unknown): Promise<ResumePdfExportResult> => {
       if (!fromMainFrame(event)) throw new Error("Not allowed.");
-      return runResumeCommand("export_resume_pdf", payload);
+      return runResumeCommand("export_resume_pdf", payload, event.sender);
     },
   );
 }

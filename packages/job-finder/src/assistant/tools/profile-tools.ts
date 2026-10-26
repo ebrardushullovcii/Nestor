@@ -1,4 +1,5 @@
 import { buildProfileSetupReviewItems } from "../../internal/profile-setup-review-items";
+import { guardResumeEditor } from "../resume-command-receipts";
 import type { AssistantPersonalState } from "../store-reads";
 import { findBulletsOnTwoCards } from "@nestor/ai-providers";
 import {
@@ -1105,6 +1106,11 @@ export async function undoReceipt(
       );
     session.assertCurrent();
     try {
+      if (
+        undo.name === "undo_resume_change" ||
+        undo.name === "undo_resume_level"
+      )
+        guardResumeEditor(Number(undo.input.jobId), { session });
       const result = await command.execute(
         command.input.parse(undo.input),
         context,
@@ -1122,6 +1128,8 @@ export async function undoReceipt(
           conflicts.push(...receipt.fieldLabels);
       } else undone.push(...receipt.fieldLabels);
     } catch (error) {
+      if (error instanceof AssistantToolError && error.kind === "conflict")
+        return { receipt, message: error.message };
       if (error instanceof Error && /changed since/iu.test(error.message))
         conflicts.push(...receipt.fieldLabels);
       else throw error;

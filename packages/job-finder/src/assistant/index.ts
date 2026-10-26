@@ -39,6 +39,11 @@ export {
 export { diffValues, undoChangeEntries } from "./change-diff";
 export { assistantCommandTools } from "./command-tools";
 export { AssistantToolError } from "./tool-kit";
+export {
+  guardResumeEditor,
+  resumeCommandReceipts,
+  resumeResultData,
+} from "./resume-command-receipts";
 export type { AssistantToolDefinition, AssistantToolContext } from "./tool-kit";
 
 export {

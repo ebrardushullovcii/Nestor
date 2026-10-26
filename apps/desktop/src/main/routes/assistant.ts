@@ -155,7 +155,11 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
       const input = AssistantUndoChangeInputSchema.parse(payload);
       const host = await getAssistantHost();
       return AssistantUndoChangeResultSchema.parse(
-        await host.undoChange(input.conversationId, input.receiptId),
+        await host.undoChange(
+          input.conversationId,
+          input.receiptId,
+          input.context,
+        ),
       );
     },
   );

@@ -11,6 +11,9 @@ import {
 } from "@nestor/contracts";
 import {
   assistantCommandTools,
+  guardResumeEditor,
+  resumeCommandReceipts,
+  resumeResultData,
   needsYouCommandTools,
   type AssistantToolContext,
 } from "@nestor/job-finder";
@@ -81,6 +84,7 @@ async function siteChange<T extends SiteChange>(
 
 /** Add each screen's command catalog here as its store lands. */
 export function assistantAppCommands() {
+  const resumeReceipts = resumeCommandReceipts(runResumeCommand);
   return [
     ...assistantApplicationCommands(),
     ...needsYouCommandTools(runNeedsYouCommand),
@@ -292,6 +296,19 @@ export function assistantAppCommands() {
       runResumeCommand,
       {
         group: "resume",
+        before: {
+          save_resume: resumeReceipts.before,
+          edit_resume: resumeReceipts.before,
+          approve_resume: resumeReceipts.before,
+          set_resume_level: (input, context) =>
+            guardResumeEditor(input.jobId, context),
+          rewrite_resume: (input, context) =>
+            guardResumeEditor(input.jobId, context),
+          undo_resume_level: (input, context) =>
+            guardResumeEditor(input.jobId, context),
+          undo_resume_change: (input, context) =>
+            guardResumeEditor(input.jobId, context),
+        },
         replaces: {
           get_resume: ["read_resume"],
           save_resume: ["edit_resume", "revise_resume", "set_resume_template"],
@@ -335,6 +352,53 @@ export function assistantAppCommands() {
                 ),
               },
             };
+          },
+          get_resume: (value) => ({
+            summary: `${value.job.title} at ${value.job.company}: ${value.resume?.state ?? "no resume yet"}. Edit with edit_resume; resume.updatedAt is the required revision.`,
+            data: {
+              job: {
+                id: value.job.id,
+                title: value.job.title,
+                company: value.job.company,
+                stage: value.job.stage,
+              },
+              resume: value.resume ? resumeResultData(value.resume) : null,
+              templates: value.templates,
+            },
+          }),
+          undo_resume_change: (value) => ({
+            summary: "Undid the resume change.",
+            data: resumeResultData(value),
+          }),
+          save_resume: (value, input, context) =>
+            resumeReceipts.result(value, input, context, "edit"),
+          edit_resume: (value, input, context) =>
+            resumeReceipts.result(value, input, context, "edit"),
+          approve_resume: (value, input, context) =>
+            resumeReceipts.result(value, input, context, "approve"),
+          async rewrite_resume(value, input, { session }) {
+            const summary = "Writing this resume again.";
+            if (!value?.levelChangeId) return { summary, data: value };
+            const { part } = await session.recordChange({
+              target: "app_command",
+              targetId: String(input.jobId),
+              summary,
+              undoCommand: {
+                name: "undo_resume_level",
+                input: { jobId: input.jobId, changeId: value.levelChangeId },
+              },
+              entries: [
+                {
+                  path: ["draft"],
+                  kind: "set",
+                  index: null,
+                  label: "Resume rewrite",
+                  before: "Previous saved resume and approval",
+                  after: "Writing a replacement resume",
+                },
+              ],
+            });
+            return { summary, data: value, parts: [part] };
           },
           async set_resume_level(value, input, { session }) {
             const label = `${value.level[0]!.toUpperCase()}${value.level.slice(1)}`;

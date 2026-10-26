@@ -115,13 +115,13 @@ export function ShortlistedScreen() {
     applyView(view) {
       const nextTab = view.stage ?? tab;
       if (nextTab !== "shortlisted" && nextTab !== "resume") return false;
-      const changed = nextTab !== tab || (view.text !== undefined && view.text !== text);
+      const changed =
+        nextTab !== tab || (view.text !== undefined && view.text !== text);
       setTab(nextTab);
       if (view.text !== undefined) setText(view.text);
       return changed;
     },
   });
-
 
   const latest = useRef({ list, activeId, view, selection, tab, text });
   latest.current = { list, activeId, view, selection, tab, text };
@@ -129,16 +129,46 @@ export function ShortlistedScreen() {
     const { list, activeId, view, selection, tab, text } = latest.current;
     return {
       screen: "review_queue",
-      focus: activeId === null ? null : { kind: "job", id: String(activeId), label: view.job?.title ?? null },
+      focus:
+        activeId === null
+          ? null
+          : {
+              kind: "job",
+              id: String(activeId),
+              label: view.job?.title ?? null,
+            },
       list: {
         listKind: "shortlist",
-        selectedIds: list.rows.filter((row) => isSelected(selection, row.id)).map((row) => String(row.id)),
+        selectedIds: list.rows
+          .filter((row) => isSelected(selection, row.id))
+          .map((row) => String(row.id)),
         displayedIds: list.rows.map((row) => String(row.id)),
         filteredIds: [],
         totalFilteredCount: list.total,
-        filterSummary: JSON.stringify({ stage: tab, text, allSelected: selection.all, except: selection.all ? [...selection.ids] : [] }),
+        filterSummary: JSON.stringify({
+          stage: tab,
+          text,
+          allSelected: selection.all,
+          except: selection.all ? [...selection.ids] : [],
+        }),
         campaignId: null,
       },
+      editor:
+        activeId === null
+          ? null
+          : {
+              editor: "resume",
+              draftId: view.draft?.id ?? null,
+              draftVersion: 0,
+              selection: null,
+              jobId: String(activeId),
+              savedRevision: view.resume?.updatedAt ?? null,
+              hasUnsavedEdits:
+                view.dirty ||
+                view.saveStatus === "saving" ||
+                view.saveStatus === "failed",
+              mode: view.resume?.level === "original" ? "original" : "editable",
+            },
     };
   });
 
@@ -180,7 +210,7 @@ export function ShortlistedScreen() {
     setBusy("approve");
     const approved: number[] = [];
     try {
-      if (!ticked) await view.flush();
+      if (view.job && ids.includes(view.job.id)) await view.flush();
       for (const id of ids) {
         await window.nestor.resumes.run("approve_resume", { jobId: id });
         approved.push(id);
@@ -356,7 +386,12 @@ export function ShortlistedScreen() {
       }
     >
       <ListDetailLayout
-        state={{ stage: tab, text, selectedIds: [...selection.ids], all: selection.all }}
+        state={{
+          stage: tab,
+          text,
+          selectedIds: [...selection.ids],
+          all: selection.all,
+        }}
         detail={
           <ResumePane
             applying={busy === "apply"}

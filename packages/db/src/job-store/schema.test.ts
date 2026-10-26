@@ -45,6 +45,8 @@ const RELEASED_COLUMNS: Record<string, string> = {
   needs_you_drafts: "task_id answer remember revision",
   needs_you_text: "prompt",
   resume_pdf_assets: "job_id path approved_at sha256",
+  resume_changes:
+    "id job_id before_json before_stage after_stage expected_updated_at undone_at",
   resumes:
     "job_id level state updated_at error draft_json previous_json approved_at pdf_path",
   search_sources:

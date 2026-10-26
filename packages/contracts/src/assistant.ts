@@ -543,11 +543,14 @@ export const AssistantChangeReceiptSchema = z
     summary: NonEmptyStringSchema.max(400),
     fieldLabels: z.array(NonEmptyStringSchema.max(160)).max(60).default([]),
     entries: z.array(AssistantChangeEntrySchema).max(600),
-    undoCommand: z.object({
-      name: NonEmptyStringSchema.max(100),
-      input: z.record(z.unknown()),
-      expectedCount: z.number().int().nonnegative().optional(),
-    }).strict().optional(),
+    undoCommand: z
+      .object({
+        name: NonEmptyStringSchema.max(100),
+        input: z.record(z.unknown()),
+        expectedCount: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
     createdAt: IsoDateTimeSchema,
     status: z
       .enum(["applied", "undone", "partially_undone"])
@@ -1028,7 +1031,11 @@ export type AssistantResolveProposalInput = z.input<
 >;
 
 export const AssistantUndoChangeInputSchema = z
-  .object({ conversationId: IdSchema, receiptId: IdSchema })
+  .object({
+    conversationId: IdSchema,
+    receiptId: IdSchema,
+    context: AssistantContextReferenceSchema.optional(),
+  })
   .strict();
 export type AssistantUndoChangeInput = z.infer<
   typeof AssistantUndoChangeInputSchema
