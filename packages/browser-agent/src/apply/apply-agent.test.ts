@@ -896,6 +896,47 @@ test.each([
   },
 );
 
+test("a terms answer cannot approve a different declaration under a wizard heading", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        inputType: "checkbox",
+        label: "I agree",
+        groupLabel: "Step 4 of 6: Marketing consent",
+        value: "yes",
+        checked: false,
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.reusableAnswers = [
+    {
+      id: "remembered_terms",
+      kind: "other",
+      label: "Terms",
+      question: "Step 2 of 6: Terms — I agree",
+      answer: "Yes",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "set_checkbox", args: { ref: "c0", checked: true } },
+      {
+        name: "finish",
+        args: {
+          reason: "The declaration needs the person.",
+          needsPerson: true,
+        },
+      },
+    ]),
+  );
+  expect(source.controls[0]?.checked).toBe(false);
+});
+
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {
   const input = config(page(), {
     application: {

@@ -342,15 +342,38 @@ export interface FormAnswerMatch {
   proofEntryIds?: string[];
 }
 /** Page legends describe the wizard, not the question or its answer's scope. */
-export function cleanFormQuestionPrompt(value: string): string {
+export function cleanFormQuestionPrompt(
+  value: string,
+  keepProgressSection = false,
+): string {
   const parts = value
     .trim()
     .replace(/^application\s*-\s*/iu, "")
     .split(/\s*[—–]\s*|\s+-\s+|\r?\n/u);
-  const chrome = (part: string) =>
-    /^(?:job\s+)?application(?:\s+form)?$/iu.test(part.trim()) ||
-    /^step\s+\d+\s*(?:of|\/)\s*\d+\b/iu.test(part.trim());
-  while (parts.length && chrome(parts[0]!)) parts.shift();
+  while (parts.length) {
+    if (/^(?:job\s+)?application(?:\s+form)?$/iu.test(parts[0]!.trim())) {
+      parts.shift();
+      continue;
+    }
+    const step = /^step\s+\d+\s*(?:of|\/)\s*\d+\b\s*[:.…]*\s*(.*)$/iu.exec(
+      parts[0]!,
+    );
+    if (!step) break;
+    const section = step[1]!.trim();
+    // Keep specific policy/reference context. Only general layout headings
+    // can disappear from an otherwise complete question.
+    if (
+      section &&
+      (keepProgressSection ||
+        !/^(?:application|compensation|eligibility questions|questions)$/iu.test(
+          section,
+        ))
+    ) {
+      parts[0] = section;
+      break;
+    }
+    parts.shift();
+  }
   return parts.join(" — ").trim();
 }
 

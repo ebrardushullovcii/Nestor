@@ -257,8 +257,8 @@ export function fileFieldHoldsOtherFile(
 }
 
 export function questionPrompt(control: ApplyFormControl): string {
-  const label = cleanFormQuestionPrompt(control.label) || control.label.trim();
-  const group = cleanFormQuestionPrompt(control.groupLabel);
+  const label = control.label.trim();
+  const group = control.groupLabel.trim();
   // File tasks name the input, without its fieldset legend or required marker.
   if (control.kind === "file") {
     return label.replace(/[\s*:]+$/u, "").replace(/\s+upload$/iu, "") || "file";
@@ -278,9 +278,15 @@ export function questionPrompt(control: ApplyFormControl): string {
     !normalizedLabel.includes(normalizedGroup) &&
     !normalizedGroup.includes(normalizedLabel);
   const prompt = groupAddsSomething ? `${group} — ${label}` : label || group;
-  return (
-    prompt || control.placeholder.trim() || "A question on the application form"
-  );
+  const described =
+    prompt ||
+    control.placeholder.trim() ||
+    "A question on the application form";
+  // A declaration's section can change what "I agree" means. Keep that
+  // context for both its saved answer and the model's permission check.
+  return control.attestationKind !== null
+    ? cleanFormQuestionPrompt(described, true)
+    : described;
 }
 
 export function buildPendingQuestion(input: {

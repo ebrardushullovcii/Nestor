@@ -4,6 +4,7 @@ import {
   type SavedFormAnswerKey,
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
+  cleanFormQuestionPrompt,
   RememberFormAnswerInputSchema,
   type RememberFormAnswerInput,
   type FormAnswerLookup,
@@ -81,7 +82,10 @@ function toTask(row: Task): NeedsYouTask {
     kind: row.kind,
     key: row.answer_key,
     scope: { country: row.country, siteOrigin: row.site_origin },
-    prompt: row.prompt,
+    prompt:
+      row.kind === "question"
+        ? cleanFormQuestionPrompt(row.prompt) || row.prompt
+        : row.prompt,
     input: row.input,
     options,
     openedAt: toIso(row.opened_at),
@@ -589,6 +593,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       options: { reuseAnswers?: boolean } = {},
     ): RequestNeedsYouResult {
       const value = RequestNeedsYouInputSchema.parse(input);
+      if (value.kind === "question")
+        value.prompt = cleanFormQuestionPrompt(value.prompt) || value.prompt;
       return store.transaction(() => {
         const application = sql(
           "SELECT state, attempt FROM applications WHERE id = ?",

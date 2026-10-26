@@ -34,4 +34,10 @@ test("the same question keeps its key across wizard headings, without discarding
   expect(
     cleanFormQuestionPrompt("Step 4 of 6: Questions — Employment — From"),
   ).toBe("Employment — From");
+  expect(
+    normalizeFormQuestionPrompt("Step 3 of 6: Marketing consent — I agree"),
+  ).not.toBe(normalizeFormQuestionPrompt("Step 4 of 6: Terms — I agree"));
+  expect(
+    cleanFormQuestionPrompt("Step 4 of 6: Compensation — I agree", true),
+  ).toBe("Compensation — I agree");
 });
