@@ -386,4 +386,5 @@ export function openJobStore(filePath: string): JobStore {
 }
 export type { JobSearches } from "./searches";
 
+export { resetJobStore } from "./reset";
 export { approveOriginalResumesForTests, seedTrackerDemo } from "./test-seeds";

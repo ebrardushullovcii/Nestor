@@ -145,6 +145,30 @@ describe("assistant repository", () => {
     expect(await repository.getCurrentConversationId()).toBeNull();
   });
 
+  it("drops every grant on reset, so none outlives the job ids it names", async () => {
+    const repository = createAssistantRepository({ filePath: ":memory:" });
+    cleanups.push(() => repository.close());
+    await repository.upsertConversation(conversation("a", at(1)));
+    await repository.upsertGrant({
+      id: "grant-1",
+      conversationId: "a",
+      sourceMessageId: "m1",
+      action: "prepare_and_send",
+      jobIds: ["1"],
+      resumePolicy: null,
+      answerPolicy: null,
+      constraints: [],
+      status: "active",
+      history: [],
+      createdAt: at(1),
+      updatedAt: at(1),
+    });
+    expect(await repository.listGrants()).toHaveLength(1);
+    await repository.reset();
+    expect(await repository.getGrant("grant-1")).toBeNull();
+    expect(await repository.listGrants()).toEqual([]);
+  });
+
   it("persists across reopen of a file database", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "assistant-repo-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));

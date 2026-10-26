@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JobFinderStartupResetRecoveryFact } from "../../../../../shared/job-finder-startup-reset-recovery";
 import { StartupResetRecoveryBanner } from "./startup-reset-recovery-banner";
@@ -24,9 +25,26 @@ function installDesktopBridge() {
   });
 }
 
+function Where() {
+  const location = useLocation();
+  return <p data-testid="where">{`${location.pathname}${location.hash}`}</p>;
+}
+
+function renderBanner() {
+  return render(
+    <MemoryRouter initialEntries={["/job-finder/home"]}>
+      <StartupResetRecoveryBanner />
+      <Routes>
+        <Route path="*" element={<Where />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 afterEach(() => {
   cleanup();
   window.localStorage?.clear();
+  window.sessionStorage?.clear();
   vi.clearAllMocks();
 });
 
@@ -35,7 +53,7 @@ describe("StartupResetRecoveryBanner", () => {
     installDesktopBridge();
     getStartupResetRecovery.mockResolvedValue({ status: "idle" });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
     await waitFor(() => {
       expect(getStartupResetRecovery).toHaveBeenCalledTimes(1);
@@ -55,7 +73,7 @@ describe("StartupResetRecoveryBanner", () => {
       completedAt: "2026-08-23T10:00:00.000Z",
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
     await screen.findByText(
       "An interrupted workspace reset was completed during startup.",
@@ -75,7 +93,7 @@ describe("StartupResetRecoveryBanner", () => {
       token: "token-1234",
       completedAt: "2026-08-23T10:00:00.000Z",
     });
-    const view = render(<StartupResetRecoveryBanner />);
+    const view = renderBanner();
 
     await screen.findByText(
       "An interrupted workspace reset was completed during startup.",
@@ -92,7 +110,7 @@ describe("StartupResetRecoveryBanner", () => {
     ).toBeNull();
 
     view.unmount();
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
     expect(
       screen.queryByText(
         "An interrupted workspace reset was completed during startup.",
@@ -108,9 +126,9 @@ describe("StartupResetRecoveryBanner", () => {
       quarantinedFileName: "job-finder-reset-intent.invalid-2026.json",
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
-    await screen.findByText("Workspace startup recovery needs attention");
+    await screen.findByText("A reset didn't finish");
     expect(
       screen.getByText(/unreadable workspace reset marker was quarantined/i),
     ).toBeTruthy();
@@ -129,9 +147,9 @@ describe("StartupResetRecoveryBanner", () => {
       quarantinedFileName: null,
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
-    await screen.findByText("Workspace startup recovery needs attention");
+    await screen.findByText("A reset didn't finish");
     const detail = screen.getByText((_, element) => {
       return (
         element?.tagName === "P" &&
@@ -153,7 +171,7 @@ describe("StartupResetRecoveryBanner", () => {
       quarantinedFileName: "job-finder-reset-intent.invalid-2026.json",
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
     await screen.findByText("Workspace startup recovery needs attention");
     expect(screen.getByText(/files are retained/i)).toBeTruthy();
@@ -174,7 +192,7 @@ describe("StartupResetRecoveryBanner", () => {
       quarantinedFileName: null,
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
     await screen.findByText("Workspace startup recovery needs attention");
     expect(
@@ -192,7 +210,7 @@ describe("StartupResetRecoveryBanner", () => {
       completedAt: "2026-08-23T10:00:00.000Z",
     });
 
-    render(<StartupResetRecoveryBanner />);
+    renderBanner();
 
     const banner = await screen.findByRole("status");
     expect(banner.getAttribute("aria-live")).toBe("polite");
@@ -204,5 +222,75 @@ describe("StartupResetRecoveryBanner", () => {
         "An interrupted workspace reset was completed during startup.",
       ),
     ).toBe(true);
+  });
+
+  it("says a reset didn't finish without deleting anything and offers to reset again", async () => {
+    installDesktopBridge();
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_unreadable",
+      quarantinedFileName: null,
+    });
+
+    renderBanner();
+
+    await screen.findByText("A reset didn't finish");
+    expect(screen.getByText(/so it deleted nothing/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reset again" }));
+    expect(screen.getByTestId("where").textContent).toBe(
+      "/job-finder/settings#settings-danger-zone",
+    );
+  });
+
+  it("offers no reset again while set-aside files wait for support", async () => {
+    installDesktopBridge();
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_quarantined_with_pending_trash",
+      quarantinedFileName: "job-finder-reset-intent.invalid-x.json",
+    });
+
+    renderBanner();
+
+    await screen.findByText("Workspace startup recovery needs attention");
+    expect(screen.queryByRole("button", { name: "Reset again" })).toBeNull();
+  });
+
+  it("keeps an unreadable-marker notice dismissed for the session only", async () => {
+    installDesktopBridge();
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_unreadable",
+      quarantinedFileName: null,
+    });
+    const view = renderBanner();
+    await screen.findByText("A reset didn't finish");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Dismiss workspace recovery message",
+      }),
+    );
+    expect(screen.queryByText("A reset didn't finish")).toBeNull();
+    expect(window.localStorage.length).toBe(0);
+
+    // The next screen mounts the banner again, now with the same marker
+    // quarantined by the old workspace's recovery; it stays dismissed.
+    getStartupResetRecovery.mockResolvedValue({
+      status: "degraded",
+      reason: "marker_quarantined_malformed",
+      quarantinedFileName: "job-finder-reset-intent.invalid-a.json",
+    });
+    view.unmount();
+    const next = renderBanner();
+    await waitFor(() =>
+      expect(getStartupResetRecovery).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.queryByText("A reset didn't finish")).toBeNull();
+
+    // A later launch is a new session, where a failure shows again.
+    next.unmount();
+    window.sessionStorage.clear();
+    renderBanner();
+    await screen.findByText("A reset didn't finish");
   });
 });

@@ -180,6 +180,7 @@ export const jobFinderStartupResetRecoveryDegradedReasonValues = [
   "marker_quarantined_oversized",
   "marker_quarantined_with_pending_trash",
   "reset_recovery_failed",
+  "marker_unreadable",
 ] as const;
 
 export const JobFinderStartupResetRecoveryDegradedReasonSchema = z.enum(

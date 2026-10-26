@@ -29,6 +29,9 @@ const {
   mockClearBrowserStorage,
   mockClearBrowserCache,
   mockSetActivityControl,
+  mockResetJobStore,
+  mockDiscardJobSearch,
+  mockResetAssistantStore,
 } = vi.hoisted(() => ({
   mockMkdir: vi.fn(),
   mockOpen: vi.fn(),
@@ -55,11 +58,18 @@ const {
   mockClearBrowserStorage: vi.fn(),
   mockClearBrowserCache: vi.fn(),
   mockSetActivityControl: vi.fn(),
+  mockResetJobStore: vi.fn(),
+  mockDiscardJobSearch: vi.fn(),
+  mockResetAssistantStore: vi.fn(),
 }));
+
+vi.mock("@nestor/db/job-store", () => ({ resetJobStore: mockResetJobStore }));
+vi.mock("../job-store", () => ({ getJobStore: () => ({ store: true }) }));
+vi.mock("../job-commands", () => ({ discardJobSearch: mockDiscardJobSearch }));
 
 vi.mock("../assistant/assistant-service", () => ({
   shutdownAssistantHost: vi.fn(),
-  resetAssistantStore: vi.fn(),
+  resetAssistantStore: mockResetAssistantStore,
 }));
 
 vi.mock("../browser/embedded-browser", () => ({
@@ -398,6 +408,52 @@ describe("resetJobFinderWorkspace", () => {
     await resetJobFinderWorkspace();
     expect(order).toEqual(["pause", "close", "storage", "cache", "records"]);
     expect(mockCloseBrowser).toHaveBeenCalledWith(true);
+  });
+
+  test("stops the search first and clears the job store before marking the reset done", async () => {
+    const markerRemoved = () =>
+      mockRm.mock.calls.some(([target]) => target === intentMarkerPath);
+    let removedBeforeStoreReset: boolean | null = null;
+    mockResetJobStore.mockImplementationOnce(() => {
+      removedBeforeStoreReset = markerRemoved();
+    });
+    await resetJobFinderWorkspace();
+    expect(mockDiscardJobSearch).toHaveBeenCalledTimes(1);
+    expect(mockResetJobStore).toHaveBeenCalledWith({ store: true });
+    expect(removedBeforeStoreReset).toBe(false);
+    expect(markerRemoved()).toBe(true);
+  });
+
+  test("clears the Assistant's store, grants included, before marking the reset done", async () => {
+    const markerRemoved = () =>
+      mockRm.mock.calls.some(([target]) => target === intentMarkerPath);
+    let removedBeforeAssistantReset: boolean | null = null;
+    mockResetAssistantStore.mockImplementationOnce(() => {
+      removedBeforeAssistantReset = markerRemoved();
+      return Promise.resolve();
+    });
+    await resetJobFinderWorkspace();
+    expect(removedBeforeAssistantReset).toBe(false);
+    expect(markerRemoved()).toBe(true);
+
+    mockResetAssistantStore.mockRejectedValueOnce(new Error("locked"));
+    mockRm.mockClear();
+    await expect(resetJobFinderWorkspace()).rejects.toThrow(
+      "Restart Nestor to finish the reset",
+    );
+    expect(markerRemoved()).toBe(false);
+  });
+
+  test("keeps the reset marker so the next start clears the store when clearing it fails", async () => {
+    mockResetJobStore.mockImplementationOnce(() => {
+      throw new Error("database is locked");
+    });
+    await expect(resetJobFinderWorkspace()).rejects.toThrow(
+      "Restart Nestor to finish the reset",
+    );
+    expect(mockRm).not.toHaveBeenCalledWith(intentMarkerPath, {
+      force: true,
+    });
   });
 
   test("does not delete records or report success when browser clearing fails", async () => {
@@ -853,6 +909,35 @@ describe("recoverPendingJobFinderWorkspaceReset", () => {
     expect(trashCleanupIndex).toBeGreaterThan(
       parentFlushAfterMarkerRemovalIndex,
     );
+  });
+
+  test("clears the job store and the Assistant's store before the marker goes, and keeps it when that fails", async () => {
+    const markerRemoved = () =>
+      mockRm.mock.calls.some(([target]) => target === intentMarkerPath);
+    const order: string[] = [];
+    mockResetJobStore.mockImplementationOnce(() => {
+      order.push(`store:${markerRemoved()}`);
+    });
+    mockResetAssistantStore.mockImplementationOnce(() => {
+      order.push(`assistant:${markerRemoved()}`);
+      return Promise.resolve();
+    });
+    mockStat.mockResolvedValue({ size: 256, mtimeMs: Date.now() });
+    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
+    await expect(
+      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+    ).resolves.toMatchObject({ status: "completed" });
+    // A grant naming job 1 must not outlive a store whose next job is 1.
+    expect(order).toEqual(["store:false", "assistant:false"]);
+    expect(markerRemoved()).toBe(true);
+
+    mockRm.mockClear();
+    mockResetAssistantStore.mockRejectedValueOnce(new Error("locked"));
+    mockReadFile.mockResolvedValueOnce(buildValidMarkerRaw());
+    await expect(
+      recoverPendingJobFinderWorkspaceReset({ reset: vi.fn() }),
+    ).rejects.toThrow("locked");
+    expect(markerRemoved()).toBe(false);
   });
 
   test("quarantines an oversized marker without reading or applying it", async () => {

@@ -129,3 +129,11 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     setTimeout(scoreUnscoredJobs, 5_000).unref?.();
   }
 }
+
+/** Reset everything: stops the search and starts the next one fresh. */
+export async function discardJobSearch(): Promise<void> {
+  const pending = searchServicePending;
+  searchService = null;
+  searchServicePending = null;
+  (await pending?.catch(() => null))?.stop();
+}

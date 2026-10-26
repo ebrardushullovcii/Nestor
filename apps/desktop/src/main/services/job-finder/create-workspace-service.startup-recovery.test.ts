@@ -22,7 +22,7 @@ import {
   serializeApplicationAuthorityDecisionPolicyForDigest,
 } from "@nestor/contracts";
 import { createFileJobFinderRepository } from "@nestor/db";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createJobFinderWorkspaceServiceAsync } from "./create-workspace-service";
 import {
@@ -30,6 +30,18 @@ import {
   sweepStaleJobFinderResetArtifacts,
 } from "./reset-workspace";
 import { missingResumeSourceWarning } from "./migrate-resume-source";
+import { closeJobStore } from "../job-store";
+
+// Recovery clears the job store, whose change reaches the app's windows;
+// there are none here. Everything else stays as Node sees Electron: absent.
+vi.mock("electron", () => {
+  const windows = { BrowserWindow: { getAllWindows: () => [] } };
+  return new Proxy(windows, {
+    has: () => true,
+    get: (target, key) =>
+      key in target ? target[key as keyof typeof target] : undefined,
+  });
+});
 
 const temporaryDirectories: string[] = [];
 const originalEnv: Record<string, string | undefined> = {
@@ -39,6 +51,7 @@ const originalEnv: Record<string, string | undefined> = {
 };
 
 afterEach(async () => {
+  closeJobStore();
   for (const [name, value] of Object.entries(originalEnv)) {
     if (value === undefined) {
       delete process.env[name];
