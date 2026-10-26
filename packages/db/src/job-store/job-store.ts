@@ -190,6 +190,8 @@ export function openJobStore(filePath: string): JobStore {
     }
     return createStatements(db);
   });
+  // Its setup writes (a search cut off by the last close is stopped).
+  const searches = closingOnFailure(db, () => createSearches(sql));
   const listeners = new Set<(change: JobChange) => void>();
   let depth = 0;
   let pending: JobChange[] = [];
@@ -346,7 +348,7 @@ export function openJobStore(filePath: string): JobStore {
            ORDER BY found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),
-    searches: createSearches(sql),
+    searches,
 
     listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
     getJob: (id) => getJob(sql, id),

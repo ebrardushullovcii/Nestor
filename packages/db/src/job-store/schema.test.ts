@@ -114,6 +114,37 @@ function foundJob(n: number): FoundJob {
   };
 }
 
+/** One row in each of `tables` that has none, with placeholder values. */
+function seedRows(db: DatabaseSync, tables: ReadonlySet<string>) {
+  db.exec("PRAGMA foreign_keys = OFF; PRAGMA ignore_check_constraints = ON");
+  for (const table of tables) {
+    const { n } = db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as {
+      n: number;
+    };
+    if (n > 0) continue;
+    const columns = (
+      db.prepare("SELECT * FROM pragma_table_info(?)").all(table) as {
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+        pk: number;
+      }[]
+    ).filter(
+      (column) => column.notnull && column.dflt_value === null && !column.pk,
+    );
+    const values = columns.map((column) =>
+      /INT|REAL|NUM/iu.test(column.type) ? 1 : "seed",
+    );
+    db.prepare(
+      columns.length
+        ? `INSERT INTO "${table}" (${columns.map((c) => `"${c.name}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`
+        : `INSERT INTO "${table}" DEFAULT VALUES`,
+    ).run(...values);
+  }
+  db.exec("PRAGMA ignore_check_constraints = OFF; PRAGMA foreign_keys = ON");
+}
+
 function withFile(run: (file: string) => void) {
   const dir = mkdtempSync(path.join(tmpdir(), "job-store-schema-"));
   try {
@@ -175,6 +206,17 @@ describe("job store schema", () => {
     });
   });
 
+  it("gives every added NOT NULL column a default", () => {
+    // SQLite adds a NOT NULL column without a default to an empty table but
+    // refuses it on one with rows, which is every table in a real file.
+    for (const { table, column, definition } of JOB_STORE_ADDED_COLUMNS)
+      if (/\bNOT\s+NULL\b/iu.test(definition))
+        expect(
+          /\bDEFAULT\b/iu.test(definition),
+          `${table}.${column} is NOT NULL without a DEFAULT; files with rows can't add it`,
+        ).toBe(true);
+  });
+
   it("opens a version-6 file with rows, keeping them and adding every listed column", () => {
     withFile((file) => {
       const store = openJobStore(file);
@@ -183,6 +225,8 @@ describe("job store schema", () => {
       // Take the added columns back out, so the file is shaped like one a
       // version-6 build wrote: what the person's file looks like on update.
       const old = new DatabaseSync(file);
+      // Every table that gains a column has a row, as a real file would.
+      seedRows(old, new Set(JOB_STORE_ADDED_COLUMNS.map(({ table }) => table)));
       for (const { table, column } of JOB_STORE_ADDED_COLUMNS) {
         const users = old
           .prepare(
@@ -224,6 +268,25 @@ describe("job store schema", () => {
           if (sql === "BEGIN IMMEDIATE") throw new Error("database is locked");
           return exec.call(this, sql);
         });
+        const close = vi.spyOn(DatabaseSync.prototype, "close");
+        expect(() => openJobStore(file)).toThrow("database is locked");
+        expect(close).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("closes its handle when stopping a cut-off search fails", () => {
+      withFile((file) => {
+        openJobStore(file).close();
+        // Called below with the instance it belongs to.
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        const prepare = DatabaseSync.prototype.prepare;
+        vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(
+          function (this: DatabaseSync, sql: string) {
+            if (sql.startsWith("UPDATE searches SET state = 'stopped'"))
+              throw new Error("database is locked");
+            return prepare.call(this, sql);
+          },
+        );
         const close = vi.spyOn(DatabaseSync.prototype, "close");
         expect(() => openJobStore(file)).toThrow("database is locked");
         expect(close).toHaveBeenCalledOnce();
