@@ -91,6 +91,8 @@ function excluded(node: Element, excludeForms = true): boolean {
 
 /** A login widget or script on a public page is not an access wall. */
 export function listingSignInRequired(html: string): boolean {
+  // Without a password field there is no sign-in form; most pages skip the parse.
+  if (!/password/iu.test(html)) return false;
   const nodes = descendants(parse(html));
   if (
     !nodes.some(

@@ -515,6 +515,22 @@ function extractJobPostingFromJsonLd(
  * is. Deciding what the posting says is the model's job, not this function's.
  */
 export function listingPageText(html: string): string {
+  // One read checks a page for a bot wall, a sign-in wall and a closed notice,
+  // each from this text; converting a large page once spares a burst of
+  // page-sized strings per listing during a search.
+  const known = recentPageText.find((entry) => entry.html === html);
+  if (known) return known.text;
+  const text = convertListingPageText(html);
+  recentPageText.unshift({ html, text });
+  recentPageText.length = Math.min(recentPageText.length, RECENT_PAGE_TEXT);
+  return text;
+}
+
+/** About as many pages as a search reads at once. */
+const RECENT_PAGE_TEXT = 8;
+const recentPageText: { html: string; text: string }[] = [];
+
+function convertListingPageText(html: string): string {
   const capped =
     html.length > MAX_HTML_LENGTH ? html.slice(0, MAX_HTML_LENGTH) : html;
   const stripped = capped
