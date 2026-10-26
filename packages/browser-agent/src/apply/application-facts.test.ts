@@ -1,11 +1,65 @@
+import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import {
+  savedAnswerForQuestion,
   serializeApplicationData,
   storedFactFor,
   storedFacts,
 } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+
+test.each(meanings.cases)(
+  "current-form saved-meaning replay: $asked",
+  (entry) => {
+    const target = {
+      ...control,
+      ref: "target",
+      label: entry.asked,
+      groupLabel: "Application questions",
+    };
+    const saved = {
+      id: "person-answer",
+      kind: "other" as const,
+      label: entry.saved,
+      question: entry.saved,
+      answer: entry.answer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    };
+    expect(savedAnswerForQuestion(target, [saved], [target])?.id ?? null).toBe(
+      entry.matches ? saved.id : null,
+    );
+  },
+);
+
+test.each(meanings.cases.filter((entry) => entry.matches))(
+  "two current questions with one meaning stay ambiguous: $saved",
+  (entry) => {
+    const first = {
+      ...control,
+      ref: "first",
+      label: entry.asked,
+      groupLabel: "First section",
+    };
+    const second = {
+      ...control,
+      ref: "second",
+      label: entry.saved,
+      groupLabel: "Second section",
+    };
+    const saved = {
+      id: "person-answer",
+      kind: "other" as const,
+      label: entry.saved,
+      question: entry.saved,
+      answer: entry.answer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    };
+    expect(savedAnswerForQuestion(first, [saved], [first, second])).toBeNull();
+  },
+);
 
 test("prompt data keeps unknown, No, zero and scoped facts without empty strings or lists", () => {
   const facts = {

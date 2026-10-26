@@ -1,5 +1,6 @@
 import reviewFixture from "./stored-json/application-review-card.full.json";
 import { SubmissionOutcomeRecordSchema } from "@nestor/contracts";
+import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import type {
   FoundJob,
   JobChange,
@@ -262,6 +263,142 @@ it("skipping retires only this application's questions and keeps a shared questi
   expect(applications.needsYou.forApplication(a.id)).toEqual([]);
   expect(applications.needsYou.list().total).toBe(1);
   expect(applications.needsYou.forApplication(b.id)).toHaveLength(1);
+});
+
+it.each(meanings.cases)(
+  "remembered question replay: $saved -> $asked",
+  (entry) => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!,
+      memory = applications.needsYou;
+    memory.remember({
+      key: "source-question",
+      prompt: entry.saved,
+      answer: entry.answer,
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    const lookup = {
+      key: "target-question",
+      prompt: entry.asked,
+      reusePrompt: true,
+      kind: "other" as const,
+    };
+    expect(
+      memory
+        .answersForQuestions(row.id, [lookup], "https://jobs.example.test")
+        .map((match) => match.answer),
+    ).toEqual(entry.matches ? [entry.answer] : []);
+    const outcome = memory.request(
+      question(row.id, row.attempt, {
+        key: lookup.key,
+        fieldKey: lookup.key,
+        prompt: entry.asked,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    );
+    expect(outcome.status).toBe(entry.matches ? "answered" : "needs_you");
+    expect(memory.list().total).toBe(entry.matches ? 0 : 1);
+  },
+);
+
+it("one remembered monitoring answer resolves reworded questions in parallel applications", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const first = applications.claimNext()!,
+    second = applications.claimNext()!,
+    memory = applications.needsYou;
+  const sample = meanings.cases[1]!;
+  const a = memory.request(
+    question(first.id, first.attempt, {
+      key: "monitoring-a",
+      fieldKey: "monitoring-a",
+      prompt: sample.saved,
+      input: "text",
+      reusePrompt: true,
+      scope: {},
+    }),
+  );
+  const b = memory.request(
+    question(second.id, second.attempt, {
+      key: "monitoring-b",
+      fieldKey: "monitoring-b",
+      prompt: sample.asked,
+      input: "text",
+      reusePrompt: true,
+      scope: {},
+    }),
+  );
+  if (a.status !== "needs_you" || b.status !== "needs_you")
+    throw Error("Expected one shared handover");
+  expect(a.task.id).toBe(b.task.id);
+  expect(memory.list().total).toBe(1);
+  expect(
+    memory.answer({ id: a.task.id, answer: sample.answer, remember: true }),
+  ).toEqual({ resolved: true, queued: 2 });
+  expect(memory.list().total).toBe(0);
+});
+
+it("conflicting saved meanings and duplicate current targets never pick the latest answer", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!,
+    memory = applications.needsYou;
+  const sample = meanings.cases[3]!;
+  memory.remember({
+    key: "notice-a",
+    prompt: sample.saved,
+    answer: "30 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  const lookup = {
+    key: "notice-target",
+    prompt: sample.asked,
+    reusePrompt: true,
+  };
+  expect(
+    memory.answersForQuestions(
+      row.id,
+      [
+        lookup,
+        {
+          ...lookup,
+          key: "second-target",
+          prompt: "How much notice do you need to give?",
+        },
+      ],
+      "https://jobs.example.test",
+    ),
+  ).toEqual([]);
+  memory.remember({
+    key: "notice-b",
+    prompt: "How much notice do you need to give?",
+    answer: "60 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(
+    memory.answersForQuestions(row.id, [lookup], "https://jobs.example.test"),
+  ).toEqual([]);
+  expect(
+    memory.request(
+      question(row.id, row.attempt, {
+        key: lookup.key,
+        fieldKey: lookup.key,
+        prompt: sample.asked,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    ).status,
+  ).toBe("needs_you");
 });
 
 it("persists guarded answer Undo without retracting answers that released applications", () => {
