@@ -249,9 +249,27 @@ if (form) {
   }
 
   for (const input of form.querySelectorAll('input[type="file"]'))
-    input.addEventListener("change", () => {
-      form.querySelector(`[data-file-name="${input.name}"]`).textContent =
-        input.files[0]?.name || "No file selected";
+    input.addEventListener("change", async () => {
+      const label = form.querySelector(`[data-file-name="${input.name}"]`);
+      label.textContent = input.files[0]?.name || "No file selected";
+      if (new URLSearchParams(location.search).get("upload") !== "async")
+        return;
+      if (!input.files[0]) return;
+      label.textContent = "Uploading resume…";
+      const target = new URL("/replica-upload", location.href);
+      target.hostname = "localhost";
+      const body = new FormData();
+      body.append(input.name, input.files[0]);
+      try {
+        const response = await fetch(target, { method: "POST", body });
+        if (!response.ok || !(await response.json()).uploaded)
+          throw new Error("Resume failed to upload");
+        input.setCustomValidity("");
+        label.textContent = `Resume attached: ${input.files[0].name}`;
+      } catch {
+        input.setCustomValidity("Resume failed to upload");
+        label.textContent = "Resume failed to upload";
+      }
     });
   for (const zone of form.querySelectorAll("[data-drop]")) {
     const input = control(zone.dataset.drop);

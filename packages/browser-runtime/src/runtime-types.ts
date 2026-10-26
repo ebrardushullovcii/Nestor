@@ -143,19 +143,19 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    * performs without this flag; only the site's attempt to transmit or
    * persist that selection externally is gated here. This never authorizes
    * DOM form submission or clicking a final apply control; those remain
-   * independently blocked. The runtime opens a short, same-origin window only
-   * around one exact grounded field action, accepts bounded fetch/XHR
-   * POST/PUT/PATCH traffic only when the URL or operation body has explicit
-   * draft/autosave/update semantics, and denies final-action, ambiguous,
-   * cross-origin, late, long-lived, beacon, and navigation traffic. Omitted
-   * values are false.
+   * independently blocked. The runtime opens a short window around a grounded
+   * field action, accepts bounded fetch/XHR POST/PUT/PATCH traffic and denies
+   * final-action, late, long-lived, beacon and navigation traffic. A pinned
+   * origin list also requires explicit draft/autosave/update semantics and
+   * denies cross-origin requests. Omitted values are false.
    */
   intermediateMutationsAuthorized?: boolean;
   /**
    * Canonical origins covered by the exact authority envelope. This list is
    * inert unless `intermediateMutationsAuthorized` is true, and the runtime
    * refuses to open a field-save window when the current page origin is not
-   * an exact member.
+   * an exact member. An empty list uses the bounded default policy, including
+   * a form's separate upload/API service. Final-submit origins stay separate.
    */
   intermediateMutationAllowedOrigins?: string[];
   /**

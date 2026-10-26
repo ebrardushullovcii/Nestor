@@ -51,6 +51,7 @@ function startFixtureServer(): Promise<FixtureServer> {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
+      response.setHeader("Access-Control-Allow-Origin", "*");
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       hits.push({
         kind: "request",
@@ -547,6 +548,73 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
       expect(await getLatestBlockedPrepareOnlyAttempt(page)).toBeNull();
     },
   );
+
+  test("uploads the selected file to a separate service while final actions stay blocked there", async () => {
+    const site = await startTrackedServer();
+    const storage = await startTrackedServer();
+    site.registerHtml(
+      "/apply-with-upload",
+      `<label>Resume <input id="resume" type="file"></label><output id="result"></output>
+       <script>
+       document.getElementById('resume').addEventListener('change', async function () {
+         const body = new FormData(); body.append('resume', this.files[0]);
+         try {
+           const response = await fetch('${storage.baseUrl}/api/resume/upload', {method:'POST',body});
+           document.getElementById('result').textContent = await response.text();
+         } catch { document.getElementById('result').textContent = 'Upload failed'; }
+       });
+       </script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/apply-with-upload`);
+    const session = createPlaywrightApplyPageSession({ page });
+    await session.installPrepareOnlyGuard({
+      intermediateMutationsAuthorized: true,
+      allowedOrigins: [],
+    });
+    const resume = (await session.readPage()).controls.find(
+      (field) => field.inputType === "file",
+    )!;
+    await session.openIntermediateWriteWindow();
+    const bytes = new TextEncoder().encode("%PDF-1.4 synthetic resume bytes");
+    expect(
+      await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+        name: "synthetic-resume.pdf",
+        mimeType: "application/pdf",
+        bytes,
+      }),
+    ).toMatchObject({ ok: true });
+    await page.waitForFunction(
+      () => document.getElementById("result")?.textContent === "fixture-ok",
+    );
+    const uploads = requestHitsFor(storage.hits, "/api/resume/upload");
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.body).toContain(new TextDecoder().decode(bytes));
+    for (const request of [
+      { path: "/api/application/submit", body: "resume=synthetic-resume.pdf" },
+      {
+        path: "/api/resume/upload",
+        body: JSON.stringify({ operationName: "SubmitApplication" }),
+      },
+    ])
+      expect(
+        await page.evaluate(
+          async ({ url, body }) => {
+            try {
+              await fetch(url, { method: "POST", body });
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { url: storage.baseUrl + request.path, body: request.body },
+        ),
+      ).toBe(false);
+    expect(
+      requestHitsFor(storage.hits, "/api/application/submit"),
+    ).toHaveLength(0);
+    expect(requestHitsFor(storage.hits, "/api/resume/upload")).toHaveLength(1);
+  });
 
   test(
     "denies a GET image query beacon while allowing a queryless static image",

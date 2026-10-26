@@ -522,13 +522,17 @@ export async function runAgentApplicationPreparation(
 ): Promise<ApplyExecutionResult> {
   const { executionInput, startedAt } = input;
   const now = input.now ?? (() => new Date());
+  const fieldSaveOrigins =
+    executionInput.intermediateMutationAllowedOrigins ??
+    executionInput.applyAllowedOrigins ??
+    [];
 
   // Nothing may leave the page during a prepare-only run. The guard goes in
   // before the agent is allowed to touch anything.
   await input.session.installPrepareOnlyGuard({
     intermediateMutationsAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
-    allowedOrigins: executionInput.applyAllowedOrigins ?? [],
+    allowedOrigins: fieldSaveOrigins,
   });
 
   const { targetUrl, isContinuation } =
@@ -572,7 +576,7 @@ export async function runAgentApplicationPreparation(
           await input.session.installPrepareOnlyGuard({
             intermediateMutationsAuthorized:
               executionInput.intermediateMutationsAuthorized === true,
-            allowedOrigins,
+            allowedOrigins: fieldSaveOrigins,
           });
         }
         await input.session.openIntermediateWriteWindow();

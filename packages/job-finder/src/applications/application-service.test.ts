@@ -434,6 +434,12 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
     f.applications.listApplications({ state: "queued" }).rows,
   ).toHaveLength(2);
   expect(f.execute.mock.calls[0]![1].resumeArtifact.filePath).toBe(f.imported);
+  expect(
+    f.execute.mock.calls[0]![1].intermediateMutationAllowedOrigins,
+  ).toEqual([]);
+  expect(f.execute.mock.calls[0]![1].applyAllowedOrigins).toEqual([
+    "https://replica.test",
+  ]);
   f.releases.shift()!();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
   const row = f.applications.forJobs([

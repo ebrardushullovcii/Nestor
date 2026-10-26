@@ -24,6 +24,16 @@ export async function handleMoreSites(
   url,
   { send, readPost, logPost },
 ) {
+  if (url.pathname === "/replica-upload") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (req.method !== "POST") send(405, "Method not allowed");
+    else {
+      const files = await readPost(req);
+      logPost(url.pathname, files);
+      send(200, JSON.stringify({ uploaded: true }), "application/json");
+    }
+    return true;
+  }
   if (url.pathname.startsWith("/replica-assets/")) {
     const name = url.pathname.slice("/replica-assets/".length);
     if (req.method !== "GET") send(405, "Method not allowed");

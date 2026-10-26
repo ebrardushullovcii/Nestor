@@ -332,7 +332,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
       intermediateMutationsAuthorized: mode !== "prepare_only",
-      intermediateMutationAllowedOrigins: [...allowedOrigins],
+      // The form can upload to a separate API/storage origin. The bounded
+      // field-save guard classifies those requests; form navigation and final
+      // submission retain the application's exact allowedOrigins below.
+      intermediateMutationAllowedOrigins: [],
       recheckIntermediateMutationAuthority: async (observedOrigin) => {
         if (
           !current(row) ||

@@ -466,9 +466,13 @@ describe("agent application preparation seam", () => {
       "installPrepareOnlyGuard",
     );
 
+    const facts = executionInput();
+    facts.intermediateMutationsAuthorized = true;
+    facts.intermediateMutationAllowedOrigins = [];
+    facts.applyAllowedOrigins = [new URL(PAGE_URL).origin];
     const result = await runAgentApplicationPreparation({
       session: openSession,
-      executionInput: executionInput(),
+      executionInput: facts,
       llmClient: modelThatFinishes(),
       startedAt: "2026-09-14T10:00:00.000Z",
       siteLabel: "the careers site",
@@ -476,7 +480,7 @@ describe("agent application preparation seam", () => {
     });
 
     expect(installPrepareOnlyGuard).toHaveBeenCalledWith({
-      intermediateMutationsAuthorized: false,
+      intermediateMutationsAuthorized: true,
       allowedOrigins: [],
     });
     expect(result.agentTiming?.modelTurns).toBeGreaterThan(0);
@@ -1899,6 +1903,13 @@ test.each(["file", "text"] as const)(
     );
     currentSession.fillText = fill;
     currentSession.uploadFile = upload;
+    const installGuard = vi.spyOn(currentSession, "installPrepareOnlyGuard");
+    const facts = executionInput();
+    facts.intermediateMutationsAuthorized = true;
+    facts.intermediateMutationAllowedOrigins = [];
+    facts.applyAllowedOrigins = [new URL(PAGE_URL).origin];
+    const recheck = vi.fn(() => Promise.resolve(true));
+    facts.recheckIntermediateMutationAuthority = recheck;
     const approved = "  My exact approved revision two.\n";
     const writeLetter = vi.fn();
     const getApprovedText = vi.fn(() => Promise.resolve(approved));
@@ -1941,7 +1952,7 @@ test.each(["file", "text"] as const)(
     const prepared = vi.fn();
     const result = await runAgentApplicationPreparation({
       session: currentSession,
-      executionInput: executionInput(),
+      executionInput: facts,
       applicationRecordId: "application",
       startedAt: "2026-10-06T10:00:00.000Z",
       siteLabel: "Synthetic careers",
@@ -1966,6 +1977,13 @@ test.each(["file", "text"] as const)(
       },
     });
     expect(result.state).toBe("ready");
+    expect(recheck).toHaveBeenCalledWith(new URL(PAGE_URL).origin);
+    expect(installGuard.mock.calls.length).toBeGreaterThan(1);
+    for (const [guard] of installGuard.mock.calls)
+      expect(guard).toEqual({
+        intermediateMutationsAuthorized: true,
+        allowedOrigins: [],
+      });
     expect(getApprovedText).toHaveBeenCalledWith(
       executionInput().job.id,
       "application",
