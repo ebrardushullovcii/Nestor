@@ -123,6 +123,25 @@ export function coverageHonest(
   return !complete || (reads > 0 && cards > 0);
 }
 
+/** Each persona is one search; cache/reasoning counters are subsets of usage. */
+export function tokenCostSummary(
+  boards: readonly { usage: ModelTokenUsage }[],
+) {
+  const tokens = boards
+    .map(({ usage }) => usage.inputTokens + usage.outputTokens)
+    .sort((a, b) => a - b);
+  const middle = Math.floor(tokens.length / 2);
+  return {
+    boards: tokens.length,
+    totalTokens: tokens.reduce((sum, value) => sum + value, 0),
+    medianTokensPerBoard: tokens.length
+      ? tokens.length % 2
+        ? tokens[middle]!
+        : (tokens[middle - 1]! + tokens[middle]!) / 2
+      : null,
+  };
+}
+
 export async function runSearchRelevance(input: {
   boards: RecordedBoard[];
   labels: LabelledListing[];
@@ -363,6 +382,7 @@ export async function runSearchRelevance(input: {
       ...grade,
       endToEnd,
       top10: ranked.slice(0, 10),
+      tokenCost: tokenCostSummary(boards),
       boards,
     });
   }

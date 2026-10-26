@@ -1,8 +1,73 @@
 import { describe, expect, it } from "vitest";
-import { coverageHonest, gradeRanking, recordedReader, turnKey } from "./run";
+import {
+  coverageHonest,
+  gradeRanking,
+  recordedReader,
+  tokenCostSummary,
+  turnKey,
+} from "./run";
 import type { LabelledListing, RecordedBoard } from "./corpus";
+import { loadCorpus } from "./corpus";
+import { readFile } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
 describe("manual search relevance eval measurements", () => {
+  it("reports cost per persona, includes empty boards, and does not double-count cached or reasoning tokens", () => {
+    const boards = [
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        reasoningTokens: 0,
+      },
+      {
+        inputTokens: 20,
+        outputTokens: 10,
+        cachedInputTokens: 15,
+        reasoningTokens: 6,
+      },
+      {
+        inputTokens: 40,
+        outputTokens: 30,
+        cachedInputTokens: 20,
+        reasoningTokens: 10,
+      },
+      {
+        inputTokens: 80,
+        outputTokens: 20,
+        cachedInputTokens: 80,
+        reasoningTokens: 20,
+      },
+    ].map((usage) => ({ usage }));
+    expect(tokenCostSummary(boards)).toEqual({
+      boards: 4,
+      totalTokens: 200,
+      medianTokensPerBoard: 50,
+    });
+    expect(tokenCostSummary([])).toEqual({
+      boards: 0,
+      totalTokens: 0,
+      medianTokensPerBoard: null,
+    });
+  });
+  it("ships a replay tape bound to the committed corpus", async () => {
+    const directory = fileURLToPath(
+      new URL("../../fixtures/search-relevance/", import.meta.url),
+    );
+    const corpus = await loadCorpus(directory);
+    const tape = JSON.parse(
+      gunzipSync(
+        await readFile(
+          new URL(
+            "../../fixtures/search-relevance/fit-quality-tape.json.gz",
+            import.meta.url,
+          ),
+        ),
+      ).toString("utf8"),
+    ) as { corpusDigest: string };
+    expect(tape.corpusDigest).toBe(corpus.digest);
+  });
   it("counts a screened-out relevant listing as a recall miss and ranks across boards", () => {
     const labels: LabelledListing[] = Array.from({ length: 12 }, (_, i) => ({
       board: i < 6 ? "first" : "second",

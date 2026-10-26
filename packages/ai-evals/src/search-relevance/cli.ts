@@ -37,7 +37,7 @@ export async function runSearchRelevanceCli(args: string[], root: string) {
     ).join("\n"),
   );
   const tapePath = path.resolve(
-    value("--tape", path.join(directory, "baseline-tape.json.gz")),
+    value("--tape", path.join(directory, "fit-quality-tape.json.gz")),
   );
   let pendingWrite = Promise.resolve();
   const saveJson = (file: string, data: unknown) => {
@@ -163,10 +163,14 @@ export async function runSearchRelevanceCli(args: string[], root: string) {
       ),
     );
     await saveJson(out, output);
-    for (const persona of report.personas)
+    for (const persona of report.personas) {
       console.log(
         `${persona.persona}: screening/fit recall ${persona.found}/${persona.relevant} (${(persona.recall * 100).toFixed(1)}%); top 10 ${persona.relevantInTop10}/10 relevant. Including collection: ${persona.endToEnd.found}/${persona.endToEnd.relevant} (${(persona.endToEnd.recall * 100).toFixed(1)}%), top 10 ${persona.endToEnd.relevantInTop10}/10.`,
       );
+      console.log(
+        `${persona.persona}: ${persona.tokenCost.totalTokens} total tokens; median ${persona.tokenCost.medianTokensPerBoard ?? "unavailable"} tokens/board over ${persona.tokenCost.boards} boards (empty boards included).`,
+      );
+    }
     console.log(
       `Coverage honesty: ${report.coverage.filter((entry) => entry.honest).length}/${report.coverage.length}; ${report.freshCalls} fresh / ${report.replayedCalls} replayed calls; ${(report.durationMs / 1000).toFixed(2)}s. Report: ${out}`,
     );
