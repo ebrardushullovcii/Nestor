@@ -103,5 +103,8 @@ const ApplyAgentTimingRecordSchema = z.object({
 });
 export type ApplyAgentTiming = z.infer<typeof ApplyAgentTimingRecordSchema>;
 // Keep the timing schema from expanding through every workspace state schema.
-export const ApplyAgentTimingSchema: z.ZodType<ApplyAgentTiming> =
-  ApplyAgentTimingRecordSchema;
+export const ApplyAgentTimingSchema: z.ZodType<
+  ApplyAgentTiming,
+  z.ZodTypeDef,
+  z.input<typeof ApplyAgentTimingRecordSchema>
+> = ApplyAgentTimingRecordSchema;
