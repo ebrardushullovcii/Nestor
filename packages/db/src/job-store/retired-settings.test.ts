@@ -14,20 +14,25 @@ it("reads a pre-cut settings table without exposing or changing its retired choi
         }[]
       ).map((row) => row.name),
     );
-    for (const name of ["keepSessionAlive", "discoveryOnly"]) {
-      if (!columns.has(name))
-        store
-          .sql(`ALTER TABLE profile_settings ADD COLUMN "${name}" INTEGER`)
-          .run();
-    }
+    expect(columns.has("keep_session_alive")).toBe(true);
+    expect(columns.has("discovery_only")).toBe(true);
     store
-      .sql('UPDATE profile_settings SET "keepSessionAlive"=0,"discoveryOnly"=1')
+      .sql("UPDATE profile_settings SET keep_session_alive=0,discovery_only=1")
       .run();
     const settings = await repository.getSettings();
     expect(settings).not.toHaveProperty("keepSessionAlive");
     expect(settings).not.toHaveProperty("discoveryOnly");
     expect(settings.collapseSideMenuWithAssistant).toBe(true);
     expect(settings.writeResumesOnShortlist).toBe(true);
+    await repository.commitSettingsUpdate((current) => ({
+      ...current,
+      appearanceTheme: "dark",
+    }));
+    expect(
+      store
+        .sql("SELECT keep_session_alive, discovery_only FROM profile_settings")
+        .get(),
+    ).toEqual({ keep_session_alive: 0, discovery_only: 1 });
   } finally {
     store.close();
   }

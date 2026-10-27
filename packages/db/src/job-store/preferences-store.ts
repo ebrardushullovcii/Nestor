@@ -75,7 +75,12 @@ const SETTINGS_TABLE: ScalarTable = {
 };
 export const PREFERENCES_SCHEMA = [
   scalarSchema(GOALS_TABLE),
-  scalarSchema(SETTINGS_TABLE),
+  // DDL only: released columns stay in the database, outside the settings scalar map.
+  scalarSchema({
+    ...SETTINGS_TABLE,
+    fields: [...settingFields, "keepSessionAlive", "discoveryOnly"],
+    booleans: [...SETTINGS_TABLE.booleans, "keepSessionAlive", "discoveryOnly"],
+  }),
   `
  CREATE TABLE IF NOT EXISTS profile_tracker_stages(id TEXT PRIMARY KEY,label TEXT NOT NULL,base_stage TEXT NOT NULL,color TEXT NOT NULL,position INTEGER NOT NULL,is_terminal INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS profile_tracker_stages_position ON profile_tracker_stages(position,id);
