@@ -154,6 +154,45 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
+  it("keeps an unfinished note with its application when another row opens", async () => {
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 1 / }),
+    );
+    const first = await screen.findByRole("region", {
+      name: "Application to Northfield 1",
+    });
+    fireEvent.click(within(first).getByRole("button", { name: "Note" }));
+    fireEvent.change(
+      within(first).getByRole("textbox", { name: "Note title" }),
+      {
+        target: { value: "Ask Northfield 1 about the design team" },
+      },
+    );
+    fireEvent.click(
+      within(list).getByRole("button", { name: /^Northfield 2 / }),
+    );
+    const second = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(
+      within(second).getByRole<HTMLInputElement>("textbox", {
+        name: /title$/,
+      }).value,
+    ).toBe("");
+    fireEvent.click(
+      within(list).getByRole("button", { name: /^Northfield 1 / }),
+    );
+    const restored = await screen.findByRole("region", {
+      name: "Application to Northfield 1",
+    });
+    expect(
+      within(restored).getByRole<HTMLInputElement>("textbox", {
+        name: "Note title",
+      }).value,
+    ).toBe("Ask Northfield 1 about the design team");
+  });
+
   it("keeps list preferences for later without advertising them as rendered board columns", async () => {
     const view = {
       layout: "board",
